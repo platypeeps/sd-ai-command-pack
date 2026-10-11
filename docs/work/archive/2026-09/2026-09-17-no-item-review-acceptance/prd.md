@@ -149,9 +149,9 @@ Stop and request a separate migration decision if validated identity remains amb
 Bound index values and receipt-enumeration work. Exceeding a documented limit refuses the operation without dropping history.
 Existing records remain readable after a capacity refusal.
 
-Recovery owner: Sven. Trigger: a real capacity refusal or ambiguous identity match.
+Recovery owner: the operator. Trigger: a real capacity refusal or ambiguous identity match.
 Successor: a separate no-item history-migration plan; no migration implementation is authorized here.
-On 2026-09-17, Sven approved refusal-only V1 recovery and deferred migration tooling.
+On 2026-09-17, the operator approved refusal-only V1 recovery and deferred migration tooling.
 
 Branch rename or copying the same HEAD cannot create fresh budget.
 This scope does not support rewritten continuations; they must retain their original review ID and stop for a migration decision.
@@ -406,19 +406,19 @@ Responses in this revision:
 
 1. Receipt enumeration: addressed by explicit query ownership, schema compatibility checks, and a real-library enumeration fixture.
 2. Short imported histories: addressed by explicit continuation, full-branch coverage, and request validation at every imported-history ordinal.
-3. Independent backup: complete. Sven approved the destination; the isolated restoration passed with primary evidence access denied.
-4. Recovery limits: parked. Sven accepted refusal-only V1 scope; migration remains deferred until a concrete case requires it.
+3. Independent backup: complete. The operator approved the destination; the isolated restoration passed with primary evidence access denied.
+4. Recovery limits: parked. The operator accepted refusal-only V1 scope; migration remains deferred until a concrete case requires it.
 5. No-item construction: addressed by explicit identity resolution, shared-context inputs, and constructor isolation tests.
 
 Host review confirms the revised integration requirements. They remain unimplemented and lack fresh independent verification.
 The full response record is `/private/tmp/sd-no-item-plan.DKvPEt/planning-verification-5-dispositions.md`.
 Earlier responses and raw reports remain in local evidence; this section records the current planning state only.
 Five Claude planning passes have completed. The planning cap is spent; no additional pass starts automatically.
-On 2026-09-17, Sven approved the limited V1 scope and post-cap amendments after disclosure of the independent-verification gap.
+On 2026-09-17, the operator approved the limited V1 scope and post-cap amendments after disclosure of the independent-verification gap.
 The approved plan hash is `3297d69e71b9ef77fc71e11d3876756ae39964018450054d9b5e3af904fa7736`.
 The decision record is `/private/tmp/sd-no-item-plan.DKvPEt/planning-post-cap-approval.json`.
 This approval settles planning judgment, not the raw provider verdict or implementation verification.
-The backup prerequisite is complete. On 2026-09-17, Sven approved implementation and local validation.
+The backup prerequisite is complete. On 2026-09-17, the operator approved implementation and local validation.
 The implementation approval binds PRD hash `472a6cd78bd7ff3e41009926dbd2abb571bf1713f988eb1c06f7b0bfcac4a4db`.
 The database row is `in_progress`; decision `2765` and transition `2766` record this approval.
 No additional provider review, push, merge, or runner assignment change is authorized.
@@ -427,7 +427,7 @@ The changed artifact is not a sensitive path; no sensitive-path concern ledger o
 
 ### Backup verification
 
-On 2026-09-17, seven archives copied to `/Users/sven/Backups/sd-review-evidence` without overwriting files.
+On 2026-09-17, seven archives copied to `/Users/example/Backups/sd-review-evidence` without overwriting files.
 All archive hashes matched the recorded source hashes.
 The isolated restoration matched all 86 members: 43 artifacts and 43 macOS metadata entries.
 The restoration sandbox denied primary evidence reads with `Operation not permitted`.
@@ -443,21 +443,21 @@ No implementation or provider review ran during backup verification.
 - Local evidence: `/private/tmp/sd-opening-ship.ly3b5l/additional-review-dispositions.md`.
 - Local raw reports: `review-approved.json`, `review-verification.json`, and `review-additional.json` in that evidence directory.
 - Local review request: `additional-review-request.json` and its exact `additional-review-history.json` input.
-- Retained archive: `/Users/sven/repos/platypeeps/sd-ai-command-pack/.git/sd-review-evidence/no-item-1006-inputs.tar.gz`.
+- Retained archive: `/Users/example/repos/platypeeps/sd-ai-command-pack/.git/sd-review-evidence/no-item-1006-inputs.tar.gz`.
 - Retained input archive SHA256: `0d1cce9dd0b809d0942ce6731bd267338608448d06b9c7c6d1298bd5c3ec5be9`.
-- Current verification archive: `/Users/sven/repos/platypeeps/sd-ai-command-pack/.git/sd-review-evidence/no-item-1006-verification-5.tar.gz`.
-- Planning decision archive: `/Users/sven/repos/platypeeps/sd-ai-command-pack/.git/sd-review-evidence/no-item-1006-post-cap-approval.tar.gz`.
-- Independent backup manifest: `/Users/sven/Backups/sd-review-evidence/no-item-1006-backup-manifest.json`.
+- Current verification archive: `/Users/example/repos/platypeeps/sd-ai-command-pack/.git/sd-review-evidence/no-item-1006-verification-5.tar.gz`.
+- Planning decision archive: `/Users/example/repos/platypeeps/sd-ai-command-pack/.git/sd-review-evidence/no-item-1006-post-cap-approval.tar.gz`.
+- Independent backup manifest: `/Users/example/Backups/sd-review-evidence/no-item-1006-backup-manifest.json`.
 - Backup manifest SHA256: `80076f886d4b5b44ae2bb2480d59796f440522b31c8808d6acf300d5e623d1c0`.
-- Restoration receipt: `/Users/sven/Backups/sd-review-evidence/no-item-1006-backup-restoration.json`.
+- Restoration receipt: `/Users/example/Backups/sd-review-evidence/no-item-1006-backup-restoration.json`.
 - Restoration receipt SHA256: `1e5e591335bceb3b17862388824bed7f4fb018d5d9982046eb1db4ce1f526caf`.
 - On 2026-09-17, all 11 archived artifacts matched their original bytes. Git does not publish this local archive.
 
 ## Log
 
-- 2026-09-17: Sven approved V1 scope, post-cap amendments, and the backup destination. Restoration passed.
-- 2026-09-17: Sven approved implementation and local validation. The row moved to `in_progress`; provider review and publication remain unapproved.
-- 2026-09-17: Sven retained whole-opening overrides and required manual review after each template update. Decision `2767` records the policy.
+- 2026-09-17: the operator approved V1 scope, post-cap amendments, and the backup destination. Restoration passed.
+- 2026-09-17: the operator approved implementation and local validation. The row moved to `in_progress`; provider review and publication remain unapproved.
+- 2026-09-17: the operator retained whole-opening overrides and required manual review after each template update. Decision `2767` records the policy.
 - 2026-09-19: All 44 acceptance criteria are ticked. The last three, 348, 352
   and 358, closed as coverage gaps rather than missing behaviour: every guard
   each names already existed, and #1071 (`e7a8f40f`) added the cases that hold

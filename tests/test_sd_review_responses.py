@@ -111,7 +111,7 @@ class URLDiagnostics(ReviewFixture):
             self.assertEqual(bool(outcome.findings), bool(rows))
 
     def test_length_finish_names_the_max_tokens_it_hit(self) -> None:
-        """sd:1805: kimi-k3 on mezmo-world-simulator#215 reasoned through all
+        """sd:1805: kimi-k3 on example-simulator#215 reasoned through all
         16384 tokens and sent no content; the detail must say so, not shrug."""
         body = self.envelope("", "length", reasoning_content="private reasoning marker " * 40)
         body["usage"] = {"prompt_tokens": 34946, "completion_tokens": 16384, "total_tokens": 51330}

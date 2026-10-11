@@ -33,11 +33,11 @@ if str(REPO_ROOT / "bin") not in sys.path:
 import sd_lib  # noqa: E402
 import sd_setup_github  # noqa: E402
 
-VIEWER = ({"login": "sven"}, "")
+VIEWER = ({"login": "example"}, "")
 
 
 def repo_payload(
-    full_name: str = "sven/thing",
+    full_name: str = "example/thing",
     *,
     admin: bool = True,
     fork: bool = False,
@@ -69,7 +69,7 @@ def table(
         sd_lib.VIEWER_QUERY: viewer,
         sd_lib.REPOSITORY_QUERY: (repo if repo is not None else repo_payload(), ""),
         sd_lib.COLLABORATOR_QUERY: (
-            people if people is not None else collaborators("sven"),
+            people if people is not None else collaborators("example"),
             "",
         ),
     }
@@ -142,8 +142,8 @@ class SixCases(Fixture):
     """The six cases `prd.md:1376-1384` enumerates, each asserted by name."""
 
     def test_case_1_a_personal_remote_only_you_can_push_to_is_full(self) -> None:
-        root = self.make_repo(origin="https://github.com/sven/thing.git")
-        answer = sd_lib.remote_permits_full(root, ask=Asker(table(repo_payload("sven/thing"))))
+        root = self.make_repo(origin="https://github.com/example/thing.git")
+        answer = sd_lib.remote_permits_full(root, ask=Asker(table(repo_payload("example/thing"))))
         self.assertEqual(answer, sd_lib.RemoteAnswer(True, True, ""))
 
     def test_case_2_an_organisation_remote_only_you_can_push_to_is_full(self) -> None:
@@ -161,21 +161,21 @@ class SixCases(Fixture):
         self.assertNotIn(sd_lib.COLLABORATOR_QUERY, ask.asked)
 
     def test_case_4_a_personal_fork_of_a_shared_upstream_is_guest(self) -> None:
-        root = self.make_repo(origin="https://github.com/sven/thing.git")
-        ask = Asker(table(repo_payload("sven/thing", fork=True, parent="acme/thing")))
+        root = self.make_repo(origin="https://github.com/example/thing.git")
+        ask = Asker(table(repo_payload("example/thing", fork=True, parent="acme/thing")))
         answer = sd_lib.remote_permits_full(root, ask=ask)
         self.assertFalse(answer.full)
         self.assertTrue(answer.answered)
-        self.assertEqual(answer.reason, "sven/thing is a fork of acme/thing")
+        self.assertEqual(answer.reason, "example/thing is a fork of acme/thing")
 
     def test_case_5_an_owned_remote_with_a_second_collaborator_is_guest(self) -> None:
-        root = self.make_repo(origin="https://github.com/sven/thing.git")
-        ask = Asker(table(people=collaborators("sven", "mallory")))
+        root = self.make_repo(origin="https://github.com/example/thing.git")
+        ask = Asker(table(people=collaborators("example", "mallory")))
         answer = sd_lib.remote_permits_full(root, ask=ask)
         self.assertFalse(answer.full)
         self.assertTrue(answer.answered)
         self.assertIn("mallory", answer.reason)
-        self.assertNotIn("sven, mallory", answer.reason, "you are not your own collaborator")
+        self.assertNotIn("example, mallory", answer.reason, "you are not your own collaborator")
 
     def test_case_6_no_remote_and_no_git_are_full_each_on_its_own_branch(self) -> None:
         ask = Asker({})
@@ -205,14 +205,14 @@ class GenuineYeses(Fixture):
     """
 
     def test_an_empty_collaborator_list_is_a_real_yes(self) -> None:
-        root = self.make_repo(origin="https://github.com/sven/thing.git")
+        root = self.make_repo(origin="https://github.com/example/thing.git")
         answer = sd_lib.remote_permits_full(root, ask=Asker(table(people=[])))
         self.assertEqual(answer, sd_lib.RemoteAnswer(True, True, ""))
 
     def test_a_pull_only_collaborator_is_not_a_pusher(self) -> None:
-        root = self.make_repo(origin="https://github.com/sven/thing.git")
+        root = self.make_repo(origin="https://github.com/example/thing.git")
         people = [
-            {"login": "sven", "permissions": {"push": True, "admin": True}},
+            {"login": "example", "permissions": {"push": True, "admin": True}},
             {"login": "mallory", "permissions": {"push": False, "pull": True}},
         ]
         answer = sd_lib.remote_permits_full(root, ask=Asker(table(people=people)))
@@ -223,7 +223,7 @@ class UnanswerableQueries(Fixture):
     """No answer is `guest`, never `full`. One test per way of not answering."""
 
     def remote_repo(self) -> pathlib.Path:
-        return self.make_repo(origin="https://github.com/sven/thing.git")
+        return self.make_repo(origin="https://github.com/example/thing.git")
 
     def test_a_remote_that_refuses_is_guest_and_unanswered(self) -> None:
         answers = table()
@@ -249,7 +249,7 @@ class UnanswerableQueries(Fixture):
         self.assertIn("who may push", answer.reason)
 
     def test_an_answer_in_the_wrong_shape_is_guest_and_unanswered(self) -> None:
-        answers = table(repo={"full_name": "sven/thing", "fork": False})
+        answers = table(repo={"full_name": "example/thing", "fork": False})
         answer = sd_lib.remote_permits_full(self.remote_repo(), ask=Asker(answers))
         self.assertEqual((answer.full, answer.answered), (False, False))
 
@@ -286,14 +286,14 @@ class UnanswerableQueries(Fixture):
 
         root = self.remote_repo()
         shapes = {
-            "no permissions key": [{"login": "sven"}, {"login": "mallory"}],
+            "no permissions key": [{"login": "example"}, {"login": "mallory"}],
             "permissions not a dict": [
-                {"login": "sven", "permissions": {"push": True}},
+                {"login": "example", "permissions": {"push": True}},
                 {"login": "mallory", "permissions": "write"},
             ],
-            "bare login strings": ["sven", "mallory"],
-            "no login": [{"login": "sven", "permissions": {"push": True}}, {"permissions": {"push": True}}],
-            "an entry that is null": [{"login": "sven", "permissions": {"push": True}}, None],
+            "bare login strings": ["example", "mallory"],
+            "no login": [{"login": "example", "permissions": {"push": True}}, {"permissions": {"push": True}}],
+            "an entry that is null": [{"login": "example", "permissions": {"push": True}}, None],
         }
         for label, people in shapes.items():
             with self.subTest(label):
@@ -313,7 +313,7 @@ class UnanswerableQueries(Fixture):
         """
 
         root = self.remote_repo()
-        sound = collaborators("sven", "mallory", "robin")
+        sound = collaborators("example", "mallory", "robin")
         for position in range(len(sound)):
             for corruption in ({}, None, "mallory", {"login": "x"}, {"permissions": {}}, 0):
                 with self.subTest(position=position, corruption=corruption):
@@ -347,13 +347,13 @@ class Composition(Fixture):
     """A written line is a ceiling. Detection lowers it and never raises it."""
 
     def test_written_full_with_a_detected_no_resolves_to_guest(self) -> None:
-        root = self.make_repo(origin="https://github.com/sven/thing.git")
+        root = self.make_repo(origin="https://github.com/example/thing.git")
         self.write_mode(root, "full")
-        ask = Asker(table(people=collaborators("sven", "mallory")))
+        ask = Asker(table(people=collaborators("example", "mallory")))
         self.assertEqual(sd_lib.mode(root, ask=ask), "guest")
 
     def test_written_guest_with_a_detected_yes_stays_guest(self) -> None:
-        root = self.make_repo(origin="https://github.com/sven/thing.git")
+        root = self.make_repo(origin="https://github.com/example/thing.git")
         self.write_mode(root, "guest")
         ask = Asker(table())
         self.assertEqual(sd_lib.mode(root, ask=ask), "guest")
@@ -369,23 +369,23 @@ class Composition(Fixture):
         the one move `WORKFLOW.md:187-189` forbids.
         """
 
-        root = self.make_repo(origin="https://github.com/sven/thing.git")
+        root = self.make_repo(origin="https://github.com/example/thing.git")
         self.write_mode(root, "minimal")
-        ask = Asker(table(people=collaborators("sven", "mallory")))
+        ask = Asker(table(people=collaborators("example", "mallory")))
         self.assertEqual(sd_lib.mode(root, ask=ask), "minimal")
         self.assertEqual(ask.asked, [])
 
     def test_no_line_with_three_yeses_resolves_to_full(self) -> None:
-        root = self.make_repo(origin="https://github.com/sven/thing.git")
+        root = self.make_repo(origin="https://github.com/example/thing.git")
         self.assertEqual(sd_lib.mode(root, ask=Asker(table())), "full")
 
     def test_the_answer_is_not_cached_between_two_calls(self) -> None:
         """Asked again before every write and every push, per `WORKFLOW.md:185`."""
 
-        root = self.make_repo(origin="https://github.com/sven/thing.git")
+        root = self.make_repo(origin="https://github.com/example/thing.git")
         first = Asker(table())
         self.assertEqual(sd_lib.mode(root, ask=first), "full")
-        gained = Asker(table(people=collaborators("sven", "mallory")))
+        gained = Asker(table(people=collaborators("example", "mallory")))
         self.assertEqual(sd_lib.mode(root, ask=gained), "guest")
         self.assertIn(sd_lib.COLLABORATOR_QUERY, gained.asked)
 
@@ -394,8 +394,8 @@ GH_STUB = """#!/bin/sh
 # `gh api <endpoint>`: $1 is `api`, $2 is the endpoint. Answers from a fixture,
 # so the transport is real and the network is not.
 case "$2" in
-  user) printf '%s' '{"login": "sven"}' ;;
-  */collaborators) printf '%s' '[{"login": "sven", "permissions": {"push": true}}]' ;;
+  user) printf '%s' '{"login": "example"}' ;;
+  */collaborators) printf '%s' '[{"login": "example", "permissions": {"push": true}}]' ;;
   *) printf '%s' '__REPO__' ;;
 esac
 """
@@ -422,12 +422,12 @@ class TheInstallerGate(Fixture):
             return sd_setup_github.setup_github(root, args, load_policy=lambda _root: policy)
 
     def test_a_fork_with_no_mode_line_is_refused(self) -> None:
-        root = self.make_repo(origin="https://github.com/sven/thing.git")
+        root = self.make_repo(origin="https://github.com/example/thing.git")
         self.assertEqual(sd_lib.local_block(root), {}, "the fixture writes no mode: line")
         with self.assertRaises(sd_setup_github.Refusal) as caught:
             self.gate(
                 root,
-                '{"full_name": "sven/thing", "fork": true, '
+                '{"full_name": "example/thing", "fork": true, '
                 '"parent": {"full_name": "acme/thing"}, '
                 '"permissions": {"admin": true, "push": true}}',
             )
@@ -437,10 +437,10 @@ class TheInstallerGate(Fixture):
     def test_the_same_repository_unforked_installs(self) -> None:
         """The control: the refusal is about the fork, not about the stub."""
 
-        root = self.make_repo(origin="https://github.com/sven/thing.git")
+        root = self.make_repo(origin="https://github.com/example/thing.git")
         result = self.gate(
             root,
-            '{"full_name": "sven/thing", "fork": false, '
+            '{"full_name": "example/thing", "fork": false, '
             '"permissions": {"admin": true, "push": true}}',
         )
         self.assertEqual(result["mode"], "full")

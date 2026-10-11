@@ -408,7 +408,7 @@ class PinTests(SetupFixture):
         self.assertEqual(setup.resolve_pin(pack, PIN), PIN)
 
 
-# platypeeps/people-profiles at origin/main on 2026-09-11, byte for byte: one of
+# example-org/example-profiles at origin/main on 2026-09-11, byte for byte: one of
 # the six hand-written wordings, and the one that recites the most -- a sibling
 # repository, two SHAs, a fix commit and a pull request number.
 OLD_WORDING = """\
@@ -424,7 +424,7 @@ updates:
       # `bin/sd-review` out of the pinned checkout, so a bump is a behaviour
       # change across the whole pack, not a version number.
       #
-      # rwbp-coordinator is the proof. It had no such entry, so Dependabot
+      # example-coordinator is the proof. It had no such entry, so Dependabot
       # bumped its pin from cada9b61 to 1ff2b049 unattended; that range
       # introduced a gate refusing any commit without an `Authored-with:`
       # trailer, `route` went red on the bump's own pull request, and it merged
@@ -484,7 +484,7 @@ class GuardTests(SetupFixture):
         # Five of the seven hand-written copies named a fix commit and a pull
         # request beside the real pin, and were stale the day it moved.
         block = guard.guard_block("")
-        for stale in ("505431b8", "#799", "cada9b61", "1ff2b049", "rwbp-coordinator", "three days"):
+        for stale in ("505431b8", "#799", "cada9b61", "1ff2b049", "example-coordinator", "three days"):
             self.assertNotIn(stale, block)
         self.assertIn("actions/review-route/README.md", block)
         self.assertIn("--pin <sha> --force", block)
@@ -695,7 +695,7 @@ class SelfInstallTests(SetupFixture):
         self.assertEqual((code, stream.getvalue()), (0, f"same {setup.WORKFLOW_RELATIVE_PATH}\n"))
 
 
-#: `mezmo/mezmo-world-simulator`'s file, trimmed to the entry under test: it
+#: `example-org/example-simulator`'s file, trimmed to the entry under test: it
 #: pins `actions/docs-gate` only, and hand-adapted the pack's guard for it.
 DOCS_GATE_CONSUMER = """\
 version: 2
@@ -1070,7 +1070,7 @@ class CheckTests(SetupFixture):
         lines = out.splitlines()
         self.assertEqual(lines[0], f"same {setup.WORKFLOW_RELATIVE_PATH}")
         self.assertEqual(lines[1], f"DIFFERS {guard.DEPENDABOT_RELATIVE_PATH}")
-        self.assertIn("-      # rwbp-coordinator is the proof. It had no such entry, so Dependabot", lines)
+        self.assertIn("-      # example-coordinator is the proof. It had no such entry, so Dependabot", lines)
         self.assertIn("+      # The sd-ai-command-pack pin is set by hand, not by Dependabot. The action", lines)
         # Nothing moved on disk.
         self.assertEqual({p: p.read_text(encoding="utf-8") for p in before}, before)

@@ -1652,7 +1652,7 @@ def stop_detail(provider: Provider, diagnostic: Mapping[str, Any], detail: str) 
 
     A reasoning model can spend the whole `max_tokens` thinking and send no
     answer; "did not produce a usable answer" hid that on
-    mezmo-world-simulator#215. Any other outcome keeps `detail`. Counts
+    example-simulator#215. Any other outcome keeps `detail`. Counts
     only: model text never enters the sentence.
     """
     if diagnostic.get("category") != "truncated":

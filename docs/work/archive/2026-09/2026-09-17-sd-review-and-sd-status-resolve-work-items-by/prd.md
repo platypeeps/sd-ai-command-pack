@@ -176,7 +176,7 @@ once the registry lane has run.
   dashboard clone; the checkout choice is recorded as decision note 2702
   on sd:981. The three pages were written together as one edit batch.
 - 2026-09-17 measured at `22183d3c`: `sd-status` from the clone, 13
-  `status-unreadable`; from `/Users/sven/repos/platypeeps/sd-ai-command-pack`,
+  `status-unreadable`; from `/Users/example/repos/platypeeps/sd-ai-command-pack`,
   7. After `sd work register` made sd:988 for this folder, the clone
   reports 14: the new row is keyed by the registered path like the other
   six, and this folder exists only on the branch, so the registered

@@ -1359,7 +1359,7 @@ still fail their own checks on `main` at `ef9d3499`, so "two criteria were
 open" undercounted by far more than one. See "The closure state today".)
 
 *Criterion 7 was unscored, and its scoring clause is now cut.* The seven
-`mezmo-world-simulator` passes had no scores anywhere on this item; `git grep`
+`example-simulator` passes had no scores anywhere on this item; `git grep`
 over `prd.md` and this file returned the sentences that *described* the
 criterion and no table of accepted against rejected. The criterion's wording
 was stronger than "unscored": the scores were due **"before the code review
@@ -1370,7 +1370,7 @@ back-scoring rather than the review point, because the benchmark is not being
 worked in parallel right now. Criterion 7 keeps the half that was load-bearing
 — no percentage removes the code review point, and the point stays or goes by
 a recorded decision — which is where C-39 and C-42 resolve. The scoring is
-parked with the operator, triggered by `mezmo-world-simulator` Phase 1 reaching
+parked with the operator, triggered by `example-simulator` Phase 1 reaching
 `done`; `prd.md`'s log carries the reasoning. (2026-09-13: this paragraph
 is incomplete. It names the scoring and the grep and leaves out the third
 part of criterion 7: the other vendor reviews the next ten code pull
@@ -1427,7 +1427,7 @@ criterion 23's second half, as the dated paragraphs below record.)
 today".) (2026-09-14: and the delivery commit still does not follow, because
 PRs 2, 3 and 4 never merged.)
 Scoring the seven passes is no longer in this order at all: it is evidence
-gathered from `answerbook/mezmo-world-simulator` rather than code written here
+gathered from `example-org/simulator` rather than code written here
 — its git history records at least the fourth and the seventh (`0c39c78`,
 `426a405`) — and it now sits behind that repository's own Phase 1 rather than
 in front of this item's delivery.

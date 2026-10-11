@@ -7,7 +7,7 @@ questions. This document prices each of them, and it is written against a tree
 that is further along than either item body says.
 
 Measured 2026-09-13. Pack: this worktree at `a8295266`. System: `origin/main` at
-`b05d684a`, and **not** the working checkout at `/Users/sven/repos/system`, which
+`b05d684a`, and **not** the working checkout at `/Users/example/repos/system`, which
 lags it — a probe against the working tree reported `sd_db/shadow_jira.py` absent
 while `git ls-tree origin/main` lists it. A plan measured against a stale
 checkout plans for a world that no longer exists, so the provenance is stated
@@ -23,7 +23,7 @@ rather than assumed.
 | System suite | **306** tests, `OK` | `grep -c "def test"` returns 293; a mixin in `tests/test_direct_access.py` is inherited twice |
 | `sd_db/shadow_jira.py` | **343 lines, on system `main`** | system pull request #312, squash `b05d684a` |
 | `TRACKERS` in the system repo | **absent**; `TRACKER = "github"` singular | `shadow_sync` |
-| Live :8767 | PID 37095, label `com.sven.sd-dashboard`, `ProgramArguments[0]` = the system `dashboard.sh` | sd:705 note #1331; re-measured on pull request #898 at `d0ad6542` |
+| Live :8767 | PID 37095, label `local.system-tools.sd-dashboard`, `ProgramArguments[0]` = the system `dashboard.sh` | sd:705 note #1331; re-measured on pull request #898 at `d0ad6542` |
 
 ## Question 1 — does the pack keep a read-only dashboard?
 
@@ -79,9 +79,9 @@ When this table was written `queues` had no row: no system-side path, no
 boundary, no budget. Step 2 gave it the first row's.
 
 Full paths, so the anchors resolve for a reader: the two files are
-/Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py
+/Users/example/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py
 and
-/Users/sven/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py.
+/Users/example/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py.
 
 So the plugin loader was the only renderer of **one** tab, `queues`, until
 step 2, and the system page had already gone native for the other five without
@@ -184,8 +184,8 @@ have, each named so it cannot be lost quietly:
 | Behaviour | Pack location | Disposition |
 |---|---|---|
 | Severity band from a rank | `band` (in `dashboard/app.js`) | ports with the Now ranking, step 6. The rank is a server-side number and the band is the rendering choice; the system page needs the second half only. |
-| Per-table filter | `addFilter` (in `dashboard/app.js`) | **dropped, measured rather than assumed.** The system page already filters its listings: the field is `[data-listing-filter]` (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/static/dashboard.js:385`) and `/` is bound to focus it (`:189`). |
-| Per-table sort | `addSort` (in `dashboard/app.js`) | **dropped, and it costs nothing, because no shipped table asks for it.** `PAGE` declares `data-sd-search` on exactly one table (the skills table; line 356 of `dashboard/server.py` at `a8295266`, 347 at step 4's landing) and `data-sd-sort` on none; the only `data-sd-sort` in the repository was a fixture in `tests/test_dashboard_markup.py`, which step 3 deleted. The system side refuses a client sort on purpose and says why (`/Users/sven/repos/system/local-project-dashboard/sd_dashboard/screens.py:135`): `sd today` and the page must list the same ids in the same order. |
+| Per-table filter | `addFilter` (in `dashboard/app.js`) | **dropped, measured rather than assumed.** The system page already filters its listings: the field is `[data-listing-filter]` (`/Users/example/repos/system/local-project-dashboard/sd_dashboard/static/dashboard.js:385`) and `/` is bound to focus it (`:189`). |
+| Per-table sort | `addSort` (in `dashboard/app.js`) | **dropped, and it costs nothing, because no shipped table asks for it.** `PAGE` declares `data-sd-search` on exactly one table (the skills table; line 356 of `dashboard/server.py` at `a8295266`, 347 at step 4's landing) and `data-sd-sort` on none; the only `data-sd-sort` in the repository was a fixture in `tests/test_dashboard_markup.py`, which step 3 deleted. The system side refuses a client sort on purpose and says why (`/Users/example/repos/system/local-project-dashboard/sd_dashboard/screens.py:135`): `sd today` and the page must list the same ids in the same order. |
 | Panel enhancement | `enhance` (in `dashboard/app.js`) | **not dropped, and not step 3's.** It is the dispatcher for the two rows above and it runs for every *static* panel at startup — `for (const [, panel] of STATIC) enhance(...)` (line 426 of `dashboard/app.js` at `a8295266`, 275 at step 4's landing), seven panels then and five since step 4, none of them a plugin. Deleting it in step 3 is a `ReferenceError` on page load. It dies with `app.js` at step 6. |
 | Plugin panel id assignment | `panelId` (in `dashboard/app.js`) | **dropped at step 3.** This one *is* plugin-only: its single caller is `drawPlugins` (in `dashboard/app.js`), which goes in the same commit. |
 | Tracker key for a null-number row | `where` (in `dashboard/app.js`) | **specification, not code.** sd:361 step 7b changes this one expression so a Jira row shows `LOG-23818` rather than `LOG`. The system page needs the same rule when it takes the tracker views over. |

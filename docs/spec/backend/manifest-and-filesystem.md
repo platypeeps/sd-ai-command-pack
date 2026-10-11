@@ -1562,7 +1562,7 @@ gitignored in the current checkout is a warning with a reinstall hint, not a
 failure. The reverse policy is equally supported: a pack-like file that
 exists but is not recorded in the receipt warns instead of failing when the
 file is gitignored, so repo-local guards that strip local-only adapters
-from the receipt (rwbp-website's policy) pass the audit alongside the
+from the receipt (example-website's policy) pass the audit alongside the
 installer's record-and-warn default. Tracked-but-unlisted pack-like files
 remain failures. Receipt lines normalize Windows-style separators to `/` at
 load time, after the unsafe-path rejection. This does not contradict the
@@ -2917,7 +2917,7 @@ ships. The fleet candidate check is what surfaces this, because it installs the
 candidate into a clone of each consumer and runs that consumer's own checks:
 
 ```
-failed      P20 platypeeps/loadsmith
+failed      P20 example-org/example-tool
 error: review preflight fixture mismatch for AGENTS.md: copied=true, expected false
 ```
 

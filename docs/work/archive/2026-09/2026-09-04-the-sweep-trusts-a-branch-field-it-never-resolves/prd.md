@@ -49,8 +49,8 @@ should not be adding.
 
 **Not a single `git rev-parse` either.** `sweep()` takes *many* roots, not one.
 `bin/sd` builds them from the project allowlist and calls
-`sd_sweep.sweep(roots, ...)`, so an item under `loadsmith` must have its branch
-resolved against `loadsmith`, not against whichever checkout the sweep was
+`sd_sweep.sweep(roots, ...)`, so an item under `example-tool` must have its branch
+resolved against `example-tool`, not against whichever checkout the sweep was
 launched from. A naive resolution in the current working directory would compare
 branch names across unrelated repositories and answer on a coincidence of
 naming.

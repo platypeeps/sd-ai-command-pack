@@ -100,7 +100,7 @@ so the owner reviews and merges the code PR, not a lane.
 ## Verification
 
 - Steps 1-5 each quote `FAILED (failures=1)` before the fix and `OK` after.
-- `make check VENV=/Users/sven/repos/platypeeps/sd-ai-command-pack/.venv`
+- `make check VENV=/Users/example/repos/platypeeps/sd-ai-command-pack/.venv`
   rc 0, `grep -c -E 'FAILED|ERROR'` 0, installer coverage 100%.
 - `tests/test_doc_citations.py` green: `source:` locators only for symbols
   that exist today.

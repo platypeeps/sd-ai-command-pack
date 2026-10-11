@@ -307,7 +307,7 @@ class Controls(unittest.TestCase):
 
         first, second = self.clean_reports()
         with contextlib.closing(sd_db.connect(home=self.home)) as connection:
-            add_note(connection, second, "followup", "look at this", session="sven")
+            add_note(connection, second, "followup", "look at this", session="example")
         human = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-10")
         self.assertEqual(human.returncode, 0, human.stderr)
         lines = human.stdout.rstrip("\n").splitlines()

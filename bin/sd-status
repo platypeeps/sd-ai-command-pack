@@ -472,11 +472,10 @@ def _reports_regardless(condition: str) -> bool:
     **Incident.** This note used to fire on the presence of `if:` alone,
     without reading a character of the expression. Measured on 2026-09-12
     across the five repositories whose required context is `CI Result` --
-    anomaly-metric-creator, hoa-manager, loadsmith, rwbp-coordinator,
-    rwbp-website -- every one writes that gate as `${{ !cancelled() }}`, so
-    every one was told its required context could hang forever, and not one of
-    them can. The consequence was not cosmetic: the note is read as evidence,
-    and the evidence argued for deleting a branch protection that worked.
+    every one writes that gate as `${{ !cancelled() }}`, so every one was told
+    its required context could hang forever, and not one of them can. The
+    consequence was not cosmetic: the note is read as evidence, and the
+    evidence argued for deleting a branch protection that worked.
 
     So the expression is read far enough to tell the two apart, and no
     further. A condition is cleared only when it is exactly one of
@@ -926,7 +925,7 @@ def _protection_reading(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any
     else:
         # 404 is the answer, not an outage: this branch has no *classic*
         # protection. That used to be the whole answer, and on 2026-09-22 it
-        # reported rwbp-website's main as unprotected while a ruleset was
+        # reported example-website's main as unprotected while a ruleset was
         # enforcing four rules on it (sd:1323). Rulesets are GitHub's other
         # mechanism, on their own endpoint, so they are read next through the
         # reader `sd-ship`'s gate shares, and an active ruleset that gates the
