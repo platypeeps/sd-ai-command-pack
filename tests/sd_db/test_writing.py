@@ -18,6 +18,7 @@ from sd_db.writing import (
     change_stage, cutover_pieces, cutover_preview, import_piece, list_pieces,
     piece_for_key, piece_state, preflight, record_gate, update_piece_metadata,
     verify_pieces, readiness, recover_cutover, park_piece, checkout, piece_files, promote,
+    adversarial_brief, record_adversarial, reconcile_companion,
 )
 from sd_db.sources import verify as verify_source
 from sd_db.sources.vault import Reader as VaultReader
@@ -682,6 +683,172 @@ class Promote(WritingCase):
         self.assertTrue(verify_pieces(self.db, str(self.repo))["ok"])
 
 
+SENTENCES = [f"Sentence {n} states one sourced claim about the fixture." for n in range(20)]
+REPORT = "# Review\n\n1. A finding. CERTAIN\n2. Another. LIKELY\n\nDoes the central argument survive hostile reading: YES\n"
+
+
+class ReviewCompanions(WritingCase):
+    """The adversarial run, its stamp and the reconcile, moved from the writing pack (sd:3301)."""
+
+    def write_draft(self, sentences, root=None):
+        index = (root or self.repo) / "content" / self.piece / "index.md"
+        head = index.read_text().split("## Draft", 1)[0]
+        index.write_text(head + "## Draft\n\n### The article\n\n" + " ".join(sentences) + "\n")
+
+    def run_review(self, report=REPORT):
+        brief = adversarial_brief(self.db, self.item)
+        return brief, record_adversarial(self.db, self.item, report, digest=brief["digest"],
+                                         record=brief["record"], generation=brief["generation"])
+
+    def reconcile(self, artifact="adversarial"):
+        return reconcile_companion(self.db, self.item, artifact, note="Each finding was checked against the revision.")
+
+    def companions(self):
+        return {name: state["state"] for name, state in readiness(self.db, self.item)["companions"].items()}
+
+    def test_the_brief_names_the_draft_research_digest_generation_and_run_record(self):
+        self.write_draft(SENTENCES)
+        brief = adversarial_brief(self.db, self.item)
+        self.assertEqual((brief["draft"], brief["research"], brief["research_exists"]),
+                         (f"content/{self.piece}/index.md", f"content/{self.piece}/research.md", True))
+        self.assertEqual(brief["root"], str(self.repo.resolve()))
+        self.assertEqual(brief["digest"], readiness(self.db, self.item)["digest"])
+        self.assertEqual(brief["generation"], 0)
+        self.assertRegex(brief["record"], r"^<!-- adversarial-reviewed: words=183 sentences=([0-9a-f]{8},){19}[0-9a-f]{8} -->$")
+
+    def test_the_brief_refuses_a_short_or_missing_draft(self):
+        with self.assertRaisesRegex(WorkflowError, "only 2 words under '## Draft'"):
+            adversarial_brief(self.db, self.item)
+        self.index.write_text(self.index.read_text().split("## Draft", 1)[0])
+        with self.assertRaisesRegex(WorkflowError, "no '## Draft' section"):
+            adversarial_brief(self.db, self.item)
+
+    def test_a_run_writes_stamp_record_provenance_then_the_report(self):
+        self.write_draft(SENTENCES)
+        brief, result = self.run_review()
+        text = (self.folder / "adversarial.md").read_text()
+        lines = text.split("\n\n")
+        self.assertRegex(lines[0], rf"^<!-- reconciled-with-draft: {brief['digest']} on \d{{4}}-\d\d-\d\d gen=0 -->$")
+        self.assertEqual(lines[1], brief["record"])
+        self.assertIn("Findings are HYPOTHESES", lines[2])
+        self.assertTrue(text.endswith(REPORT))
+        self.assertEqual(result["confidence"], {"CERTAIN": 1, "LIKELY": 1, "SPECULATIVE": 0})
+        self.assertEqual(result["verdict"], "Does the central argument survive hostile reading: YES")
+        self.assertTrue(result["current"])
+        self.assertEqual(result["path"], f"content/{self.piece}/adversarial.md")
+        self.assertEqual(self.companions()["adversarial"], "current")
+
+    def test_a_draft_changed_during_the_run_leaves_a_stale_report(self):
+        self.write_draft(SENTENCES)
+        brief = adversarial_brief(self.db, self.item)
+        self.write_draft(SENTENCES[:-1])
+        result = record_adversarial(self.db, self.item, REPORT, digest=brief["digest"], record=brief["record"],
+                                    generation=brief["generation"])
+        self.assertFalse(result["current"])
+        self.assertEqual(self.companions()["adversarial"], "stale")
+
+    def test_an_empty_report_writes_nothing(self):
+        self.write_draft(SENTENCES)
+        before = (self.folder / "adversarial.md").read_bytes()
+        brief = adversarial_brief(self.db, self.item)
+        with self.assertRaisesRegex(WorkflowError, "no report"):
+            record_adversarial(self.db, self.item, "  \n", digest=brief["digest"], record=brief["record"],
+                               generation=brief["generation"])
+        self.assertEqual((self.folder / "adversarial.md").read_bytes(), before)
+
+    def test_companion_states_are_missing_unstamped_current_or_stale(self):
+        self.assertEqual(self.companions(), {"adversarial": "unstamped", "research": "current"})
+        (self.folder / "adversarial.md").unlink()
+        self.write_draft(SENTENCES)
+        self.assertEqual(self.companions(), {"adversarial": "missing", "research": "stale"})
+
+    def test_reconcile_refuses_a_rewrite_the_run_never_read(self):
+        """sd:2025: a reconcile stamped a large rewrite reviewed, and the gate then accepted it."""
+        self.write_draft(SENTENCES)
+        self.run_review()
+        self.write_draft([s.replace("sourced", "rewritten") if n % 2 else s for n, s in enumerate(SENTENCES)])
+        before = (self.folder / "adversarial.md").read_bytes()
+        # 183 words read (the heading joins sentence 0); 10 sentences of 9 words are new.
+        with self.assertRaisesRegex(WorkflowError, "49% of the draft is prose the last run did not read"):
+            self.reconcile()
+        self.assertEqual((self.folder / "adversarial.md").read_bytes(), before)
+
+    def test_reconcile_allows_a_small_revision_and_counts_cumulatively(self):
+        self.write_draft(SENTENCES)
+        self.run_review()
+        revised = list(SENTENCES)
+        revised[0] = "Sentence 0 now hedges its claim about the fixture."
+        self.write_draft(revised)
+        result = self.reconcile()
+        self.assertEqual((result["was"]["state"], result["digest"]), ("stale", readiness(self.db, self.item)["digest"]))
+        text = (self.folder / "adversarial.md").read_text()
+        self.assertIn("<!-- adversarial-reviewed: words=", text)
+        self.assertIn("## Resolution ledger", text)
+        self.assertTrue(text.endswith("Each finding was checked against the revision.\n"))
+        self.assertEqual(self.companions()["adversarial"], "current")
+        # 36 more words against the reconcile, 20%, but 48 against the run: 26% of 183.
+        revised[1:5] = [s.replace("sourced", "revised") for s in revised[1:5]]
+        self.write_draft(revised)
+        with self.assertRaisesRegex(WorkflowError, "26% of the draft"):
+            self.reconcile()
+
+    def test_reconcile_counts_reordered_sentences_as_unread(self):
+        self.write_draft(SENTENCES)
+        self.run_review()
+        self.write_draft(list(reversed(SENTENCES)))
+        with self.assertRaisesRegex(WorkflowError, "of the draft is prose the last run did not read"):
+            self.reconcile()
+
+    def test_reconcile_without_a_run_record_reads_the_committed_draft(self):
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+               "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+
+        def commit(message):
+            for args in (["add", "-A"], ["commit", "-q", "-m", message]):
+                subprocess.run(["git", *args], cwd=self.repo, env=env, check=True, capture_output=True)
+
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=self.repo, env=env, check=True, capture_output=True)
+        self.write_draft(SENTENCES)
+        digest = readiness(self.db, self.item)["digest"]
+        report = self.folder / "adversarial.md"
+        report.write_text(f"<!-- reconciled-with-draft: {digest} on 2026-09-08 -->\n\n# Old review\n")
+        revised = list(SENTENCES)
+        revised[0] = "Sentence 0 now hedges its claim about the fixture."
+        self.write_draft(revised)
+        with self.assertRaisesRegex(WorkflowError, "cannot tell how much of the draft the last run read"):
+            self.reconcile()
+        self.write_draft(SENTENCES)
+        commit("reviewed draft")
+        self.write_draft(revised)
+        self.reconcile()
+        # The reconcile keeps the recovered record, so the next one still measures against
+        # the reviewed draft, not against the committed draft the new stamp names.
+        self.assertIn("<!-- adversarial-reviewed: words=", report.read_text())
+        commit("reconciled draft")
+        revised[1:5] = [s.replace("sourced", "revised") for s in revised[1:5]]
+        self.write_draft(revised)
+        with self.assertRaisesRegex(WorkflowError, "26% of the draft"):
+            self.reconcile()
+
+    def test_research_reconcile_stamps_the_draft_and_generation(self):
+        self.write_draft(SENTENCES)
+        self.assertIn("research.md is missing, unstamped or stale against this draft", readiness(self.db, self.item)["problems"])
+        self.reconcile("research")
+        text = (self.folder / "research.md").read_text()
+        self.assertRegex(text.splitlines()[0], r"^<!-- reconciled-with-draft: [0-9a-f]{12} on \S+ gen=0 -->$")
+        self.assertIn("## Reconciled with the draft", text)
+        self.assertNotIn("research.md is missing, unstamped or stale against this draft",
+                         readiness(self.db, self.item)["problems"])
+
+    def test_reconcile_refuses_a_missing_companion_or_draft(self):
+        (self.folder / "adversarial.md").unlink()
+        with self.assertRaisesRegex(WorkflowError, "no adversarial.md"):
+            self.reconcile()
+        self.index.write_text(self.index.read_text().split("## Draft", 1)[0])
+        with self.assertRaisesRegex(WorkflowError, "no '## Draft' section to reconcile against"):
+            self.reconcile("research")
+
+
 class WorktreeCheckout(WritingCase):
     """A writer in a linked worktree reads its own files under the registered row (sd:2024)."""
 
@@ -770,6 +937,19 @@ class WorktreeCheckout(WritingCase):
         relative = f"content/{state['item']['piece']}/index.md"
         self.assertTrue((self.worktree / relative).is_file())
         self.assertFalse((self.repo / relative).exists())
+
+    def test_an_adversarial_run_reviews_and_writes_the_worktree_draft(self):
+        """A writer in its own worktree reviews the prose it changed there (sd:3301)."""
+        index = self.worktree / "content" / self.piece / "index.md"
+        index.write_text(index.read_text().split("## Draft", 1)[0] + "## Draft\n\n" + " ".join(SENTENCES) + "\n")
+        before = (self.folder / "adversarial.md").read_bytes()
+        with checkout(str(self.repo), self.worktree):
+            brief = adversarial_brief(self.db, self.item)
+            record_adversarial(self.db, self.item, REPORT, digest=brief["digest"], record=brief["record"],
+                               generation=brief["generation"])
+        self.assertEqual(brief["root"], str(self.worktree.resolve()))
+        self.assertIn(brief["record"], (self.worktree / "content" / self.piece / "adversarial.md").read_text())
+        self.assertEqual((self.folder / "adversarial.md").read_bytes(), before)
 
     def test_the_registered_checkout_is_its_own_checkout(self):
         with checkout(str(self.repo), self.repo):

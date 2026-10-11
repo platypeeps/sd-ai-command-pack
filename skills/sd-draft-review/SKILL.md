@@ -11,7 +11,7 @@ Two modes on one private review copy per piece:
 - `push` writes the draft and its research to Google Docs in the private drafts folder.
 - `pull` reads comments and edits back. It writes nothing anywhere.
 
-Run from the root of the writing content repository (it holds `scripts/pack.py`). `pack` below means `python3 scripts/pack.py`.
+Run from the root of a content repository (it holds `content/`, `profile/` and `templates/`). This skill also needs sd-writing's `scripts/pack.py`. `pack` below means `python3 scripts/pack.py`.
 The piece comes from the arguments; with none, ask which piece, or offer the ones at `review` (push) or with a recorded review URL (pull).
 Always pull before a push that replaces a document: a replace overwrites reviewer edits in the body, and no tool here recovers them.
 
@@ -29,7 +29,7 @@ This skill writes only the drafts folder. It never writes the publishing folder:
 
 ## push
 
-1. `pack pieces get --piece <year>/<slug> --json`; use `item.path` and `writing.stage`.
+1. `sd writing get --piece <year>/<slug> --json`; use `item.path` and `writing.stage`.
    - `review` is the intended stage. `drafting` and `ready` are allowed; name the stage in the report.
    - `idea` and `researching` refuse (suggest `sd-draft`); `published` refuses.
    - An empty or placeholder `## Draft` stops the push.
@@ -54,7 +54,7 @@ Push report: the URL, word count, stage, and how comments come back (`/sd-draft-
 
 ## pull
 
-1. `pack pieces get --piece <year>/<slug> --json`; take `writing.metadata.review_urls.gdocs`. A null, empty or missing value means never pushed: say so and suggest `push`. Take the document ID from that URL only; never search Drive for a likely title.
+1. `sd writing get --piece <year>/<slug> --json`; take `writing.metadata.review_urls.gdocs`. A null, empty or missing value means the piece was not pushed: say so and suggest `push`. Take the document ID from that URL only; do not search Drive for a likely title.
 2. `pack review status --piece <year>/<slug>`. A `review=stale` or `unstamped` copy may quote sentences that no longer exist: say so at the top of the report.
 3. Comments: `list_document_comments` with `user_google_email` and `document_id`. "No comments" and "could not read" are different results; on an error, report it and stop. `get_doc_as_markdown` shows comments against their anchors when an anchor is thin.
 4. Suggestion-mode edits: `get_doc_as_markdown` with `suggestions_view_mode=SUGGESTIONS_INLINE`.

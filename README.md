@@ -302,7 +302,9 @@ YEAR/slug`, and `sd writing stage` share the dashboard's writing controls.
 Import and cutover have separate preview and verification commands. `list`,
 `import` and `verify` refuse a checkout with no `content/` folder.
 `sd writing promote ID` turns an idea row into a registered piece in the
-current writing checkout, from its piece template. Once the
+current writing checkout, from its piece template. `sd writing adversarial`
+runs the shared adversarial gate on a draft, and `sd writing reconcile` marks
+`adversarial.md` or `research.md` current after a small revision. Once the
 repository uses rows, routine stage, parking and metadata changes leave content
 files untouched. See the writing pack's `.claude/reference/database-workflow.md`
 for review evidence and recovery commands.
