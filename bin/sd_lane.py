@@ -162,6 +162,7 @@ import os
 import pathlib
 import re
 import secrets
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -1420,11 +1421,10 @@ def claim_entry(queue: Queue, token: str, reclaimed: list[dict[str, Any]] | None
                            lease_until=stamp_at(time.time() + 2 * PREPARE_SECONDS))
                 return dict(row)
         return None
-    try:
-        return runner_write(queue, claim_first, check=host_check(queue))
-    finally:
-        if reclaimed is not None:
-            reclaimed.extend(found)
+    claimed = runner_write(queue, claim_first, check=host_check(queue))
+    if reclaimed is not None:  # only once the claim's transaction landed
+        reclaimed.extend(found)
+    return claimed
 
 
 class Moved(Stop):
@@ -1554,6 +1554,9 @@ def checkout_for(root: pathlib.Path, queue: Queue, entry: dict[str, Any]) -> dic
     expected, branch = str(entry.get("expected_head")), str(entry.get("branch") or "")
     if entry.get("gate") == "satellite":
         return skip("retired_hand_off", "a satellite hand-off entry an older version queued; enqueue it again")
+    if not branch:  # nothing to fetch, now or on a later run
+        return {"status": "failed", "code": "no_branch", "reason": "the entry names no branch; queue it with "
+                                                                    "`sd-ship lane enqueue`"}
     own = pathlib.Path(str(entry.get("worktree") or ""))
     if entry.get("enqueued_on") == this_host() and own.is_dir() and at_head(own, expected):
         return {"tree": own}
@@ -1597,6 +1600,8 @@ def lane_tree(main: pathlib.Path, lane: pathlib.Path, branch: str, expected: str
         if path.resolve() == lane.resolve():
             drop_lane_worktree(main, path, name or None)
     listed = [(path, name) for path, name in listed if path.resolve() != lane.resolve()]
+    if lane.exists():  # the lane's own folder, which git no longer lists: a killed run's
+        shutil.rmtree(lane)
     ref, tip = f"refs/heads/{branch}", fetched_tip(main, branch)
     if not tip:
         return skip(HEAD_GONE, f"origin/{branch} is gone; `sd-ship lane retry` publishes {expected} again from "

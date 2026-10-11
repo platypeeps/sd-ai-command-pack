@@ -1149,6 +1149,15 @@ class SharedQueue(Lane):
         finally:
             connection.close()
 
+    def failing_store(self, when: Any) -> Any:
+        real = sd_lane.store
+
+        def store(connection: Any, repository: str, entry: dict) -> None:
+            if when(entry):
+                raise sqlite3.OperationalError("the hub went away")
+            real(connection, repository, entry)
+        return mock.patch.object(sd_lane, "store", store)
+
     def make_dead(self) -> None:
         """The runner that holds the running entry exits, as a stopped or killed one does."""
         runner = subprocess.Popen([sys.executable, "-c", ""])
@@ -1365,15 +1374,6 @@ class ClaimAndLease(SharedQueue):
         self.assertIn("one entry of a repository runs at a time", answer["stopped"])
         self.assertEqual((self.calls, self.entries()[0]["status"]), ([], "running"))
 
-    def failing_store(self, when: Any) -> Any:
-        real = sd_lane.store
-
-        def store(connection: Any, repository: str, entry: dict) -> None:
-            if when(entry):
-                raise sqlite3.OperationalError("the hub went away")
-            real(connection, repository, entry)
-        return mock.patch.object(sd_lane, "store", store)
-
     def test_a_step_write_that_fails_stops_the_runner_and_reclaim_puts_it_back(self) -> None:
         """Failure table, before merge: the hub fails for the whole retry; no merge, and the rerun runs it."""
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
@@ -1527,6 +1527,34 @@ class AnyHost(SharedQueue):
         sd_lane.run_lane(self.repo, self.environ, ship)
         self.assertEqual((heads[:1], self.entries()[0]["status"]), ([head], "merged"))
         self.assertFalse(self.made().exists())
+
+    def test_a_pending_entry_with_no_branch_fails_and_does_not_loop(self) -> None:
+        """Failure table, worktree: an entry another host left with no branch has nothing to fetch; it fails once."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        sd_lane.update(self.store(), lambda rows: rows[0].update(branch=None))
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry.get("code"), self.calls), ("failed", "no_branch", []))
+        self.assertNotIn("stopped", answer)
+
+    def test_a_leftover_lane_folder_git_no_longer_knows_is_replaced(self) -> None:
+        """Failure table, worktree: the lane folder exists but is no registered worktree; the runner remakes it."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        self.made().mkdir(parents=True)
+        (self.made() / "stale.txt").write_text("left by a killed run\n", encoding="utf-8")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged")
+
+    def test_a_claim_whose_write_fails_reports_no_reclaim(self) -> None:
+        """Failure table, claim: a cross-host reclaim inside a claim the hub never took is not reported."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.claim_entry(self.store(), "elsewhere")
+        sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(host="build-2")
+                       or rows[0].update(lease_until="2020-01-01T00:00:00Z"))
+        reclaimed: list = []
+        with self.failing_store(lambda entry: True), self.assertRaises(sd_lane.Stop):
+            sd_lane.claim_entry(self.store(), "mine", reclaimed)
+        self.assertEqual((reclaimed, self.entries()[0]["status"]), ([], "running"))
 
     def test_an_expired_lease_on_another_host_is_reclaimed_at_claim(self) -> None:
         """Failure table, claim: a holder on another host is dead once its lease passed; the lane host reclaims it."""
