@@ -1,4 +1,4 @@
-"""`sd-db.sh` — the entrypoint the repository's convention asks for."""
+"""`bin/sd-db`: the library's verbs through the entrypoint (system's `sd-db.sh` until sd:3285)."""
 
 import os
 import re
@@ -11,9 +11,10 @@ from pathlib import Path
 
 from sd_db.schema import SCHEMA_VERSION
 from sd_db.testing.wire import hub_only
+from . import support
 
-PACKAGE_ROOT = Path(__file__).resolve().parent.parent
-ENTRYPOINT = PACKAGE_ROOT / "sd-db.sh"
+PACKAGE_ROOT = support.LIB
+ENTRYPOINT = support.SD_DB
 
 REGISTRY = """\
 bills:
@@ -49,7 +50,7 @@ class CliCase(unittest.TestCase):
         # installed this morning.
         environment.pop("XDG_STATE_HOME", None)
         completed = subprocess.run(
-            [str(ENTRYPOINT), *args], capture_output=True, text=True, input="",
+            [sys.executable, str(ENTRYPOINT), *args], capture_output=True, text=True, input="",
             # `work register` takes no repository argument: the checkout is
             # the one enclosing the working directory, so a test of it has to
             # be able to say where it is standing.
@@ -58,271 +59,6 @@ class CliCase(unittest.TestCase):
         )
         self.assertEqual(completed.returncode, expect, completed.stdout + completed.stderr)
         return completed
-
-
-class WhichInterpreterItRuns(CliCase):
-    """A defect that shipped: every verb needed a login shell's PATH.
-
-    `PYTHON="${PYTHON:-python3}"` resolves to Xcode's 3.9 on a bare PATH, and
-    `sd_db/backup.py` imports `datetime.UTC`, which 3.9 does not have. So
-    every verb here died three imports deep rather than in a sentence. It
-    survived because a login shell puts Homebrew first; it broke the first
-    time `local-sd-plan` ran `work register` from the runner's exec'd
-    environment, which carries `/usr/bin:/bin:/usr/sbin:/sbin` and nothing
-    else. `local-sd-plan/sd-plan.sh` hit the same thing first
-    (source:local-sd-plan/sd-plan.sh::python_is_new_enough).
-    """
-
-    def old_python(self):
-        """A stand-in that fails the version probe, on any machine.
-
-        Fabricated rather than reaching for `/usr/bin/python3`, so the case
-        runs identically in CI and never turns into a skip -- the CI wrapper
-        fails on skips.
-        """
-        path = self.home / "old-python"
-        path.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
-        path.chmod(0o755)
-        return path
-
-    def test_an_interpreter_that_is_too_old_refuses_in_a_sentence(self):
-        done = self.sd_db("init", expect=1, PYTHON=str(self.old_python()))
-        self.assertIn("too old", done.stderr)
-        self.assertIn("3.13", done.stderr)
-        self.assertNotIn("Traceback", done.stderr)
-
-    def test_a_bare_path_still_finds_a_usable_interpreter(self):
-        """The runner's environment, reproduced.
-
-        This is the invocation that failed: `work register` reached from a
-        queued command, with no Homebrew on PATH. `SD_DB_PYTHON` names the
-        interpreter running this suite, which is the mechanism the fix relies
-        on.
-        """
-        marker = self.home / "fallback-reached"
-        python = self.home / "sd-db-python"
-        python.write_text(f'#!/bin/sh\ntouch {shlex.quote(str(marker))}\n'
-                          f'exec {shlex.quote(sys.executable)} "$@"\n', encoding="utf-8")
-        python.chmod(0o755)
-        done = self.sd_db("init", PATH="/usr/bin:/bin", SD_DB_PYTHON=str(python), unset=("PYTHON",))
-        self.assertTrue((self.home / ".local/share/sd/sd.db").exists(),
-                        "the verb has to have actually run, not just resolved")
-        self.assertNotIn("Traceback", done.stdout + done.stderr)
-        # An inherited PYTHON takes the early branch and never reaches the
-        # fallback loop, so the case passed in CI while testing nothing.
-        self.assertTrue(marker.exists(), "the interpreter did not come from the fallback loop")
-
-    def test_the_minimum_version_is_stated_once_and_is_three_thirteen(self):
-        text = ENTRYPOINT.read_text(encoding="utf-8")
-        self.assertEqual(text.count("(3, 13)"), 1)
-        self.assertIn('requires-python = ">=3.13"',
-                      (PACKAGE_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
-
-    def test_a_python_older_than_the_package_metadata_is_refused(self):
-        """3.12 passed the old 3.11 probe while pyproject requires 3.13."""
-        python = self.home / "python-3.12"
-        python.write_text(
-            '#!/bin/sh\n'
-            'if [ "$1" = -c ]; then\n'
-            f'  exec {shlex.quote(sys.executable)} -c '
-            '"import sys; sys.version_info = (3, 12, 0, \'final\', 0); exec(sys.argv[1])" "$2"\n'
-            'fi\n'
-            f'exec {shlex.quote(sys.executable)} "$@"\n', encoding="utf-8")
-        python.chmod(0o755)
-        done = self.sd_db("init", expect=1, PYTHON=str(python))
-        self.assertIn("too old", done.stderr)
-        self.assertFalse((self.home / ".local/share/sd/sd.db").exists())
-
-    def test_a_python_that_does_not_exist_is_not_called_too_old(self):
-        done = self.sd_db("init", expect=1, PYTHON=str(self.home / "no-such-python"))
-        self.assertIn("not an executable command", done.stderr)
-        self.assertNotIn("too old", done.stderr)
-
-    def test_help_and_usage_need_no_interpreter(self):
-        """The help contract holds on a machine with no usable Python."""
-        done = self.sd_db("--help", PYTHON=str(self.old_python()))
-        self.assertIn("Usage: sd-db.sh", done.stderr)
-        done = self.sd_db(expect=1, PYTHON=str(self.old_python()))
-        self.assertIn("Usage: sd-db.sh", done.stderr)
-        self.assertNotIn("too old", done.stderr)
-
-
-class ACheckoutBehindTheDatabase(CliCase):
-    """sd:1664: the checkout lags `origin/main`, the database does not.
-
-    `sd-db.sh` runs `sd_db` from this checkout, so one schema bump on `main`
-    broke every verb until someone pulled. The refusal told the operator to
-    install into a virtualenv this entrypoint never uses. It has to name the
-    checkout and the pull, and leave the newer database exactly as it was.
-    """
-
-    def sd_db(self, *args, **extra):
-        # The checkout's own refusal: an installed copy built for the newer
-        # schema would answer instead (sd:1765, tests/test_library_choice.py).
-        return super().sd_db(*args, **{"SD_DB_LIBRARY": "checkout", **extra})
-
-    def setUp(self):
-        super().setUp()
-        self.sd_db("init")
-        self.database = self.home / ".local/share/sd/sd.db"
-        self.newer = SCHEMA_VERSION + 1
-        raw = sqlite3.connect(self.database, isolation_level=None)
-        raw.execute(f"PRAGMA user_version = {self.newer}")
-        raw.close()
-
-    def version(self):
-        raw = sqlite3.connect(self.database, isolation_level=None)
-        try:
-            return raw.execute("PRAGMA user_version").fetchone()[0]
-        finally:
-            raw.close()
-
-    def assert_names_the_pull(self, text):
-        self.assertIn(f"schema version {self.newer}", text)
-        self.assertIn(f"built for {SCHEMA_VERSION}", text)
-        self.assertIn(f"git -C {PACKAGE_ROOT.parent} pull --ff-only", text)
-        self.assertNotIn("into this virtualenv", text)
-        self.assertNotIn("Traceback", text)
-
-    def test_every_kind_of_verb_refuses_naming_the_pull(self):
-        for verb in (("status",), ("repo", "list"), ("usage",), ("migrate",), ("init",)):
-            with self.subTest(verb=verb):
-                done = self.sd_db(*verb, expect=1)
-                self.assert_names_the_pull(done.stderr)
-        self.assertEqual(self.version(), self.newer, "a newer database must never move")
-
-    def test_the_backup_mail_names_the_pull_too(self):
-        mail = self.home / "mail"
-        notify = self.home / "notify"
-        notify.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {shlex.quote(str(mail))}\n',
-                          encoding="utf-8")
-        notify.chmod(0o755)
-        done = self.sd_db("backup", "--destination", str(self.home / "backups"),
-                          expect=1, SD_NOTIFY=str(notify))
-        self.assert_names_the_pull(done.stderr)
-        self.assert_names_the_pull(mail.read_text(encoding="utf-8"))
-        self.assertEqual(self.version(), self.newer)
-
-
-class TheTestAndCheckArguments(CliCase):
-    """What `test` and `check` hand to unittest, seen through a stub interpreter."""
-
-    def run_stub(self, *args, expect=0):
-        python = self.home / "argv-python"
-        python.write_text('#!/bin/sh\n[ "$1" = -c ] && exit 0\nprintf "%s\\n" "$@"\n',
-                          encoding="utf-8")
-        python.chmod(0o755)
-        return self.sd_db(*args, expect=expect, PYTHON=str(python))
-
-    def argv(self, *args):
-        return self.run_stub(*args).stdout.splitlines()
-
-    def test_a_discovery_option_reaches_discover(self):
-        argv = self.argv("test", "-k", "TheCleanReport")
-        self.assertEqual(argv[:3], ["-m", "unittest", "discover"])
-        self.assertEqual(argv[-2:], ["-k", "TheCleanReport"])
-
-    def test_a_test_id_runs_without_discover(self):
-        self.assertEqual(self.argv("test", "tests.test_cli.TheConventions", "-v"),
-                         ["-m", "unittest", "tests.test_cli.TheConventions", "-v"])
-
-    def test_check_refuses_an_argument_rather_than_narrow_the_suite(self):
-        done = self.run_stub("check", "-k", "x", expect=1)
-        self.assertIn("sd-db check: takes no arguments", done.stderr)
-        self.assertEqual(done.stdout, "")
-
-
-class TheFailureMailWithoutNotifyOnPath(CliCase):
-    """A PATH without bin-links' `notify` still mails a failed backup."""
-
-    def test_the_vendored_notifier_carries_the_mail(self):
-        tree = self.home / "tree"
-        (tree / "local-sd-db").mkdir(parents=True)
-        (tree / "local-notify").mkdir()
-        entrypoint = tree / "local-sd-db/sd-db.sh"
-        entrypoint.write_bytes(ENTRYPOINT.read_bytes())
-        entrypoint.chmod(0o755)
-        record = self.home / "mail"
-        notifier = tree / "local-notify/notify.sh"
-        notifier.write_text(f'#!/bin/sh\nprintf "%s\\n" "$@" > {shlex.quote(str(record))}\n',
-                            encoding="utf-8")
-        notifier.chmod(0o755)
-        # HOME has no database, so the backup fails whether or not `sd_db` imports.
-        environment = {"HOME": str(self.home), "PATH": "/usr/bin:/bin",
-                       "PYTHON": sys.executable}
-        done = subprocess.run([str(entrypoint), "backup"], capture_output=True, text=True,
-                              input="", env=environment, check=False)
-        self.assertEqual(done.returncode, 1, done.stderr)
-        self.assertNotIn("the failure mail did not leave", done.stderr)
-        self.assertIn("sd-db backup FAILED", record.read_text(encoding="utf-8"))
-
-
-class TheConventions(CliCase):
-    def test_it_is_posix_sh_and_resolves_its_own_folder(self):
-        text = ENTRYPOINT.read_text(encoding="utf-8")
-        self.assertTrue(text.startswith("#!/bin/sh\n"))
-        self.assertIn("set -e", text)
-        self.assertIn('DIR="$(cd "$(dirname "$0")" && pwd)"', text)
-
-    def test_it_is_named_after_the_folder_without_the_prefix(self):
-        self.assertEqual(ENTRYPOINT.name, PACKAGE_ROOT.name.replace("local-", "") + ".sh")
-
-    def test_no_argument_prints_usage_to_stderr_and_exits_one(self):
-        completed = self.sd_db(expect=1)
-        self.assertEqual(completed.stdout, "")
-        self.assertIn("Usage: sd-db.sh", completed.stderr)
-
-    def test_help_describes_the_subcommands_and_exits_zero(self):
-        """Each verb starts a line of its own, not merely appears somewhere.
-
-        `assertIn` passed for `retire` while the usage described the verb in
-        prose and named no such entry -- the word was in the text, so the
-        check agreed with itself. The entries are what the reader scans.
-
-        The verbs come from the dispatcher rather than from a list written
-        here. A list written here is one more inventory to remember, and
-        `work` was added to the dispatcher and to the usage while this tuple
-        still named ten verbs and agreed with itself about all of them.
-        """
-        completed = self.sd_db("--help")
-        entries = {
-            match.group(1)
-            for match in re.finditer(r"^  ([a-z-]+)\b", completed.stderr, re.MULTILINE)
-        }
-        self.assertTrue(self.dispatched, "read no verbs out of the dispatcher")
-        for verb in self.dispatched:
-            self.assertIn(verb, entries, f"{verb} is dispatched and undocumented")
-
-    #: Every label of the entrypoint's `case`, minus the catch-all and the
-    #: help aliases, which describe no verb of their own.
-    @property
-    def dispatched(self):
-        body = ENTRYPOINT.read_text(encoding="utf-8").partition("\ncase ")[2]
-        labels = re.findall(r"^    ([a-z|*-]+)\)$", body, re.MULTILINE)
-        return sorted(
-            verb
-            for label in labels
-            for verb in label.split("|")
-            if verb not in ("*", "-h", "--help", "help")
-        )
-
-    def test_a_help_flag_after_a_database_verb_prints_usage_and_acts_on_nothing(self):
-        """sd:2716: `init --help` ran `init` on the live database.
-
-        The verbs come from the arm that hands them to `sd_db.jobs.cli`, so a
-        verb added to that line is covered here without a list to update.
-        """
-        body = ENTRYPOINT.read_text(encoding="utf-8")
-        line = re.search(r"^    ([a-z|-]+)\)\n(?:.*\n){0,8}?.*-m sd_db\.jobs\.cli ", body, re.MULTILINE)
-        self.assertIsNotNone(line, "found no arm that runs sd_db.jobs.cli")
-        verbs = line.group(1).split("|")
-        self.assertIn("init", verbs)
-        database = self.home / ".local/share/sd/sd.db"
-        for argv in [(verb, flag) for verb in verbs for flag in ("-h", "--help")] + [("repo", "add", "--help")]:
-            with self.subTest(argv=argv):
-                completed = self.sd_db(*argv)
-                self.assertIn("Usage: sd-db.sh", completed.stderr)
-                self.assertFalse(database.exists(), f"{' '.join(argv)} made a database")
 
 
 class TheVerbs(CliCase):
@@ -538,7 +274,7 @@ class TheMigrationVerbs(MigrationVerbCase):
         self.assertEqual(row[-4:], ["no", "github", "hub", "manual"])
         self.assertNotIn("file", row)
         completed = self.sd_db("retire", "docs-work", expect=1)
-        self.assertIn("Usage: sd-db.sh <command>", completed.stderr)
+        self.assertIn("Usage: sd-db <verb>", completed.stderr)
         self.assertNotIn("retire S", completed.stderr)
         completed = self.sd_db("import", "docs-work", expect=1)
         self.assertIn("the sources are index, issues, register, vault", completed.stderr)
@@ -786,7 +522,7 @@ class RemoveCase(CliCase):
         for name in ("PYTHONPATH", "XDG_STATE_HOME", *cleared):
             environment.pop(name, None)
         completed = subprocess.run(
-            [str(ENTRYPOINT), *args], capture_output=True, text=True, input="",
+            [sys.executable, str(ENTRYPOINT), *args], capture_output=True, text=True, input="",
             env={**environment, "PYTHONPATH": str(PACKAGE_ROOT), **extra},
         )
         self.assertEqual(completed.returncode, expect, completed.stdout + completed.stderr)

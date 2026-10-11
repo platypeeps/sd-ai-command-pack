@@ -34,9 +34,10 @@ from sd_db.schema import SCHEMA_DIR, SCHEMA_VERSION, migrations
 from sd_db.testing import Stubs, add_unknown_table, break_foreign_keys, make_store
 from sd_db.testing.wire import hub_only
 from sd_db.writes import record_state, unresolved_state
+from . import support
 
-PACKAGE_ROOT = Path(__file__).resolve().parent.parent
-ENTRYPOINT = PACKAGE_ROOT / "sd-db.sh"
+PACKAGE_ROOT = support.LIB
+ENTRYPOINT = support.SD_DB
 
 #: The module, not `sd_db.backup` the re-exported function: two tests patch
 #: names inside it.
@@ -1024,7 +1025,7 @@ class TheDatabaseWaitingForMigrate(BackupCase):
     def test_the_job_reports_the_read_only_copy_and_exits_zero_without_a_prune(self):
         self.older()
         environment = dict(os.environ, HOME=str(self.home), PYTHON=sys.executable)
-        completed = subprocess.run([str(ENTRYPOINT), "backup"], capture_output=True, text=True,
+        completed = subprocess.run([sys.executable, str(ENTRYPOINT), "backup"], capture_output=True, text=True,
                                    input="", env=environment, check=False)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertIn("taken read-only before `migrate`", completed.stdout)
@@ -1039,7 +1040,7 @@ class TheDatabaseWaitingForMigrate(BackupCase):
         older = [run(home=self.home, when=first + timedelta(days=day)) for day in range(3)]
         self.older()
         environment = dict(os.environ, HOME=str(self.home), PYTHON=sys.executable)
-        completed = subprocess.run([str(ENTRYPOINT), "backup", "--keep", "1"], capture_output=True,
+        completed = subprocess.run([sys.executable, str(ENTRYPOINT), "backup", "--keep", "1"], capture_output=True,
                                    text=True, input="", env=environment, check=False)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertEqual([snapshot.directory.exists() for snapshot in older], [False, False, True])
@@ -1066,7 +1067,7 @@ class JobRun(BackupCase):
         if notify is not None:
             environment["SD_NOTIFY"] = str(notify)
         completed = subprocess.run(
-            [str(ENTRYPOINT), "backup", *argv], capture_output=True, text=True,
+            [sys.executable, str(ENTRYPOINT), "backup", *argv], capture_output=True, text=True,
             input="", env=environment, check=False
         )
         self.assertEqual(completed.returncode, expect, completed.stdout + completed.stderr)

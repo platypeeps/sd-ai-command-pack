@@ -279,7 +279,7 @@ p = writing.cutover_preview(c, sys.argv[2])
 writing._write_marker = lambda repo: os._exit(86)
 writing.cutover_pieces(c, sys.argv[2], expected_fingerprint=p['fingerprint'], who='operator')
 """
-        package = Path(__file__).resolve().parent.parent
+        package = support.LIB
         result = subprocess.run([sys.executable, "-c", script, str(self.path), str(self.repo)],
                                 env={**os.environ, "PYTHONPATH": str(package)}, capture_output=True, text=True)
         self.assertEqual(result.returncode, 86, result.stderr)

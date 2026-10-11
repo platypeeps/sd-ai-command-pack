@@ -27,7 +27,9 @@ import venv
 import zipfile
 from pathlib import Path
 
-PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+from . import support
+
+PACKAGE_ROOT = support.LIB
 
 
 def clean_environment():

@@ -130,7 +130,7 @@ class Retention(BackupCase):
         self.assertFalse(backup.backup_root(self.home).exists())
 
     def test_cli_forwards_explicit_no_delete_mode(self):
-        result = subprocess.run(["sh", str(ENTRYPOINT), "backup", "--keep", "all"],
+        result = subprocess.run([sys.executable, str(ENTRYPOINT), "backup", "--keep", "all"],
                                 env={**os.environ, "HOME": str(self.home), "PYTHON": sys.executable},
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -141,7 +141,7 @@ class Retention(BackupCase):
     def test_cli_forwards_explicit_destination(self):
         destination = self.home / "external" / "sd-backups"
         result = subprocess.run(
-            ["sh", str(ENTRYPOINT), "backup", "--destination", str(destination)],
+            [sys.executable, str(ENTRYPOINT), "backup", "--destination", str(destination)],
             env={**os.environ, "HOME": str(self.home), "PYTHON": sys.executable},
             capture_output=True, text=True, timeout=30,
         )
@@ -163,7 +163,7 @@ class Retention(BackupCase):
     def test_cli_forwards_explicit_numeric_retention(self):
         for day in range(3):
             self.snapshot(day)
-        result = subprocess.run(["sh", str(ENTRYPOINT), "backup", "--keep", "2"],
+        result = subprocess.run([sys.executable, str(ENTRYPOINT), "backup", "--keep", "2"],
                                 env={**os.environ, "HOME": str(self.home), "PYTHON": sys.executable},
                                 capture_output=True, text=True, timeout=30)
         self.assertEqual(result.returncode, 0, result.stderr)

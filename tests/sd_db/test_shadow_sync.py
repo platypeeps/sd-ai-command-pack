@@ -35,7 +35,7 @@ from sd_db.shadow_sync import (
     window_start,
     write_watermark,
 )
-from tests.test_shadow_jira import (BROKEN_ANSWERS, JIRA_ENV, NON_ASCII_HOST, NON_ASCII_HOST_REASON, NOT_A_HOST,
+from .test_shadow_jira import (BROKEN_ANSWERS, JIRA_ENV, NON_ASCII_HOST, NON_ASCII_HOST_REASON, NOT_A_HOST,
                                     NOT_A_HOST_REASON, SECRET, UNSPLITTABLE,
                                     RawServer, jira_issue, jira_transport, no_socket, without_jira_environment)
 
@@ -162,7 +162,7 @@ class TheWatermark(SyncCase):
 
 class TheSync(SyncCase):
     def test_collected_issues_land_as_shadow_rows(self):
-        from tests.test_contribution_github import URL, Api
+        from .test_contribution_github import URL, Api
 
         runner = Gh(nodes=[node(11), node(7, kind="PullRequest", url=URL)])
         result = sync(self.connection, now=self.now, runner=runner,

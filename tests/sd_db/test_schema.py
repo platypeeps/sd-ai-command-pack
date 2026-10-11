@@ -14,8 +14,9 @@ from sd_db.database import connect, schema_version, set_schema_version, tables
 from sd_db.errors import SchemaTooNew, SchemaTooOld
 from sd_db.migrate import initialise, migrate
 from sd_db.schema import SCHEMA_VERSION, TABLES
+from . import support
 
-PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+PACKAGE_ROOT = support.LIB
 
 
 class SchemaCase(unittest.TestCase):
@@ -55,8 +56,8 @@ class TheTables(SchemaCase):
         source = subprocess.run(
             # `--untracked` before the pattern: after it, git reads it as one.
             ["git", "grep", "-hIE", "--untracked",
-             "INSERT (OR IGNORE )?INTO [a-z_]+", "--", "local-sd-db/sd_db"],
-            cwd=PACKAGE_ROOT.parent, capture_output=True, text=True,
+             "INSERT (OR IGNORE )?INTO [a-z_]+", "--", "sd_db"],
+            cwd=PACKAGE_ROOT, capture_output=True, text=True,
         ).stdout
         # An SQL comment is a hand-run reverse, not a library write: 025's
         # rebuilds `repo` through a scratch table (sd:3217).

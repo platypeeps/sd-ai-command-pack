@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import ast
 import unittest
-from pathlib import Path
+from . import support
 
-PACKAGE = Path(__file__).resolve().parent.parent / "sd_db"
+PACKAGE = support.LIB / "sd_db"
 
 
 def literal_decision_writers() -> list[str]:

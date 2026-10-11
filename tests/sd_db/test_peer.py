@@ -29,9 +29,10 @@ from unittest import mock
 
 from sd_db import database, initialise, remote, serve, tailnet
 from sd_db.testing import Stubs
+from . import support
 
-HERE = Path(__file__).resolve().parents[1]
-SD_DB = HERE / "sd-db.sh"
+HERE = support.LIB
+SD_DB = support.SD_DB
 
 OPERATOR = "operator@example.test"
 HUB = "100.64.0.10"
@@ -262,7 +263,7 @@ class TheCommand(StubCase):
         self.database = self.root / "sd.db"
         if not self.database.exists():
             initialise(self.database)
-        return subprocess.run(["sh", str(SD_DB), "serve", *arguments, "--database", str(self.database)],
+        return subprocess.run([sys.executable, str(SD_DB), "serve", *arguments, "--database", str(self.database)],
                               capture_output=True, text=True, env=environment, cwd=HERE, timeout=60)
 
     def test_it_binds_this_nodes_tailscale_address(self):

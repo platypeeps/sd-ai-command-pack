@@ -117,10 +117,11 @@ def main(argv: list[str]) -> int:
     install(host, int(port), read_token(Path(argv[1])))
     atexit.register(lambda: print(f"sd-db test --remote: {_sessions} sessions over the wire, {_local} local creates, "
                                   f"{_hub_only_runs} hub-only tests ran local", file=sys.stderr))
-    here = Path(__file__).resolve().parents[2]
+    # The pack checkout: `lib/sd_db/testing/` up three; the suite is its `tests/sd_db`.
+    here = Path(__file__).resolve().parents[3]
     program = unittest.main(
         module=None,
-        argv=["sd_db.testing.wire", "discover", "-s", str(here / "tests"), "-t", str(here), *argv[2:]],
+        argv=["sd_db.testing.wire", "discover", "-s", str(here / "tests" / "sd_db"), "-t", str(here), *argv[2:]],
         exit=False,
         testRunner=_Runner,
     )

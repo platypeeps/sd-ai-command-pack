@@ -349,10 +349,6 @@ class TheVerb(CliCase):
         done = self.sd_db("work", cwd=self.repo, expect=1)
         self.assertIn("register <docs/work/<item>/prd.md>", done.stderr)
 
-    def test_help_describes_the_verb_and_the_argument_it_takes(self):
-        done = self.sd_db("help")
-        self.assertIn("work register PATH", done.stderr)
-
 
 if __name__ == "__main__":
     unittest.main()

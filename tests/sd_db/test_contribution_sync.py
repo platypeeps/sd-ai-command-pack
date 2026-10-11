@@ -18,8 +18,8 @@ from sd_db.database import transaction
 from sd_db.contribution_github import Client
 from sd_db.shadow_sync import _SearchBudget, read_watermark, sync
 
-from tests import test_contribution_github as fixtures
-from tests.test_contribution_github import AT, BASE, ISSUE_URL, ROOT, URL, Api, IssueApi, Response
+from . import test_contribution_github as fixtures
+from .test_contribution_github import AT, BASE, ISSUE_URL, ROOT, URL, Api, IssueApi, Response
 
 
 class SyncCase(unittest.TestCase):

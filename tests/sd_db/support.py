@@ -10,7 +10,21 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 from pathlib import Path
+
+#: The pack checkout this suite runs from.
+PACK = Path(__file__).resolve().parents[2]
+#: The folder that holds `sd_db`, `_build.py` and `pyproject.toml`: system's
+#: `local-sd-db` before the move (sd:3278).
+LIB = PACK / "lib"
+#: The entrypoint that replaced `local-sd-db/sd-db.sh` (sd:3285).
+SD_DB = PACK / "bin" / "sd-db"
+
+
+def sd_db_argv(*args: str) -> list[str]:
+    """`bin/sd-db` under this interpreter: its shebang's `python3` may be too old."""
+    return [sys.executable, str(SD_DB), *args]
 
 PRD = """\
 ---
