@@ -1587,6 +1587,26 @@ class AnyHost(SharedQueue):
         with mock.patch("sd_db.ship.this_host", lambda: "build-2"):
             self.assertEqual((sd_lane.claim_entry(self.store(), "new-host") or {}).get("item"), 1)
 
+    def test_a_lane_host_that_cannot_be_read_before_the_merge_stops_with_no_merge(self) -> None:
+        """Failure table, before merge: clones that disagree on the host; no merge starts and the run stops."""
+        self.repo_row()
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+
+        def prepared_then_unknown(argv: list[str], log: pathlib.Path) -> dict:
+            import sd_db
+            connection = sd_db.connect(home=self.tmp)
+            try:
+                sd_db.upsert_repo(connection, str(self.tmp / "clone-2"), remote="https://github.com/example/pack.git",
+                                  managed=1)
+                connection.execute("UPDATE repo SET lane_host = 'build-2' WHERE path = ?", (str(self.tmp / "clone-2"),))
+            finally:
+                connection.close()
+            return self.ship(argv, log)
+        answer = sd_lane.run_lane(self.repo, self.environ, prepared_then_unknown)
+        self.assertEqual([c[2] for c in self.calls], ["prepare"])
+        self.assertIn("Cannot read the lane host before the merge", answer["stopped"])
+        self.assertEqual((self.entries()[0]["status"], self.entries()[0]["step"]), ("running", "prepare"))
+
     def test_a_merge_that_answers_lane_elsewhere_puts_the_entry_back(self) -> None:
         """Failure table, merge: `sd-ship merge` refused `lane_elsewhere`; the runner treats it as a move."""
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
