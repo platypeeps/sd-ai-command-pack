@@ -1489,20 +1489,47 @@ def read_git(tree: pathlib.Path, *args: str, ok: tuple[int, ...] = (0,)) -> subp
 
 
 def catch_up_of(tree: pathlib.Path, commit: str, expected: str) -> bool:
-    """Whether `commit` is prepare's catch-up of `expected`: a merge whose first parent it is, or a chain of them.
+    """Whether `commit` is prepare's catch-up of `expected`, or a chain of them (sd:3283).
 
-    Each prepare that pushed a catch-up and was then put back or reclaimed
-    adds one, so the chain is at most `CATCH_UPS` long. A read that fails, or
-    a commit this checkout lacks, raises `PUBLISH_UNKNOWN`.
+    Prepare's catch-up is `git merge --no-ff origin/<default branch>`, and a
+    conflict aborts it, so each link must be just that: a merge whose second
+    parent is on `origin`'s default branch and whose tree is the clean merge
+    of its parents. A merge of anything else, or one with edits of its own, is
+    scope no review saw, so the entry skips `HEAD_MOVED`. Each prepare that
+    pushed a catch-up and was then put back or reclaimed adds a link, so the
+    chain is at most `CATCH_UPS` long. A read that fails raises `PUBLISH_UNKNOWN`.
     """
+    default: list[str] = []
     for _ in range(CATCH_UPS if commit != expected else 0):
         parents = read_git(tree, "rev-list", "--parents", "-n", "1", commit).stdout.split()[1:]
-        if len(parents) < 2:
+        if len(parents) != 2 or not clean_merge(tree, commit, *parents) or not landed(tree, parents[1], default):
             return False
         if parents[0] == expected:
             return True
         commit = parents[0]
     return False
+
+
+def clean_merge(tree: pathlib.Path, commit: str, first: str, second: str) -> bool:
+    """Whether `commit`'s tree is what git's merge of `first` and `second` makes, with no conflict and no edit."""
+    merged = read_git(tree, "merge-tree", "--write-tree", first, second, ok=(0, 1))
+    return merged.returncode == 0 and merged.stdout.split()[:1] == [read_git(tree, "rev-parse", f"{commit}^{{tree}}").stdout.strip()]
+
+
+def landed(tree: pathlib.Path, commit: str, default: list[str]) -> bool:
+    """Whether `commit` is on `origin`'s default branch; `default` keeps its tip, read once per check."""
+    if not default:
+        listed = [line.split("\t") for line in read_git(tree, "ls-remote", "--symref", "origin", "HEAD").stdout.splitlines()]
+        name = next((ref.removeprefix("ref: refs/heads/") for ref, *rest in listed
+                     if rest == ["HEAD"] and ref.startswith("ref: refs/heads/")), None)
+        tip = next((ref for ref, *rest in listed if rest == ["HEAD"] and not ref.startswith("ref: ")), None)
+        if not name or not tip:
+            raise LaneError(f"origin advertised no default branch to {tree}; the entry is not skipped.",
+                            code=PUBLISH_UNKNOWN)
+        if read_git(tree, "rev-parse", "--verify", "--quiet", f"{tip}^{{commit}}", ok=(0, 1)).returncode != 0:
+            read_git(tree, "fetch", "-q", "--no-tags", "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}")
+        default.append(tip)
+    return read_git(tree, "merge-base", "--is-ancestor", commit, default[0], ok=(0, 1)).returncode == 0
 
 
 def caught_up(worktree: pathlib.Path, expected: str) -> str:

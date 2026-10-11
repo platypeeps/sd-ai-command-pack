@@ -259,6 +259,7 @@ class Runner(Lane):
         tree = self.worktree("topic")
         sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
+        git(self.repo, "push", "-q", "origin", "main")  # prepare merges `origin/<default>`
 
         def catch_up_then_block(argv: list[str], log: pathlib.Path) -> dict:
             git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
@@ -444,6 +445,7 @@ class Runner(Lane):
                 queued = sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True,
                                                claim="deliver")["expected_head"]
                 git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
+                git(self.repo, "push", "-q", "origin", "main")  # prepare merges `origin/<default>`
 
                 def catch_up_then_fault(argv: list[str], log: pathlib.Path, tree: pathlib.Path = tree,
                                         name: str = name, pushed: bool = pushed) -> dict:
@@ -1468,11 +1470,122 @@ class AnyHost(SharedQueue):
         git(self.repo, "worktree", "add", "-q", "--detach", str(scratch), head)
         for number in range(count):
             git(self.repo, "commit", "-q", "--allow-empty", "-m", f"base {number}")
+            git(self.repo, "push", "-q", "origin", "main")  # prepare merges `origin/<default>`
             git(scratch, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
             merges.append(git(scratch, "rev-parse", "HEAD"))
         git(scratch, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
         git(self.repo, "worktree", "remove", "--force", str(scratch))
         return merges
+
+    def foreign_merge(self, tree: pathlib.Path, edited: bool = False) -> str:
+        """A merge with a catch-up's message on `tree`'s HEAD that prepare did not make; the new HEAD.
+
+        Plain, it merges a feature branch that is not on origin's default branch. `edited`, it merges
+        `origin/main` but adds a file no merge makes.
+        """
+        if edited:
+            git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
+            git(self.repo, "push", "-q", "origin", "main")
+            git(tree, "merge", "-q", "--no-ff", "--no-commit", "main")
+            (tree / "unreviewed.txt").write_text("unreviewed\n", encoding="utf-8")
+            git(tree, "add", "unreviewed.txt")
+            git(tree, "commit", "-q", "-m", "Merge origin/main")
+        else:
+            other = self.tmp / f"other-{tree.name}"
+            git(self.repo, "worktree", "add", "-q", "-b", other.name, str(other), "main")
+            (other / "feature.txt").write_text("unreviewed\n", encoding="utf-8")
+            git(other, "add", "feature.txt")
+            git(other, "commit", "-q", "-m", "an unrelated feature")
+            git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", other.name)
+        return git(tree, "rev-parse", "HEAD")
+
+    def test_a_merge_the_lane_did_not_make_is_not_a_catch_up(self) -> None:
+        """Review round 1: a merge on the queued head is a catch-up only when it is prepare's own.
+
+        That is a clean merge of a commit on origin's default branch; an unrelated feature, or an edit inside
+        the merge, is scope no review saw.
+        """
+        tree = self.worktree("unit")
+        queued = git(tree, "rev-parse", "HEAD")
+        for edited in (False, True):
+            with self.subTest(edited=edited):
+                git(tree, "reset", "-q", "--hard", queued)
+                merge = self.foreign_merge(tree, edited)
+                self.assertEqual((sd_lane.catch_up_of(tree, merge, queued), sd_lane.at_head(tree, queued),
+                                  sd_lane.caught_up(tree, queued)), (False, False, queued))
+        git(tree, "reset", "-q", "--hard", queued)
+        [merge] = self.catch_ups("unit", queued, 1)
+        git(tree, "reset", "-q", "--hard", merge)
+        self.assertEqual((sd_lane.at_head(tree, queued), sd_lane.caught_up(tree, queued)), (True, merge))
+
+    def test_a_foreign_merge_on_origin_skips_head_moved(self) -> None:
+        """Review round 1, remote validation: origin/<branch> holds a merge the lane did not make."""
+        for edited in (False, True):
+            with self.subTest(edited=edited):
+                item = 1 + edited
+                [head] = self.enqueued_elsewhere(item, f"topic{item}", "work")
+                scratch = self.tmp / f"scratch{item}"
+                git(self.repo, "worktree", "add", "-q", "--detach", str(scratch), head)
+                self.foreign_merge(scratch, edited)
+                git(scratch, "push", "-q", "origin", f"HEAD:refs/heads/topic{item}")
+                git(self.repo, "worktree", "remove", "--force", str(scratch))
+                sd_lane.run_lane(self.repo, self.environ, self.ship)
+                entry = self.entries()[-1]
+                self.assertEqual((entry["status"], entry.get("code"), self.calls), ("skipped", "head_moved", []))
+
+    def test_a_foreign_merge_in_the_own_worktree_is_not_run(self) -> None:
+        """Review round 1, own worktree and the head check: the entry's worktree holds a merge the lane did not make."""
+        for edited in (False, True):
+            with self.subTest(edited=edited):
+                item = 1 + edited
+                tree = self.worktree(f"own{item}")
+                sd_lane.enqueue_entry(tree, item, "one", self.body, self.environ, manual=True, claim="deliver")
+                self.foreign_merge(tree, edited)
+                sd_lane.run_lane(self.repo, self.environ, self.ship)
+                self.assertEqual((self.entries()[-1]["status"], self.calls), ("skipped", []))
+
+    def test_a_put_back_never_adopts_a_foreign_merge_origin_holds(self) -> None:
+        """Review round 1, put-back and the before-merge check: origin/<branch> gained a merge the lane did not make.
+
+        A hub fault, a merge that answers `lane_elsewhere`, and a move seen by the before-merge write each put
+        the entry back; `expected_head` stays the queued head.
+        """
+        for case in ("hub_fault", "merge_elsewhere", "moved"):
+            with self.subTest(case=case):
+                item = {"hub_fault": 1, "merge_elsewhere": 2, "moved": 3}[case]
+                tree = self.worktree(f"back{item}")
+                queued = sd_lane.enqueue_entry(tree, item, "one", self.body, self.environ, manual=True,
+                                               claim="deliver")["expected_head"]
+                self.answers[(item, "merge")] = {"ok": False, "phase": "merge", "error": "runs on build-2",
+                                                 "workflow": {"blocker": {"code": "lane_elsewhere"}}}
+
+                def prepare(argv: list[str], log: pathlib.Path, tree: pathlib.Path = tree, case: str = case,
+                            item: int = item) -> dict:
+                    if argv[2] == "prepare":
+                        self.foreign_merge(tree)
+                        git(tree, "push", "-q", "origin", f"HEAD:refs/heads/back{item}")
+                        if case == "moved":
+                            self.repo_row("build-2")
+                    answer = self.ship(argv, log)
+                    return Runner.HUB_FAULT if case == "hub_fault" and argv[2] == "prepare" else answer
+                sd_lane.run_lane(self.repo, self.environ, prepare)
+                entry = self.entries()[-1]
+                self.repo_row(None)
+                sd_lane.cancel(self.repo, item, self.environ)  # before the check, so a failure leaves no entry behind
+                self.assertEqual((entry["item"], entry["status"], entry["expected_head"]), (item, "pending", queued))
+
+    def test_a_retry_never_starts_from_a_foreign_merge(self) -> None:
+        """Review round 1, retry: the worktree's HEAD is a merge the lane did not make; the retry keeps the head."""
+        tree = self.worktree("again")
+        queued = sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True,
+                                       claim="deliver")["expected_head"]
+
+        def blocked(argv: list[str], log: pathlib.Path) -> dict:
+            self.foreign_merge(tree)
+            self.ship(argv, log)
+            return {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        sd_lane.run_lane(self.repo, self.environ, blocked)
+        self.assertEqual(sd_lane.retry(self.repo, 1, self.environ)["expected_head"], queued)
 
     def test_a_chain_of_pushed_catch_ups_after_two_reclaims_still_runs(self) -> None:
         """Codex review: prepare pushed a catch-up, died, was reclaimed, caught up again; both merges are its own."""

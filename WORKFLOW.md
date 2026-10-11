@@ -519,7 +519,9 @@ The rules for them:
   entry, whichever host enqueued it (sd:3283): from the entry's own worktree
   when it was enqueued there, from any worktree there at its head, or from a
   lane worktree it makes from `origin/<branch>` and removes once the entry
-  ends. A remote branch that moved skips the entry `head_moved`, a deleted
+  ends. Its head is the queued head or prepare's catch-up of it: a clean
+  merge of a commit on `origin`'s default branch, with no edit of its own.
+  A remote branch that moved otherwise skips the entry `head_moved`, a deleted
   one `head_gone`, a local branch at another commit `branch_busy`; an
   `origin` that does not answer leaves it pending. A dead holder goes back to
   pending in prepare, failing at the third time, and fails in merge: on its
