@@ -797,8 +797,6 @@ def _refuse_task_delivery(workflow: Any, connection: Any, args: argparse.Namespa
 
 #: The comment `sd_db.ship.note_merge` writes for each merge of an item.
 CODE_DELIVERY = re.compile(r"Code delivery (\S+) at ([0-9a-f]{40,64})\b")
-#: The sentence every delivering transition writes (`DELIVERY_REASON`).
-DELIVERED_AT = re.compile(r"delivered at ([0-9a-f]{40,64})\b")
 
 
 def _delivered_by(state: dict[str, Any]) -> str | None:
@@ -815,7 +813,7 @@ def _delivered_by(state: dict[str, Any]) -> str | None:
             number = url.rstrip("/").rpartition("/pull/")[2]
             return f"#{number}" if number.isdigit() else url
     for note in reversed(notes):
-        found = DELIVERED_AT.search(note.get("body") or "")
+        found = sd_lib.DELIVERED_AT.search(note.get("body") or "")
         if found and note.get("kind") == "status_change":
             return f"commit {found.group(1)[:12]}"
     return None
@@ -868,8 +866,11 @@ def _deliver(progress: Any, workflow: Any, connection: Any, args: argparse.Names
             connection, args.item, args.commit, who=who, expected_revision=args.if_revision)
     if not (args.reason or "").strip():
         raise WorkRefusal("--associated needs --reason: say why the merge carried Item: and not Delivers:")
-    row = workflow.item_state(connection, args.item)["item"]
+    state = workflow.item_state(connection, args.item)
+    row = state["item"]
     if row["kind"] in ASSOCIATED_STATUS_KINDS:
+        if row["status"] == "done":
+            return _delivered_again(state, args.commit)
         sentence = _delivery_reason(row, args.commit, trailer="Item")
         return workflow.change_status(
             connection, args.item, "done", who=who, expected_revision=args.if_revision,
@@ -881,6 +882,21 @@ def _deliver(progress: Any, workflow: Any, connection: Any, args: argparse.Names
             "system/local-sd-db build")
     return deliver(connection, args.item, args.commit, who=who, reason=args.reason,
                    expected_revision=args.if_revision)
+
+
+def _delivered_again(state: dict[str, Any], commit: str) -> dict[str, Any]:
+    """A done task or followup: unchanged when its receipt names `commit`, else refused (sd:3346).
+
+    Its move to `done` is the receipt, and a row already done does not move:
+    `change_status` would write nothing and report success, and `sd-status`
+    would go on calling the item unmarked.
+    """
+    if sd_lib.delivery_receipt(state.get("notes") or []) == commit:
+        return state
+    item = state["item"]["id"]
+    raise WorkRefusal(
+        f"item {item} is already done, so no move to done can record this delivery; "
+        f"reopen it with `sd task status {item} planning`, then run this again")
 
 
 def _cancel_guard(progress: Any, action: str) -> dict[str, Any]:
