@@ -54,7 +54,7 @@ Push report: the URL, word count, stage, and how comments come back (`/sd-draft-
 
 ## pull
 
-1. `sd writing get --piece <year>/<slug> --json`; take `writing.metadata.review_urls.gdocs`. A null, empty or missing value means never pushed: say so and suggest `push`. Take the document ID from that URL only; never search Drive for a likely title.
+1. `sd writing get --piece <year>/<slug> --json`; take `writing.metadata.review_urls.gdocs`. A null, empty or missing value means the piece was not pushed: say so and suggest `push`. Take the document ID from that URL only; do not search Drive for a likely title.
 2. `pack review status --piece <year>/<slug>`. A `review=stale` or `unstamped` copy may quote sentences that no longer exist: say so at the top of the report.
 3. Comments: `list_document_comments` with `user_google_email` and `document_id`. "No comments" and "could not read" are different results; on an error, report it and stop. `get_doc_as_markdown` shows comments against their anchors when an anchor is thin.
 4. Suggestion-mode edits: `get_doc_as_markdown` with `suggestions_view_mode=SUGGESTIONS_INLINE`.
