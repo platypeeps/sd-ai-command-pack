@@ -1,0 +1,116 @@
+#!/usr/bin/env python3
+"""The workflow database's verbs, run from this checkout's `lib/` (sd:3285).
+
+The pack owns `sd_db` now (sd:3278), so its entrypoint moves here too. This is
+system's `local-sd-db/sd-db.sh` with its folder pointed at `lib/`, for the
+verbs that run the library: the same verbs, arguments and exit codes. `lib/`
+goes first on `sys.path`, so a worktree runs its own library and no installed
+copy or `PYTHONPATH` entry answers in its place.
+
+Not carried over. `library`, `release` and `SD_DB_LIBRARY` chose between the
+checkout and an installed copy, and step 3 of the design deletes them: here
+there is one copy. `test`, `check`, `build` and `install` build or test
+system's checkout; step 2 decides what replaces them.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+LIB = Path(__file__).resolve().parent.parent / "lib"
+
+#: The verbs `sd_db.jobs.cli` answers; `sd-db.sh` hands each one straight to it.
+CLI_VERBS = ("init", "migrate", "status", "restore", "repo", "item", "work",
+             "import", "verify", "usage", "judgments", "credentials")
+
+USAGE = """\
+sd-db: the workflow database's verbs, run from this checkout's lib/.
+
+Usage: sd-db <verb> [arguments]
+
+  init, migrate, status, restore, repo, item, work, import, verify,
+  usage, judgments, credentials
+              sd_db.jobs.cli answers these, with the arguments given.
+              -h or --help anywhere prints this text and acts on nothing.
+  backup [ARGS]
+              Snapshot the database and prove the copy (sd_db.jobs.backup).
+              A failure prints its output on stderr, mails it through
+              SD_NOTIFY or `notify` on PATH, and exits 1. Exit 3 is a
+              backup that passed over a source with broken references;
+              it mails too.
+  serve [ARGS]
+              Serve the database to sd_db.remote connections (sd_db.serve).
+  help        This text.
+
+Each verb is described in lib/sd_db's module help and in system's
+local-sd-db/README.md, which this replaces.
+"""
+
+
+def usage(code: int) -> int:
+    print(USAGE, end="", file=sys.stderr)
+    return code
+
+
+def report_failure(body: str, title: str) -> None:
+    """Mail a failed backup; best effort on the channel, never on the exit code."""
+    notify = os.environ.get("SD_NOTIFY") or shutil.which("notify")
+    try:
+        sent = bool(notify) and subprocess.run(
+            [str(notify), "-t", title, "-k", "status", "-F", "-c", "email", "-b", body], check=False).returncode == 0
+    except OSError:
+        sent = False
+    if not sent:
+        print("sd-db backup: the failure mail did not leave", file=sys.stderr)
+
+
+def backup(argv: list[str]) -> int:
+    from sd_db.jobs.backup import BROKEN_SOURCE  # noqa: PLC0415 - after the path insert
+
+    # A child, as `sd-db.sh` ran it: the mail carries everything the backup
+    # wrote to either stream, its own children's included. `-P` keeps the
+    # working directory off the child's path, so `lib/` is the only `sd_db`.
+    done = subprocess.run([sys.executable, "-P", "-m", "sd_db.jobs.backup", *argv],
+                          env={**os.environ, "PYTHONPATH": str(LIB)}, check=False,
+                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    output = done.stdout.rstrip("\n")
+    if done.returncode == 0:
+        print(output)
+        return 0
+    print(output, file=sys.stderr)
+    if done.returncode == BROKEN_SOURCE:
+        report_failure(output, "sd-db backup: the source is referentially broken")
+        return BROKEN_SOURCE
+    report_failure(output, "sd-db backup FAILED")
+    return 1
+
+
+def dispatch_verb(argv: list[str]) -> int:
+    verb = argv[0] if argv else ""
+    if verb in ("-h", "--help", "help"):
+        return usage(0)
+    if verb not in (*CLI_VERBS, "backup", "serve"):
+        return usage(1)
+    if verb in CLI_VERBS and any(word in ("-h", "--help") for word in argv):
+        return usage(0)
+    if sys.version_info < (3, 13):
+        print(f"sd-db: {sys.executable} is too old; sd_db needs Python 3.13 or newer", file=sys.stderr)
+        return 1
+    sys.path.insert(0, str(LIB))
+    if verb == "backup":
+        return backup(argv[1:])
+    if verb == "serve":
+        from sd_db import serve  # noqa: PLC0415 - after the path insert
+
+        return serve.main(argv[1:])
+    from sd_db.jobs import cli  # noqa: PLC0415 - after the path insert
+
+    return cli.main(argv)
+
+
+if __name__ == "__main__":
+    raise SystemExit(dispatch_verb(sys.argv[1:]))
