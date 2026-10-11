@@ -9,6 +9,8 @@ database and runs it under one runner lock per repository:
            a title and the body text to the repository's queue;
   list     print the queue, each body as its size;
   cancel   mark a pending entry cancelled, or release a stuck running one;
+           `--expected-claim <holder token>:<step>` releases only the
+           running claim the caller read (sd:3330);
   retry    queue the item's last failed, skipped or prepared entry again, at
            its head with its texts; `--manual` grants the merge (sd:3254);
            `--expected-head` refuses, in the write's transaction, a last
@@ -222,6 +224,8 @@ class Stop(LaneError):
 STALE_REVISION = "stale_revision"
 #: The refusal code of a retry whose `--expected-head` is not the head of the item's last entry (sd:3268).
 STALE_HEAD = "stale_head"
+#: The refusal code of a cancel whose `--expected-claim` no longer holds the item's running entry (sd:3330).
+STALE_CLAIM = "stale_claim"
 #: The refusal code of a lane verb whose hub database did not answer; a write may have landed (sd:3282).
 HUB_UNAVAILABLE = "hub_unavailable"
 #: The code of a runner write whose claim token no longer holds its entry: a reclaim or a release voided it.
@@ -650,16 +654,40 @@ def reclaim(row: dict[str, Any], *, released: bool = False) -> dict[str, Any]:
     return {"item": row.get("item"), "runner_pid": pid, "step": step, "status": row["status"]}
 
 
+def check_claim(running: dict[str, Any] | None, item: int, expected: str | None) -> None:
+    """Refuse a release of a claim other than `<holder token>:<step>`, the one the caller read; None checks nothing.
+
+    The revision covers the pending entries only, and a token is made per
+    claim, so this one catches a step that moved on, a claim that ended, and
+    an entry that went back to pending and was claimed again (sd:3330).
+    """
+    if expected is None:
+        return
+    token = ((running or {}).get("holder") or {}).get("token")
+    now = f"{token}:{(running or {}).get('step')}" if token else None
+    if now != expected:
+        raise LaneError(f"sd:{item} is not running under claim {expected}; "
+                        f"{f'it is at {now}' if now else 'no claim holds it'}; read it again with `sd-ship lane list`",
+                        code=STALE_CLAIM)
+
+
 def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
-           expected_revision: str | None = None) -> dict[str, Any]:
+           expected_revision: str | None = None, expected_claim: str | None = None) -> dict[str, Any]:
     """Cancel a pending entry, or release a running one (D3 of sd:3174) by the reclaim rule (`reclaim`).
 
     A release refuses while the holder is on this machine and its pid is
     alive. A holder on another machine counts as stuck on the operator's word.
+    `expected_claim` binds the cancel to the running claim the caller read
+    (`check_claim`), in the write's transaction.
     """
+    if expected_claim is not None and not all(expected_claim.partition(":")[::2]):
+        raise LaneError(f"name the claim as <holder token>:<step>, as `sd-ship lane list` prints them, "
+                        f"not {expected_claim!r}")
+
     def mark(entries: list[dict[str, Any]]) -> dict[str, Any]:
         check_revision(entries, expected_revision)
         running = next((row for row in entries if row.get("item") == item and row.get("status") == "running"), None)
+        check_claim(running, item, expected_claim)
         if running is not None:
             holder = running.get("holder") or {}
             if holder.get("host") == this_host() and runner_alive(holder.get("pid")):
@@ -1952,8 +1980,11 @@ def add_lane_verbs(commands: Any) -> None:
                          help="authorize the runner to merge when repo.runner_merge is manual, as enqueue --manual")
     retrier.add_argument("--expected-head", help=f"refuse with {STALE_HEAD} unless the item's last entry is at this "
                                                  "full commit id, checked in the write's transaction (sd:3268)")
-    canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled")
+    canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled, or release a stuck running one")
     canceller.add_argument("item", type=int)
+    canceller.add_argument("--expected-claim", metavar="TOKEN:STEP",
+                           help=f"release only the running claim `lane list` printed, its holder.token and step; "
+                                f"else refuse with {STALE_CLAIM}, checked in the write's transaction (sd:3330)")
     mover = verbs.add_parser("move", help="move a pending entry; the runner reads the new order at the next item")
     mover.add_argument("item", type=int)
     mover.add_argument("where", type=position, help="up, down, top, or a position from 1 among the pending entries")
@@ -1995,7 +2026,8 @@ def lane_main(args: Any) -> int:
         elif args.lane_command == "retry":
             result = retry(root, args.item, environ, manual=args.manual, expected_head=args.expected_head)
         elif args.lane_command == "cancel":
-            result = cancel(root, args.item, environ, expected_revision=args.expected_revision)
+            result = cancel(root, args.item, environ, expected_revision=args.expected_revision,
+                            expected_claim=args.expected_claim)
         elif args.lane_command == "move":
             result = move(root, args.item, args.where, environ, expected_revision=args.expected_revision)
         elif args.lane_command in ("hold", "release"):

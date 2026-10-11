@@ -526,7 +526,10 @@ The rules for them:
   `origin` that does not answer leaves it pending. A dead holder goes back to
   pending in prepare, failing at the third time, and fails in merge: on its
   own host once its pid is gone, on another once its lease passed. `lane
-  cancel` on a stuck running entry releases it the same way. With the hub
+  cancel` on a stuck running entry releases it the same way.
+  `--expected-claim <holder token>:<step>`, from `lane list`, releases only
+  that claim and refuses `stale_claim` once its step moved, it ended, or a
+  new runner claimed the entry again (sd:3330). With the hub
   down every lane verb refuses `hub_unavailable`. Each prepare and merge keeps its whole output under
   `<lane>/logs/`. `list` and `cancel` read and edit the queue; `watch` prints
   each gate end a log under `sd.lane_root` records, once. While an entry
