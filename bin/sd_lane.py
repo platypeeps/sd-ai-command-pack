@@ -54,7 +54,9 @@ retry and the import of a pending entry publish its head first, by
 "no": nothing is queued.
 
 A claim reads the lane host and takes the first pending entry in one
-transaction, and refuses while another entry of the repository runs. A
+transaction, and refuses while another entry of the repository runs. It
+takes only an entry enqueued on this machine, whose worktree is here: after
+a move the old host's entries stay pending for `list` and `cancel`. A
 running entry carries a `holder` (host, pid, a token per claim), its `step`
 and `lease_until`. Every runner write checks the token, so a reclaimed or
 released claim writes nothing more; a hub fault is tried again for
@@ -278,6 +280,15 @@ def this_host() -> str:
         this_host as host,  # noqa: PLC0415 -- the one host name the lane host rows use
     )
     return host()
+
+
+def runs_here(row: dict[str, Any], host: str) -> bool:
+    """A pending entry, not held, enqueued on `host`: its worktree is on this disk.
+
+    Another host's entry stays pending after a lane move, readable and
+    cancellable; until slice 2 of sd:3282 no runner here can use its worktree.
+    """
+    return row.get("status") == "pending" and not row.get("held") and row.get("enqueued_on") == host
 
 
 def repository_of(root: pathlib.Path) -> str | None:
@@ -1029,7 +1040,7 @@ def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
 
 
 def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = False) -> threading.Thread | None:
-    """Start the next pending entry's gate on `entry`'s predicted landing; None when no gate started.
+    """Start the gate of the next entry this host runs (`runs_here`) on `entry`'s predicted landing, or None.
 
     An entry the runner may not merge (`merge_refusal`) stops prepared and
     never lands, so nothing follows it to predict. `busy` says an earlier
@@ -1037,7 +1048,8 @@ def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = Fals
     next entry as `speculation`, and the gate's whole result to a log beside
     the others.
     """
-    following = next((row for row in read_queue(queue) if row.get("status") == "pending" and not row.get("held")), None)
+    host = this_host()
+    following = next((row for row in read_queue(queue) if runs_here(row, host)), None)
     if following is None or merge_refusal(entry) is not None:
         return None
 
@@ -1311,13 +1323,14 @@ def held(entries: list[dict[str, Any]], entry: dict[str, Any], token: str) -> di
 
 
 def claim_entry(queue: Queue, token: str) -> dict[str, Any] | None:
-    """Take the first pending entry not held, by position, under a new holder; None when there is none.
+    """Take the first pending entry not held and enqueued here, by position, under a new holder; None when none.
 
     One transaction reads the lane host and claims, so a move is before the
     claim or after it. It refuses while another entry of the repository
     runs. A retried claim that finds its own token running landed before.
     """
     def claim_first(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
+        host = this_host()
         for row in entries:
             if row.get("status") != "running":
                 continue
@@ -1327,9 +1340,9 @@ def claim_entry(queue: Queue, token: str) -> dict[str, Any] | None:
             raise LaneError(f"sd:{row.get('item')} is running under {holder.get('host')} pid {holder.get('pid')}; "
                             "one entry of a repository runs at a time", code="lane_busy")
         for row in entries:
-            if row.get("status") == "pending" and not row.get("held"):
+            if runs_here(row, host):
                 row.update(status="running", started_at=stamp_now(), step="prepare",
-                           holder={"host": this_host(), "pid": os.getpid(), "token": token},
+                           holder={"host": host, "pid": os.getpid(), "token": token},
                            lease_until=stamp_at(time.time() + 2 * PREPARE_SECONDS))
                 return dict(row)
         return None

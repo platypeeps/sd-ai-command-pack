@@ -873,7 +873,7 @@ class Speculation(Lane):
         sd_lane.update(self.store(), lambda rows: rows.append({
             "id": "older", "position": 0, "worktree": str(self.repo), "item": 1, "gate": "satellite", "branch": "sat", "base": "main",
             "expected_head": git(satellite, "rev-parse", "HEAD"), "authority": "manual", "status": "pending",
-            "enqueued_at": sd_lane.stamp_now()}))
+            "enqueued_at": sd_lane.stamp_now(), "enqueued_on": sd_lane.this_host()}))
         sd_lane.enqueue_entry(self.second, 2, "two", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, super().ship, lambda root, head, base: {"status": "success"})
         self.assertEqual([(entry["item"], entry["status"]) for entry in self.entries()], [(1, "skipped"), (2, "merged")])
@@ -1239,6 +1239,22 @@ class ClaimAndLease(SharedQueue):
             sd_lane.claim_entry(self.store(), "satellite-token")
         self.assertEqual((first["item"], busy.exception.code), (1, "lane_busy"))
         self.assertEqual([row["status"] for row in self.entries()], ["running", "pending"])
+
+    def test_a_lane_move_leaves_the_old_hosts_pending_entries_unclaimed(self) -> None:
+        """Review round 1: the new host claims none of the old host's entries; they stay pending; slice 2 runs them."""
+        self.repo_row()
+        with mock.patch("sd_db.ship.this_host", lambda: "build-2"):
+            sd_lane.enqueue_entry(self.repo, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, claim="deliver")
+        claimed = sd_lane.claim_entry(self.store(), "token")
+        self.assertEqual((claimed or {}).get("item"), 2, "the runner claimed an entry whose worktree is on another host")
+        gate = mock.Mock()
+        self.assertIsNone(sd_lane.speculate(claimed, self.store(), gate))
+        gate.assert_not_called()
+        self.assertEqual([(row["item"], row["status"]) for row in self.entries()], [(1, "pending"), (2, "running")])
+        self.assertNotIn("speculation", self.entries()[0])
+        sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(self.entries()[0]["status"], "cancelled")
 
     def test_a_kill_mid_prepare_puts_the_entry_back_and_the_third_fails_it(self) -> None:
         """Failure table, prepare: the runner dies; pid gone, back to pending; the third reclaim fails it."""

@@ -512,7 +512,9 @@ The rules for them:
   refused at enqueue, as prepare refuses it. A
   failed entry is marked and the next one runs. A second runner exits at once
   rather than wait. A claim takes a holder token and a lease and refuses
-  while another entry of the repository runs; a dead holder here goes back to
+  while another entry of the repository runs. It takes only an entry
+  enqueued on this machine, so after a move the old host's entries stay
+  pending until `cancel` or a move back. A dead holder here goes back to
   pending in prepare, failing at the third time, and fails in merge. `lane
   cancel` on a stuck running entry releases it the same way. With the hub
   down every lane verb refuses `hub_unavailable`. Each prepare and merge keeps its whole output under
