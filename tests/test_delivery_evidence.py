@@ -906,6 +906,41 @@ class AssociatedDeliveryCLITests(unittest.TestCase):
         self.assertIn(f"delivered at {sha} on refs/heads/main (after the fact: {self.REASON})",
                       self.statuses(case, item)[-1])
 
+    def followup(self, case, root: pathlib.Path) -> int:
+        import sd_db
+        import sd_db.writes
+
+        item = json.loads(case.call("task", "add", "Follow the thing up", "--json",
+                                    cwd=root).stdout)["item"]["id"]
+        with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
+            sd_db.writes.set_item_fields(connection, item, kind="followup")
+            connection.commit()
+        return item
+
+    def test_associated_on_a_done_followup_refuses_rather_than_record_nothing(self) -> None:
+        """sd:3346. The move to done is the receipt, and a row already done does
+        not move: the command exited 0 and wrote nothing, so `sd-status` went on
+        calling the item unmarked. The refusal names the way to a receipt."""
+        case = self.host()
+        root = self.repository(case)
+        item = self.followup(case, root)
+        sha = self.commit(root, f"fix: the follow-up\n\nItem: sd:{item}\n", "one\n")
+        case.call("task", "status", item, "done", cwd=root)
+        refused = case.call("work", "deliver", item, sha, "--associated", "--reason", self.REASON,
+                            code=1, cwd=root)
+        self.assertIn(f"sd task status {item} planning", refused.stderr)
+        self.assertNotIn("delivered at", self.statuses(case, item)[-1])
+
+    def test_associated_again_on_its_own_receipt_is_a_no_op(self) -> None:
+        """The control: a second run naming the commit the receipt names succeeds."""
+        case = self.host()
+        root = self.repository(case)
+        item = self.followup(case, root)
+        sha = self.commit(root, f"fix: the follow-up\n\nItem: sd:{item}\n", "one\n")
+        for _ in range(2):
+            case.call("work", "deliver", item, sha, "--associated", "--reason", self.REASON, cwd=root)
+        self.assertEqual(1, sum("delivered at" in line for line in self.statuses(case, item)))
+
     def test_associated_on_a_task_still_needs_the_item_trailer(self) -> None:
         case = self.host()
         root = self.repository(case)
