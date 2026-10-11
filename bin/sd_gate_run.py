@@ -136,10 +136,14 @@ def gate_environment(root: pathlib.Path, environ: dict[str, str] | None = None) 
 Run = Callable[[list[str], dict[str, str], pathlib.Path, int], tuple[int | None, str, str]]
 
 
-def run_child(argv: list[str], env: dict[str, str], cwd: pathlib.Path, timeout: int) -> tuple[int | None, str, str]:
-    """`sd-check` as a process group's leader, so stopping this process stops it and frees its slot (sd:2978)."""
+def run_child(argv: list[str], env: dict[str, str], cwd: pathlib.Path, timeout: int,
+              started: Callable[[int | None], None] | None = None) -> tuple[int | None, str, str]:
+    """`sd-check` as a process group's leader, so stopping this process stops it and frees its slot (sd:2978).
+
+    `started` hears the group's id, as `sd_lib.run_group` gives it (sd:3361).
+    """
     try:
-        result = sd_lib.run_group(argv, cwd=cwd, env=env, timeout=timeout)
+        result = sd_lib.run_group(argv, cwd=cwd, env=env, timeout=timeout, started=started)
     except (OSError, subprocess.SubprocessError, sd_lib.GroupTimeout) as error:
         return None, f"sd-check could not finish: {error}", ""
     return result.returncode, result.stdout, result.stderr

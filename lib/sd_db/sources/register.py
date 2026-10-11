@@ -259,7 +259,7 @@ class Reader:
         if row_for(connection, self.repo) is None:
             raise MigrationRefused(
                 f"{self.repo} is not in the `repo` table, so its register's rows "
-                f"cannot reference it. Run `sd-db.sh repo add {self.repo}` first; "
+                f"cannot reference it. Run `bin/sd-db repo add {self.repo}` first; "
                 f"criterion 6 enumerates `docs/work` from the same table."
             )
         counts = Counts()

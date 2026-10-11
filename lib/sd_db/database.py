@@ -208,7 +208,7 @@ def open_local(
     """
     if not create and not target.exists():
         raise FileNotFoundError(
-            f"no database at {target}; run `local-sd-db/sd-db.sh init`"
+            f"no database at {target}; run `bin/sd-db init` from the command pack"
         )
     if create:
         target.parent.mkdir(parents=True, exist_ok=True)

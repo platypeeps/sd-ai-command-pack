@@ -13,14 +13,14 @@ from pathlib import Path
 def _checkout() -> Path | None:
     """The git checkout this package runs from, or None for an installed copy.
 
-    `sd-db.sh` sits beside the package only in the source tree; a wheel ships
-    the package alone. The checkout is the folder above it, when git owns it
-    (a worktree's `.git` is a file, so `exists` and not `is_dir`).
+    The pack keeps the package in `lib/` and its entrypoint in `bin/sd-db`
+    (sd:3370); a wheel ships the package alone. The checkout is the folder
+    above `lib/`, when git owns it (a worktree's `.git` is a file, so `exists`
+    and not `is_dir`).
     """
-    folder = Path(__file__).resolve().parent.parent
-    if not (folder / "sd-db.sh").is_file():
+    root = Path(__file__).resolve().parent.parent.parent
+    if not (root / "bin" / "sd-db").is_file():
         return None
-    root = folder.parent
     return root if (root / ".git").exists() else None
 
 
@@ -35,7 +35,7 @@ class SchemaTooNew(SdDbError):
     not understand reads wrong answers silently, which is worse than not
     starting.
 
-    `sd-db.sh` runs the package from the checkout, so there the usual cause
+    `bin/sd-db` runs the package from the checkout, so there the usual cause
     is a checkout behind the code that migrated the database (sd:1664). The
     remedy names the pull; reinstalling a virtualenv the script never reads,
     or restoring an older snapshot over live rows, would be the wrong advice.
@@ -71,7 +71,7 @@ class SchemaTooOld(SdDbError):
         self.built_for = built_for
         super().__init__(
             f"the database is at schema version {found} and this library is "
-            f"built for {built_for}; run `local-sd-db/sd-db.sh migrate` after a "
+            f"built for {built_for}; run `bin/sd-db migrate` from the command pack after a "
             f"backup, with the dashboard, the runner and sd-serve stopped, then "
             f"start all three again"
         )

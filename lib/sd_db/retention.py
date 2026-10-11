@@ -1,6 +1,6 @@
 """The nightly row prune: what ages out of the database, after a backup passed.
 
-One retention table, read by one prune that `sd-db.sh backup` runs after
+One retention table, read by one prune that `sd-db backup` runs after
 its snapshot restored and compared, and never before. What the table says:
 
     cost rows        never.  The ledger: an assignment's budget is admitted

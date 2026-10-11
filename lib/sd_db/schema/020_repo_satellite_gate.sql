@@ -5,7 +5,7 @@
 -- `accept`, the hub's merge lane compares that receipt and merges with no
 -- second run. `off` keeps today's merge, where the hub runs the gate itself.
 -- The grant is the operator's, per repository, outside the tree. The pack
--- reads the column; `sd-db.sh repo satellite-gate PATH off|accept` sets it,
+-- reads the column; `sd-db repo satellite-gate PATH off|accept` sets it,
 -- and `repo list` prints it just before `runner_merge`, which stays the last
 -- field.
 --

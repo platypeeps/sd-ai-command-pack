@@ -7,7 +7,7 @@ contexts they produced, which no longer arrive. This verb makes the three
 changes together, each read live and each skipped when it already holds:
 
   * `repo.ci` becomes `local`, through `sd_db.repos.set_ci` -- the writer
-    `sd-db.sh repo ci` uses, on the row `registered_for` resolves, so a
+    `sd-db repo ci` uses, on the row `registered_for` resolves, so a
     worktree switches its repository;
   * `sd/local-gate` becomes the one required status check, `strict` on, in
     whichever mechanism the default branch uses. A classic protection object
@@ -157,7 +157,7 @@ def ci_step(root: pathlib.Path, database: pathlib.Path | None) -> Step:
         target = repos.registered_for(connection, str(root.resolve()), origin)
         row = sd_lib.repo_row(connection, target)
         if row is None:
-            raise CiRefusal(f"{target} is not a registered repository; run `sd-db.sh repo add {target}`")
+            raise CiRefusal(f"{target} is not a registered repository; run `bin/sd-db repo add {target}`")
         if not sd_lib.is_managed(row):
             raise CiRefusal(sd_lib.unmanaged_text(row["path"]))
         current = row["ci"] if "ci" in row.keys() else None

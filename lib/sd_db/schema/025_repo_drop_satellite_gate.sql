@@ -3,7 +3,7 @@
 -- A lane host per repository replaced the satellite gate offload: the machine
 -- that hosts a repository's lane gates and merges it, and the pack no longer
 -- merges on a satellite's pass. Nothing reads the grant, and
--- `sd-db.sh repo satellite-gate` is gone. 020 stays as applied; this file
+-- `sd-db repo satellite-gate` is gone. 020 stays as applied; this file
 -- undoes its column.
 --
 -- `DROP COLUMN` in place, as 020's reverse does it: SQLite rewrites `repo`

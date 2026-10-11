@@ -5,8 +5,8 @@ They do not establish the currently loaded build or complete the coordinated clo
 Verify installation, process identity and live acceptance after delivering matching commits across all three repositories.
 
 The workflow dashboard is installed at **http://127.0.0.1:8767** and privately at
-**https://sol.tail6dbb92.ts.net:8443**. Remote access requires the Tailscale login
-`sven@ignoranceisbliss.com`. The command pack, system repository and writing pack
+**https://hub.example.test:8443**. Remote access requires the Tailscale login
+`operator@example.test`. The command pack, system repository and writing pack
 share the installed `sd_db` library and `~/.local/share/sd/sd.db`. Ordinary work
 progress belongs to the database.
 
@@ -61,8 +61,8 @@ the registered checkout enclosing cwd (`--no-repo` files it against none), and
 `proposal` is the same collision with only one live half: the
 note exists, the item kind is reserved and nothing creates it, so neither
 `sd task add --kind` nor `sd task edit --kind` offers it. The other three --
-Comment, Question, Decision -- are notes and nothing else. `local-sd-db/README.md` holds the
-full table of both closed lists.
+Comment, Question, Decision -- are notes and nothing else. [docs/sd-db.md](sd-db.md#the-item-kinds-and-the-two-words-called-followup)
+holds the full table of both closed lists.
 
 The `sd` launcher is installed at `~/bin/common/sd` and is also managed by the
 system repository's bin-links installer.

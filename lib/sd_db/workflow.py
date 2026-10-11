@@ -457,7 +457,7 @@ def register_work_item(
 
     owner = repos.row_for(connection, repo)
     if owner is None:
-        raise WorkflowError(f"repository {repo!r} is not registered; `sd-db.sh repo add` first")
+        raise WorkflowError(f"repository {repo!r} is not registered; `bin/sd-db repo add` first")
     # The key the row holds, so `external_id` is built from it and a second
     # machine builds the same one (sd:1439).
     repo = owner["path"]

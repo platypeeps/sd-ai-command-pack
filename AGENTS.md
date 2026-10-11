@@ -7,7 +7,7 @@ Instructions for AI assistants working in this repository.
 - Follow [.claude/rules/sd-operator-defaults.md](.claude/rules/sd-operator-defaults.md) for reviewer selection and report content.
   These defaults apply to both Claude and Codex.
   Writing style and diagram tooling come from each agent's global instructions.
-- Merge permission is one setting, `repo.runner_merge` on the repository row (`sd-db.sh repo list`, last field).
+- Merge permission is one setting, `repo.runner_merge` on the repository row (`bin/sd-db repo list`, last field).
   `auto`: merge active, in-scope PR work without asking, through `sd-ship prepare` then `sd-ship merge`,
   unless the user says wait. `manual` or no row: ask the operator first.
   No value permits a merge that skips `sd-ship`, such as `gh pr merge` or a web squash; an `sd-ship` refusal is a stop.

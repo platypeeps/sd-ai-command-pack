@@ -1129,7 +1129,7 @@ def month_of(month: str | None = None, *, now: str | None = None) -> str:
 
     `9999-12` parses and is refused anyway. `_usage_reads` measures a month's
     length by stepping into the next one, and December 9999 has no next one
-    in `datetime`: `sd-db.sh usage --month 9999-12` raised an uncaught
+    in `datetime`: `sd-db usage --month 9999-12` raised an uncaught
     `OverflowError` out of the verb and out of the API the Usage screen
     reads. Refusing it here is the one place a caller's month is checked, so
     every reader gets the refusal rather than the traceback.

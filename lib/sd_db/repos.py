@@ -8,10 +8,10 @@ vacuously is worse than one that fails, because it reports a green.
 
 So the table is populated two ways, and only two:
 
-* **By hand**, `sd-db.sh repo add <path>`. One repository, deliberately, with
+* **By hand**, `sd-db repo add <path>`. One repository, deliberately, with
   its remote read from the checkout rather than typed.
 * **From repo-sync's `repos.common.conf` and `repos.<profile>.conf`**,
-  `sd-db.sh repo seed`. That pair lives in `<config>/repo-sync/` (see
+  `sd-db repo seed`. That pair lives in `<config>/repo-sync/` (see
   `config.py`) and is what `repo-sync` clones on this machine's profile,
   one `<subdir> <owner/repo>` per line, and it is maintained because
   the sync breaks when it is wrong. Deriving from it beats a second list that
@@ -144,7 +144,7 @@ def missing_conf(path: Path) -> ConfMissing:
     return ConfMissing(
         f"{path.name} is not set. Copy local-repo-sync/{path.name}.example "
         f"(or another profile's example) to {path} and fill it in, or name a "
-        f"conf: `sd-db.sh repo seed <conf>`."
+        f"conf: `bin/sd-db repo seed <conf>`."
     )
 
 
@@ -590,7 +590,7 @@ def set_runner_merge(
         probe).fetchone()
     if row is None:
         raise RepoRefusal(
-            f"{given} is not a registered repository; run `sd-db.sh repo add {given}`")
+            f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
     target = row["path"]
     before = row["runner_merge"]
     upsert_repo(connection, target, runner_merge=value)
@@ -620,7 +620,7 @@ def set_managed(
         probe).fetchone()
     if row is None:
         raise RepoRefusal(
-            f"{given} is not a registered repository; run `sd-db.sh repo add {given}`")
+            f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
     target = row["path"]
     before = "yes" if row["managed"] else "no"
     upsert_repo(connection, target, managed=MANAGED_VALUES[value])
@@ -654,7 +654,7 @@ def set_ci(
         probe).fetchone()
     if row is None:
         raise RepoRefusal(
-            f"{given} is not a registered repository; run `sd-db.sh repo add {given}`")
+            f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
     target = row["path"]
     before = row["ci"]
     upsert_repo(connection, target, ci=value)
@@ -735,7 +735,7 @@ def set_lane_host(
             probe).fetchone()
         if row is None:
             raise RepoRefusal(
-                f"{given} is not a registered repository; run `sd-db.sh repo add {given}`")
+                f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
         was = row["lane_host"] or LANE_HUB
         if before is not None and was != before:
             raise StaleItem(f"lane_host for {row['path']} is {was} now, not {before}; read the page again")
@@ -751,7 +751,7 @@ def set_lane_host(
         if repository is not None:
             # No GitHub remote, no ship: nothing can hold a lock for it.
             held.enter_context(ship.repository_flock(
-                database, repository, holder={"command": f"sd-db.sh repo lane-host {row['path']} {value}"}))
+                database, repository, holder={"command": f"bin/sd-db repo lane-host {row['path']} {value}"}))
         paths_of = [clone["path"] for clone in clones]
         connection.execute(
             f"UPDATE repo SET lane_host = ?, updated_at = ? WHERE path IN ({paths.placeholders(paths_of)})",

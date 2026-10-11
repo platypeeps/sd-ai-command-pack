@@ -1,6 +1,6 @@
 """`sd usage`: the month, printed from the read the Usage screen shows.
 
-The verb is the one in `sd-db.sh` (the pack's `usage` group, when it lands,
+The verb is the one in `sd-db` (the pack's `usage` group, when it lands,
 calls `report` and prints the same text). It reads `read` -- `reads.usage_month`
 under the registry's merged caps, one read, shared with the Usage screen and,
 per bill, with Today's cost tile -- and writes nothing but the sweep (the

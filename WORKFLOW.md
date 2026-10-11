@@ -56,7 +56,7 @@ These run without being asked.
 
 - No pack command runs in a checkout whose `repo.managed` is no (sd:1620, sd:2566).
   `sd-ship`, `sd-review`, `sd-check`, `sd-status` and `sd-ship lane enqueue` refuse there, dry runs included.
-  The refusal names the remedy: `sd-db.sh repo managed <path> yes`.
+  The refusal names the remedy: `bin/sd-db repo managed <path> yes`.
   A checkout with no row proceeds; only a row marked unmanaged refuses.
 - `sd-status` reports. It never writes.
 - `sd-review --scope branch --challenge` runs on the machine before a push.
@@ -127,7 +127,7 @@ It is a dry run; `--apply` makes the changes, and a second run finds none.
 It refuses a repository the sd database does not mark managed (`repo.managed = no`, sd:1620).
 It needs `admin` on the repository and makes three changes, each only where it does not hold yet:
 
-- It sets `repo.ci` to `local`, as `sd-db.sh repo ci <path> local` does.
+- It sets `repo.ci` to `local`, as `bin/sd-db repo ci <path> local` does.
 - It makes `sd/local-gate` the one required status check, `strict` on, in whichever mechanism the default branch uses.
   Classic protection has its required checks replaced.
   A repository ruleset keeps every other rule; only its status-check rule changes, or is added.
@@ -286,7 +286,7 @@ advance (sd:1933).
 `prepare` writes `Work:` into the body it publishes; `merge` writes `Item:`, `Delivers:` and any owed
 `Closes:` (sd:1600) into the squash message. A body keeps `Closes: sd:N[, sd:M]` to co-deliver those
 items; the merge adds `Delivers:` for each (sd:1481). Each `sd:N` the pull request title names closes
-the same way (sd:3014). `prepare` strips any other owned line from the
+the same way (sd:3014). Both need `--deliver`: an `--associate-only` claim closes nothing (sd:3365). `prepare` strips any other owned line from the
 supplied body and lists it in the result's `normalized`. `Refs:` is not owned; its items stay open.
 Without `--body-file`, `prepare` reads the open pull request's live body; `body_source` names the source.
 `sd-ship body --item <item> [--body-file <file>] [--pr <n>]` prints the body `prepare` would publish
@@ -537,6 +537,8 @@ The rules for them:
   predicted landing in the background, and waits for that gate after the
   merge, so the next prepare reuses its receipt (sd:2586). That needs the
   tree key above; the next entry's `speculation` field says what ran.
+  A run that stops ends that gate's process group and waits at most
+  20 seconds, so it frees its lock; `speculative_gate` says how (sd:3361).
 - **Reorder a lane queue between items (sd:2584).** `sd-ship lane move <item>
   up|down|top|<position>` reorders the pending entries; `hold <item>` keeps an
   entry in place but skips it, and its speculative gate, until `release
@@ -587,7 +589,7 @@ The rules for them:
   minutes a run claims no next entry and finishes the one it started, so the
   job's 120-minute limit never stops a merge; the next run goes on (sd:3287). The lane
   host gates and merges on its own machine; an entry's commits reach it
-  through `origin`.
+  through `origin`. [docs/sd-db.md § Lane host](docs/sd-db.md#lane-host) covers the move.
 - **Large uncommitted data goes under the bulk root (sd:1792).** When
   `sd.bulk_storage_root` names a folder, put run outputs, logs, captures,
   agent scratch evidence and large downloaded fixtures under
@@ -647,7 +649,7 @@ item saying which answer lowered it, once per item and remote however many
 runs it takes, and `sd-status` names the planning artifacts the shared tree
 was already carrying, which are yours to move. Mode never decides merging.
 `runner_merge: auto` is a per-repository policy you set once with
-`sd-db.sh repo runner-merge <path> auto`, off by default, and nothing derives it.
+`bin/sd-db repo runner-merge <path> auto`, off by default, and nothing derives it.
 Every merge asks the same three questions again, one function for both gates.
 Two of the three answers are final: a repository you do not administer, and a
 fork, are refusals no setting reaches, and so is a question the remote could
@@ -769,7 +771,7 @@ reviewer chain before vendor, transport, availability and spending gates run.
 Core settings use `sd config get|set|unset|list` and the existing atomic machine configuration writer.
 The file is `~/.config/sd-ai-command-pack/config.json`, honoring `XDG_CONFIG_HOME`.
 Merge permission is one setting, `repo.runner_merge`: a column on the repository row in the workflow database, not an `sd` key.
-Set it with `sd-db.sh repo runner-merge <path> auto|manual`; `sd-db.sh repo list` shows it as each row's last field.
+Set it with `bin/sd-db repo runner-merge <path> auto|manual`; `bin/sd-db repo list` shows it as each row's last field.
 `auto` lets the runner and the assistant merge active, in-scope work without asking, only through `sd-ship prepare` then `sd-ship merge`.
 No value permits a merge that skips the review lane, such as a raw `gh pr merge` or a web squash; a refusal from `sd-ship` is a stop.
 `manual`, no row, or an unreadable database means ask the operator first. An explicit instruction to wait wins.

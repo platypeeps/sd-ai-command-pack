@@ -10,7 +10,8 @@ Whole-item delivery also carries `Delivers: <item>`.
 Changes without an item omit both trailers and create no placeholder row.
 One PR claims one item.
 A body line `Closes: sd:A, sd:B` names the other items it delivers (operator ruling 2026-10-03, sd:1481).
-The merge adds `Delivers:` for each `Closes:` item and closes it, with or without `--deliver`.
+The merge adds `Delivers:` for each `Closes:` item and closes it; only a `--deliver` claim closes them.
+An `--associate-only` claim closes nothing: its title's ids are context, and a `Closes:` line on one stops the prepare (sd:3365).
 Prepare refuses a `Closes:` id that is no item or belongs to another repository, and a `Closes:` line naming the claimed item.
 A `Closes:` item the merge could not close returns `delivery_pending: true` with `closes_failed`; `reconcile` retries it.
 A body line `Refs: sd:A, sd:B` names related or partial items; the merge adds no trailer for them and leaves them open.

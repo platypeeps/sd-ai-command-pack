@@ -139,7 +139,7 @@ and the workflow each selects is stated in [WORKFLOW.md](WORKFLOW.md):
 
 - `full` — planning artifacts live in `docs/work/` in the repository, and the
   whole path runs; an unattended merge additionally needs `runner_merge: auto`
-  on the repository row, set with `sd-db.sh repo runner-merge <path> auto`.
+  on the repository row, set with `bin/sd-db repo runner-merge <path> auto`.
 - `minimal` — no work items anywhere, and the small-change path only.
 - `guest` — planning artifacts stay out of the repository, a fork's branches
   included; the loop stops at pull-request-ready, and nothing is posted upstream.
@@ -171,7 +171,7 @@ After that operator explicitly grants permission, record it:
 
 ```sh
 sd config set sd.external_reviews configured
-sd-db.sh repo runner-merge <path> auto
+bin/sd-db repo runner-merge <path> auto
 ```
 
 Merge permission is one setting, `repo.runner_merge` on the repository row; the runner and the assistant both read it.

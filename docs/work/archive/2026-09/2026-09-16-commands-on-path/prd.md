@@ -12,7 +12,7 @@ status: done
 On 2026-09-16 a skill ran `sd-handoff` from `~/` and the shell did not find
 it. The command lives in the pack checkout's `bin/`, and nothing the pack
 ships puts it on PATH. The owner wants the pack commands usable from every
-repository, on every machine. Measured at `c6879551` on sol:
+repository, on every machine. Measured at `c6879551` on the hub:
 
 - `bin/` holds 17 extensionless executables, all `#!/usr/bin/env python3`.
   Fourteen locate the checkout with `Path(__file__).resolve()`; `sd-handoff`,
@@ -74,7 +74,7 @@ Decided 2026-09-16, note #2616: the four recommendations were accepted as
 written.
 
 - **Default link directory.** `~/.local/bin`, with `--bin-dir DIR` as the
-  override. On sol `~/.zshrc` prepends it (`path=("$HOME/.local/bin" $path)`)
+  override. On the hub `~/.zshrc` prepends it (`path=("$HOME/.local/bin" $path)`)
   and appends `~/bin/common`; `~/.local/bin` existed and held no `sd*`;
   `~/.config/shell/env.sh` sets neither. The second machine was not
   measurable from the planning lane; the item states `~/.local/bin` is on

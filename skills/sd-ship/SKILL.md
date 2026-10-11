@@ -14,7 +14,7 @@ Use STE-Concise; report delivery state, decisive checks, blockers, and retained 
 
 ## Standing permission
 
-Read `repo.runner_merge` on the repository row (`sd-db.sh repo list`, last field) before relying on standing permission.
+Read `repo.runner_merge` on the repository row (`bin/sd-db repo list`, last field) before relying on standing permission.
 `auto` means merge active, in-scope PR work without asking, unless the operator explicitly says wait.
 Merge only through `sd-ship prepare` then `sd-ship merge`; the review lane and required CI are part of those gates.
 `auto` never permits a merge that skips the review lane, such as a raw `gh pr merge` or a web squash.
@@ -110,6 +110,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
 8. **Record verified delivery.**
    An associated merge carries `Item:`; only whole-item delivery adds `Delivers:`.
    A body `Closes: sd:N[, sd:M]` line names co-delivered items; each gets `Delivers:` and closes on the merge (sd:1481).
+   An `--associate-only` claim closes nothing, not even the items its title names (sd:3365).
    Prepare refuses one inside a code fence or HTML comment; indent an example.
    A body `Refs: sd:N` line names a related or partial item; the merge leaves it open.
    Record the row only after the remote confirms the merge.

@@ -166,6 +166,7 @@ import os
 import pathlib
 import re
 import secrets
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -187,6 +188,9 @@ MERGE_WAIT_SECONDS = 2100
 #: JOB_TIMEOUT is 120 minutes, and one entry takes 30 to 45, so an entry started
 #: just inside the budget still finishes before the job limit TERMs the runner.
 RUN_BUDGET_SECONDS = 55 * 60
+#: How long a stopped run waits for its cancelled speculative gate, once after
+#: SIGTERM and once after SIGKILL (sd:3361).
+CANCEL_SECONDS = 10
 #: The lines a gate writes when it ends: the pack's test runner, `make`'s own
 #: failure, and the system repository's check script.
 GATE_END = re.compile(r"run-tests: end head=|check\.sh: every suite passed|make: \*\*\*")
@@ -1065,6 +1069,53 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
     return {**fields, "status": "merged", "merge_commit": merged.get("merge_commit")}
 
 
+class SpeculativeGate(threading.Thread):
+    """A speculative gate's thread, which a stopped run cancels (sd:3361).
+
+    The gate's `sd-check` runs as a process group's leader; `started` records
+    that group while it runs. `cancel_gate` ends the group and waits a bounded time,
+    so a stopped run frees its runner lock instead of waiting on the check. A
+    group that starts after the cancel is ended at once.
+    """
+
+    def __init__(self, target: Callable[[], None], name: str) -> None:
+        super().__init__(target=target, name=name)
+        self.cancelled = False
+        self.group: int | None = None
+        self.guard = threading.Lock()
+
+    def started(self, group: int | None) -> None:
+        with self.guard:
+            self.group = group
+            if self.cancelled and group is not None:
+                end_group(group, signal.SIGTERM)
+
+    def cancel_gate(self) -> bool:
+        """End the gate's group, SIGTERM then SIGKILL, each followed by `CANCEL_SECONDS`; whether the gate ended."""
+        for number in (signal.SIGTERM, signal.SIGKILL):
+            with self.guard:
+                self.cancelled = True
+                if self.group is not None:
+                    end_group(self.group, number)
+            self.join(CANCEL_SECONDS)
+            if not self.is_alive():
+                return True
+        return False
+
+
+def end_group(group: int, number: int) -> None:
+    with contextlib.suppress(ProcessLookupError, PermissionError):  # already gone
+        os.killpg(group, number)
+
+
+def gate_run() -> Any:
+    """`sd_gate_run.run_child` that tells the speculative gate running it about its group (sd:3361)."""
+    import sd_gate_run  # noqa: PLC0415 -- the gate loads only for a speculation
+    current = threading.current_thread()
+    hook = current.started if isinstance(current, SpeculativeGate) else None
+    return functools.partial(sd_gate_run.run_child, started=hook)
+
+
 def default_gate(root: pathlib.Path, head: str, base: str) -> dict[str, Any]:
     """`sd gate check`'s run at `head` against `base`, which leaves the receipt prepare reads."""
     import sd_gate_run  # noqa: PLC0415 -- the gate loads only for a speculation
@@ -1072,7 +1123,7 @@ def default_gate(root: pathlib.Path, head: str, base: str) -> dict[str, Any]:
     if library is None:
         raise LaneError("no sd_db library, so a pass would leave no receipt")
     return sd_gate_run.check_in_worktree(root, head, base=base, database=library.default_path(os.environ.get("HOME")),
-                                         slot_timeout=sd_lib.GATE_SLOT_SECONDS)
+                                         run=gate_run(), slot_timeout=sd_lib.GATE_SLOT_SECONDS)
 
 
 def scratch_git(tree: pathlib.Path, *args: str) -> str | None:
@@ -1137,7 +1188,7 @@ def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
     return {"head": head, "base": landed} if head else {"skipped": "the merged head could not be read"}
 
 
-def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = False) -> threading.Thread | None:
+def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = False) -> SpeculativeGate | None:
     """Start the next entry's gate on `entry`'s predicted landing, or None.
 
     An entry the runner may not merge (`merge_refusal`) stops prepared and
@@ -1182,10 +1233,12 @@ def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = Fals
                       result.get("receipt_skipped") or result.get("receipt_error") or "none"}
         except Exception as error:
             result = fields = {"status": "error", "reason": f"{type(error).__name__}: {error}"[:600]}
+        if thread.cancelled:
+            fields = {"status": "cancelled", "reason": "the run stopped, so it ended this gate (sd:3361)"}
         log.parent.mkdir(parents=True, exist_ok=True)
         log.write_text(json.dumps(result, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
         record_speculation({**plan, "log": str(log), "log_host": this_host(), **fields})
-    thread = threading.Thread(target=run_gate, name=f"sd-lane-speculate-{following['item']}")
+    thread = SpeculativeGate(run_gate, f"sd-lane-speculate-{following['item']}")
     thread.start()
     return thread
 
@@ -1764,7 +1817,9 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     the serving tree or the tools checkout moves, and then the runner runs
     nothing (sd:3273). Once `clock` passes `deadline`, by default
     `RUN_BUDGET_SECONDS` from now, it claims no next entry and says so in
-    `stopped`; an entry it started still finishes (sd:3287).
+    `stopped`; an entry it started still finishes (sd:3287). A stopped run
+    cancels its speculative gate (`SpeculativeGate.cancel_gate`) rather than wait
+    on it, and says how that went in `speculative_gate` (sd:3361).
     """
     refuse_elsewhere(root, environ)
     queue = queue_for(root, environ)
@@ -1779,7 +1834,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
             return {"ran": [], "busy": "the tools this lane runs are moving; the next run retries"}
         ran: list[dict[str, Any]] = []
         answer: dict[str, Any] = {"ran": ran, **settle_checkout(root, queue)}
-        ahead: threading.Thread | None = None
+        ahead: SpeculativeGate | None = None
         deadline = clock() + RUN_BUDGET_SECONDS if deadline is None else deadline
         while True:
             if clock() >= deadline:
@@ -1806,9 +1861,20 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                 break
             if ahead is not None and row is not None and row.get("status") == "merged":
                 ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
-        if ahead is not None:
-            ahead.join()
-        return answer
+        return finish_speculation(ahead, answer)
+
+
+def finish_speculation(ahead: SpeculativeGate | None, answer: dict[str, Any]) -> dict[str, Any]:
+    """`answer` once the speculative gate is done: waited for, or cancelled when the run stopped (sd:3361).
+
+    A stopped run waits on no check, so it frees its runner lock now.
+    """
+    if ahead is not None and "stopped" in answer:
+        answer["speculative_gate"] = ("cancelled" if ahead.cancel_gate() else
+                                      f"still ending {2 * CANCEL_SECONDS}s after SIGKILL; the lock is freed anyway")
+    elif ahead is not None:
+        ahead.join()
+    return answer
 
 
 def run_entry(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: str, environ: dict[str, str],

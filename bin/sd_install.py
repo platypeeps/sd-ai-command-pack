@@ -1822,7 +1822,7 @@ def open_library(ctx: Context):
     sd_db = imported.module
     path = sd_db.default_path(ctx.home)
     if not path.exists():
-        return None, f"no database at {path}; run `sd-db.sh init` for trials"
+        return None, f"no database at {path}; run `bin/sd-db init` for trials"
     try:
         return sd_db.connect(path), ""
     except Exception as problem:  # pragma: no cover - a corrupt file
@@ -2067,7 +2067,7 @@ def cmd_user(ctx: Context, out) -> int:
 
         # Seeded here because the registry is what a machine with no library
         # still needs: the file-only reader answers
-        # from it, and `sd-db.sh init` seeds its rows from it when the library does
+        # from it, and `sd-db init` seeds its rows from it when the library does
         # arrive. Not recorded in `owned`: the installer removes what it owns on
         # uninstall, and this file is the operator's the moment it lands.
         seeded_registry, registry_report = seed_registry(ctx)

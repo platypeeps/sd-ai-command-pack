@@ -2,13 +2,13 @@
 
     python -m sd_db.testing.wire HOST:PORT TOKEN_FILE [unittest args...]
 
-`sd-db.sh test --remote HOST:PORT TOKEN_FILE` runs this against a server started with
-`sd-db.sh serve --loopback`. Every `sd_db.connect` in this process then
+`sd-db test --remote HOST:PORT TOKEN_FILE` runs this against a server started with
+`sd-db serve --loopback`. Every `sd_db.connect` in this process then
 returns an `sd_db.remote.Connection` to that server, naming the file the
 test built; the server opens it with the library's local open. Criterion 1
 of the second-machine plan: the summary line equals the local run's.
 
-In-process only. A test that runs `sd-db.sh` or `python -m sd_db...` in a
+In-process only. A test that runs `sd-db` or `python -m sd_db...` in a
 child process opens its database locally in that child, because the seam is
 a module attribute and not an environment variable (see `database._opener`).
 The run prints how many sessions went over the wire so the share is visible.
@@ -29,7 +29,7 @@ import sys
 import unittest
 from pathlib import Path
 
-#: The one address `sd-db.sh serve --loopback` binds. `localhost` and `::1`
+#: The one address `sd-db serve --loopback` binds. `localhost` and `::1`
 #: are refused: either can reach an address the server does not listen on.
 LOOPBACK_HOSTS = ("127.0.0.1",)
 
@@ -109,7 +109,7 @@ class _Runner(unittest.TextTestRunner):
 def main(argv: list[str]) -> int:
 
     if len(argv) < 2 or ":" not in argv[0]:
-        print("usage: sd-db.sh test --remote HOST:PORT TOKEN_FILE [unittest args...]", file=sys.stderr)
+        print("usage: bin/sd-db test --remote HOST:PORT TOKEN_FILE [unittest args...]", file=sys.stderr)
         return 1
     from ..serve import read_token
 

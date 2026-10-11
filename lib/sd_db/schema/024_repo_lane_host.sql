@@ -4,7 +4,7 @@
 -- The value is that machine's `hostname -s`, lower-cased, the per-host
 -- folder rule of `local-cron-jobs`. NULL means the hub. Every row starts at
 -- NULL, so nothing moves at migration: the hub keeps every lane.
--- `sd-db.sh repo lane-host PATH HOST|hub` sets it, as does the dashboard's
+-- `sd-db repo lane-host PATH HOST|hub` sets it, as does the dashboard's
 -- Move lane; `sd_db.ship.repository_lock` reads it and refuses on any other
 -- machine. The CHECK repeats the setter's `[a-z0-9-]+` so no other writer
 -- stores a name the lock never matches.

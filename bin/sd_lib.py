@@ -1163,7 +1163,7 @@ def is_managed(row: Any) -> bool:
 def unmanaged_text(path: str) -> str:
     """How a pack tool refuses a repository outside its reach, naming the flag and its remedy."""
     return (f"{path} is not managed in the sd database (repo.managed = no), so pack tools do not run there; "
-            f"set it with `sd-db.sh repo managed {path} yes` if they should")
+            f"set it with `bin/sd-db repo managed {path} yes` if they should")
 
 
 def managed_rows(rows: Iterable[Any]) -> list[Any]:
@@ -1199,8 +1199,8 @@ def unmanaged(root: pathlib.Path | str, *, warn: bool = True, database: pathlib.
     if row is None:
         if warn:
             print(f"warning: {path} has no row in the sd database, so nothing says whether it is managed "
-                  f"(repo.managed); proceeding. Register it with `sd-db.sh repo add {path}`, then "
-                  f"`sd-db.sh repo managed {path} yes`", file=sys.stderr)
+                  f"(repo.managed); proceeding. Register it with `bin/sd-db repo add {path}`, then "
+                  f"`bin/sd-db repo managed {path} yes`", file=sys.stderr)
         return None
     return None if is_managed(row) else unmanaged_text(row["path"])
 
@@ -3351,7 +3351,8 @@ def term_ends_group() -> Iterator[None]:
 
 
 def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeout: float,
-              input_text: str | None = None) -> subprocess.CompletedProcess:
+              input_text: str | None = None,
+              started: Callable[[int | None], None] | None = None) -> subprocess.CompletedProcess:
     """Run `argv` as the leader of a process group, and end the whole group.
 
     sd:1482. `subprocess.run(timeout=)` kills the one process it started. A
@@ -3362,7 +3363,8 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
     SIGTERM to this process ends the group first, then this process (`term_ends_group`).
 
     Raises `GroupTimeout` at the deadline, and what `Popen` raises when
-    `argv[0]` cannot start.
+    `argv[0]` cannot start. `started` hears the group's id once it runs, and
+    None before the group is ended, so a caller can end it early (sd:3361).
     """
     with term_ends_group():
         process = subprocess.Popen(
@@ -3370,10 +3372,14 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
             stdin=subprocess.DEVNULL if input_text is None else subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         try:
+            if started is not None:
+                started(process.pid)
             output, errors = process.communicate(input_text, timeout=timeout)
         except subprocess.TimeoutExpired:
             raise GroupTimeout(f"{argv[0]}: timed out after {timeout}s") from None
         finally:
+            if started is not None:
+                started(None)
             _end_group(process)
     return subprocess.CompletedProcess(list(argv), process.returncode, output or "", errors or "")
 

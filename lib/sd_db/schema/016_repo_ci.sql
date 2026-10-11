@@ -4,7 +4,7 @@
 -- is a repository that runs without Actions: `sd-ship` runs `sd-check` in a
 -- clean worktree of the exact head and posts an `sd/local-gate` commit
 -- status, which a protected branch may require (sd:1843). The pack reads the
--- column; `sd-db.sh repo ci PATH github|local` sets it, and `repo list`
+-- column; `sd-db repo ci PATH github|local` sets it, and `repo list`
 -- prints it just before `runner_merge`, which stays the last field.
 --
 -- The column only, and every row starts at `github`, which is what each

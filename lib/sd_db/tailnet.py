@@ -1,7 +1,7 @@
 """This Tailscale node and its TCP peers, as the local daemon names them.
 
 Step 7 of `docs/work/2026-09-22-run-the-framework-from-a-second-machine/`.
-Two listeners admit a tailnet peer: `sd-db.sh serve` without `--loopback`,
+Two listeners admit a tailnet peer: `sd-db serve` without `--loopback`,
 and the dashboard's direct listener on 8768. Both read the rules here, so a
 change to one is a change to both:
 
