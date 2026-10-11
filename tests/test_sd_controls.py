@@ -459,8 +459,8 @@ class Controls(unittest.TestCase):
                 sd_controls.run(args)
         self.assertEqual(
             str(raised.exception),
-            "the installed sd_db takes no --resolve-ingest-followups; "
-            "run bin/sd_install.py --provision-library",
+            "this sd_db takes no --resolve-ingest-followups; "
+            "run bin/ and lib/ from one pack checkout",
         )
         self.assertEqual(self.followups(report), ("planning", [(note, "cron", False)]))
 

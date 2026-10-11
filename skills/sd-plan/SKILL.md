@@ -116,10 +116,11 @@ tracker said when `sd shadow sync` last ran rather than what anyone
 remembered. `sd-trackers ref` did this until it retired with sd:719 step 4;
 the two remote schemes now read `sd_db.progress.tracker_items` and take the
 row whose URL tail is the reference (`42` for `gh:openai/whisper#42`,
-`ABC-45` for `jira:ABC-45`):
+`ABC-45` for `jira:ABC-45`). Run it from the pack checkout, whose `lib/` is
+the one `sd_db` (sd:3280):
 
 ```bash
-python -c 'import sd_db, sd_db.progress as p
+PYTHONPATH=lib .venv/bin/python -c 'import sd_db, sd_db.progress as p
 c = sd_db.connect(write=False)
 print([r for r in p.tracker_items(c, tracker="github", repo="openai/whisper") if r["url"].endswith("/42")])'
 sd store item 455 --json

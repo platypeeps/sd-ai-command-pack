@@ -22,6 +22,7 @@ import shlex
 import subprocess
 import sys
 import time
+import traceback
 from collections.abc import Iterator
 from dataclasses import dataclass, field, replace
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Mapping, NamedTuple
@@ -1223,104 +1224,16 @@ def repo_disk(value: pathlib.Path | str) -> pathlib.Path:
     return pathlib.Path(value) if paths is None else pathlib.Path(paths.disk(str(value)))
 
 
-# The file `make setup` leaves inside a `.venv` while it is building it. The
-# Makefile writes it before its first mutation and removes it only once the
-# provisioning record is published, so an environment carrying it is
-# half-built -- by a run still going, or by one that died. Every place that
-# resolves a `.venv` treats it the same way: as an environment that is not
-# there. The name is shared by spelling and not by import, because the
-# Makefile is the writer and it cannot import either of us; a rename has to
-# be made in all three, and `tests/test_sd_lib.py` fails if one is missed.
-MID_PROVISION = "sd-provisioning"
-
-
-def _checkouts_that_may_hold_a_venv() -> list[pathlib.Path]:
-    """This checkout, then the main worktree it was linked from.
-
-    `make setup` provisions one virtualenv, into the checkout it ran in. A
-    linked worktree is a checkout without one, so every entrypoint run inside
-    a worktree found no `sd_db` and answered from git instead -- `sd-review`
-    reported `registry_unavailable` and asked for a library that was already
-    installed twenty directories away. The doctrine puts every writer in a
-    worktree, so this was the common case rather than the edge one.
-
-    `--git-common-dir` is the question that distinguishes them: it answers the
-    *shared* git directory, so its parent is the main checkout from any linked
-    worktree, and the checkout itself from the main one. Returned second, and
-    only when it is somewhere else, so a worktree carrying its own virtualenv
-    still answers from that one.
-
-    A checkout whose `.venv` carries `MID_PROVISION` drops out of the list.
-    `make setup` writes that file before its first mutation and removes it
-    only after the environment is complete, so while it is there the
-    `site-packages` under it may be from the run that is still going, from
-    one that died, or from neither. The caller's fallback -- answering from
-    git -- is worse than a good pinned library and better than a half-written
-    one, and it is the same answer this function already gives a checkout
-    that was never provisioned at all.
-    """
-
-    here = pathlib.Path(__file__).resolve().parent.parent
-    roots = [here]
-    common = git_output(["rev-parse", "--git-common-dir"], here)
-    if common:
-        main = (here / common).resolve().parent
-        if main != here and main.is_dir():
-            roots.append(main)
-    return [root for root in roots if not (root / ".venv" / MID_PROVISION).exists()]
-
-
-def _provisioned_library_paths() -> list[str]:
-    """Where `make setup` put `sd_db`, for an interpreter that did not find it.
-
-    The pack provisions the library into its own virtualenv and every
-    entrypoint runs under `#!/usr/bin/env python3`, so on a machine whose
-    `python3` is not that virtualenv the import fails and git answers in the
-    row's place -- silently, and differently. The run that found this reported
-    `in_progress` for an item whose row says `done`.
-
-    The library is pure Python and its floor is 3.11, so the interpreter that
-    found no `sd_db` can read the *pinned* one off the virtualenv it was
-    installed into. That is the same copy `make setup` chose, not a second
-    source: reading the checkout's source instead would answer from something
-    nothing pinned.
-
-    Ordered by version number and newest first, because a rebuilt virtualenv
-    can leave two `lib/python*` directories behind and the first path on
-    `sys.path` is the one that answers. Sorting the names compares text, and
-    text agrees with the numbers only by luck: it happens to be right for
-    `python3.9` against `python3.13`, and wrong for `python3.1` against
-    `python3.10`, where the shorter name is a prefix of the longer and sorts
-    first. Empty when there is no provisioned copy to offer.
-    """
-    ordered: list[str] = []
-    for root in _checkouts_that_may_hold_a_venv():
-        found = []
-        for path in root.glob(".venv/lib/python*/site-packages"):
-            if not (path / "sd_db").is_dir():
-                continue
-            version = tuple(int(part) for part in re.findall(r"\d+", path.parent.name))
-            found.append((version, str(path)))
-        # Sorted inside the checkout and concatenated in checkout order, not
-        # sorted across both. One list would rank by version first, so two
-        # equal versions fall back to comparing paths -- and a worktree that
-        # deliberately provisioned its own copy would lose to the main
-        # checkout on nothing but the spelling of its directory.
-        ordered.extend(path for _, path in sorted(found, reverse=True))
-    return ordered
-
-
 class Imported(NamedTuple):
     """What one entrypoint's attempt to reach `sd_db` came to.
 
     Three fields because "did it work" is not the whole question. `problem`
     is the sentence to show; `provisioned` says which of the two faults
-    produced it -- a path when the pack's own copy was there and would not
-    import, empty when there was no copy to try. A caller with a canned
-    remedy of its own needs that distinction, and the alternative is matching
-    on the wording of the sentences below, which is a coupling that breaks
-    the first time somebody rewords one. Both are meaningful only when
-    `module` is `None`.
+    produced it -- the `lib/` path when the checkout's own copy was there and
+    raised while importing, empty when there was no copy to try. A caller
+    with a canned remedy of its own needs that distinction, and the
+    alternative is matching on the wording of the sentences below. Both are
+    meaningful only when `module` is `None`.
     """
 
     module: Any
@@ -1328,179 +1241,34 @@ class Imported(NamedTuple):
     provisioned: str
 
 
-def import_sd_db(*, match_database: bool = True) -> Imported:
+def import_sd_db() -> Imported:
     """`sd_db` for an entrypoint running under whatever `python3` is on PATH.
 
-    The one place the two tries live. `_provisioned_library_paths` above says
-    why there has to be a second try; this says why every caller has to make
-    it. No `python3` on a developer's PATH carries `sd_db` -- the pack
-    provisions it into its own virtualenv and every entrypoint starts
-    `#!/usr/bin/env python3` -- so an entrypoint that tries once and gives up
-    is not degraded on an unusual machine, it is broken on all of them. That
-    is sd:745: `bin/sd-ship` refused every verb with "install matching
-    sd_db" while `bin/sd`, which had this fallback, answered fine, and the
-    only difference between the two was a copy of these six lines.
+    The checkout's own `lib/` goes first on `sys.path` (sd:3278): the pack
+    owns `sd_db`, so `bin/` and `lib/` come from one commit and a worktree
+    runs its own library. It is the only copy (sd:3280): `make setup`
+    provisions none, so nothing falls back to a `.venv` copy, which could only
+    be stale. A `lib/` built for another schema than the database's is not
+    replaced either; its own open names both versions.
 
     Returns the module, or `None` and the problem, so each caller still
     decides for itself whether an absent library is a refusal, a fall back to
-    the revision history, or a field on a report. The two problem sentences
-    stay apart for the reason the retry below states: a provisioned copy that
-    will not import is not a machine without the library, and one message over
-    both sends half its readers to the wrong remedy.
-
-    The checkout's own `lib/` goes first on `sys.path` (sd:3278): the pack
-    owns `sd_db` now, so `bin/` and `lib/` come from one commit and a
-    worktree runs its own library. The two tries stay behind it, so a `lib/`
-    that will not import still falls back to the provisioned copy. A `lib/`
-    built for another schema than the database's gives way to a provisioned
-    copy that matches it (`_matching_library`). `match_database=False` keeps
-    `lib/` for a verb that moves the database to `lib/`'s schema: `bin/sd-db
-    migrate` run from the matching copy would find nothing to apply.
+    the revision history, or a field on a report. A `lib/` copy that raised
+    while importing is not an absent one (sd:746): its sentence quotes the
+    error instead of sending the reader to an installer.
     """
     tree = str(pathlib.Path(__file__).resolve().parent.parent / "lib")
     if tree in sys.path:
         sys.path.remove(tree)
     sys.path.insert(0, tree)
     try:
-        import sd_db  # noqa: PLC0415 - `make setup` provisions it; absent is a state
+        import sd_db  # noqa: PLC0415 - the checkout's `lib/`; absent is a state
     except ImportError as error:
-        offered = _provisioned_library_paths()
-        # Prepended, and that is the difference between the provisioned copy
-        # answering and an incompatible one keeping the answer. The retry
-        # only runs because the first try failed, and it can fail two ways:
-        # nothing on `sys.path` held an `sd_db`, or something earlier on it
-        # held one that raised. Appended, the pack's copy sits behind that
-        # second one, the finder walks the path in order and reaches the same
-        # incompatible package again, and the sentence below then names the
-        # provisioned path as the thing that would not import -- about a copy
-        # that was never tried. At the front, the copy `make setup` chose is
-        # the copy this run gets, and any error reported is that copy's own.
-        #
-        # No deliberate `PYTHONPATH` is overridden by this. An `sd_db` a
-        # developer put there that imports has already answered the first try
-        # and never reaches here; the only thing that loses is one that
-        # raised. Ordering among the offered paths is preserved -- newest
-        # interpreter first, which is `_provisioned_library_paths`'s contract
-        # and pointless anywhere but the front of the list.
-        #
-        # What is prepended is a whole `site-packages`, so in principle it
-        # shadows more than `sd_db`. In this pack it shadows nothing -- but
-        # not for the reason the first version of this comment gave, which
-        # said every import in `bin/` and `dashboard/` is stdlib, a sibling
-        # module, or `sd_db` itself. An AST scan of both trees finds one
-        # exception: `bin/sd_research_render.py:51 import markdown`.
-        #
-        # The safety survives on other grounds. Python-Markdown is not
-        # provisioned into the pack's virtualenv, so the `site-packages` this
-        # prepends has no `markdown` in it to shadow anything with, and that
-        # module's only consumer, `bin/sd-research-kit`, never reaches this
-        # function. So a third-party dependency arriving in either tree is
-        # not by itself the thing to watch for -- one that is also
-        # PROVISIONED is, and that is what would make this worth narrowing to
-        # the one module it is for.
-        for path in offered:
-            if path in sys.path:
-                sys.path.remove(path)
-        sys.path[:0] = offered
-        try:
-            import sd_db  # noqa: PLC0415 - the provisioned copy, second and last try
-        except ImportError as retry:
-            # Two faults, two sentences. A provisioned copy that will not
-            # import is not a machine without the library, and saying "not
-            # installed" over the top of one sends the reader to `make
-            # setup` for a package that is already there. Where nothing
-            # was offered, the first error is the only one there is.
-            return Imported(None, (
-                f"sd_db is provisioned at {offered[0]} but will not import: {retry}"
-                if offered else f"sd_db is not installed here: {error}"
-            ), offered[0] if offered else "")
-    return Imported(_matching_library(sd_db, tree) if match_database else sd_db, "", "")
-
-
-def _wanted_build(sd_db: Any) -> Callable[[pathlib.Path], bool] | None:
-    """What a provisioned package must be to open the default database `sd_db` cannot, or None.
-
-    None when `sd_db` opens it at its own schema, when there is no database,
-    and when the open fails another way: an unknown answer is not a mismatch,
-    and the caller's own open reports it. Two refusals name what would open
-    it. An older copy's `SchemaTooNew` carries the database's version in
-    `found`; a newer copy reads it and finds it behind. On a satellite the hub
-    compares whole builds, and its `BuildMismatch` carries `hub_build`, the
-    digest a package must have (`sd_db.remote.tree_digest`).
-    """
-    def schema_is(found: int) -> Callable[[pathlib.Path], bool]:
-        guard = sibling("sd_library_guard", "sd_library_guard.py")
-        return lambda package: guard.schema_version((package / "schema.py").read_text(encoding="utf-8")) == found
-
-    try:
-        path = sd_db.default_path()
-        if not path.exists():
-            return None
-        connection = sd_db.connect(path, write=False)
-    except Exception as problem:  # noqa: BLE001 - any other failure leaves the answer unknown
-        hub_build = getattr(problem, "hub_build", None)
-        remote = getattr(sd_db, "remote", None)
-        if isinstance(hub_build, str) and remote is not None:
-            return lambda package: remote.tree_digest(package) == hub_build
-        found = getattr(problem, "found", None)
-        return schema_is(found) if isinstance(found, int) else None
-    try:
-        found = int(sd_db.schema_version(connection))
-    except Exception:  # noqa: BLE001 - as above
-        return None
-    finally:
-        connection.close()
-    return None if found == getattr(sd_db, "SCHEMA_VERSION", None) else schema_is(found)
-
-
-def _sd_db_modules() -> dict[str, Any]:
-    return {name: module for name, module in sys.modules.items() if name == "sd_db" or name.startswith("sd_db.")}
-
-
-def _matching_library(sd_db: Any, tree: str) -> Any:
-    """`lib/`'s `sd_db`, unless it cannot open the database and a provisioned copy can.
-
-    Review round 1 of sd:3278. Reading `lib/` first bypassed the guards that
-    keep the provisioned copy at the database's schema: a worktree whose
-    `lib/` adds a migration refused every write with `SchemaTooOld`, one left
-    behind a migrated database refused every open with `SchemaTooNew`, and on
-    a satellite the hub refused any build but its own. The first provisioned
-    copy `_wanted_build` accepts answers instead; one that will not import
-    is put back and the next is tried. With none, `lib/` stays, and its own
-    open names both sides. A copy from anywhere but `lib/` is a choice
-    already made.
-    """
-    origin = getattr(sd_db, "__file__", None)
-    if not origin or pathlib.Path(origin).resolve().parent.parent != pathlib.Path(tree).resolve():
-        return sd_db
-    # ponytail: one read-only open per call; memoize per database if a caller loops.
-    wanted = _wanted_build(sd_db)
-    if wanted is None:
-        return sd_db
-    loaded = _sd_db_modules()
-    for path in _provisioned_library_paths():
-        try:
-            if not wanted(pathlib.Path(path) / "sd_db"):
-                continue
-        except (OSError, UnicodeError):
-            continue
-        for name in _sd_db_modules():
-            del sys.modules[name]
-        for entry in (tree, path):
-            if entry in sys.path:
-                sys.path.remove(entry)
-        sys.path.insert(0, path)
-        try:
-            import sd_db as provisioned  # noqa: PLC0415 - the copy that opens the database
-        except Exception:  # noqa: BLE001 - any failure puts lib/ back before the next try
-            for name in _sd_db_modules():
-                del sys.modules[name]
-            sys.modules.update(loaded)
-            sys.path.remove(path)
-            sys.path.insert(0, tree)
-            continue
-        return provisioned
-    return sd_db
+        frames = traceback.extract_tb(error.__traceback__)
+        if any(frame.filename.startswith(tree + os.sep) for frame in frames):
+            return Imported(None, f"sd_db is provisioned at {tree} but will not import: {error}", tree)
+        return Imported(None, f"sd_db is not installed here: {error}", "")
+    return Imported(sd_db, "", "")
 
 
 class Rows:

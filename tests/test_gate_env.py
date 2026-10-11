@@ -1,7 +1,7 @@
 """Gate mode (sd:1918): under `SD_LOCAL_GATE=1` the Makefile provisions, never borrows.
 
 `bin/sd_local_gate.py` exports the variable; `.github/scripts/provision-gate-env.py`
-builds the in-tree environment, with `sd_db` from the worktree's own `lib/` (sd:3278). The dry runs here read what `make`
+builds the in-tree environment, with no `sd_db`: the worktree's own `lib/` is the one copy (sd:3280). The dry runs here read what `make`
 would do and build nothing; the script is driven only down its refusals.
 """
 
@@ -50,9 +50,9 @@ class TheMakefile(unittest.TestCase):
 
 
 class TheLibrary(unittest.TestCase):
-    """sd:3278. The gate tests the worktree's own `lib/`; no system checkout, no pin file."""
+    """sd:3280. The gate installs no `sd_db`; the suite reads the worktree's own `lib/`."""
 
-    def test_the_gate_installs_sd_db_from_the_worktrees_own_lib(self) -> None:
+    def test_the_gate_installs_no_sd_db(self) -> None:
         seen: list[list[str]] = []
         with tempfile.TemporaryDirectory() as tmp:
             venv = pathlib.Path(tmp) / ".venv"
@@ -64,9 +64,9 @@ class TheLibrary(unittest.TestCase):
                     mock.patch("sys.stdout"):
                 self.assertEqual(provision.main(["provision-gate-env.py", sys.executable]), 0)
             marker = (venv / provision.MARKER).read_text(encoding="utf-8")
-        self.assertEqual(seen[-1][-1], str(REPO_ROOT / "lib"))
-        self.assertEqual([argv for argv in seen if "local-sd-db" in " ".join(argv)], [])
-        self.assertTrue(marker.startswith("sd_db lib/"), marker)
+        self.assertEqual([argv for argv in seen if argv[-1] == str(REPO_ROOT / "lib") or "local-sd-db" in " ".join(argv)], [])
+        self.assertEqual(len(seen), 2, seen)
+        self.assertTrue(marker.startswith("requirements at "), marker)
 
     def test_the_pin_file_is_gone(self) -> None:
         self.assertFalse((REPO_ROOT / ".sd-system-rev").exists())

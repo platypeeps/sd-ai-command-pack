@@ -470,7 +470,7 @@ class TheHandshake(ServedCase):
                                                       params=[]))
                 refused = remote.read_frame(raw)
         self.assertEqual(caught.exception.upgrade, "hub")
-        self.assertIn(f"upgrade the hub's sd_db to {newer}", str(caught.exception))
+        self.assertIn(f"run `repo-sync.sh refresh` on the hub for sd_db {newer}", str(caught.exception))
         self.assertFalse(refused["ok"])
         self.assertIn("the first frame must be open", refused["error"]["text"])
         self.assertEqual(self.rows(), 0)
@@ -483,7 +483,7 @@ class TheHandshake(ServedCase):
         with self.assertRaises(remote.BuildMismatch) as caught:
             hub.connect()
         self.assertEqual((caught.exception.field, caught.exception.upgrade), ("package", "satellite"))
-        self.assertIn(f"upgrade this satellite's sd_db to {version}", str(caught.exception))
+        self.assertIn(f"run `repo-sync.sh follow` on this satellite for sd_db {version}", str(caught.exception))
 
     def test_a_hub_upgraded_under_a_connected_satellite_refuses_its_next_session(self):
         wire = self.served.connect()
@@ -499,7 +499,7 @@ class TheHandshake(ServedCase):
                 self.assertRaises(remote.UnknownOutcome) as raised:
             wire.execute("INSERT INTO probe (name) VALUES ('after')")
         self.assertIsInstance(raised.exception.__cause__, remote.HubUnreachable)
-        with self.assertRaisesRegex(remote.BuildMismatch, f"upgrade this satellite's sd_db to {version}"):
+        with self.assertRaisesRegex(remote.BuildMismatch, f"run `repo-sync.sh follow` on this satellite for sd_db {version}"):
             upgraded.connect()
         self.assertEqual(self.rows(), 0)
 
@@ -509,7 +509,8 @@ class TheHandshake(ServedCase):
         with self.assertRaises(remote.BuildMismatch) as caught:
             hub.connect()
         self.assertEqual((caught.exception.field, caught.exception.upgrade), ("build", "both"))
-        self.assertIn("install the same sd_db build", str(caught.exception))
+        self.assertIn("run `repo-sync.sh refresh` on the hub, then `repo-sync.sh follow` on this satellite",
+                      str(caught.exception))
 
     def test_a_build_installed_under_a_running_hub_is_refused_until_it_restarts(self):
         """sd:1480. The hub states the build it runs, not the build on its disk.
@@ -567,7 +568,7 @@ class TheHandshake(ServedCase):
             refused = remote.read_frame(raw)
         self.assertEqual(refused["error"]["name"], "BuildMismatch")
         self.assertIn("protocol version", refused["error"]["text"])
-        self.assertIn("upgrade the hub", refused["error"]["text"])
+        self.assertIn("run `repo-sync.sh refresh` on the hub", refused["error"]["text"])
 
 
 class TheServer(ServedCase):

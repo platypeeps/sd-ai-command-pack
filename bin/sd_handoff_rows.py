@@ -52,9 +52,8 @@ import pathlib
 #: `sd_lib`'s own for the other, which is a provisioned copy that will not
 #: import and wants its error rather than an installer it already ran.
 NOT_INSTALLED = (
-    "sd_db is not installed in this virtualenv. Followups are rows; install "
-    "the library with the pack's installer (`sd-install`), which provisions "
-    "it from the `system` checkout at its tag, then run this again."
+    "sd_db is not installed in this virtualenv. Followups are rows; run the "
+    "pack's bin/ from its checkout, whose lib/ holds sd_db, then run this again."
 )
 
 #: The kind `sd-note add` writes by default. `add_note` accepts six more and

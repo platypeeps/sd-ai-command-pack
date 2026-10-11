@@ -138,7 +138,7 @@ def run(args: argparse.Namespace) -> int:
     try:
         import sd_db.writing as writing
     except ImportError:
-        raise WorkRefusal("install the current system/local-sd-db build for writing controls") from None
+        raise WorkRefusal("update this pack checkout, whose lib/ is the sd_db bin/ runs for writing controls") from None
     root = sd_lib.repo_root()
     if root is None:
         raise WorkRefusal("writing controls require the writing Git checkout as the current directory")
@@ -153,10 +153,10 @@ def run(args: argparse.Namespace) -> int:
     # Looked up, not imported: the gate builds an older sd_db that lacks it.
     checkout: Any = getattr(writing, "checkout", None)
     if linked and checkout is None:
-        raise WorkRefusal("install the current system/local-sd-db build to run writing controls from a worktree")
+        raise WorkRefusal("update this pack checkout, whose lib/ is the sd_db bin/ runs to run writing controls from a worktree")
     promote: Any = getattr(writing, "promote", None)
     if action == "promote" and promote is None:
-        raise WorkRefusal("install the current system/local-sd-db build to promote an idea")
+        raise WorkRefusal("update this pack checkout, whose lib/ is the sd_db bin/ runs to promote an idea")
     # Looked up, as `checkout` is: an older installed sd_db lacks them.
     review: Any = getattr(writing, REVIEWS[action], None) if action in REVIEWS else None
     if action in REVIEWS and review is None:

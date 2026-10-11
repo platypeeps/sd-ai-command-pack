@@ -1276,11 +1276,11 @@ def _database_issues(slug: str) -> dict[str, Any]:
     reported here the way `jira_section` reports it, naming the library the
     rows live in rather than a verb to run.
     """
-    imported = sd_lib.import_sd_db()  # the provisioned copy's second try, before the first import (sd:746)
+    imported = sd_lib.import_sd_db()  # puts the checkout's `lib/` first, before the import (sd:746)
     try:
         import sd_db
         from sd_db.progress import tracker_freshness, tracker_items
-    except ImportError:  # a provisioned copy that will not import is named, not called absent
+    except ImportError:  # a `lib/` copy that will not import is named, not called absent
         return {"available": False, "reason": imported.problem if imported.provisioned else "shared tracker library is not installed", "needs_you": [], "other": []}
     if not sd_db.default_path().exists():
         return {"available": False, "reason": "no shared sd_db database yet", "needs_you": [], "other": []}
@@ -1320,11 +1320,11 @@ def jira_section() -> dict[str, Any]:
     rule on closed rows is applied here and not in the renderer, so the
     `rows` list `--json` carries is the list the text prints.
     """
-    imported = sd_lib.import_sd_db()  # the provisioned copy's second try, before the first import (sd:746)
+    imported = sd_lib.import_sd_db()  # puts the checkout's `lib/` first, before the import (sd:746)
     try:
         import sd_db
         from sd_db.progress import tracker_freshness, tracker_items
-    except ImportError:  # a provisioned copy that will not import is named, not called absent
+    except ImportError:  # a `lib/` copy that will not import is named, not called absent
         return {"available": False, "reason": imported.problem if imported.provisioned else "shared tracker library is not installed", "freshness": None, "rows": []}
     if not sd_db.default_path().exists():
         return {"available": False, "reason": "no shared database yet", "freshness": None, "rows": []}
@@ -1363,11 +1363,11 @@ def _jira_row_is_current(row: dict[str, Any], cutoff: datetime.datetime) -> bool
 
 def contributions_section(root: pathlib.Path) -> dict[str, Any]:
     """Read the shared contribution projection without collecting or opening a writer."""
-    imported = sd_lib.import_sd_db()  # the provisioned copy's second try, before the first import (sd:746)
+    imported = sd_lib.import_sd_db()  # puts the checkout's `lib/` first, before the import (sd:746)
     try:
         import sd_db
         from sd_db import contributions
-    except ImportError:  # a provisioned copy that will not import is named, not called absent
+    except ImportError:  # a `lib/` copy that will not import is named, not called absent
         return {"available": False, "reason": imported.problem if imported.provisioned else "shared contribution library is not installed", "rows": []}
     if not sd_db.default_path().exists():
         return {"available": False, "reason": "no shared database yet", "rows": []}

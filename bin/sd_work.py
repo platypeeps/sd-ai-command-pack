@@ -99,8 +99,8 @@ def _kinds(workflow: Any) -> None:
         raise WorkRefusal(
             "the installed sd_db cannot file or reclassify item kinds; it is missing "
             + ", ".join(f"sd_db.workflow.{name}" for name in missing)
-            + ". Install the current system/local-sd-db build with the pack's "
-            "installer (`sd-install`), then run this again."
+            + ". Update this pack checkout, whose lib/ is the sd_db bin/ runs, "
+            "then run this again."
         )
 
 
@@ -261,8 +261,8 @@ def _library():
         import sd_db.workflow as workflow
     except ImportError as error:
         raise WorkRefusal(
-            "the installed sd_db lacks workflow controls; install the current "
-            "system/local-sd-db build"
+            "the installed sd_db lacks workflow controls; update this pack checkou"
+            "t, whose lib/ is the sd_db bin/ runs"
         ) from error
     return sd_db, workflow
 
@@ -310,9 +310,8 @@ def _register_library(sd_db):
         raise WorkRefusal(
             "the installed sd_db cannot register work items; it is missing "
             + ", ".join(missing)
-            + ". Install the current system/local-sd-db build with the pack's "
-            "installer (`sd-install`), which provisions it from the `system` "
-            "checkout at its tag, then run this again."
+            + ". Update this pack checkout, whose lib/ is the sd_db bin/ runs, "
+            "then run this again."
         )
     return tuple(found[name] for name, _ in REGISTER_NEEDS)
 
@@ -325,8 +324,8 @@ def _frontmatter(prd: pathlib.Path) -> tuple[str, str]:
         from sd_db.sources.frontmatter import read as read_frontmatter  # noqa: PLC0415
     except ImportError as error:
         raise WorkRefusal(
-            "the installed sd_db cannot read work-item frontmatter; install "
-            "the current system/local-sd-db build"
+            "the installed sd_db cannot read work-item frontmatter; update this pack checkou"
+            "t, whose lib/ is the sd_db bin/ runs"
         ) from error
     try:
         front, _ = read_frontmatter(prd.read_text(encoding="utf-8"))
@@ -878,8 +877,8 @@ def _deliver(progress: Any, workflow: Any, connection: Any, args: argparse.Names
     deliver = getattr(progress, "deliver_associated_work", None)
     if deliver is None:
         raise WorkRefusal(
-            "the installed sd_db lacks deliver_associated_work; install the current "
-            "system/local-sd-db build")
+            "the installed sd_db lacks deliver_associated_work; update this pack checkou"
+            "t, whose lib/ is the sd_db bin/ runs")
     return deliver(connection, args.item, args.commit, who=who, reason=args.reason,
                    expected_revision=args.if_revision)
 
@@ -914,8 +913,8 @@ def _cancel_guard(progress: Any, action: str) -> dict[str, Any]:
     if guard is None:
         raise WorkRefusal(
             "the installed sd_db cannot cancel a task or followup; it is missing "
-            "sd_db.progress.task_guard. Install the current system/local-sd-db build "
-            "with the pack's installer (`sd-install`), then run this again.")
+            "sd_db.progress.task_guard. Update this pack checkout, whose lib/ is the "
+            "sd_db bin/ runs, then run this again.")
     return {"guard": guard}
 
 
@@ -1187,8 +1186,8 @@ def _contribution_library():
         import sd_db.contributions as contributions
     except ImportError as error:
         raise WorkRefusal(
-            "the installed sd_db lacks contribution controls; install the current "
-            "system/local-sd-db build"
+            "the installed sd_db lacks contribution controls; update this pack checkou"
+            "t, whose lib/ is the sd_db bin/ runs"
         ) from error
     return sd_db, contributions
 

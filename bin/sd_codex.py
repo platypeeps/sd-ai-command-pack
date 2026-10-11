@@ -58,9 +58,8 @@ import re
 #: Why the verb cannot run, when it cannot.
 NOT_INSTALLED = (
     "sd_db is not installed in this virtualenv. `sd skill scan` writes "
-    "skill_use rows; install the library with the pack's installer "
-    "(`sd-install`), which provisions it from the `system` checkout, then "
-    "run this again."
+    "skill_use rows; run the pack's bin/ from its checkout, whose lib/ holds "
+    "sd_db, then run this again."
 )
 
 #: The platform key, from the three `bin/sd_install.py:202-204` names.
@@ -103,12 +102,10 @@ def sessions_root(environ: dict[str, str] | None = None) -> pathlib.Path:
 
 def _library():
     """Import `sd_db`, or refuse with the remedy rather than a traceback."""
-    # Through `sd_lib.import_sd_db`, which makes the second try against the
-    # copy `make setup` provisioned (sd:746): `sd` runs under whatever
-    # `python3` is on PATH, and one try here refused on every machine with the
-    # installer as the remedy for a library already installed. A provisioned
-    # copy that will not import gets the helper's sentence, which names it and
-    # quotes its error; `NOT_INSTALLED` is for a machine with nothing to try.
+    # Through `sd_lib.import_sd_db`, which reads the checkout's own `lib/`:
+    # `sd` runs under whatever `python3` is on PATH (sd:746, sd:3280). A
+    # `lib/` copy that will not import gets the helper's sentence, which names
+    # it and quotes its error; `NOT_INSTALLED` is for a machine with nothing to try.
     import sd_lib  # noqa: PLC0415 - a sibling; `bin/sd` puts `bin/` on the path
 
     imported = sd_lib.import_sd_db()

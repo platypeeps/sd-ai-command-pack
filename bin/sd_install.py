@@ -31,7 +31,6 @@ asserts the Antigravity count is zero or twelve, never partial.
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import importlib
 import json
@@ -44,7 +43,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Iterable
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -1806,303 +1805,16 @@ def seed_registry(ctx: Context) -> tuple[bool, str]:
     return True, f"provider registry seeded at {target}"
 
 
-# One installer, one place that knows the path. `sd_db` lives in this pack's
-# `lib/` (sd:3278), and `make setup` installs it into this pack's virtualenv
-# from this checkout at a commit, as a built copy and never editable, so the
-# system callers that still read the virtualenv get one commit's library.
-# This is that place; nothing else in the pack may name the path.
-LIBRARY_RELATIVE = Path("lib")
-#: Tags that name a release *of the library*. The pin uses one only when it matches this.
-LIBRARY_TAGS = "sd-db-v*"
-VENV_RELATIVE = Path(".venv") / "bin" / "python"
-
-
-def library_source(checkout: Path) -> Path:
-    return checkout / LIBRARY_RELATIVE
-
-
-def library_pin(checkout: Path) -> tuple[str, str]:
-    """The immutable ref to install `sd_db` from, or a reason there is none.
-
-    A path install takes the *working tree*, so two machines standing on the
-    same commit with different uncommitted edits install different libraries
-    and call them one version. The ref is what makes the copy reproducible.
-
-    An `sd-db-v*` tag when the checkout stands on one, else the commit.
-    Matched by pattern and not by "any tag here": a bare `--exact-match`
-    would return a tag cut for something else in the repository and record it
-    as the version of `sd_db`, which names a release that is not about the
-    thing installed. There are no tags at all
-    today, and a rule that refuses without one makes `sd_db` uninstallable
-    on the only machine that has it. Both refs are immutable, which is the
-    property requirement 13 is about; the tag is only the nicer name, and
-    cutting a first `sd-db-v0.1` starts working with no change here.
-
-    Uncommitted work is *not* installed, and the caller says so rather than
-    refusing, because refusing would strand an operator mid-edit.
-    """
-    git = sibling("sd_lib").git_output
-    ref = git(
-        ["describe", "--tags", "--exact-match", "--match", LIBRARY_TAGS], checkout
-    ) or git(["rev-parse", "HEAD"], checkout)
-    if not ref:
-        return "", f"{checkout} is not a git checkout, so there is nothing to pin to"
-    return ref, ""
-
-
-def provision_library(ctx: Context, out, ref: str | None = None) -> tuple[bool, str]:
-    """Install `sd_db` into this pack's virtualenv, as a copy.
-
-    `ref` installs that commit instead of this checkout's pin: a merge the
-    checkout has fetched but not checked out (`reprovision_after_merge`).
-    Callers go through `provision_guarded`, which holds the provisioning lock
-    and refuses to put older library code over newer.
-
-    Returns whether it worked and a one-line report, rather than raising. A
-    checkout with no `lib/` or no git history still gets its skills: the paths
-    render without the library, and only the trials are unavailable, which
-    the caller says out loud.
-
-    The flag is separate from the line because the line is prose and prose is
-    not a status. The caller read one for a while -- `"installed" in report`
-    -- and `"sd_db not installed, trials unavailable"` contains it, so the one
-    machine the exit code exists for, the one with no library, exited zero.
-    """
-    del out
-    python = library_venv(ctx) / "bin" / "python"
-    checkout = ctx.checkout
-    source = library_source(checkout)
-    if not python.is_file():
-        return False, f"no virtualenv at {python}; run `make setup` for sd_db"
-    if not (source / "pyproject.toml").is_file():
-        return False, f"no library at {source}; sd_db is absent, trials unavailable"
-    pinned = ref is None
-    if pinned:
-        ref, why = library_pin(checkout)
-        if not ref:
-            return False, f"sd_db not installed, trials unavailable: {why}"
-    refusal = sibling("sd_library_guard").downgrade_refusal(
-        library_venv(ctx), checkout, ref, sibling("sd_lib").git_output)
-    if refusal:
-        return False, refusal
-    target = f"git+file://{checkout}@{ref}#subdirectory={LIBRARY_RELATIVE}"
-    git = sibling("sd_lib").git_output
-    # The note is about the checkout's HEAD: a `ref` that is not it installs
-    # nothing the working tree could have changed.
-    at_head = pinned or git(["rev-parse", f"{ref}^{{commit}}"], checkout) == git(["rev-parse", "HEAD"], checkout)
-    dirty = " (uncommitted work in that checkout is not installed)" if at_head and git(
-        ["status", "--porcelain", "--", str(LIBRARY_RELATIVE)], checkout) else ""
-    if ctx.dry_run:
-        return True, f"would install sd_db from {source} at {ref}{dirty}"
-    try:
-        done = subprocess.run(  # nosec B603 - fixed argv, no shell
-            [str(python), "-m", "pip", "install", "--quiet", "--upgrade", "--force-reinstall", target],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=300,
-        )
-    except (OSError, subprocess.SubprocessError) as problem:
-        return False, f"sd_db install failed: {problem}"
-    if done.returncode != 0:
-        last = done.stderr.strip().splitlines()[-1:] or ["no output"]
-        return False, f"sd_db install failed: {last[0]}"
-    return True, f"sd_db installed from {source} at {ref}{dirty}"
-
-
-#: The one machine-wide hold every `sd_db` install takes, under the state home.
-PROVISION_LOCK = "sd-db-provision.lock"
-
-
-@contextmanager
-def provisioning_lock(ctx: Context):
-    """Hold the machine-wide `sd_db` provisioning lock; a dry run takes none (sd:2108 review).
-
-    Two shippers reconciling library merges at once each read the installed
-    commit, each passed the ancestry check, and the older install could land
-    last. Pip into one virtualenv from two processes is unsafe in any case.
-    The hold spans the read, the check and the install, so each provisioner
-    sees what the previous one installed.
-    """
-    if ctx.dry_run:
-        yield
-        return
-    path = state_home(ctx.home, ctx.environ) / STATE_DIR / PROVISION_LOCK
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
-        yield
-
-
-def library_venv(ctx: Context) -> Path:
-    """The environment a provisioning run installs `sd_db` into: `--venv`, else the checkout's `.venv`.
-
-    The guards read the same one, so a custom `VENV` with a newer install is
-    protected like `.venv` (sd:1118 review round 18).
-    """
-    return ctx.venv or ctx.checkout / ".venv"
-
-
-def installed_library_commit(venv: Path) -> str | None:
-    """The commit pip installed `sd_db` from into the environment `venv`, or None.
-
-    A VCS install records `vcs_info.commit_id` in `direct_url.json`; a path
-    install records none, and neither does a virtualenv without `sd_db`.
-    """
-    for record in sorted((venv / "lib").glob("python*/site-packages/sd_db-*.dist-info/direct_url.json")):
-        try:
-            vcs = json.loads(record.read_text(encoding="utf-8")).get("vcs_info")
-        except (OSError, ValueError, AttributeError):
-            continue
-        commit = vcs.get("commit_id") if isinstance(vcs, dict) else None
-        if isinstance(commit, str) and commit:
-            return commit
-    return None
-
-
-def ancestry_refusal(venv: Path, checkout: Path, ref: str, *, merged: bool) -> str:
-    """Why installing `ref` would put older `sd_db` than `venv` holds, or "".
-
-    The schema guard compares schema numbers, so two library commits under
-    one schema pass it in either order. A `ref` that is an ancestor of the
-    installed commit is older library code, refused on every path: a stale
-    checkout's `make setup` after a reconcile installed a newer merge
-    (sd:2108 review). A reconcile (`merged`) also keeps an installed commit
-    that is not an ancestor of `ref`, because reconciles need not run in merge
-    order. A record naming no commit, or a ref git cannot resolve, refuses
-    nothing here; the install reports the latter.
-    """
-    git = sibling("sd_lib").git_output
-    present = installed_library_commit(venv)
-    commit = git(["rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"], checkout)
-    if not present or not commit or present == commit:
-        return ""
-    if merged:
-        if git(["merge-base", "--is-ancestor", present, commit], checkout) is None:
-            return (f"kept installed sd_db {present}: installed sd_db {present} is not an ancestor of "
-                    f"{commit}, so installing would replace newer or unrelated library code")
-        return ""
-    if git(["merge-base", "--is-ancestor", commit, present], checkout) is not None:
-        return (f"preserving installed sd_db {present}: {ref} ({commit}) is an ancestor of it, so "
-                f"installing would replace newer library code; update {checkout} before provisioning")
-    return ""
-
-
-def provision_guarded(ctx: Context, out, ref: str | None = None, *, merged: bool = False) -> tuple[bool, str]:
-    """The one provisioning operation: lock, ancestry check, install (sd:2108 review).
-
-    `make setup` (no `ref`: this checkout's pin) and a reconcile (`ref`
-    the merge commit, `merged`) both come through here, so the check and the
-    install share one hold and neither path can put older code over newer.
-    A reconcile of the commit already installed installs nothing.
-    """
-    with provisioning_lock(ctx):
-        candidate = ref
-        if candidate is None:
-            candidate, _ = library_pin(ctx.checkout)
-        if candidate:
-            if merged and installed_library_commit(library_venv(ctx)) == candidate:
-                return False, f"sd_db {candidate} is already installed"
-            refusal = ancestry_refusal(library_venv(ctx), ctx.checkout, candidate, merged=merged)
-            if refusal:
-                return False, refusal
-            return provision_library(ctx, out, ref=candidate)
-        return provision_library(ctx, out)
-
-
-def reprovision_after_merge(root: Path, commit: str, environ: dict[str, str], pack: Path | None = None) -> dict | None:
-    """Install `sd_db` at `commit` when it merged a change to the library (sd:2108).
-
-    The dashboard refuses an installed `sd_db` that lacks the library's last
-    commit, and until this nothing installed one between a merge and the next
-    restart, which then failed. The library is this pack's `lib/` (sd:3278).
-    None when `root` is not the pack or one of its worktrees, or when `commit`
-    leaves `lib/` alone; a system merge installs nothing. The pack whose
-    virtualenv receives the copy is this file's main checkout, the one the
-    dashboard runs under. A failed
-    install is reported, not raised: the merge it follows has happened. An
-    installed copy that is not an ancestor of `commit` is kept, and the
-    report says why: reconciles need not run in merge order. A `commit` whose
-    schema differs from the database's installs nothing (`schema_refusal`).
-    """
-    lib = sibling("sd_lib")
-    pack = pack or lib.main_worktree_root(Path(__file__).resolve().parent.parent)
-    if lib.main_worktree_root(root).resolve() != pack.resolve():
-        return None
-    touched = lib.git_output(["diff", "--name-only", f"{commit}^1", commit, "--", str(LIBRARY_RELATIVE)], root)
-    if not touched:
-        return None
-    ctx = Context(checkout=pack, home=Path(os.path.expanduser("~")), environ=dict(environ))
-    refusal = schema_refusal(root, commit, ctx.home)
-    if refusal:
-        return {"ref": commit, "installed": False, "report": refusal}
-    installed, report = provision_guarded(ctx, None, ref=commit, merged=True)
-    return {"ref": commit, "installed": installed, "report": report}
-
-
-#: What the operator runs after a merge that changes the schema (`local-repo-sync/README.md`).
-MIGRATE_STEPS = ("run `repo-sync.sh refresh`; stop the dashboard, the runner and `sd-serve`; "
-                 "run `sd-db.sh backup`, then `sd-db.sh migrate`; start them again")
-
-
-def schema_refusal(root: Path, commit: str, home: Path) -> str:
-    """Why `commit` must not be installed over the database as it stands, or "" (sd:3249).
-
-    Installing a library built for another schema than the database's made
-    every database command refuse until somebody migrated by hand. A version
-    that cannot be read on either side is unknown, not a match.
-    """
-    source = sibling("sd_lib").git_output(["show", f"{commit}:{LIBRARY_RELATIVE}/sd_db/schema.py"], root)
-    built = sibling("sd_library_guard").schema_version(source or "")
-    if built is None:
-        return f"kept installed sd_db: cannot read SCHEMA_VERSION at {commit}"
-    found, why = database_schema(home)
-    if found is None:
-        return f"kept installed sd_db: cannot read the database's schema version ({why})"
-    if built > found:
-        return (f"kept installed sd_db: {commit} builds schema {built} and the database is at "
-                f"schema {found}; to finish: {MIGRATE_STEPS}")
-    if built < found:
-        return f"kept installed sd_db: {commit} builds schema {built}, older than the database's schema {found}"
-    return ""
-
-
-def database_schema(home: Path) -> tuple[int | None, str]:
-    """The database's schema version through the installed `sd_db`, or None and why.
-
-    Opened read-only. A copy older than the database refuses the open with
-    `SchemaTooNew`, which carries the version it found.
-    """
-    imported = sibling("sd_lib").import_sd_db()
-    if imported.module is None:
-        return None, imported.problem
-    sd_db = imported.module
-    try:
-        connection = sd_db.connect(sd_db.default_path(home), write=False)
-    except sd_db.SchemaTooNew as newer:
-        return newer.found, ""
-    except Exception as problem:
-        return None, str(problem)
-    try:
-        return sd_db.schema_version(connection), ""
-    except Exception as problem:
-        return None, str(problem)
-    finally:
-        connection.close()
-
-
 def open_library(ctx: Context):
     """The pack's connection to the one database, or None with a reason.
 
-    Imported here rather than at module scope. The installer is the thing that
-    provisions `sd_db`, so it has to run on a machine where the import fails,
-    and a top-level import would make the installer unable to fix the problem
-    it exists to fix.
+    Imported here rather than at module scope, so the installer still renders
+    skills on a machine where the import fails.
 
     Through `sd_lib.import_sd_db`, loaded as a sibling like every other
-    `sd_lib` read here, so the render under a PATH `python3` still finds the
-    provisioned copy (sd:746). Its sentence says which of the two faults it
-    was: nothing to import, or a provisioned copy that would not.
+    `sd_lib` read here, so the render under a PATH `python3` reads the
+    checkout's `lib/` (sd:746, sd:3280). Its sentence says which of the two
+    faults it was: nothing to import, or a `lib/` copy that would not.
     """
     imported = sibling("sd_lib").import_sd_db()
     if imported.module is None:
@@ -2156,8 +1868,6 @@ class Context:
     dry_run: bool = False
     # `--bin-dir`, when given. `link_directory` is what the link step reads.
     bin_dir: Path | None = None
-    # `--venv`, when given: the environment `--provision-library` installs into.
-    venv: Path | None = None
 
     @property
     def sandboxed(self) -> bool:
@@ -2213,16 +1923,11 @@ def link_directory(ctx: Context, receipt: dict) -> Path:
 def cmd_user(ctx: Context, out) -> int:
     """Render what the paths name plus what is on trial, and converge.
 
-    This reads the library; it does not install it. Provisioning is
-    `--provision-library`, which `make setup` runs, and the two are separate
-    on purpose: an ordinary skill install must not rebuild the virtualenv it
-    is running from. Made them one call first, and the suite found why -- the
-    render happens in every fixture and in parallel, so a `pip install` here
-    replaced `sd_db` in site-packages underneath whichever other shard was
-    importing it, which fails as `No module named 'sd_db.testing.home'` in a
-    test that has nothing to do with either. A machine with no library is
-    told so and gets its skills; `make setup` is the remedy, and the path to
-    the source is still spelled in this file only.
+    This reads the library from the checkout's `lib/`; it never installs
+    one (sd:3280). A render that ran `pip` once replaced `sd_db` underneath a
+    parallel test shard, which failed as `No module named
+    'sd_db.testing.home'`. A machine whose library will not import is told so
+    and gets its skills.
     """
     # Before the library: `expire_trials` writes, and a refusal writes nothing.
     recorded = read_receipt(ctx.receipt)
@@ -2360,8 +2065,8 @@ def cmd_user(ctx: Context, out) -> int:
         excludes_changed = ensure_excludes_line(excludes, dry_run=ctx.dry_run)
         set_excludes_config(excludes, dry_run=ctx.dry_run, sandboxed=ctx.sandboxed)
 
-        # Seeded here rather than at `--provision-library`, because the registry is
-        # what a machine with no library still needs: the file-only reader answers
+        # Seeded here because the registry is what a machine with no library
+        # still needs: the file-only reader answers
         # from it, and `sd-db.sh init` seeds its rows from it when the library does
         # arrive. Not recorded in `owned`: the installer removes what it owns on
         # uninstall, and this file is the operator's the moment it lands.
@@ -3133,10 +2838,6 @@ usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --serv
   --uninstall      remove exactly what the receipt records having written
   --adopt-legacy   delete the old fleet installer's successor-less renders (M1)
   --repo [PATH]    write the marked block into PATH/CLAUDE.local.md (default: .)
-  --provision-library
-                   install sd_db into this pack's virtualenv and stop
-  --venv DIR       with --provision-library, install into DIR instead; `make setup` passes
-                   the environment it builds
 
   --reviewers NAMES
                    with --repo, the registry entries this repo consents to
@@ -3149,7 +2850,7 @@ usage: python3 bin/sd_install.py (--user | --status | --verify | --pull | --serv
                    ~/.local/bin); the installer never edits PATH
 """
 
-MODES = ("user", "status", "verify", "pull", "serve", "uninstall", "adopt-legacy", "repo", "provision-library")
+MODES = ("user", "status", "verify", "pull", "serve", "uninstall", "adopt-legacy", "repo")
 
 
 def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> int:
@@ -3163,7 +2864,6 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     as_json = False
     home_arg = None
     bin_dir_arg = None
-    venv_arg = None
     index = 0
     while index < len(argv):
         token = argv[index]
@@ -3192,12 +2892,6 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
                 print("error: --bin-dir needs a directory", file=out)
                 return 2
             bin_dir_arg = argv[index]
-        elif token == "--venv":
-            index += 1
-            if index >= len(argv):
-                print("error: --venv needs a directory", file=out)
-                return 2
-            venv_arg = argv[index]
         elif token == "--reviewers":
             # Taken positionally: an empty string is a real answer, nobody.
             index += 1
@@ -3219,9 +2913,6 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     if as_json and mode != "verify":
         print("error: --json requires --verify", file=out)
         return 2
-    if venv_arg is not None and mode != "provision-library":
-        print("error: --venv requires --provision-library", file=out)
-        return 2
 
     home = Path(home_arg).expanduser().resolve() if home_arg else Path(
         os.path.expanduser("~")
@@ -3240,7 +2931,6 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
     bin_dir = Path(bin_dir_arg).expanduser().resolve() if bin_dir_arg else None
     ctx = Context(
         checkout=checkout, home=home, environ=environ, dry_run=dry_run, bin_dir=bin_dir,
-        venv=Path(venv_arg).expanduser().absolute() if venv_arg else None,
     )
     # Checked here, before any mode runs: `--pull` fast-forwards the serving
     # checkout before it calls `cmd_user`, so a check inside the link step
@@ -3266,14 +2956,6 @@ def main(argv: list[str], environ: dict[str, str] | None = None, out=None) -> in
             )
             return 2
 
-    if mode == "provision-library":
-        # `make setup` calls this so the system callers can import `sd_db`
-        # without a second file learning the path to `lib/`. It is the
-        # only door: `--user` reads the library and never installs it, because
-        # rendering skills must not rebuild the virtualenv it renders from.
-        installed, report = provision_guarded(ctx, out)
-        print(report, file=out)
-        return 0 if installed else 1
     if mode == "user":
         return cmd_user(ctx, out)
     if mode == "status":

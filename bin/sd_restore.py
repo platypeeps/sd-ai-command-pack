@@ -21,12 +21,9 @@ Two verbs clear it:
   done. It names what was blocked and what was frozen, resolves the row, and
   dispatch resumes.
 
-`sd_db` is imported inside the handlers, not at module import. The library
-reaches this virtualenv through the pack's installer -- item A's criterion 13,
-whose `sd_db` step landed with PR 5 as `sd-install --provision-library`, which
-`make setup` runs. Before that has run, and on any machine whose `system`
-checkout has moved, `sd` must keep working for every other verb and refuse
-this one with the reason.
+`sd_db` is imported inside the handlers, not at module import. The library is
+the pack checkout's own `lib/` (sd:3280). Where it will not import, `sd` must
+keep working for every other verb and refuse this one with the reason.
 """
 
 from __future__ import annotations
@@ -36,9 +33,8 @@ import argparse
 #: Why the two verbs cannot run yet, when they cannot.
 NOT_INSTALLED = (
     "sd_db is not installed in this virtualenv. `sd restore` reads the "
-    "database directly; install the library with the pack's installer "
-    "(`sd-install`), which provisions it from the `system` checkout at its "
-    "tag, then run this again."
+    "database directly; run the pack's bin/ from its checkout, whose lib/ "
+    "holds sd_db, then run this again."
 )
 
 #: The column a repository's source authority is held in, and the word it
@@ -53,8 +49,8 @@ class RestoreRefusal(Exception):
 
 def _library():
     """Import `sd_db`, or refuse with the remedy rather than a traceback."""
-    # Through `sd_lib.import_sd_db`, which makes the second try against the
-    # copy `make setup` provisioned (sd:746). An absent library is a supported
+    # Through `sd_lib.import_sd_db`, which reads the checkout's own `lib/`
+    # (sd:746, sd:3280). An absent library is a supported
     # state, not an edge case, and `NOT_INSTALLED` is its refusal; a
     # provisioned copy that will not import is a different fault, and the
     # helper's sentence names that copy and its error instead of sending the

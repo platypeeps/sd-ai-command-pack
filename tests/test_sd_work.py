@@ -164,7 +164,7 @@ class TaskCLI(unittest.TestCase):
             cwd=str(self.home), env=environment, capture_output=True, text=True)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("sd_db.progress.task_guard", result.stderr)
-        self.assertIn("sd-install", result.stderr)
+        self.assertIn("Update this pack checkout", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
         after = json.loads(self.call("store", "item", item, "--json").stdout)
         self.assertEqual((after["item"]["status"], after["revision"]),
@@ -1234,7 +1234,7 @@ class WorkRegister(unittest.TestCase):
                     with self.assertRaises(sd_work.WorkRefusal) as refusal:
                         sd_work._register_library(sd_db)
                 self.assertIn(attribute, str(refusal.exception))
-                self.assertIn("sd-install", str(refusal.exception))
+                self.assertIn("Update this pack checkout", str(refusal.exception))
 
     def test_the_stale_library_refusal_reaches_the_command_line(self):
         """The helper exception is not the contract; the exit code is.
@@ -1258,7 +1258,7 @@ class WorkRegister(unittest.TestCase):
             cwd=str(self.root), env=environment, capture_output=True, text=True)
         self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
         self.assertIn("register_work_item", result.stderr)
-        self.assertIn("sd-install", result.stderr)
+        self.assertIn("Update this pack checkout", result.stderr)
         self.assertNotIn("Traceback", result.stderr)
 
 
@@ -1270,32 +1270,14 @@ def load_cli():
     return module
 
 
-class Replayable(unittest.TestCase):
-    """sd:2845: a read-only verb lets a satellite's `sd_db` self-install run it again; a write verb does not."""
+class NoSelfInstall(unittest.TestCase):
+    """sd:3280: `sd_db.self_install` is gone; a read verb runs without it."""
 
-    def declared(self, *argv):
-        fake = unittest.mock.Mock(spec=["declare_replayable"])
-        with unittest.mock.patch.dict(sys.modules, {"sd_db.self_install": fake}), \
-                unittest.mock.patch.object(sd_work, "run", unittest.mock.Mock(return_value=0)) as run:
-            self.assertEqual(load_cli().main(list(argv)), 0)
-        run.assert_called_once()
-        return fake.declare_replayable
-
-    def test_a_read_only_verb_declares_itself_replayable(self):
-        for argv in (("task", "show", "5"), ("store", "item", "5"), ("store", "items"), ("today",)):
-            with self.subTest(argv=argv):
-                self.declared(*argv).assert_called_once_with()
-
-    def test_a_write_verb_keeps_the_manual_rerun(self):
-        for argv in (("task", "note", "5", "--body", "x"), ("task", "status", "5", "done"), ("task", "add", "t")):
-            with self.subTest(argv=argv):
-                self.declared(*argv).assert_not_called()
-
-    def test_an_sd_db_without_the_call_still_runs_the_verb(self):
-        with unittest.mock.patch.dict(sys.modules, {"sd_db.self_install": object()}), \
-                unittest.mock.patch.object(sd_work, "run", unittest.mock.Mock(return_value=0)) as run:
+    def test_a_read_verb_runs_with_no_self_install_module(self):
+        with unittest.mock.patch.object(sd_work, "run", unittest.mock.Mock(return_value=0)) as run:
             self.assertEqual(load_cli().main(["task", "show", "5"]), 0)
         run.assert_called_once()
+        self.assertNotIn("sd_db.self_install", sys.modules)
 
 
 if __name__ == "__main__":

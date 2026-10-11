@@ -16,10 +16,8 @@ import os
 import subprocess
 import sys
 import tempfile
-import textwrap
 import unittest
 from pathlib import Path
-from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -44,28 +42,9 @@ class TheHarnessIsImportableHere(unittest.TestCase):
     """Criterion 23's pack half, asserted from the pack.
 
     The library's own suite asserts the same import. Both are needed: the
-    library's proves the module exists, this one proves the pack's virtualenv
-    can reach it, which is the half the installer is responsible for and the
-    half that silently fails when nobody provisions anything.
+    library's proves the module exists, this one proves the pack's tests can
+    reach it from the checkout's `lib/` (sd:3280).
     """
-
-    def test_the_library_resolves_to_a_copy_and_not_to_its_source(self):
-        """B's criterion 1: the import resolves outside the library's checkout.
-
-        The venv lives inside the pack, so "outside the pack" is the wrong
-        test -- a correct install fails it. What must be true is that the
-        virtualenv's import does not reach the pack's `lib/` (sd:3278), which
-        is exactly what an editable install would do and what a branch switch
-        there would then change under the system callers' feet.
-        """
-        resolved = Path(sd_db.__file__).resolve()
-        source = sd_install.library_source(REPO_ROOT).resolve()
-        self.assertFalse(
-            resolved.is_relative_to(source),
-            f"sd_db resolved to {resolved}, inside {source}; it is installed "
-            "as a built copy, never as an editable checkout",
-        )
-        self.assertIn("site-packages", resolved.parts)
 
     def test_the_fixture_harness_is_reachable(self):
         self.assertTrue(hasattr(sd_db, "testing") or sd_db.testing is not None)
@@ -241,12 +220,10 @@ class TheExpiry(TrialCase):
         self.assertNotIn("sd-grill", sd_install.named_skills(REPO_ROOT))
 
 
-class ProvisioningIsItsOwnRun(unittest.TestCase):
+class RenderingInstallsNothing(unittest.TestCase):
     """Rendering skills must not rebuild the virtualenv it renders from.
 
-    Criterion 13 puts the path to the library's source in this installer and
-    nowhere else. It does not say every render should reinstall, and the first
-    version of this work did: `cmd_user` called `provision_library`, so each
+    An early version of this work did: `cmd_user` called `provision_library`, so each
     of the hundreds of fixture installs in this suite shelled out to `pip`.
     In a parallel run that replaced `sd_db` in site-packages while another
     shard was importing it, which surfaced as `No module named
@@ -278,24 +255,12 @@ class ProvisioningIsItsOwnRun(unittest.TestCase):
             }}),
             encoding="utf-8",
         )
-        interpreter = self.checkout / sd_install.VENV_RELATIVE
+        interpreter = self.checkout / ".venv" / "bin" / "python"
         interpreter.parent.mkdir(parents=True)
         interpreter.write_text(
             f'#!/bin/sh\nprintf "%s\\n" "$@" >> "{self.marker}"\n', encoding="utf-8"
         )
         interpreter.chmod(0o755)
-
-        # A library source the provisioner would accept, so a call would get
-        # past the "nothing to install" guard rather than being turned back.
-        # A git repository, because the provisioner installs from a ref.
-        source = sd_install.library_source(self.checkout)
-        source.mkdir(parents=True)
-        (source / "pyproject.toml").write_text("[project]\nname = 'sd-db'\n", encoding="utf-8")
-        for args in (("init",), ("add", "-A"), ("commit", "-m", "fixture")):
-            subprocess.run(
-                ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
-                cwd=self.checkout, capture_output=True, text=True, check=False,
-            )
 
     def context(self) -> "sd_install.Context":
         return sd_install.Context(
@@ -315,15 +280,6 @@ class ProvisioningIsItsOwnRun(unittest.TestCase):
             f"the render installed: {self.marker.read_text() if self.marker.exists() else ''}",
         )
 
-    def test_the_provisioning_mode_does_shell_out(self) -> None:
-        """The other half. Without it the test above passes on a broken path."""
-        out = io.StringIO()
-        installed, report = sd_install.provision_library(self.context(), out)
-        self.assertTrue(installed, report)
-        self.assertTrue(self.marker.exists(), report)
-        self.assertIn("pip", self.marker.read_text(encoding="utf-8"))
-
-
 class NoLibrary:
     """A `sys.meta_path` finder that refuses `sd_db` wherever it is installed."""
 
@@ -334,13 +290,11 @@ class NoLibrary:
 
 
 class TheLibraryDoor(unittest.TestCase):
-    """Every way `open_library` and `provision_library` can answer.
+    """Every way `open_library` can answer.
 
-    Each of these is a machine somebody actually has: no virtualenv yet, no
-    `lib/`, a `--dry-run`, a `pip` that is not there, a `pip` that
-    fails, a library that will not import, a database that was never created.
-    The installer answers all of them with a line and a working install of
-    whatever it could still render, so none of them may raise.
+    A library that will not import, a database that was never created: the
+    installer answers both with a line and a working install of whatever it
+    could still render, so neither may raise.
     """
 
     def setUp(self) -> None:
@@ -349,8 +303,6 @@ class TheLibraryDoor(unittest.TestCase):
         self.home = Path(scratch.name).resolve()
         self.checkout = self.home / "checkout"
         self.checkout.mkdir()
-        # The library is the checkout's own `lib/` (sd:3278).
-        self.system = self.checkout
 
     def context(self, **overrides) -> "sd_install.Context":
         fields = {
@@ -364,239 +316,11 @@ class TheLibraryDoor(unittest.TestCase):
         fields.update(overrides)
         return sd_install.Context(**fields)
 
-    def interpreter(self, script: str) -> Path:
-        path = self.checkout / sd_install.VENV_RELATIVE
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(script, encoding="utf-8")
-        path.chmod(0o755)
-        return path
-
-    def library(self, *, committed: bool = True, tag: str = "") -> Path:
-        """A fixture pack checkout holding `lib/`, as a git repository.
-
-        A repository and not a bare directory, because `provision_library`
-        installs from an immutable ref now and a directory has none. The
-        `committed=False` case is the machine that cloned nothing yet.
-        """
-        source = sd_install.library_source(self.checkout)
-        source.mkdir(parents=True, exist_ok=True)
-        (source / "pyproject.toml").write_text("[project]\nname = 'sd-db'\n", encoding="utf-8")
-        if committed:
-            self.git("init")
-            self.git("add", "lib")
-            self.git("commit", "-m", "fixture")
-            if tag:
-                self.git("tag", tag)
-        return source
-
-    def git(self, *args: str) -> str:
-        done = subprocess.run(
-            ["git", "-c", "user.name=t", "-c", "user.email=t@example.invalid", *args],
-            cwd=self.system, capture_output=True, text=True, check=False,
-        )
-        return done.stdout.strip()
-
-    def test_no_virtualenv_names_the_remedy(self) -> None:
-        installed, report = sd_install.provision_library(self.context(), io.StringIO())
-        self.assertFalse(installed)
-        self.assertIn("no virtualenv at", report)
-        self.assertIn("make setup", report)
-
-    def test_no_library_source_says_trials_are_unavailable(self) -> None:
-        self.interpreter("#!/bin/sh\nexit 0\n")
-        installed, report = sd_install.provision_library(self.context(), io.StringIO())
-        self.assertFalse(installed)
-        self.assertIn("no library at", report)
-        self.assertIn("trials unavailable", report)
-
-    def test_the_install_names_the_tag_the_checkout_stands_on(self) -> None:
-        self.interpreter("#!/bin/sh\nexit 0\n")
-        self.library(tag="sd-db-v9.9.9")
-        installed, report = sd_install.provision_library(self.context(), io.StringIO())
-        self.assertTrue(installed, report)
-        self.assertIn("sd-db-v9.9.9", report)
-
-    def test_a_tag_for_another_project_in_the_monorepo_is_not_the_library_version(
-        self,
-    ) -> None:
-        """A tag cut for something else in the repository is not a version."""
-        self.interpreter("#!/bin/sh\nexit 0\n")
-        self.library(tag="ha-mcp-v2")
-        head = self.git("rev-parse", "HEAD")
-        installed, report = sd_install.provision_library(self.context(), io.StringIO())
-        self.assertTrue(installed, report)
-        self.assertNotIn("ha-mcp-v2", report)
-        self.assertIn(head, report)
-
-    def test_an_untagged_checkout_pins_to_its_commit_and_is_not_refused(self) -> None:
-        """The repository carries no `sd-db-v*` tags. Refusing here uninstalls sd_db everywhere."""
-        self.interpreter("#!/bin/sh\nexit 0\n")
-        self.library()
-        head = self.git("rev-parse", "HEAD")
-        installed, report = sd_install.provision_library(self.context(), io.StringIO())
-        self.assertTrue(installed, report)
-        self.assertIn(head, report)
-
-    def test_the_working_tree_is_never_what_pip_is_pointed_at(self) -> None:
-        """The whole point of the ref: an edit on disk is not a version."""
-        seen = self.home / "argv"
-        self.interpreter(f'#!/bin/sh\nprintf "%s\\n" "$@" >> "{seen}"\n')
-        source = self.library()
-        (source / "pyproject.toml").write_text("[project]\nname = 'edited'\n", encoding="utf-8")
-        installed, report = sd_install.provision_library(self.context(), io.StringIO())
-        self.assertTrue(installed, report)
-        argv = seen.read_text(encoding="utf-8")
-        self.assertIn("git+file://", argv)
-        self.assertNotIn(f"\n{source}\n", argv)
-
-    def test_uncommitted_work_is_said_out_loud_and_not_refused(self) -> None:
-        self.interpreter("#!/bin/sh\nexit 0\n")
-        source = self.library()
-        (source / "pyproject.toml").write_text("[project]\nname = 'edited'\n", encoding="utf-8")
-        installed, report = sd_install.provision_library(self.context(), io.StringIO())
-        self.assertTrue(installed, report)
-        self.assertIn("uncommitted work", report)
-
-    def test_a_checkout_that_is_no_repository_is_refused_with_a_reason(self) -> None:
-        self.interpreter("#!/bin/sh\nexit 0\n")
-        self.library(committed=False)
-        installed, report = sd_install.provision_library(self.context(), io.StringIO())
-        self.assertFalse(installed)
-        self.assertIn("nothing to pin to", report)
-
-    def test_a_dry_run_says_what_it_would_do_and_does_not(self) -> None:
-        marker = self.home / "ran"
-        self.interpreter(f'#!/bin/sh\ntouch "{marker}"\n')
-        self.library()
-        installed, report = sd_install.provision_library(self.context(dry_run=True), io.StringIO())
-        self.assertTrue(installed)
-        self.assertIn("would install sd_db from", report)
-        self.assertFalse(marker.exists())
-
-    def test_provisioning_preserves_a_newer_installed_database_library(self) -> None:
-        marker = self.home / "pip-ran"
-        self.interpreter(f'#!/bin/sh\ntouch "{marker}"\n')
-        source = self.library()
-        schema = source / "sd_db/schema.py"
-        schema.parent.mkdir()
-        schema.write_text("SCHEMA_VERSION = 2\n")
-        self.git("add", "lib")
-        self.git("commit", "-m", "schema two")
-        installed = self.checkout / ".venv/lib/python3.13/site-packages/sd_db/schema.py"
-        installed.parent.mkdir(parents=True)
-        installed.write_text("SCHEMA_VERSION = 3\n")
-        ok, report = sd_install.provision_library(self.context(), io.StringIO())
-        self.assertFalse(ok)
-        self.assertIn("preserving installed sd_db schema 3", report)
-        self.assertFalse(marker.exists())
-        self.assertEqual(installed.read_text(), "SCHEMA_VERSION = 3\n")
-
-    def test_new_commit_replaces_the_same_package_version(self) -> None:
-        source = self.library()
-        (source / "pyproject.toml").write_text(
-            '[build-system]\nrequires = []\nbuild-backend = "_build"\n'
-            'backend-path = ["."]\n\n[project]\nname = "sd-db"\nversion = "0.1.0"\n',
-            encoding="utf-8",
-        )
-        (source / "_build.py").write_text(textwrap.dedent("""\
-            from pathlib import Path
-            import zipfile
-
-            def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
-                root = Path(__file__).parent
-                dist = "sd_db-0.1.0.dist-info"
-                files = {str(p.relative_to(root)): p.read_bytes()
-                         for p in (root / "sd_db").glob("*.py")}
-                files[dist + "/METADATA"] = b"Metadata-Version: 2.1\\nName: sd-db\\nVersion: 0.1.0\\n"
-                files[dist + "/WHEEL"] = b"Wheel-Version: 1.0\\nRoot-Is-Purelib: true\\nTag: py3-none-any\\n"
-                record = dist + "/RECORD"
-                files[record] = "".join(name + ",,\\n" for name in [*files, record]).encode()
-                filename = "sd_db-0.1.0-py3-none-any.whl"
-                with zipfile.ZipFile(Path(wheel_directory) / filename, "w") as wheel:
-                    for name, data in files.items():
-                        wheel.writestr(name, data)
-                return filename
-            """), encoding="utf-8")
-        package = source / "sd_db"
-        package.mkdir()
-        (package / "__init__.py").write_text('MARKER = "old-commit"\n', encoding="utf-8")
-        (package / "schema.py").write_text("SCHEMA_VERSION = 3\n", encoding="utf-8")
-        self.git("add", "lib")
-        self.git("commit", "-m", "old same-version library")
-        old_commit = self.git("rev-parse", "HEAD")
-        python = self.checkout / sd_install.VENV_RELATIVE
-        environment = {key: value for key, value in os.environ.items() if not key.startswith("PIP_")}
-        environment.update(HOME=str(self.home), PIP_CONFIG_FILE=os.devnull,
-                           PIP_NO_INDEX="1", PIP_NO_CACHE_DIR="1",
-                           PIP_DISABLE_PIP_VERSION_CHECK="1", TZ="UTC")
-        probe = (
-            "import importlib.metadata,json,sd_db;from sd_db.schema import SCHEMA_VERSION;"
-            "d=importlib.metadata.distribution('sd-db');"
-            "print(json.dumps({'marker':sd_db.MARKER,'schema':SCHEMA_VERSION,"
-            "'version':d.version,'path':sd_db.__file__,"
-            "'provenance':json.loads(d.read_text('direct_url.json'))}))"
-        )
-        with patch.dict(os.environ, environment, clear=True):
-            subprocess.run([sys.executable, "-m", "venv", str(self.checkout / ".venv")],
-                           capture_output=True, text=True, check=True, timeout=60)
-            installed, report = sd_install.provision_library(self.context(), io.StringIO())
-            self.assertTrue(installed, report)
-            initial = json.loads(subprocess.check_output([str(python), "-I", "-B", "-c", probe], text=True))
-            self.assertEqual(initial["marker"], "old-commit")
-            self.assertEqual(initial["provenance"]["vcs_info"]["commit_id"], old_commit)
-            (package / "__init__.py").write_text('MARKER = "new-commit"\n', encoding="utf-8")
-            (package / "schema.py").write_text("SCHEMA_VERSION = 5\n", encoding="utf-8")
-            self.git("add", "lib")
-            self.git("commit", "-m", "new bytes at the same version")
-            new_commit = self.git("rev-parse", "HEAD")
-            self.assertNotEqual(old_commit, new_commit)
-            (package / "__init__.py").write_text('MARKER = "uncommitted"\n', encoding="utf-8")
-            installed, report = sd_install.provision_library(self.context(), io.StringIO())
-            self.assertTrue(installed, report)
-            self.assertIn(new_commit, report)
-            observed = json.loads(subprocess.check_output([str(python), "-I", "-B", "-c", probe], text=True))
-        self.assertEqual(observed["marker"], "new-commit")
-        self.assertEqual(observed["schema"], 5)
-        self.assertEqual(initial["version"], observed["version"])
-        self.assertEqual(observed["version"], "0.1.0")
-        self.assertEqual(observed["provenance"]["vcs_info"]["commit_id"], new_commit)
-        self.assertTrue(Path(observed["path"]).is_relative_to(self.checkout / ".venv"))
-
-    def test_an_interpreter_that_cannot_run_is_reported_not_raised(self) -> None:
-        # Present and executable to the guard above, unrunnable to the kernel:
-        # an interpreter line naming a program that does not exist.
-        self.interpreter("#!/nonexistent/interpreter\n")
-        self.library()
-        installed, report = sd_install.provision_library(self.context(), io.StringIO())
-        self.assertFalse(installed)
-        self.assertIn("sd_db install failed", report)
-
-    def test_a_failing_pip_is_reported_with_its_last_line(self) -> None:
-        self.interpreter('#!/bin/sh\necho "the wheel would not build" >&2\nexit 1\n')
-        self.library()
-        installed, report = sd_install.provision_library(self.context(), io.StringIO())
-        self.assertFalse(installed)
-        self.assertIn("sd_db install failed", report)
-        self.assertIn("the wheel would not build", report)
-
-    def test_a_pip_that_says_nothing_still_reports_the_failure(self) -> None:
-        """`[-1:] or ['no output']` -- a silent failure is still a failure."""
-        self.interpreter("#!/bin/sh\nexit 1\n")
-        self.library()
-        installed, report = sd_install.provision_library(self.context(), io.StringIO())
-        self.assertFalse(installed)
-        self.assertIn("sd_db install failed", report)
-        self.assertIn("no output", report)
-
     def test_a_library_that_will_not_import_leaves_the_render_working(self) -> None:
-        """No library anywhere: nothing on `sys.path` and nothing provisioned.
+        """No library anywhere: the blocker answers before the checkout's `lib/`.
 
-        Pinned to that branch. `open_library` goes through `sd_lib.import_sd_db`,
-        whose second try reads the checkout's own `.venv`; on a checkout that
-        has one (CI, the main checkout) the blocker would otherwise describe a
-        provisioned copy that will not import, and these assertions would pass
-        about the other fault. The retry also prepends to `sys.path`, which is
-        put back so no later test inherits it.
+        `open_library` goes through `sd_lib.import_sd_db`, which prepends
+        `lib/` to `sys.path`; that is put back so no later test inherits it.
         """
         blocker = NoLibrary()
         sys.meta_path.insert(0, blocker)
@@ -607,9 +331,7 @@ class TheLibraryDoor(unittest.TestCase):
         self.addCleanup(sys.path.__setitem__, slice(None), saved_path)
         for name in [n for n in sys.modules if n == "sd_db" or n.startswith("sd_db.")]:
             del sys.modules[name]
-        helper = sd_install.sibling("sd_lib")
-        with patch.object(helper, "_provisioned_library_paths", return_value=[]):
-            connection, reason = sd_install.open_library(self.context())
+        connection, reason = sd_install.open_library(self.context())
         self.assertIsNone(connection)
         self.assertEqual(
             reason, "sd_db is not installed here: sd_db is not installed (blocked by the test); trials unavailable"
@@ -620,65 +342,6 @@ class TheLibraryDoor(unittest.TestCase):
         self.assertIsNone(connection)
         self.assertIn("no database at", reason)
         self.assertIn("sd-db.sh init", reason)
-
-
-class TheProvisioningMode(unittest.TestCase):
-    """`--provision-library`, the one door `make setup` goes through.
-
-    What the dispatch does is turn a report into an exit code, and that is
-    what these test. `main` derives the checkout from the module's own
-    location and has no flag for it, so a test that went all the way to
-    `pip` would be asserting facts about the machine it runs on: the first
-    version did, and it passed here and failed on CI, where the checkout has
-    no `.venv` and the refusal arrives before anything else can. The
-    provisioning itself is covered by `TheLibraryDoor` against a fixture.
-    """
-
-    def setUp(self) -> None:
-        scratch = tempfile.TemporaryDirectory()
-        self.addCleanup(scratch.cleanup)
-        self.home = Path(scratch.name).resolve()
-        self.saved = sd_install.provision_library
-        self.addCleanup(setattr, sd_install, "provision_library", self.saved)
-
-    def answer(self, installed: bool, report: str) -> None:
-        def stub(ctx, out, ref=None):
-            del ctx, out, ref
-            return installed, report
-
-        sd_install.provision_library = stub
-
-    def run_mode(self) -> tuple[int, str]:
-        out = io.StringIO()
-        code = sd_install.main(
-            ["--provision-library", "--home", str(self.home)],
-            environ={},
-            out=out,
-        )
-        return code, out.getvalue()
-
-    def test_a_machine_it_cannot_provision_exits_one_and_says_why(self) -> None:
-        self.answer(False, "no library at /nowhere; sd_db is absent, trials unavailable")
-        code, output = self.run_mode()
-        self.assertEqual(code, 1)
-        self.assertIn("sd_db is absent", output)
-
-    def test_a_successful_provision_exits_zero_and_says_so(self) -> None:
-        self.answer(True, "sd_db installed from /somewhere")
-        code, output = self.run_mode()
-        self.assertEqual(code, 0)
-        self.assertIn("sd_db installed from", output)
-
-    def test_the_exit_code_follows_the_flag_and_not_the_words(self) -> None:
-        """The defect this replaced: the dispatch used to read its own prose.
-
-        `"installed" in report` is true of "sd_db not installed", so the one
-        machine the exit code exists for returned zero. A report whose words
-        say the opposite of its flag pins that the words no longer decide.
-        """
-        self.answer(False, "sd_db installed from /somewhere")
-        code, _ = self.run_mode()
-        self.assertEqual(code, 1)
 
 
 if __name__ == "__main__":

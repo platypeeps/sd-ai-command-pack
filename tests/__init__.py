@@ -14,9 +14,19 @@ resolves passes its own environment.
 import atexit
 import os
 import shutil
+import sys
 import tempfile
 
 os.environ["TMPDIR"] = tempfile.mkdtemp(prefix=f"sd-tests-{os.getpid()}-")
 tempfile.tempdir = None
 os.environ["SD_LANE_ROOT"] = os.path.join(os.environ["TMPDIR"], "lanes")
 atexit.register(shutil.rmtree, os.environ["TMPDIR"], ignore_errors=True)
+
+# `sd_db` is this checkout's `lib/` and nothing is installed (sd:3280). On the path here and in
+# `PYTHONPATH`, so a module that imports it at the top, and a child's `sitecustomize` shim, read the
+# commit under test; `bin/` entrypoints put `lib/` first themselves.
+LIB = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib")
+if LIB not in sys.path:
+    sys.path.insert(0, LIB)
+if LIB not in os.environ.get("PYTHONPATH", "").split(os.pathsep):
+    os.environ["PYTHONPATH"] = os.pathsep.join(filter(None, (LIB, os.environ.get("PYTHONPATH"))))

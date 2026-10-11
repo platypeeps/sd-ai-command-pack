@@ -418,7 +418,7 @@ RULES: tuple[Rule, ...] = (
         checker="tests/test_code_health.py::"
                 "test_no_function_is_branchier_than_the_ceiling",
         proof="insert a function with one decision point more than the "
-              "ceiling ahead of `schema_version` in `bin/sd_library_guard.py`; "
+              "ceiling ahead of `review_argv` in `bin/sd_review_request.py`; "
               "it is in no baseline and "
               "`test_no_function_is_branchier_than_the_ceiling` goes red",
         scope="code",
@@ -433,7 +433,7 @@ RULES: tuple[Rule, ...] = (
         checker="tests/test_code_health.py::"
                 "test_no_function_is_longer_than_the_ceiling",
         proof="insert a function one statement longer than the ceiling ahead "
-              "of `schema_version` in `bin/sd_library_guard.py`; it is in no "
+              "of `review_argv` in `bin/sd_review_request.py`; it is in no "
               "baseline and `test_no_function_is_longer_than_the_ceiling` "
               "goes red",
         scope="code",
@@ -448,7 +448,7 @@ RULES: tuple[Rule, ...] = (
         checker="tests/test_code_health.py::"
                 "test_no_function_nests_deeper_than_the_ceiling",
         proof="insert a function nesting one block deeper than the ceiling "
-              "ahead of `schema_version` in `bin/sd_library_guard.py`; it is "
+              "ahead of `review_argv` in `bin/sd_review_request.py`; it is "
               "in no baseline and "
               "`test_no_function_nests_deeper_than_the_ceiling` goes red",
         scope="code",
@@ -463,8 +463,8 @@ RULES: tuple[Rule, ...] = (
         checker="tests/test_code_health.py::"
                 "test_no_two_functions_are_the_same_function",
         proof="insert two functions of one body and two names, each past the "
-              "clone floor, ahead of `schema_version` in "
-              "`bin/sd_library_guard.py`; the pair is not in `CLONES` and "
+              "clone floor, ahead of `review_argv` in "
+              "`bin/sd_review_request.py`; the pair is not in `CLONES` and "
               "`test_no_two_functions_are_the_same_function` goes red",
         scope="code",
         teaches="skills/sd-check/SKILL.md#Code health",
@@ -490,7 +490,7 @@ RULES: tuple[Rule, ...] = (
         checker="tests/test_doc_citations.py::"
                 "test_line_citations_into_a_symbol_match_their_baseline",
         proof="append a `path:line` citation into the body of "
-              "`schema_version` in `bin/sd_library_guard.py` to a sentence "
+              "`review_argv` in `bin/sd_review_request.py` to a sentence "
               "of `skills/sd-check/SKILL.md`; that document's count rises "
               "above its baseline and "
               "`test_line_citations_into_a_symbol_match_their_baseline` "

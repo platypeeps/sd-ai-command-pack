@@ -41,11 +41,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 #: speed claim. At 30 s it failed gates at load average 157 on runs that take
 #: about 7 s alone.
 CLI_TIMEOUT = 300
-#: The directory `make setup` provisioned the library into, read off the copy
-#: this run imported rather than off `ROOT / ".venv"`. A test that asks the
-#: checkout for a virtualenv has to skip where there is none, and a skipped
-#: test in CI asserts nothing; a run that got this far has the library by
-#: definition, so this path always exists.
+#: The directory holding the library this run imported: the checkout's `lib/`
+#: (sd:3280). A run that got this far has the library by definition, so this
+#: path always exists.
 SITE_PACKAGES = pathlib.Path(sd_db.__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "bin"))
 loader = importlib.machinery.SourceFileLoader("sd_ship_tested", str(ROOT / "bin/sd-ship"))
@@ -2450,11 +2448,10 @@ roles:
         self.assertEqual((blocker["code"], blocker["retryable"]), ("merge_commit_unreachable", False))
         self.assertIn(f"restore {commit}", caught.exception.workflow["next_action"])
 
-    def test_a_merge_touching_the_library_reprovisions_sd_db_at_the_merge_commit(self):
-        """sd:2108. The dashboard refuses an installed sd_db older than the
-        library's last commit, and the restart after a library merge failed
-        until somebody ran `make setup` in the pack. The library is the pack's
-        `lib/` (sd:3278); this fixture repository stands in for the pack."""
+    def test_a_merge_touching_the_library_installs_nothing(self):
+        """sd:3280. `bin/` reads `lib/` at the checkout's commit, so a library
+        merge has no copy to refresh: the reconcile records no `library` and the
+        installer has no post-merge door left (sd:2108's reprovision is gone)."""
         import sd_install
         library = self.root / "lib/sd_db/writing.py"
         library.parent.mkdir(parents=True)
@@ -2462,22 +2459,9 @@ roles:
         _git(self.root, "add", "-A")
         _git(self.root, "commit", "-m", "touch the library\n\nAuthored-with: human")
         self.prepare()
-        installs = []
-
-        def provision(ctx, out, ref=None):
-            installs.append(ref)
-            return True, f"sd_db installed at {ref}"
-        # The schema guard (sd:3249) has its own tests in test_sd_install_reprovision.
-        reprovision = sd_install.reprovision_after_merge
-        with patch.object(sd_install, "reprovision_after_merge",
-                          lambda root, commit, environ: reprovision(root, commit, environ, pack=self.root)), \
-                patch.object(sd_install, "schema_refusal", return_value=""), \
-                patch.object(sd_install, "installed_library_commit", return_value=None), \
-                patch.object(sd_install, "provision_library", provision):
-            merged = self.merge()
-        commit = self.remote.pull(1).merge_commit_sha
-        self.assertEqual(installs, [commit])
-        self.assertEqual(merged["library"], {"ref": commit, "installed": True, "report": f"sd_db installed at {commit}"})
+        merged = self.merge()
+        self.assertNotIn("library", merged)
+        self.assertFalse(hasattr(sd_install, "reprovision_after_merge"))
 
     def test_a_base_that_advanced_under_the_put_holds_delivery(self):
         """GitHub squashes onto the base it holds at the `PUT`, not the one the
@@ -3287,8 +3271,8 @@ roles:
         """
         pack = self.directory / f"pack-{library}"
         shutil.copytree(ROOT / "bin", pack / "bin")
-        site = pack / f".venv/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
-        site.parent.mkdir(parents=True)
+        # The pack's own `lib/` is where `import_sd_db` looks, and the only place (sd:3280).
+        site = pack / "lib"
         site.mkdir()
         # A real copy of the package, and deliberately NOT a symlink to
         # `SITE_PACKAGES`. Symlinking the whole directory worked -- the only
