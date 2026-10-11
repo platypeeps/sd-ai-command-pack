@@ -6,6 +6,12 @@ import argparse
 import contextlib
 import getpass
 import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +26,111 @@ REGISTERED_ONLY = frozenset({"import", "register", "cutover", "recover", "public
 
 #: Verbs that read the checkout's pieces, so a checkout with none is refused (sd:1660, sd:1803).
 CONTENT_ONLY = frozenset({"list", "import", "verify"})
+
+#: Review verbs that write only the piece's own report files, and the library function each needs (sd:3301).
+REVIEWS = {"adversarial": "adversarial_brief", "reconcile": "reconcile_companion"}
+
+
+def gate_bin() -> str:
+    """The shared adversarial gate: `$ADVERSARIAL_GATE_BIN`, else the system checkout's copy.
+
+    `isfile` and `X_OK` together: a directory answers True to `X_OK` alone.
+    """
+    def usable(path: str | None) -> bool:
+        return bool(path) and os.path.isfile(str(path)) and os.access(str(path), os.X_OK)
+
+    named = os.environ.get("ADVERSARIAL_GATE_BIN")
+    if usable(named):
+        return str(named)
+    default = str(Path.home() / "repos/system/local-adversarial-gate/adversarial-gate.sh")
+    if usable(default):
+        return default
+    raise WorkRefusal(f"cannot find the shared adversarial gate: $ADVERSARIAL_GATE_BIN is unset or not executable, "
+                      f"and {default} is not executable")
+
+
+def _render(brief: dict) -> str:
+    """The `writing-draft` lens with this piece's paths, checked before codex sees it."""
+    command = [gate_bin(), "render", "--lens", "writing-draft",
+               "--set", f"DRAFT_PATH={brief['draft']}", "--set", f"RESEARCH_PATH={brief['research']}"]
+    try:
+        rendered = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", timeout=30, check=False)
+    except subprocess.TimeoutExpired:
+        raise WorkRefusal("adversarial-gate render timed out after 30s") from None
+    except OSError as error:
+        raise WorkRefusal(f"cannot run {command[0]}: {error}") from None
+    if rendered.returncode:
+        raise WorkRefusal((rendered.stderr or rendered.stdout).strip()[:500] or "adversarial-gate render failed")
+    prompt = rendered.stdout
+    # Composed in another repository, so checked rather than assumed: a literal
+    # placeholder would send codex to read a file that does not exist.
+    left = sorted(set(re.findall(r"\{[A-Z_]+\}", prompt)))
+    if left:
+        raise WorkRefusal(f"the composed prompt still carries {', '.join(left)}; "
+                          "the writing-draft lens and sd writing disagree about which keys it takes")
+    if len(prompt.split()) < 100:
+        raise WorkRefusal(f"adversarial-gate render returned {len(prompt.split())} words; that is not the prompt")
+    return prompt
+
+
+def _codex(root: str, prompt: str, *, model: str | None, timeout: int) -> str:
+    """Run codex read-only in `root` with the prompt on stdin; return its final message.
+
+    codex runs in a session of its own, so a timeout stops the sandbox and the
+    reviewer under the launcher, not only the launcher.
+    """
+    with tempfile.TemporaryDirectory(prefix="sd-writing-adversarial-") as scratch:
+        out = Path(scratch) / "report.md"
+        command = ["codex", "exec", *(["-m", model] if model else []), "-s", "read-only", "-C", root,
+                   "-o", str(out), "-"]
+        try:
+            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                       stderr=subprocess.PIPE, text=True, encoding="utf-8", start_new_session=True)
+        except OSError as error:
+            raise WorkRefusal(f"cannot run codex ({error}); report the adversarial gate as skipped, never as passed") from None
+        try:
+            _, error_text = process.communicate(prompt, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            for stop in (signal.SIGTERM, signal.SIGKILL):
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, stop)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    process.communicate(timeout=2)
+                    break
+            raise WorkRefusal(f"codex exceeded --timeout {timeout}s; rerun or raise the limit") from None
+        if process.returncode:
+            sys.stderr.write(error_text[-2000:])
+            raise WorkRefusal(f"codex exited {process.returncode}")
+        report = out.read_text(encoding="utf-8") if out.is_file() else ""
+        if not report.strip():
+            raise WorkRefusal("codex produced no final message; nothing written")
+        return report
+
+
+def adversarial(writing: Any, connection: Any, item: int, args: argparse.Namespace) -> dict:
+    """One hostile read of the current draft by another vendor's model, written to `adversarial.md`.
+
+    Its findings are hypotheses: the report records which prose it read and
+    decides nothing. `sd writing gate` records the verdict after a reader checks them.
+    """
+    brief = writing.adversarial_brief(connection, item)
+    if not brief["research_exists"]:
+        print(f"# warning: no research.md for {brief['piece']}; the citation-strength axis "
+              "has nothing to check against", file=sys.stderr)
+    prompt = _render(brief)
+    print(f"# codex adversarial review: {brief['piece']} (sandbox=read-only, {brief['root']})", file=sys.stderr)
+    report = _codex(brief["root"], prompt, model=args.model, timeout=args.timeout)
+    result = writing.record_adversarial(connection, item, report, digest=brief["digest"], record=brief["record"],
+                                        generation=brief["generation"])
+    print(f"# reviewed draft {result['digest']}", file=sys.stderr)
+    if not result["current"]:
+        print("# draft changed during review; this report is stale and cannot clear readiness", file=sys.stderr)
+    counts = result["confidence"]
+    print(f"# confidence tags: CERTAIN={counts['CERTAIN']} LIKELY={counts['LIKELY']} "
+          f"SPECULATIVE={counts['SPECULATIVE']}", file=sys.stderr)
+    if result["verdict"]:
+        print(f"# {result['verdict']}", file=sys.stderr)
+    return result
 
 
 def run(args: argparse.Namespace) -> int:
@@ -46,6 +157,17 @@ def run(args: argparse.Namespace) -> int:
     promote: Any = getattr(writing, "promote", None)
     if action == "promote" and promote is None:
         raise WorkRefusal("install the current system/local-sd-db build to promote an idea")
+    # Looked up, as `checkout` is: an older installed sd_db lacks them.
+    review: Any = getattr(writing, REVIEWS[action], None) if action in REVIEWS else None
+    if action in REVIEWS and review is None:
+        raise WorkRefusal(f"install the current library build for sd writing {action}")
+    note = None
+    if action == "reconcile":
+        # From a file, so prose with backticks never passes through a shell.
+        try:
+            note = (Path(args.note_file).read_text(encoding="utf-8") if args.note_file else args.note).strip()
+        except OSError as error:
+            raise WorkRefusal(f"cannot read --note-file: {error}") from None
     pieces = any((root / name).is_dir() for name in ("content", "content-parked"))
     if action in CONTENT_ONLY and not pieces:
         # Another checkout has no pieces, so these would answer on zero files and zero rows (sd:1660, sd:1803).
@@ -120,6 +242,10 @@ def run(args: argparse.Namespace) -> int:
                     result = publication.reconcile(connection, item, args.claim, context, read_json(args.evidence_file), who=who)
                 else:
                     result = publication.abandon(connection, item, args.claim, reason=args.reason, leave=args.leave, who=who)
+            elif action == "adversarial":
+                result = adversarial(writing, connection, item, args)
+            elif action == "reconcile":
+                result = review(connection, item, args.artifact, note=note)
             elif action == "get":
                 result = writing.piece_state(connection, item)
             elif action == "readiness":
@@ -161,7 +287,7 @@ def register(groups: Any) -> None:
     writing = groups.add_parser("writing", help="shared piece stages, evidence, and database cutover")
     verbs = writing.add_subparsers(dest="verb", required=True)
     for action in ("list", "get", "readiness", "import", "verify", "cutover", "recover", "register", "promote",
-                   "stage", "metadata", "gate", "park", "publication-render", "publication-recover", "publication-claim", "publication-status",
+                   "stage", "metadata", "gate", "park", "adversarial", "reconcile", "publication-render", "publication-recover", "publication-claim", "publication-status",
                    "publication-dispatch", "publication-receipt", "publication-reconcile", "publication-abandon"):
         parser = verbs.add_parser(action)
         parser.set_defaults(handler=run, writing_action=action)
@@ -189,7 +315,7 @@ def register(groups: Any) -> None:
             elif action == "publication-abandon":
                 parser.add_argument("--reason", required=True)
                 parser.add_argument("--leave", action="store_true")
-        elif action in {"get", "readiness", "register", "stage", "metadata", "gate", "park"}:
+        elif action in {"get", "readiness", "register", "stage", "metadata", "gate", "park", "adversarial", "reconcile"}:
             parser.add_argument("--piece", required=True, help="YEAR/slug")
         if action in {"promote", "stage", "metadata", "gate", "park"}:
             parser.add_argument("--if-revision")
@@ -221,3 +347,12 @@ def register(groups: Any) -> None:
             parser.add_argument("--findings-json", default="[]")
             parser.add_argument("--reason", required=True)
             parser.add_argument("--reviewed-digest", help="draft digest actually reviewed, required for an unstamped report")
+        elif action == "adversarial":
+            parser.add_argument("--model", help="codex model; default is codex's own")
+            parser.add_argument("--timeout", type=int, default=1800, help="seconds before codex is stopped (default 1800)")
+        elif action == "reconcile":
+            parser.add_argument("--artifact", required=True, choices=("adversarial", "research"))
+            note = parser.add_mutually_exclusive_group(required=True)
+            note.add_argument("--note", help="for adversarial: what became of each finding; "
+                                             "for research: which claims the revision added and where each is sourced")
+            note.add_argument("--note-file", help="read the note from a file; use it when the note holds backticks")

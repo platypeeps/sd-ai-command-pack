@@ -8,6 +8,7 @@ the exact draft and research they reviewed. No verdict is guessed from prose.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import os
@@ -211,12 +212,22 @@ def _hash(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
+def _draft(text: str) -> str | None:
+    """The prose after `## Draft`, the part every gate reviews; None without that heading."""
+    return text.split("## Draft", 1)[1] if "## Draft" in text else None
+
+
+def _prose_digest(prose: str) -> str:
+    """The draft digest: whitespace-normalized, so only a prose change moves it."""
+    return hashlib.sha1(" ".join(prose.split()).encode("utf-8")).hexdigest()[:12]
+
+
 def _snapshot(row) -> dict:
     path = _path(row["repo"], row["piece"], row["path"])
     data = path.read_bytes()
     text = data.decode("utf-8")
-    prose = text.split("## Draft", 1)[1] if "## Draft" in text else ""
-    digest = hashlib.sha1(" ".join(prose.split()).encode("utf-8")).hexdigest()[:12] if prose.strip() else ""
+    prose = _draft(text) or ""
+    digest = _prose_digest(prose) if prose.strip() else ""
     files = {"index": data}
     for name, filename in REPORTS.items():
         candidate = path.with_name(filename)
@@ -320,9 +331,11 @@ def piece_state(connection: sqlite3.Connection, item: int) -> dict:
         problems = _problems(row, snapshot)
         digest = snapshot["digest"]
         document = snapshot["text"]
+        companions = {name: _companion(snapshot, name) for name in COMPANIONS}
     except (OSError, UnicodeError, WorkflowError) as error:
         problems, digest = [str(error)], ""
         document = None
+        companions = {}
     stages = _normal(row["stage"])
     corrections = [target for target in ("researching", "drafting", "review")
                    if row["stage"] in STAGES and STAGES.index(target) < STAGES.index(row["stage"])]
@@ -333,7 +346,8 @@ def piece_state(connection: sqlite3.Connection, item: int) -> dict:
                         "metadata": _fields(row["fields"]).get("writing") or {},
                         "document": document,
                         "gates": {"ok": not problems, "digest": digest,
-                                  "generation": row["gate_generation"], "problems": problems}}
+                                  "generation": row["gate_generation"], "problems": problems,
+                                  "companions": companions}}
     if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='publication_claim'").fetchone():
         claims = []
         for claim in connection.execute("SELECT id,active_item,state FROM publication_claim WHERE item=? ORDER BY created_at", (item,)):
@@ -709,6 +723,206 @@ def preflight(connection: sqlite3.Connection, item: int) -> dict:
 def readiness(connection: sqlite3.Connection, item: int) -> dict:
     """Read-only gate diagnosis at any stage, including before readiness."""
     return piece_state(connection, item)["writing"]["gates"]
+
+
+# Review companions (sd:3301). `adversarial.md` and `research.md` each answer
+# to one draft, and each goes silently stale when the draft is revised, so
+# each carries the digest of the draft it was last reconciled with, on a line
+# of its own. A missing stamp reads as stale, never as fine. These mechanics
+# lived in the writing pack's `scripts/pack.py`; they live here so every
+# content repository runs the same gates.
+COMPANIONS = {"adversarial": REPORTS["adversarial"], "research": REPORTS["research"]}
+_STAMP_LINE = re.compile(r"(?m)^<!-- reconciled-with-draft: ([0-9a-f]{12}) .*-->$")
+#: The sentences an adversarial run read, so a later reconcile can tell how much is new.
+_REVIEWED = re.compile(r"(?m)^<!-- adversarial-reviewed: words=(\d+) sentences=([0-9a-f,]*) -->$")
+#: A reconcile stamps prose the run never read; past this share of the draft it refuses (sd:2025).
+REWRITE_LIMIT = 0.25
+#: A shorter draft is not ready for a hostile reader.
+REVIEW_MIN_WORDS = 100
+
+
+def _companion(snapshot: dict, artifact: str) -> dict:
+    """One companion's currency against the draft: missing, unstamped, current or stale."""
+    data = snapshot["files"].get(artifact)
+    if data is None:
+        return {"state": "missing", "detail": "never written"}
+    stamped = _STAMP_LINE.search(data.decode("utf-8"))
+    if not stamped:
+        return {"state": "unstamped", "detail": "predates reconcile tracking; treat as stale"}
+    if stamped.group(1) == snapshot["digest"]:
+        return {"state": "current", "detail": f"draft {snapshot['digest']}"}
+    return {"state": "stale", "detail": f"reconciled with {stamped.group(1)}, draft is now {snapshot['digest']}"}
+
+
+def _sentences(prose: str) -> list[str]:
+    return [sentence for sentence in re.split(r"(?<=[.!?])\s+", " ".join(prose.split())) if sentence]
+
+
+def _sentence_hash(sentence: str) -> str:
+    return hashlib.sha1(sentence.encode("utf-8")).hexdigest()[:8]
+
+
+def reviewed_record(prose: str) -> str:
+    """The line a run writes: how many words it read, and a hash per sentence."""
+    sentences = _sentences(prose)
+    return (f"<!-- adversarial-reviewed: words={sum(len(sentence.split()) for sentence in sentences)} "
+            f"sentences={','.join(_sentence_hash(sentence) for sentence in sentences)} -->")
+
+
+def _unread_share(words: int, hashes: list[str], prose: str) -> float:
+    """Share of the larger of the two drafts that the run did not read verbatim, in order.
+
+    Matching is order-sensitive: a moved sentence counts as unread, because
+    reordering can change what the prose says.
+    """
+    sentences = _sentences(prose)
+    counts = [len(sentence.split()) for sentence in sentences]
+    matcher = difflib.SequenceMatcher(None, hashes, [_sentence_hash(sentence) for sentence in sentences], autojunk=False)
+    kept = sum(sum(counts[block.b:block.b + block.size]) for block in matcher.get_matching_blocks())
+    return 1 - kept / max(words, sum(counts), 1)
+
+
+def _committed_draft(root: Path, relative: str, digest: str) -> str | None:
+    """The `## Draft` prose of the last commit whose draft has `digest`; None when Git cannot say."""
+    try:
+        commits = _git(root, "log", "--format=%H", "-n", "200", "--", relative).split()
+    except WorkflowError:
+        return None
+    for commit in commits:
+        try:
+            prose = _draft(_git(root, "show", f"{commit}:{relative}"))
+        except WorkflowError:
+            continue
+        if prose is not None and _prose_digest(prose) == digest:
+            return prose
+    return None
+
+
+def _adversarial_rewrite(row, snapshot: dict, report: str) -> tuple[float | None, str]:
+    """How much of the current draft the last run did not read; None when unknowable.
+
+    A report written before runs recorded their sentences falls back to the
+    committed draft its stamp names. The second value is the run record
+    recovered that way, for the reconcile to keep: the stamp moves on every
+    reconcile, the record does not.
+    """
+    prose = _draft(snapshot["text"]) or ""
+    recorded = _REVIEWED.search(report)
+    if recorded:
+        return _unread_share(int(recorded.group(1)), [h for h in recorded.group(2).split(",") if h], prose), ""
+    stamped = _STAMP_LINE.search(report)
+    reviewed = _committed_draft(_disk(row["repo"]), row["path"], stamped.group(1)) if stamped else None
+    if reviewed is None:
+        return None, ""
+    record = reviewed_record(reviewed)
+    found = _REVIEWED.search(record)
+    return _unread_share(int(found.group(1)), [h for h in found.group(2).split(",") if h], prose), record
+
+
+def adversarial_brief(connection: sqlite3.Connection, item: int) -> dict:
+    """What one adversarial run reviews: paths in the checkout, the draft digest, generation and run record.
+
+    The caller renders the prompt from `draft` and `research`, runs the
+    reviewer read-only in `root`, and hands its report to `record_adversarial`
+    with this digest, record and generation, so the report names the prose
+    the run read even if the draft changes while it runs.
+    """
+    row = _piece(connection, item)["item"]
+    snapshot = _snapshot(row)
+    prose = _draft(snapshot["text"])
+    if prose is None:
+        raise WorkflowError(f"{row['piece']} has no '## Draft' section; nothing to review")
+    words = len(prose.split())
+    if words < REVIEW_MIN_WORDS:
+        raise WorkflowError(f"{row['piece']} has only {words} words under '## Draft'; "
+                            "draft it before running an adversarial pass")
+    disk = _disk(row["repo"])
+    draft = snapshot["path"]
+    return {"piece": row["piece"], "root": str(disk), "draft": draft.relative_to(disk).as_posix(),
+            "research": draft.with_name(REPORTS["research"]).relative_to(disk).as_posix(),
+            "research_exists": "research" in snapshot["files"], "digest": snapshot["digest"],
+            "generation": row["gate_generation"], "record": reviewed_record(prose), "words": words}
+
+
+def _write_report(path: Path, text: str) -> None:
+    """Replace a report whole; a new one takes the umask mode, as an editor would give it."""
+    umask = os.umask(0)
+    os.umask(umask)
+    _replace(path, text.encode("utf-8"), mode=None if path.exists() else 0o666 & ~umask)
+
+
+def record_adversarial(connection: sqlite3.Connection, item: int, report: str, *, digest: str, record: str,
+                       generation: int) -> dict:
+    """Write `adversarial.md` for one run: draft stamp, run record, provenance, then the report.
+
+    `digest`, `record` and `generation` come from the `adversarial_brief`
+    the run reviewed. The result says whether the draft is still that one,
+    counts the confidence tags, and quotes the reviewer's verdict line.
+    The report is a set of hypotheses; this records which prose it answers
+    and decides nothing about it.
+    """
+    if not isinstance(report, str) or not report.strip():
+        raise WorkflowError("the adversarial run produced no report; nothing written")
+    if (not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{12}", digest) is None
+            or not isinstance(record, str) or _REVIEWED.fullmatch(record) is None
+            or type(generation) is not int):
+        raise WorkflowError("adversarial run needs the digest, run record and generation from its brief")
+    row = _piece(connection, item)["item"]
+    snapshot = _snapshot(row)
+    day = now()[:10]
+    target = snapshot["path"].with_name(REPORTS["adversarial"])
+    _write_report(target, f"<!-- reconciled-with-draft: {digest} on {day} gen={generation} -->\n\n{record}\n\n"
+                          f"<!-- codex adversarial review of {row['piece']}, {day}. Findings are HYPOTHESES: "
+                          "verify each against the source before acting. Nothing here edited the draft. -->\n\n"
+                          + (report if report.endswith("\n") else report + "\n"))
+    verdict = re.findall(r"(?im)^.*survive[s]? hostile reading.*$", report)
+    return {"piece": row["piece"], "path": target.relative_to(_disk(row["repo"])).as_posix(), "digest": digest,
+            "current": snapshot["digest"] == digest,
+            "confidence": {tag: len(re.findall(rf"\b{tag}\b", report)) for tag in ("CERTAIN", "LIKELY", "SPECULATIVE")},
+            "verdict": verdict[-1].strip() if verdict else None}
+
+
+def reconcile_companion(connection: sqlite3.Connection, item: int, artifact: str, *, note: str) -> dict:
+    """Record that a companion answers the current draft, and append what was reconciled.
+
+    For `adversarial` the note says what became of each finding; it refuses
+    when more than `REWRITE_LIMIT` of the draft is prose the last run did not
+    read, or when nothing can say how much that is. For `research` the note
+    names the claims the revision added and where each is sourced.
+    """
+    if artifact not in COMPANIONS:
+        raise WorkflowError(f"reconcile takes one of {', '.join(sorted(COMPANIONS))}")
+    note = _text(note, "reconcile note")
+    row = _piece(connection, item)["item"]
+    snapshot = _snapshot(row)
+    piece, name = row["piece"], COMPANIONS[artifact]
+    if artifact not in snapshot["files"]:
+        raise WorkflowError(f"no {name} for {piece}; there is nothing to reconcile. "
+                            "Run the gate, or write the research, first.")
+    digest = snapshot["digest"]
+    if not digest:
+        raise WorkflowError(f"{piece} has no '## Draft' section to reconcile against")
+    before = _companion(snapshot, artifact)
+    text = snapshot["files"][artifact].decode("utf-8")
+    if before["state"] != "current" and artifact == "adversarial":
+        share, record = _adversarial_rewrite(row, snapshot, text)
+        rerun = f"Run `sd writing adversarial --piece {piece}`; a fresh run is current by construction."
+        if share is None:
+            raise WorkflowError(f"{piece} adversarial: cannot tell how much of the draft the last run read "
+                                f"({before['detail']}), so a reconcile would stamp prose nobody reviewed. {rerun}")
+        if share > REWRITE_LIMIT:
+            raise WorkflowError(f"{piece} adversarial: {share:.0%} of the draft is prose the last run did not read "
+                                f"(the limit is {REWRITE_LIMIT:.0%}), so a reconcile would stamp a rewrite nobody "
+                                f"reviewed. {rerun}")
+        if record:
+            text = f"{record}\n\n{text}"
+    day = now()[:10]
+    heading = "## Resolution ledger" if artifact == "adversarial" else "## Reconciled with the draft"
+    body = _STAMP_LINE.sub("", text).strip()
+    _write_report(snapshot["path"].with_name(name),
+                  f"<!-- reconciled-with-draft: {digest} on {day} gen={row['gate_generation']} -->\n\n"
+                  f"{body}\n\n{heading} — {day}\n\n{note}\n")
+    return {"piece": piece, "artifact": artifact, "digest": digest, "was": before}
 
 
 def change_stage(connection: sqlite3.Connection, item: int, target: str, *, actor: str = "human", who: str,

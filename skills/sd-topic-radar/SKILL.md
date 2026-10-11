@@ -137,13 +137,13 @@ stop and identify them before reading personal or external sources.
 
 ## Filing into the vault
 
-With `file=vault`, run from the root of the writing content repository (it
-holds `scripts/pack.py` and `profile/`). Its `sdw` plugin declares the
+With `file=vault`, run from the root of a content repository (it holds
+`content/`, `profile/` and `templates/`). Its `sdw` plugin declares the
 `blog-idea` kind, its floor and its template.
 
 - **Extra sources.** `profile/personality-profile/PROFILE.md` and
   `profile/brand-voice/VOICE.md` steer what is worth writing and what to
-  avoid. `python3 scripts/pack.py pieces list --all --json` is the prior
+  avoid. `sd writing list --all --json` is the prior
   content, parked pieces included. Newsletters follow the labels in
   `profile/newsletter-sweep.md`, read-only with `search_gmail_messages` and
   `get_gmail_message_content`; without that file, skip them and say so.
