@@ -5,7 +5,7 @@ A machine whose home holds this file is a satellite: `sd_db.connect` sends
 every open of the default database to the hub the file names, and
 `sd_db.default_path` answers with a `HubPath`, whose `exists()` asks the hub.
 
-    {"hub": "sol", "port": 8769}
+    {"hub": "hub.example.test", "port": 8769}
 
 The selector is a file and not an environment variable. Cron and launchd
 read no shell profile, and a satellite must refuse the same way from every

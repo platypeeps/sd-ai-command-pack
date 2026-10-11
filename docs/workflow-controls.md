@@ -5,8 +5,8 @@ They do not establish the currently loaded build or complete the coordinated clo
 Verify installation, process identity and live acceptance after delivering matching commits across all three repositories.
 
 The workflow dashboard is installed at **http://127.0.0.1:8767** and privately at
-**https://sol.tail6dbb92.ts.net:8443**. Remote access requires the Tailscale login
-`sven@ignoranceisbliss.com`. The command pack, system repository and writing pack
+**https://hub.example.test:8443**. Remote access requires the Tailscale login
+`operator@example.test`. The command pack, system repository and writing pack
 share the installed `sd_db` library and `~/.local/share/sd/sd.db`. Ordinary work
 progress belongs to the database.
 

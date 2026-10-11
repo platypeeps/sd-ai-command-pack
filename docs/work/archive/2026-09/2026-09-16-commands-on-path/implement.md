@@ -104,7 +104,7 @@ so the owner reviews and merges the code PR, not a lane.
   rc 0, `grep -c -E 'FAILED|ERROR'` 0, installer coverage 100%.
 - `tests/test_doc_citations.py` green: `source:` locators only for symbols
   that exist today.
-- Not verifiable from this lane, the owner runs it: on sol after merge,
+- Not verifiable from this lane, the owner runs it: on the hub after merge,
   `--user` then `--status` prints `commands: 17 in bin/, 17 resolve on PATH
   from this checkout` and `ls -l ~/.local/bin/sd*` shows 17 links; on the
   second machine, that `~/.local/bin` is on PATH at all.
