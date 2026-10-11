@@ -594,7 +594,7 @@ class Connection:
 
     `outcomes` lists, per lost `COMMIT` answer, each `(R, answer)` the hub
     gave while this connection asked for R; `unreachable` stands for an ask
-    that reached no hub.
+    that reached no hub, and `refused` for one the hub refused for the build.
     """
 
     def __init__(self, host: str, port: int, *, path: Path | str | None, write: bool,
@@ -773,7 +773,10 @@ class Connection:
         Each ask opens its own session: this one is gone. `recorded` returns,
         as the `COMMIT` would have. `absent` raises `TransactionLost`. A live
         owner (`in_flight`) or no hub at all is asked again, waiting longer
-        each time, until `OUTCOME_BOUND`; then `UnknownOutcome`.
+        each time, until `OUTCOME_BOUND`; then `UnknownOutcome`. A hub that
+        refuses this build, or whose database is newer than it, ends it at
+        once (sd:3359): this process keeps the build it loaded, so no later
+        ask can pass.
         """
         deadline = time.monotonic() + OUTCOME_BOUND
         wait = OUTCOME_FIRST_WAIT
@@ -781,6 +784,9 @@ class Connection:
         while True:
             try:
                 answer = self.outcome(rid)
+            except (BuildMismatch, _errors.SchemaTooNew) as refused:
+                self.outcomes.append((rid, "refused"))
+                raise UnknownOutcome(rid, f"{reason}, and the hub refuses this build: {refused}") from refused
             except Exception as error:  # no hub, or a hub that cannot answer yet
                 answer = "unreachable"
                 reason = f"the answer to {what} was lost ({lost.reason}), and the hub " \
@@ -934,12 +940,14 @@ class Connection:
 
 def connect(host: str, port: int, target: Path | str | None, *, token, write: bool = True,
             create: bool = False, busy_timeout: int = 5000,
-            timeout: float | None = None) -> Connection:
+            timeout: float | None = None, answer_timeout: float | None = None) -> Connection:
     """Open a session on the hub at `host:port`.
 
     `token` is the content of the server's `<database>.serve.token`, which
     only the server's owner can read, or a callable that reads it once the
     socket is up. A `target` of `None` opens the hub's own database.
+    `timeout` bounds the connect, `answer_timeout` each wait for an answer.
     """
     return Connection(host, port, path=target, write=write, create=create,
-                      busy_timeout=busy_timeout, token=token, timeout=timeout)
+                      busy_timeout=busy_timeout, token=token, timeout=timeout,
+                      answer_timeout=answer_timeout)

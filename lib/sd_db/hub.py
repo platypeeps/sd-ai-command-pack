@@ -48,6 +48,11 @@ DEFAULT_PORT = 8769
 #: Seconds to wait for the hub to answer a connect. A satellite with
 #: Tailscale down must fail by name in seconds, not hang for a TCP timeout.
 CONNECT_TIMEOUT = 5.0
+#: Seconds a satellite waits on a silent hub, per read of an answer, past
+#: the session's own wait for the write lock (`busy_timeout`) (sd:3359). A
+#: hub that took the session and stopped answering held its caller, and a
+#: lane runner's lock with it, for as long as the socket lived.
+ANSWER_TIMEOUT = 120.0
 
 
 class HubConfigError(remote.RemoteError):
@@ -113,7 +118,8 @@ class Hub:
             raise remote.HubOnly("init and migrate", f"{self.host}:{self.port}")
         try:
             return remote.connect(self.host, self.port, None, token=self.token, write=write,
-                                  busy_timeout=busy_timeout, timeout=CONNECT_TIMEOUT)
+                                  busy_timeout=busy_timeout, timeout=CONNECT_TIMEOUT,
+                                  answer_timeout=ANSWER_TIMEOUT + busy_timeout / 1000)
         except remote.HubUnreachable as error:
             raise remote.HubUnreachable(
                 self.host, self.port, f"{error.reason} (named in {self.config})"

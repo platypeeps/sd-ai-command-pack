@@ -65,7 +65,8 @@ once the entry ends (`checkout_for`). A
 running entry carries a `holder` (host, pid, a token per claim), its `step`
 and `lease_until`. Every runner write checks the token, so a reclaimed or
 released claim writes nothing more; a hub fault is tried again for
-`WRITE_RETRY_SECONDS`, then the run stops. A holder on this machine is dead
+`WRITE_RETRY_SECONDS`, then the run stops, and a hub that refuses this
+build stops it at once (sd:3359). A holder on this machine is dead
 when the runner lock is free and its pid is gone; one on another machine
 once its lease passed, which the lane host checks at claim. In prepare its
 entry goes back to pending, failing at the `RECLAIMS`th time; in merge it
@@ -221,6 +222,10 @@ class Stop(LaneError):
     """A runner write that cannot land: its claim was voided, or the hub stayed down past `WRITE_RETRY_SECONDS`."""
 
 
+class BuildRefused(LaneError):
+    """A `hub_unavailable` refusal no retry in this process can pass (`sd_ship_workflow.BUILD_FAULTS`, sd:3359)."""
+
+
 #: The refusal code of a cancel, move, hold or release whose `--expected-revision` no longer matches (sd:2717).
 STALE_REVISION = "stale_revision"
 #: The refusal code of a retry whose `--expected-head` is not the head of the item's last entry (sd:3268).
@@ -361,9 +366,10 @@ def on_hub(queue: Queue, work: Callable[[Any], Any]) -> Any:
         finally:
             connection.close()
     except (SdDbError, sqlite3.Error, OSError, EOFError) as error:
-        raise LaneError(f"The hub database did not answer: {type(error).__name__}: {error}. A write may have "
-                        "landed; `sd-ship lane list` shows the queue once the hub answers.",
-                        code=HUB_UNAVAILABLE) from None
+        refusal = BuildRefused if sd_ship_workflow.is_hub_fault(error, sd_ship_workflow.BUILD_FAULTS) else LaneError
+        raise refusal(f"The hub database did not answer: {type(error).__name__}: {error}. A write may have "
+                      "landed; `sd-ship lane list` shows the queue once the hub answers.",
+                      code=HUB_UNAVAILABLE) from None
 
 
 def stored(connection: Any, repository: str) -> list[dict[str, Any]]:
@@ -410,7 +416,10 @@ def runner_write(queue: Queue, change: Callable[[list[dict[str, Any]]], Any],
     """`update` for the runner: a hub fault is tried again every `WRITE_PAUSE` seconds, up to `WRITE_RETRY_SECONDS`.
 
     Then it raises `Stop`, and the run stops; a write that landed unseen is
-    found by the next try or the next run, under the claim's token.
+    found by the next try or the next run, under the claim's token. A hub
+    that refuses this process's build (`BuildRefused`) stops it at once
+    (sd:3359): no retry in this process can pass, and the `repo-sync.sh
+    follow` that clears it waits for the runner lock the retry would hold.
     """
     deadline = time.monotonic() + WRITE_RETRY_SECONDS
     while True:
@@ -418,6 +427,9 @@ def runner_write(queue: Queue, change: Callable[[list[dict[str, Any]]], Any],
             return update(queue, change, check)
         except Stop:
             raise
+        except BuildRefused as error:
+            raise Stop(f"{error} This process keeps the build it loaded, so the runner stops now and frees its "
+                       "lock; the next run settles the entry.", code=HUB_UNAVAILABLE) from None
         except LaneError as error:
             if error.code != HUB_UNAVAILABLE:
                 raise
