@@ -24,7 +24,7 @@ An explicit path other than the default is opened locally, as before: the
 Jev meter's own file, a backup target and a test's fixture are not the
 record, and the hub does not hold them.
 
-`token_file` is for loopback only: `sd-db.sh serve --loopback` refuses a
+`token_file` is for loopback only: `sd-db serve --loopback` refuses a
 session without the token it wrote beside its database. A hub on the
 tailnet carries no token; it admits the session by its peer's Tailscale
 identity (step 7), so a satellite's `hub.json` names no `token_file`.
@@ -43,7 +43,7 @@ from .errors import SchemaTooNew
 #: Beside `runner.json` and `dashboard.json`, under the same home as the
 #: database path it replaces.
 CONFIG_RELATIVE = Path(".config/sd/hub.json")
-#: The port the design names for `sd-db.sh serve`.
+#: The port the design names for `sd-db serve`.
 DEFAULT_PORT = 8769
 #: Seconds to wait for the hub to answer a connect. A satellite with
 #: Tailscale down must fail by name in seconds, not hang for a TCP timeout.

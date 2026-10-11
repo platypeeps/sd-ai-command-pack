@@ -1,4 +1,4 @@
-"""`sd-db.sh backup`. Prints what it did; raises what it could not do."""
+"""`sd-db backup`. Prints what it did; raises what it could not do."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from ..retention import prune
 
 #: The job's exit code when the BACKUP PASSED but the SOURCE is referentially
 #: broken. It is not 1, because 1 means the documented failure -- the library
-#: raised, nothing was written, no prune ran -- and `sd-db.sh` mails that as
+#: raised, nothing was written, no prune ran -- and `sd-db` mails that as
 #: "sd-db backup FAILED". This run wrote a snapshot and verified it; calling it
 #: a failed backup sends the operator looking for a snapshot that is on disk.
 #: It is not 0 either: 0 is silent, and three silent nights over six orphan
@@ -28,7 +28,7 @@ from ..retention import prune
 #:
 #: It is not 2, and that is the reason for the gap in the numbering.
 #: `argparse` exits 2 for a usage error, so `--keep nope` leaves `main`
-#: unreached, and `sd-db.sh` reads a status and not a traceback. On 2 the two
+#: unreached, and `sd-db` reads a status and not a traceback. On 2 the two
 #: are indistinguishable and a typo mails "the source is referentially
 #: broken".
 BROKEN_SOURCE = 3

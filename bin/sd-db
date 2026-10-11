@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-#: The verbs `sd_db.jobs.cli` answers; `sd-db.sh` hands each one straight to it.
+#: The verbs `sd_db.jobs.cli` answers; `sd-db` hands each one straight to it.
 CLI_VERBS = ("init", "migrate", "status", "restore", "repo", "item", "work",
              "import", "verify", "usage", "judgments", "credentials")
 
@@ -71,7 +71,7 @@ def report_failure(body: str, title: str) -> None:
 def backup(argv: list[str], sd_db: Any) -> int:
     from sd_db.jobs.backup import BROKEN_SOURCE  # noqa: PLC0415 - the chosen copy
 
-    # A child, as `sd-db.sh` ran it: the mail carries everything the backup
+    # A child, as the old `sd-db.sh` ran it: the mail carries everything the backup
     # wrote to either stream, its own children's included. `-P` keeps the
     # working directory off the child's path, so the chosen copy is its only `sd_db`.
     library = Path(sd_db.__file__).resolve().parent.parent

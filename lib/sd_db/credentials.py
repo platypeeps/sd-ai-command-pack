@@ -1,6 +1,6 @@
 """Credential presence and expiry, for Health's Credentials area (sd:2203).
 
-`sd-db.sh credentials` runs nightly (`local-cron-jobs/examples/
+`sd-db credentials` runs nightly (`local-cron-jobs/examples/
 credentials-nightly.job`) in the environment cron gives a job, which has
 sourced `~/.config/shell/env.sh`. It writes one `heartbeat` state row under
 `HEARTBEAT_KEY`; the dashboard reads the latest and calls nothing (the

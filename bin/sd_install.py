@@ -2067,7 +2067,7 @@ def cmd_user(ctx: Context, out) -> int:
 
         # Seeded here because the registry is what a machine with no library
         # still needs: the file-only reader answers
-        # from it, and `sd-db.sh init` seeds its rows from it when the library does
+        # from it, and `sd-db init` seeds its rows from it when the library does
         # arrive. Not recorded in `owned`: the installer removes what it owns on
         # uninstall, and this file is the operator's the moment it lands.
         seeded_registry, registry_report = seed_registry(ctx)

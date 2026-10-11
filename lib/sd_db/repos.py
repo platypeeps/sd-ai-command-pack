@@ -8,10 +8,10 @@ vacuously is worse than one that fails, because it reports a green.
 
 So the table is populated two ways, and only two:
 
-* **By hand**, `sd-db.sh repo add <path>`. One repository, deliberately, with
+* **By hand**, `sd-db repo add <path>`. One repository, deliberately, with
   its remote read from the checkout rather than typed.
 * **From repo-sync's `repos.common.conf` and `repos.<profile>.conf`**,
-  `sd-db.sh repo seed`. That pair lives in `<config>/repo-sync/` (see
+  `sd-db repo seed`. That pair lives in `<config>/repo-sync/` (see
   `config.py`) and is what `repo-sync` clones on this machine's profile,
   one `<subdir> <owner/repo>` per line, and it is maintained because
   the sync breaks when it is wrong. Deriving from it beats a second list that

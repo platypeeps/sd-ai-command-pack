@@ -1,4 +1,4 @@
-"""`sd-db.sh`'s Python half: the schema verbs, the repositories, the migrations.
+"""`sd-db`'s Python half: the schema verbs, the repositories, the migrations.
 
 The shell script is the entrypoint the repository's convention asks for; it
 resolves the folder and hands the verb here. Everything that needs to know

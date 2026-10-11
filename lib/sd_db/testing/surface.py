@@ -147,7 +147,7 @@ def uninstall() -> None:
     """Undo the latest `install`; with none left to undo, change nothing.
 
     An extra call must not clear an opener this module did not install,
-    such as the wire opener of `sd-db.sh test --remote`.
+    such as the wire opener of `sd-db test --remote`.
     """
     from .. import database
 

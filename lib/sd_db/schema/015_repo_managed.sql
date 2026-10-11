@@ -2,7 +2,7 @@
 --
 -- Sessions named "the repositories the operator manages" by inferring it from
 -- remotes and prose, and two inferences disagreed. The column makes it one
--- stored fact (sd:1619). `sd-db.sh repo managed PATH yes|no` sets it, and
+-- stored fact (sd:1619). `sd-db repo managed PATH yes|no` sets it, and
 -- `repo list --managed` reads it back.
 --
 -- The column only, and every row starts at 0. No rule derives the flag:
