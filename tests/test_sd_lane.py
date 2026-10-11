@@ -14,6 +14,7 @@ import io
 import json
 import os
 import pathlib
+import signal
 import sqlite3
 import subprocess
 import sys
@@ -893,6 +894,49 @@ class Speculation(Lane):
         sd_lane.run_lane(self.repo, self.environ, super().ship, lambda root, head, base: {"status": "success"})
         self.assertEqual([(entry["item"], entry["status"]) for entry in self.entries()], [(1, "skipped"), (2, "merged")])
         self.assertEqual([call[call.index("--item") + 1] for call in self.calls], ["2", "2"])
+
+    def test_a_stopped_run_cancels_its_speculative_gate_and_frees_its_lock(self) -> None:
+        """sd:3361. A run that stopped on a build refusal waited in an unbounded join for the
+        speculative gate's `sd-check` child, and held its runner lock the whole time. The stop
+        now ends the gate's process group and waits a bounded time for it."""
+        import sd_db.database
+        from sd_db import remote
+        self.queue_both()
+        marker = self.tmp / "gate-child.pid"
+        refusing: list[bool] = []
+        connect = sd_db.database.connect
+
+        def hub(*args: Any, **kwargs: Any) -> Any:
+            if refusing:
+                raise remote.BuildMismatch("build", "0000aaaa", "1111bbbb")
+            return connect(*args, **kwargs)
+
+        def endless(root: pathlib.Path, head: str, base: str) -> dict:
+            """A gate whose child would outlive the run by far, run as the real gate runs its `sd-check`."""
+            child = f"import os, pathlib, time; pathlib.Path({str(marker)!r}).write_text(str(os.getpid())); time.sleep(60)"
+            code, _, _ = sd_lane.gate_run()([sys.executable, "-c", child], dict(os.environ), root, 120)
+            return {"status": "failure", "summary": f"exit {code}"}
+
+        def prepare_then_upgrade(argv: list[str], log: pathlib.Path) -> dict:
+            for _ in range(200):  # the gate's child is running before the run stops
+                if marker.exists() and marker.read_text():
+                    break
+                time.sleep(0.05)
+            self.ship(argv, log)
+            refusing.append(True)
+            return Runner.HUB_FAULT
+
+        started = time.monotonic()
+        with mock.patch.object(sd_lane, "WRITE_RETRY_SECONDS", 600), mock.patch.object(sd_lane, "WRITE_PAUSE", 30), \
+                mock.patch("sd_db.database.connect", hub):
+            answer = sd_lane.run_lane(self.repo, self.environ, prepare_then_upgrade, endless)
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertIn("BuildMismatch", answer["stopped"])
+        self.assertEqual(answer["speculative_gate"], "cancelled")
+        with open(self.store().lock_file, "a", encoding="utf-8") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)  # free for `follow`
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(marker.read_text()), 0)
 
 
 class Landing(Lane):
@@ -2329,6 +2373,61 @@ class Bounds(unittest.TestCase):
         """sd:2611: the gate under them queues for up to `GATE_SLOT_SECONDS` before its check starts."""
         for bound in (sd_lane.PREPARE_SECONDS, sd_lane.MERGE_SECONDS):
             self.assertGreaterEqual(bound, 3 * 3600 + sd_lane.sd_lib.GATE_SLOT_SECONDS)
+
+    def test_a_gate_child_that_starts_after_the_cancel_is_ended_at_once(self) -> None:
+        """sd:3361, the step between the cancel and the gate's `sd-check` start: the late group is ended too."""
+        go, answers = threading.Event(), []
+
+        def target() -> None:
+            go.wait(10)
+            answers.append(sd_lane.gate_run()([sys.executable, "-c", "import time; time.sleep(60)"],
+                                              dict(os.environ), pathlib.Path.cwd(), 120))
+        gate = sd_lane.SpeculativeGate(target, "late")
+        gate.start()
+        cancelled: list[bool] = []
+        canceller = threading.Thread(target=lambda: cancelled.append(gate.cancel_gate()))
+        started = time.monotonic()
+        canceller.start()
+        for _ in range(1000):  # bounded: a cancel that never lands fails below rather than hangs
+            if gate.cancelled:
+                break
+            time.sleep(0.01)
+        go.set()
+        canceller.join(60)
+        self.assertEqual(cancelled, [True])
+        self.assertLess(time.monotonic() - started, sd_lane.CANCEL_SECONDS)
+        self.assertNotEqual(answers[0][0], 0)
+
+    def test_a_gate_child_that_ignores_sigterm_is_killed(self) -> None:
+        """sd:3361, the SIGKILL step: a child that ignores SIGTERM is killed one bound later."""
+        child = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+        answers: list[Any] = []
+        gate = sd_lane.SpeculativeGate(lambda: answers.append(sd_lane.gate_run()(
+            [sys.executable, "-c", child], dict(os.environ), pathlib.Path.cwd(), 120)), "deaf")
+        gate.start()
+        for _ in range(500):  # bounded: the group is recorded once the child starts
+            if gate.group is not None:
+                break
+            time.sleep(0.01)
+        time.sleep(0.5)  # the child has installed its handler
+        started = time.monotonic()
+        with mock.patch.object(sd_lane, "CANCEL_SECONDS", 1):
+            self.assertTrue(gate.cancel_gate())
+        self.assertLess(time.monotonic() - started, 10)
+        self.assertEqual(answers[0][0], -signal.SIGKILL)
+
+    def test_a_gate_that_outlives_both_signals_is_reported_and_left(self) -> None:
+        """sd:3361, the last step: a gate still running after SIGKILL does not hold the run; the answer says so."""
+        release = threading.Event()
+        gate = sd_lane.SpeculativeGate(lambda: release.wait(60), "stuck")
+        gate.start()
+        try:
+            with mock.patch.object(sd_lane, "CANCEL_SECONDS", 0.2):
+                answer = sd_lane.finish_speculation(gate, {"stopped": "BuildMismatch"})
+            self.assertEqual(answer["speculative_gate"], "still ending 0.4s after SIGKILL; the lock is freed anyway")
+        finally:
+            release.set()
+            gate.join(10)
 
 
 if __name__ == "__main__":

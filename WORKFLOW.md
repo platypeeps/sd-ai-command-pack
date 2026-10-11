@@ -537,6 +537,8 @@ The rules for them:
   predicted landing in the background, and waits for that gate after the
   merge, so the next prepare reuses its receipt (sd:2586). That needs the
   tree key above; the next entry's `speculation` field says what ran.
+  A run that stops ends that gate's process group and waits at most
+  20 seconds, so it frees its lock; `speculative_gate` says how (sd:3361).
 - **Reorder a lane queue between items (sd:2584).** `sd-ship lane move <item>
   up|down|top|<position>` reorders the pending entries; `hold <item>` keeps an
   entry in place but skips it, and its speculative gate, until `release
