@@ -1446,6 +1446,22 @@ class Rows:
         row = self.item(item_dir)
         return row is not None and self._completion_read(row) is not None
 
+    def delivery_commit(self, item_dir: pathlib.Path) -> str:
+        """The commit the row's latest move to `done` names, `""` for none (sd:3346).
+
+        Empty for every absence, as `activity` is: a read that failed recorded
+        nothing, and the `unmarked` warning it leaves standing is the safe side.
+        """
+        if not self.opened or self._notes_read is None:
+            return ""
+        try:
+            row = self.item(item_dir)
+            if row is None:
+                return ""
+            return delivery_receipt(self._notes_read(self._connection, int(row["id"])))
+        except Exception:  # noqa: BLE001 - a read that failed recorded nothing
+            return ""
+
     def identity(self, item_dir: pathlib.Path) -> str:
         """`sd:<id>` for this folder's row, or `""` when no row answers.
 
@@ -1591,7 +1607,8 @@ def _from_row(
 
     *Unmarked*: the row is `done` and no commit carries a closing trailer for
     the item, so every database-free checkout goes on picking it. `delivered`
-    is the one question asked about that, here as everywhere else.
+    is the one question asked about that, here as everywhere else; a delivery
+    receipt on the row answers it too (`_unmarked`).
     """
     said, trouble = statuses.rows.status(item_dir)
     if trouble:
@@ -1636,12 +1653,29 @@ def _from_row(
         and statuses.history
         and delivered(statuses.root, wanted) != YES
     ):
-        carries = " or ".join(f"{DELIVERS_TRAILER} {name}" for name in wanted)
-        problems.append(
-            f"{prd}: the row is done and no commit carries {carries}, nor the "
-            f"same value after {CLOSES_TRAILER}; the item is unmarked"
-        )
+        unmarked = _unmarked(item_dir, statuses, wanted)
+        if unmarked:
+            problems.append(f"{prd}: {unmarked}")
     return StatusReport(said, False, tuple(problems))
+
+
+def _unmarked(item_dir: pathlib.Path, statuses: "Statuses", wanted: tuple[str, ...]) -> str:
+    """The `unmarked` finding for a done row no trailer closes, `""` when its receipt does (sd:3346).
+
+    A task or followup closed by `sd work deliver --associated` carries the
+    receipt on its move to `done`. It counts while its commit is on the
+    default branch and still names the item, as the writer verified; a
+    receipt that fails either is named in the finding.
+    """
+    carries = " or ".join(f"{DELIVERS_TRAILER} {name}" for name in wanted)
+    finding = (f"the row is done and no commit carries {carries}, nor the "
+               f"same value after {CLOSES_TRAILER}; the item is unmarked")
+    commit = statuses.rows.delivery_commit(item_dir)
+    identity = statuses.rows.identity(item_dir)
+    if not commit or not identity:
+        return finding
+    gap = _receipt_gap(statuses.root, commit, identity)
+    return f"{finding}, and its receipt names {commit}, which {gap}" if gap else ""
 
 
 def _status_report(
@@ -2335,6 +2369,27 @@ WORK_TRAILER = "Work:"
 #: template's closing block to it.
 OWNED_TRAILERS = (ITEM_TRAILER, WORK_TRAILER, DELIVERS_TRAILER, CLOSES_TRAILER)
 
+#: The sentence every delivering status move writes: `sd work deliver` and
+#: `sd task status done --delivered-by` (`sd_work.DELIVERY_REASON`).
+DELIVERED_AT = re.compile(r"delivered at ([0-9a-f]{40,64})\b")
+
+
+def delivery_receipt(notes: Iterable[Any]) -> str:
+    """The commit the latest move to `done` among `notes` names, `""` for none.
+
+    A task or followup closed by `sd work deliver --associated` keeps no work
+    receipt (sd:1913): the sentence on its move to `done` is the record. Only
+    the latest such move speaks, so a row reopened and closed by hand is not
+    delivered by an earlier close.
+    """
+    for note in reversed(list(notes)):
+        body = str(note["body"] or "")
+        if note["kind"] == "status_change" and body.partition(" by ")[0].endswith(" -> done"):
+            found = DELIVERED_AT.search(body)
+            return found.group(1) if found else ""
+    return ""
+
+
 #: `no` is a positive finding from history the checkout actually has;
 #: `unknown` is what a checkout that cannot see far enough says instead.
 #: Swapping the two silently reopens delivered work, since every reader that
@@ -2504,6 +2559,25 @@ def delivered(root: pathlib.Path, item: "str | tuple[str, ...]") -> Answer:
         elif _closed_by(root, fetched, item):
             return Answer(YES)
     return Answer(YES if _closed_by(root, "HEAD", item) else NO)
+
+
+def _receipt_gap(root: pathlib.Path, commit: str, identity: str) -> str:
+    """Why a receipt's `commit` does not deliver `identity`, `""` when it does.
+
+    It must be reachable from the default branch as just fetched, and its
+    trailer block must name the item by `Item:` or `Delivers:`. A fetch that
+    fails, or a commit this clone lacks, delivers nothing: unknown is not yes.
+    """
+    remote, default = upstream(root)
+    ref = _fetched(root, remote, default) if remote else default
+    if ref is None:
+        return f"could not be checked: `git fetch {remote} {default}` failed"
+    if git_output(["merge-base", "--is-ancestor", commit, ref], root) is None:
+        return f"is not reachable from {f'{remote}/' if remote else ''}{default}"
+    block = trailer_block(git_output(["show", "-s", "--format=%B", commit], root) or "")
+    named = {value.strip() for name, _, value in (line.partition(" ") for line in block.splitlines())
+             if name in (ITEM_TRAILER, DELIVERS_TRAILER)}
+    return "" if identity in named else f"carries no {ITEM_TRAILER} {identity}"
 
 
 # --------------------------------------------------------------------------

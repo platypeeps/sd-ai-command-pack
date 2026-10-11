@@ -160,6 +160,10 @@ Repeated incomplete runs exhaust the automatic allowance and grant no publicatio
 
 A dropped hub session or a hub build or schema refusal answers `hub_unavailable`, a retryable failure (sd:3239).
 Rerun the same command once the hub answers; a review that cleared before the fault is reused at its head.
+A review that finished while the hub was down waits in the lane folder's `review/` until a hub save records it (sd:3340).
+The next prepare at that head records it with no provider call, `--retry-review` or not.
+It then goes on as with any recorded pass: `--provider` is checked against it, and an additional request is dispatched.
+A file for another record, head, reserved pass or review tool binding, or a damaged one, is set aside, and the review runs as before.
 `sd-ship lane run` puts such an entry back in its queue, stops, and retries it on its next run.
 
 The repository gate runs after a review that does not block.
