@@ -1155,16 +1155,47 @@ class Publishing(SharedQueue):
         self.assertEqual((refused.exception.code, self.rows()), (sd_lane.BRANCH_DIVERGED, []))
         self.assertNotEqual(self.remote_tip("topic"), head)
 
-    def test_enqueue_from_the_default_branch_refuses_before_it_reaches_origin(self) -> None:
+    def test_enqueue_from_the_default_branch_refuses_before_any_push(self) -> None:
         """Failure table, enqueue: a main checkout with a commit origin lacks; nothing is pushed or queued."""
         before = self.remote_tip("main")
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "unreviewed")
         with self.assertRaises(sd_lane.LaneError) as refused:
             sd_lane.enqueue_entry(self.repo, 1, "t", self.body, self.environ, claim="deliver")
         self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("main"), self.git_verbs),
-                         (sd_lane.DEFAULT_BRANCH, [], before, []))
+                         (sd_lane.DEFAULT_BRANCH, [], before, ["ls-remote"]))
         head = git(self.repo, "rev-parse", "HEAD")
         self.assertEqual(sd_lane.publish_head(self.repo, "", head), sd_lane.DEFAULT_BRANCH)
+
+    def test_with_no_local_origin_head_the_default_branch_is_origins_not_a_guess(self) -> None:
+        """Failure table, enqueue: no local `origin/HEAD`, and origin's default is `trunk`, not the local `main`."""
+        git(self.repo, "push", "-q", "origin", "main:refs/heads/trunk")
+        git(self.origin, "symbolic-ref", "HEAD", "refs/heads/trunk")
+        before = self.remote_tip("trunk")
+        tree, _ = self.committed("trunk", "unreviewed")
+        self.assertEqual(git(self.repo, "for-each-ref", "refs/remotes/origin/HEAD"), "")
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+        self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("trunk"), "push" in self.git_verbs),
+                         (sd_lane.DEFAULT_BRANCH, [], before, False))
+
+    def test_a_stale_local_origin_head_does_not_hide_origins_default_branch(self) -> None:
+        """Failure table, enqueue: the local `origin/HEAD` still names `old`; origin's HEAD is `main`."""
+        git(self.repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/old")
+        before = self.remote_tip("main")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "unreviewed")
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.enqueue_entry(self.repo, 1, "t", self.body, self.environ, claim="deliver")
+        self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("main"), "push" in self.git_verbs),
+                         (sd_lane.DEFAULT_BRANCH, [], before, False))
+
+    def test_an_origin_that_names_no_default_branch_is_unknown_and_pushes_nothing(self) -> None:
+        """Failure table, enqueue: origin advertises no HEAD symref; the lane does not guess one."""
+        git(self.origin, "symbolic-ref", "HEAD", "refs/heads/unborn")
+        tree, _ = self.committed("topic", "work")
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+        self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("topic"), "push" in self.git_verbs),
+                         (sd_lane.PUBLISH_UNKNOWN, [], None, False))
 
     def test_enqueue_publishes_the_expected_head_and_not_the_branch_tip(self) -> None:
         """Failure table, enqueue: the tip moved past `--expected-head`; the explicit refspec publishes that head."""
@@ -1407,7 +1438,7 @@ class Retrying(SharedQueue):
         retried = sd_lane.retry(self.repo, 1, self.environ)
         self.assertEqual((retried["status"], retried["branch"], self.remote_tip("topic")), ("pending", "topic", head))
 
-    def test_retry_of_an_entry_on_the_default_branch_refuses_before_it_reaches_origin(self) -> None:
+    def test_retry_of_an_entry_on_the_default_branch_refuses_before_any_push(self) -> None:
         """Failure table, retry: an older version queued a main checkout; retry pushes nothing to main."""
         before = self.remote_tip("main")
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "unreviewed")
@@ -1416,7 +1447,7 @@ class Retrying(SharedQueue):
         with self.assertRaises(sd_lane.LaneError) as refused:
             sd_lane.retry(self.repo, 1, self.environ)
         self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("main"), self.git_verbs),
-                         (sd_lane.DEFAULT_BRANCH, rows, before, []))
+                         (sd_lane.DEFAULT_BRANCH, rows, before, ["ls-remote"]))
 
     def test_retry_after_the_branch_and_worktree_went_refuses_and_writes_no_row(self) -> None:
         """Failure table, retry: the commit is gone here and on origin; `head_gone` names where it was queued."""

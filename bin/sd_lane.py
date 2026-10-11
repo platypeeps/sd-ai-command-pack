@@ -50,8 +50,8 @@ earlier version left there is imported once (`import_file_queue`).
 Another host runs an entry only from a commit on `origin`, so enqueue,
 retry and the import of a pending entry publish its head first, by
 `<head>:refs/heads/<branch>`, never the tip, never with force and never to
-`origin`'s default branch (`publish_head`). A failed read, fetch or push is
-an unknown answer, not a "no": nothing is queued.
+the default branch `origin` advertises (`publish_head`). A failed read,
+fetch or push is an unknown answer, not a "no": nothing is queued.
 
 A claim reads the lane host and takes the first pending entry in one
 transaction, and refuses while another entry of the repository runs. It
@@ -467,10 +467,12 @@ def publish_head(root: pathlib.Path, branch: str, head: str) -> str | None:
     entry names. A tip that is `head` or contains it pushes nothing. The two
     answers are definite: the same push can never succeed. A failed read,
     fetch or push raises `PUBLISH_UNKNOWN`: `origin` may have moved.
-    No branch, or `origin`'s default branch, answers `DEFAULT_BRANCH` before
-    any read of `origin`: a push there lands commits no pull request reviewed.
+    No branch, or `origin`'s default branch, answers `DEFAULT_BRANCH`: a push
+    there lands commits no pull request reviewed. The default branch is the
+    `HEAD` symref `origin` advertises in the same read as the tip, never a
+    local `origin/HEAD` or a guess; no symref is `PUBLISH_UNKNOWN`.
     """
-    if not branch or branch == sd_lib.remote_default(root, "origin"):
+    if not branch:
         return DEFAULT_BRANCH
     ref = f"refs/heads/{branch}"
 
@@ -487,8 +489,15 @@ def publish_head(root: pathlib.Path, branch: str, head: str) -> str | None:
 
     def descends(newer: str, older: str) -> bool:
         return answer("merge-base", "--is-ancestor", older, newer, ok=(0, 1)).returncode == 0
-    listed = answer("ls-remote", "origin", ref).stdout.split()
-    tip = listed[0] if listed else None
+    listed = [line.split("\t") for line in answer("ls-remote", "--symref", "origin", "HEAD", ref).stdout.splitlines()]
+    default = next((name.removeprefix("ref: refs/heads/") for name, *rest in listed
+                    if rest == ["HEAD"] and name.startswith("ref: refs/heads/")), None)
+    if default is None:
+        raise LaneError(f"Cannot tell whether {branch} is origin's default branch: origin advertised no HEAD branch. "
+                        "Nothing was queued or pushed; retry when origin answers.", code=PUBLISH_UNKNOWN)
+    if branch == default:
+        return DEFAULT_BRANCH
+    tip = next((name for name, *rest in listed if rest == [ref]), None)
     if tip == head:
         return None
     if tip and not has(tip):
