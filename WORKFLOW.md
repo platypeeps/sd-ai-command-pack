@@ -380,6 +380,9 @@ The rules for them:
   agent or session that changes files works in its own git worktree or clone.
   Prefer a patch-only worker: it returns a diff, and one integrator applies
   it. Never start a second writer in a checkout that already has one.
+- **Make worktrees outside the repositories folder.** Use a sibling folder such
+  as `~/worktrees/<repository>-<branch>`: a tool that reads every folder under
+  the repositories folder as a checkout would take a worktree for one.
 - **One lane lands the work.** Several workers may produce patches or
   pull requests. One lane merges them, one at a time. Metadata that orders
   the landings — a session number, a journal or ledger entry, a changelog
@@ -543,6 +546,10 @@ The rules for them:
   checkout when it is on the default branch. When that checkout holds the
   running `sd-ship`, it first tries every other lane's runner lock once and
   skips if one is held; the next landing retries.
+- **Clean up after a merge, once its builder has stopped.** Remove the clean
+  worktree, its local branches, its build output and agents nothing uses; keep
+  unpushed unmerged work. A live builder holds its worktree open, and a
+  removal under it loses its writes.
 - **Each lane runs on its lane host (sd:3003).** `repo.lane_host` names the
   machine that runs a repository's lane; NULL means the hub. Off that host,
   `sd-ship merge`, `reconcile`, `review`, `adjudicate --accept-dispositions`
