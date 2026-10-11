@@ -17,6 +17,7 @@ import io
 import json
 import os
 import pathlib
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -309,6 +310,12 @@ class DirectProvisioningAfterANewerReconcile(ReprovisionAfterMerge):
         topic = self.commit("lib/sd_db/b.py")
         code, _ = self.make_setup(installed)
         self.assertEqual((code, self.calls), (0, [topic]))
+
+    def test_a_checkout_git_cannot_pin_leaves_the_report_to_the_install(self) -> None:
+        """No pin, no ancestry check: `provision_library` names why it cannot install."""
+        shutil.rmtree(self.pack / ".git")
+        code, _ = self.make_setup("e" * 40)
+        self.assertEqual((code, self.calls), (0, [None]))
 
 
 class SchemaGuardReadsTheEnvironmentItProtects(unittest.TestCase):
