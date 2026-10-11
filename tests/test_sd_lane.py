@@ -29,6 +29,8 @@ sys.path.insert(0, str(REPO_ROOT / "bin"))
 
 import sd_lane  # noqa: E402
 
+from tests.clean_env import clean_environment  # noqa: E402
+
 
 def git(root: pathlib.Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
@@ -1365,6 +1367,106 @@ class ClaimAndLease(SharedQueue):
         released = sd_lane.cancel(self.repo, 1, self.environ)
         self.assertEqual(released["status"], "failed")
         self.assertIn("a merge may have landed", released["reason"])
+
+    def elsewhere(self) -> None:
+        """The running entry's holder is on another machine, so a release counts it stuck on the operator's word."""
+        sd_lane.update(self.store(), lambda rows: [row["holder"].update(host="build-2") for row in rows
+                                                   if row.get("status") == "running"])
+
+    def test_a_bound_release_refuses_a_step_the_caller_did_not_see(self) -> None:
+        """Failure table, release (sd:3330): prepare moved to merge between the read and the cancel."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        entry = sd_lane.claim_entry(self.store(), "seen")
+        seen = f"{self.entries()[0]['holder']['token']}:{self.entries()[0]['step']}"
+        sd_lane.advance(self.store(), entry, "seen")
+        self.elsewhere()
+        before = self.rows()
+        with self.assertRaises(sd_lane.LaneError) as stale:
+            sd_lane.cancel(self.repo, 1, self.environ, expected_claim=seen)
+        self.assertEqual((stale.exception.code, self.rows()), (sd_lane.STALE_CLAIM, before))
+        with self.assertRaisesRegex(sd_lane.LaneError, "<holder token>:<step>"):  # a token alone names no step
+            sd_lane.cancel(self.repo, 1, self.environ, expected_claim="seen")
+        released = sd_lane.cancel(self.repo, 1, self.environ, expected_claim="seen:merge")
+        self.assertEqual((released["status"], released["released"]), ("failed", True))
+
+    def test_a_bound_release_refuses_a_reclaimed_entry_at_the_same_revision(self) -> None:
+        """Failure table, release (sd:3330): recovery put the entry back and a new runner claimed it again."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, claim="deliver")
+        sd_lane.claim_entry(self.store(), "seen")
+        self.elsewhere()
+        revision = sd_lane.queue_revision(self.entries())
+        sd_lane.update(self.store(), lambda rows: rows[0].update(lease_until="2020-01-01T00:00:00Z"))
+        reclaimed: list[dict] = []
+        again = sd_lane.claim_entry(self.store(), "new", reclaimed)
+        self.elsewhere()
+        self.assertEqual((reclaimed[0]["status"], again["item"], sd_lane.queue_revision(self.entries())),
+                         ("pending", 1, revision))  # the revision alone cannot tell the two claims apart
+        before = self.rows()
+        with self.assertRaises(sd_lane.LaneError) as stale:
+            sd_lane.cancel(self.repo, 1, self.environ, expected_revision=revision, expected_claim="seen:prepare")
+        self.assertEqual((stale.exception.code, self.rows()), (sd_lane.STALE_CLAIM, before))
+        self.assertEqual(self.entries()[0]["holder"]["token"], "new")
+
+    def test_a_bound_release_refuses_a_finished_entry_and_another_items_entry(self) -> None:
+        """Failure table, release (sd:3330): the claim ended before the cancel, and its item was queued again."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, claim="deliver")
+        entry = sd_lane.claim_entry(self.store(), "seen")
+        self.elsewhere()
+        before = self.rows()
+        with self.assertRaises(sd_lane.LaneError) as other:  # item 1's claim names no entry of item 2
+            sd_lane.cancel(self.repo, 2, self.environ, expected_claim="seen:prepare")
+        self.assertEqual((other.exception.code, self.rows()), (sd_lane.STALE_CLAIM, before))
+        sd_lane.finish_entry(self.store(), entry, "seen", {"status": "failed", "step": "prepare", "reason": "red"})
+        sd_lane.retry(self.repo, 1, self.environ)
+        before = self.rows()
+        with self.assertRaises(sd_lane.LaneError) as finished:
+            sd_lane.cancel(self.repo, 1, self.environ, expected_claim="seen:prepare")
+        self.assertEqual((finished.exception.code, self.rows()), (sd_lane.STALE_CLAIM, before))
+        self.assertEqual([row["status"] for row in self.entries() if row["item"] == 1], ["failed", "pending"])
+
+    def test_the_claim_is_compared_under_the_queue_lock(self) -> None:
+        """A step write that lands while the cancel waits for the hub's write lock is caught (sd:3330)."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.claim_entry(self.store(), "seen")
+        self.elsewhere()
+        refused: list[str | None] = []
+
+        def bound_cancel() -> None:
+            try:
+                sd_lane.cancel(self.repo, 1, self.environ, expected_claim="seen:prepare")
+            except sd_lane.LaneError as error:
+                refused.append(error.code)
+        import sd_db
+        writer = sd_db.connect(home=self.tmp)
+        self.addCleanup(writer.close)
+        with sd_db.database.transaction(writer):  # BEGIN IMMEDIATE: the cancel waits for it
+            canceller = threading.Thread(target=bound_cancel)
+            canceller.start()
+            time.sleep(0.5)
+            [row] = sd_lane.stored(writer, "example/pack")
+            sd_lane.store(writer, "example/pack", {**row, "step": "merge"})
+        canceller.join(30)
+        self.assertEqual((refused, self.entries()[0]["status"], self.entries()[0]["step"]),
+                         ([sd_lane.STALE_CLAIM], "running", "merge"))
+
+    def test_cancel_takes_the_claim_list_prints_and_unbound_keeps_todays_behaviour(self) -> None:
+        """`--expected-claim <holder.token>:<step>` from `lane list`; a stale one exits 3 with its code (sd:3330)."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.claim_entry(self.store(), "seen")
+        self.elsewhere()
+
+        def lane(*args: str) -> tuple[int, dict]:
+            done = subprocess.run([sys.executable, str(REPO_ROOT / "bin/sd-ship"), "-C", str(self.repo), "lane", *args],
+                                  env=clean_environment(**self.environ), capture_output=True, text=True, timeout=120)
+            return done.returncode, json.loads(done.stdout)
+        [row] = lane("list")[1]["entries"]
+        code, refused = lane("cancel", "1", "--expected-claim", f"{row['holder']['token']}:merge")
+        self.assertEqual((code, refused["code"]), (3, sd_lane.STALE_CLAIM))
+        code, released = lane("cancel", "1", "--expected-claim", f"{row['holder']['token']}:{row['step']}")
+        self.assertEqual((code, released["status"]), (0, "pending"))
+        self.assertEqual(lane("cancel", "1")[1]["status"], "cancelled")  # unbound: a pending entry, as before
 
     def test_an_expired_lease_with_a_live_pid_on_this_host_keeps_the_entry_running(self) -> None:
         """Failure table, prepare: the lease passed while the holder slept; same host, live pid: no reclaim."""
