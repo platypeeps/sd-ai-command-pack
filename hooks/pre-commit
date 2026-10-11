@@ -79,8 +79,8 @@ DEV_REQUIREMENT = "ruff"
 # half-built -- by a run still going, or by one that died. Every place that
 # resolves a `.venv` treats it the same way: as an environment that is not
 # there. The name is shared by spelling and not by import, because the
-# Makefile is the writer and it cannot import either of us; a rename has to
-# be made in all three, and `tests/test_sd_lib.py` fails if one is missed.
+# Makefile is the writer and it cannot import this hook; a rename has to
+# be made in both, and `tests/test_sd_lib.py` fails if one is missed.
 MID_PROVISION = "sd-provisioning"
 # The bound tests/test_code_health.py reads a shebang with: the whole first
 # line, capped so a binary is not read to its end.

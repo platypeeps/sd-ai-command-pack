@@ -1281,18 +1281,16 @@ class BorrowedEnvironmentTests(unittest.TestCase):
         self.assertNotIn("refusing-to-borrow", done.stderr)
 
     def test_every_implementation_spells_the_marker_the_same(self) -> None:
-        """Three writers of one name, and no import between them.
+        """Two users of one name, and no import between them.
 
-        The Makefile writes the file; `bin/sd_lib.py` and `hooks/pre-commit`
-        read it. The Makefile cannot import either, so the name is shared by
-        spelling -- which is only safe while something fails when one of the
-        three is renamed alone.
+        The Makefile writes the file and `hooks/pre-commit` reads it. The
+        Makefile cannot import the hook, so the name is shared by spelling --
+        which is only safe while something fails when one is renamed alone.
         """
 
         root = pathlib.Path(__file__).resolve().parents[1]
-        self.assertEqual(sd_lib.MID_PROVISION, "sd-provisioning")
         for path in (root / "Makefile", root / "hooks" / "pre-commit"):
-            self.assertIn(sd_lib.MID_PROVISION, path.read_text(encoding="utf-8"),
+            self.assertIn("sd-provisioning", path.read_text(encoding="utf-8"),
                           f"{path.name} does not name the marker")
 
     def test_an_environment_that_matches_is_borrowed(self) -> None:
@@ -1683,121 +1681,6 @@ exit 0
         self.assertIn("Unable to create directory", done.stderr + done.stdout)
 
 
-class ProvisionedLibraryTests(unittest.TestCase):
-    """Which checkouts the `sd_db` probe will look in.
-
-    `make setup` provisions one virtualenv, into the checkout it ran in. The
-    doctrine puts every writer in a linked worktree, which has none, so until
-    2026-09-22 every entrypoint run in one found no `sd_db` and answered from
-    git instead -- `sd-review` reported `registry_unavailable` and asked for a
-    library that was already installed in the main checkout.
-    """
-
-    def setUp(self) -> None:
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.tmp = pathlib.Path(self._tmp.name).resolve()
-
-    def git(self, *args: str, cwd: pathlib.Path) -> None:
-        subprocess.run(["git", *args], cwd=cwd, check=True,
-                       capture_output=True, text=True)
-
-    def test_a_linked_worktree_offers_the_main_checkout_too(self) -> None:
-        main = self.tmp / "main"
-        main.mkdir()
-        self.git("init", "-q", "-b", "main", cwd=main)
-        self.git("-c", "user.email=t@t", "-c", "user.name=t",
-                 "commit", "-q", "--allow-empty", "-m", "root", cwd=main)
-        linked = self.tmp / "linked"
-        self.git("worktree", "add", "-q", str(linked), cwd=main)
-
-        # The probe reads its own location, so it is asked from each checkout
-        # in turn by pointing `__file__` at that checkout's `bin/`.
-        for root in (main, linked):
-            (root / "bin").mkdir(exist_ok=True)
-        with unittest.mock.patch.object(
-                sd_lib, "__file__", str(linked / "bin" / "sd_lib.py")):
-            roots = sd_lib._checkouts_that_may_hold_a_venv()
-        self.assertEqual(roots, [linked, main])
-
-    def test_the_main_checkout_offers_only_itself(self) -> None:
-        """No second entry, so a checkout with its own virtualenv keeps it."""
-
-        main = self.tmp / "solo"
-        main.mkdir()
-        self.git("init", "-q", "-b", "main", cwd=main)
-        (main / "bin").mkdir()
-        with unittest.mock.patch.object(
-                sd_lib, "__file__", str(main / "bin" / "sd_lib.py")):
-            self.assertEqual(sd_lib._checkouts_that_may_hold_a_venv(), [main])
-
-    def test_a_mid_provision_checkout_is_not_offered(self) -> None:
-        """A marked `.venv` is skipped, so the probe never reads into it.
-
-        The `site-packages` under an environment `make setup` is rebuilding
-        belongs to the run that is still going, to one that died, or to
-        neither. Answering from git is the same fallback an unprovisioned
-        checkout already gets, and it is the better of the two.
-        """
-
-        main = self.tmp / "main"
-        main.mkdir()
-        self.git("init", "-q", "-b", "main", cwd=main)
-        self.git("-c", "user.email=t@t", "-c", "user.name=t",
-                 "commit", "-q", "--allow-empty", "-m", "root", cwd=main)
-        linked = self.tmp / "linked"
-        self.git("worktree", "add", "-q", str(linked), cwd=main)
-        for root in (main, linked):
-            (root / "bin").mkdir(exist_ok=True)
-        (main / ".venv").mkdir()
-        (main / ".venv" / sd_lib.MID_PROVISION).write_text("building\n",
-                                                           encoding="utf-8")
-        with unittest.mock.patch.object(
-                sd_lib, "__file__", str(linked / "bin" / "sd_lib.py")):
-            self.assertEqual(sd_lib._checkouts_that_may_hold_a_venv(), [linked])
-
-    def test_a_local_environment_wins_an_equal_version_in_the_main_checkout(self) -> None:
-        """Checkout order outranks the version sort, not the other way round.
-
-        Ranking every candidate in one list sorts by version first, so two
-        equal versions fall back to comparing paths -- and a worktree that
-        deliberately provisioned its own copy loses to the main checkout on
-        nothing but the spelling of its directory. The names here are chosen
-        so that the wrong implementation fails: `z-main` sorts above
-        `a-linked`.
-        """
-
-        linked, main = self.tmp / "a-linked", self.tmp / "z-main"
-        for root in (linked, main):
-            (root / ".venv/lib/python3.13/site-packages/sd_db").mkdir(parents=True)
-        with unittest.mock.patch.object(
-                sd_lib, "_checkouts_that_may_hold_a_venv", lambda: [linked, main]):
-            found = sd_lib._provisioned_library_paths()
-        self.assertEqual(len(found), 2)
-        self.assertTrue(found[0].startswith(str(linked)), found)
-
-    def test_newest_first_still_holds_inside_one_checkout(self) -> None:
-        """The rebuilt-virtualenv case the version sort was written for."""
-
-        root = self.tmp / "one"
-        for version in ("3.9", "3.13"):
-            (root / f".venv/lib/python{version}/site-packages/sd_db").mkdir(parents=True)
-        with unittest.mock.patch.object(
-                sd_lib, "_checkouts_that_may_hold_a_venv", lambda: [root]):
-            found = sd_lib._provisioned_library_paths()
-        self.assertEqual([p.split("/lib/")[1].split("/")[0] for p in found],
-                         ["python3.13", "python3.9"])
-
-    def test_outside_a_repository_it_is_still_one_root(self) -> None:
-        """Git refusing is not an error here; the probe just has one place."""
-
-        loose = self.tmp / "loose"
-        (loose / "bin").mkdir(parents=True)
-        with unittest.mock.patch.object(
-                sd_lib, "__file__", str(loose / "bin" / "sd_lib.py")):
-            self.assertEqual(sd_lib._checkouts_that_may_hold_a_venv(), [loose])
-
-
 class TheCheckoutLibraryAnswersFirst(unittest.TestCase):
     """sd:3278. `import_sd_db` reads `<checkout>/lib` before any installed copy.
 
@@ -1837,9 +1720,12 @@ class TheCheckoutLibraryAnswersFirst(unittest.TestCase):
     def test_the_checkout_lib_wins_over_an_importable_pythonpath_copy(self) -> None:
         self.assertEqual(self.answer(PYTHONPATH=str(self.root.parent / "elsewhere")), "lib")
 
-    def test_a_lib_that_will_not_import_falls_back_to_the_venv_copy(self) -> None:
+    def test_a_lib_that_will_not_import_is_reported_and_no_venv_copy_answers(self) -> None:
+        """sd:3280. No copy is provisioned any more, so a stale one left in `.venv` is never run."""
         self.copy(self.root / "lib", "lib", body="raise ImportError('broken on purpose')\n")
-        self.assertEqual(self.answer(), "venv")
+        answer = self.answer()
+        self.assertIn("broken on purpose", answer)
+        self.assertNotEqual(answer, "venv")
 
 
 #: A fake `sd_db` that reads its database's version from a file: `FAKE_DB` holds the number,
@@ -1876,14 +1762,13 @@ def schema_version(connection):
 """
 
 
-class TheCheckoutLibraryMatchesTheDatabase(unittest.TestCase):
-    """sd:3278 review round 1. `lib/` answers only when it builds the database's schema.
+class TheCheckoutLibraryIsTheOnlyCopy(unittest.TestCase):
+    """sd:3280. `lib/` answers whatever schema or build the database or hub wants.
 
-    A worktree whose `lib/` adds a migration, or one left behind a migrated
-    database, would otherwise open the live database with the wrong library:
-    writes refuse with `SchemaTooOld`, or every open with `SchemaTooNew`. The
-    guarded installed copy answers instead when it matches; when neither
-    matches, `lib/` answers and its own open names both versions.
+    Step 1 let a provisioned `.venv` copy answer when it matched the database
+    and `lib/` did not (sd:3278 review round 1). Step 3 provisions no copy, so a
+    copy still in `.venv` is stale by definition and never runs; `lib/`'s own
+    open names both versions, and the hub's refusal names `repo-sync.sh follow`.
     """
 
     def setUp(self) -> None:
@@ -1891,76 +1776,39 @@ class TheCheckoutLibraryMatchesTheDatabase(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.root = pathlib.Path(self._tmp.name).resolve() / "pack"
         (self.root / "bin").mkdir(parents=True)
-        for name in ("sd_lib.py", "sd_library_guard.py"):
-            shutil.copy2(REPO_ROOT / "bin" / name, self.root / "bin" / name)
+        shutil.copy2(REPO_ROOT / "bin" / "sd_lib.py", self.root / "bin" / "sd_lib.py")
         self.database = self.root.parent / "sd.db"
 
-    def library(self, where: str, built: int, *, prefix: str = "") -> None:
+    def library(self, where: str, built: int) -> None:
         folder = self.root / ".venv/lib/python3.13/site-packages" if where == "venv" else self.root / where
         (folder / "sd_db").mkdir(parents=True, exist_ok=True)
-        (folder / "sd_db" / "__init__.py").write_text(
-            prefix + FAKE_LIBRARY.format(built=built, where=where), encoding="utf-8")
+        (folder / "sd_db" / "__init__.py").write_text(FAKE_LIBRARY.format(built=built, where=where),
+                                                    encoding="utf-8")
         (folder / "sd_db" / "schema.py").write_text(f"SCHEMA_VERSION = {built}\n", encoding="utf-8")
         (folder / "sd_db" / "BUILD").write_text(f"build-{where}", encoding="utf-8")
 
-    def answer(self, lib: int, venv: int, database: str | None) -> str:
+    def answer(self, lib: int, venv: int, database: str) -> str:
         from tests.clean_env import clean_environment
         self.library("lib", lib)
         self.library("venv", venv)
-        if database is not None:
-            self.database.write_text(database, encoding="utf-8")
+        self.database.write_text(database, encoding="utf-8")
         code = ("import sys; sys.path.insert(0, sys.argv[1]); import sd_lib; "
-                "first = sd_lib.import_sd_db().module; second = sd_lib.import_sd_db().module; "
-                "print(first.WHERE, second.WHERE)")
+                "got = sd_lib.import_sd_db().module; print(got.WHERE, "
+                "any('site-packages' in entry for entry in sys.path))")
         done = subprocess.run([sys.executable, "-S", "-c", code, str(self.root / "bin")],
                               capture_output=True, text=True, check=False,
                               env=clean_environment(FAKE_DB=str(self.database)))
         self.assertEqual(done.returncode, 0, done.stderr)
         return done.stdout.strip()
 
-    def test_lib_answers_when_it_builds_the_database_s_schema(self) -> None:
-        self.assertEqual(self.answer(lib=27, venv=27, database="27"), "lib lib")
+    def test_a_checkout_ahead_of_the_database_runs_lib_not_a_matching_venv_copy(self) -> None:
+        self.assertEqual(self.answer(lib=28, venv=27, database="27"), "lib False")
 
-    def test_lib_answers_when_there_is_no_database(self) -> None:
-        self.assertEqual(self.answer(lib=28, venv=27, database=None), "lib lib")
+    def test_a_worktree_behind_a_migrated_database_runs_lib_not_a_matching_venv_copy(self) -> None:
+        self.assertEqual(self.answer(lib=27, venv=28, database="28"), "lib False")
 
-    def test_a_checkout_ahead_of_the_database_runs_the_matching_installed_copy(self) -> None:
-        self.assertEqual(self.answer(lib=28, venv=27, database="27"), "venv venv")
-
-    def test_a_worktree_behind_a_migrated_database_runs_the_matching_installed_copy(self) -> None:
-        self.assertEqual(self.answer(lib=27, venv=28, database="28"), "venv venv")
-
-    def test_with_neither_copy_matching_lib_answers_and_its_open_names_both_versions(self) -> None:
-        self.assertEqual(self.answer(lib=28, venv=26, database="27"), "lib lib")
-
-    def test_an_unreadable_database_version_is_unknown_and_keeps_lib(self) -> None:
-        self.assertEqual(self.answer(lib=28, venv=27, database="not a number"), "lib lib")
-
-    def test_a_satellite_whose_hub_refuses_lib_s_build_runs_the_copy_with_the_hub_s_build(self) -> None:
-        self.assertEqual(self.answer(lib=27, venv=27, database="hub:build-venv"), "venv venv")
-
-    def test_a_satellite_whose_hub_refuses_both_builds_keeps_lib(self) -> None:
-        self.assertEqual(self.answer(lib=27, venv=27, database="hub:build-other"), "lib lib")
-
-    def test_a_matching_copy_that_will_not_import_gives_way_to_the_next(self) -> None:
-        newer = ".venv/lib/python3.14/site-packages"
-        self.library(newer, 27, prefix="import sd_db.schema\nraise RuntimeError('broken on purpose')\n")
-        self.assertEqual(self.answer(lib=28, venv=27, database="27"), "venv venv")
-
-    def test_with_every_matching_copy_broken_lib_comes_back_whole(self) -> None:
-        from tests.clean_env import clean_environment
-        self.library("lib", 28)
-        self.library("venv", 27, prefix="import sd_db.schema\nraise RuntimeError('broken on purpose')\n")
-        self.database.write_text("27", encoding="utf-8")
-        code = ("import sys; sys.path.insert(0, sys.argv[1]); import sd_lib; "
-                "got = sd_lib.import_sd_db().module; import sd_db.schema; "
-                "print(got.WHERE, sys.modules['sd_db'] is got, sd_db.schema.__file__.split('/pack/')[1], "
-                "any('site-packages' in entry for entry in sys.path))")
-        done = subprocess.run([sys.executable, "-S", "-c", code, str(self.root / "bin")],
-                              capture_output=True, text=True, check=False,
-                              env=clean_environment(FAKE_DB=str(self.database)))
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(done.stdout.split(), ["lib", "True", "lib/sd_db/schema.py", "False"])
+    def test_a_satellite_whose_hub_wants_the_venv_copy_s_build_still_runs_lib(self) -> None:
+        self.assertEqual(self.answer(lib=27, venv=27, database="hub:build-venv"), "lib False")
 
 
 class TheCopyHashesLikeItsSource(unittest.TestCase):

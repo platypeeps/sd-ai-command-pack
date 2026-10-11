@@ -3287,8 +3287,8 @@ roles:
         """
         pack = self.directory / f"pack-{library}"
         shutil.copytree(ROOT / "bin", pack / "bin")
-        site = pack / f".venv/lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
-        site.parent.mkdir(parents=True)
+        # The pack's own `lib/` is where `import_sd_db` looks, and the only place (sd:3280).
+        site = pack / "lib"
         site.mkdir()
         # A real copy of the package, and deliberately NOT a symlink to
         # `SITE_PACKAGES`. Symlinking the whole directory worked -- the only

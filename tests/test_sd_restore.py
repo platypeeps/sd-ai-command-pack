@@ -99,14 +99,6 @@ class WithoutTheLibrary(unittest.TestCase):
         sys.modules.pop("sd_db", None)
         self.blocker = NoLibrary()
         sys.meta_path.insert(0, self.blocker)
-        # Nothing provisioned either. `sd_restore` goes through
-        # `sd_lib.import_sd_db`, whose second try reads the checkout's own
-        # `.venv`; on a checkout that has run `make setup` the blocker would
-        # then describe a provisioned copy that will not import, which is the
-        # other fault and has its own test below.
-        provisioned = patch("sd_lib._provisioned_library_paths", return_value=[])
-        provisioned.start()
-        self.addCleanup(provisioned.stop)
 
     def tearDown(self) -> None:
         sys.meta_path.remove(self.blocker)
@@ -141,15 +133,18 @@ class WithoutTheLibrary(unittest.TestCase):
         """sd:746. The installer has run; telling its owner to run it again is wrong.
 
         `NOT_INSTALLED` names `sd-install` as the remedy, which is right only
-        when there was nothing to try. With a provisioned copy offered and
+        when there was nothing to try. With the checkout's `lib/` copy there and
         refusing, the helper's sentence names that copy and quotes its error.
         """
-        with patch("sd_lib._provisioned_library_paths", return_value=["/pack/.venv/site-packages"]):
+        import sd_lib
+
+        broken = sd_lib.Imported(None, "sd_db is provisioned at /pack/lib but will not import: broken", "/pack/lib")
+        with patch("sd_lib.import_sd_db", return_value=broken):
             with self.assertRaises(sd_restore.RestoreRefusal) as raised:
                 sd_restore.resume(argparse.Namespace())
         message = str(raised.exception)
-        self.assertIn("provisioned at /pack/.venv/site-packages", message)
-        self.assertIn("blocked by the test", message)
+        self.assertIn("provisioned at /pack/lib", message)
+        self.assertIn("will not import: broken", message)
         self.assertNotIn("sd-install", message)
 
 

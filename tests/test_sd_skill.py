@@ -589,14 +589,10 @@ class TheLibraryDoor(unittest.TestCase):
         self.assertIn("no output", report)
 
     def test_a_library_that_will_not_import_leaves_the_render_working(self) -> None:
-        """No library anywhere: nothing on `sys.path` and nothing provisioned.
+        """No library anywhere: the blocker answers before the checkout's `lib/`.
 
-        Pinned to that branch. `open_library` goes through `sd_lib.import_sd_db`,
-        whose second try reads the checkout's own `.venv`; on a checkout that
-        has one (CI, the main checkout) the blocker would otherwise describe a
-        provisioned copy that will not import, and these assertions would pass
-        about the other fault. The retry also prepends to `sys.path`, which is
-        put back so no later test inherits it.
+        `open_library` goes through `sd_lib.import_sd_db`, which prepends
+        `lib/` to `sys.path`; that is put back so no later test inherits it.
         """
         blocker = NoLibrary()
         sys.meta_path.insert(0, blocker)
@@ -607,9 +603,7 @@ class TheLibraryDoor(unittest.TestCase):
         self.addCleanup(sys.path.__setitem__, slice(None), saved_path)
         for name in [n for n in sys.modules if n == "sd_db" or n.startswith("sd_db.")]:
             del sys.modules[name]
-        helper = sd_install.sibling("sd_lib")
-        with patch.object(helper, "_provisioned_library_paths", return_value=[]):
-            connection, reason = sd_install.open_library(self.context())
+        connection, reason = sd_install.open_library(self.context())
         self.assertIsNone(connection)
         self.assertEqual(
             reason, "sd_db is not installed here: sd_db is not installed (blocked by the test); trials unavailable"

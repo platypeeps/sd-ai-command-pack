@@ -103,12 +103,10 @@ def sessions_root(environ: dict[str, str] | None = None) -> pathlib.Path:
 
 def _library():
     """Import `sd_db`, or refuse with the remedy rather than a traceback."""
-    # Through `sd_lib.import_sd_db`, which makes the second try against the
-    # copy `make setup` provisioned (sd:746): `sd` runs under whatever
-    # `python3` is on PATH, and one try here refused on every machine with the
-    # installer as the remedy for a library already installed. A provisioned
-    # copy that will not import gets the helper's sentence, which names it and
-    # quotes its error; `NOT_INSTALLED` is for a machine with nothing to try.
+    # Through `sd_lib.import_sd_db`, which reads the checkout's own `lib/`:
+    # `sd` runs under whatever `python3` is on PATH (sd:746, sd:3280). A
+    # `lib/` copy that will not import gets the helper's sentence, which names
+    # it and quotes its error; `NOT_INSTALLED` is for a machine with nothing to try.
     import sd_lib  # noqa: PLC0415 - a sibling; `bin/sd` puts `bin/` on the path
 
     imported = sd_lib.import_sd_db()

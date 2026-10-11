@@ -6,14 +6,10 @@ system's `local-sd-db/sd-db.sh` with its folder pointed at `lib/`, for the
 verbs that run the library: the same verbs, arguments and exit codes.
 
 Every verb takes its library from `sd_lib.import_sd_db`, which reads `lib/`
-first. `init`, `migrate` and `status` keep `lib/`: they move the database to
-its schema or report both versions. Every other verb takes `lib/` when it
-opens the database, else a provisioned copy that does (sd:3278 review
-round 1). A `PYTHONPATH` entry never answers in their place.
+and nothing else (sd:3280). A `PYTHONPATH` entry never answers in its place.
 
 Not carried over. `library`, `release` and `SD_DB_LIBRARY` chose between the
-checkout and an installed copy, and step 3 of the design deletes them: here
-there is one copy. `test`, `check`, `build` and `install` build or test
+checkout and an installed copy; here there is one copy. `test`, `check`, `build` and `install` build or test
 system's checkout; step 2 decides what replaces them.
 """
 
@@ -25,9 +21,6 @@ import subprocess
 import sys
 from pathlib import Path
 from typing import Any
-
-#: The verbs that move the database to `lib/`'s schema, or report both versions.
-SCHEMA_VERBS = ("init", "migrate", "status")
 
 #: The verbs `sd_db.jobs.cli` answers; `sd-db.sh` hands each one straight to it.
 CLI_VERBS = ("init", "migrate", "status", "restore", "repo", "item", "work",
@@ -109,7 +102,7 @@ def dispatch_verb(argv: list[str]) -> int:
         return 1
     import sd_lib  # noqa: PLC0415 - bin/ is this script's own path entry
 
-    imported = sd_lib.import_sd_db(match_database=verb not in SCHEMA_VERBS)
+    imported = sd_lib.import_sd_db()
     if imported.module is None:
         print(f"sd-db: {imported.problem}", file=sys.stderr)
         return 1

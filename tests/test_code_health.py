@@ -1533,7 +1533,7 @@ UNSHIELDED = {
     "test_sd_issue_guard.py": 2,
     "test_sd_jev_shadow.py": 4,
     "test_sd_lane.py": 6,
-    "test_sd_lib.py": 9,
+    "test_sd_lib.py": 8,
     "test_sd_local_gate.py": 3,
     "test_sd_managed.py": 3,
     "test_sd_plugin.py": 1,

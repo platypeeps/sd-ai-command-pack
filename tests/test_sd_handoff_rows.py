@@ -352,7 +352,7 @@ class TheRefusalNamesTheFault(unittest.TestCase):
     `bin/sd-note` and `bin/sd` print a `RowsRefusal` verbatim to a human, so
     the sentence this module chooses is the whole of what that person gets.
     `NOT_INSTALLED` is right for one of the two faults and misleading for the
-    other: a virtualenv holding an `sd_db` that raises on import is not a
+    other: a `lib/` holding an `sd_db` that raises on import is not a
     machine without the library, and telling its owner to run the installer
     sends them to provision a package already sitting there while discarding
     the error that says what is wrong with it.
@@ -361,15 +361,15 @@ class TheRefusalNamesTheFault(unittest.TestCase):
     `tests/test_status_source.py` gives: the run that reaches this test
     necessarily has a working `sd_db`, and `-S` with a copied tree is the only
     honest way to describe a machine that does not. Binding the name to `None`
-    in `sys.modules` cannot express it -- that defeats the retry as well as
-    the first try, and the retry is the thing under test.
+    in `sys.modules` cannot express it -- that never runs the copy, and a
+    copy that raises is the thing under test.
     """
 
     def refusal(self, provisioned: str | None) -> str:
-        """`library()`'s sentence on a pack whose provisioned copy is `provisioned`.
+        """`library()`'s sentence on a pack whose `lib/` copy is `provisioned`.
 
-        `None` builds the virtualenv and leaves it empty, which is the machine
-        before `make setup`. A string is written as the copy's `__init__.py`.
+        `None` leaves `lib/` without `sd_db`. A string is written as the
+        copy's `__init__.py`.
         """
         directory = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, directory, True)
@@ -377,8 +377,7 @@ class TheRefusalNamesTheFault(unittest.TestCase):
         (pack / "bin").mkdir(parents=True)
         for name in ("sd_lib.py", "sd_handoff_rows.py"):
             (pack / "bin" / name).write_bytes((REPO_ROOT / "bin" / name).read_bytes())
-        version = f"python{sys.version_info.major}.{sys.version_info.minor}"
-        site = pack / ".venv" / "lib" / version / "site-packages"
+        site = pack / "lib"
         site.mkdir(parents=True)
         if provisioned is not None:
             (site / "sd_db").mkdir()

@@ -53,8 +53,8 @@ class RestoreRefusal(Exception):
 
 def _library():
     """Import `sd_db`, or refuse with the remedy rather than a traceback."""
-    # Through `sd_lib.import_sd_db`, which makes the second try against the
-    # copy `make setup` provisioned (sd:746). An absent library is a supported
+    # Through `sd_lib.import_sd_db`, which reads the checkout's own `lib/`
+    # (sd:746, sd:3280). An absent library is a supported
     # state, not an edge case, and `NOT_INSTALLED` is its refusal; a
     # provisioned copy that will not import is a different fault, and the
     # helper's sentence names that copy and its error instead of sending the
