@@ -77,13 +77,15 @@ One rule for every publish: push `<head>:refs/heads/<branch>`, never the branch 
 A builder can move its branch after enqueue, and `--expected-head` takes any local commit; the explicit refspec still
 publishes the head the entry names. The steps, from the repository's checkout, whose worktrees share one object store:
 
-1. Read the tip of `branch` on `origin` (`git ls-remote`), and fetch it when this checkout lacks it.
+1. No branch, or `origin`'s default branch (`sd_lib.remote_default`): `default_branch`, before any read of
+   `origin`. Only a pull request lands there, and prepare refuses that branch anyway.
+2. Read the tip of `branch` on `origin` (`git ls-remote`), and fetch it when this checkout lacks it.
    A failed read or fetch is an unknown answer, not "no branch".
-2. The tip is `head` or contains it: published, push nothing. The runner's head rule decides the rest, as today:
+3. The tip is `head` or contains it: published, push nothing. The runner's head rule decides the rest, as today:
    a catch-up merge runs, any other move skips with `head_moved`.
-3. This checkout has no `head` commit: `head_gone`. The tip and `head` each lack the other: `branch_diverged`.
+4. This checkout has no `head` commit: `head_gone`. The tip and `head` each lack the other: `branch_diverged`.
    Both answers are definite: the same push can never succeed.
-4. Else push; with no branch, or a tip that `head` contains, it is a fast-forward. A failed or refused push is
+5. Else push; with no branch, or a tip that `head` contains, it is a fast-forward. A failed or refused push is
    unknown: `origin` may have moved between the read and the push.
 
 Every step that publishes, or depends on a published head:
@@ -94,8 +96,8 @@ Every step that publishes, or depends on a published head:
   `origin` or in this checkout; run the retry on <enqueued_on>, or enqueue again from a worktree that has it".
   `branch_diverged` and unknown refuse with git's answer. A refusal queues nothing, and the old entry stays blocked.
 - The import publishes pending entries only (see "Migration"). An unknown answer stops the import for the repository
-  and keeps the file. `head_gone` or `branch_diverged` imports that entry `skipped` with the reason, so one dead branch
-  cannot hold the live queue; `lane retry` publishes it once the operator fixes the branch.
+  and keeps the file. `default_branch`, `head_gone` or `branch_diverged` imports that entry `skipped` with the
+  reason, so one dead branch cannot hold the live queue; `lane retry` publishes it once the operator fixes the branch.
 - The import publishes no blocked (`failed`, `skipped`, `prepared`) or terminal entry: those rows are history.
   Their worktrees or branches may be gone. `lane retry` is the one way back to pending, and it publishes then.
 - `prepare`, unchanged, pushes its reviewed head, catch-up merge included, by the same refspec.
@@ -236,6 +238,7 @@ Today a satellite already refuses `lane enqueue` with `lane_unknown` while the h
 
 | Step | State moved | Failure | Recovery | Test |
 | --- | --- | --- | --- | --- |
+| enqueue | none | the checkout is on `origin`'s default branch, or on no branch, with commits `origin` lacks | `default_branch` refuses before any read of `origin`; nothing pushed or queued | new: enqueue from main ahead of origin; origin/main unchanged, no row, no git call to origin |
 | enqueue | branch pushed | push refused or fails, or `branch_diverged` | enqueue refuses; nothing queued | new: a failing push double leaves no row; a diverged remote refuses |
 | enqueue | branch pushed | the branch tip moved past `--expected-head` before enqueue | the explicit refspec publishes `expected_head`, not the tip | new: enqueue an older commit; `origin/<branch>` is that commit |
 | enqueue | branch pushed, no row | killed or hub fault between the push and the row write | the rerun finds the head published, pushes nothing, and writes one row | new: kill after the push; rerun gives one entry and no second push |
@@ -266,9 +269,11 @@ Today a satellite already refuses `lane enqueue` with `lane_unknown` while the h
 | import publish | pending branches pushed | a read, fetch or push fails or is refused | unknown: nothing written, file kept, entry reported; next pass retries | new: a failing push leaves the file and writes no row |
 | import publish | some branches pushed | killed before the transaction | pushed branches are harmless; the rerun finds them published, pushes nothing, and imports | new: rerun after a kill between push and write gives one row per entry |
 | import publish | branch pushed | the builder moved the branch after enqueue | the refspec publishes `expected_head`, not the tip; a remote tip that already contains it is left alone, and the runner skips `head_moved` as today | new: pending entry behind its branch tip; `origin/<branch>` gets `expected_head` |
+| import publish | entry row | an older version queued a pending entry on the default branch | definite: that entry imports `skipped` with `default_branch` and nothing is pushed; the rest import | new: a pending main entry ahead of origin imports skipped; origin/main unchanged; a live row imports |
 | import publish | entry row | a pending entry's commit is gone, or its remote branch diverged | definite: that entry imports `skipped` with `head_gone` or `branch_diverged`; the rest import | new: one dead pending branch among live ones; live rows import, the file is renamed |
 | import | rows | a blocked entry's worktree and branch were deleted | no publish: it imports as history with its status; the pending rows import | new: blocked entry with no branch or commit; no push attempted, every row written |
 | retry | branch pushed | the retried entry's commit is in this checkout but not on `origin` | retry publishes `<head>:refs/heads/<branch>` at retry time, then queues | new: retry an imported blocked entry; `origin/<branch>` is its head |
+| retry | none | the blocked entry names the default branch | refuses `default_branch` before any read of `origin`; nothing queued or pushed | new: retry of an imported main entry ahead of origin refuses; rows and origin/main unchanged |
 | retry | none | the commit is gone here and on `origin`, or the remote diverged | refuses with `head_gone` naming `enqueued_on`, or with git's answer; nothing queued; the old entry stays blocked | new: retry after the branch and worktree were deleted refuses and writes no row |
 | retry | branch pushed, no row | killed or hub fault between the push and the row write | the rerun finds the head published, pushes nothing, and queues one entry | new: kill after the retry push; rerun gives one entry |
 | import | rows | an older `sd-ship` enqueues during the import | the old queue flock orders it; a later entry lands in a new file, imported next pass | new: append after rename imported once |

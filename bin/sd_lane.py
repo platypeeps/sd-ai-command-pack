@@ -49,9 +49,9 @@ earlier version left there is imported once (`import_file_queue`).
 
 Another host runs an entry only from a commit on `origin`, so enqueue,
 retry and the import of a pending entry publish its head first, by
-`<head>:refs/heads/<branch>`, never the tip and never with force
-(`publish_head`). A failed read, fetch or push is an unknown answer, not a
-"no": nothing is queued.
+`<head>:refs/heads/<branch>`, never the tip, never with force and never to
+`origin`'s default branch (`publish_head`). A failed read, fetch or push is
+an unknown answer, not a "no": nothing is queued.
 
 A claim reads the lane host and takes the first pending entry in one
 transaction, and refuses while another entry of the repository runs. It
@@ -224,6 +224,8 @@ CLAIM_LOST = "claim_lost"
 PUBLISH_UNKNOWN = "publish_unknown"
 #: The definite publish answers: the head's commit is in neither place, or the remote branch and the head diverged.
 HEAD_GONE, BRANCH_DIVERGED = "head_gone", "branch_diverged"
+#: The definite publish answer for no branch or `origin`'s default branch: only a pull request lands there.
+DEFAULT_BRANCH = "default_branch"
 #: Each entry is the latest `state` row, kind `checkpoint`, of its key `lane:v1:<owner/repo>:<id>` (sd:3282).
 KEY_PREFIX = "lane:v1:"
 #: A runner write that meets a hub fault is tried every `WRITE_PAUSE` seconds for this long, then the run stops.
@@ -457,7 +459,7 @@ def publish_git(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess[s
 
 
 def publish_head(root: pathlib.Path, branch: str, head: str) -> str | None:
-    """Put `head` on `origin/<branch>`; None once it is there, else `HEAD_GONE` or `BRANCH_DIVERGED` (sd:3282).
+    """Put `head` on `origin/<branch>`; None once it is there, else `DEFAULT_BRANCH`, `HEAD_GONE` or `BRANCH_DIVERGED` (sd:3282).
 
     Another host runs an entry only from a commit on `origin`. The one push is
     `<head>:refs/heads/<branch>`, never the branch tip and never with force,
@@ -465,7 +467,11 @@ def publish_head(root: pathlib.Path, branch: str, head: str) -> str | None:
     entry names. A tip that is `head` or contains it pushes nothing. The two
     answers are definite: the same push can never succeed. A failed read,
     fetch or push raises `PUBLISH_UNKNOWN`: `origin` may have moved.
+    No branch, or `origin`'s default branch, answers `DEFAULT_BRANCH` before
+    any read of `origin`: a push there lands commits no pull request reviewed.
     """
+    if not branch or branch == sd_lib.remote_default(root, "origin"):
+        return DEFAULT_BRANCH
     ref = f"refs/heads/{branch}"
 
     def answer(*args: str, ok: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[str]:
@@ -500,6 +506,9 @@ def publish_head(root: pathlib.Path, branch: str, head: str) -> str | None:
 def require_published(root: pathlib.Path, branch: str, head: str, gone: str) -> None:
     """`publish_head`, refusing a definite answer: `gone` says what to do when the head's commit is nowhere."""
     found = publish_head(root, branch, head)
+    if found == DEFAULT_BRANCH:
+        raise LaneError(f"{branch or 'a detached HEAD'} is not a feature branch: the lane publishes and prepares a "
+                        "branch other than origin's default; nothing was queued or pushed.", code=DEFAULT_BRANCH)
     if found == HEAD_GONE:
         raise LaneError(gone, code=HEAD_GONE)
     if found == BRANCH_DIVERGED:
@@ -804,9 +813,11 @@ def import_locked(root: pathlib.Path, queue: Queue, path: pathlib.Path) -> dict[
             except LaneError as error:
                 return {"stopped": f"sd:{row.get('item')}: {error}", "file": str(path)}
             if found is not None:
+                fix = ("enqueue it again from a feature branch" if found == DEFAULT_BRANCH
+                       else "`sd-ship lane retry` publishes it once the branch is fixed")
                 row.update(status="skipped", code=found, finished_at=stamp_now(),
                            reason=f"{found}: {row.get('expected_head')} could not be published to "
-                                  f"origin/{row['branch']}; `sd-ship lane retry` publishes it once the branch is fixed")
+                                  f"origin/{row['branch']}; {fix}")
 
         def write(entries: list[dict[str, Any]]) -> list[Any]:
             ids = {entry["id"] for entry in entries}
