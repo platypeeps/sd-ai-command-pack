@@ -148,7 +148,7 @@ class WritingPromote(unittest.TestCase):
 
     def test_an_older_library_refuses_by_name(self):
         with patch.object(writing, "promote", None):
-            with self.assertRaisesRegex(cli.WorkRefusal, "current system/local-sd-db build to promote"):
+            with self.assertRaisesRegex(cli.WorkRefusal, "update this pack checkout.* to promote"):
                 self.call("12")
         self.connect.assert_not_called()
 
@@ -477,7 +477,7 @@ class WritingFromWorktree(unittest.TestCase):
 
     def test_an_older_library_refuses_a_worktree_by_name(self):
         with patch.object(writing, "checkout", None, create=True):
-            with self.assertRaisesRegex(cli.WorkRefusal, "current system/local-sd-db"):
+            with self.assertRaisesRegex(cli.WorkRefusal, "update this pack checkout"):
                 self.run_in(self.linked, "readiness", "--piece", "2026/a")
 
 

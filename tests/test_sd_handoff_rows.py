@@ -406,7 +406,7 @@ class TheRefusalNamesTheFault(unittest.TestCase):
         self.assertNotIn("is not installed in this virtualenv", said)
         self.assertNotIn("sd-install", said)
 
-    def test_a_library_absent_everywhere_still_gets_the_installer(self):
+    def test_a_library_absent_everywhere_names_the_pack_checkout(self):
         """The other half, and the reason the fix is a choice and not a swap.
 
         Nothing provisioned means nothing to inspect, and the remedy really is
@@ -414,7 +414,7 @@ class TheRefusalNamesTheFault(unittest.TestCase):
         take the first fault's answer away with it.
         """
         said = self.refusal(None)
-        self.assertIn("sd-install", said)
+        self.assertIn("pack's bin/ from its checkout", said)
         self.assertNotIn("will not import", said)
 
 

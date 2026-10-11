@@ -15,7 +15,7 @@ def service_result(connection: Any, args: argparse.Namespace) -> Any:
     try:
         import sd_db.services as services
     except ImportError:
-        raise WorkRefusal("install the current system/local-sd-db build for service controls") from None
+        raise WorkRefusal("update this pack checkout, whose lib/ is the sd_db bin/ runs for service controls") from None
     if args.operation == "list":
         return services.inventory(connection)["services"]
     state = services.service_state(connection, args.identity)
@@ -33,7 +33,7 @@ def run(args: argparse.Namespace) -> int:
     try:
         import sd_db.operations as operations
     except ImportError:
-        raise WorkRefusal("install the current system/local-sd-db build for job controls") from None
+        raise WorkRefusal("update this pack checkout, whose lib/ is the sd_db bin/ runs for job controls") from None
     write = args.operation in {"retry", "cancel", "start", "stop", "restart"}
     connection = sd_handoff_rows.connect(sd_db, write=write)
     try:

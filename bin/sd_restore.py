@@ -33,9 +33,8 @@ import argparse
 #: Why the two verbs cannot run yet, when they cannot.
 NOT_INSTALLED = (
     "sd_db is not installed in this virtualenv. `sd restore` reads the "
-    "database directly; install the library with the pack's installer "
-    "(`sd-install`), which provisions it from the `system` checkout at its "
-    "tag, then run this again."
+    "database directly; run the pack's bin/ from its checkout, whose lib/ "
+    "holds sd_db, then run this again."
 )
 
 #: The column a repository's source authority is held in, and the word it

@@ -201,7 +201,7 @@ def read(
             raise RegistryError(
                 "a connection was given but sd_db is not installed in this "
                 "virtualenv, so the provider and bill rows cannot be read. "
-                "Provision the library (`sd-install --provision-library`) or "
+                "Run the pack's bin/ from its checkout, whose lib/ holds sd_db, or "
                 "read the file alone by passing no connection."
             )
         return read_file(target)

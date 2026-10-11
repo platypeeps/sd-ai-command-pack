@@ -98,7 +98,7 @@ class WithoutTheLibrary(unittest.TestCase):
             sd_restore.resume(argparse.Namespace())
         message = str(raised.exception)
         self.assertIn("sd_db is not installed", message)
-        self.assertIn("sd-install", message)
+        self.assertIn("pack's bin/ from its checkout", message)
 
     def test_reimport_refuses_the_same_way(self) -> None:
         with self.assertRaises(sd_restore.RestoreRefusal) as raised:

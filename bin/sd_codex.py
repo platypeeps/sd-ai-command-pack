@@ -58,9 +58,8 @@ import re
 #: Why the verb cannot run, when it cannot.
 NOT_INSTALLED = (
     "sd_db is not installed in this virtualenv. `sd skill scan` writes "
-    "skill_use rows; install the library with the pack's installer "
-    "(`sd-install`), which provisions it from the `system` checkout, then "
-    "run this again."
+    "skill_use rows; run the pack's bin/ from its checkout, whose lib/ holds "
+    "sd_db, then run this again."
 )
 
 #: The platform key, from the three `bin/sd_install.py:202-204` names.
