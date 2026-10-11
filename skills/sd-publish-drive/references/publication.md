@@ -123,7 +123,7 @@ accepted as proof of completion.
 A repeated dispatch returns `execute: false` and read-only recovery actions.
 Never replay the earlier write merely because its caller lost the response.
 
-- Lost claim ID: run `pieces get --piece YEAR/SLUG --json`. Read the active
+- Lost claim ID: run `sd writing get --piece YEAR/SLUG --json`. Read the active
   claim's `id` from `writing.publications`, then inspect that claim with
   `pieces publication-status --piece YEAR/SLUG --claim CLAIM --json`.
 - Missing HTML export: run `pieces publication-status --piece YEAR/SLUG

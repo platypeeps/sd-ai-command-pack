@@ -16,10 +16,10 @@ It has no `bin/` command: the steps below are the procedure, and `scripts/pack.p
 
 ## Workflow
 
-1. `pack pieces get --piece <year>/<slug> --json`. Refuse unless `writing.stage` is `ready`; send it back to `sd-draft` and say why.
-2. `pack pieces readiness --piece <year>/<slug> --json` must show current passing fact-check and adversarial records. Build the preview with `pack pieces preflight --piece <year>/<slug> --out <scratch dir>/preview.html --json`.
+1. `sd writing get --piece <year>/<slug> --json`. Refuse unless `writing.stage` is `ready`; send it back to `sd-draft` and say why.
+2. `sd writing readiness --piece <year>/<slug> --json` must show current passing fact-check and adversarial records. Build the preview with `pack pieces preflight --piece <year>/<slug> --out <scratch dir>/preview.html --json`.
 3. Read `research.md`, `profile/brand-voice/VOICE.md` and `profile/personality-profile/PROFILE.md`.
-4. Reuse a current passing fact-check record. Re-run it when the draft, research or report changed, the way `sd-draft` step 7 does, and record it with `pack review record-gate`. A contradicted or unverified claim blocks until fixed or accepted by the user.
+4. Reuse a current passing fact-check record. Re-run it when the draft, research or report changed, the way `sd-draft` step 7 does, and record it with `sd writing gate`. A contradicted or unverified claim blocks until fixed or accepted by the user.
 5. Then spawn three blind sub-agents in one message, each returning a verdict, line-tied findings and fixes:
    - **Style**: the draft, `VOICE.md`, and the `sd-humanizer` and `no-ai-slop` (Detect mode) pattern lists. Audit only.
    - **Appeal**: the draft only. Hook, pacing, where a reader leaves, the ending.
@@ -46,7 +46,7 @@ Never guess or build the live URL from a title or slug. A plausible 404 reads as
 
 ## If a published piece has to come back
 
-`pack pieces set-status --piece <year>/<slug> --status <earlier> --correct --reason "<why>"` records the correction with its reason. It does not reopen the drift gate. Then say which of `published_urls`, the idea note and the tip still point at the retracted piece.
+`sd writing stage --piece <year>/<slug> --stage <earlier> --correct --reason "<why>"` records the correction with its reason. It does not reopen the drift gate. Then say which of `published_urls`, the idea note and the tip still point at the retracted piece.
 
 ## Safety rules
 

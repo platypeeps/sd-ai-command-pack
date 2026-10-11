@@ -79,12 +79,11 @@ before the first search.
 
 ## Writing piece mode
 
-With `piece=` or `from=idea`, run from the root of the writing content
-repository: the checkout holding `scripts/pack.py`, `content/` and
-`templates/`. `pack` below means `python3 scripts/pack.py`. Keep to notes and
-sources; draft prose is `sd-draft` work.
+With `piece=` or `from=idea`, run from the root of a content repository (it
+holds `content/`, `profile/` and `templates/`). Keep to notes and sources;
+draft prose is `sd-draft` work.
 
-1. **Find the work.** `piece=`: `pack pieces get --piece <year>/<slug> --json`
+1. **Find the work.** `piece=`: `sd writing get --piece <year>/<slug> --json`
    and use the registered `item.path`; a revived piece may stay under
    `content-parked/`, and never gets a second folder. `from=idea`: list
    `sd store list sdw.blog-idea --status drafting`, read each with
@@ -98,7 +97,7 @@ sources; draft prose is `sd-draft` work.
    `type: blog`, `tags` from its `topics`, the extra field
    `obsidian_source: "<the idea note's path in the vault>"`, and its
    description and `Argument` section seeded into `## Notes / angle`. Then
-   `pack pieces register --piece <year>/<slug>`. Do not copy the template over
+   `sd writing register --piece <year>/<slug>`. Do not copy the template over
    an existing `index.md`: it holds the piece's draft prose.
 3. **Read the topic notes first:** `sd store list sdw.topic --status active --full`.
    Take `## Ground truth` as orientation (never a citation), `## Feeds` as
@@ -114,7 +113,7 @@ sources; draft prose is `sd-draft` work.
    quotes, counterarguments, open questions. Every claim gets a source and a
    marking per the safety rules. Write down what the piece will tell the
    reader to do, and the remedy evidence for it, or its absence.
-6. `pack pieces set-status --piece <year>/<slug> --status researching`.
+6. `sd writing stage --piece <year>/<slug> --stage researching`.
 7. Report per piece: folder, source count, the topic notes and profiles that
    fed in, ground truth that proved wrong (fix it in that topic note), what
    the remedy evidence covers and does not, and open questions. For
