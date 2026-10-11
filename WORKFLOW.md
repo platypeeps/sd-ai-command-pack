@@ -515,10 +515,15 @@ The rules for them:
   refused at enqueue, as prepare refuses it. A
   failed entry is marked and the next one runs. A second runner exits at once
   rather than wait. A claim takes a holder token and a lease and refuses
-  while another entry of the repository runs. It takes only an entry
-  enqueued on this machine, so after a move the old host's entries stay
-  pending until `cancel` or a move back. A dead holder here goes back to
-  pending in prepare, failing at the third time, and fails in merge. `lane
+  while another entry of the repository runs. The lane host runs any
+  entry, whichever host enqueued it (sd:3283): from the entry's own worktree
+  when it was enqueued there, from any worktree there at its head, or from a
+  lane worktree it makes from `origin/<branch>` and removes once the entry
+  ends. A remote branch that moved skips the entry `head_moved`, a deleted
+  one `head_gone`, a local branch at another commit `branch_busy`; an
+  `origin` that does not answer leaves it pending. A dead holder goes back to
+  pending in prepare, failing at the third time, and fails in merge: on its
+  own host once its pid is gone, on another once its lease passed. `lane
   cancel` on a stuck running entry releases it the same way. With the hub
   down every lane verb refuses `hub_unavailable`. Each prepare and merge keeps its whole output under
   `<lane>/logs/`. `list` and `cancel` read and edit the queue; `watch` prints
@@ -545,8 +550,9 @@ The rules for them:
   the remote branch with `--force-with-lease` while the worktree's tip is
   the merged head. It never removes the worktree or its local branch: no
   lock excludes the builder, and a write through a file handle opened before
-  removal reaches an unlinked file and is lost. The entry's `remove` holds
-  the command to run once the builder stops: `git -C <main> worktree remove
+  removal reaches an unlinked file and is lost. The cleanup names the host
+  that holds the worktree, and the entry's `remove` holds the command to run
+  there once the builder stops: `git -C <main> worktree remove
   <worktree> && git -C <main> update-ref -d refs/heads/<branch> <tip>`.
   `git worktree remove` refuses uncommitted or untracked files, and
   `update-ref -d` refuses a branch that moved. The runner then notes the
@@ -562,18 +568,21 @@ The rules for them:
 - **Each lane runs on its lane host (sd:3003).** `repo.lane_host` names the
   machine that runs a repository's lane; NULL means the hub. Off that host,
   `sd-ship merge`, `reconcile`, `review`, `adjudicate --accept-dispositions`
-  and `lane enqueue`, `retry`, `move`, `hold`, `release` and `run` refuse with
-  `lane_elsewhere` before they read a row (sd:2795); the text names the host,
-  the dashboard's Move lane control, and the verb. A host that cannot be read
-  refuses with `lane_unknown` and never counts as the hub. `prepare` runs
-  everywhere without the ship lock (sd:1938), and `lane list` and `cancel` still answer, so
-  an old host's pending entries can be cancelled after a move. Every machine
+  and `lane run` refuse with `lane_elsewhere` before they read a row
+  (sd:2795); the text names the host, the dashboard's Move lane control, and
+  the verb. A host that cannot be read refuses with `lane_unknown` and never
+  counts as the hub. `prepare` runs everywhere without the ship lock
+  (sd:1938), and every other lane verb edits the shared queue from any host
+  (sd:3283), so pending entries follow a move. Every machine
   runs the same scheduled `sd-ship lane run --hosted`: each lane it hosts, in
   path order, skipping one whose runner is busy. The runner reads the host
-  again before each claim, so a move stops it at the next item. After 55
+  again before each claim and before each merge: after a move the entry in
+  flight goes back to pending at its place, and the new host takes it first.
+  After 55
   minutes a run claims no next entry and finishes the one it started, so the
-  job's 120-minute limit never stops a merge; the next run goes on (sd:3287). A satellite
-  that hosts a lane gates and merges there; no item passes between machines.
+  job's 120-minute limit never stops a merge; the next run goes on (sd:3287). The lane
+  host gates and merges on its own machine; an entry's commits reach it
+  through `origin`.
 - **Large uncommitted data goes under the bulk root (sd:1792).** When
   `sd.bulk_storage_root` names a folder, put run outputs, logs, captures,
   agent scratch evidence and large downloaded fixtures under

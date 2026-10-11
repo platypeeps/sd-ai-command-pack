@@ -18,6 +18,8 @@ def blocked(code: str, boundary: str, next_action: str, *, state: str = "policy_
 HUB_FAULTS = frozenset({"HubUnreachable", "TransactionLost", "BuildMismatch", "HubRestartNeeded", "SchemaTooNew"})
 #: The blocker code of a hub fault; the lane puts such an entry back for its next run.
 HUB_UNAVAILABLE = "hub_unavailable"
+#: The blocker code of a verb off its repository's lane host (sd:3003), also when the ship lock refuses it.
+LANE_ELSEWHERE = "lane_elsewhere"
 
 
 def is_hub_fault(error: Exception) -> bool:
@@ -32,6 +34,9 @@ def failure(phase: str, error: Exception) -> dict:
         if is_hub_fault(error):
             detail = blocked(HUB_UNAVAILABLE, "runtime", "Retry this command when the sd hub answers again.",
                              state="retryable_failure")
+        if getattr(error, "code", None) == LANE_ELSEWHERE:  # the ship lock's refusal; the lane reads it as a move
+            detail = blocked(LANE_ELSEWHERE, "runtime", "Run it on the lane host, or move the lane back.",
+                             state="operator_decision")
         if isinstance(error, (OSError, subprocess.SubprocessError)):
             detail = blocked("execution_failed", "runtime", "Restore the local runtime, then retry this command.",
                              state="retryable_failure")
