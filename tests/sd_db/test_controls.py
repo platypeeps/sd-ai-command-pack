@@ -35,6 +35,8 @@ from sd_db.writes import (
     upsert_repo,
 )
 
+from . import support
+
 REGISTRY = """bills:
   a: {cost: subscription}
   b: {cost: subscription}
@@ -672,8 +674,8 @@ class NoVerbNamesItsOperatorForTheCaller(unittest.TestCase):
     default on `_import_piece` writes the same row as one on `import_piece`.
     """
 
-    SYSTEM = Path(__file__).resolve().parents[2]
-    ROOTS = (SYSTEM / "local-sd-db/sd_db",)
+    SYSTEM = support.PACK
+    ROOTS = (support.LIB / "sd_db",)
 
     @staticmethod
     def functions(tree):
@@ -728,8 +730,8 @@ class NoVerbNamesItsOperatorForTheCaller(unittest.TestCase):
         """An empty walk passes every rule below, so it has to have found the verbs."""
         seen = self.findings()[0]
         self.assertGreaterEqual(len(seen), 40, seen)
-        self.assertIn("local-sd-db/sd_db/writes.py transition", seen)
-        self.assertEqual(seen.count("local-sd-db/sd_db/reporting.py acknowledge_clean"), 2, "who and principal")
+        self.assertIn("lib/sd_db/writes.py transition", seen)
+        self.assertEqual(seen.count("lib/sd_db/reporting.py acknowledge_clean"), 2, "who and principal")
 
     def test_no_who_parameter_has_a_default(self):
         self.assertEqual(self.findings()[1], [], "a default `who` names every caller and identifies none; "

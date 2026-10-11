@@ -9,7 +9,7 @@ its bytes, which the Usage screen's `/api/usage` serves too.
 import os
 import sqlite3
 import subprocess
-from pathlib import Path
+import sys
 
 from sd_db import connect, provider_controls, reads, usage, writes
 from sd_db.errors import SdDbError
@@ -17,17 +17,18 @@ from sd_db.ledger import claim, lose, reserve, settle
 from sd_db.testing.wire import hub_only
 
 from .test_ledger import ME, REGISTRY, LedgerCase, dead_pid
+from . import support
 
 REGISTRY_WITH_EXTRA_BILL = REGISTRY.replace("  open:   { cost: subscription }\n", "  open:   { cost: subscription }\n  extra:  { cost: subscription }\n")
 
-ENTRYPOINT = Path(__file__).resolve().parents[1] / "sd-db.sh"
+ENTRYPOINT = support.SD_DB
 
 
 class UsageCase(LedgerCase):
     def sd_db(self, *args, expect=0):
-        environment = {**os.environ, "HOME": str(self.home), "PYTHONPATH": str(ENTRYPOINT.parent)}
+        environment = {**os.environ, "HOME": str(self.home), "PYTHONPATH": str(support.LIB)}
         environment.pop("XDG_STATE_HOME", None)
-        completed = subprocess.run([str(ENTRYPOINT), *args], capture_output=True, text=True,
+        completed = subprocess.run([sys.executable, str(ENTRYPOINT), *args], capture_output=True, text=True,
                                    input="", env=environment)
         self.assertEqual(completed.returncode, expect, completed.stdout + completed.stderr)
         return completed

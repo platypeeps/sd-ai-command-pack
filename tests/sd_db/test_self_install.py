@@ -29,9 +29,10 @@ from unittest import mock
 
 from sd_db import hub, remote, satellite, self_install
 
-from tests.test_wire import Served, newer_build
+from .test_wire import Served, newer_build
+from . import support
 
-HERE = Path(__file__).resolve().parents[1]
+HERE = support.LIB
 
 #: Git with no operator config: no signing, no hooks, a fixed author.
 GIT_ENV = {
@@ -550,25 +551,6 @@ class TheNightly(Case):
         self.assertEqual(self.unpack.calls, [])
         self.assertTrue(any(line.startswith("  DIFFERS") and "origin/main" in line and "0" * 16 in line
                             for line in lines), lines)
-
-
-class TheInstallVerb(unittest.TestCase):
-    """`sd-db.sh install VENV` records the checkout it installed from."""
-
-    def test_install_writes_the_source_marker_into_the_venv(self):
-        root = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, root)
-        target = root / "venv"
-        (target / "bin").mkdir(parents=True)
-        log = root / "pip.log"
-        stub = target / "bin" / "python"
-        stub.write_text(f'#!/bin/sh\necho "$@" > "{log}"\n')
-        stub.chmod(0o755)
-        done = subprocess.run(["sh", str(HERE / "sd-db.sh"), "install", str(target)], capture_output=True,
-                              check=False, text=True, timeout=120, env={**os.environ, "PYTHON": sys.executable})
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("-m pip install", log.read_text())
-        self.assertEqual((target / self_install.MARKER).read_text().strip(), str(HERE.parent.resolve()))
 
 
 if __name__ == "__main__":

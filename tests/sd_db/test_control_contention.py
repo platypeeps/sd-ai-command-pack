@@ -15,7 +15,7 @@ from sd_db.services import restart_service, stop_service
 from sd_db.testing.wire import hub_only
 from sd_db.workflow import WorkflowError
 
-from tests import test_backup, test_operations, test_services
+from . import test_backup, test_operations, test_services
 
 
 @hub_only

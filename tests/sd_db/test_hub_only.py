@@ -31,9 +31,10 @@ from sd_db.operations import control_gate
 from sd_db.registry import parse
 from sd_db.testing import wire
 
-from tests.test_hub import Satellite
-from tests.test_ledger import REGISTRY
-from tests.test_wire import HERE, Served
+from . import support
+from .test_hub import Satellite
+from .test_ledger import REGISTRY
+from .test_wire import HERE, Served
 
 PACKAGE = HERE / "sd_db"
 
@@ -327,7 +328,7 @@ class TheMarks(unittest.TestCase):
     """
 
     def test_every_marked_test_meets_a_hub_only_refusal_over_the_wire(self):
-        loaded = unittest.TestLoader().discover(start_dir=str(HERE / "tests"), top_level_dir=str(HERE))
+        loaded = unittest.TestLoader().discover(start_dir=str(support.PACK / "tests" / "sd_db"), top_level_dir=str(support.PACK))
         marked = [test for test in _tests(loaded) if wire.is_hub_only(test)]
         self.assertTrue(marked, "no test is marked hub_only")
         with tempfile.TemporaryDirectory() as folder:

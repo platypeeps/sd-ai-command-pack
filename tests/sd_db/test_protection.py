@@ -15,7 +15,7 @@ from sd_db import protection
 from sd_db.contribution_github import Client, Response
 from sd_db.shadow_sync import _SearchBudget, read_watermark, sync as tracker_sync
 
-from tests.test_shadow_sync import Gh, node
+from .test_shadow_sync import Gh, node
 
 AT = "2026-09-11T02:45:00Z"
 MAIN = "main"

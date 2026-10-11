@@ -21,7 +21,7 @@ from unittest import mock
 from sd_db import create_item, database, hub, initialise, remote
 from sd_db.database import connect, default_path, local_path
 
-from tests.test_wire import Served
+from .test_wire import Served
 
 
 def files_under(root: Path) -> list[str]:

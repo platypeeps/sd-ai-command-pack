@@ -27,9 +27,10 @@ from sd_db import create_item, database, initialise, remote, schema
 from sd_db.serve import read_token
 from sd_db.database import transaction
 from sd_db.testing import Stubs, surface
+from . import support
 
-HERE = Path(__file__).resolve().parents[1]
-SD_DB = HERE / "sd-db.sh"
+HERE = support.LIB
+SD_DB = support.SD_DB
 
 
 def environment(root: Path) -> dict[str, str]:
@@ -46,9 +47,11 @@ def environment(root: Path) -> dict[str, str]:
 class Served:
     """One `sd-db.sh serve --loopback` over a fresh database, and its log."""
 
-    def __init__(self, root: Path, name: str = "sd.db", *, build: Path = HERE, log: str = "") -> None:
-        """`build` is the `local-sd-db` folder the server runs from; another
-        one is another `sd_db` build (step 3). A database already there is
+    def __init__(self, root: Path, name: str = "sd.db", *, build: Path = HERE, log: str = "",
+                 program: tuple[str, ...] = (sys.executable, "-m", "sd_db.serve")) -> None:
+        """`build` is the folder holding the `sd_db` the server runs; another
+        one is another `sd_db` build (step 3). `program` is what runs there,
+        `sd-db serve` without the launcher. A database already there is
         served as it is."""
         self.database = root / name
         self.token_file = root / f"{name}.serve.token"
@@ -57,7 +60,7 @@ class Served:
         self.log = root / f"{name}.serve{log}.log"
         self.stream = open(self.log, "w")
         self.process = subprocess.Popen(
-            ["sh", str(build / "sd-db.sh"), "serve", "--loopback", "--port", "0", "--database", str(self.database)],
+            [*program, "--loopback", "--port", "0", "--database", str(self.database)],
             # `python -m` puts the working directory first on `sys.path`, so
             # the build's own folder, or the child imports this one's sd_db.
             stdout=subprocess.DEVNULL, stderr=self.stream, env=environment(root), cwd=build,
@@ -570,7 +573,7 @@ class TheHandshake(ServedCase):
 class TheServer(ServedCase):
     def test_a_second_server_over_the_same_file_is_refused_and_the_first_keeps_serving(self):
         second = subprocess.run(
-            ["sh", str(SD_DB), "serve", "--loopback", "--port", "0", "--database", str(self.served.database)],
+            [sys.executable, str(SD_DB), "serve", "--loopback", "--port", "0", "--database", str(self.served.database)],
             capture_output=True, text=True, env=environment(self.root), timeout=60,
         )
         self.assertNotEqual(second.returncode, 0)
@@ -598,7 +601,7 @@ class TheServer(ServedCase):
             holder.listen()
             port = holder.getsockname()[1]
             done = subprocess.run(
-                ["sh", str(SD_DB), "serve", "--loopback", "--port", str(port), "--database", str(busy)],
+                [sys.executable, str(SD_DB), "serve", "--loopback", "--port", str(port), "--database", str(busy)],
                 capture_output=True, text=True, env=environment(self.root), timeout=60,
             )
         self.assertEqual(done.returncode, 1, done.stderr)
@@ -616,7 +619,7 @@ class TheServer(ServedCase):
     def test_serve_never_creates_a_database(self):
         """Without `--loopback` too: the missing file refuses before Tailscale is asked."""
         stubs = Stubs(self.root / "stubs", names=("tailscale",))
-        bare = subprocess.run(["sh", str(SD_DB), "serve"], capture_output=True, text=True,
+        bare = subprocess.run([sys.executable, str(SD_DB), "serve"], capture_output=True, text=True,
                               env=stubs.environment(environment(self.root)), timeout=60)
         self.assertEqual(bare.returncode, 1)
         self.assertIn("no database at", bare.stderr)
@@ -624,7 +627,7 @@ class TheServer(ServedCase):
         self.assertFalse((self.root / "home" / ".local" / "share" / "sd").exists())
         absent = self.root / "nothing" / "sd.db"
         missing = subprocess.run(
-            ["sh", str(SD_DB), "serve", "--loopback", "--port", "0", "--database", str(absent)],
+            [sys.executable, str(SD_DB), "serve", "--loopback", "--port", "0", "--database", str(absent)],
             capture_output=True, text=True, env=environment(self.root), timeout=60,
         )
         self.assertEqual(missing.returncode, 1)
@@ -634,7 +637,7 @@ class TheServer(ServedCase):
     def test_the_suite_runs_over_the_wire(self):
         """`sd-db.sh test --remote` end to end, narrowed to one test."""
         done = subprocess.run(
-            ["sh", str(SD_DB), "test", "--remote", f"127.0.0.1:{self.served.port}",
+            [sys.executable, "-m", "sd_db.testing.wire", f"127.0.0.1:{self.served.port}",
              str(self.served.token_file), "-k", "test_rows_values_and_counters_match_a_local_connection"],
             capture_output=True, text=True, env=environment(self.root), timeout=300,
         )
@@ -646,7 +649,7 @@ class TheServer(ServedCase):
     def test_remote_needs_an_address_and_a_token_file(self):
         for extra in ([], [f"127.0.0.1:{self.served.port}"]):
             with self.subTest(extra=extra):
-                done = subprocess.run(["sh", str(SD_DB), "test", "--remote", *extra], capture_output=True,
+                done = subprocess.run([sys.executable, "-m", "sd_db.testing.wire", *extra], capture_output=True,
                                       text=True, env=environment(self.root), timeout=60)
                 self.assertEqual(done.returncode, 1)
                 self.assertIn("TOKEN_FILE", done.stderr)

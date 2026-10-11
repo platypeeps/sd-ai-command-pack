@@ -25,7 +25,7 @@ from pathlib import Path
 from sd_db import initialise, satellite
 from sd_db.errors import RegistryError
 
-from tests.test_wire import SD_DB, Served, environment
+from .test_wire import SD_DB, Served, environment
 
 #: The words `machine-setup.sh status` counts as drift.
 DRIFT = r"DIFFERS|MISSING|STALE|ABSENT|UNLOADED|EXTRA"
@@ -63,7 +63,7 @@ class TheServeStart(unittest.TestCase):
     def test_an_empty_home_exits_non_zero_naming_the_resolved_path_and_creates_nothing(self):
         home = self.root / "home"
         home.mkdir()
-        done = subprocess.run(["sh", str(SD_DB), "serve", "--loopback", "--port", "0"],
+        done = subprocess.run([sys.executable, str(SD_DB), "serve", "--loopback", "--port", "0"],
                               capture_output=True, text=True, env=environment(self.root), timeout=60)
         self.assertNotEqual(done.returncode, 0)
         missing = home.resolve() / ".local/share/sd/sd.db"
@@ -213,14 +213,9 @@ class TheSatelliteCheck(unittest.TestCase):
 
     def serve_version(self, version: str) -> Served:
         """A hub whose package says `version`: another tag of the same build."""
-        shim = self.root / "build"
-        shim.mkdir()
-        (shim / "sd-db.sh").write_text(
-            "#!/bin/sh\nshift\n"
-            f'exec "{sys.executable}" -c "import sys, sd_db; sd_db.__version__ = \'{version}\'; '
-            'from sd_db import serve; sys.exit(serve.main(sys.argv[1:]))" "$@"\n'
-        )
-        served = Served(self.hub_root, build=shim)
+        program = (sys.executable, "-c", f"import sys, sd_db; sd_db.__version__ = {version!r}; "
+                   "from sd_db import serve; sys.exit(serve.main(sys.argv[1:]))")
+        served = Served(self.hub_root, program=program)
         self.addCleanup(served.stop)
         return served
 

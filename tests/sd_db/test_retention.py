@@ -37,9 +37,10 @@ from sd_db.testing import Stubs
 from sd_db.testing.wire import hub_only
 from sd_db.writes import (add_note, create_assignment, create_item, record_cost, record_state, resolve_note,
                           upsert_repo)
+from . import support
 
-PACKAGE_ROOT = Path(__file__).resolve().parent.parent
-ENTRYPOINT = PACKAGE_ROOT / "sd-db.sh"
+PACKAGE_ROOT = support.LIB
+ENTRYPOINT = support.SD_DB
 
 NOW = datetime(2026, 9, 12, 2, 10, tzinfo=UTC)
 
@@ -275,7 +276,7 @@ class TheRefusal(PruneCase):
         environment = stubs.environment(base=dict(os.environ))
         environment.update({"HOME": str(self.home), "PYTHON": sys.executable})
         environment.pop("SD_NOTIFY", None)
-        completed = subprocess.run([str(ENTRYPOINT), "backup"], capture_output=True, text=True,
+        completed = subprocess.run([sys.executable, str(ENTRYPOINT), "backup"], capture_output=True, text=True,
                                    input="", env=environment, check=False)
         self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
         self.assertNotIn("pruned:", completed.stdout + completed.stderr)
@@ -289,7 +290,7 @@ class TheJob(PruneCase):
         shutil.copy2(stubs.bin / "local-notify", stubs.bin / "notify")
         environment = stubs.environment(base=dict(os.environ))
         environment.update({"HOME": str(self.home), "PYTHON": sys.executable})
-        completed = subprocess.run([str(ENTRYPOINT), "backup"], capture_output=True, text=True,
+        completed = subprocess.run([sys.executable, str(ENTRYPOINT), "backup"], capture_output=True, text=True,
                                    input="", env=environment, check=False)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertIn("pruned: 0 exec output(s) expired, 2 stale heartbeat row(s) removed, "

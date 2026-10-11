@@ -19,8 +19,8 @@ from unittest import mock
 from sd_db import database, initialise, ship, upsert_repo
 from sd_db.database import default_path
 
-from tests.test_hub import Satellite
-from tests.test_wire import Served
+from .test_hub import Satellite
+from .test_wire import Served
 
 REPOSITORY = "example/one"
 REMOTE = "git@github.com:example/one.git"

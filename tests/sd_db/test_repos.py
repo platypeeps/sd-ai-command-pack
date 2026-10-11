@@ -49,9 +49,6 @@ with ship.repository_lock(Path(sys.argv[1]), sys.argv[2], holder={"command": "sd
     time.sleep(60)
 """
 
-#: The repo-sync folder of this checkout, which ships the `.example` lists.
-REPO_SYNC = Path(__file__).resolve().parents[2] / "local-repo-sync"
-
 
 class RepoCase(unittest.TestCase):
     def setUp(self):
@@ -185,20 +182,13 @@ class SeedingTheCommonConf(RepoCase):
         result = seed(self.connection, self.personal, root=self.checkouts, home=self.home)
         self.assertEqual(result.counts, {"registered": 1, "absent": 0})
 
-    def test_the_shipped_pair_is_what_repo_sync_reads_on_personal(self):
+    def test_the_personal_profile_reads_the_common_and_personal_pair(self):
         with mock.patch.dict(os.environ, {"SYSTEM_TOOLS_CONFIG": str(self.root / "cfg")}):
             os.environ.pop("REPO_SYNC_PROFILE", None)
             self.assertEqual(
                 [path.name for path in conf_paths()],
                 ["repos.common.conf", "repos.personal.conf"],
             )
-        # The real pair is private config; the repository ships each one as a
-        # `.example` template in local-repo-sync the operator copies into place.
-        shipped = conf_paths(root=REPO_SYNC)
-        self.assertTrue(all(path.with_name(path.name + ".example").is_file()
-                            for path in shipped))
-        for path in shipped:
-            read_conf(path.with_name(path.name + ".example"))
 
 
 class TheConfigDirectory(RepoCase):

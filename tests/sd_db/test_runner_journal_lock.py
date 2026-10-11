@@ -27,11 +27,13 @@ from sd_db.runner import RunnerRefused
 from sd_db.testing.wire import hub_only
 from sd_db.workflow import WorkflowError
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+from . import support
+
+REPO_ROOT = support.PACK
 
 #: The one opener, and the package tree that may take a lock.
-OPENER = "local-sd-db/sd_db/runner_journal.py"
-PACKAGES = ("local-sd-db/sd_db",)
+OPENER = "lib/sd_db/runner_journal.py"
+PACKAGES = ("lib/sd_db",)
 
 
 def foreign(details):
@@ -289,8 +291,8 @@ class HardenedLock(unittest.TestCase):
         source tree and not a git checkout.
         """
         trees = [REPO_ROOT / package for package in PACKAGES]
-        if not all(tree.is_dir() for tree in trees):
-            self.skipTest(f"no source tree at {REPO_ROOT}")
+        for tree in trees:
+            self.assertTrue(tree.is_dir(), f"{tree} is part of this checkout; the walk cannot cover it")
         importers = set()
         for tree in trees:
             for source in tree.rglob("*.py"):

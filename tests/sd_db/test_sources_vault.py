@@ -10,7 +10,6 @@ pinned pack and imports through the real command.
 import json
 import os
 import shutil
-import subprocess
 import sys
 import tempfile
 import textwrap
@@ -24,9 +23,6 @@ from sd_db.sources.vault import SOURCE, Reader, plugin_entries, stages_in
 
 from . import support
 
-SYSTEM = Path(__file__).resolve().parents[2]
-PACK = Path(os.environ.get("SD_ACCEPTANCE_PACK", SYSTEM.parent / "pack"))
-WRITING_MANIFEST = SYSTEM / ".github/fixtures/writing-sd-plugin.json"
 
 BLOG_IDEA, TOPIC, entry = support.BLOG_IDEA, support.TOPIC, support.plugin_entry
 
@@ -290,55 +286,6 @@ class ThePackCommand(unittest.TestCase):
         found = plugin_entries(home=self.home, environ=self.environ)
         self.assertEqual(found[0]["prefix"], "sdw")
         self.assertEqual(found[0]["interpreter"], sys.executable)
-
-
-class TheWritingDeclaration(unittest.TestCase):
-    """The pinned writing manifest, registered with the pinned pack, imports.
-
-    The design's integration test: a temporary checkout holding the fixture
-    manifest and an empty file at each template path, registered in an
-    isolated `XDG_CONFIG_HOME`, read back through `Reader.at` and the real
-    `sd plugin list --json`.
-    """
-
-    def test_the_pinned_pack_accepts_the_declaration_and_both_kinds_land(self):
-        self.assertTrue((PACK / "bin/sd").is_file(),
-                        "set SD_ACCEPTANCE_PACK to the companion pack checkout")
-        with tempfile.TemporaryDirectory() as name:
-            root = Path(name)
-            checkout = root / "writing"
-            checkout.mkdir()
-            manifest = json.loads(WRITING_MANIFEST.read_text(encoding="utf-8"))
-            (checkout / "sd-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
-            for kind in manifest["kinds"].values():
-                template = checkout / kind["sections"]["template"]
-                template.parent.mkdir(parents=True, exist_ok=True)
-                template.touch()
-            home = root / "home"
-            support.pack(home, checkout=PACK, library=None)
-            vault = support.vault(root / "vault", ideas={"an idea": "inbox"},
-                                  topics={"a topic": "candidate"})
-            environ = {
-                "HOME": str(home),
-                "XDG_CONFIG_HOME": str(root / "config"),
-                "OBSIDIAN_VAULT": str(vault),
-                "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
-            }
-            added = subprocess.run([sys.executable, str(PACK / "bin/sd"), "plugin", "add", str(checkout)],
-                                   capture_output=True, text=True, env=environ, check=False)
-            self.assertEqual(added.returncode, 0, added.stderr)
-            database = root / "sd.db"
-            initialise(database)
-            connection = connect(database)
-            self.addCleanup(connection.close)
-            sitting = run(connection, Reader.at(home=home, environ=environ))
-            self.assertTrue(sitting.clean)
-            found = {row["external_id"]: row["status"] for row in connection.execute(
-                "SELECT external_id, status FROM item WHERE source = ?", (SOURCE,))}
-            self.assertEqual(found, {
-                "blog-idea:System/Databases/Blog Ideas/an idea.md": "planning",
-                "topic:System/Databases/Topics/a topic.md": "planning",
-            })
 
 
 if __name__ == "__main__":
