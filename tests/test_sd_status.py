@@ -592,9 +592,8 @@ class GapVocabularyTests(unittest.TestCase):
     `sd_db.protection` writes the fleet's gap ids and the dashboard reads them;
     `sd-status` emits them here and `ACKNOWLEDGEABLE_GAPS` accepts them. Both
     sides were checked alone, and nothing held them together: an id added on
-    one side only failed nothing. This reads the system library at the pin in
-    `.sd-system-rev`, the one `make setup` installs, and names each id on one
-    side only. `unprotected` is the system's status column, not a gap cell.
+    one side only failed nothing. This reads the library `make setup`
+    installs from `lib/`, and names each id on one side only. `unprotected` is the system's status column, not a gap cell.
     """
 
     def test_the_systems_gap_ids_are_the_packs(self) -> None:

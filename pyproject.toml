@@ -18,8 +18,12 @@ packages = []
 [tool.uv]
 package = false
 
+# `lib/` and `tests/sd_db/` are `sd_db` as copied from the system checkout
+# (sd:3278), which never ran Ruff over it. Excluded until it is linted on its
+# own terms; `force-exclude` keeps the pre-commit hook's file arguments out too.
 [tool.ruff]
 line-length = 88
+force-exclude = true
 extend-exclude = [
     ".agents",
     ".build",
@@ -31,7 +35,9 @@ extend-exclude = [
     ".ruff_cache",
     ".sd-ai-command-pack",
     ".venv",
+    "lib",
     "node_modules",
+    "tests/sd_db",
 ]
 
 [tool.ruff.lint]
@@ -56,9 +62,9 @@ scripts_are_modules = true
 module = ["markdown"]
 ignore_missing_imports = true
 
-# `sd_db` is the one database's library. It is not vendored here and not on
-# PyPI: `make setup` builds a copy from the `system` checkout into this
-# virtualenv, so whether mypy can see it depends on whether that ran. Declared
+# `sd_db` is the one database's library. It lives in `lib/`, outside mypy's
+# path, and `make setup` builds a copy from it into this virtualenv, so
+# whether mypy can see it depends on whether that ran. Declared
 # here for the same reason `markdown` is -- an inline ignore in bin/sd_restore.py
 # was correct on a machine without the library and, with `warn_unused_ignores`
 # above, a lint failure on every machine with it.

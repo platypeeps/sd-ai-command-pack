@@ -3002,10 +3002,10 @@ class PathsTests(InstallerHarness):
             environ={
                 "XDG_STATE_HOME": str(self.home / ".local" / "state"),
                 "XDG_CONFIG_HOME": str(self.home / ".config"),
-                # No system checkout, so the library is absent and the trials
-                # are unavailable. That is the machine most of these tests are
-                # describing, and the installer still has to render the paths.
-                sd_install.SYSTEM_CHECKOUT_ENV: str(self.home / "absent"),
+                # The fixture checkout has no `lib/`, so the library is absent
+                # and the trials are unavailable. That is the machine most of
+                # these tests are describing, and the installer still has to
+                # render the paths.
             },
         )
 
