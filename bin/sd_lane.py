@@ -45,7 +45,8 @@ rows are its history. A write is one `BEGIN IMMEDIATE` transaction, local on
 the hub and over the tailnet session on a satellite; with the hub down every
 verb refuses `hub_unavailable`. A checkout whose origin names no GitHub
 repository has no lane. The lane folder, `<lane root>/<repository>/lane/`,
-keeps this machine's logs and runner lock. The lane root is `SD_LANE_ROOT`,
+keeps this machine's logs and runner lock, and under `review/` each review
+`sd-ship prepare` finished but the hub has not yet recorded (sd:3340). The lane root is `SD_LANE_ROOT`,
 else `sd.lane_root`, else `$XDG_STATE_HOME/sd/lanes`. A `queue/queue.json` an
 earlier version left there is imported once (`import_file_queue`).
 

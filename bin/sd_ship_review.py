@@ -287,6 +287,9 @@ class ReviewRuntime:
     # The per-file manifest stored beside `binding`, so a moved binding names
     # what moved (sd:1834). None where a test seam supplies a bare digest.
     manifest: Callable[[pathlib.Path], dict] | None = None
+    # The folder where a completed review waits until the hub records it
+    # (sd:3340, `hold_review`). None where a test seam holds nothing.
+    held: Callable[[pathlib.Path], pathlib.Path] | None = None
 
 
 GATE_NOT_RUN = sd_ship_dispositions.GATE_NOT_RUN
@@ -863,6 +866,8 @@ class SharedReview:
     def review(self, head: str) -> None:
         if getattr(self.args, "restart_review", None) is not None:
             self.restart_review(head)
+        # A resumed review is on the hub now; what follows treats it as any recorded pass (sd:3340).
+        self.resume_held(head)
         passes = self.history.native(self.state)
         if not passes and (base := empty_branch_base(self.root, head)):
             print(f"sd-ship: {head[:12]} changes no file against {base[:12]}; local review skipped, no provider called",
@@ -912,7 +917,113 @@ class SharedReview:
                 prior_path.write_text(json.dumps(prior, sort_keys=True), encoding="utf-8")
                 argv += ["--resume-report" if retry or full else "--verify-report", str(prior_path)]
             result = self.execute_review(argv, head, passes)
-        self.record_review(result, head, passes)
+        self.record_held(result, head, passes, self.hold_review(result, head, passes))
+
+    def held_path(self) -> pathlib.Path | None:
+        """sd:3340. Where this record's completed review waits for the hub; None without a lane folder."""
+        if self.runtime.held is None:
+            return None
+        try:
+            folder = self.runtime.held(self.root)
+        except (OSError, RuntimeError, ValueError) as error:
+            print(f"sd-ship: no lane folder to hold the review in ({error})", file=sys.stderr)
+            return None
+        return folder / (hashlib.sha256(self.key.encode()).hexdigest()[:32] + ".json")
+
+    def held_binding(self, head: str, passes: list[dict]) -> dict:
+        """What a held review answers for: this record, the head, the reserved pass and the tools that ran it."""
+        return {"version": HELD_VERSION, "key": self.key, "repository": self.repository, "branch": self.branch,
+                "head": head, "passes": len(passes), "reservation": digest(passes[-1]) if passes else None,
+                "binding": self.state.get("binding"), "binding_manifest": digest(self.state.get("binding_manifest"))}
+
+    def hold_review(self, result: subprocess.CompletedProcess, head: str, passes: list[dict]) -> pathlib.Path | None:
+        """sd:3340. Write the completed review beside the lane before the hub save, so a hub fault keeps it.
+
+        A part file renamed into place, so a reader never sees half a record.
+        A failed write holds nothing and the save goes ahead, as before.
+        """
+        path = self.held_path()
+        if path is None:
+            return None
+        argv = result.args if isinstance(result.args, list) else [result.args]
+        record = {"binding": self.held_binding(head, passes),
+                  "superseded": {key: value for key, value in self.superseded.items() if value is not ABSENT},
+                  "result": {"args": [str(part) for part in argv], "returncode": result.returncode,
+                             "stdout": result.stdout, "stderr": result.stderr}}
+        part = path.with_name(path.name + ".part")
+        try:
+            record["digest"] = digest(record)
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            with os.fdopen(os.open(part, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as handle:
+                json.dump(record, handle, sort_keys=True)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(part, path)
+        except (OSError, TypeError, ValueError) as error:
+            print(f"sd-ship: the completed review was not held on disk ({error}); a hub fault before its save loses it",
+                  file=sys.stderr)
+            discard_held(path)
+            return None
+        return path
+
+    def record_held(self, result: subprocess.CompletedProcess, head: str, passes: list[dict],
+                    path: pathlib.Path | None) -> None:
+        """Record the review with the hub; drop the held copy once a hub save has gone through.
+
+        Every path through `record_review` saves the outcome before it can
+        refuse, so a new revision means the hub holds it. No new revision, as
+        when the hub is down or its reply was lost, keeps the file.
+        """
+        revision = self.revision
+        try:
+            self.record_review(result, head, passes)
+        finally:
+            if path is not None and self.revision != revision:
+                discard_held(path)
+
+    def resume_held(self, head: str) -> None:
+        """sd:3340. Record the review a hub fault left on disk, as its own prepare would have.
+
+        Only a whole record bound to this record, this head, the pass the hub
+        still holds reserved and unchanged review tools resumes. Anything else
+        is set aside and removed. Either way `review` then goes on as with any
+        recorded pass: a reviewed head is reused, a named provider is checked
+        against it and an additional request is dispatched.
+        """
+        path = self.held_path()
+        if path is None:
+            return
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            discard_held(path)  # a part file a killed write left
+            return
+        except (OSError, UnicodeDecodeError) as error:
+            return refuse_held(path, f"unreadable: {error}")
+        try:
+            record = json.loads(text)
+        except ValueError:
+            return refuse_held(path, "not a whole record")
+        if not isinstance(record, dict) or record.pop("digest", None) != digest(record):
+            return refuse_held(path, "its digest does not match its content")
+        passes = self.history.native(self.state)
+        expected = self.held_binding(head, passes)
+        held = record.get("binding") if isinstance(record.get("binding"), dict) else {}
+        moved = sorted(name for name in expected if held.get(name) != expected[name])
+        if moved:
+            return refuse_held(path, f"bound to another {', '.join(moved)}")
+        if self.state.get("binding") != self.runtime.binding(self.root):
+            return refuse_held(path, "the review tools or policy changed since it ran")
+        try:
+            outcome = record["result"]
+            result = subprocess.CompletedProcess(list(outcome["args"]), int(outcome["returncode"]),
+                                                 str(outcome["stdout"]), str(outcome["stderr"]))
+            kept = dict(record["superseded"])
+        except (KeyError, TypeError, ValueError):
+            return refuse_held(path, "not a whole record")
+        self.superseded = {key: kept.get(key, ABSENT) for key in DISPATCH_FIELDS}
+        print(f"sd-ship: recording the review of {head[:12]} held at {path}; no provider called", file=sys.stderr)
+        self.record_held(result, head, passes, path)
 
     def preflight_diagnostic(self, planned: subprocess.CompletedProcess,
                              kind: str = "invalid_timing_plan", stage: str = "planning") -> dict:
@@ -1143,6 +1254,26 @@ def unreviewed(report: dict, exit_code: int) -> bool:
 #: The receipt fields `execute_review` overwrites when it dispatches a pass.
 DISPATCH_FIELDS = ("phase", "head", "binding", "binding_manifest", "review_clearance")
 ABSENT = object()
+
+#: The held review's record shape (sd:3340); a record of another version is set aside.
+HELD_VERSION = 1
+
+
+def discard_held(path: pathlib.Path) -> None:
+    """Remove a held review and any part file a killed write left; a file already gone is fine."""
+    for name in (path, path.with_name(path.name + ".part")):
+        try:
+            name.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as error:
+            print(f"sd-ship: could not remove {name} ({error})", file=sys.stderr)
+
+
+def refuse_held(path: pathlib.Path, reason: str) -> None:
+    """Refuse a held review, say why, and remove it: the review runs as it would have (sd:3340)."""
+    print(f"sd-ship: set aside the held review at {path}: {reason}", file=sys.stderr)
+    discard_held(path)
 
 
 def gate_diagnostics(check: dict, limit: int) -> list[dict]:
