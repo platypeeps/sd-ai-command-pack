@@ -269,13 +269,22 @@ def queue_path(root: pathlib.Path, environ: dict[str, str]) -> pathlib.Path:
     return lane_dir(root, environ) / "queue" / "queue.json"
 
 
+def require_sd_db() -> None:
+    """Make `sd_db` importable through `sd_lib.import_sd_db`, or refuse: the queue lives in its database."""
+    imported = sd_lib.import_sd_db()
+    if imported.module is None:
+        raise LaneError(f"the lane queue lives in the workflow database: {imported.problem}", code=HUB_UNAVAILABLE)
+
+
 def hub_database(environ: dict[str, str]) -> Any:
     """The workflow database: the file on the hub, the hub's over the tailnet on a satellite."""
+    require_sd_db()
     from sd_db.database import default_path  # noqa: PLC0415
     return default_path(environ.get("HOME"))
 
 
 def this_host() -> str:
+    require_sd_db()
     from sd_db.ship import (
         this_host as host,  # noqa: PLC0415 -- the one host name the lane host rows use
     )
@@ -293,6 +302,7 @@ def runs_here(row: dict[str, Any], host: str) -> bool:
 
 def repository_of(root: pathlib.Path) -> str | None:
     """`owner/name`, lower-cased, of the GitHub repository `root`'s origin names, or None."""
+    require_sd_db()
     from sd_db.protection import github_slug  # noqa: PLC0415
     found = github_slug(lane_git(sd_lib.main_worktree_root(root), "config", "--get", "remote.origin.url") or "")
     return "/".join(found).lower() if found else None
@@ -300,9 +310,6 @@ def repository_of(root: pathlib.Path) -> str | None:
 
 def queue_for(root: pathlib.Path, environ: dict[str, str]) -> Queue:
     """The queue of the repository `root` is a checkout of; one whose origin names no GitHub repository has none."""
-    imported = sd_lib.import_sd_db()
-    if imported.module is None:
-        raise LaneError(f"the lane queue lives in the workflow database: {imported.problem}", code=HUB_UNAVAILABLE)
     repository = repository_of(root)
     if repository is None:
         raise LaneError(f"{root} has no lane: its origin names no GitHub repository, so prepare could not open "
@@ -318,6 +325,7 @@ def on_hub(queue: Queue, work: Callable[[Any], Any]) -> Any:
     keeps its meaning. A fault of the database or its session refuses with
     `HUB_UNAVAILABLE`: an unknown answer, since a write may have landed.
     """
+    require_sd_db()
     from sd_db.database import connect, transaction  # noqa: PLC0415
     from sd_db.errors import SdDbError  # noqa: PLC0415
     try:
@@ -343,6 +351,7 @@ def stored(connection: Any, repository: str) -> list[dict[str, Any]]:
 
 
 def store(connection: Any, repository: str, entry: dict[str, Any]) -> None:
+    require_sd_db()
     from sd_db.writes import now  # noqa: PLC0415
     connection.execute("INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
                        (f"{KEY_PREFIX}{repository}:{entry['id']}", now(), json.dumps(entry, sort_keys=True)))
