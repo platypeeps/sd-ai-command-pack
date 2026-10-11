@@ -1220,6 +1220,77 @@ class AFollowupRowIsClearedByItsTrailerAlone(Fixture):
         self.assertIn(f"Delivers: sd:{number}", found[0])
 
 
+class AFollowupRowIsClearedByItsDeliveryReceipt(Fixture):
+    """sd:3346. A followup closed by `sd work deliver --associated` is marked.
+
+    A task or followup has no work receipt (sd:1913): its `Item:` merge is
+    verified, and the move to `done` records `delivered at <sha> on <ref>`
+    with the reason. The `unmarked` clause read trailers alone, so the row
+    warned forever. The receipt now counts while its commit is on the default
+    branch and its trailer block names the item.
+    """
+
+    named = ATaskKeyedFolder.named
+    row = ATaskKeyedFolder.row
+    unmarked = AFollowupRowIsClearedByItsTrailerAlone.unmarked
+
+    def merged(self, number: int, *trailers: str) -> str:
+        """A merge carrying `trailers`, on whatever branch is checked out; its sha."""
+        self.named(f"sd:{number}", status=None)
+        self.git("add", "-A")
+        self.git("commit", "-q", "--allow-empty", "-m", merge_message(*trailers))
+        return self.git("rev-parse", "HEAD")
+
+    def close(self, number: int, reason: str) -> None:
+        """The status move `sd work deliver --associated` makes for a followup."""
+        sd_db.workflow.change_status(self._connection, number, "done", who="the test", reason=reason)
+
+    def receipt(self, number: int, commit: str) -> None:
+        self.close(number, f"delivered at {commit} on origin/main (after the fact: the merge was the item)")
+
+    def test_a_receipt_on_the_default_branch_clears_the_check(self) -> None:
+        number = self.row("followup", "planning")
+        commit = self.merged(number, f"Item: sd:{number}")
+        self.remote()
+        self.receipt(number, commit)
+        item = self.only()
+        self.assertEqual(item.status, "done")
+        self.assertEqual(self.unmarked(), [], item.inconsistencies)
+
+    def test_a_receipt_off_the_default_branch_still_warns_and_names_it(self) -> None:
+        number = self.row("followup", "planning")
+        self.named(f"sd:{number}", status=None)
+        self.commit("chore: the folder names its row")
+        self.git("checkout", "-q", "-b", "side")
+        commit = self.merged(number, f"Item: sd:{number}")
+        self.git("checkout", "-q", "main")
+        self.receipt(number, commit)
+        found = self.unmarked()
+        self.assertEqual(len(found), 1, self.only().inconsistencies)
+        self.assertIn(commit, found[0])
+        self.assertIn("not reachable from main", found[0])
+
+    def test_a_receipt_naming_a_commit_for_another_item_still_warns(self) -> None:
+        """The sentence is free text on `task status --reason`, so the commit is
+        held to the item: one whose trailers name `sd:<id>9` delivers nothing here."""
+        number = self.row("followup", "planning")
+        commit = self.merged(number, f"Item: sd:{number}9")
+        self.receipt(number, commit)
+        found = self.unmarked()
+        self.assertEqual(len(found), 1, self.only().inconsistencies)
+        self.assertIn(f"carries no Item: sd:{number}", found[0])
+
+    def test_a_later_close_by_hand_drops_the_receipt(self) -> None:
+        """Only the latest move to `done` speaks: a reopened row closed by hand
+        was not delivered by the earlier receipt."""
+        number = self.row("followup", "planning")
+        commit = self.merged(number, f"Item: sd:{number}")
+        self.receipt(number, commit)
+        sd_db.workflow.change_status(self._connection, number, "planning", who="the test")
+        self.close(number, "closed by hand")
+        self.assertEqual(len(self.unmarked()), 1, self.only().inconsistencies)
+
+
 class TheRowNamesTheBranch(Fixture):
     """sd:1382. The row's `branch` column is the maintained copy.
 
