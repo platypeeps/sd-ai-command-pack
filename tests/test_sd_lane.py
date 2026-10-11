@@ -259,6 +259,7 @@ class Runner(Lane):
         tree = self.worktree("topic")
         sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
+        git(self.repo, "push", "-q", "origin", "main")  # prepare merges `origin/<default>`
 
         def catch_up_then_block(argv: list[str], log: pathlib.Path) -> dict:
             git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
@@ -432,20 +433,30 @@ class Runner(Lane):
                          ("merged", ["prepare", "merge", "prepare", "merge"]))
 
     def test_the_retry_starts_from_prepares_catch_up_merge_and_not_from_a_builder_commit(self) -> None:
-        """The catch-up moved HEAD past the queued head; a commit of the builder's still skips the entry."""
-        for builder in (False, True):
-            with self.subTest(builder=builder):
-                tree = self.worktree(f"topic-{builder}")
-                sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
-                git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
+        """The catch-up moved HEAD past the queued head; a commit of the builder's still skips the entry.
 
-                def catch_up_then_fault(argv: list[str], log: pathlib.Path, tree: pathlib.Path = tree) -> dict:
+        Failure table, put-back (sd:3283): the catch-up is only in the worktree, so `expected_head` stays at
+        the published head, and this host's worktree rule accepts the catch-up. Pushed, the entry moves to it.
+        """
+        for builder, pushed in ((False, False), (True, False), (False, True)):
+            with self.subTest(builder=builder, pushed=pushed):
+                name = f"topic-{builder}-{pushed}"
+                tree = self.worktree(name)
+                queued = sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True,
+                                               claim="deliver")["expected_head"]
+                git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
+                git(self.repo, "push", "-q", "origin", "main")  # prepare merges `origin/<default>`
+
+                def catch_up_then_fault(argv: list[str], log: pathlib.Path, tree: pathlib.Path = tree,
+                                        name: str = name, pushed: bool = pushed) -> dict:
                     git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
+                    if pushed:
+                        git(tree, "push", "-q", "origin", f"HEAD:refs/heads/{name}")
                     self.ship(argv, log)
                     return self.HUB_FAULT
                 sd_lane.run_lane(self.repo, self.environ, catch_up_then_fault)
                 caught_up = git(tree, "rev-parse", "HEAD")
-                self.assertEqual(self.entries()[-1]["expected_head"], caught_up)
+                self.assertEqual(self.entries()[-1]["expected_head"], caught_up if pushed else queued)
                 if builder:
                     git(tree, "commit", "-q", "--allow-empty", "-m", "the builder's")
                 sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -932,7 +943,7 @@ class Landing(Lane):
         [(item, body, main)] = self.notes
         self.assertEqual((item, main), (1, self.repo))
         self.assertEqual(body, f"Landed: merged at c0ffeec0ffee (head {head[:12]}). Cleanup: removed origin/topic, "
-                               f"worktree {tree} and branch topic kept for removal once the builder stops. "
+                               f"worktree {tree} and branch topic kept on {sd_lane.this_host()} for removal once the builder stops. "
                                f"Recover: git branch topic {head}. Remove: {remove}")
         entry = self.entries()[0]
         self.assertEqual((entry["status"], entry["remove"]), ("merged", remove))
@@ -1131,6 +1142,24 @@ class SharedQueue(Lane):
             return real(root, *args)
         return mock.patch.object(sd_lane, "publish_git", answer)
 
+    def repo_row(self, host: str | None = None) -> None:
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            sd_db.upsert_repo(connection, str(self.repo), remote="https://github.com/example/pack.git", managed=1)
+            connection.execute("UPDATE repo SET lane_host = ?", (host,))
+        finally:
+            connection.close()
+
+    def failing_store(self, when: Any) -> Any:
+        real = sd_lane.store
+
+        def store(connection: Any, repository: str, entry: dict) -> None:
+            if when(entry):
+                raise sqlite3.OperationalError("the hub went away")
+            real(connection, repository, entry)
+        return mock.patch.object(sd_lane, "store", store)
+
     def make_dead(self) -> None:
         """The runner that holds the running entry exits, as a stopped or killed one does."""
         runner = subprocess.Popen([sys.executable, "-c", ""])
@@ -1220,7 +1249,10 @@ class Publishing(SharedQueue):
         real = sd_lane.on_hub
 
         def landed_then_lost(queue: sd_lane.Queue, work: Any) -> Any:
-            real(queue, work)
+            before = self.rows()
+            answer = real(queue, work)
+            if self.rows() == before:  # a read, such as enqueue's check before it publishes (sd:3283)
+                return answer
             raise sd_lane.LaneError("the session dropped", code=sd_lane.HUB_UNAVAILABLE)
         with mock.patch.object(sd_lane, "on_hub", landed_then_lost), self.assertRaises(sd_lane.LaneError) as lost:
             sd_lane.enqueue_entry(self.feature, 1, "t", self.body, self.environ, claim="deliver")
@@ -1231,15 +1263,6 @@ class Publishing(SharedQueue):
 
 
 class ClaimAndLease(SharedQueue):
-    def repo_row(self, host: str | None = None) -> None:
-        import sd_db
-        connection = sd_db.connect(home=self.tmp)
-        try:
-            sd_db.upsert_repo(connection, str(self.repo), remote="https://github.com/example/pack.git", managed=1)
-            connection.execute("UPDATE repo SET lane_host = ?", (host,))
-        finally:
-            connection.close()
-
     def test_a_claim_that_lands_with_its_answer_lost_is_put_back_by_the_next_run(self) -> None:
         """Failure table, claim: the hub fails after the claim landed; no step starts, and reclaim puts it back."""
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
@@ -1285,21 +1308,20 @@ class ClaimAndLease(SharedQueue):
         self.assertEqual((first["item"], busy.exception.code), (1, "lane_busy"))
         self.assertEqual([row["status"] for row in self.entries()], ["running", "pending"])
 
-    def test_a_lane_move_leaves_the_old_hosts_pending_entries_unclaimed(self) -> None:
-        """Review round 1: the new host claims none of the old host's entries; they stay pending; slice 2 runs them."""
+    def test_another_hosts_entry_gets_no_speculative_gate_and_says_why(self) -> None:
+        """Failure table, speculation (sd:3283): the next entry has no worktree on this host; nothing is gated."""
         self.repo_row()
+        sd_lane.enqueue_entry(self.worktree("second"), 1, "one", self.body, self.environ, manual=True, claim="deliver")
         with mock.patch("sd_db.ship.this_host", lambda: "build-2"):
-            sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
-        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(self.feature, 2, "two", self.body, self.environ, claim="deliver")
         claimed = sd_lane.claim_entry(self.store(), "token")
-        self.assertEqual((claimed or {}).get("item"), 2, "the runner claimed an entry whose worktree is on another host")
+        self.assertEqual((claimed or {}).get("item"), 1)
         gate = mock.Mock()
         self.assertIsNone(sd_lane.speculate(claimed, self.store(), gate))
         gate.assert_not_called()
-        self.assertEqual([(row["item"], row["status"]) for row in self.entries()], [(1, "pending"), (2, "running")])
-        self.assertNotIn("speculation", self.entries()[0])
-        sd_lane.cancel(self.repo, 1, self.environ)
-        self.assertEqual(self.entries()[0]["status"], "cancelled")
+        speculation = self.entries()[1]["speculation"]
+        self.assertEqual((speculation["after"], speculation["status"]), (1, "skipped"))
+        self.assertIn("no worktree on this host", speculation["reason"])
 
     def test_a_kill_mid_prepare_puts_the_entry_back_and_the_third_fails_it(self) -> None:
         """Failure table, prepare: the runner dies; pid gone, back to pending; the third reclaim fails it."""
@@ -1354,15 +1376,6 @@ class ClaimAndLease(SharedQueue):
         self.assertIn("one entry of a repository runs at a time", answer["stopped"])
         self.assertEqual((self.calls, self.entries()[0]["status"]), ([], "running"))
 
-    def failing_store(self, when: Any) -> Any:
-        real = sd_lane.store
-
-        def store(connection: Any, repository: str, entry: dict) -> None:
-            if when(entry):
-                raise sqlite3.OperationalError("the hub went away")
-            real(connection, repository, entry)
-        return mock.patch.object(sd_lane, "store", store)
-
     def test_a_step_write_that_fails_stops_the_runner_and_reclaim_puts_it_back(self) -> None:
         """Failure table, before merge: the hub fails for the whole retry; no merge, and the rerun runs it."""
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
@@ -1416,6 +1429,418 @@ class ClaimAndLease(SharedQueue):
         self.assertEqual(len(merged), 1)
 
 
+class AnyHost(SharedQueue):
+    """sd:3283, slice 2 of the sd:3174 design: the lane host runs any entry. One test per failure-table row."""
+
+    def enqueued_elsewhere(self, item: int, name: str, *messages: str) -> list[str]:
+        """`name`'s commits, enqueued by another host; this disk keeps neither its worktree nor its branch."""
+        tree, heads = self.committed(name, *messages)
+        with mock.patch("sd_db.ship.this_host", lambda: "build-2"):
+            sd_lane.enqueue_entry(tree, item, name, self.body, self.environ, manual=True, claim="deliver")
+        git(self.repo, "worktree", "remove", "--force", str(tree))
+        git(self.repo, "branch", "-D", name)
+        return heads
+
+    def made(self, item: int = 1) -> pathlib.Path:
+        return self.store().lane / "worktrees" / str(item)
+
+    def pushed_on_top(self, branch: str) -> None:
+        other = self.tmp / "other"
+        git(self.tmp, "clone", "-q", "-b", branch, str(self.origin), str(other))
+        git(other, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "more")
+        git(other, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
+
+    def test_an_entry_another_host_enqueued_runs_here_from_origin(self) -> None:
+        """Failure table, claim and mixed versions: the runner makes a lane worktree from origin, then removes it."""
+        [head] = self.enqueued_elsewhere(1, "topic", "work")
+        seen: list[tuple[str, str]] = []
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            tree = pathlib.Path(argv[1])
+            seen.append((git(tree, "rev-parse", "HEAD"), git(tree, "rev-parse", "--abbrev-ref", "@{upstream}")))
+            return self.ship(argv, log)
+        sd_lane.run_lane(self.repo, self.environ, ship)
+        self.assertEqual([(c[2], c[1]) for c in self.calls], [("prepare", str(self.made())), ("merge", str(self.made()))])
+        self.assertEqual((seen[0], self.entries()[0]["status"]), ((head, "origin/topic"), "merged"))
+        self.assertEqual((self.made().exists(), git(self.repo, "branch", "--list", "topic")), (False, ""))
+
+    def catch_ups(self, branch: str, head: str, count: int) -> list[str]:
+        """`count` catch-up merges of a moving main onto `head`, each on the last, pushed to `origin/<branch>`."""
+        scratch, merges = self.tmp / "scratch", []
+        git(self.repo, "worktree", "add", "-q", "--detach", str(scratch), head)
+        for number in range(count):
+            git(self.repo, "commit", "-q", "--allow-empty", "-m", f"base {number}")
+            git(self.repo, "push", "-q", "origin", "main")  # prepare merges `origin/<default>`
+            git(scratch, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
+            merges.append(git(scratch, "rev-parse", "HEAD"))
+        git(scratch, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
+        git(self.repo, "worktree", "remove", "--force", str(scratch))
+        return merges
+
+    def foreign_merge(self, tree: pathlib.Path, edited: bool = False) -> str:
+        """A merge with a catch-up's message on `tree`'s HEAD that prepare did not make; the new HEAD.
+
+        Plain, it merges a feature branch that is not on origin's default branch. `edited`, it merges
+        `origin/main` but adds a file no merge makes.
+        """
+        if edited:
+            git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
+            git(self.repo, "push", "-q", "origin", "main")
+            git(tree, "merge", "-q", "--no-ff", "--no-commit", "main")
+            (tree / "unreviewed.txt").write_text("unreviewed\n", encoding="utf-8")
+            git(tree, "add", "unreviewed.txt")
+            git(tree, "commit", "-q", "-m", "Merge origin/main")
+        else:
+            other = self.tmp / f"other-{tree.name}"
+            git(self.repo, "worktree", "add", "-q", "-b", other.name, str(other), "main")
+            (other / "feature.txt").write_text("unreviewed\n", encoding="utf-8")
+            git(other, "add", "feature.txt")
+            git(other, "commit", "-q", "-m", "an unrelated feature")
+            git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", other.name)
+        return git(tree, "rev-parse", "HEAD")
+
+    def test_a_merge_the_lane_did_not_make_is_not_a_catch_up(self) -> None:
+        """Review round 1: a merge on the queued head is a catch-up only when it is prepare's own.
+
+        That is a clean merge of a commit on origin's default branch; an unrelated feature, or an edit inside
+        the merge, is scope no review saw.
+        """
+        tree = self.worktree("unit")
+        queued = git(tree, "rev-parse", "HEAD")
+        for edited in (False, True):
+            with self.subTest(edited=edited):
+                git(tree, "reset", "-q", "--hard", queued)
+                merge = self.foreign_merge(tree, edited)
+                self.assertEqual((sd_lane.catch_up_of(tree, merge, queued), sd_lane.at_head(tree, queued),
+                                  sd_lane.caught_up(tree, queued)), (False, False, queued))
+        git(tree, "reset", "-q", "--hard", queued)
+        [merge] = self.catch_ups("unit", queued, 1)
+        git(tree, "reset", "-q", "--hard", merge)
+        self.assertEqual((sd_lane.at_head(tree, queued), sd_lane.caught_up(tree, queued)), (True, merge))
+
+    def test_a_foreign_merge_on_origin_skips_head_moved(self) -> None:
+        """Review round 1, remote validation: origin/<branch> holds a merge the lane did not make."""
+        for edited in (False, True):
+            with self.subTest(edited=edited):
+                item = 1 + edited
+                [head] = self.enqueued_elsewhere(item, f"topic{item}", "work")
+                scratch = self.tmp / f"scratch{item}"
+                git(self.repo, "worktree", "add", "-q", "--detach", str(scratch), head)
+                self.foreign_merge(scratch, edited)
+                git(scratch, "push", "-q", "origin", f"HEAD:refs/heads/topic{item}")
+                git(self.repo, "worktree", "remove", "--force", str(scratch))
+                sd_lane.run_lane(self.repo, self.environ, self.ship)
+                entry = self.entries()[-1]
+                self.assertEqual((entry["status"], entry.get("code"), self.calls), ("skipped", "head_moved", []))
+
+    def test_a_foreign_merge_in_the_own_worktree_is_not_run(self) -> None:
+        """Review round 1, own worktree and the head check: the entry's worktree holds a merge the lane did not make."""
+        for edited in (False, True):
+            with self.subTest(edited=edited):
+                item = 1 + edited
+                tree = self.worktree(f"own{item}")
+                sd_lane.enqueue_entry(tree, item, "one", self.body, self.environ, manual=True, claim="deliver")
+                self.foreign_merge(tree, edited)
+                sd_lane.run_lane(self.repo, self.environ, self.ship)
+                self.assertEqual((self.entries()[-1]["status"], self.calls), ("skipped", []))
+
+    def test_a_put_back_never_adopts_a_foreign_merge_origin_holds(self) -> None:
+        """Review round 1, put-back and the before-merge check: origin/<branch> gained a merge the lane did not make.
+
+        A hub fault, a merge that answers `lane_elsewhere`, and a move seen by the before-merge write each put
+        the entry back; `expected_head` stays the queued head.
+        """
+        for case in ("hub_fault", "merge_elsewhere", "moved"):
+            with self.subTest(case=case):
+                item = {"hub_fault": 1, "merge_elsewhere": 2, "moved": 3}[case]
+                tree = self.worktree(f"back{item}")
+                queued = sd_lane.enqueue_entry(tree, item, "one", self.body, self.environ, manual=True,
+                                               claim="deliver")["expected_head"]
+                self.answers[(item, "merge")] = {"ok": False, "phase": "merge", "error": "runs on build-2",
+                                                 "workflow": {"blocker": {"code": "lane_elsewhere"}}}
+
+                def prepare(argv: list[str], log: pathlib.Path, tree: pathlib.Path = tree, case: str = case,
+                            item: int = item) -> dict:
+                    if argv[2] == "prepare":
+                        self.foreign_merge(tree)
+                        git(tree, "push", "-q", "origin", f"HEAD:refs/heads/back{item}")
+                        if case == "moved":
+                            self.repo_row("build-2")
+                    answer = self.ship(argv, log)
+                    return Runner.HUB_FAULT if case == "hub_fault" and argv[2] == "prepare" else answer
+                sd_lane.run_lane(self.repo, self.environ, prepare)
+                entry = self.entries()[-1]
+                self.repo_row(None)
+                sd_lane.cancel(self.repo, item, self.environ)  # before the check, so a failure leaves no entry behind
+                self.assertEqual((entry["item"], entry["status"], entry["expected_head"]), (item, "pending", queued))
+
+    def test_a_retry_never_starts_from_a_foreign_merge(self) -> None:
+        """Review round 1, retry: the worktree's HEAD is a merge the lane did not make; the retry keeps the head."""
+        tree = self.worktree("again")
+        queued = sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True,
+                                       claim="deliver")["expected_head"]
+
+        def blocked(argv: list[str], log: pathlib.Path) -> dict:
+            self.foreign_merge(tree)
+            self.ship(argv, log)
+            return {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        sd_lane.run_lane(self.repo, self.environ, blocked)
+        self.assertEqual(sd_lane.retry(self.repo, 1, self.environ)["expected_head"], queued)
+
+    def test_a_chain_of_pushed_catch_ups_after_two_reclaims_still_runs(self) -> None:
+        """Codex review: prepare pushed a catch-up, died, was reclaimed, caught up again; both merges are its own."""
+        [head] = self.enqueued_elsewhere(1, "topic", "work")
+        [_, second] = self.catch_ups("topic", head, 2)
+        seen: list[str] = []
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            seen.append(git(pathlib.Path(argv[1]), "rev-parse", "HEAD"))
+            return self.ship(argv, log)
+        sd_lane.run_lane(self.repo, self.environ, ship)
+        self.assertEqual((self.entries()[0]["status"], seen[:1]), ("merged", [second]))
+
+    def test_a_failed_read_of_a_catch_ups_parents_leaves_the_entry_pending(self) -> None:
+        """Codex review: origin holds a valid catch-up, and the read of its parents fails; unknown, not head_moved."""
+        [head] = self.enqueued_elsewhere(1, "topic", "work")
+        [merge] = self.catch_ups("topic", head, 1)
+        real_lane, real_publish = sd_lane.lane_git, sd_lane.publish_git
+
+        def parents_read(args: tuple[str, ...]) -> bool:
+            return any(merge in arg for arg in args) and args[0] in ("rev-parse", "rev-list", "cat-file", "log")
+
+        def lane_git(worktree: pathlib.Path, *args: str) -> str | None:
+            return None if parents_read(args) else real_lane(worktree, *args)
+
+        def publish_git(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess | None:
+            return None if parents_read(args) else real_publish(root, *args)
+        with mock.patch.object(sd_lane, "lane_git", lane_git), mock.patch.object(sd_lane, "publish_git", publish_git):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], "holder" in entry, self.calls), ("pending", False, []))
+        self.assertIn("stopped", answer)
+
+    def test_a_lane_worktree_landing_names_the_builders_worktree_and_host(self) -> None:
+        """Codex review: the builder's worktree stays on the host that enqueued it; the note says where and how."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [(_, body, _)] = self.notes
+        kept = self.tmp / "topic"
+        self.assertIn(f"{kept} stays on build-2", body)
+        self.assertTrue(body.endswith(f"Remove on build-2: git -C {kept} worktree remove {kept}"), body)
+
+    def test_a_lane_worktree_is_removed_when_its_entry_fails(self) -> None:
+        """Failure table, end: the runner removes the lane worktree and the branch it made, whatever the outcome."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "prepare", "error": "review blocked"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "failed")
+        self.assertEqual((self.made().exists(), git(self.repo, "branch", "--list", "topic")), (False, ""))
+
+    def test_a_remote_branch_that_moved_skips_head_moved(self) -> None:
+        """Failure table, worktree: the fetched head is neither `expected_head` nor its catch-up merge."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        self.pushed_on_top("topic")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry.get("code"), self.calls), ("skipped", "head_moved", []))
+
+    def test_a_deleted_remote_branch_skips_head_gone(self) -> None:
+        """Failure table, worktree: `origin/<branch>` was deleted after enqueue."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        git(self.origin, "update-ref", "-d", "refs/heads/topic")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry.get("code"), self.calls), ("skipped", sd_lane.HEAD_GONE, []))
+        self.assertIn("lane retry", entry["reason"])
+
+    def test_a_failing_read_or_fetch_of_origin_leaves_the_entry_pending(self) -> None:
+        """Failure table, worktree: an unknown answer is not a skip; back to pending at its place, the run stops."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        for verb in ("ls-remote", "fetch"):
+            with self.subTest(verb=verb):
+                with self.failing(verb):
+                    answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+                entry = self.entries()[0]
+                self.assertEqual((entry["status"], "holder" in entry, self.calls), ("pending", False, []))
+                self.assertIn("origin", answer["stopped"])
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged")
+
+    def test_a_failing_local_read_leaves_the_entry_pending(self) -> None:
+        """Codex class pass, unknown reads: a failed worktree list or local branch read is not a skip or a failure."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        for verb in ("worktree", "rev-parse"):
+            with self.subTest(verb=verb):
+                with self.failing(verb):
+                    answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+                entry = self.entries()[0]
+                self.assertEqual((entry["status"], "holder" in entry, self.calls), ("pending", False, []))
+                self.assertIn("not skipped", answer["stopped"])
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged")
+
+    def test_a_head_check_with_no_answer_before_prepare_leaves_the_entry_pending(self) -> None:
+        """Codex class pass, unknown reads: the head check before prepare has no answer; no skip, no failure."""
+        self.enqueued_elsewhere(1, "topic", "work")
+
+        def unknown(tree: pathlib.Path, expected: str) -> bool:
+            raise sd_lane.LaneError("git rev-parse failed; the entry is not skipped.", code=sd_lane.PUBLISH_UNKNOWN)
+        with mock.patch.object(sd_lane, "at_head", unknown):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], "holder" in entry, self.calls), ("pending", False, []))
+        self.assertIn("not skipped", answer["stopped"])
+        self.assertFalse(self.made().exists())
+
+    def test_a_local_branch_at_another_commit_skips_branch_busy(self) -> None:
+        """Failure table, worktree: a local branch of that name at another commit, or checked out at another head."""
+        for checked_out in (False, True):
+            with self.subTest(checked_out=checked_out):
+                item = 1 + checked_out
+                self.enqueued_elsewhere(item, f"topic{item}", "work")
+                if checked_out:
+                    git(self.repo, "worktree", "add", "-q", "-b", f"topic{item}", str(self.tmp / "busy"), "main")
+                else:
+                    git(self.repo, "branch", f"topic{item}", "main")
+                sd_lane.run_lane(self.repo, self.environ, self.ship)
+                entry = self.entries()[-1]
+                self.assertEqual((entry["status"], entry.get("code"), self.calls), ("skipped", "branch_busy", []))
+
+    def test_a_leftover_lane_worktree_at_another_head_is_remade(self) -> None:
+        """Failure table, worktree: a killed run left its lane worktree and branch at another head."""
+        [head] = self.enqueued_elsewhere(1, "topic", "work")
+        self.made().parent.mkdir(parents=True, exist_ok=True)
+        git(self.repo, "worktree", "add", "-q", "-b", "topic", str(self.made()), "main")
+        heads: list[str] = []
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            heads.append(git(pathlib.Path(argv[1]), "rev-parse", "HEAD"))
+            return self.ship(argv, log)
+        sd_lane.run_lane(self.repo, self.environ, ship)
+        self.assertEqual((heads[:1], self.entries()[0]["status"]), ([head], "merged"))
+        self.assertFalse(self.made().exists())
+
+    def test_a_pending_entry_with_no_branch_fails_and_does_not_loop(self) -> None:
+        """Failure table, worktree: an entry another host left with no branch has nothing to fetch; it fails once."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        sd_lane.update(self.store(), lambda rows: rows[0].update(branch=None))
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry.get("code"), self.calls), ("failed", "no_branch", []))
+        self.assertNotIn("stopped", answer)
+
+    def test_a_leftover_lane_folder_git_no_longer_knows_is_replaced(self) -> None:
+        """Failure table, worktree: the lane folder exists but is no registered worktree; the runner remakes it.
+
+        Gate round 1: the stale folder is renamed aside, never deleted, so no new deletion path exists.
+        """
+        self.enqueued_elsewhere(1, "topic", "work")
+        self.made().mkdir(parents=True)
+        (self.made() / "stale.txt").write_text("left by a killed run\n", encoding="utf-8")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [aside] = self.made().parent.glob(f"{self.made().name}.stale-*")
+        self.assertEqual((self.entries()[0]["status"], (aside / "stale.txt").read_text(encoding="utf-8")),
+                         ("merged", "left by a killed run\n"))
+
+    def test_a_claim_whose_write_fails_reports_no_reclaim(self) -> None:
+        """Failure table, claim: a cross-host reclaim inside a claim the hub never took is not reported."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.claim_entry(self.store(), "elsewhere")
+        sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(host="build-2")
+                       or rows[0].update(lease_until="2020-01-01T00:00:00Z"))
+        reclaimed: list = []
+        with self.failing_store(lambda entry: True), self.assertRaises(sd_lane.Stop):
+            sd_lane.claim_entry(self.store(), "mine", reclaimed)
+        self.assertEqual((reclaimed, self.entries()[0]["status"]), ([], "running"))
+
+    def test_an_expired_lease_on_another_host_is_reclaimed_at_claim(self) -> None:
+        """Failure table, claim: a holder on another host is dead once its lease passed; the lane host reclaims it."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.claim_entry(self.store(), "elsewhere")
+        sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(host="build-2"))
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertIn("one entry of a repository runs at a time", answer["stopped"])
+        self.assertEqual((self.calls, self.entries()[0]["status"]), ([], "running"))
+        sd_lane.update(self.store(), lambda rows: rows[0].update(lease_until="2020-01-01T00:00:00Z"))
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([(row["item"], row["status"]) for row in answer["reclaimed"]], [(1, "pending")])
+        self.assertEqual(self.entries()[0]["status"], "merged")
+
+    def test_a_move_during_prepare_puts_the_entry_back_and_the_new_host_claims_it(self) -> None:
+        """Failure table, before merge: the lane moved mid-prepare; no merge here, the entry keeps its place."""
+        self.repo_row()
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, manual=True, claim="deliver")
+
+        def prepared_then_moved(argv: list[str], log: pathlib.Path) -> dict:
+            answer = self.ship(argv, log)
+            self.repo_row("build-2")
+            return answer
+        answer = sd_lane.run_lane(self.repo, self.environ, prepared_then_moved)
+        self.assertEqual([c[2] for c in self.calls], ["prepare"])
+        self.assertIn("runs on build-2", answer["stopped"])
+        one = self.entries()[0]
+        self.assertEqual((one["status"], "holder" in one, one["moved_off"]["host"]), ("pending", False, sd_lane.this_host()))
+        with mock.patch("sd_db.ship.this_host", lambda: "build-2"):
+            self.assertEqual((sd_lane.claim_entry(self.store(), "new-host") or {}).get("item"), 1)
+
+    def test_a_lane_host_that_cannot_be_read_before_the_merge_stops_with_no_merge(self) -> None:
+        """Failure table, before merge: clones that disagree on the host; no merge starts and the run stops."""
+        self.repo_row()
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+
+        def prepared_then_unknown(argv: list[str], log: pathlib.Path) -> dict:
+            import sd_db
+            connection = sd_db.connect(home=self.tmp)
+            try:
+                sd_db.upsert_repo(connection, str(self.tmp / "clone-2"), remote="https://github.com/example/pack.git",
+                                  managed=1)
+                connection.execute("UPDATE repo SET lane_host = 'build-2' WHERE path = ?", (str(self.tmp / "clone-2"),))
+            finally:
+                connection.close()
+            return self.ship(argv, log)
+        answer = sd_lane.run_lane(self.repo, self.environ, prepared_then_unknown)
+        self.assertEqual([c[2] for c in self.calls], ["prepare"])
+        self.assertIn("Cannot read the lane host before the merge", answer["stopped"])
+        self.assertEqual((self.entries()[0]["status"], self.entries()[0]["step"]), ("running", "prepare"))
+
+    def test_a_merge_that_answers_lane_elsewhere_puts_the_entry_back(self) -> None:
+        """Failure table, merge: `sd-ship merge` refused `lane_elsewhere`; the runner treats it as a move."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "merge")] = {"ok": False, "phase": "merge", "error": "The lane for example/pack runs on build-2",
+                                      "workflow": {"blocker": {"code": "lane_elsewhere"}}}
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], "holder" in entry, entry["moved_off"]["host"]),
+                         ("pending", False, sd_lane.this_host()))
+        self.assertIn("runs on build-2", answer["stopped"])
+
+    def test_the_ship_locks_lane_elsewhere_reaches_the_runner_as_that_code(self) -> None:
+        """Failure table, merge: the lock's `LaneElsewhere` is a `WorkflowError`; its JSON names `lane_elsewhere`."""
+        from sd_db.ship import LaneElsewhere
+        answer = sd_lane.sd_ship_workflow.failure("merge", LaneElsewhere("example/pack", "build-2", None))
+        self.assertEqual(answer["workflow"]["blocker"]["code"], "lane_elsewhere")
+
+    def test_every_verb_but_run_works_off_the_lane_host(self) -> None:
+        """Failure table, verbs: with the lane on another host, the queue verbs work here; only `run` refuses."""
+        import argparse
+        self.repo_row("build-2")
+        tree, _ = self.committed("topic", "work")
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed"))
+        parser = argparse.ArgumentParser()
+        sd_lane.add_lane_verbs(parser.add_subparsers(dest="command"))
+        verbs = (["enqueue", "--item", "2", "--title", "t", "--body-file", str(self.body), "--deliver"], ["list"],
+                 ["move", "2", "top"], ["hold", "2"], ["release", "2"], ["cancel", "2"], ["retry", "1"], ["run"])
+        codes = []
+        for argv in verbs:
+            with contextlib.chdir(tree), mock.patch.dict(os.environ, self.environ), \
+                    contextlib.redirect_stdout(io.StringIO()) as said:
+                code = sd_lane.lane_main(parser.parse_args(["lane", *argv]))
+            codes.append((argv[0], code, json.loads(said.getvalue()).get("code")))
+        self.assertEqual(codes, [(verb[0], 0, None) for verb in verbs[:-1]] + [("run", 3, "lane_elsewhere")])
+
+
 class Retrying(SharedQueue):
     def imported_blocked(self, tree: pathlib.Path, head: str) -> None:
         """Item 1, failed in a file queue at `head`, imported; `retry` takes it from there."""
@@ -1446,7 +1871,8 @@ class Retrying(SharedQueue):
         rows = self.rows()
         with self.assertRaises(sd_lane.LaneError) as refused:
             sd_lane.retry(self.repo, 1, self.environ)
-        self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("main"), self.git_verbs),
+        remote = [verb for verb in self.git_verbs if verb != "rev-parse"]  # the local head read is not a publish step
+        self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("main"), remote),
                          (sd_lane.DEFAULT_BRANCH, rows, before, ["ls-remote"]))
 
     def test_retry_after_the_branch_and_worktree_went_refuses_and_writes_no_row(self) -> None:
@@ -1700,6 +2126,7 @@ class HubDown(SharedQueue):
         tree, _ = self.committed("topic", "work")
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
         before = self.rows()
+        self.git_verbs.clear()
         parser = argparse.ArgumentParser()
         sd_lane.add_lane_verbs(parser.add_subparsers(dest="command"))
         verbs = (["enqueue", "--item", "2", "--title", "t", "--body-file", str(self.body), "--deliver"], ["list"],
@@ -1711,7 +2138,7 @@ class HubDown(SharedQueue):
                 code = sd_lane.lane_main(parser.parse_args(["lane", *argv]))
                 answer = json.loads(said.getvalue())
             self.assertEqual((code, answer.get("code")), (3, sd_lane.HUB_UNAVAILABLE), answer)
-        self.assertEqual(self.rows(), before)
+        self.assertEqual((self.rows(), "push" in self.git_verbs), (before, False))
 
 
 class ShipProcess(Lane):

@@ -54,17 +54,20 @@ the default branch `origin` advertises (`publish_head`). A failed read,
 fetch or push is an unknown answer, not a "no": nothing is queued.
 
 A claim reads the lane host and takes the first pending entry in one
-transaction, and refuses while another entry of the repository runs. It
-takes only an entry enqueued on this machine, whose worktree is here: after
-a move the old host's entries stay pending for `list` and `cancel`. A
+transaction, and refuses while another entry of the repository runs. The
+lane host runs any entry, whichever host enqueued it (sd:3283): its own
+worktree when it was enqueued here, any worktree here at its head, else a
+lane worktree from the fetched `origin/<branch>`, which the runner removes
+once the entry ends (`checkout_for`). A
 running entry carries a `holder` (host, pid, a token per claim), its `step`
 and `lease_until`. Every runner write checks the token, so a reclaimed or
 released claim writes nothing more; a hub fault is tried again for
 `WRITE_RETRY_SECONDS`, then the run stops. A holder on this machine is dead
-when the runner lock is free and its pid is gone: in prepare its entry goes
-back to pending, failing at the `RECLAIMS`th time; in merge it fails, since a
-merge may have landed. `lane cancel` on a running entry releases it by the
-same rule, unless its holder here is alive.
+when the runner lock is free and its pid is gone; one on another machine
+once its lease passed, which the lane host checks at claim. In prepare its
+entry goes back to pending, failing at the `RECLAIMS`th time; in merge it
+fails, since a merge may have landed. `lane cancel` on a running entry
+releases it by the same rule, unless its holder here is alive.
 
 What the hand-run chains taught, kept here:
 
@@ -104,9 +107,10 @@ The next entry records what happened as its `speculation`.
 
 After a merge the runner lands the entry (sd:2568). It deletes the remote
 branch with `--force-with-lease` while the worktree's tip is the merged head.
-It never removes the worktree: no lock excludes its builder, and a write
-through a handle opened before removal is lost. The entry's `remove` holds
-the command that removes the worktree and its branch once the builder stops.
+It never removes a builder's worktree: no lock excludes its builder, and a
+write through a handle opened before removal is lost. The entry's `remove`
+holds the command that removes the worktree and its branch once the builder
+stops, and the note names the host that holds it.
 It notes the item with the merge commit, what the cleanup did, a `git
 branch` recover command and that command. A worktree `sd-ship merge` has
 already removed (sd:3006) is noted as such, from the lane's own checkout
@@ -119,23 +123,27 @@ root folder's lock meanwhile, and a runner that starts then runs nothing
 (sd:3273): a lane with no runner lock yet has none to try.
 
 Only a repository's lane host drains its queue (sd:3003): the machine
-`repo.lane_host` names, or the hub when it is NULL. Elsewhere `run`,
-`enqueue`, `move`, `hold` and `release` refuse with `lane_elsewhere`, and a
-host that cannot be read refuses with `lane_unknown`. Each claim reads the
-host in its own transaction, so a move stops the runner at the next item. The
-same scheduled job runs on every machine: `lane run --hosted` runs each lane
-this machine hosts, one after another, and skips one whose runner is busy;
-for every other checkout here it imports the file queue and reclaims. A
-satellite that hosts a lane gates and merges on its own machine, so no item
-passes from one machine to another.
+`repo.lane_host` names, or the hub when it is NULL. Elsewhere `run` refuses
+with `lane_elsewhere`, and a host that cannot be read refuses with
+`lane_unknown`; every other verb edits the shared queue from any host
+(sd:3283). Each claim reads the host in its own transaction, and so does
+the before-merge write: after a move the entry in flight goes back to
+pending at its place, with `moved_off`, and the run stops; a merge that
+answers `lane_elsewhere` counts as the same move. Such a put-back moves
+`expected_head` only to a catch-up merge prepare pushed
+(`pushed_catch_up`). The same scheduled job runs on every machine: `lane
+run --hosted` runs each lane this machine hosts, one after another, and
+skips one whose runner is busy; for every other checkout here it imports
+the file queue and reclaims. The lane host gates and merges on its own
+machine; the entry's commits reach it through `origin`.
 
 A hub fault is retried (sd:3239). A hub upgrade broke a satellite's sessions
 mid-prepare, and the entries failed for good. When `sd-ship` names the
 blocker `hub_unavailable` (`sd_ship_workflow.HUB_FAULTS`), the runner puts the
 entry back as pending with its `hub_retries` count and stops: the next entry
 would meet the same hub. The next run starts after the satellite's
-self-install, in a new process. When prepare's catch-up merge moved HEAD,
-the entry's `expected_head` moves to it; any other move still skips the entry.
+self-install, in a new process. A catch-up merge prepare made is accepted
+as the entry's head; any other move still skips the entry.
 The retry's prepare reuses a review that cleared before the fault, as at any
 head the ship receipt records reviewed; a review whose report the fault kept
 from the receipt is incomplete, and spends the one `--retry-review`.
@@ -143,6 +151,7 @@ from the receipt is incomplete, and spends the one `--retry-review`.
 
 from __future__ import annotations
 
+import calendar
 import contextlib
 import dataclasses
 import fcntl
@@ -182,9 +191,6 @@ WATCH_MINUTES = 3
 CLAIMS = ("deliver", "associate-only")
 #: The relative places `move` takes besides a 1-based position among pending entries.
 PLACES = ("up", "down", "top")
-#: The verbs that fill or reorder a queue only its lane host drains; off the host they refuse (sd:2795, sd:3003).
-#: `list` and `cancel` still answer there, so an old host's pending entries can be read and cancelled after a move.
-HOST_VERBS = ("enqueue", "move", "hold", "release", "retry")
 #: `(argv, log) -> sd-ship's JSON answer`; the log receives the step's whole output.
 Ship = Callable[[list[str], pathlib.Path], dict[str, Any]]
 #: `(root, head, base) -> the gate's result`: the next entry's gate on a predicted landing (sd:2586).
@@ -226,6 +232,11 @@ PUBLISH_UNKNOWN = "publish_unknown"
 HEAD_GONE, BRANCH_DIVERGED = "head_gone", "branch_diverged"
 #: The definite publish answer for no branch or `origin`'s default branch: only a pull request lands there.
 DEFAULT_BRANCH = "default_branch"
+#: The skips of an entry with no checkout here (sd:3283): `origin/<branch>` is past the queued head and its
+#: catch-up merge, or a local branch of that name is at another commit; `HEAD_GONE` when `origin` has no branch.
+HEAD_MOVED, BRANCH_BUSY = "head_moved", "branch_busy"
+#: The code of a lane verb off its lane host, and of an `sd-ship merge` that met a lane move (sd:3003).
+LANE_ELSEWHERE = "lane_elsewhere"
 #: Each entry is the latest `state` row, kind `checkpoint`, of its key `lane:v1:<owner/repo>:<id>` (sd:3282).
 KEY_PREFIX = "lane:v1:"
 #: A runner write that meets a hub fault is tried every `WRITE_PAUSE` seconds for this long, then the run stops.
@@ -237,6 +248,9 @@ RECLAIMS = 3
 LANDING_SECONDS = 1800
 #: The bound on one `git` step of a publish: a fetch or a push crosses the network.
 PUBLISH_SECONDS = 300
+#: The longest chain of catch-up merges an entry's head may carry: one per prepare that pushed a catch-up
+#: and was then reclaimed or put back after a hub fault, so every reclaim and hub retry fits (sd:3283).
+CATCH_UPS = RECLAIMS + HUB_RETRIES + 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -293,13 +307,17 @@ def this_host() -> str:
     return host()
 
 
-def runs_here(row: dict[str, Any], host: str) -> bool:
-    """A pending entry, not held, enqueued on `host`: its worktree is on this disk.
+def runnable(row: dict[str, Any]) -> bool:
+    """A pending entry, not held: the lane host runs it from whichever host enqueued it (sd:3283)."""
+    return row.get("status") == "pending" and not row.get("held")
 
-    Another host's entry stays pending after a lane move, readable and
-    cancellable; until slice 2 of sd:3282 no runner here can use its worktree.
-    """
-    return row.get("status") == "pending" and not row.get("held") and row.get("enqueued_on") == host
+
+def lease_passed(row: dict[str, Any]) -> bool:
+    """Whether a running entry's `lease_until` is past; a lease that is missing or unreadable has not passed."""
+    try:
+        return calendar.timegm(time.strptime(str(row["lease_until"]), "%Y-%m-%dT%H:%M:%SZ")) < time.time()
+    except (KeyError, ValueError, OverflowError):
+        return False
 
 
 def repository_of(root: pathlib.Path) -> str | None:
@@ -566,6 +584,9 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     if not branch:
         raise LaneError(f"{worktree} has no branch checked out; the lane publishes and prepares a branch")
     queue = queue_for(worktree, environ)
+    # Read first: a hub that does not answer, or an item already queued, refuses before anything is pushed.
+    if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in read_queue(queue)):
+        raise LaneError(f"sd:{item} is already queued in this lane")
     entry = {"id": entry_id(), "repository": queue.repository, "item": item, "branch": branch, "expected_head": head,
              "title": title, "body": body_file.read_text(encoding="utf-8"),
              "acceptance": acceptance_file.read_text(encoding="utf-8") if acceptance_file else None,
@@ -945,9 +966,14 @@ def merge_refusal(entry: dict[str, Any]) -> dict[str, str] | None:
                                                    "merge by hand"}
 
 
+def blocker_code(answer: dict[str, Any]) -> str | None:
+    """The code of the blocker `sd-ship` answered with, or None."""
+    return ((answer.get("workflow") or {}).get("blocker") or {}).get("code")
+
+
 def answered_hub_fault(answer: dict[str, Any]) -> bool:
     """Whether `sd-ship` answered with a hub fault, which the next run retries (sd:3239)."""
-    return ((answer.get("workflow") or {}).get("blocker") or {}).get("code") == sd_ship_workflow.HUB_UNAVAILABLE
+    return blocker_code(answer) == sd_ship_workflow.HUB_UNAVAILABLE
 
 
 def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[], None]) -> dict[str, Any]:
@@ -958,8 +984,8 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
     when the claim is lost or the hub stays down, and no merge starts.
     """
     worktree, item, logs = pathlib.Path(entry["worktree"]), entry["item"], queue.lane / "logs"
-    if lane_git(worktree, "rev-parse", "HEAD") != entry["expected_head"]:
-        return {"status": "skipped", "reason": "the worktree's HEAD moved from the queued head"}
+    if not at_head(worktree, entry["expected_head"]):
+        return {"status": "skipped", "code": HEAD_MOVED, "reason": "the worktree's HEAD moved from the queued head"}
     stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
     prepare_log = logs / f"prepare-{item}-{stamp}.log"
     with tempfile.TemporaryDirectory(prefix="sd-lane-texts-") as private:  # 0700, removed with the step
@@ -973,7 +999,7 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
                 "--title", entry["title"], "--body-file", str(body), "--json"]
         prepared = ship(argv, prepare_log)
         # sd:3037. An incomplete review gets the one retry an operator would give it, and no second.
-        if ((prepared.get("workflow") or {}).get("blocker") or {}).get("code") == "review_incomplete":
+        if blocker_code(prepared) == "review_incomplete":
             prepare_log = logs / f"prepare-{item}-{stamp}-retry.log"
             prepared = ship([*argv, "--retry-review"], prepare_log)
     fields: dict[str, Any] = {"prepare_log": str(prepare_log), "log_host": this_host(), "head": prepared.get("head")}
@@ -989,6 +1015,8 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
     merged = ship(["-C", str(worktree), "merge", "--item", str(item), "--expected-head", str(prepared.get("head")),
                    "--manual", "--watch", "--wait-seconds", str(MERGE_WAIT_SECONDS), "--json"], merge_log)
     fields["merge_log"] = str(merge_log)
+    if blocker_code(merged) == LANE_ELSEWHERE:
+        return {**fields, "moved": str(merged.get("error") or "the lane moved")[:600]}  # a move, not a failure
     if not (merged.get("ok") and merged.get("phase") == "merged"):
         return {**fields, "status": "failed", "step": "merge", "phase": merged.get("phase"),
                 "reason": str(merged.get("error") or merged.get("code") or "merge did not confirm")[:600],
@@ -1069,16 +1097,17 @@ def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
 
 
 def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = False) -> threading.Thread | None:
-    """Start the gate of the next entry this host runs (`runs_here`) on `entry`'s predicted landing, or None.
+    """Start the next entry's gate on `entry`'s predicted landing, or None.
 
     An entry the runner may not merge (`merge_refusal`) stops prepared and
     never lands, so nothing follows it to predict. `busy` says an earlier
-    speculative gate still runs; one at a time. What happened goes on the
-    next entry as `speculation`, and the gate's whole result to a log beside
-    the others.
+    speculative gate still runs; one at a time. Either entry with no
+    worktree of its own on this host gets no gate (sd:3283). What happened
+    goes on the next entry as `speculation`, and the gate's whole result to
+    a log beside the others.
     """
     host = this_host()
-    following = next((row for row in read_queue(queue) if runs_here(row, host)), None)
+    following = next((row for row in read_queue(queue) if runnable(row)), None)
     if following is None or merge_refusal(entry) is not None:
         return None
 
@@ -1089,8 +1118,13 @@ def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = Fals
                     row["speculation"] = {"after": entry["item"], **fields}
         with contextlib.suppress(LaneError, OSError):  # a note that cannot be written stops nothing
             update(queue, on_follower)
+    def own_tree_here(row: dict[str, Any]) -> bool:
+        return row.get("enqueued_on") == host and pathlib.Path(str(row.get("worktree") or "")).is_dir()
     try:
-        plan = {"skipped": "an earlier speculative gate still runs"} if busy else predict(entry, following)
+        plan = ({"skipped": "an earlier speculative gate still runs"} if busy else
+                {"skipped": f"no worktree on this host for sd:{entry['item']} or sd:{following['item']}; "
+                            "a lane worktree is made only when its entry runs"}
+                if not (own_tree_here(entry) and own_tree_here(following)) else predict(entry, following))
     except Exception as error:  # a speculation that cannot be set up gates nothing; the lane goes on
         plan = {"skipped": f"{type(error).__name__}: {error}"[:600]}
     if "skipped" in plan:
@@ -1147,8 +1181,11 @@ def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch
         done.append(f"removed origin/{branch}" if deleted is not None else f"origin/{branch} kept: the delete failed")
     elif remote:
         done.append(f"origin/{branch} kept: it is at {remote}, not the merged head")
+    if entry.get("lane_worktree"):
+        done.append(f"the lane worktree {worktree} is removed with its entry")
+        return "Cleanup: " + ", ".join(done), None
     remove = f"git -C {main} worktree remove {worktree} && git -C {main} update-ref -d refs/heads/{branch} {tip}"
-    done.append(f"worktree {worktree} and branch {branch} kept for removal once the builder stops")
+    done.append(f"worktree {worktree} and branch {branch} kept on {this_host()} for removal once the builder stops")
     return "Cleanup: " + ", ".join(done), remove
 
 
@@ -1227,12 +1264,15 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
         return land_note(fields, body, entry, environ, note, own_lock, main)
     branch, tip = lane_git(worktree, "branch", "--show-current") or "", lane_git(worktree, "rev-parse", "HEAD")
     cleanup, remove = clean_up(entry, head, main, branch, tip)
+    kept, where = entry.get("builder_worktree"), f" on {entry.get('builder_host')}"
+    if entry.get("lane_worktree") and kept:  # the builder's own worktree, on the host that enqueued it (sd:3283)
+        cleanup, remove = f"{cleanup}; the builder worktree {kept} stays{where}", f"git -C {kept} worktree remove {kept}"
     fields = {"cleanup": cleanup, "remove": remove}
     body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {cleanup}."
     if branch and tip:
         body += f" Recover: git branch {branch} {tip}."
     if remove:
-        body += f" Remove: {remove}"  # last and bare, so it copies whole
+        body += f" Remove{where if entry.get('lane_worktree') else ''}: {remove}"  # last and bare, so it copies whole
     return land_note(fields, body, entry, environ, note, own_lock, main)
 
 
@@ -1298,10 +1338,13 @@ def lane_host_reason(root: pathlib.Path, environ: dict[str, str] | None = None) 
 
 
 def refuse_elsewhere(root: pathlib.Path, environ: dict[str, str] | None = None) -> None:
-    """Refuse a host verb off `root`'s lane host, before it reads or writes the queue (sd:3003)."""
+    """Refuse `lane run` off `root`'s lane host, before it reads or writes the queue (sd:3003).
+
+    Only `run` is host-bound: the other verbs edit the shared queue from any host (sd:3283).
+    """
     elsewhere = lane_host_reason(root, environ)
     if elsewhere is not None:
-        raise LaneError(elsewhere, code="lane_elsewhere")
+        raise LaneError(elsewhere, code=LANE_ELSEWHERE)
 
 
 def host_check(queue: Queue) -> Callable[[Any], None]:
@@ -1312,7 +1355,7 @@ def host_check(queue: Queue) -> Callable[[Any], None]:
         except Exception as error:  # noqa: BLE001 -- `LaneUnknown`, or a read fault it did not wrap
             raise LaneError(str(error), code=getattr(error, "code", None) or "lane_unknown") from None
         if elsewhere is not None:
-            raise LaneError(elsewhere, code="lane_elsewhere")
+            raise LaneError(elsewhere, code=LANE_ELSEWHERE)
     return on_lane_host
 
 
@@ -1351,38 +1394,76 @@ def held(entries: list[dict[str, Any]], entry: dict[str, Any], token: str) -> di
                "and stops", code=CLAIM_LOST)
 
 
-def claim_entry(queue: Queue, token: str) -> dict[str, Any] | None:
-    """Take the first pending entry not held and enqueued here, by position, under a new holder; None when none.
+def claim_entry(queue: Queue, token: str, reclaimed: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+    """Take the first pending entry not held, by position, under a new holder; None when none.
 
     One transaction reads the lane host and claims, so a move is before the
     claim or after it. It refuses while another entry of the repository
-    runs. A retried claim that finds its own token running landed before.
+    runs. A holder on another host is dead once its `lease_until` passed: it
+    is reclaimed (`reclaim`) and listed in `reclaimed` (sd:3283). A retried
+    claim that finds its own token running landed before.
     """
+    found: list[dict[str, Any]] = []
+
     def claim_first(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
         host = this_host()
+        found.clear()
         for row in entries:
             if row.get("status") != "running":
                 continue
             holder = row.get("holder") or {}
             if holder.get("token") == token:
                 return dict(row)
+            if holder.get("host") != host and lease_passed(row):
+                found.append(reclaim(row))
+                continue
             raise LaneError(f"sd:{row.get('item')} is running under {holder.get('host')} pid {holder.get('pid')}; "
                             "one entry of a repository runs at a time", code="lane_busy")
         for row in entries:
-            if runs_here(row, host):
+            if runnable(row):
                 row.update(status="running", started_at=stamp_now(), step="prepare",
                            holder={"host": host, "pid": os.getpid(), "token": token},
                            lease_until=stamp_at(time.time() + 2 * PREPARE_SECONDS))
                 return dict(row)
         return None
-    return runner_write(queue, claim_first, check=host_check(queue))
+    claimed = runner_write(queue, claim_first, check=host_check(queue))
+    if reclaimed is not None:  # only once the claim's transaction landed
+        reclaimed.extend(found)
+    return claimed
+
+
+class Moved(Stop):
+    """The lane moved to another host before the merge; the entry is pending again at its place (sd:3283)."""
 
 
 def advance(queue: Queue, entry: dict[str, Any], token: str) -> None:
-    """The before-merge write: `step: merge` and the merge lease, while `token` still holds the entry."""
+    """The before-merge write: `step: merge` and the merge lease, while `token` holds the entry on the lane host.
+
+    The host is read in the write's transaction. Off it the entry goes back
+    to pending at its place with `moved_off`, and `Moved` stops the run; a
+    host that cannot be read stops it too, and reclaim settles the entry.
+    """
+    expected = pushed_catch_up(pathlib.Path(entry["worktree"]), str(entry.get("branch") or ""), entry["expected_head"])
+    elsewhere: list[str] = []
+
+    def read_host(connection: Any) -> None:
+        try:
+            found = sd_lib.lane_elsewhere(connection, hub_database(queue.environ), queue.repository)
+        except Exception as error:  # noqa: BLE001 -- `LaneUnknown`, or a read fault it did not wrap
+            raise Stop(f"Cannot read the lane host before the merge: {error}. No merge started; the next run "
+                       "settles the entry.", code="lane_unknown") from None
+        elsewhere[:] = [found] if found else []
+
     def to_merge(entries: list[dict[str, Any]]) -> None:
-        held(entries, entry, token).update(step="merge", lease_until=stamp_at(time.time() + MERGE_SECONDS + LANDING_SECONDS))
-    runner_write(queue, to_merge)
+        row = held(entries, entry, token)
+        if elsewhere:
+            back_to_pending(row, expected, moved_off={"host": this_host(), "at": stamp_now()})
+        else:
+            row.update(step="merge", lease_until=stamp_at(time.time() + MERGE_SECONDS + LANDING_SECONDS))
+    runner_write(queue, to_merge, check=read_host)
+    if elsewhere:
+        raise Moved(f"{elsewhere[0]} sd:{entry['item']} is pending again at its place, for that host.",
+                    code=LANE_ELSEWHERE)
 
 
 def finish_entry(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, Any]) -> None:
@@ -1397,40 +1478,218 @@ def finish_entry(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[
     runner_write(queue, mark_finished)
 
 
-def caught_up(worktree: pathlib.Path, expected: str) -> str:
-    """`expected`, or the worktree's HEAD when that is prepare's catch-up of it: a merge whose first parent it is.
+def read_git(tree: pathlib.Path, *args: str, ok: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[str]:
+    """`git <args>` in `tree` for a runner decision; a failure raises `PUBLISH_UNKNOWN`, never a "no"."""
+    done = publish_git(tree, *args)
+    if done is None or done.returncode not in ok:
+        said = (done.stderr or done.stdout).strip()[-300:] if done is not None else "no answer"
+        raise LaneError(f"git {args[0]} failed in {tree} ({said}); the entry is not skipped.", code=PUBLISH_UNKNOWN)
+    return done
 
-    A retried entry starts there (sd:3239, sd:3254); any other move of HEAD still skips the entry.
+
+def catch_up_of(tree: pathlib.Path, commit: str, expected: str) -> bool:
+    """Whether `commit` is prepare's catch-up of `expected`, or a chain of them (sd:3283).
+
+    Prepare's catch-up is `git merge --no-ff origin/<default branch>`, and a
+    conflict aborts it, so each link must be just that: a merge whose second
+    parent is on `origin`'s default branch and whose tree is the clean merge
+    of its parents. A merge of anything else, or one with edits of its own, is
+    scope no review saw, so the entry skips `HEAD_MOVED`. Each prepare that
+    pushed a catch-up and was then put back or reclaimed adds a link, so the
+    chain is at most `CATCH_UPS` long. A read that fails raises `PUBLISH_UNKNOWN`.
     """
-    head = lane_git(worktree, "rev-parse", "HEAD")
-    if (head and head != expected and lane_git(worktree, "rev-parse", "HEAD^1") == expected
-            and lane_git(worktree, "rev-parse", "--verify", "--quiet", "HEAD^2")):
-        return head
-    return expected
+    default: list[str] = []
+    for _ in range(CATCH_UPS if commit != expected else 0):
+        parents = read_git(tree, "rev-list", "--parents", "-n", "1", commit).stdout.split()[1:]
+        if len(parents) != 2 or not clean_merge(tree, commit, *parents) or not landed(tree, parents[1], default):
+            return False
+        if parents[0] == expected:
+            return True
+        commit = parents[0]
+    return False
+
+
+def clean_merge(tree: pathlib.Path, commit: str, first: str, second: str) -> bool:
+    """Whether `commit`'s tree is what git's merge of `first` and `second` makes, with no conflict and no edit."""
+    merged = read_git(tree, "merge-tree", "--write-tree", first, second, ok=(0, 1))
+    return merged.returncode == 0 and merged.stdout.split()[:1] == [read_git(tree, "rev-parse", f"{commit}^{{tree}}").stdout.strip()]
+
+
+def landed(tree: pathlib.Path, commit: str, default: list[str]) -> bool:
+    """Whether `commit` is on `origin`'s default branch; `default` keeps its tip, read once per check."""
+    if not default:
+        listed = [line.split("\t") for line in read_git(tree, "ls-remote", "--symref", "origin", "HEAD").stdout.splitlines()]
+        name = next((ref.removeprefix("ref: refs/heads/") for ref, *rest in listed
+                     if rest == ["HEAD"] and ref.startswith("ref: refs/heads/")), None)
+        tip = next((ref for ref, *rest in listed if rest == ["HEAD"] and not ref.startswith("ref: ")), None)
+        if not name or not tip:
+            raise LaneError(f"origin advertised no default branch to {tree}; the entry is not skipped.",
+                            code=PUBLISH_UNKNOWN)
+        if read_git(tree, "rev-parse", "--verify", "--quiet", f"{tip}^{{commit}}", ok=(0, 1)).returncode != 0:
+            read_git(tree, "fetch", "-q", "--no-tags", "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}")
+        default.append(tip)
+    return read_git(tree, "merge-base", "--is-ancestor", commit, default[0], ok=(0, 1)).returncode == 0
+
+
+def caught_up(worktree: pathlib.Path, expected: str) -> str:
+    """`expected`, or the worktree's HEAD when that is prepare's catch-up of it.
+
+    A retried entry starts there (sd:3239, sd:3254); any other move of HEAD
+    still skips the entry. A read that fails raises `PUBLISH_UNKNOWN`.
+    """
+    head = read_git(worktree, "rev-parse", "HEAD").stdout.strip()
+    return head if catch_up_of(worktree, head, expected) else expected
+
+
+def at_head(tree: pathlib.Path, expected: str) -> bool:
+    """Whether `tree`'s HEAD is `expected` or its catch-up merge, the heads the runner prepares."""
+    head = read_git(tree, "rev-parse", "HEAD").stdout.strip()
+    return head == expected or catch_up_of(tree, head, expected)
+
+
+def pushed_catch_up(tree: pathlib.Path, branch: str, expected: str) -> str:
+    """`origin/<branch>` when it is the catch-up merge of `expected` that prepare pushed, else `expected` (sd:3283).
+
+    A put-back reads `origin` only for this, so `expected_head` always names a
+    published commit. A catch-up only in the worktree, or a read that fails,
+    keeps `expected`; this host's worktree rule (`checkout_for`) accepts that
+    catch-up.
+    """
+    listed = publish_git(tree, "ls-remote", "origin", f"refs/heads/{branch}") if branch else None
+    tip = (listed.stdout.split() or [""])[0] if listed is not None and listed.returncode == 0 else ""
+    try:
+        return tip if tip and catch_up_of(tree, tip, expected) else expected
+    except LaneError:  # unknown keeps the published head
+        return expected
+
+
+def back_to_pending(row: dict[str, Any], expected: str, **fields: Any) -> None:
+    """A running row back to pending at its place, its holder gone; `fields` say why."""
+    for key in ("started_at", "holder", "step", "lease_until"):
+        row.pop(key, None)
+    row.update(status="pending", expected_head=expected, **fields)
+
+
+def put_back(queue: Queue, entry: dict[str, Any], token: str, expected: str, **fields: Any) -> None:
+    """`back_to_pending` while `token` still holds the entry: a move, a hub fault, or an `origin` that did not answer."""
+    runner_write(queue, lambda entries: back_to_pending(held(entries, entry, token), expected, **fields))
+
+
+def worktrees(main: pathlib.Path) -> list[tuple[pathlib.Path, str]]:
+    """Each worktree of the repository on this disk, with the branch it has checked out, or ''."""
+    found: list[tuple[pathlib.Path, str]] = []
+    for line in read_git(main, "worktree", "list", "--porcelain").stdout.splitlines():
+        if line.startswith("worktree "):
+            found.append((pathlib.Path(line.removeprefix("worktree ")), ""))
+        elif line.startswith("branch refs/heads/") and found:
+            found[-1] = (found[-1][0], line.removeprefix("branch refs/heads/"))
+    return found
+
+
+def drop_lane_worktree(main: pathlib.Path, tree: pathlib.Path, branch: str | None) -> None:
+    """Remove a worktree the lane made under its folder, and `branch` with it; no builder writes there."""
+    publish_git(main, "worktree", "remove", "--force", str(tree))
+    publish_git(main, "worktree", "prune")
+    if branch:
+        publish_git(main, "branch", "-D", branch)
+
+
+def skip(code: str, reason: str) -> dict[str, Any]:
+    return {"status": "skipped", "code": code, "reason": reason}
+
+
+def checkout_for(root: pathlib.Path, queue: Queue, entry: dict[str, Any]) -> dict[str, Any]:
+    """Where this host runs `entry` (sd:3283): `{"tree"}`, with `made` for a lane worktree, or a skip's fields.
+
+    In order: the entry's own worktree, when it was enqueued here; any
+    worktree here with its branch at the head; else a lane worktree at
+    `<lane folder>/worktrees/<item>` from the fetched `origin/<branch>`
+    (`lane_tree`). The head is `expected_head` or its catch-up merges (`catch_up_of`). A
+    `gate: satellite` entry of the retired hand-off is skipped (sd:3003).
+    """
+    expected, branch = str(entry.get("expected_head")), str(entry.get("branch") or "")
+    if entry.get("gate") == "satellite":
+        return skip("retired_hand_off", "a satellite hand-off entry an older version queued; enqueue it again")
+    if not branch:  # nothing to fetch, now or on a later run
+        return {"status": "failed", "code": "no_branch", "reason": "the entry names no branch; queue it with "
+                                                                    "`sd-ship lane enqueue`"}
+    own = pathlib.Path(str(entry.get("worktree") or ""))
+    if entry.get("enqueued_on") == this_host() and own.is_dir() and at_head(own, expected):
+        return {"tree": own}
+    main, lane = sd_lib.main_worktree_root(root), queue.lane / "worktrees" / str(entry["item"])
+    listed = worktrees(main)
+    for path, name in listed:
+        if branch and name == branch and path.is_dir() and at_head(path, expected):
+            mine = path.resolve() == lane.resolve()  # a killed run's lane worktree at the head: reused, then removed
+            return {"tree": path, **({"made": True, "branch_made": name} if mine else {})}
+    return lane_tree(main, lane, branch, expected, listed)
+
+
+def fetched_tip(main: pathlib.Path, branch: str) -> str:
+    """`origin/<branch>`'s tip, fetched into `refs/remotes/origin/<branch>`, or '' when `origin` has no such branch.
+
+    A failed read or fetch raises `PUBLISH_UNKNOWN`: the branch may be there.
+    """
+    ref = f"refs/heads/{branch}"
+    read = publish_git(main, "ls-remote", "origin", ref) if branch else None
+    if read is None or read.returncode != 0:
+        raise LaneError(f"Cannot read origin/{branch}: git ls-remote failed; the entry is not skipped.",
+                        code=PUBLISH_UNKNOWN)
+    tip = (read.stdout.split() or [""])[0]
+    fetched = publish_git(main, "fetch", "-q", "--no-tags", "origin", f"+{ref}:refs/remotes/origin/{branch}") if tip else None
+    if tip and (fetched is None or fetched.returncode != 0):
+        raise LaneError(f"Cannot fetch origin/{branch}; the entry is not skipped.", code=PUBLISH_UNKNOWN)
+    return tip
+
+
+def lane_tree(main: pathlib.Path, lane: pathlib.Path, branch: str, expected: str,
+              listed: list[tuple[pathlib.Path, str]]) -> dict[str, Any]:
+    """A lane worktree at `lane` from the fetched `origin/<branch>`, or a skip; raises `PUBLISH_UNKNOWN`.
+
+    A lane worktree a killed run left at another head is the lane's own, so
+    it goes with its branch. No `origin/<branch>` is `HEAD_GONE`; a tip past
+    the head and its catch-up is `HEAD_MOVED`; a local branch at another
+    commit, or one checked out elsewhere, is `BRANCH_BUSY`. A failed read or
+    fetch of `origin` is unknown, not a skip.
+    """
+    for path, name in listed:
+        if path.resolve() == lane.resolve():
+            drop_lane_worktree(main, path, name or None)
+    listed = [(path, name) for path, name in listed if path.resolve() != lane.resolve()]
+    if lane.exists():  # the lane's own folder, which git no longer lists: a killed run's, kept aside, never deleted
+        lane.rename(lane.with_name(f"{lane.name}.stale-{entry_id()}"))
+    ref, tip = f"refs/heads/{branch}", fetched_tip(main, branch)
+    if not tip:
+        return skip(HEAD_GONE, f"origin/{branch} is gone; `sd-ship lane retry` publishes {expected} again from "
+                               "a checkout that has it")
+    if tip != expected and not catch_up_of(main, tip, expected):
+        return skip(HEAD_MOVED, f"origin/{branch} is at {tip}, neither the queued head {expected} nor its catch-up")
+    local = read_git(main, "rev-parse", "--verify", "--quiet", ref, ok=(0, 1)).stdout.strip()
+    if local and (local != tip or any(name == branch for _, name in listed)):
+        return skip(BRANCH_BUSY, f"the local branch {branch} is at {local}, or checked out at another head; "
+                                 "remove it, or retry from a worktree at the head")
+    lane.parent.mkdir(parents=True, exist_ok=True)
+    made = publish_git(main, "worktree", "add", "-q", *([str(lane), branch] if local else
+                       ["--track", "-b", branch, str(lane), f"refs/remotes/origin/{branch}"]))
+    if made is None or made.returncode != 0:
+        raise LaneError(f"Cannot make the lane worktree {lane}: {(made.stderr if made else 'no answer')[-300:]}")
+    return {"tree": lane, "made": True, "branch_made": None if local else branch}
 
 
 def requeue(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, Any]) -> bool:
     """Put a running entry back as pending after a hub fault, or False once its retries are spent (sd:3239).
 
     It keeps its place, and `hub_fault` says what failed where; a later
-    outcome writes its own fields beside it. Its `expected_head` moves to the
-    worktree's HEAD only when that is prepare's catch-up: a merge whose first
-    parent is the queued head.
+    outcome writes its own fields beside it. Its `expected_head` moves only
+    to a catch-up merge prepare pushed (`pushed_catch_up`, sd:3283).
     """
     retries = int(entry.get("hub_retries") or 0)
     if not outcome.pop("hub_fault", False) or retries >= HUB_RETRIES:
         return False
-    expected = caught_up(pathlib.Path(entry["worktree"]), entry["expected_head"])
+    expected = pushed_catch_up(pathlib.Path(entry["worktree"]), str(entry.get("branch") or ""), entry["expected_head"])
     fault: dict[str, Any] = {key: outcome[key] for key in ("step", "reason", "prepare_log", "merge_log", "log_host")
                              if key in outcome}
-
-    def put_back(entries: list[dict[str, Any]]) -> None:
-        row = held(entries, entry, token)
-        for key in ("started_at", "holder", "step", "lease_until"):
-            row.pop(key, None)
-        row.update(status="pending", expected_head=expected, hub_retries=retries + 1,
-                   hub_fault={**fault, "at": stamp_now()})
-    runner_write(queue, put_back)
+    put_back(queue, entry, token, expected, hub_retries=retries + 1, hub_fault={**fault, "at": stamp_now()})
     return True
 
 
@@ -1485,11 +1744,13 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
             if clock() >= deadline:
                 answer["stopped"] = "the run spent its budget; the next run takes the pending entries"
                 break
-            token = secrets.token_hex(16)
+            token, reclaimed = secrets.token_hex(16), list[dict[str, Any]]()
             try:
-                entry = claim_entry(queue, token)
+                entry = claim_entry(queue, token, reclaimed)
             except LaneError as error:  # moved, unknown, busy, or a hub that stayed down
                 answer["stopped"], entry = str(error), None
+            if reclaimed:
+                answer["reclaimed"] = [*answer.get("reclaimed", []), *reclaimed]
             if entry is None:
                 break
             if ahead is not None and ahead.is_alive():
@@ -1511,18 +1772,67 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
 
 def run_entry(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: str, environ: dict[str, str],
               ship: Ship, note: Note) -> tuple[dict[str, Any] | None, str | None]:
-    """Prepare, merge and record one claimed entry; its row for `ran`, and why the run stops, or None."""
+    """Find a checkout here (`checkout_for`), then prepare, merge and record one claimed entry.
+
+    Its row for `ran`, and why the run stops, or None. An `origin` that did
+    not answer puts the entry back at its place and stops the run. A lane
+    worktree the runner made goes once the entry ends, whatever its outcome.
+    """
     try:
-        outcome = process(entry, queue, ship, functools.partial(advance, queue, entry, token))
-        if requeue(queue, entry, token, outcome):
-            return ({"item": entry["item"], **outcome, "status": "pending"},
-                    f"sd:{entry['item']} met a hub fault in {outcome.get('step')}; "
-                    "it is pending again, and the next run retries it")
+        found = checkout_for(root, queue, entry)
+    except LaneError as error:
+        if error.code == PUBLISH_UNKNOWN:
+            return unknown_checkout(queue, entry, token, error)
+        found = {"status": "failed", "step": "worktree", "reason": str(error)[:600]}
+    tree = found.pop("tree", None)
+    try:
+        return run_checkout(root, queue, entry, token, environ, ship, note, tree, found)
+    finally:
+        if tree is not None and found.get("made"):
+            drop_lane_worktree(sd_lib.main_worktree_root(root), tree, found.get("branch_made"))
+
+
+def unknown_checkout(queue: Queue, entry: dict[str, Any], token: str,
+                     error: LaneError) -> tuple[dict[str, Any] | None, str]:
+    """Put `entry` back at its place after a git read with no answer, and stop the run: unknown is not a skip."""
+    try:
+        put_back(queue, entry, token, entry["expected_head"], checkout_fault={"reason": str(error)[:600],
+                                                                              "at": stamp_now()})
+    except Stop as stop:
+        return None, str(stop)
+    return {"item": entry["item"], "status": "pending"}, f"sd:{entry['item']}: {error} It is pending again."
+
+
+def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: str, environ: dict[str, str],
+                 ship: Ship, note: Note, tree: pathlib.Path | None,
+                 found: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    """`run_entry` in `tree`, or the skip `found` holds when there is none."""
+    outcome = found
+    try:
+        if tree is not None:
+            built = {"lane_worktree": True, "builder_worktree": entry.get("worktree"),
+                     "builder_host": entry.get("enqueued_on")}
+            local = {**entry, "worktree": str(tree), **(built if found.get("made") else {})}
+            outcome = process(local, queue, ship, functools.partial(advance, queue, local, token))
+            if outcome.get("moved"):
+                put_back(queue, entry, token, pushed_catch_up(tree, str(entry.get("branch") or ""),
+                                                              entry["expected_head"]),
+                         moved_off={"host": this_host(), "at": stamp_now(), "step": "merge"})
+                return ({"item": entry["item"], **outcome, "status": "pending"},
+                        f"{outcome['moved']} sd:{entry['item']} is pending again at its place, for that host.")
+            if requeue(queue, local, token, outcome):
+                return ({"item": entry["item"], **outcome, "status": "pending"},
+                        f"sd:{entry['item']} met a hub fault in {outcome.get('step')}; "
+                        "it is pending again, and the next run retries it")
+            outcome.update(settle(local, outcome, environ, note, queue.lock_file, root))
     except Stop as error:
         return None, str(error)
+    except LaneError as error:
+        if error.code == PUBLISH_UNKNOWN:  # the head check had no answer; prepare has not started
+            return unknown_checkout(queue, entry, token, error)
+        outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
     except Exception as error:  # a broken entry is marked; the next one still runs
         outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
-    outcome.update(settle(entry, outcome, environ, note, queue.lock_file, root))
     try:
         finish_entry(queue, entry, token, outcome)
     except Stop as error:
@@ -1673,8 +1983,6 @@ def lane_main(args: Any) -> int:
         root = sd_lib.repo_root(None)  # a git that gave no answer says why, as a ConfigError (sd:2986)
         if root is None:
             raise LaneError("cwd is not inside a Git repository")
-        if args.lane_command in HOST_VERBS:  # no `lane run` drains this machine's queue (sd:2795, sd:3003)
-            refuse_elsewhere(root, environ)
         imported = {} if args.lane_command == "run" else import_file_queue(root, queue_for(root, environ))
         if args.lane_command == "enqueue":
             result: Any = enqueue_entry(root, args.item, args.title, args.body_file, environ,
