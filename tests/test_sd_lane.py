@@ -1566,6 +1566,19 @@ class AnyHost(SharedQueue):
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual(self.entries()[0]["status"], "merged")
 
+    def test_a_head_check_with_no_answer_before_prepare_leaves_the_entry_pending(self) -> None:
+        """Codex class pass, unknown reads: the head check before prepare has no answer; no skip, no failure."""
+        self.enqueued_elsewhere(1, "topic", "work")
+
+        def unknown(tree: pathlib.Path, expected: str) -> bool:
+            raise sd_lane.LaneError("git rev-parse failed; the entry is not skipped.", code=sd_lane.PUBLISH_UNKNOWN)
+        with mock.patch.object(sd_lane, "at_head", unknown):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], "holder" in entry, self.calls), ("pending", False, []))
+        self.assertIn("not skipped", answer["stopped"])
+        self.assertFalse(self.made().exists())
+
     def test_a_local_branch_at_another_commit_skips_branch_busy(self) -> None:
         """Failure table, worktree: a local branch of that name at another commit, or checked out at another head."""
         for checked_out in (False, True):
