@@ -3282,7 +3282,16 @@ GROUP_CLEANUP_SECONDS = 5
 
 
 class GroupTimeout(Exception):
-    """`run_group` reached its deadline. The group is already gone."""
+    """`run_group` reached its deadline. The group is already gone.
+
+    `stdout` and `stderr` hold what the group wrote before it ended (sd:3414):
+    three gates timed out with nothing kept, so nobody could name the shard that hung.
+    """
+
+    def __init__(self, message: str, stdout: str = "", stderr: str = "") -> None:
+        super().__init__(message)
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 class _Terminated(BaseException):
@@ -3296,11 +3305,28 @@ def _raise_terminated(number: int, frame: object) -> None:
     raise _Terminated
 
 
-def _end_group(process: subprocess.Popen) -> None:
+def _drained(process: subprocess.Popen) -> tuple[str, str]:
+    """Everything an ended group wrote: `communicate` keeps what it read before its timeout, so this returns that too.
+
+    A process that left the group can hold a stream open; the read then stops
+    after `GROUP_CLEANUP_SECONDS` with what came so far, which `TimeoutExpired` carries as bytes.
+    """
+    try:
+        output, errors = process.communicate(timeout=GROUP_CLEANUP_SECONDS)
+    except subprocess.TimeoutExpired as error:
+        output, errors = (part.decode(errors="replace") if isinstance(part, bytes) else part
+                          for part in (error.output, error.stderr))
+    except (OSError, ValueError):
+        return "", ""
+    return output or "", errors or ""
+
+
+def _end_group(process: subprocess.Popen, *, drain: bool = False) -> tuple[str, str]:
     """End the group `process` leads, and reap it: SIGTERM, up to `GROUP_CLEANUP_SECONDS` for the leader, then SIGKILL.
 
     SIGTERM first lets a leader end what it started in groups of its own (sd:2978): `sd-check`, killed outright by
-    `sd gate check`, left its `make check` running.
+    `sd gate check`, left its `make check` running. With `drain`, returns what the group wrote, read before its
+    streams close (sd:3414); else two empty strings.
     """
     import signal  # noqa: PLC0415 - only the group helpers need it
 
@@ -3313,12 +3339,14 @@ def _end_group(process: subprocess.Popen) -> None:
             process.wait(timeout=GROUP_CLEANUP_SECONDS)
         except subprocess.TimeoutExpired:
             pass
+    written = _drained(process) if drain else ("", "")
     for stream in (process.stdin, process.stdout, process.stderr):
         if stream is not None:
             try:
                 stream.close()
             except OSError:
                 pass
+    return written
 
 
 @contextlib.contextmanager
@@ -3362,25 +3390,29 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
     The leader gets SIGTERM and a moment to end its own groups before SIGKILL.
     SIGTERM to this process ends the group first, then this process (`term_ends_group`).
 
-    Raises `GroupTimeout` at the deadline, and what `Popen` raises when
-    `argv[0]` cannot start. `started` hears the group's id once it runs, and
-    None before the group is ended, so a caller can end it early (sd:3361).
+    Raises `GroupTimeout` at the deadline, carrying what the group wrote, and
+    what `Popen` raises when `argv[0]` cannot start. `started` hears the
+    group's id once it runs, and None before the group is ended, so a caller
+    can end it early (sd:3361).
     """
     with term_ends_group():
         process = subprocess.Popen(
             list(argv), cwd=str(cwd), env=dict(env), text=True, start_new_session=True,
             stdin=subprocess.DEVNULL if input_text is None else subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        timed_out = False
         try:
             if started is not None:
                 started(process.pid)
             output, errors = process.communicate(input_text, timeout=timeout)
         except subprocess.TimeoutExpired:
-            raise GroupTimeout(f"{argv[0]}: timed out after {timeout}s") from None
+            timed_out = True
         finally:
             if started is not None:
                 started(None)
-            _end_group(process)
+            written = _end_group(process, drain=timed_out)
+        if timed_out:
+            raise GroupTimeout(f"{argv[0]}: timed out after {timeout}s", *written)
     return subprocess.CompletedProcess(list(argv), process.returncode, output or "", errors or "")
 
 

@@ -1,3 +1,9 @@
+---
+title: Lane host per repository
+created: 2026-10-08
+item: sd:3003
+---
+
 # Design — lane host per repository (sd:3003)
 
 ## Status

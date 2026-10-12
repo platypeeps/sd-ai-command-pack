@@ -985,5 +985,45 @@ class RunHeaderTests(unittest.TestCase):
             self.assertIn("head=unknown dirty=unknown", run.stderr)
 
 
+def _running_module(pid, module):
+    """True once a process under `pid` runs `module`'s tests."""
+    for child in _descendants(pid):
+        command = subprocess.run(["ps", "-o", "command=", "-p", str(child)],
+                                 capture_output=True, text=True, check=False).stdout
+        if module in command:
+            return True
+    return False
+
+
+class InterruptedRunTests(unittest.TestCase):
+    """sd:3414. A run cut off at a gate's timeout names the shard that never finished.
+
+    Shard output waits in per-shard logs until every shard is done, and an
+    interrupted run deletes them, so three timed-out gates said nothing about which shard hung.
+    """
+
+    def test_a_terminated_run_names_the_shard_that_had_not_finished(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            script = _build_fixture(root)
+            log = root / "run.log"
+            with open(log, "w", encoding="utf-8") as handle:
+                # Its own group, as `sd_lib.run_group` starts a check, which ends the whole group at the deadline.
+                run = subprocess.Popen(["bash", str(script)], stdout=handle, stderr=subprocess.STDOUT,
+                                       env=_fixture_env(HARNESS_FIXTURE_SLEEP="120"), start_new_session=True)
+                try:
+                    self.assertTrue(_wait_for(lambda: _running_module(run.pid, "test_aaa_slow"), timeout=120),
+                                    log.read_text())
+                    os.killpg(run.pid, signal.SIGTERM)
+                    run.wait(timeout=60)
+                finally:
+                    if run.poll() is None:
+                        os.killpg(run.pid, signal.SIGKILL)
+                    run.wait(timeout=30)
+            output = log.read_text()
+            self.assertEqual(run.returncode, 143, output)
+            self.assertRegex(output, r"(?m)^shard tests\.test_aaa_slow\S*: start$")
+
+
 if __name__ == "__main__":
     unittest.main()
