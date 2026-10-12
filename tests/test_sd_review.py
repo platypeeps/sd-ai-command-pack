@@ -1038,6 +1038,20 @@ class PipelineTests(ReviewFixture):
         planning = sd_review.Subject("planning", "", "", ("docs/work/x/prd.md",), 0, "")
         self.assertNotIn("external JSON", sd_review.build_prompt(planning, False, ""))
 
+    def test_every_prompt_weighs_findings_for_one_developer(self) -> None:
+        """sd:3563: KISS and one developer's speed reach every lane, code and planning, plain and challenge."""
+        root = self.make_repo()
+        self.prepare(root)
+        code = sd_review.resolve_subject(root, "worktree")
+        planning = sd_review.Subject("planning", "", "", ("docs/work/x/prd.md",), 0, "")
+        for subject in (code, planning):
+            for challenge in (False, True):
+                prompt = sd_review.build_prompt(subject, challenge, "")
+                with self.subTest(scope=subject.scope, challenge=challenge):
+                    self.assertIn("one developer on their own machines", prompt)
+                    self.assertIn("is low severity at most", prompt)
+                    self.assertIn("Security, data loss and correctness defects still block", prompt)
+
     def test_a_blocking_finding_blocks(self) -> None:
         root = self.make_repo()
         self.prepare(root)
