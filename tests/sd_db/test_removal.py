@@ -532,12 +532,16 @@ class ItemRefusals(Store):
         self.db.execute("UPDATE item SET fields='{not json' WHERE id=?", (other,))
         self.assertEqual([r["key"] for r in self.refused(self.plan(item), "I11")], [other])
         self.db.execute("UPDATE item SET fields=NULL WHERE id=?", (other,))
-        resolve_state(self.db, record_state(self.db, "checkpoint", key=QUEUE, body="{not json"))
+        # `record_state` serialises every body (sd:3578); a store written before it can still hold this one.
+        raw = self.db.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
+                              (QUEUE, "2026-10-01T00:00:00+00:00", "{not json")).lastrowid
+        self.db.commit()
+        resolve_state(self.db, raw)
         self.assertEqual([r["table"] for r in self.refused(self.plan(item), "I11")], ["state"])
 
     def test_i11_a_queue_of_the_wrong_shape_is_not_called_invalid_json(self):
         item = self.item()
-        for body in ('{"pending": 5}', '{"pending": [5]}'):
+        for body in ({"pending": 5}, {"pending": [5]}):
             with self.subTest(body=body):
                 self.db.execute("DELETE FROM state WHERE key=?", (QUEUE,))
                 resolve_state(self.db, record_state(self.db, "checkpoint", key=QUEUE, body=body))

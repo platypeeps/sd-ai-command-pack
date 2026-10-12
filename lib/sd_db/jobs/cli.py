@@ -82,6 +82,16 @@ def command_status(_argv: list[str]) -> int:
         print(f"sd-db: {path}")
         print(f"sd-db: schema version {found}, this library is built for {SCHEMA_VERSION}")
         print(f"sd-db: {len(tables(connection))} table(s)")
+        # sd:3472: the store grew to 1.7 GB, half of it free pages, and nothing said so.
+        pages = connection.execute("PRAGMA freelist_count").fetchone()[0]
+        free = pages * connection.execute("PRAGMA page_size").fetchone()[0]
+        print(f"sd-db: {path.stat().st_size:,} bytes on disk; {pages} free page(s), {free:,} bytes, "
+              "that only VACUUM returns")
+        from ..serve import LOCK_SUFFIX, TOKEN_SUFFIX
+        owned = {path.name + suffix for suffix in ("", "-wal", "-shm", "-journal", LOCK_SUFFIX, TOKEN_SUFFIX)}
+        for stray in sorted(path.parent.glob(path.name + "*")):
+            if stray.name not in owned and stray.is_file():
+                print(f"sd-db: {stray.name} beside the store is not the store's ({stray.stat().st_size:,} bytes)")
         # One line per kind: the hub holds tens of thousands of checkpoint
         # and heartbeat rows, and their NULL resolved_at is not open (sd:2849).
         marks = ", ".join("?" * len(OPEN_STATE_KINDS))
