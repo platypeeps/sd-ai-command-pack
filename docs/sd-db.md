@@ -326,7 +326,8 @@ A batch is one task under the ref `review:<queue>:<batch>`, so a second filing f
 Its first comment is the header; each question is a `question` note in the Decisions format, with one `Subject:` line.
 A label is the Decisions ruling, `Ruling on note #N: <option>`; an undo is a `Withdrawn: ruling #M on note #N` decision.
 A sealed export refuses a key whose SHA-256 is not the header's seal, and refuses while a question is open.
-It closes the batch before it writes the key's rows, and a closed batch refuses every ruling and withdrawal.
+It commits the batch's close before it parses the key.
+A batch once closed refuses every ruling and withdrawal; one written after the close by another path is exported as `late` and moves no label.
 The key is CSV; its first column names the subject.
 `apply` acts only on questions that offer `Approve` and `Reject`; each approval files one task under `review-approved:<note>`.
 It resolves a batch's open questions as `Expired, not ruled` after 7 days.

@@ -24,9 +24,11 @@ provenance. No table is new:
 Modes: `open` shows everything; `blind` asks the reader to show the text and
 options only (the dashboard's job, not this module's); `sealed` is blind plus
 a key the producer keeps outside the store, whose SHA-256 the header holds.
-A sealed export refuses another key and an open question, and closes the
-batch before it writes the key's rows into the file; a closed batch refuses
-every ruling and withdrawal through `rule` and `withdraw`.
+A sealed export refuses another key and an open question, and commits the
+batch's close before it parses the key. A batch once closed refuses every
+ruling and withdrawal through `rule` and `withdraw`; one written after the
+close by another path (`sd task note`, a reopen) is read as `late` and moves
+no label.
 """
 
 from __future__ import annotations
@@ -72,6 +74,8 @@ HEADER = "Review batch"
 RULING = re.compile(r"Ruling on note #(\d+): (.+)")
 WITHDRAWN = re.compile(r"Withdrawn: ruling #(\d+) on note #(\d+)")
 COMMENT = re.compile(r"On note #(\d+): (.+)", re.DOTALL)
+#: The `status_change` note `writes.transition` writes when an item closes.
+CLOSE = re.compile(r"\S+ -> done by ")
 #: The nightly queue's options, the ref prefix of the task an approval
 #: files, and how long an unruled suggestion waits (operator, 2026-10-12).
 APPROVE, REJECT = "Approve", "Reject"
@@ -238,21 +242,35 @@ def _batch(row: dict, notes: list[dict]) -> dict:
     if len(asked) < header["questions"] or header["questions"] < 0:
         raise ReviewError(f"sd:{row['id']}'s header counts {header['questions']} questions; "
                           f"{len(asked)} follow it")
-    questions = {note["id"]: {**_parse_question(note), "rulings": [], "comments": []}
+    questions = {note["id"]: {**_parse_question(note), "rulings": [], "comments": [], "late": []}
                  for note in asked[:header["questions"]]}
+    # The first close ends the batch: a ruling or withdrawal written after it,
+    # by hand or after a reopen, is kept as `late` and moves no label.
+    closed = next((note["id"] for note in notes if note["kind"] == "status_change"
+                   and CLOSE.match(note["body"] or "")), None)
     rulings: dict[int, dict] = {}
     for note in notes:
         body = note["body"] or ""
+        late = closed is not None and note["id"] > closed
         if note["kind"] == "decision" and (ruled := RULING.fullmatch(body)):
             question = questions.get(int(ruled[1]))
-            if question is not None and ruled[2] in question["options"]:
-                rulings[note["id"]] = {"ruling": note["id"], "option": ruled[2], "by": note["session"],
-                                       "at": note["timestamp"], "withdrawal": None}
-                question["rulings"].append(rulings[note["id"]])
+            if question is None or ruled[2] not in question["options"]:
+                continue
+            if late:
+                question["late"].append({"note": note["id"], "body": body, "at": note["timestamp"]})
+                continue
+            rulings[note["id"]] = {"ruling": note["id"], "question": question["note"], "option": ruled[2],
+                                   "by": note["session"], "at": note["timestamp"], "withdrawal": None}
+            question["rulings"].append(rulings[note["id"]])
         elif note["kind"] == "decision" and (pulled := WITHDRAWN.fullmatch(body)):
             ruling = rulings.get(int(pulled[1]))
-            if ruling is not None and ruling["withdrawal"] is None and int(pulled[2]) in questions:
-                ruling.update(withdrawal=note["id"], withdrawn_at=note["timestamp"])
+            if ruling is None or ruling["question"] != int(pulled[2]) or ruling["withdrawal"] is not None:
+                continue
+            if late:
+                questions[ruling["question"]]["late"].append({"note": note["id"], "body": body,
+                                                              "at": note["timestamp"]})
+                continue
+            ruling.update(withdrawal=note["id"], withdrawn_at=note["timestamp"])
         elif note["kind"] == "comment" and note["id"] > first["id"] and (said := COMMENT.fullmatch(body)):
             question = questions.get(int(said[1]))
             if question is not None:
@@ -265,7 +283,7 @@ def _batch(row: dict, notes: list[dict]) -> dict:
                         ruled_by=live and live["by"], ruled_at=live and live["at"],
                         position=live and question["options"].index(live["option"]) + 1)
     found = list(questions.values())
-    return {"item": row, "ref": row["external_id"], "header": header, "questions": found,
+    return {"item": row, "ref": row["external_id"], "header": header, "questions": found, "closed": closed,
             "open": sum(question["resolved_at"] is None for question in found),
             "labels": sum(question["label"] is not None for question in found)}
 
@@ -370,8 +388,8 @@ def _open_batch(connection: sqlite3.Connection, item: int, expected_revision: st
     if state["revision"] != expected_revision:
         raise workflow.StaleItem(f"item {item} changed; reload it before applying this change")
     found = _batch(state["item"], state["notes"])
-    if state["item"]["status"] == "done":
-        raise ReviewError(f"sd:{item} is closed; a closed batch takes no ruling or withdrawal")
+    if state["item"]["status"] == "done" or found["closed"] is not None:
+        raise ReviewError(f"sd:{item} is closed; a batch once closed takes no ruling or withdrawal")
     return state, found
 
 
@@ -424,9 +442,10 @@ def _key_rows(key: bytes) -> dict[str, dict]:
     """The key's rows by subject: CSV, its first column naming the subject."""
     try:
         reader = csv.DictReader(io.StringIO(key.decode("utf-8-sig"), newline=""))
-        if not reader.fieldnames or not reader.fieldnames[0]:
-            raise ReviewError("the key has no header row; its first column names the subject")
-        column, rows = reader.fieldnames[0], {}
+        names = reader.fieldnames
+        if not names or not all(names) or len(set(names)) != len(names):
+            raise ReviewError("the key needs a header row of unique, named columns; the first names the subject")
+        column, rows = names[0], {}
         for row in reader:
             if row[column] in rows:
                 raise ReviewError(f"the key names subject {row[column]!r} more than once")
@@ -476,7 +495,7 @@ def _lines(found: dict, key: bytes | None, rows: dict[str, dict] | None, now: st
                 "withdrawn": [{"ruling": held["ruling"], "option": held["option"], "withdrawal": held["withdrawal"],
                                "at": held["withdrawn_at"]}
                               for held in question["rulings"] if held["withdrawal"] is not None],
-                "comments": question["comments"]}
+                "comments": question["comments"], "late": question["late"]}
         if rows is not None:
             line["key"] = rows.get(question["subject"])
         lines.append(line)
@@ -508,10 +527,10 @@ def export(connection: sqlite3.Connection, item: int, *, who: str, key: bytes | 
                 count = found["open"]
                 raise ReviewError(f"sd:{item} has {count} question{'s' if count != 1 else ''} open; "
                                   f"a sealed export waits until every question is ruled")
-            rows = _key_rows(key)
             if found["item"]["status"] != "done":
                 workflow.change_status(connection, item, "done", who=who,
                                        reason="sealed export: closed before the key is read")
+        rows = _key_rows(key)
     return _lines(read(connection, item), key, rows, now)
 
 

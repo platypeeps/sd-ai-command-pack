@@ -245,12 +245,16 @@ class NightlySuppression(ReviewCase):
         self.assertEqual([d["subject"] for d in result["dropped"]], ["idea-5", "idea-6"])
 
     def test_a_rerun_after_a_new_rejection_still_finds_its_batch(self):
-        """The same file twice is one batch, even when a rejection landed between the two runs."""
+        """The same file twice is one batch, even when a rejection of one of its subjects landed between."""
         yesterday = self.file(nightly("2026-10-11", ["cap-retries"]))
-        today = review.file(self.db, nightly("2026-10-12", ["cap-retries-2", "split-gate"]), who="tester")
+        today = review.file(self.db, nightly("2026-10-12", ["cap-retries", "split-gate"]), who="tester")
         self.rule(yesterday, 0, "Reject")
-        again = review.file(self.db, nightly("2026-10-12", ["cap-retries-2", "split-gate"]), who="tester")
-        self.assertEqual((again["item"], again["created"]), (today["item"], False))
+        before = self.counts()
+        again = review.file(self.db, nightly("2026-10-12", ["cap-retries", "split-gate"]), who="tester")
+        self.assertEqual((again["item"], again["created"], again["dropped"]), (today["item"], False, []))
+        self.assertEqual([q["subject"] for q in review.read(self.db, today["item"])["questions"]],
+                         ["cap-retries", "split-gate"])
+        self.assertEqual(self.counts(), before)
 
 
 class LabelAndWithdraw(ReviewCase):
@@ -339,6 +343,31 @@ class LabelAndWithdraw(ReviewCase):
         self.rule(item, 0, "deep")
         with self.assertRaises(review.ReviewError):
             self.withdraw(item, first["ruling"]["id"])
+
+    def test_a_withdrawal_naming_another_question_moves_nothing(self):
+        item = self.file(batch())
+        ruled = self.rule(item, 0, "cheap")
+        other = review.read(self.db, item)["questions"][1]["note"]
+        workflow.add_item_note(self.db, item, kind="decision", who="tester",
+                               body=f"Withdrawn: ruling #{ruled['ruling']['id']} on note #{other}")
+        found = review.read(self.db, item)["questions"][0]
+        self.assertEqual((found["label"], found["ruling"]), ("cheap", ruled["ruling"]["id"]))
+        self.withdraw(item, ruled["ruling"]["id"])
+        self.assertIsNone(review.read(self.db, item)["questions"][0]["label"])
+
+    def test_a_reopened_batch_still_refuses_and_a_late_hand_ruling_moves_no_label(self):
+        item = self.file(batch())
+        self.rule(item, 0, "cheap")
+        workflow.change_status(self.db, item, "done", who="tester", reason="closed for the test")
+        workflow.change_status(self.db, item, "planning", who="tester")
+        with self.assertRaisesRegex(review.ReviewError, "closed"):
+            self.rule(item, 1, "skip")
+        note = review.read(self.db, item)["questions"][1]["note"]
+        ruled = workflow.add_item_note(self.db, item, kind="decision", who="tester",
+                                       body=f"Ruling on note #{note}: deep")
+        workflow.resolve_item_note(self.db, note, who="tester", expected_revision=ruled["revision"])
+        found = review.read(self.db, item)["questions"][1]
+        self.assertEqual((found["label"], [late["note"] for late in found["late"]]), (None, [ruled["note"]["id"]]))
 
     def test_a_done_batch_refuses_a_ruling_and_a_withdrawal(self):
         item = self.file(batch())
@@ -444,14 +473,31 @@ class SealedExport(ReviewCase):
         self.assertEqual((lines[0]["open"], self.status(item)), (1, "planning"))
         self.assertNotIn("key", lines[1])
 
-    def test_a_key_with_a_repeated_subject_is_refused_before_the_close(self):
-        key = KEY_A + b"example.test/a@1a2b3c4:src/one.py,skip\n"
-        item = self.file(sealed(key=key))
-        self.rule(item, 0, "cheap")
-        self.rule(item, 1, "deep")
-        with self.assertRaisesRegex(review.ReviewError, "more than once"):
-            review.export(self.db, item, key=key, who="tester")
-        self.assertEqual(self.status(item), "planning")
+    def test_a_key_is_parsed_only_after_the_close_commits(self):
+        item = self.ruled_sealed()
+        with mock.patch.object(review, "_key_rows", side_effect=RuntimeError("stopped while reading the key")):
+            with self.assertRaises(RuntimeError):
+                review.export(self.db, item, key=KEY_A, who="tester")
+        self.assertEqual(self.status(item), "done")
+
+    def test_a_late_hand_ruling_after_the_export_moves_no_label(self):
+        item = self.ruled_sealed()
+        review.export(self.db, item, key=KEY_A, who="tester")
+        note = review.read(self.db, item)["questions"][0]["note"]
+        workflow.add_item_note(self.db, item, kind="decision", who="tester", body=f"Ruling on note #{note}: deep")
+        line = review.export(self.db, item, key=KEY_A, who="tester")[1]
+        self.assertEqual((line["label"], len(line["late"])), ("cheap", 1))
+
+    def test_a_key_with_a_repeated_subject_or_column_is_refused(self):
+        for key, reason in ((KEY_A + b"example.test/a@1a2b3c4:src/one.py,skip\n", "more than once"),
+                            (b"subject,subject,tier\nexample.test/a@1a2b3c4:src/one.py,"
+                             b"example.test/a@1a2b3c4:src/two.py,deep\n", "unique, named columns")):
+            with self.subTest(reason=reason):
+                item = self.file(sealed(key=key, batch=f"K{len(key)}"))
+                self.rule(item, 0, "cheap")
+                self.rule(item, 1, "deep")
+                with self.assertRaisesRegex(review.ReviewError, reason):
+                    review.export(self.db, item, key=key, who="tester")
 
 
 class Apply(ReviewCase):
@@ -592,6 +638,23 @@ class TheVerb(unittest.TestCase):
                              "--out", str(out), expect=1)
         self.assertIn("2 questions", refused.stderr)
         self.assertIn("nothing to apply", self.sd_db("review", "apply", "nightly").stdout)
+
+    def test_an_export_that_cannot_write_exits_1_and_the_rerun_writes(self):
+        self.sd_db("review", "file", str(self.write("batch.json", sealed())))
+        item = self.store().execute("SELECT id FROM item WHERE external_id = 'review:jev-entry-2:C1'").fetchone()[0]
+        connection = connect(self.home / ".local/share/sd/sd.db")
+        self.addCleanup(connection.close)
+        for index, option in ((0, "cheap"), (1, "deep")):
+            note = review.read(connection, item)["questions"][index]["note"]
+            revision = workflow.item_state(connection, item)["revision"]
+            review.rule(connection, item, note, option, expected_revision=revision, who="tester")
+        key = str(self.write("key.csv", KEY_A.decode()))
+        missing = self.home / "absent" / "labels.jsonl"
+        refused = self.sd_db("review", "export", str(item), "--key", key, "--out", str(missing), expect=1)
+        self.assertIn("is done, and the same command writes it again", refused.stderr)
+        out = self.home / "labels.jsonl"
+        self.sd_db("review", "export", str(item), "--key", key, "--out", str(out))
+        self.assertEqual(json.loads(out.read_text().splitlines()[1])["key"]["tier"], "cheap")
 
     def test_invalid_json_refuses_and_files_nothing(self):
         refused = self.sd_db("review", "file", str(self.write("batch.json", '{"schema": 1, "queue": ')), expect=1)

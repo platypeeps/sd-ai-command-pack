@@ -398,8 +398,13 @@ def _review_export(item: int, key_path: str | None, out: Path) -> int:
         lines = review.export(connection, item, key=key, who=getpass.getuser())
     finally:
         connection.close()
-    review.write(lines, out)
     manifest = lines[0]
+    try:
+        review.write(lines, out)
+    except OSError as failure:
+        print(f"sd-db review export: cannot write {out}: {failure.strerror}; sd:{item} is {manifest['status']}, "
+              f"and the same command writes it again", file=sys.stderr)
+        return 1
     print(f"sd-db: exported sd:{item}: {manifest['questions']} questions, {manifest['labels']} labels, "
           f"{manifest['open']} open, to {out}")
     return 0
