@@ -77,7 +77,7 @@ TWO_OPEN_ISSUES = {
                     "url": "https://github.com/o/r/issues/11",
                     "state": "OPEN",
                     "updatedAt": "2026-09-06T10:00:00Z",
-                    "author": {"login": "sven"},
+                    "author": {"login": "example"},
                     "repository": {"nameWithOwner": "o/r"},
                 },
                 {
@@ -87,7 +87,7 @@ TWO_OPEN_ISSUES = {
                     "url": "https://github.com/o/r/issues/12",
                     "state": "OPEN",
                     "updatedAt": "2026-09-06T11:00:00Z",
-                    "author": {"login": "sven"},
+                    "author": {"login": "example"},
                     "repository": {"nameWithOwner": "o/r"},
                 },
             ],

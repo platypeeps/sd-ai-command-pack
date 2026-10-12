@@ -35,31 +35,31 @@ import sd_lib  # noqa: E402
 
 from tests import row_seed  # noqa: E402
 
-VIEWER = ({"login": "sven"}, "")
+VIEWER = ({"login": "example"}, "")
 
 #: A `gh api` that answers from a fixture: the transport is real, the network
 #: is not. `__REPO__` is replaced per case so one stub covers fork and not.
 GH_STUB = """#!/bin/sh
 case "$2" in
-  user) printf '%s' '{"login": "sven"}' ;;
-  */collaborators) printf '%s' '[{"login": "sven", "permissions": {"push": true}}]' ;;
+  user) printf '%s' '{"login": "example"}' ;;
+  */collaborators) printf '%s' '[{"login": "example", "permissions": {"push": true}}]' ;;
   *) printf '%s' '__REPO__' ;;
 esac
 """
 
 FORK_JSON = (
-    '{"full_name": "sven/thing", "fork": true, '
+    '{"full_name": "example/thing", "fork": true, '
     '"parent": {"full_name": "acme/thing"}, '
     '"permissions": {"admin": true, "push": true}}'
 )
 OWN_JSON = (
-    '{"full_name": "sven/thing", "fork": false, '
+    '{"full_name": "example/thing", "fork": false, '
     '"permissions": {"admin": true, "push": true}}'
 )
 #: sd:1347 -- a repository this account may push to but does not administer.
 #: The first of the three questions, which no repository row may answer for.
 NOT_ADMIN_JSON = (
-    '{"full_name": "sven/thing", "fork": false, '
+    '{"full_name": "example/thing", "fork": false, '
     '"permissions": {"admin": false, "push": true}}'
 )
 
@@ -68,7 +68,7 @@ def answers(*, full: bool) -> dict:
     """The three answers `remote_permits_full` asks for, yes or a plain no."""
 
     repo = {
-        "full_name": "sven/thing",
+        "full_name": "example/thing",
         "fork": not full,
         "permissions": {"admin": True, "push": True, "pull": True},
     }
@@ -77,7 +77,7 @@ def answers(*, full: bool) -> dict:
     return {
         sd_lib.VIEWER_QUERY: VIEWER,
         sd_lib.REPOSITORY_QUERY: (repo, ""),
-        sd_lib.COLLABORATOR_QUERY: ([{"login": "sven", "permissions": {"push": True}}], ""),
+        sd_lib.COLLABORATOR_QUERY: ([{"login": "example", "permissions": {"push": True}}], ""),
     }
 
 
@@ -104,7 +104,7 @@ class Fixture(unittest.TestCase):
     def git(self, cwd: pathlib.Path, *args: str) -> None:
         subprocess.run(["git", *args], cwd=str(cwd), check=True, capture_output=True, text=True)
 
-    def make_repo(self, origin: str = "https://github.com/sven/thing.git") -> pathlib.Path:
+    def make_repo(self, origin: str = "https://github.com/example/thing.git") -> pathlib.Path:
         root = self.tmp / "repo"
         root.mkdir(parents=True)
         self.git(root, "init", "-b", "main")
@@ -331,7 +331,7 @@ class TheReviewGate(Fixture):
 #: one a second collaborator may push to.
 SHIP_GH_STUB = """#!/bin/sh
 case "$2" in
-  user) printf '%s' '{"login": "sven"}' ;;
+  user) printf '%s' '{"login": "example"}' ;;
   */collaborators*) printf '%s' '__PEOPLE__' ;;
   *) printf '%s' '__REPO__' ;;
 esac
@@ -346,15 +346,15 @@ echo 'gh: could not resolve host: api.github.com' >&2
 exit 1
 """
 
-ALONE = '[{"login": "sven", "permissions": {"push": true}}]'
-WITH_MALLORY = '[{"login": "sven", "permissions": {"push": true}}, {"login": "mallory", "permissions": {"push": true}}]'
+ALONE = '[{"login": "example", "permissions": {"push": true}}]'
+WITH_MALLORY = '[{"login": "example", "permissions": {"push": true}}, {"login": "mallory", "permissions": {"push": true}}]'
 
 #: sd:853 -- the second remote, whose name has the first one's as a prefix.
-#: `sven/thing` is a prefix of `sven/thing-two`, and the demotion marker is
+#: `example/thing` is a prefix of `example/thing-two`, and the demotion marker is
 #: built from the name, so the shorter marker is a prefix of the longer note's
 #: body. That is the collision the idempotence key has to survive.
 OWN_TWO_JSON = (
-    '{"full_name": "sven/thing-two", "fork": false, '
+    '{"full_name": "example/thing-two", "fork": false, '
     '"permissions": {"admin": true, "push": true}}'
 )
 
@@ -372,7 +372,7 @@ class TheDemotionAnswer(Fixture):
         self.write_mode(root, "full")
         resolved, lowered = sd_lib.mode_answer(root, ask=Asker(answers(full=False)))
         self.assertEqual(resolved, "guest")
-        self.assertEqual(lowered, sd_lib.RemoteAnswer(False, True, "sven/thing is a fork of acme/thing",
+        self.assertEqual(lowered, sd_lib.RemoteAnswer(False, True, "example/thing is a fork of acme/thing",
                                                       sd_lib.FORK_QUESTION))
 
     def test_a_full_the_remote_confirms_was_not_lowered(self) -> None:
@@ -417,16 +417,16 @@ class TheDemotionAnswer(Fixture):
 
     def test_the_note_names_the_remote_first_and_the_answer_second(self) -> None:
         marker, body = sd_lib.demotion_note(
-            "sven/thing", sd_lib.RemoteAnswer(False, True, "sven/thing lets mallory push too")
+            "example/thing", sd_lib.RemoteAnswer(False, True, "example/thing lets mallory push too")
         )
-        self.assertEqual(marker, "Mode demoted to guest on sven/thing")
+        self.assertEqual(marker, "Mode demoted to guest on example/thing")
         self.assertTrue(body.startswith(marker + "\n"), body)
-        self.assertIn("the remote answered: sven/thing lets mallory push too", body)
+        self.assertIn("the remote answered: example/thing lets mallory push too", body)
         self.assertIn("shared tree", body)
 
     def test_an_unanswered_question_is_said_as_one(self) -> None:
         _, body = sd_lib.demotion_note(
-            "sven/thing", sd_lib.RemoteAnswer(False, False, "gh could not be run: no such file")
+            "example/thing", sd_lib.RemoteAnswer(False, False, "gh could not be run: no such file")
         )
         self.assertIn("the remote could not be asked: gh could not be run", body)
         self.assertNotIn("the remote answered", body)
@@ -456,7 +456,7 @@ class TheDemotionAnswer(Fixture):
         self.assertFalse(lowered.answered, "the question was not put, so it was not answered")
         self.assertIn(unreachable, lowered.reason)
         # The rest of the route, from this answer to the sentence on the item.
-        marker, body = sd_lib.demotion_note("sven/thing", lowered)
+        marker, body = sd_lib.demotion_note("example/thing", lowered)
         self.assertTrue(body.startswith(marker + "\n"), body)
         self.assertIn("the remote could not be asked", body)
         self.assertNotIn("the remote answered", body)
@@ -466,7 +466,7 @@ class TheDemotionAnswer(Fixture):
 
         The marker is built from the repository name, so one marker is a
         prefix of another whenever one name is a prefix of another --
-        `sven/thing` of `sven/thing-two`, which is what a renamed or forked
+        `example/thing` of `example/thing-two`, which is what a renamed or forked
         sibling looks like. Looking a note up by the bare marker would read
         the longer name's note as the shorter name's own. The key carries the
         terminator, and no repository name holds a newline, so it ends at the
@@ -474,8 +474,8 @@ class TheDemotionAnswer(Fixture):
         """
 
         answer = sd_lib.RemoteAnswer(False, True, "someone else may push too")
-        short_marker, short_body = sd_lib.demotion_note("sven/thing", answer)
-        long_marker, long_body = sd_lib.demotion_note("sven/thing-two", answer)
+        short_marker, short_body = sd_lib.demotion_note("example/thing", answer)
+        long_marker, long_body = sd_lib.demotion_note("example/thing-two", answer)
         self.assertTrue(
             long_marker.startswith(short_marker),
             "the premise of this test: the bare markers do collide",
@@ -486,7 +486,7 @@ class TheDemotionAnswer(Fixture):
         self.assertTrue(long_body.startswith(long_key))
         self.assertFalse(
             long_body.startswith(short_key),
-            "sven/thing-two's note must not answer for sven/thing",
+            "example/thing-two's note must not answer for example/thing",
         )
         self.assertFalse(short_body.startswith(long_key))
 
@@ -566,7 +566,7 @@ class ShipMergeFixture(Fixture):
         # a demotion changes the repository's `runner_merge` not at all: the
         # policy is the operator's standing setting, and a remote that gained
         # a collaborator is a reason to stop this merge, not to rewrite it.
-        upsert_repo(self.connection, str(self.root), remote="https://github.com/sven/thing.git",
+        upsert_repo(self.connection, str(self.root), remote="https://github.com/example/thing.git",
                     runner_merge="auto")
         self.item = create_item(
             self.connection, kind="work", title="a thing", status="in_progress", repo=str(self.root), branch="topic"
@@ -592,7 +592,7 @@ class ShipMergeFixture(Fixture):
 
         from sd_db import upsert_repo
 
-        upsert_repo(self.connection, str(self.root), remote="https://github.com/sven/thing.git",
+        upsert_repo(self.connection, str(self.root), remote="https://github.com/example/thing.git",
                     runner_merge=value)
 
     def remote(self, people: str, repo: str = OWN_JSON) -> None:
@@ -635,8 +635,8 @@ class TheDemotionNote(ShipMergeFixture):
         self.assertEqual(self.operation().resolve_mode(), "guest")
         notes = self.notes()
         self.assertEqual(len(notes), 1, notes)
-        self.assertTrue(notes[0].startswith("Mode demoted to guest on sven/thing\n"), notes[0])
-        self.assertIn("sven/thing lets mallory push too", notes[0])
+        self.assertTrue(notes[0].startswith("Mode demoted to guest on example/thing\n"), notes[0])
+        self.assertIn("example/thing lets mallory push too", notes[0])
         self.assertEqual(
             (self.root / sd_lib.LOCAL_FILE_NAME).read_text(encoding="utf-8").count("mode: full"), 1,
             "the written line is the operator's; detection never edits it",
@@ -655,7 +655,7 @@ class TheDemotionNote(ShipMergeFixture):
         self.assertEqual(self.operation().resolve_mode(), "guest")
         notes = self.notes()
         self.assertEqual(len(notes), 1, notes)
-        self.assertTrue(notes[0].startswith("Mode demoted to guest on sven/thing\n"), notes[0])
+        self.assertTrue(notes[0].startswith("Mode demoted to guest on example/thing\n"), notes[0])
         self.assertIn("the remote could not be asked", notes[0])
         self.assertIn("could not resolve host", notes[0])
         self.assertNotIn("the remote answered", notes[0])
@@ -718,7 +718,7 @@ class TheDemotionNote(ShipMergeFixture):
 
     def test_a_remote_that_lets_the_merge_through_writes_nothing(self) -> None:
         self.remote(ALONE)
-        self.assertEqual(self.operation("merge").merge_ownership().get("full_name"), "sven/thing")
+        self.assertEqual(self.operation("merge").merge_ownership().get("full_name"), "example/thing")
         self.assertEqual(self.notes(), [])
 
     def repoint(self, origin: str, repo_json: str, people: str = WITH_MALLORY) -> None:
@@ -740,21 +740,21 @@ class TheDemotionNote(ShipMergeFixture):
         """sd:853 -- one note per item *and remote*, when one name prefixes the other.
 
         The idempotence key was the first `len(marker)` characters of the
-        body, and the marker is built from the repository name. `sven/thing`
-        is a prefix of `sven/thing-two`, so once the longer name had left its
+        body, and the marker is built from the repository name. `example/thing`
+        is a prefix of `example/thing-two`, so once the longer name had left its
         note the shorter name's lookup matched it and wrote nothing: the
         remote actually refusing the push left no reason on the item, and the
         note that was there named a different remote.
         """
 
-        self.repoint("https://github.com/sven/thing-two.git", OWN_TWO_JSON)
+        self.repoint("https://github.com/example/thing-two.git", OWN_TWO_JSON)
         self.assertEqual(self.operation().resolve_mode(), "guest")
-        self.repoint("https://github.com/sven/thing.git", OWN_JSON)
+        self.repoint("https://github.com/example/thing.git", OWN_JSON)
         self.assertEqual(self.operation().resolve_mode(), "guest")
         notes = self.notes()
         self.assertEqual(len(notes), 2, notes)
-        self.assertTrue(notes[0].startswith("Mode demoted to guest on sven/thing-two\n"), notes[0])
-        self.assertTrue(notes[1].startswith("Mode demoted to guest on sven/thing\n"), notes[1])
+        self.assertTrue(notes[0].startswith("Mode demoted to guest on example/thing-two\n"), notes[0])
+        self.assertTrue(notes[1].startswith("Mode demoted to guest on example/thing\n"), notes[1])
         # And the key is still a key: neither remote writes a second note.
         self.assertEqual(self.operation().resolve_mode(), "guest")
         self.assertEqual(len(self.notes()), 2, self.notes())
@@ -819,9 +819,9 @@ class TheQuestionThatAnswered(Fixture):
         }))
 
     def test_each_refusing_question_names_itself(self) -> None:
-        alone = [{"login": "sven", "permissions": {"push": True}}]
+        alone = [{"login": "example", "permissions": {"push": True}}]
         crowd = alone + [{"login": "mallory", "permissions": {"push": True}}]
-        own = {"full_name": "sven/thing", "fork": False, "permissions": {"admin": True, "push": True}}
+        own = {"full_name": "example/thing", "fork": False, "permissions": {"admin": True, "push": True}}
 
         admin = self.answer_for({**own, "permissions": {"admin": False, "push": True}}, alone)
         self.assertEqual(admin.question, sd_lib.ADMIN_QUESTION)
@@ -834,9 +834,9 @@ class TheQuestionThatAnswered(Fixture):
         self.assertEqual((permitted.full, permitted.question, permitted.others), (True, "", ()))
 
     def test_only_an_answered_coownership_no_passes_the_predicate(self) -> None:
-        alone = [{"login": "sven", "permissions": {"push": True}}]
+        alone = [{"login": "example", "permissions": {"push": True}}]
         crowd = alone + [{"login": "mallory", "permissions": {"push": True}}]
-        own = {"full_name": "sven/thing", "fork": False, "permissions": {"admin": True, "push": True}}
+        own = {"full_name": "example/thing", "fork": False, "permissions": {"admin": True, "push": True}}
 
         self.assertTrue(sd_lib.coownership_only(self.answer_for(own, crowd)))
         self.assertFalse(sd_lib.coownership_only(self.answer_for(own, alone)), "a yes is not an override")
@@ -859,7 +859,7 @@ class TheRowAuthorizedMerge(ShipMergeFixture):
 
     Merge authority was repository ownership, and its third question --
     "nobody else may push" -- is false of every co-authored repository, so
-    `sd-ship merge` refused sd:1337 in `answerbook/mezmo_benchmark` and the
+    `sd-ship merge` refused sd:1337 in `example-org/benchmark` and the
     whole Mezmo lane ended at `ready_to_send` for a human to finish by hand.
     The row is the operator's per-repository decision about exactly that, so
     `runner_merge: auto` answers the third question and nothing else.
@@ -888,7 +888,7 @@ class TheRowAuthorizedMerge(ShipMergeFixture):
         self.runner_merge("auto")
         self.remote(WITH_MALLORY)
         delivery = self.operation("merge")
-        self.assertEqual(delivery.merge_ownership().get("full_name"), "sven/thing")
+        self.assertEqual(delivery.merge_ownership().get("full_name"), "example/thing")
         self.assertEqual(self.notes(), [], "nothing was lowered, so nothing was demoted")
 
     def test_the_authority_names_the_other_pushers_and_is_not_durable_yet(self) -> None:
@@ -908,7 +908,7 @@ class TheRowAuthorizedMerge(ShipMergeFixture):
         delivery = self.operation("merge")
         delivery.merge_ownership()
         recorded = delivery.row_authority
-        self.assertEqual(recorded["repository"], "sven/thing")
+        self.assertEqual(recorded["repository"], "example/thing")
         self.assertEqual(recorded["runner_merge"], "auto")
         self.assertEqual(recorded["other_pushers"], ["mallory"])
         self.assertIn("mallory", recorded["remote_said"])
@@ -989,9 +989,9 @@ class TheRowAuthorizedMerge(ShipMergeFixture):
         self.remote(WITH_MALLORY)
         delivery = self.operation("merge")
         self.connection.execute("UPDATE repo SET remote = ? WHERE path = ?",
-                                ("https://github.com/sven/elsewhere.git", str(self.root)))
+                                ("https://github.com/example/elsewhere.git", str(self.root)))
         self.connection.commit()
-        self.assertFalse(delivery.row_merges(), "sven/elsewhere's policy does not speak for sven/thing")
+        self.assertFalse(delivery.row_merges(), "example/elsewhere's policy does not speak for example/thing")
         with self.assertRaisesRegex(self.ship.Refusal, "mallory"):
             delivery.merge_ownership()
         self.assertNotIn("row_authorized_merge", delivery.state)
@@ -1007,12 +1007,12 @@ class TheRowAuthorizedMerge(ShipMergeFixture):
         refuse the common case rather than the wrong-row one.
         """
 
-        self.git(self.root, "remote", "set-url", "origin", "git@github.com:sven/thing.git")
+        self.git(self.root, "remote", "set-url", "origin", "git@github.com:example/thing.git")
         self.runner_merge("auto")  # stores the https form
         self.remote(WITH_MALLORY)
         delivery = self.operation("merge")
         self.assertTrue(delivery.row_merges())
-        self.assertEqual(delivery.merge_ownership().get("full_name"), "sven/thing")
+        self.assertEqual(delivery.merge_ownership().get("full_name"), "example/thing")
         self.assertEqual(self.notes(), [])
 
     def test_a_repository_the_account_does_not_administer_still_refuses(self) -> None:
@@ -1046,7 +1046,7 @@ class TheRowAuthorizedMerge(ShipMergeFixture):
         self.remote(ALONE)
         delivery = self.operation("merge")
         self.forget_the_row()
-        self.assertEqual(delivery.merge_ownership().get("full_name"), "sven/thing")
+        self.assertEqual(delivery.merge_ownership().get("full_name"), "example/thing")
         self.assertEqual(self.notes(), [])
         self.assertNotIn("row_authorized_merge", delivery.state,
                          "ownership answered; the receipt claims no override")
@@ -1057,7 +1057,7 @@ class TheRowAuthorizedMerge(ShipMergeFixture):
         self.write_mode(self.root, "guest")
         self.runner_merge("auto")
         self.remote(WITH_MALLORY)
-        self.assertEqual(self.operation("merge").merge_ownership().get("full_name"), "sven/thing")
+        self.assertEqual(self.operation("merge").merge_ownership().get("full_name"), "example/thing")
         self.assertEqual(self.notes(), [], "a written guest was not lowered by anyone")
 
 

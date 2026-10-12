@@ -154,7 +154,7 @@ DASHBOARD_IGNORES = frozenset({
 
 #: The one `unprotected` acceptance the fleet carries. Plain on purpose: a
 #: `because` that cites a ruleset goes false when the ruleset is deleted, which
-#: is how rwbp-website's came to name one D2 had removed (sd:1326 note).
+#: is how example-website's came to name one D2 had removed (sd:1326 note).
 UNPROTECTED_ENTRY: dict[str, Any] = {
     "id": "unprotected",
     "state": {"branch_protection": False},

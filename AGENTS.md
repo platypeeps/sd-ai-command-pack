@@ -29,8 +29,8 @@ Instructions for AI assistants working in this repository.
 
 Work started here may also change these companion repositories:
 
-- `/Users/sven/repos/platypeeps/sd-writing`
-- `/Users/sven/repos/system`
+- `/Users/example/repos/platypeeps/sd-writing`
+- `/Users/example/repos/system`
 
 Treat related implementation, tests, documentation, CI, and coordinated delivery in these repositories as part of this project's scope.
 Do not request confirmation solely because an in-scope operation targets either companion repository.

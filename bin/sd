@@ -1475,7 +1475,7 @@ def store_root(store: dict[str, object]) -> pathlib.Path:
 
     There is no default. `pack.py` had one -- an absolute string with a
     username in it -- and five shell callers have another, spelled
-    `${OBSIDIAN_VAULT:-$HOME/Documents/Sven Delmas Vault}`. A default here
+    `${OBSIDIAN_VAULT:-$HOME/Documents/Example Vault}`. A default here
     would make a fourth spelling of the same path, and the failure it prevents
     is the mild one: an unset variable is a sentence naming the knob, where a
     default is a silent read of somebody else's vault layout.

@@ -882,7 +882,7 @@ def demotion_note_key(marker: str) -> str:
     `sd-ship` finds an existing note by matching the head of its body, and the
     bare marker is the wrong thing to match: markers are built from repository
     names, so one marker is a prefix of another whenever one name is a prefix
-    of another -- `sven/thing` of `sven/thing-two`, which is what a rename, a
+    of another -- `example/thing` of `example/thing-two`, which is what a rename, a
     move between owners, or a sibling fork looks like. Matched bare, the
     longer name's note answers for the shorter name and the shorter name's
     demotion is never written down: the remote that is actually refusing the
@@ -1934,7 +1934,7 @@ def last_active(when: datetime.date, name: str, activity: str,
     the others see. A `row` checkout records a triage decision as a note and
     touches no file; a `file` checkout has no database at all; an item nobody
     has committed or recorded has only its birth date. Twenty-one of
-    mezmo_benchmark's twenty-four planning items read past the threshold on
+    example-benchmark's twenty-four planning items read past the threshold on
     birth dates alone while every one of them had been triaged live the day
     before, and the triage was notes.
     """

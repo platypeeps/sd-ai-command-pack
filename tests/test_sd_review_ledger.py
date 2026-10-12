@@ -475,7 +475,7 @@ class TheShippedBounds(unittest.TestCase):
     """sd:1805 raised the shipped reviewers' `max_tokens`; the reservation
     must move with it, or a cap is held against a bound the call can exceed.
 
-    Priced at the prompt that ran out of room on mezmo-world-simulator#215:
+    Priced at the prompt that ran out of room on example-simulator#215:
     131600 bytes, estimated at the library's `BYTES_PER_TOKEN` (sd:2935 made
     it 3, so 43866 tokens; it was 4, 32900 tokens).
     """

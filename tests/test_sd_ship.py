@@ -2214,7 +2214,7 @@ roles:
     def test_a_coowned_remote_merges_when_the_repository_row_says_auto(self):
         """sd:1347 -- the defect, end to end: a merge that used to be impossible.
 
-        `sd-ship merge` refused sd:1337 in `answerbook/mezmo_benchmark` with
+        `sd-ship merge` refused sd:1337 in `example-org/benchmark` with
         "lets adrianfurlong, ... push too" -- repository ownership, asked at
         merge time, and its third question is false of every co-authored
         repository. The row said `auto` and nothing read it, so the Mezmo lane
@@ -5847,7 +5847,7 @@ class DeclaredGapCase(unittest.TestCase):
         pull.mergeable, pull.merge_state_status = mergeable, "UNSTABLE"
 
     def test_an_unstable_answer_after_the_gate_post_merges_without_waiting(self):
-        # sd:2075, answerbook/mezmo_benchmark #583: sd/local-gate success, the
+        # sd:2075, example-org/benchmark #583: sd/local-gate success, the
         # optional CodeQL run in progress, and five reads refused `unstable`.
         self.ruleset_protection()
         self.local_ci()
@@ -6069,7 +6069,7 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(self.gate_posts(), [])
 
     def test_a_ruleset_that_gates_the_merge_is_path_a_without_a_declaration(self):
-        """answerbook/log-distiller's shape on the fixture: no classic object, one
+        """example-org/log-tool's shape on the fixture: no classic object, one
         active ruleset requiring a pull request and the strict `route` check
         bound to app 7. No declaration, and the merge lands once; the receipt's
         protection object says where it came from (sd:1327)."""
@@ -6228,7 +6228,7 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(self.puts(), 0)
 
     def test_a_ruleset_that_only_forbids_deletion_is_not_protection(self):
-        """answerbook/mezmo-world-simulator's ruleset 21772988: `deletion` and
+        """example-org/simulator's ruleset 21772988: `deletion` and
         `non_fast_forward`, nothing a pull request must satisfy. Path B, so the
         refusal is the present one and a declaration is honoured."""
         self.double.rules = [{"type": "deletion", "ruleset_id": 42}, {"type": "non_fast_forward", "ruleset_id": 42}]

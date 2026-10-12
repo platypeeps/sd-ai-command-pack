@@ -531,7 +531,7 @@ def repo_relative(repo: pathlib.Path, value: str) -> tuple[str, str]:
     says to do that instead.
 
     One residual, deliberately left: an absolute value whose *prefix* is
-    mis-cased -- `/USERS/sven/...` for `/Users/sven/...` -- fails the
+    mis-cased -- `/USERS/example/...` for `/Users/example/...` -- fails the
     containment test and is refused as outside the repository, though a
     case-insensitive filesystem would have opened it. That is a loud refusal
     naming the spelling to use, not a silent pass, so it is the safe side of

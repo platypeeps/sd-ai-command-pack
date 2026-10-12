@@ -11,6 +11,7 @@ import json
 import os
 import pathlib
 import posixpath
+import re
 import socket
 import subprocess
 import sys
@@ -316,17 +317,47 @@ def complete_report(last: dict, head: str, reviewed_head: str | None) -> dict:
     the gate's pass.
     """
     report = last.get("report") or {}
+    missing = missing_part(last, report, head, reviewed_head)
+    if missing:
+        # sd:3379. The refusal names the part that fails, so a lane log says why.
+        raise Refusal(f"local review receipt is incomplete or does not name this exact head: {missing}")
+    return report
+
+
+def missing_part(last: dict, report: dict, head: str, reviewed_head: str | None) -> str | None:
+    """The first part of a stored pass that keeps it from clearing `head`, or None when it is whole."""
     blocked = report.get("status") == "blocking"
-    if (last.get("head") != head or report.get("subject", {}).get("head") != head
-            or (reviewed_head != head and not blocked)
-            or report.get("status") not in ("clean", "advisory", "blocking")
-            or (report.get("check") or {}).get("status") not in (("pass", GATE_NOT_RUN) if blocked else ("pass",))
-            or not completed_depth(report)):
-        raise Refusal("local review receipt is incomplete or does not name this exact head")
+    subject = report.get("subject")
+    subject = subject if isinstance(subject, dict) else {}
+    gate = (report.get("check") or {}).get("status")
+    if last.get("head") != head:
+        return f"the last pass reserved {short(last.get('head'))}, not {head[:12]}"
+    if subject.get("head") != head:
+        return f"its review covers {short(subject.get('head'))}, not {head[:12]}"
+    if reviewed_head != head and not blocked:
+        return f"no review is recorded as clearing {head[:12]}"
+    if report.get("status") not in ("clean", "advisory", "blocking"):
+        return f"its review status is {report.get('status') or 'missing'}"
+    if gate not in (("pass", GATE_NOT_RUN) if blocked else ("pass",)):
+        return f"its gate status is {gate or 'missing'}"
+    if not completed_depth(report):
+        return f"{report.get('completed_reviews')}/{report.get('requested_reviews')} reviewers completed"
     if blocked and (last.get("exit_code") != 1 or last.get("execution_error")
                     or report.get("scope") != "branch" or report.get("dry_run") or report.get("explain_only")):
-        raise Refusal("local review receipt is incomplete or does not name this exact head")
-    return report
+        return "its blocking report is not a whole-branch review that exited 1"
+    return None
+
+
+def short(commit: Any) -> str:
+    """The first 12 characters of a commit id, or `no head`."""
+    return commit[:12] if isinstance(commit, str) and commit else "no head"
+
+
+def reviewed_commit(report: dict) -> str | None:
+    """The commit a report's subject names, when it is a whole commit id (sd:3379)."""
+    subject = report.get("subject")
+    head = subject.get("head") if isinstance(subject, dict) else None
+    return head if isinstance(head, str) and re.fullmatch(r"[0-9a-f]{40}([0-9a-f]{24})?", head) else None
 
 
 def validate_findings(report: dict) -> None:
@@ -863,7 +894,43 @@ class SharedReview:
             return None
         return {"from": previous, "base": fork}
 
+    def covered_head(self, last: dict, report: dict) -> str:
+        """sd:3379. The head a finished pass reviewed, with the pass moved under it when that is not the one reserved.
+
+        sd-review reads HEAD itself, after prepare read it. An amend between
+        the two reads left a review of the amended commit stored under the
+        old one, with that old head as `reviewed_head`. `complete_report`
+        then refused it on every prepare, and neither --retry-review nor
+        --restart-review could see why: the pass named a head the branch
+        still held. Under the head it covers, the review is reused there, and
+        a branch that cannot reach it gets the orphaned-head refusal and its
+        --restart-review remedy. `reserved_head` keeps the head prepare read.
+        A pass an operator request bought stays where it is: the request
+        binds its head (`validate_additional_requests`), and `record_review`
+        releases such a pass instead (`release_moved_request`).
+        """
+        covered, reserved = reviewed_commit(report), last["head"]
+        if covered is None or covered == reserved or last.get("additional_review_request"):
+            return reserved
+        last.update(head=covered, reserved_head=reserved)
+        print(f"sd-ship: HEAD moved from {reserved[:12]} to {covered[:12]} while the review ran; "
+              f"the review covers {covered[:12]}, so its pass is kept under that head", file=sys.stderr)
+        return covered
+
+    def rekey_moved_pass(self) -> None:
+        """sd:3379. Move a stored review of another head under the head it covers, as `record_review` now does."""
+        passes = self.history.native(self.state)
+        if not passes or not isinstance(passes[-1].get("report"), dict):
+            return
+        reserved = passes[-1]["head"]
+        covered = self.covered_head(passes[-1], passes[-1]["report"])
+        if covered != reserved:
+            cleared = self.state.get("reviewed_head")
+            self.save(passes=passes, reviewed_head=covered if cleared == reserved else cleared)
+
     def review(self, head: str) -> None:
+        # Before a restart reads which reviewed heads the branch cannot reach.
+        self.rekey_moved_pass()
         if getattr(self.args, "restart_review", None) is not None:
             self.restart_review(head)
         # A resumed review is on the hub now; what follows treats it as any recorded pass (sd:3340).
@@ -1164,6 +1231,23 @@ class SharedReview:
                       code="review_unreviewed", boundary="review", state="operator_decision",
                       next_action="Resolve the reviewers' refusals, then repeat the same --additional-review-for request.")
 
+    def release_moved_request(self, report: dict, head: str, passes: list[dict], exit_code: int) -> None:
+        """sd:3379. A requested pass that reviewed another head does not spend the operator's request.
+
+        The request buys a review of the head it names, and the pass cannot
+        move to the head sd-review read without breaking that binding. It is
+        released as `release_unreviewed_request` releases one that reviewed
+        nothing, with the head it did review under `review_preflight_error`.
+        """
+        covered = str(reviewed_commit(report))
+        self.release_pass(passes, {"kind": "review_head_moved", "stage": "execution", "head": head,
+                                   "reviewed_head": covered, "exit_code": exit_code, "status": report.get("status")})
+        raise Refusal(f"HEAD moved from {head[:12]} to {covered[:12]} while the requested review ran; it reviewed "
+                      f"{covered[:12]}, not the head the request names, so the operator request was not consumed",
+                      code="review_head_moved", boundary="review", state="operator_decision",
+                      next_action="Keep one writer in this checkout while prepare runs, then repeat "
+                                  "--additional-review-for for the head to review.")
+
     def record_review(self, result: subprocess.CompletedProcess, head: str, passes: list[dict]) -> None:
         try:
             report = json.loads(result.stdout)
@@ -1185,9 +1269,13 @@ class SharedReview:
                           f"its reserved pass remains recorded{consumed(passes)}; "
                           "bounded diagnostics remain in the item ship receipt")
         stash_raw_responses(report, head)
+        request = passes[-1].get("additional_review_request")
+        if request and reviewed_commit(report) not in (None, head):
+            self.release_moved_request(report, head, passes, result.returncode)
+        reserved = head
+        head = self.covered_head(passes[-1], report)
         if released_gate_failure(report, result.returncode):
             self.release_gate_failure(report, head, passes, result.returncode)
-        request = passes[-1].get("additional_review_request")
         if request and unreviewed(report, result.returncode):
             self.release_unreviewed_request(report, head, passes, result.returncode)
         passes[-1]["report"] = report
@@ -1198,6 +1286,13 @@ class SharedReview:
         except Refusal:
             self.save(reviewed_head=None)
             raise
+        if head != reserved:
+            raise Refusal(f"HEAD moved from {reserved[:12]} to {head[:12]} while the review ran; sd-review reviewed "
+                          f"and gated {head[:12]}, so the receipt keeps the pass under {head[:12]}",
+                          code="review_head_moved", boundary="review", state="retryable_failure",
+                          next_action=f"Keep one writer in this checkout while prepare runs, then prepare again: at "
+                                      f"{head[:12]} it reuses this review, and a head that cannot reach "
+                                      f"{head[:12]}, as after an amend, is refused with the --restart-review remedy.")
         if result.returncode:
             # sd:2605. A review that refuses the head stops before the gate; say so,
             # so nobody reads a refusal with no gate failure in it as tests that passed.

@@ -18,7 +18,7 @@ The command is `sd-ship review --no-item --create-record --assert-new-work
 --json`. It is written only in `skills/sd-ship/SKILL.md`. A caller who reads
 the refusal must leave the tool to learn it.
 
-Observed 2026-09-28 in rwbp-songs, on PRs #20 and #21: each itemless merge
+Observed 2026-09-28 in example-songs, on PRs #20 and #21: each itemless merge
 cost a failed `merge`, a failed `prepare`, and a search of the skill before
 the first working call.
 

@@ -381,6 +381,150 @@ class ProviderSelection(unittest.TestCase):
         self.assertEqual(retry.state["passes"][-1]["requested_provider"], "baseten")
 
 
+class MovedHeadReview(unittest.TestCase):
+    """sd:3379: an amend landed while prepare started, and sd-review reviewed the amended head.
+
+    The receipt kept that review under the head prepare had read, so every
+    later prepare refused it as not naming the head, and no flag cleared it.
+    """
+
+    MOVED = "e" * 40
+    context = ProviderSelection.context
+
+    @staticmethod
+    def ancestry():
+        """Unrelated heads: each commit reaches only itself, as an amend leaves them."""
+        return patch("sd_ship_review.is_ancestor", side_effect=lambda _root, previous, head: previous == head)
+
+    def moved_review(self):
+        review, process = self.context(report_changes={"subject": {"head": self.MOVED, "base": BASE}})
+        with patch("sys.stderr"), self.assertRaises(ship.Refusal) as caught:
+            review.review(HEAD)
+        return review, process, caught.exception
+
+    def legacy_state(self):
+        """What a prepare before sd:3379 stored: the review of MOVED under the head it had read."""
+        prepared, _process = self.context()
+        prepared.review(HEAD)
+        state = copy.deepcopy(prepared.state)
+        state["passes"][0]["report"]["subject"]["head"] = self.MOVED
+        return state
+
+    def test_a_review_of_another_head_is_kept_under_the_head_it_covers(self):
+        review, process, refusal = self.moved_review()
+        self.assertEqual(refusal.workflow["blocker"]["code"], "review_head_moved")
+        self.assertIn(f"from {HEAD[:12]} to {self.MOVED[:12]}", str(refusal))
+        self.assertEqual(process.call_count, 2)
+        stored = review.state["passes"][0]
+        self.assertEqual((stored["head"], stored["reserved_head"]), (self.MOVED, HEAD))
+        self.assertEqual(review.state["reviewed_head"], self.MOVED)
+
+    def test_the_next_prepare_at_the_reviewed_head_reuses_it(self):
+        moved, _process, _refusal = self.moved_review()
+        review, process = self.context(state=moved.state, head=self.MOVED)
+        with self.ancestry():
+            review.review(self.MOVED)
+        process.assert_not_called()
+        self.assertIsNone(review.check_review(self.MOVED))
+
+    def test_a_stored_review_of_another_head_is_rekeyed_and_names_the_restart(self):
+        review, process = self.context(state=self.legacy_state())
+        with self.ancestry(), patch("sys.stderr"), self.assertRaises(ship.Refusal) as caught:
+            review.review(HEAD)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "reviewed_head_orphaned")
+        self.assertIn("--restart-review", caught.exception.workflow["next_action"])
+        process.assert_not_called()
+        stored = review.state["passes"][0]
+        self.assertEqual((stored["head"], stored["reserved_head"]), (self.MOVED, HEAD))
+        self.assertEqual(review.state["reviewed_head"], self.MOVED)
+
+    def test_a_restart_then_reviews_the_reserved_head(self):
+        review, process = self.context(state=self.legacy_state())
+        review.args.restart_review = "amend landed while prepare ran"
+        with self.ancestry(), patch("sys.stderr"):
+            review.review(HEAD)
+        self.assertEqual(process.call_count, 2)
+        self.assertEqual(review.state["superseded_reviews"][0]["orphaned"], [self.MOVED])
+        self.assertEqual(review.state["reviewed_head"], HEAD)
+        review.check_review(HEAD)
+
+    def test_a_gate_failure_at_the_moved_head_keeps_the_pass_there_for_a_gate_rerun(self):
+        cleared = {"status": "gate_failed", "cleared_status": "clean", "subject": {"head": self.MOVED, "base": BASE},
+                   "check": {"status": "fail", "exit_code": 1, "detail": "timed out"}}
+        review, _process = self.context(report_changes=cleared)
+        with patch("sys.stderr") as stderr, self.assertRaisesRegex(ship.Refusal, "the review pass is kept"):
+            review.review(HEAD)
+        self.assertIn(f"HEAD moved from {HEAD[:12]} to {self.MOVED[:12]}",
+                      "".join(call.args[0] for call in stderr.write.call_args_list))
+        self.assertEqual(review.state["passes"][0]["head"], self.MOVED)
+        rerun, process = self.context(state=review.state, head=self.MOVED)
+        passed = {"status": "pass", "exit_code": 0, "detail": "", "checks": None, "summary": "sd-check pass"}
+        with patch.object(sd_ship_review, "adjudicated_check", return_value=passed) as gate:
+            rerun.review(self.MOVED)
+        self.assertEqual((process.call_count, gate.call_args.args[1]), (0, self.MOVED))
+        self.assertEqual(rerun.state["reviewed_head"], self.MOVED)
+
+    def spent_state(self):
+        """Every automatic pass spent on reviews that did not complete, so only a request reviews again."""
+        spent, _process = self.context(report_changes={"status": "unavailable", "completed_reviews": 0, "reviewed_by": []})
+        with patch("sys.stderr"), self.assertRaises(ship.Refusal):
+            spent.review(HEAD)
+        for _index in range(CAP - 1):
+            spent, _process = self.context(state=spent.state,
+                                            report_changes={"status": "unavailable", "completed_reviews": 0, "reviewed_by": []})
+            spent.args.retry_review = True
+            with patch("sd_ship_review.is_ancestor", return_value=True), self.assertRaises(ship.Refusal):
+                spent.review(HEAD)
+        return spent.state
+
+    def test_a_requested_pass_that_reviewed_another_head_is_released(self):
+        """The request binds its head, so the pass is released rather than moved (sd:3379 local review)."""
+        state = self.spent_state()
+        prefix = copy.deepcopy(state["passes"])
+        moved, process = self.context(state=state, report_changes={"subject": {"head": self.MOVED, "base": BASE}})
+        moved.args.additional_review_for, moved.args.request_reason = HEAD, "Synthetic explicit additional request"
+        with patch("sd_ship_review.is_ancestor", return_value=True), self.assertRaises(ship.Refusal) as caught:
+            moved.review(HEAD)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "review_head_moved")
+        self.assertIn("the operator request was not consumed", str(caught.exception))
+        self.assertEqual((process.call_count, moved.state["passes"]), (2, prefix))
+        self.assertEqual(moved.state["review_preflight_error"]["reviewed_head"], self.MOVED)
+        again, _process = self.context(state=moved.state)
+        again.args.additional_review_for, again.args.request_reason = HEAD, "Synthetic explicit additional request"
+        with patch("sd_ship_review.is_ancestor", return_value=True):
+            again.review(HEAD)
+        self.assertEqual(again.state["passes"][-1]["head"], HEAD)
+        again.check_review(HEAD)
+
+    def test_a_stored_requested_pass_is_not_moved(self):
+        state = self.spent_state()
+        reviewed, _process = self.context(state=state)
+        reviewed.args.additional_review_for, reviewed.args.request_reason = HEAD, "Synthetic explicit additional request"
+        with patch("sd_ship_review.is_ancestor", return_value=True):
+            reviewed.review(HEAD)
+        stored = copy.deepcopy(reviewed.state)
+        stored["passes"][-1]["report"]["subject"]["head"] = self.MOVED
+        review, process = self.context(state=stored)
+        with self.assertRaisesRegex(ship.Refusal, f"its review covers {self.MOVED[:12]}, not {HEAD[:12]}"):
+            review.review(HEAD)
+        process.assert_not_called()
+        self.assertEqual(review.state["passes"], stored["passes"])
+
+    def test_the_refusal_says_which_part_of_the_receipt_is_missing(self):
+        """sd:3379: the refusal named no cause, so the lane log could not say why the receipt failed."""
+        reviewed, _process = self.context()
+        reviewed.review(HEAD)
+        last = reviewed.state["passes"][-1]
+        cases = (({"check": None}, "its gate status is missing"),
+                 ({"check": {"status": "fail"}}, "its gate status is fail"),
+                 ({"subject": {"head": self.MOVED, "base": BASE}}, f"its review covers {self.MOVED[:12]}, not {HEAD[:12]}"),
+                 ({"completed_reviews": 0}, "0/1 reviewers completed"))
+        for change, said in cases:
+            with self.subTest(said=said), self.assertRaises(ship.Refusal) as caught:
+                sd_ship_review.complete_report(dict(last, report={**last["report"], **change}), HEAD, HEAD)
+            self.assertIn(f"does not name this exact head: {said}", str(caught.exception))
+
+
 class ProviderPublication(unittest.TestCase):
     setUp = fixture.ShipCase.setUp
     args = fixture.ShipCase.args

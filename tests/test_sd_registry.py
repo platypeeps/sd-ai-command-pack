@@ -132,7 +132,7 @@ class TheShippedRegistry(unittest.TestCase):
     OUTPUT_CEILINGS = {"kimi-k3": 1_048_576, "MiniMax-M3": 1_000_000,
                        "deepseek-ai/DeepSeek-V4-Pro-0813": 262_144}
     #: The fewest tokens a reasoning reviewer gets (sd:1805). kimi-k3 spent all
-    #: 16384 reasoning on a 35k-token prompt (mezmo-world-simulator#215) and
+    #: 16384 reasoning on a 35k-token prompt (example-simulator#215) and
     #: sent no answer; K3 always thinks, so the budget holds reasoning too.
     REASONING_FLOOR = 65536
 

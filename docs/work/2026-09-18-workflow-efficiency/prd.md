@@ -62,13 +62,13 @@ Installation and machine settings also remain separate from staged source change
     Support unranked reviewer-capable providers in system controls before migrating the machine registry.
     Remove only automatic Copilot requests from in-scope repository settings.
     Preserve the system repository's stronger no-Copilot restriction and unrelated settings.
-    The approved machine-wide change targets the Copilot-requesting `PostToolUse` Bash hook in `/Users/sven/.claude/settings.json`.
+    The approved machine-wide change targets the Copilot-requesting `PostToolUse` Bash hook in `/Users/example/.claude/settings.json`.
     Remove its automatic Copilot request instructions globally; preserve the push detector and unrelated permissions.
     Do not edit repository `.githooks`.
     The user approved these source, registry, global hook, and GitHub ruleset changes, then deferred merge-authorization redesign.
     Preserve scoped backups and read-back verification for each configuration change.
     Capture the actual machine registry before migration; never substitute the seed YAML as its baseline.
-    Back up `/Users/sven/.local/share/sd/providers.yaml` and affected `provider` and `bill` rows at a new migration checkpoint.
+    Back up `/Users/example/.local/share/sd/providers.yaml` and affected `provider` and `bill` rows at a new migration checkpoint.
     Record the effective inventory, configuration hash, and current revision; reject stale writes.
 11. Add conditional post-merge closeout through a ship-skill reference, not a cleanup executable.
     Use existing reconciliation, fetch-prune, review acknowledgment, and GitHub thread reads, replies, and resolution.
@@ -90,7 +90,7 @@ The locked worktree `agent-a539046d3d46c5816` had empty status and diff output d
 The remaining `sd:1006` acceptance work is separate; this task does not alter its row or claim its acceptance.
 
 The 2026-09-18 machine read from `bin/sd providers list --json` contains disabled Kimi and exo entries.
-Both carry reason `Disabled by sven`; the seed YAML is not this machine's inventory.
+Both carry reason `Disabled by the operator`; the seed YAML is not this machine's inventory.
 That read returned configuration SHA256 `d9a8740446d97aa000bd5e50b0525392843fb2c88259b5b1a6b1b5e2748ca6ed`.
 Its revision was `181fbc974f161ee0849deeae0873be2324fc6092ef210492fd8d7d79690bb5c1`.
 Capture a fresh baseline at the migration checkpoint; these dated values do not authorize a later stale write.
@@ -145,8 +145,8 @@ AC5 and AC14 contain the two accepted exceptions; neither claims that missing hi
       C-29 records both passes contemporaneously; the raw validator transcript was not located.
 
       ```bash
-      python /Users/sven/.codex/skills/.system/skill-creator/scripts/quick_validate.py "$scratch_home/.codex/skills/sd-review"
-      python /Users/sven/.codex/skills/.system/skill-creator/scripts/quick_validate.py "$scratch_home/.codex/skills/sd-ship"
+      python /Users/example/.codex/skills/.system/skill-creator/scripts/quick_validate.py "$scratch_home/.codex/skills/sd-review"
+      python /Users/example/.codex/skills/.system/skill-creator/scripts/quick_validate.py "$scratch_home/.codex/skills/sd-ship"
       ```
 
 - [x] `make check` passes in the pack worktree with zero failed groups and the existing installer coverage floor.
@@ -163,7 +163,7 @@ AC5 and AC14 contain the two accepted exceptions; neither claims that missing hi
 - [x] The migration checkpoint contains the registry file, affected provider/bill rows, configuration hash, and current revision.
       Backup read-back matches the captured machine baseline before any migration write.
       Scoped rollback restores only affected rows with an optimistic current-revision check; conflicting concurrent changes stop restoration.
-- [x] Back up `/Users/sven/.claude/settings.json` and read back the exact scoped hook diff.
+- [x] Back up `/Users/example/.claude/settings.json` and read back the exact scoped hook diff.
       Automatic request instructions are absent globally; the push detector, system no-Copilot restriction, and unrelated permissions remain unchanged.
       Repository `.githooks` remains unchanged.
 - [x] Read back affected GitHub settings after scoped changes.
@@ -191,7 +191,7 @@ These records establish implementation acceptance, not review clearance for anot
 | AC14 | `/private/tmp/sd-system-fix-verification.1rHhIY/REPORT.md` records passing library and prompt suites. The user accepted only the missing pre-edit prompt evidence. |
 | AC15–16 | `/private/tmp/sd-workflow-policy.wgpIrs/reviewer-migration.uVDl7s/migration-plan.json` records checkpoint identities, preservation, and scoped recovery instructions. Codex then Claude remain automatic; MiniMax/Baseten require explicit selection. All six provider states remain preserved. |
 | AC17–18 | `/private/tmp/sd-workflow-policy.wgpIrs/configuration-changes.json` records exact hook and repository-ruleset read-back. Personal Copilot settings were outside this scope. |
-| AC19 | `/Users/sven/.local/share/sd/runtime-backups/workflow-policy-20260919T140005Z/activation-result.json` records strict installer verification: 260 checks, zero failures. Its earlier service limitation remains preserved. |
+| AC19 | `/Users/example/.local/share/sd/runtime-backups/workflow-policy-20260919T140005Z/activation-result.json` records strict installer verification: 260 checks, zero failures. Its earlier service limitation remains preserved. |
 | AC20 | `/private/tmp/sd-restoration-rehearsal.MwidYw/artifacts/result.json` records matching source, receipt, renders, and runtime. Sixteen command checks and three smoke checks passed. This was a fixture, not a live rollback. |
 
 Item note 2949 records later dashboard health: `ok:true`, `code_changed:false` at `2026-09-19T18:41:36Z`.
@@ -201,7 +201,7 @@ The user confirmed discovery through `@sd-ship`; installation did not create `/s
 The diagnostic remains at `/private/tmp/sd-codex-discovery.GQcUBZ/DIAGNOSIS.md`.
 
 Approved cleanup removed two backed-up worktrees and their exact local branches without forced removal.
-Recovery remains under `/Users/sven/.local/share/sd/runtime-backups/workflow-policy-20260919T140005Z/closeout/candidate-pairs-aqb6p6h_`.
+Recovery remains under `/Users/example/.local/share/sd/runtime-backups/workflow-policy-20260919T140005Z/closeout/candidate-pairs-aqb6p6h_`.
 Its `removal-completion.json` reports `verified`; all four recovery archive hashes matched during independent read-back.
 Primary checkouts, six dirty worktrees, the archive branch, unrelated work, and shared runtimes remained preserved.
 Follow-ups `sd:1024` and `sd:1025` remain separate planning items.
@@ -216,7 +216,7 @@ The blast radius includes installed commands, reviewer dispatch, runner reuse, r
 Preserve the existing staged policy changes and all unrelated work in both primary checkouts.
 Use isolated worktrees for implementation; do not alter the original dirty system checkout.
 Back up enumerated machine and GitHub settings before changing them, then verify each write by read-back.
-The migration checkpoint includes `/Users/sven/.local/share/sd/providers.yaml`, affected `provider` and `bill` rows, and effective configuration identity.
+The migration checkpoint includes `/Users/example/.local/share/sd/providers.yaml`, affected `provider` and `bill` rows, and effective configuration identity.
 Rollback restores only those backed-up settings or discards only newly created isolated worktrees after preserving their work.
 Restore only migration-affected provider/bill rows using optimistic current-revision checks; stop if concurrent changes conflict.
 Never restore the whole database over other work.

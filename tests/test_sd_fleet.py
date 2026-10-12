@@ -224,7 +224,7 @@ class DryRun(Fleet):
         self.assertIn("--force", refused)
 
     def test_employer_repository_gets_no_unprotected_declaration(self) -> None:
-        root, remote = self.repo("work", owner="answerbook")
+        root, remote = self.repo("work", owner="example-org")
         [plan] = self.plan([(root, remote)])
         self.assertNotIn(sd_fleet.STATUS_PATH, [change["path"] for change in plan["changes"]])
         self.assertTrue(any("protection stands" in line for line in plan["adapted"]))
@@ -306,7 +306,7 @@ class DryRun(Fleet):
         self.assertIn("+# Parallel work follows", change["diff"])
 
     def test_local_block_refresh_drops_no_operator_line(self) -> None:
-        # The rwbp-website shape: an older template block, the operator's
+        # The example-website shape: an older template block, the operator's
         # comment lines inside it, and notes outside it.
         block = "".join(line for line in sd_install.local_block_text("")[0].splitlines(keepends=True)
                         if "Parallel work" not in line)
@@ -314,7 +314,7 @@ class DryRun(Fleet):
                                             "    # `npm run test:unit` is the local gate.\n"
                                             "    test: npm run test:unit\n    # test:", 1)
         local = f"# operator note above\n\n{block}\n# operator note below\n"
-        root, remote = self.repo("rwbp-website", local=local)
+        root, remote = self.repo("example-website", local=local)
         [plan] = self.plan([(root, remote)])
         [change] = [c for c in plan["changes"] if c["path"] == "CLAUDE.local.md"]
         removed = [line for line in change["diff"].splitlines() if line.startswith("-") and not line.startswith("---")]

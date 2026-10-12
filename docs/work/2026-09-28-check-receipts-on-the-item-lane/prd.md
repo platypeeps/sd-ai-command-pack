@@ -42,8 +42,8 @@ is the first thing to find out.
 4. Measure once: one item lane through prepare with a receipt, wall time of the
    gate step against sd:1910's four-minute runs, in the Log.
 5. Measure the other managed repositories with a real test gate:
-   mezmo-world-simulator, mezmo_benchmark, anomaly-metric-creator,
-   people-profiles, rwbp-coordinator, rwbp-website, rwbp-songs. `sd-check
+   example-simulator, example-benchmark, anomaly-metric-creator,
+   example-profiles, example-coordinator, example-website, example-songs. `sd-check
    --json` wall time in each, in the Log. File one item per repository whose
    gate takes longer than the threshold the operator sets; suggested 60 s.
    ui-design's gate is seconds and needs nothing; system, sd-writing-pack and

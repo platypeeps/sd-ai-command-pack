@@ -56,7 +56,7 @@ def _load_status():
 
 status = _load_status()
 
-LOWERED = sd_lib.RemoteAnswer(False, True, "sven/thing lets mallory push too")
+LOWERED = sd_lib.RemoteAnswer(False, True, "example/thing lets mallory push too")
 
 
 class SharedTree(unittest.TestCase):
@@ -71,7 +71,7 @@ class SharedTree(unittest.TestCase):
         self.git("init", "-q", "-b", "main", ".")
         self.git("config", "user.email", "test@example.com")
         self.git("config", "user.name", "Test User")
-        self.git("remote", "add", "origin", "https://github.com/sven/thing.git")
+        self.git("remote", "add", "origin", "https://github.com/example/thing.git")
 
     def git(self, *args: str) -> str:
         done = subprocess.run(["git", *args], cwd=str(self.root), check=True,
@@ -219,7 +219,7 @@ class SharedTree(unittest.TestCase):
                               "unchecked": []},
             "work": {"available": False, "reason": "no database",
                      "total": 0, "active": 0, "counts": {}, "items": []},
-            "pull_requests": {"repo": "sven/thing", "pull_requests": [],
+            "pull_requests": {"repo": "example/thing", "pull_requests": [],
                               "available": False, "reason": "no gh"},
             "setup": section,
             "protection": {"available": False, "reason": "no remote", "gaps": [],
