@@ -158,6 +158,18 @@ class QueueOutlivesTheProcess(Lane):
         self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
         self.assertEqual(json.loads(done.stdout)["expected_head"], head)
 
+    def test_retry_takes_a_cancelled_entry_and_its_help_says_so(self) -> None:
+        """sd:3389. The system Queue page re-queues a cancelled row; it reads `cancelled` in the help to offer it."""
+        sd_lane.enqueue_entry(self.feature, 7, "Topic", self.body, self.environ, claim="deliver")
+        sd_lane.cancel(self.repo, 7, self.environ)
+        head = self.entries()[0]["expected_head"]
+        done = self.sd_ship(self.repo, "retry", "7", "--expected-head", head)
+        self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
+        self.assertEqual((json.loads(done.stdout)["status"], json.loads(done.stdout)["retried"]["status"]),
+                         ("pending", "cancelled"))
+        helped = self.sd_ship(self.repo, "retry", "--help")
+        self.assertIn("cancelled", " ".join(helped.stdout.split()))
+
     def test_an_entry_without_a_delivery_claim_is_refused_with_exit_3(self) -> None:
         done = self.sd_ship(self.feature, "enqueue", "--item", "7", "--title", "Topic", "--body-file", str(self.body))
         self.assertEqual(done.returncode, 3, done.stderr + done.stdout)
@@ -282,7 +294,7 @@ class Runner(Lane):
             sd_lane.retry(self.repo, 1, self.environ)
         sd_lane.enqueue_entry(self.feature, 2, "two", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.cancel(self.repo, 2, self.environ)
-        with self.assertRaisesRegex(sd_lane.LaneError, "last entry is cancelled"):
+        with self.assertRaisesRegex(sd_lane.LaneError, "cancelled.*--expected-head"):
             sd_lane.retry(self.repo, 2, self.environ)
         # An entry that ended before its copy was kept has none to queue again.
         sd_lane.enqueue_entry(self.feature, 3, "three", self.body, self.environ, manual=True, claim="deliver")
@@ -2091,6 +2103,175 @@ class Retrying(SharedQueue):
         sd_lane.retry(self.repo, 1, self.environ)
         self.assertNotIn("push", self.git_verbs)
         self.assertEqual([row["status"] for row in self.entries()], ["failed", "pending"])
+
+
+class RetryCancelled(SharedQueue):
+    """sd:3389. `lane retry` takes a cancelled entry, bound to the head the caller read; one test per failure-table row."""
+
+    def cancelled(self, item: int = 1) -> tuple[pathlib.Path, str]:
+        """Item `item` enqueued from its own worktree with one commit, then cancelled; the worktree and its head."""
+        tree, [head] = self.committed(f"topic-{item}", "work")
+        sd_lane.enqueue_entry(tree, item, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.cancel(self.repo, item, self.environ)
+        self.git_verbs.clear()  # the enqueue's own publish
+        return tree, head
+
+    def test_a_cancelled_entry_joins_the_queue_last_at_its_head(self) -> None:
+        """Failure table, write: the retried entry is a plain pending entry after every other one; it jumps nothing."""
+        self.cancelled(1)
+        for item in (2, 3):
+            sd_lane.enqueue_entry(self.committed(f"topic-{item}", "work")[0], item, "t", self.body, self.environ,
+                                  claim="deliver")
+        head = self.entries()[0]["expected_head"]
+        retried = sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
+        self.assertEqual((retried["status"], retried["expected_head"], retried["authority"], retried["retried"]["status"]),
+                         ("pending", head, "manual", "cancelled"))
+        pending = [row["item"] for row in self.entries() if row["status"] == "pending"]
+        self.assertEqual(pending, [2, 3, 1])
+        self.assertEqual([(row["item"], row["status"]) for row in self.entries() if row["item"] == 1],
+                         [(1, "cancelled"), (1, "pending")])
+        self.assertNotIn("held", retried)
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([int(call[call.index("--item") + 1]) for call in self.calls if call[2] == "prepare"], [2, 3, 1])
+
+    def test_a_cancelled_entry_needs_the_expected_head_and_a_stale_one_is_refused(self) -> None:
+        """Failure table, read: without the head the caller showed, or with another one, nothing is pushed or written."""
+        _, head = self.cancelled()
+        before = self.rows()
+        with self.assertRaisesRegex(sd_lane.LaneError, "--expected-head"):
+            sd_lane.retry(self.repo, 1, self.environ)
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, 1, self.environ, expected_head="0" * 40)
+        self.assertEqual(refused.exception.code, sd_lane.STALE_HEAD)
+        self.assertEqual((self.rows(), [verb for verb in self.git_verbs if verb == "push"]), (before, []))
+
+    def test_a_cancelled_entry_whose_branch_moved_on_origin_is_refused(self) -> None:
+        """Failure table, read: the builder pushed past the cancelled head; a retry would ship scope nobody saw."""
+        tree, head = self.cancelled()
+        git(tree, "commit", "-q", "--allow-empty", "-m", "more")
+        git(tree, "push", "-q", "origin", "topic-1")
+        before = self.rows()
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
+        self.assertEqual(refused.exception.code, sd_lane.HEAD_MOVED)
+        self.assertIn(git(tree, "rev-parse", "HEAD"), str(refused.exception))
+        self.assertEqual((self.rows(), self.remote_tip("topic-1"), "push" in self.git_verbs),
+                         (before, git(tree, "rev-parse", "HEAD"), False))
+
+    def test_a_cancelled_entry_whose_worktree_moved_is_refused(self) -> None:
+        """Failure table, read: the builder committed past the cancelled head but has not pushed."""
+        tree, head = self.cancelled()
+        git(tree, "commit", "-q", "--allow-empty", "-m", "more")
+        before = self.rows()
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
+        self.assertEqual(refused.exception.code, sd_lane.HEAD_MOVED)
+        self.assertEqual((self.rows(), self.remote_tip("topic-1")), (before, head))
+
+    def merged_receipt(self, branch: str, item: int, head: str, phase: str = "merged") -> None:
+        """The ship receipt `sd-ship merge` leaves for `branch` and `item`, in the lane or by hand."""
+        import sd_db
+        from sd_db import ship
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            key = ship.receipt_key("example/pack", branch, item)
+            ship.save(connection, key, ship.read(connection, key)[0],
+                      {"repository": "example/pack", "branch": branch, "item": item, "phase": phase, "head": head,
+                       "merge_commit": "1" * 40})
+        finally:
+            connection.close()
+
+    def test_a_cancelled_entry_whose_head_already_merged_is_refused(self) -> None:
+        """Failure table, read: `sd-ship` merged a head that holds the cancelled one; a retry would ship it twice."""
+        tree, head = self.cancelled()
+        child = git(tree, "commit-tree", f"{head}^{{tree}}", "-p", head, "-m", "prepare's catch-up")
+        for merged, phase in ((head, "merged"), (child, "merged"), (child, "merge_dispatch")):
+            self.merged_receipt("topic-1", 1, merged, phase)
+            before = self.rows()
+            with self.assertRaises(sd_lane.LaneError) as refused:
+                sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
+            self.assertEqual(refused.exception.code, sd_lane.ALREADY_MERGED, phase)
+            self.assertIn("1" * 40, str(refused.exception))
+            self.assertEqual((self.rows(), "push" in self.git_verbs), (before, False))
+        # A merged head this checkout cannot read is unknown, not "not merged".
+        self.merged_receipt("topic-1", 1, "2" * 40)
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
+        self.assertEqual(refused.exception.code, sd_lane.PUBLISH_UNKNOWN)
+        # A later head on the same branch is a follow-up nobody merged yet; it is queued again.
+        self.merged_receipt("topic-1", 1, head)
+        git(tree, "commit", "-q", "--allow-empty", "-m", "follow-up")
+        later = git(tree, "rev-parse", "HEAD")
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(sd_lane.retry(self.repo, 1, self.environ, expected_head=later)["expected_head"], later)
+
+    def test_a_branch_that_moves_after_the_check_is_skipped_by_the_runner(self) -> None:
+        """Failure table, publish: the builder pushes between the branch read and the write; the run skips it."""
+        tree, head = self.cancelled()
+        real = sd_lane.require_published
+
+        def builder_pushes_first(*args: Any) -> None:
+            git(tree, "commit", "-q", "--allow-empty", "-m", "more")
+            git(tree, "push", "-q", "origin", "topic-1")
+            real(*args)
+        with mock.patch.object(sd_lane, "require_published", builder_pushes_first):
+            self.assertEqual(sd_lane.retry(self.repo, 1, self.environ, expected_head=head)["expected_head"], head)
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.entries()[-1]["status"], self.entries()[-1]["code"], self.calls),
+                         ("skipped", sd_lane.HEAD_MOVED, []))
+
+    def test_a_cancelled_entry_with_a_successor_moved_above_it_is_refused(self) -> None:
+        """Failure table, read: a newer entry of the item ended at a position above the cancelled one."""
+        sd_lane.enqueue_entry(self.committed("topic-2", "work")[0], 2, "t", self.body, self.environ, claim="deliver")
+        _, head = self.cancelled(1)
+        sd_lane.enqueue_entry(self.tmp / "topic-1", 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.move(self.repo, 1, "top", self.environ)
+        sd_lane.update(self.store(), lambda rows: [row.update(status="failed") for row in rows
+                                                   if row["item"] == 1 and row["status"] == "pending"])
+        self.assertEqual([(row["item"], row["status"]) for row in self.entries() if row["item"] == 1][-1],
+                         (1, "cancelled"))
+        before = self.rows()
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
+        self.assertEqual(refused.exception.code, sd_lane.SUPERSEDED)
+        self.assertEqual(self.rows(), before)
+
+    def test_a_successor_written_between_the_read_and_the_write_is_refused(self) -> None:
+        """Failure table, write: the transaction finds the item's entry it read is no longer its newest."""
+        _, head = self.cancelled()
+        real = sd_lane.require_published
+
+        def another_entry_lands_first(*args: Any) -> None:
+            real(*args)
+            sd_lane.update(self.store(), lambda rows: rows.append(
+                {**rows[0], "id": "later", "position": 9, "status": "merged", "merge_commit": "merged-1"}))
+        with mock.patch.object(sd_lane, "require_published", another_entry_lands_first):
+            with self.assertRaises(sd_lane.LaneError) as refused:
+                sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
+        self.assertEqual(refused.exception.code, sd_lane.SUPERSEDED)
+        self.assertEqual([row["status"] for row in self.entries()], ["cancelled", "merged"])
+
+    def test_a_failed_branch_read_is_unknown_and_writes_nothing(self) -> None:
+        """Failure table, read: `ls-remote` did not answer; that is not "the branch did not move"."""
+        _, head = self.cancelled()
+        before = self.rows()
+        with self.failing("ls-remote"), self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
+        self.assertEqual((refused.exception.code, self.rows(), "push" in self.git_verbs),
+                         (sd_lane.PUBLISH_UNKNOWN, before, False))
+
+    def test_a_rerun_after_a_kill_between_the_push_and_the_row_queues_one_entry(self) -> None:
+        """Failure table, publish: origin lost the branch after the cancel; killed after the push, before the row."""
+        tree, head = self.cancelled()
+        git(tree, "push", "-q", "origin", "--delete", "topic-1")
+        with mock.patch.object(sd_lane, "add_entry", side_effect=Killed), self.assertRaises(Killed):
+            sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
+        self.assertEqual((self.remote_tip("topic-1"), [row["status"] for row in self.entries()]), (head, ["cancelled"]))
+        self.git_verbs.clear()
+        sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
+        self.assertNotIn("push", self.git_verbs)
+        self.assertEqual([row["status"] for row in self.entries()], ["cancelled", "pending"])
 
 
 class Importing(SharedQueue):

@@ -14,7 +14,8 @@ database and runs it under one runner lock per repository:
   retry    queue the item's last failed, skipped or prepared entry again, at
            its head with its texts; `--manual` grants the merge (sd:3254);
            `--expected-head` refuses, in the write's transaction, a last
-           entry at another head (sd:3268);
+           entry at another head (sd:3268); a cancelled one needs it, and
+           refuses a moved branch, a newer entry or a merged head (sd:3389);
   move     put a pending entry up, down, on top or at a position (sd:2584);
   hold     keep a pending entry in place but skip it; `release` ends that;
            these four take `--expected-revision`, the `revision` `list`
@@ -93,7 +94,9 @@ when the setting cannot be read, it stops at a prepared head, marks the entry
 
 An entry that stops short of a merge (`failed`, `skipped` or `prepared`)
 keeps its texts as every row does (sd:3254), so `retry` needs no body file.
-The runner writes them to private temporary files for prepare.
+The runner writes them to private temporary files for prepare. A cancelled
+entry keeps them too, and `retry` queues it again only at the head the caller
+read (sd:3389): the system Queue page re-queues a cancel, and enqueues nothing.
 
 The next entry's gate runs early (sd:2586). Its prepare used to start only
 after the entry ahead merged, then catch up and gate for 10 to 20 minutes.
@@ -210,7 +213,8 @@ RUNNER_MERGE_MANUAL = "runner_merge_manual"
 RUNNER_MERGE_UNKNOWN = "runner_merge_unknown"
 #: The runs that put an entry back after a hub fault before the next fault fails it (sd:3239).
 HUB_RETRIES = 2
-#: The ends short of a merge: `retry` queues such an entry again, with its texts (sd:3254).
+#: The ends short of a merge: `retry` queues such an entry again, with its texts (sd:3254), and a cancelled
+#: one at the head the caller read (sd:3389).
 BLOCKED = ("failed", "skipped", "prepared")
 
 
@@ -236,6 +240,8 @@ STALE_REVISION = "stale_revision"
 STALE_HEAD = "stale_head"
 #: The refusal code of a cancel whose `--expected-claim` no longer holds the item's running entry (sd:3330).
 STALE_CLAIM = "stale_claim"
+#: The refusals of a cancelled entry's retry (sd:3389): its item has a newer entry, or merged at its head.
+SUPERSEDED, ALREADY_MERGED = "superseded", "already_merged"
 #: The refusal code of a lane verb whose hub database did not answer; a write may have landed (sd:3282).
 HUB_UNAVAILABLE = "hub_unavailable"
 #: The code of a runner write whose claim token no longer holds its entry: a reclaim or a release voided it.
@@ -565,8 +571,12 @@ def require_published(root: pathlib.Path, branch: str, head: str, gone: str) -> 
 
 
 def add_entry(queue: Queue, entry: dict[str, Any],
-              guard: Callable[[list[dict[str, Any]]], None] | None = None) -> dict[str, Any]:
-    """Append `entry` at the largest position plus one; `guard` reads the queue in the same transaction first."""
+              guard: Callable[[list[dict[str, Any]]], None] | None = None,
+              check: Callable[[Any], None] | None = None) -> dict[str, Any]:
+    """Append `entry` at the largest position plus one; `guard` and `check` refuse first, in the same transaction.
+
+    `guard` reads the entries, `check(connection)` the hub database (`update`).
+    """
     def append_last(entries: list[dict[str, Any]]) -> dict[str, Any]:
         if guard is not None:
             guard(entries)
@@ -575,7 +585,7 @@ def add_entry(queue: Queue, entry: dict[str, Any],
         entry["position"] = max((int(row.get("position") or 0) for row in entries), default=0) + 1
         entries.append(entry)
         return entry
-    return update(queue, append_last)
+    return update(queue, append_last, check)
 
 
 def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: pathlib.Path, environ: dict[str, str], *,
@@ -718,6 +728,84 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
     return update(queue_for(root, environ), mark)
 
 
+def enqueue_order(connection: Any, repository: str) -> dict[str, int]:
+    """Each entry id's first row id: the order the hub took the entries in, which no clock and no `move` changes."""
+    prefix = f"{KEY_PREFIX}{repository}:"
+    return {row["key"][len(prefix):]: row["first"] for row in connection.execute(
+        "SELECT key, MIN(id) AS first FROM state WHERE kind = 'checkpoint' AND substr(key, 1, ?) = ? GROUP BY key",
+        (len(prefix), prefix)).fetchall()}
+
+
+def check_successor(connection: Any, repository: str, cancelled: dict[str, Any]) -> None:
+    """Refuse `SUPERSEDED` when `cancelled`'s item has a newer entry, whatever its end (sd:3389).
+
+    Newer is by `enqueue_order`, not position: `move` can put a later entry
+    above it. The operator's next step for the item was that entry.
+    """
+    item, order = cancelled.get("item"), enqueue_order(connection, repository)
+    newer = [row for row in stored(connection, repository)
+             if row.get("item") == item and order.get(row["id"], 0) > order.get(cancelled["id"], 0)]
+    if newer:
+        raise LaneError(f"sd:{item} has a newer entry, {newer[-1].get('status')} at {newer[-1].get('expected_head')}, "
+                        "than the cancelled one; read it again with `sd-ship lane list`", code=SUPERSEDED)
+
+
+def check_unmerged(root: pathlib.Path, queue: Queue, cancelled: dict[str, Any]) -> None:
+    """Refuse `ALREADY_MERGED` when the ship receipt of the entry's branch and item merged its head (sd:3389).
+
+    Every merge goes through `sd-ship`, in the lane or by hand, and leaves that
+    receipt in the hub database; a squash leaves the head off the base, so the
+    base's history cannot tell. A receipt `merged` or `merge_dispatch` at a
+    head that contains the cancelled one refuses; a later head on the branch
+    is a follow-up and passes. An unreadable receipt, or a git read that fails,
+    is unknown and refuses.
+    """
+    require_sd_db()
+    from sd_db import ship  # noqa: PLC0415
+    from sd_db.workflow import WorkflowError  # noqa: PLC0415
+    item, branch, head = cancelled.get("item"), str(cancelled["branch"]), str(cancelled["expected_head"])
+
+    def branch_receipt(connection: Any) -> dict[str, Any]:
+        try:
+            return ship.read(connection, ship.receipt_key(queue.repository, branch, int(str(item))))[1]
+        except WorkflowError as error:
+            raise LaneError(f"sd:{item}'s ship receipt for {branch} cannot be read ({error}), so whether {head} "
+                            "merged is unknown; nothing was queued") from None
+    found = on_hub(queue, branch_receipt)
+    if found.get("phase") not in ("merged", "merge_dispatch"):
+        return
+    merged = str(found.get("head") or "")
+    if not merged or merged == head or read_git(root, "merge-base", "--is-ancestor", head, merged,
+                                                 ok=(0, 1)).returncode == 0:
+        raise LaneError(f"sd:{item}'s ship receipt for {branch} is {found.get('phase')} at "
+                        f"{found.get('merge_commit') or merged or 'an unrecorded head'}, which holds the cancelled "
+                        f"head {head}; nothing was queued", code=ALREADY_MERGED)
+
+
+def branch_unmoved(root: pathlib.Path, cancelled: dict[str, Any]) -> None:
+    """Refuse `HEAD_MOVED` when a cancelled entry's branch moved past its head (sd:3389).
+
+    A moved branch is scope the caller did not see: enqueue it from its
+    worktree. `origin/<branch>` must be the head, prepare's catch-up of it, or
+    gone (the publish puts the head back); this host's worktree, while on the
+    branch, the head or its catch-up. A read that fails raises `PUBLISH_UNKNOWN`.
+    """
+    item, branch, head = cancelled.get("item"), str(cancelled["branch"]), str(cancelled["expected_head"])
+    tip = (read_git(root, "ls-remote", "origin", f"refs/heads/{branch}").stdout.split() or [""])[0]
+    if tip and read_git(root, "rev-parse", "--verify", "--quiet", f"{tip}^{{commit}}", ok=(0, 1)).returncode != 0:
+        read_git(root, "fetch", "-q", "--no-tags", "origin", f"refs/heads/{branch}")
+    if tip and tip != head:
+        if not catch_up_of(root, tip, head):
+            raise LaneError(f"origin/{branch} is at {tip}, not sd:{item}'s cancelled head {head} or its catch-up; "
+                            "nothing was queued. Enqueue the new head from its worktree.", code=HEAD_MOVED)
+    worktree = pathlib.Path(str(cancelled.get("worktree")))
+    if (cancelled.get("enqueued_on") == this_host() and worktree.is_dir()
+            and read_git(worktree, "branch", "--show-current").stdout.strip() == branch
+            and not at_head(worktree, head)):
+        raise LaneError(f"{worktree} moved on {branch} from sd:{item}'s cancelled head {head}; nothing was "
+                        "queued. Enqueue the new head from that worktree.", code=HEAD_MOVED)
+
+
 def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: bool = False,
           expected_head: str | None = None) -> dict[str, Any]:
     """Queue `item`'s last entry again when it stopped short of a merge (sd:3254).
@@ -732,6 +820,13 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     `expected_head`, a full commit id, is the head the caller showed: in the
     write's transaction, a last entry at another head is refused with
     `STALE_HEAD` (sd:3268). None checks nothing.
+
+    A cancelled last entry (sd:3389) needs `expected_head`, and is refused
+    before the publish by `check_successor`, `branch_unmoved` and
+    `check_unmerged`, and in the write's transaction by `check_successor`
+    again. The new entry joins the queue last, as any enqueue does. A branch
+    that moves after `branch_unmoved` read it leaves the entry pending; the
+    runner's head check (`checkout_for`) then skips it `HEAD_MOVED`.
     """
     def at_expected_head(entries: list[dict[str, Any]]) -> None:
         latest = [row for row in entries if row.get("item") == item][-1:]
@@ -747,13 +842,21 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     at_expected_head(rows)
     if last.get("status") in ("pending", "running"):
         raise LaneError(f"sd:{item} is already queued in this lane")
-    if last.get("status") not in BLOCKED:
-        raise LaneError(f"sd:{item}'s last entry is {last.get('status')}; retry takes a failed, skipped or "
-                        "prepared one")
+    cancelled = last.get("status") == "cancelled"
+    if not cancelled and last.get("status") not in BLOCKED:
+        raise LaneError(f"sd:{item}'s last entry is {last.get('status')}; retry takes a failed, skipped, "
+                        "prepared or cancelled one")
+    if cancelled and expected_head is None:
+        raise LaneError(f"sd:{item}'s last entry is cancelled; retry it only at the head you read, with "
+                        "--expected-head <full commit id> as `sd-ship lane list` prints it")
     if not last.get("branch"):
         raise LaneError(f"sd:{item}'s last entry names no branch; queue it with `sd-ship lane enqueue`")
     if not isinstance(last.get("body"), str):
         raise LaneError(f"sd:{item}'s last entry kept no body; enqueue it again with --body-file")
+    if cancelled:
+        on_hub(queue, lambda connection: check_successor(connection, queue.repository, last))
+        branch_unmoved(root, last)
+        check_unmerged(root, queue, last)
     worktree, head = pathlib.Path(str(last.get("worktree"))), last["expected_head"]
     if last.get("enqueued_on") == this_host() and worktree.is_dir():
         head = caught_up(worktree, head)
@@ -764,7 +867,8 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     entry = {**{key: last.get(key) for key in keep}, "id": entry_id(), "expected_head": head,
              "authority": "manual" if manual or last.get("authority") == "manual" else None,
              "status": "pending", "enqueued_at": stamp_now()}
-    added = add_entry(queue, entry, guard=at_expected_head)
+    added = add_entry(queue, entry, guard=at_expected_head, check=(
+        (lambda connection: check_successor(connection, queue.repository, last)) if cancelled else None))
     return {**added, "retried": {"status": last["status"], "finished_at": last.get("finished_at")}}
 
 
@@ -2053,12 +2157,16 @@ def add_lane_verbs(commands: Any) -> None:
     adder.add_argument("--acceptance-file", type=pathlib.Path, help="forwarded to prepare unchanged")
     verbs.add_parser("list", help="print this repository's queue")
     retrier = verbs.add_parser("retry", help="queue the item's last failed, skipped or prepared entry again, "
-                                             "at its head with its body text (sd:3254)")
+                                             "at its head with its body text (sd:3254); a cancelled one needs "
+                                             "--expected-head (sd:3389)")
     retrier.add_argument("item", type=int)
     retrier.add_argument("--manual", action="store_true",
                          help="authorize the runner to merge when repo.runner_merge is manual, as enqueue --manual")
     retrier.add_argument("--expected-head", help=f"refuse with {STALE_HEAD} unless the item's last entry is at this "
-                                                 "full commit id, checked in the write's transaction (sd:3268)")
+                                                 "full commit id, checked in the write's transaction (sd:3268); "
+                                                 f"a cancelled entry needs it, and refuses {HEAD_MOVED} when its "
+                                                 f"branch moved, {SUPERSEDED} after a newer entry and "
+                                                 f"{ALREADY_MERGED} at a merged head (sd:3389)")
     canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled, or release a stuck running one")
     canceller.add_argument("item", type=int)
     canceller.add_argument("--expected-claim", metavar="TOKEN:STEP",
