@@ -27,13 +27,18 @@ database and runs it under one runner lock per repository:
            While one entry ships, the next one's gate runs on its predicted
            landing (sd:2586, below). After a merge it deletes the remote
            branch, notes the item with the worktree's removal command and
-           fast-forwards the main checkout (sd:2568, below). Under the
+           fast-forwards the main checkout (sd:2568, below). A run that
+           merged runs that checkout's `make post-merge`, when its Makefile
+           has one, once it released its runner lock (sd:3566). Under the
            runner lock it first reclaims a running entry whose holder here
            is gone, and lists it as `reclaimed` (sd:2821, below). An entry
            whose prepare or merge met a hub fault goes
            back to pending, at most `HUB_RETRIES` times, and the run stops
            (sd:3239, below);
-  watch    print each gate end a lane or builder log records, once.
+  watch    print each gate end a lane or builder log records, once; with
+           `--item N`, repeated, wait until each item's newest entry that is
+           not cancelled ends, print one line each, and exit 0 only when all
+           merged (sd:3565).
 
 The verbs are the queue's only writers, each in one hub database
 transaction, so a terminal and a dashboard reorder it the same way. A change
@@ -125,7 +130,12 @@ already removed (sd:3006) is noted as such, from the lane's own checkout
 checkout. When that checkout holds the running `sd-ship`, as the pack's does
 for every lane, it tries each other lane's runner lock once and skips if one
 is held: a lane mid-prepare must not have its tools change under it, and no
-lane waits on another's lock. The next landing retries. It holds the lane
+lane waits on another's lock. The next landing retries. Once a run that
+merged released its runner lock, and the last landing fast-forwarded the
+checkout, a `post-merge:` rule in its Makefile runs there once as `make
+post-merge`, bounded by `POST_MERGE_SECONDS` (sd:3566). Each merged item
+gets a note: a comment when it passed, else a followup. A failure never
+fails a merged entry. It holds the lane
 root folder's lock meanwhile, and a runner that starts then runs nothing
 (sd:3273): a lane with no runner lock yet has none to try.
 
@@ -198,6 +208,8 @@ CANCEL_SECONDS = 10
 #: failure, and the system repository's check script.
 GATE_END = re.compile(r"run-tests: end head=|check\.sh: every suite passed|make: \*\*\*")
 WATCH_MINUTES = 3
+#: How often `watch --item` reads the queue again (sd:3565).
+WATCH_PAUSE = 30
 #: Prepare's delivery choices; an entry carries one and forwards it unchanged.
 CLAIMS = ("deliver", "associate-only")
 #: The relative places `move` takes besides a 1-based position among pending entries.
@@ -266,6 +278,10 @@ WRITE_PAUSE = 30
 RECLAIMS = 3
 #: A merge lease is `MERGE_SECONDS` and this long for the landing.
 LANDING_SECONDS = 1800
+#: The bound on the main checkout's `make post-merge` after a run that merged (sd:3566).
+POST_MERGE_SECONDS = 600
+#: A `post-merge` rule in a Makefile, not a `post-merge :=` variable.
+POST_MERGE_RULE = re.compile(r"^post-merge\s*:(?!=)", re.MULTILINE)
 #: The bound on one `git` step of a publish: a fetch or a push crosses the network.
 PUBLISH_SECONDS = 300
 #: The longest chain of catch-up merges an entry's head may carry: one per prepare that pushed a catch-up
@@ -736,14 +752,16 @@ def enqueue_order(connection: Any, repository: str) -> dict[str, int]:
         (len(prefix), prefix)).fetchall()}
 
 
-def newest_entry(connection: Any, repository: str, item: int | None) -> dict[str, Any] | None:
-    """`item`'s newest entry by `enqueue_order`, or None (sd:3412).
+def newest_entry(connection: Any, repository: str, item: int | None,
+                 skip: tuple[str, ...] = ()) -> dict[str, Any] | None:
+    """`item`'s newest entry by `enqueue_order` whose status is not in `skip`, or None (sd:3412).
 
     Not the last by position: after a hold and `move top`, a newer entry
     sits above older finished ones.
     """
     order = enqueue_order(connection, repository)
-    return max((row for row in stored(connection, repository) if row.get("item") == item),
+    return max((row for row in stored(connection, repository) if row.get("item") == item
+                and row.get("status") not in skip),
                key=lambda row: order.get(row["id"], 0), default=None)
 
 
@@ -1358,9 +1376,10 @@ def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = Fals
     return thread
 
 
-def default_note(item: int, body: str, main: pathlib.Path) -> str:
+def default_note(item: int, body: str, main: pathlib.Path, kind: str = "comment") -> str:
     """`sd task note`, run from the main checkout as a person would."""
-    done = subprocess.run([sys.executable, str(BIN / "sd"), "task", "note", str(item), "--body", body], cwd=main,
+    done = subprocess.run([sys.executable, str(BIN / "sd"), "task", "note", str(item), "--kind", kind, "--body", body],
+                          cwd=main,
                           capture_output=True, text=True, timeout=120, check=False)
     return "written" if done.returncode == 0 else f"failed: {(done.stderr or done.stdout).strip()[-300:]}"
 
@@ -1494,6 +1513,62 @@ def land_note(fields: dict[str, Any], body: str, entry: dict[str, Any], environ:
         fields["note"] = f"failed: {type(error).__name__}: {error}"[:400]
     fields["fast_forward"] = fast_forward(main, environ, own_lock)
     return fields
+
+
+def post_merge(root: pathlib.Path, environ: dict[str, str], answer: dict[str, Any]) -> dict[str, Any]:
+    """`answer` with `post_merge`: the target, once a run that merged released its runner lock (sd:3566).
+
+    Not between entries: the system repository's target runs `repo-sync.sh
+    refresh`, which waits for every lane's runner lock, so under this lane's
+    own it waited out its bound. Each merged item gets a note, a comment
+    when the target passed, else a followup; it never fails a merged entry.
+    A run that merged nothing, or a Makefile without the rule, adds nothing.
+    """
+    landed = [row for row in answer.get("ran", []) if row.get("status") == "merged"]
+    if not landed:
+        return answer
+    main = sd_lib.main_worktree_root(root).resolve()
+    ran = make_post_merge(main, environ, str(landed[-1].get("fast_forward") or ""))
+    if ran is None:
+        return answer
+    kind = "comment" if ran.startswith("make post-merge passed") else "followup"
+    for row in landed:
+        try:
+            written = default_note(row["item"], f"Post-merge: {ran}", main, kind)
+        except Exception as error:  # noqa: BLE001 -- the merge stands; the answer keeps what the note could not
+            written = f"failed: {type(error).__name__}: {error}"
+        if written != "written":
+            ran = f"{ran}; the note on sd:{row['item']} {written}"[:1200]
+    return {**answer, "post_merge": ran}
+
+
+def make_post_merge(main: pathlib.Path, environ: dict[str, str], moved: str) -> str | None:
+    """`make post-merge` in the main checkout the last landing fast-forwarded, when its Makefile has that rule.
+
+    None without the rule. A checkout that did not fast-forward holds the old
+    code, so the target is skipped and the reason given. A failure or the
+    `POST_MERGE_SECONDS` bound is reported; the run group ends the target's
+    children at the bound.
+    """
+    try:
+        if not POST_MERGE_RULE.search((main / "Makefile").read_text(encoding="utf-8", errors="replace")):
+            return None
+    except FileNotFoundError:
+        return None
+    except OSError as error:  # unknown, not "no rule": say so
+        return f"make post-merge unknown: {main / 'Makefile'} could not be read: {error}"
+    if not moved.startswith("fast-forwarded"):
+        return f"make post-merge skipped: the main checkout did not fast-forward ({moved})"
+    try:
+        done = sd_lib.run_group(["make", "post-merge"], cwd=main, env={**os.environ, **environ},
+                                timeout=POST_MERGE_SECONDS)
+    except sd_lib.GroupTimeout:
+        return f"make post-merge timed out after {POST_MERGE_SECONDS}s in {main}"
+    except OSError as error:
+        return f"make post-merge did not start in {main}: {error}"
+    if done.returncode == 0:
+        return f"make post-merge passed in {main}"
+    return f"make post-merge failed (exit {done.returncode}) in {main}: {(done.stderr or done.stdout).strip()[-300:]}"
 
 
 def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str], note: Note,
@@ -1939,7 +2014,8 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     `RUN_BUDGET_SECONDS` from now, it claims no next entry and says so in
     `stopped`; an entry it started still finishes (sd:3287). A stopped run
     cancels its speculative gate (`SpeculativeGate.cancel_gate`) rather than wait
-    on it, and says how that went in `speculative_gate` (sd:3361).
+    on it, and says how that went in `speculative_gate` (sd:3361). A run that
+    merged runs `post_merge` once its runner lock is released (sd:3566).
     """
     refuse_elsewhere(root, environ)
     queue = queue_for(root, environ)
@@ -1981,7 +2057,8 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                 break
             if ahead is not None and row is not None and row.get("status") == "merged":
                 ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
-        return finish_speculation(ahead, answer)
+        answer = finish_speculation(ahead, answer)
+    return post_merge(root, environ, answer)
 
 
 def finish_speculation(ahead: SpeculativeGate | None, answer: dict[str, Any]) -> dict[str, Any]:
@@ -2146,6 +2223,48 @@ def gate_ends(root: pathlib.Path, seen: set[str], minutes: int = WATCH_MINUTES) 
     return found
 
 
+def watch_pause() -> None:
+    """The wait between two reads of `watch --item`; a suite replaces it."""
+    time.sleep(WATCH_PAUSE)
+
+
+def watch_items(queue: Queue, items: list[int], write: Callable[[str], Any] = print) -> int:
+    """Wait until each item's newest entry that is not cancelled ends; 0 when every one merged (sd:3565).
+
+    It reads the hub alone, through `queue`, resolved once: the merge may
+    remove the worktree it started in. One line per item as it ends; an item
+    with no such entry ends at once. A read the hub did not answer is no end:
+    it reads again after the pause, and a hub that refuses this build stops it.
+    """
+    left, merged = list(dict.fromkeys(items)), True
+    while True:
+        try:
+            newest = on_hub(queue, lambda connection: {
+                item: newest_entry(connection, queue.repository, item, skip=("cancelled",)) for item in left})
+        except BuildRefused:
+            raise
+        except LaneError as error:
+            if error.code != HUB_UNAVAILABLE:
+                raise
+            write(f"hub unavailable: {error}; reading again")
+            newest = {}
+        for item, entry in newest.items():
+            status = entry.get("status") if entry else "none"
+            if status in ("pending", "running"):
+                continue
+            if entry is None:
+                write(f"sd:{item} none: no lane entry that is not cancelled")
+            elif status == "merged":
+                write(f"sd:{item} merged at {str(entry.get('merge_commit') or '')[:12]}")
+            else:
+                write(f"sd:{item} {status}: {entry.get('reason') or entry.get('code') or 'no reason recorded'}")
+            left.remove(item)
+            merged = merged and status == "merged"
+        if not left:
+            return 0 if merged else 1
+        watch_pause()
+
+
 def watch(root: pathlib.Path, *, once: bool, write: Callable[[str], Any] = print) -> int:
     seen: set[str] = set()
     while True:
@@ -2205,19 +2324,24 @@ def add_lane_verbs(commands: Any) -> None:
                         help="run the lane of each repository this machine hosts, one after another (sd:3003)")
     watcher = verbs.add_parser("watch", help="print each gate end a log under the lane root records, once")
     watcher.add_argument("--once", action="store_true", help="scan once and exit")
+    watcher.add_argument("--item", type=int, action="append", dest="items",
+                         help=f"instead wait until this item's newest entry that is not cancelled ends, reading "
+                              f"every {WATCH_PAUSE}s; repeat it; exit 0 only when every one merged (sd:3565)")
 
 
 def lane_main(args: Any) -> int:
     """The `sd-ship lane` verbs; prints JSON and exits 0, or 3 with the refusal."""
     environ = dict(os.environ)
     try:
-        if args.lane_command == "watch":
+        if args.lane_command == "watch" and not getattr(args, "items", None):
             return watch(lane_root(environ), once=args.once)
         if args.lane_command == "run" and args.hosted:  # from any folder: it reads the repo table, not the cwd
             return succeed(run_hosted(environ))
         root = sd_lib.repo_root(None)  # a git that gave no answer says why, as a ConfigError (sd:2986)
         if root is None:
             raise LaneError("cwd is not inside a Git repository")
+        if args.lane_command == "watch":
+            return watch_items(queue_for(root, environ), args.items)
         imported = {} if args.lane_command == "run" else import_file_queue(root, queue_for(root, environ))
         if args.lane_command == "enqueue":
             result: Any = enqueue_entry(root, args.item, args.title, args.body_file, environ,
