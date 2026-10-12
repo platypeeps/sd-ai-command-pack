@@ -571,7 +571,11 @@ The rules for them:
   branch <branch> <tip>. Remove: <command>` Last, it fast-forwards the main
   checkout when it is on the default branch. When that checkout holds the
   running `sd-ship`, it first tries every other lane's runner lock once and
-  skips if one is held; the next landing retries.
+  skips if one is held; the next landing retries. Once a run that merged
+  releases its runner lock, a `post-merge:` rule in that checkout's Makefile
+  runs there once as `make post-merge`, bounded to 10 minutes, if the last
+  landing fast-forwarded it. The run's `post_merge` and a note on each merged
+  item give the outcome: a comment when it passed, else a followup (sd:3566).
 - **Clean up after a merge, once its builder has stopped.** Remove the clean
   worktree, its local branches, its build output and agents nothing uses; keep
   unpushed unmerged work. A live builder holds its worktree open, and a

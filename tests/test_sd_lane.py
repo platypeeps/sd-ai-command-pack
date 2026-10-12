@@ -70,6 +70,7 @@ class Lane(unittest.TestCase):
         self.answers: dict[tuple[int, str], dict] = {}
         # A landing notes its item (sd:2568); no test writes to a real workflow database.
         self.notes: list[tuple[int, str, pathlib.Path]] = []
+        self.note_kinds: list[str] = []
         patcher = mock.patch.object(sd_lane, "default_note", self.note)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -83,8 +84,9 @@ class Lane(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def note(self, item: int, body: str, main: pathlib.Path) -> str:
+    def note(self, item: int, body: str, main: pathlib.Path, kind: str = "comment") -> str:
         self.notes.append((item, body, main))
+        self.note_kinds.append(kind)
         return "written"
 
     def worktree(self, name: str) -> pathlib.Path:
@@ -1207,6 +1209,82 @@ class Landing(Lane):
         self.assertEqual(entry["status"], "merged")
         self.assertIn("the store is locked", entry["note"])
         self.assertIn("fast-forward", entry["fast_forward"])
+
+    def post_merge(self, *recipe: str) -> None:
+        """A stub Makefile in the main checkout with a `post-merge` target, untracked, as an install step would be."""
+        lines = ["VERSION := 1", "post-merge:", *(f"\t{line}" for line in recipe), "other:", "\t@echo other"]
+        (self.repo / "Makefile").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_post_merge_runs_once_per_run_after_the_runner_lock_is_released(self) -> None:
+        """sd:3566. The system target's `repo-sync.sh refresh` waits for every lane's runner lock; under this
+        lane's own it waited out its 45-minute bound. So the target runs once the run released the lock."""
+        first, first_head = self.topic()
+        second, second_head = self.topic("second")
+        landed = self.advance_origin_main()
+        lock = self.store().lock_file
+        self.post_merge(f'"{sys.executable}" -c "import fcntl, sys; '
+                        f'fcntl.flock(open(sys.argv[1], \'a\'), fcntl.LOCK_EX | fcntl.LOCK_NB)" "{lock}"',
+                        "git rev-parse HEAD >> post-merge.out")
+        self.merge_lands(first, 1, first_head)
+        self.merge_lands(second, 2, second_head)
+        answer = self.drain()
+        self.assertEqual([row["status"] for row in self.entries()], ["merged", "merged"])
+        self.assertEqual(answer["post_merge"], f"make post-merge passed in {self.repo}")
+        self.assertEqual((self.repo / "post-merge.out").read_text(encoding="utf-8").splitlines(), [landed])
+        self.assertEqual([(item, body) for item, body, _ in self.notes if body.startswith("Post-merge")],
+                         [(1, f"Post-merge: make post-merge passed in {self.repo}"),
+                          (2, f"Post-merge: make post-merge passed in {self.repo}")])
+        self.assertEqual(self.note_kinds[-2:], ["comment", "comment"])
+
+    def test_a_makefile_without_the_target_runs_nothing_and_notes_nothing(self) -> None:
+        tree, head = self.topic()
+        (self.repo / "Makefile").write_text("post-merge-later:\n\ttouch ran\npost-merge := 1\n", encoding="utf-8")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertEqual((self.entries()[0]["status"], "post_merge" in answer, len(self.notes)), ("merged", False, 1))
+        self.assertFalse((self.repo / "ran").exists())
+
+    def test_a_run_that_merged_nothing_runs_no_post_merge(self) -> None:
+        tree, head = self.topic()
+        self.post_merge("touch ran")
+        self.merge_lands(tree, 1, head)
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        answer = self.drain()
+        self.assertEqual((self.entries()[0]["status"], "post_merge" in answer), ("failed", False))
+        self.assertFalse((self.repo / "ran").exists())
+
+    def test_a_failing_or_slow_post_merge_never_fails_the_merged_entry_and_files_a_followup(self) -> None:
+        tree, head = self.topic()
+        self.post_merge("@echo the install broke >&2", "@exit 3")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertEqual(self.entries()[0]["status"], "merged")
+        self.assertTrue(answer["post_merge"].startswith(f"make post-merge failed (exit 2) in {self.repo}:"), answer)
+        self.assertIn("the install broke", answer["post_merge"])
+        self.assertEqual((self.notes[-1][1], self.note_kinds[-1]), (f"Post-merge: {answer['post_merge']}", "followup"))
+        tree, head = self.topic("slow")
+        self.post_merge("sleep 60")
+        self.merge_lands(tree, 2, head)
+        started = time.monotonic()
+        with mock.patch.object(sd_lane, "POST_MERGE_SECONDS", 1):
+            answer = self.drain()
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual((self.entries()[-1]["status"], answer["post_merge"]),
+                         ("merged", f"make post-merge timed out after 1s in {self.repo}"))
+        self.assertEqual(self.note_kinds[-1], "followup")
+
+    def test_a_checkout_that_did_not_fast_forward_skips_the_post_merge_and_says_why(self) -> None:
+        tree, head = self.topic()
+        git(self.repo, "switch", "-q", "-c", "elsewhere")
+        self.post_merge("touch ran")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertFalse((self.repo / "ran").exists())
+        self.assertEqual(self.entries()[0]["status"], "merged")
+        self.assertTrue(answer["post_merge"].startswith("make post-merge skipped: the main checkout did not "
+                                                        "fast-forward (fast-forward skipped: the main checkout is on "
+                                                        "elsewhere"), answer["post_merge"])
+        self.assertEqual((self.notes[-1][1], self.note_kinds[-1]), (f"Post-merge: {answer['post_merge']}", "followup"))
 
 class Killed(BaseException):
     """A process killed between two steps: nothing after the raise runs, and no `except Exception` catches it."""

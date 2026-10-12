@@ -27,7 +27,9 @@ database and runs it under one runner lock per repository:
            While one entry ships, the next one's gate runs on its predicted
            landing (sd:2586, below). After a merge it deletes the remote
            branch, notes the item with the worktree's removal command and
-           fast-forwards the main checkout (sd:2568, below). Under the
+           fast-forwards the main checkout (sd:2568, below). A run that
+           merged runs that checkout's `make post-merge`, when its Makefile
+           has one, once it released its runner lock (sd:3566). Under the
            runner lock it first reclaims a running entry whose holder here
            is gone, and lists it as `reclaimed` (sd:2821, below). An entry
            whose prepare or merge met a hub fault goes
@@ -128,7 +130,12 @@ already removed (sd:3006) is noted as such, from the lane's own checkout
 checkout. When that checkout holds the running `sd-ship`, as the pack's does
 for every lane, it tries each other lane's runner lock once and skips if one
 is held: a lane mid-prepare must not have its tools change under it, and no
-lane waits on another's lock. The next landing retries. It holds the lane
+lane waits on another's lock. The next landing retries. Once a run that
+merged released its runner lock, and the last landing fast-forwarded the
+checkout, a `post-merge:` rule in its Makefile runs there once as `make
+post-merge`, bounded by `POST_MERGE_SECONDS` (sd:3566). Each merged item
+gets a note: a comment when it passed, else a followup. A failure never
+fails a merged entry. It holds the lane
 root folder's lock meanwhile, and a runner that starts then runs nothing
 (sd:3273): a lane with no runner lock yet has none to try.
 
@@ -271,6 +278,10 @@ WRITE_PAUSE = 30
 RECLAIMS = 3
 #: A merge lease is `MERGE_SECONDS` and this long for the landing.
 LANDING_SECONDS = 1800
+#: The bound on the main checkout's `make post-merge` after a run that merged (sd:3566).
+POST_MERGE_SECONDS = 600
+#: A `post-merge` rule in a Makefile, not a `post-merge :=` variable.
+POST_MERGE_RULE = re.compile(r"^post-merge\s*:(?!=)", re.MULTILINE)
 #: The bound on one `git` step of a publish: a fetch or a push crosses the network.
 PUBLISH_SECONDS = 300
 #: The longest chain of catch-up merges an entry's head may carry: one per prepare that pushed a catch-up
@@ -1365,9 +1376,10 @@ def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = Fals
     return thread
 
 
-def default_note(item: int, body: str, main: pathlib.Path) -> str:
+def default_note(item: int, body: str, main: pathlib.Path, kind: str = "comment") -> str:
     """`sd task note`, run from the main checkout as a person would."""
-    done = subprocess.run([sys.executable, str(BIN / "sd"), "task", "note", str(item), "--body", body], cwd=main,
+    done = subprocess.run([sys.executable, str(BIN / "sd"), "task", "note", str(item), "--kind", kind, "--body", body],
+                          cwd=main,
                           capture_output=True, text=True, timeout=120, check=False)
     return "written" if done.returncode == 0 else f"failed: {(done.stderr or done.stdout).strip()[-300:]}"
 
@@ -1501,6 +1513,62 @@ def land_note(fields: dict[str, Any], body: str, entry: dict[str, Any], environ:
         fields["note"] = f"failed: {type(error).__name__}: {error}"[:400]
     fields["fast_forward"] = fast_forward(main, environ, own_lock)
     return fields
+
+
+def post_merge(root: pathlib.Path, environ: dict[str, str], answer: dict[str, Any]) -> dict[str, Any]:
+    """`answer` with `post_merge`: the target, once a run that merged released its runner lock (sd:3566).
+
+    Not between entries: the system repository's target runs `repo-sync.sh
+    refresh`, which waits for every lane's runner lock, so under this lane's
+    own it waited out its bound. Each merged item gets a note, a comment
+    when the target passed, else a followup; it never fails a merged entry.
+    A run that merged nothing, or a Makefile without the rule, adds nothing.
+    """
+    landed = [row for row in answer.get("ran", []) if row.get("status") == "merged"]
+    if not landed:
+        return answer
+    main = sd_lib.main_worktree_root(root).resolve()
+    ran = make_post_merge(main, environ, str(landed[-1].get("fast_forward") or ""))
+    if ran is None:
+        return answer
+    kind = "comment" if ran.startswith("make post-merge passed") else "followup"
+    for row in landed:
+        try:
+            written = default_note(row["item"], f"Post-merge: {ran}", main, kind)
+        except Exception as error:  # noqa: BLE001 -- the merge stands; the answer keeps what the note could not
+            written = f"failed: {type(error).__name__}: {error}"
+        if written != "written":
+            ran = f"{ran}; the note on sd:{row['item']} {written}"[:1200]
+    return {**answer, "post_merge": ran}
+
+
+def make_post_merge(main: pathlib.Path, environ: dict[str, str], moved: str) -> str | None:
+    """`make post-merge` in the main checkout the last landing fast-forwarded, when its Makefile has that rule.
+
+    None without the rule. A checkout that did not fast-forward holds the old
+    code, so the target is skipped and the reason given. A failure or the
+    `POST_MERGE_SECONDS` bound is reported; the run group ends the target's
+    children at the bound.
+    """
+    try:
+        if not POST_MERGE_RULE.search((main / "Makefile").read_text(encoding="utf-8", errors="replace")):
+            return None
+    except FileNotFoundError:
+        return None
+    except OSError as error:  # unknown, not "no rule": say so
+        return f"make post-merge unknown: {main / 'Makefile'} could not be read: {error}"
+    if not moved.startswith("fast-forwarded"):
+        return f"make post-merge skipped: the main checkout did not fast-forward ({moved})"
+    try:
+        done = sd_lib.run_group(["make", "post-merge"], cwd=main, env={**os.environ, **environ},
+                                timeout=POST_MERGE_SECONDS)
+    except sd_lib.GroupTimeout:
+        return f"make post-merge timed out after {POST_MERGE_SECONDS}s in {main}"
+    except OSError as error:
+        return f"make post-merge did not start in {main}: {error}"
+    if done.returncode == 0:
+        return f"make post-merge passed in {main}"
+    return f"make post-merge failed (exit {done.returncode}) in {main}: {(done.stderr or done.stdout).strip()[-300:]}"
 
 
 def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str], note: Note,
@@ -1946,7 +2014,8 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     `RUN_BUDGET_SECONDS` from now, it claims no next entry and says so in
     `stopped`; an entry it started still finishes (sd:3287). A stopped run
     cancels its speculative gate (`SpeculativeGate.cancel_gate`) rather than wait
-    on it, and says how that went in `speculative_gate` (sd:3361).
+    on it, and says how that went in `speculative_gate` (sd:3361). A run that
+    merged runs `post_merge` once its runner lock is released (sd:3566).
     """
     refuse_elsewhere(root, environ)
     queue = queue_for(root, environ)
@@ -1988,7 +2057,8 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                 break
             if ahead is not None and row is not None and row.get("status") == "merged":
                 ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
-        return finish_speculation(ahead, answer)
+        answer = finish_speculation(ahead, answer)
+    return post_merge(root, environ, answer)
 
 
 def finish_speculation(ahead: SpeculativeGate | None, answer: dict[str, Any]) -> dict[str, Any]:
