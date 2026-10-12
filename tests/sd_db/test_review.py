@@ -598,6 +598,52 @@ class Apply(ReviewCase):
         self.assertEqual(self.status(other), "planning")
 
 
+class ABenchmarkPlugIn(ReviewCase):
+    """The contract a benchmark's labelling flow needs (the work satellite's survey, note #16318 on sd:3635).
+
+    Cells keyed by their row id; one vocabulary; provenance on every label;
+    labels that outlive a regrade; an export a kappa reads; LLM adjudication
+    conflicts filed as questions. No code here is the benchmark's.
+    """
+
+    VERDICTS = ["keyword_correct", "rubric_correct", "both_wrong"]
+
+    def conflicts(self, name: str, source: str, key: bytes) -> dict:
+        return batch(queue="benchmark-conflicts", batch=name, title=f"Conflicts {name}", source=source,
+                     mode="sealed", seal={"sha256": hashlib.sha256(key).hexdigest(), "name": f"key-{name}.csv"},
+                     questions=[{"subject": row, "text": "Which grader read this cell right?",
+                                 "evidence": ["grader: rubric v3, prompt v7", "adjudication: needs_human_review, low"],
+                                 "options": self.VERDICTS} for row in ("row-0001", "row-0002", "row-0003")])
+
+    def test_labels_keyed_by_row_id_export_with_provenance_and_feed_an_agreement_count(self):
+        key = b"row_id,judge\nrow-0001,rubric_correct\nrow-0002,both_wrong\nrow-0003,rubric_correct\n"
+        item = self.file(self.conflicts("matrix-0001", "bench@1a2b3c4", key))
+        for index, verdict in enumerate(["rubric_correct", "keyword_correct", "rubric_correct"]):
+            self.rule(item, index, verdict)
+        manifest, *lines = review.export(self.db, item, key=key, who="tester")
+        self.assertEqual(manifest["source"], "bench@1a2b3c4")
+        self.assertEqual([line["subject"] for line in lines], ["row-0001", "row-0002", "row-0003"])
+        for line in lines:
+            self.assertEqual((line["ruled_by"], line["evidence"][0]), ("tester", "grader: rubric v3, prompt v7"))
+            self.assertIsNotNone(line["ruled_at"])
+        # Human against judge, joined by row id in one line each: what a kappa counts.
+        pairs = [(line["label"], line["key"]["judge"]) for line in lines]
+        self.assertEqual(sum(human == judge for human, judge in pairs), 2)
+
+    def test_a_regrade_files_a_new_batch_and_the_old_labels_still_export(self):
+        first_key = b"row_id,judge\nrow-0001,rubric_correct\nrow-0002,both_wrong\nrow-0003,rubric_correct\n"
+        first = self.file(self.conflicts("matrix-0001", "bench@1a2b3c4", first_key))
+        for index in range(3):
+            self.rule(first, index, "rubric_correct")
+        review.export(self.db, first, key=first_key, who="tester")
+        second = self.file(self.conflicts("matrix-0002", "bench@5d6e7f8", b"row_id,judge\nrow-0001,keyword_correct\n"))
+        self.assertNotEqual(first, second)
+        # The regrade deletes nothing: the first batch's labels export unchanged.
+        self.assertEqual([line["label"] for line in review.export(self.db, first, who="tester")[1:]],
+                         ["rubric_correct"] * 3)
+        self.assertEqual(review.read(self.db, second)["open"], 3)
+
+
 class TheVerb(unittest.TestCase):
     """`bin/sd-db review` through the entrypoint, on a store under a temporary home."""
 
