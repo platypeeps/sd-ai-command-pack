@@ -1547,7 +1547,6 @@ UNSHIELDED = {
     "test_sd_review_gate_check.py": 1,
     "test_sd_review_jev.py": 7,
     "test_sd_review_lens.py": 2,
-    "test_sd_review_opencode.py": 1,
     "test_sd_review_output_contract.py": 4,
     "test_sd_review_oversize.py": 17,
     "test_sd_review_preflight.py": 3,
