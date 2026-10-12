@@ -532,7 +532,8 @@ The rules for them:
   that claim and refuses `stale_claim` once its step moved, it ended, or a
   new runner claimed the entry again (sd:3330). With the hub
   down every lane verb refuses `hub_unavailable`. Each prepare and merge keeps its whole output under
-  `<lane>/logs/`. `list` and `cancel` read and edit the queue; `watch` prints
+  `<lane>/logs/`. `list` and `cancel` read and edit the queue; `list` gives each entry
+  `enqueue_seq`, an integer that orders an item's entries by enqueue and no `move` changes; `watch` prints
   each gate end a log under `sd.lane_root` records, once. While an entry
   the runner may merge ships, the runner gates the next entry on its
   predicted landing in the background, and waits for that gate after the
