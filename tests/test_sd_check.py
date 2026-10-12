@@ -339,6 +339,20 @@ class FailedStepTests(CheckFixture):
         record = self.run_failing(self.make_repo(), "import time\ntime.sleep(30)\n", "--timeout", "2")
         self.assertEqual(record["failed_steps"], ["check: timed out after 2s"])
 
+    def test_a_check_that_timed_out_keeps_its_output_and_names_the_shard_that_hung(self) -> None:
+        """sd:3414: three gates timed out and kept no output, so nobody could tell which shard hung."""
+        record = self.run_failing(self.make_repo(), (
+            "import time\n"
+            "print('shard tests.test_done: start')\nprint('shard tests.test_done: 0s exit=0')\n"
+            "print('shard tests.test_hang: start', flush=True)\n"
+            "time.sleep(30)\n"), "--timeout", "2")
+        self.assertEqual(record["reason"], "timed out after 2s")
+        self.assertIn("shard tests.test_hang: start", record["stdout"])
+        self.assertEqual(record["failed_shards"], ["shard tests.test_hang: unfinished"])
+        self.assertEqual(record["failed_steps"], ["shard tests.test_hang: unfinished"])
+        self.assertIn("shard tests.test_hang: start", record["failure"])
+        self.assertIn("shard tests.test_hang: start", pathlib.Path(record["output_path"]).read_text(encoding="utf-8"))
+
     def test_a_failed_shard_carries_its_own_failure_though_the_tail_misses_it(self) -> None:
         record = self.run_failing(self.make_repo(), (
             "import sys\n"

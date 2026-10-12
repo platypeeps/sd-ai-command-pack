@@ -4085,7 +4085,7 @@ roles:
         self.assert_tier_reviews({"skills/sd-example/SKILL.md": "steps\n"})
 
     def test_a_design_record_is_reviewed(self):
-        self.assert_tier_reviews({"docs/work/2026-10-09-example/design.md": "design\n"})
+        self.assert_tier_reviews({"docs/work/2026-10-09-example/design.md": "---\nitem: sd:1\n---\n\ndesign\n"})
 
     def test_a_never_skip_spec_is_reviewed(self):
         self.assert_tier_reviews({"docs/spec/example.md": "spec\n"})

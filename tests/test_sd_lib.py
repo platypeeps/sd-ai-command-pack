@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 import unittest.mock
 
@@ -1871,6 +1872,30 @@ class TheCopyHashesLikeItsSource(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         ours, theirs = done.stdout.split()
         self.assertEqual(ours, theirs)
+
+
+class RunGroupTimeoutTests(unittest.TestCase):
+    """sd:3414: a group past its deadline is ended, and what it wrote first rides on `GroupTimeout`."""
+
+    def test_the_timeout_carries_what_the_group_wrote(self) -> None:
+        with self.assertRaises(sd_lib.GroupTimeout) as raised:
+            sd_lib.run_group(["sh", "-c", "echo 'shard x: start'; echo 'to stderr' >&2; sleep 30"],
+                             cwd=pathlib.Path("."), env={"PATH": "/usr/bin:/bin"}, timeout=2)
+        self.assertEqual(str(raised.exception), "sh: timed out after 2s")
+        self.assertEqual(raised.exception.stdout, "shard x: start\n")
+        self.assertEqual(raised.exception.stderr, "to stderr\n")
+
+    def test_a_process_that_left_the_group_cannot_hold_the_timeout_open(self) -> None:
+        """A child in a session of its own keeps the pipe open past the group's end; the drain is bounded."""
+        started = time.monotonic()
+        with self.assertRaises(sd_lib.GroupTimeout) as raised:
+            sd_lib.run_group([sys.executable, "-c", (
+                "import subprocess, sys, time\n"
+                "subprocess.Popen(['sleep', '20'], start_new_session=True)\n"
+                "print('before the hang', flush=True)\ntime.sleep(30)\n")],
+                cwd=pathlib.Path("."), env={"PATH": "/usr/bin:/bin"}, timeout=2)
+        self.assertLess(time.monotonic() - started, 2 + 3 * sd_lib.GROUP_CLEANUP_SECONDS)
+        self.assertEqual(raised.exception.stdout, "before the hang\n")
 
 
 if __name__ == "__main__":

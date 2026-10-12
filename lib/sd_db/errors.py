@@ -24,6 +24,20 @@ def _checkout() -> Path | None:
     return root if (root / ".git").exists() else None
 
 
+def _on_branch(checkout: Path) -> bool | None:
+    """Whether `checkout`'s HEAD names a branch: False when detached, None when it cannot be read.
+
+    Read from the file, not from `git`: a worktree's `.git` names its git directory.
+    """
+    git = checkout / ".git"
+    try:
+        if git.is_file():
+            git = checkout / git.read_text(encoding="utf-8").partition("gitdir:")[2].strip()
+        return (git / "HEAD").read_text(encoding="utf-8").startswith("ref:")
+    except OSError:
+        return None
+
+
 class SdDbError(Exception):
     """Every refusal this library raises."""
 
@@ -39,19 +53,37 @@ class SchemaTooNew(SdDbError):
     is a checkout behind the code that migrated the database (sd:1664). The
     remedy names the pull; reinstalling a virtualenv the script never reads,
     or restoring an older snapshot over live rows, would be the wrong advice.
+    A detached checkout, as the serving tree is, cannot pull, and
+    `sd-install --pull` refuses one (sd:3415): there the remedy names the
+    `repo-sync.sh` verb that moves it, `follow` where `hub.json` makes the
+    machine a satellite, else `refresh` on the hub.
     """
 
     def __init__(self, found: int, built_for: int) -> None:
+        from . import hub  # noqa: PLC0415 - `hub` imports this module
+
         self.found = found
         self.built_for = built_for
         checkout = _checkout()
+        on_branch = None if checkout is None else _on_branch(checkout)
+        move = ("`repo-sync.sh follow` on this satellite" if hub.configured()
+                else "`repo-sync.sh refresh` on the hub")
         if checkout is None:
             remedy = ("install the matching version of sd-db into this "
                       "virtualenv, or restore a snapshot taken before the migration")
-        else:
+        elif on_branch:
             remedy = (f"this library runs from the checkout at {checkout}, which "
                       f"is behind the code that migrated the database; update it with "
                       f"`git -C {checkout} pull --ff-only` and run the verb again")
+        elif on_branch is False:
+            remedy = (f"this library runs from the detached checkout at {checkout}, which "
+                      f"is behind the code that migrated the database; move it with "
+                      f"{move} and run the verb again")
+        else:
+            remedy = (f"this library runs from the checkout at {checkout}, which "
+                      f"is behind the code that migrated the database, and its HEAD cannot be read; "
+                      f"update it with `git -C {checkout} pull --ff-only` on a branch, or with "
+                      f"{move} when it is detached, and run the verb again")
         super().__init__(
             f"the database is at schema version {found} and this library is "
             f"built for {built_for}; {remedy}"
