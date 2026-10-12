@@ -191,7 +191,8 @@ If the amend only edited a commit message, run `git reset --soft <reviewed head>
 Commit on top of it, then prepare again; the fix verification continues from the reviewed head.
 
 A commit made while prepare starts can move HEAD between prepare's read and sd-review's.
-Prepare then refuses with `review_head_moved` and keeps the pass under the head sd-review reviewed and gated (sd:3379).
+Prepare then refuses with `review_head_moved`.
+It keeps the pass under the head sd-review reviewed and gated (sd:3379).
 The pass keeps the head prepare read as `reserved_head`.
 The next prepare at that head reuses the review; an amended-away head takes the orphaned-head path above.
 A pass bought by `--additional-review-for` is released instead, so the request is not consumed; repeat it.
