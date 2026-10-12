@@ -14,7 +14,7 @@ progress belongs to the database.
 
 | Need | Control |
 | --- | --- |
-| Capture work without a PRD | Today, or `sd task add "Title"` — it takes the registered checkout enclosing cwd; `--no-repo` files one that belongs to none |
+| Capture work without a PRD | Today, or `sd task add "Title"` — it takes the registered checkout enclosing cwd; `--belongs-to PATH` files it in another registered checkout, as `edit` moves one; `--no-repo` files one that belongs to none |
 | Prioritize, schedule, add details | Item screen, or `sd task edit ID` |
 | Move a task or followup to the right checkout | `sd task edit ID --belongs-to PATH` — `.` names the checkout enclosing cwd; `--no-repo` leaves it belonging to none, as it does on `add`. An unregistered path is refused, and the move is recorded as an item note. The move prints the checkout it landed in; ordinary output names a row's checkout only when it is not the one you are standing in |
 | Clear a stale branch name | `sd task edit ID --clear-branch` — sets the row's branch to none and records an "Updated branch" note. It sets no branch; `sd work register` records one from git |

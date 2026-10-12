@@ -110,9 +110,10 @@ def _task_repo(args: argparse.Namespace, connection: Any, workflow: Any) -> str 
     Filing from inside a checkout and getting no repository is the mistake
     ``--here`` existed to prevent, and a flag nobody remembers prevents
     nothing: 41 of the rows it guards were filed without it. So the enclosing
-    repository is the default and the flags are the two exceptions --
+    repository is the default and the flags are the exceptions --
     ``--no-repo`` for work that belongs to no checkout, ``--here`` to refuse
-    rather than file a repo-less task by accident.
+    rather than file a repo-less task by accident, ``--belongs-to`` to name
+    another checkout (sd:3567).
 
     Two things make the default narrower than "whatever cwd is in".
 
@@ -143,12 +144,19 @@ def _task_repo(args: argparse.Namespace, connection: Any, workflow: Any) -> str 
     because it asks for a repository the kind cannot have, and a flag that
     silently succeeds at the opposite of what it says is worse than absent.
     """
+    belongs_to = getattr(args, "belongs_to", None)
     if args.kind in workflow.REPO_LESS_KINDS:
         if args.here:
             raise WorkRefusal(f"--here: a {args.kind} item carries no repository")
+        if belongs_to is not None:
+            raise WorkRefusal(f"--belongs-to: a {args.kind} item carries no repository")
         return None
     if args.no_repo:
         return None
+    # `edit`'s option (sd:3567): the path is read by `_belongs_to`, and
+    # `capture_task` refuses an unregistered checkout as `edit_item` does.
+    if belongs_to is not None:
+        return _belongs_to(belongs_to)
     root = sd_lib.repo_root()
     if root is None:
         if args.here:
@@ -1388,6 +1396,9 @@ def register(groups: Any, store: Any) -> None:
                             "(a registered one is used by default)")
     where.add_argument("--no-repo", action="store_true",
                        help="file the item, whatever --kind names, belonging to no checkout")
+    where.add_argument("--belongs-to", metavar="PATH",
+                       help="file the item in this registered checkout, not the one cwd is in, as edit "
+                            "--belongs-to moves it (`.` is this one)")
     _output(add, "add")
 
     edit = verbs.add_parser("edit", help="change a task's or followup's details, or any hand-filed item's kind")
