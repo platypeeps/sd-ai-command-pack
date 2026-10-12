@@ -488,7 +488,7 @@ def _lines(found: dict, key: bytes | None, rows: dict[str, dict] | None, now: st
     lines = [manifest]
     for question in questions:
         line = {"kind": "question", "note": question["note"], "subject": question["subject"],
-                "question_sha256": question["sha256"], "options": question["options"],
+                "question_sha256": question["sha256"], "evidence": question["evidence"], "options": question["options"],
                 "label": question["label"], "position": question["position"], "ruling": question["ruling"],
                 "ruled_by": question["ruled_by"], "ruled_at": question["ruled_at"],
                 "resolved_at": question["resolved_at"],

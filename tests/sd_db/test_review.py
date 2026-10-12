@@ -398,6 +398,8 @@ class Export(ReviewCase):
                           "questions": 2, "labels": 1, "open": 1})
         self.assertRegex(manifest["exported_by"], r"^sd-ai-command-pack@([0-9a-f]{40}|unknown)$")
         self.assertEqual((first["label"], first["position"], first["ruled_by"]), ("deep", 4, "tester"))
+        # A producer's per-question provenance, such as a grader version, rides in the evidence lines.
+        self.assertEqual(first["evidence"], ["diff: git show 1a2b3c4"])
         self.assertEqual([w["ruling"] for w in first["withdrawn"]], [ruled["ruling"]["id"]])
         self.assertEqual([c["text"] for c in first["comments"]], ["borderline"])
         body = self.db.execute("SELECT body FROM note WHERE id = ?", (note,)).fetchone()[0]

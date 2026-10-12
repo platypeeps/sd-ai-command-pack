@@ -315,7 +315,7 @@ A stage with no such pair says `no paired samples with the old mechanism`.
 
 `bin/sd-db review` is the plumbing behind one review queue that any repository or experiment files into (sd:3635).
 A producer writes one batch file and files it; the operator answers each question with one option; the producer exports the labels.
-The design is system's `docs/work/2026-10-12-review-queue/design.md`; `lib/sd_db/review.py` holds the note formats.
+The design is the review-queue design in the system repository; `lib/sd_db/review.py` holds the note formats.
 
     bin/sd-db review file batch.json                      # file a batch; the same file again is a no-op
     bin/sd-db review export 4242 --out labels.jsonl       # labels with provenance, as JSONL
