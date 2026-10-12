@@ -1,8 +1,9 @@
 """Tasks that recur: the RRULE subset, and the next occurrence at completion.
 
 `docs/work/2026-09-19-tasks-that-recur/` is the plan. The engine is a stdlib
-subset of RFC 5545 RRULE -- FREQ, INTERVAL, BYMONTH, BYMONTHDAY -- and every
-other part is refused by name at write time (sd:1099, note 3728).
+subset of RFC 5545 RRULE -- FREQ, INTERVAL, BYMONTH, BYMONTHDAY, and BYDAY on
+WEEKLY (sd:3453) -- and every other part is refused by name at write time
+(sd:1099, note 3728).
 """
 import importlib
 import json
@@ -44,11 +45,30 @@ class TheRuleSubset(unittest.TestCase):
                          "FREQ=MONTHLY;BYMONTHDAY=-1,15")
 
     def test_every_part_outside_the_subset_is_refused_by_name(self):
-        for part in ("COUNT=3", "UNTIL=20261231", "BYDAY=MO", "WKST=MO", "BYSETPOS=1",
+        for part in ("COUNT=3", "UNTIL=20261231", "WKST=MO", "BYSETPOS=1",
                      "BYYEARDAY=100", "BYWEEKNO=1", "BYHOUR=9", "X-NAME=1"):
             name = part.split("=")[0]
             with self.subTest(part=part):
                 self.refused(f"FREQ=WEEKLY;{part}", name)
+
+    def test_byday_takes_plain_weekdays_on_weekly(self):
+        # sd:3453: the vault's weekly rules name their weekday. The spelling
+        # lists the days Monday first, as weeks start on Monday (WKST=MO).
+        rec = engine()
+        self.assertEqual(rec.parse("freq=weekly;byday=fr,mo,mo;interval=2").text(),
+                         "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,FR")
+        cases = {
+            "FREQ=WEEKLY;BYDAY=1MO": "BYDAY",
+            "FREQ=WEEKLY;BYDAY=-1FR": "BYDAY",
+            "FREQ=WEEKLY;BYDAY=XX": "BYDAY",
+            "FREQ=WEEKLY;BYDAY=MO,,TU": "BYDAY",
+            "FREQ=DAILY;BYDAY=MO": "WEEKLY",
+            "FREQ=MONTHLY;BYDAY=MO": "WEEKLY",
+            "FREQ=YEARLY;BYMONTH=5;BYDAY=MO": "WEEKLY",
+        }
+        for text, word in cases.items():
+            with self.subTest(text=text):
+                self.refused(text, word)
 
     def test_a_sub_day_frequency_is_refused(self):
         for freq in ("HOURLY", "MINUTELY", "SECONDLY", "FORTNIGHTLY"):
@@ -93,6 +113,23 @@ class TheNextOccurrence(unittest.TestCase):
         self.assertEqual(self.after("FREQ=DAILY;INTERVAL=10", "2026-03-05"), "2026-03-15")
         self.assertEqual(self.after("FREQ=WEEKLY", "2026-01-01"), "2026-01-08")
         self.assertEqual(self.after("FREQ=WEEKLY;INTERVAL=2", "2026-12-24"), "2027-01-07")
+
+    def test_weekly_byday_lands_on_the_named_weekdays(self):
+        # The two vault shapes, from a due date on the rule's weekday.
+        self.assertEqual(self.after("FREQ=WEEKLY;BYDAY=MO", "2026-04-27"), "2026-05-04")
+        self.assertEqual(self.after("FREQ=WEEKLY;INTERVAL=2;BYDAY=FR", "2026-09-11"), "2026-09-25")
+        # A start off the weekday snaps to it in the start's own week.
+        self.assertEqual(self.after("FREQ=WEEKLY;BYDAY=FR", "2026-09-15"), "2026-09-18")
+        self.assertEqual(self.after("FREQ=WEEKLY;INTERVAL=2;BYDAY=FR", "2026-09-15"), "2026-09-18")
+        # Several days expand each week; INTERVAL counts weeks from the start's.
+        self.assertEqual(self.after("FREQ=WEEKLY;BYDAY=MO,TH", "2026-01-05"), "2026-01-08")
+        self.assertEqual(self.after("FREQ=WEEKLY;BYDAY=MO,TH", "2026-01-08"), "2026-01-12")
+        self.assertEqual(self.after("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO,TH", "2026-01-08"), "2026-01-19")
+        # BYMONTH limits the weeks' days.
+        self.assertEqual(self.after("FREQ=WEEKLY;BYMONTH=3;BYDAY=MO", "2026-01-05"), "2026-03-02")
+        rec = engine()
+        rule = rec.parse("FREQ=WEEKLY;INTERVAL=2;BYDAY=FR")
+        self.assertEqual(rec.next_after(rule, date(2026, 9, 11), date(2026, 10, 1)), date(2026, 10, 9))
 
     def test_month_end_skips_a_month_without_the_day(self):
         # Skip, not clamp: RFC 5545 drops an invalid date. February and April
@@ -435,6 +472,17 @@ class RecurringTasks(unittest.TestCase):
         self.assertNotIn("next_occurrence", results["second"])
         self.assertEqual(results["second"]["item"]["status"], "done")
 
+    def test_a_weekly_byday_rule_is_stored_and_walked(self):
+        item = self.capture(due="2026-09-11", recurrence="freq=weekly;interval=2;byday=fr")
+        self.assertEqual(item["recurrence"], "FREQ=WEEKLY;INTERVAL=2;BYDAY=FR")
+        spawned = self.complete(item["id"], "2026-09-11")["next_occurrence"]
+        self.assertEqual(self.row(spawned)["due"], "2026-09-25")
+        # Completion-anchored, a Wednesday completion moves to the next Monday.
+        item = self.capture(due="2026-09-21", recurrence="FREQ=WEEKLY;BYDAY=MO",
+                            recurrence_anchor="completion")
+        spawned = self.complete(item["id"], "2026-09-23")["next_occurrence"]
+        self.assertEqual(self.row(spawned)["due"], "2026-09-28")
+
     def test_month_end_skips_through_a_completion(self):
         item = self.capture(due="2026-01-31", recurrence="FREQ=MONTHLY;BYMONTHDAY=31")
         spawned = self.complete(item["id"], "2026-01-31")["next_occurrence"]
@@ -499,7 +547,7 @@ class RecurringTasks(unittest.TestCase):
 
     def test_a_part_outside_the_subset_is_refused_at_write_time(self):
         before = self.items()
-        for rule, name in (("FREQ=WEEKLY;BYDAY=MO", "BYDAY"), ("FREQ=DAILY;COUNT=3", "COUNT")):
+        for rule, name in (("FREQ=WEEKLY;BYSETPOS=1", "BYSETPOS"), ("FREQ=DAILY;COUNT=3", "COUNT")):
             with self.subTest(rule=rule):
                 with self.assertRaisesRegex(WorkflowError, name):
                     self.capture(recurrence=rule)

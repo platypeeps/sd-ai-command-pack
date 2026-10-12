@@ -1172,7 +1172,7 @@ def _recurrence_flags(parser: argparse.ArgumentParser, *, clear: bool = False) -
     rule = parser.add_mutually_exclusive_group() if clear else parser
     rule.add_argument("--recur", metavar="RRULE",
                       help="repeat on completion, e.g. FREQ=WEEKLY or FREQ=MONTHLY;INTERVAL=3 "
-                           "(FREQ, INTERVAL, BYMONTH, BYMONTHDAY); needs a due date")
+                           "(FREQ, INTERVAL, BYMONTH, BYMONTHDAY, BYDAY on WEEKLY); needs a due date")
     if clear:
         rule.add_argument("--clear-recur", action="store_true",
                           help="stop the series; clears the anchor too")
