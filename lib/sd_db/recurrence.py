@@ -1,7 +1,9 @@
 """Recurrence rules: a stdlib subset of RFC 5545 RRULE.
 
 The subset is `FREQ` (`DAILY`, `WEEKLY`, `MONTHLY`, `YEARLY`), `INTERVAL`,
-`BYMONTH` and `BYMONTHDAY` (operator decision, sd:1099 note 3728). There is
+`BYMONTH` and `BYMONTHDAY` (operator decision, sd:1099 note 3728), and
+`BYDAY` with plain weekdays on `WEEKLY`, the shape the vault's tasks use
+(sd:3453). There is
 no `python-dateutil`: `sd_db` stays dependency-free. Every other part, and
 every sub-day frequency, is refused with `RecurrenceError` naming it. A part
 the engine ignored would produce dates the operator did not ask for.
@@ -15,6 +17,9 @@ means here what it means in TaskNotes:
   `MONTHLY` or `YEARLY` rule without `BYMONTHDAY` takes its day from it; a
   `YEARLY` rule without `BYMONTH` takes its month from it, unless
   `BYMONTHDAY` is given, which expands over every month.
+- **Weeks start on Monday**, RFC 5545's default `WKST`. A `WEEKLY` rule
+  counts `INTERVAL` in weeks from the one that holds the start, and takes each
+  `BYDAY` weekday in it; without `BYDAY` the weekday is the start's.
 
 `docs/work/2026-09-19-tasks-that-recur/design.md` is the plan.
 """
@@ -29,7 +34,9 @@ from datetime import date
 from .errors import SdDbError
 
 FREQUENCIES = ("DAILY", "WEEKLY", "MONTHLY", "YEARLY")
-PARTS = ("FREQ", "INTERVAL", "BYMONTH", "BYMONTHDAY")
+PARTS = ("FREQ", "INTERVAL", "BYMONTH", "BYMONTHDAY", "BYDAY")
+#: RFC 5545's weekday codes, in `date.weekday()` order.
+WEEKDAYS = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
 ANCHORS = ("schedule", "completion")
 
 #: How far `next_after` searches before it calls a rule empty. A rule with no
@@ -49,6 +56,7 @@ class Rule:
     interval: int = 1
     bymonth: tuple[int, ...] = ()
     bymonthday: tuple[int, ...] = ()
+    byday: tuple[int, ...] = ()
 
     def text(self) -> str:
         """The canonical spelling: parts in `PARTS` order, `INTERVAL=1` dropped."""
@@ -59,6 +67,8 @@ class Rule:
             parts.append("BYMONTH=" + ",".join(map(str, self.bymonth)))
         if self.bymonthday:
             parts.append("BYMONTHDAY=" + ",".join(map(str, self.bymonthday)))
+        if self.byday:
+            parts.append("BYDAY=" + ",".join(WEEKDAYS[day] for day in self.byday))
         return ";".join(parts)
 
 
@@ -76,6 +86,7 @@ _RANGES = {
     "INTERVAL": "one positive integer",
     "BYMONTH": "a comma-separated list of 1 to 12",
     "BYMONTHDAY": "a comma-separated list of 1 to 31 or -31 to -1",
+    "BYDAY": f"a comma-separated list of {', '.join(WEEKDAYS)}, without an ordinal such as 1MO",
 }
 
 
@@ -119,7 +130,15 @@ def parse(text: object) -> Rule:
                   if "BYMONTHDAY" in seen else ())
     if bymonthday and freq == "WEEKLY":
         raise RecurrenceError("BYMONTHDAY cannot be used with FREQ=WEEKLY; RFC 5545 forbids it")
-    return Rule(freq, interval, bymonth, bymonthday)
+    byday: tuple[int, ...] = ()
+    if "BYDAY" in seen:
+        if freq != "WEEKLY":
+            raise RecurrenceError(f"BYDAY is supported with FREQ=WEEKLY only, not FREQ={freq}")
+        pieces = [piece.strip() for piece in seen["BYDAY"].split(",")]
+        if not all(piece in WEEKDAYS for piece in pieces):
+            raise RecurrenceError(f"BYDAY={seen['BYDAY']} is not valid; BYDAY takes {_RANGES['BYDAY']}")
+        byday = tuple(sorted({WEEKDAYS.index(piece) for piece in pieces}))
+    return Rule(freq, interval, bymonth, bymonthday, byday)
 
 
 def _days(year: int, month: int, wanted: tuple[int, ...]) -> list[int]:
@@ -145,13 +164,26 @@ def next_after(rule: Rule, start: date, after: date | None = None) -> date:
     """
     threshold = start if after is None or after < start else after
     limit = min(threshold.year + HORIZON_YEARS, date.max.year - 1)
-    if rule.freq in ("DAILY", "WEEKLY"):
-        step = rule.interval * (7 if rule.freq == "WEEKLY" else 1)
+    if rule.freq == "WEEKLY":
+        # Weeks start on Monday; jump to the week that holds the threshold.
+        step = 7 * rule.interval
+        monday = start.toordinal() - start.weekday()
+        k = (threshold.toordinal() - monday) // step
+        while True:
+            week = monday + k * step
+            if week > date(limit, 12, 31).toordinal():
+                break
+            for day in rule.byday or (start.weekday(),):
+                candidate = date.fromordinal(week + day)
+                if candidate > threshold and (not rule.bymonth or candidate.month in rule.bymonth):
+                    return candidate
+            k += 1
+    elif rule.freq == "DAILY":
         # Jump straight to the first step past the threshold; the filter below
         # walks on from there.
-        k = (threshold.toordinal() - start.toordinal()) // step + 1
+        k = (threshold.toordinal() - start.toordinal()) // rule.interval + 1
         while True:
-            ordinal = start.toordinal() + k * step
+            ordinal = start.toordinal() + k * rule.interval
             if ordinal > date(limit, 12, 31).toordinal():
                 break
             candidate = date.fromordinal(ordinal)
