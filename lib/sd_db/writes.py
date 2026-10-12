@@ -489,6 +489,9 @@ def record_state(
     These are not items. They live in `state` because a record kind written
     into a table named for something else is how a schema grows by
     convention, which requirement 1 forbids.
+
+    Every body is serialised, a `str` included: a raw string was the one
+    body a reader could not parse (sd:3578).
     """
     if kind not in STATE_KINDS:
         raise SdDbError(
@@ -498,7 +501,7 @@ def record_state(
     with transaction(connection):
         cursor = connection.execute(
             "INSERT INTO state (kind, key, timestamp, body) VALUES (?, ?, ?, ?)",
-            (kind, key, timestamp or now(), _json(body) if not isinstance(body, str) else body),
+            (kind, key, timestamp or now(), _json(body)),
         )
     return int(cursor.lastrowid)
 

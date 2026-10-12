@@ -44,6 +44,11 @@ class WriteCase(unittest.TestCase):
         self.connection = connect(self.path)
         self.addCleanup(self.connection.close)
 
+    def raw_state(self, kind, key, body, timestamp="2026-10-10T12:00:00Z"):
+        """A row as a store may hold it, body verbatim: `record_state` serialises every body (sd:3578)."""
+        self.connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES (?, ?, ?, ?)",
+                                (kind, key, timestamp, body))
+
     def notes(self, item, kind=None):
         if kind is None:
             rows = self.connection.execute(
@@ -173,6 +178,14 @@ class TheStateTable(WriteCase):
         resolve_state(self.connection, row)
         self.assertEqual(unresolved_state(self.connection, "restore"), [])
 
+    def test_every_body_is_stored_as_json_a_string_included(self):
+        """A `str` body was written raw, so 442 backup rows were not JSON (sd:3578)."""
+        for body in ("2026-10-12T15:50:05+00:00", "{not json", {"at": "now"}, ["a"], 3):
+            with self.subTest(body=body):
+                row = record_state(self.connection, "checkpoint", key="body-test", body=body)
+                stored = self.connection.execute("SELECT body FROM state WHERE id=?", (row,)).fetchone()[0]
+                self.assertEqual(json.loads(stored), body)
+
 
 class TheSnooze(WriteCase):
     """A row hidden until a time (sd:1896): a `snooze` state row per write,
@@ -233,7 +246,7 @@ class TheSnooze(WriteCase):
                           ("today:e", '{"until": "2026-10-11T08:00:00Z"}'),
                           ("today:f", '{"until": "2026-10-11T08:00:00Z", "seen": 7}'),
                           ("today:g", '{"until": "2026-10-11T08:00:00Z", "seen": ""}')):
-            record_state(self.connection, "snooze", key=key, body=body, timestamp=self.NOW)
+            self.raw_state("snooze", key, body, timestamp=self.NOW)
         self.assertEqual(snoozed(self.connection, now=self.NOW), {})
 
 
@@ -288,7 +301,7 @@ class TheView(WriteCase):
                           ("r/g", '{"pinned": true, "hidden": false, "tags": [""]}'),
                           ("r/h", '{"pinned": true, "hidden": false, "tags": ["%s"]}' % ("x" * 65)),
                           ("r/i", json.dumps({"pinned": True, "hidden": False, "tags": [f"t{n}" for n in range(17)]}))):
-            record_state(self.connection, "view", key=key, body=body)
+            self.raw_state("view", key, body)
         self.assertEqual(views(self.connection), {})
         self.assertEqual(set_view(self.connection, "r/f", hidden=True), {"pinned": False, "hidden": True, "tags": []})
         # A partial write never carries tags the writer itself would refuse.

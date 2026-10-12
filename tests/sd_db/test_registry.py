@@ -272,7 +272,12 @@ class TheRowsOverTheFile(unittest.TestCase):
                 {**valid, "explicit_providers": []}, {**valid, "explicit_providers": ["codex", "codex"]},
                 {**valid, "explicit_providers": [None]}, {**valid, "explicit_providers": [""]}):
             with self.subTest(invalid=invalid):
-                writes.record_state(self.connection, "checkpoint", key=registry.ORDER_POLICY_KEY, body=invalid)
+                # A string is the body verbatim: `record_state` would serialise it (sd:3578).
+                if isinstance(invalid, str):
+                    self.connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
+                                            (registry.ORDER_POLICY_KEY, writes.now(), invalid))
+                else:
+                    writes.record_state(self.connection, "checkpoint", key=registry.ORDER_POLICY_KEY, body=invalid)
                 before = tuple(self.connection.iterdump())
                 with self.assertRaisesRegex(RegistryError, "unreadable provider order policy"):
                     read_registry(connection=self.connection)
