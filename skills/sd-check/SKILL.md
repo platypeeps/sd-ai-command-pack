@@ -170,8 +170,6 @@ Each rule uses a per-document baseline that can shrink but cannot grow:
   or the file alone; every `path:line` into code counts.
 - R13-D2 — a count of something the tree enumerates is derived, or carries
   the commit, pull request number or date it was measured at.
-- R13-D3 — a claim about what a pack tool or a test does cites a rule id on
-  the same line.
 
 The rows in `bin/sd_rules.py` state what each rule exempts; it is not
 restated here. `sd-rules --for <path>` prints the rows in scope for the

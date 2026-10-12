@@ -1,35 +1,33 @@
-"""The rule registry and the four-legged meta-check that keeps it honest.
+"""The rule registry and the meta-check that keeps it honest.
 
 `bin/sd_rules.py` answers "which rules exist". This module is what stops that
-answer and the repository drifting apart, and it is the deliverable: legs a to d
-below are worth more than any number of rules, because rules with no meta-check
-start drifting the day they land.
+answer and the repository drifting apart, and it is the deliverable: legs a, c
+and d below are worth more than any number of rules, because rules with no
+meta-check start drifting the day they land.
 
-The four legs fail independently, and each one catches a different way the
+The legs fail independently, and each one catches a different way the
 sentence and the machinery come apart:
 
     a. a registry rule no skill teaches -- a rule authors meet only as a CI
        failure, never while they are writing;
-    b. a skill claiming a tool behaviour with no rule id behind it -- prose
-       asserting an enforcement nothing performs, which is the defect that
-       let `WORKFLOW.md` claim for weeks that every writing skill refuses the
-       upstream tree while nothing refused;
     c. a rule id cited in live prose that the registry does not carry -- a
        deleted checker leaving live prose behind;
     d. a row whose named checker does not redden when its rule is violated --
        a checker that exists and enforces nothing.
 
-**Leg d is why the other three are worth anything.** Legs a to c landed first
-and each asserted a *link*: a row is taught, a claim cites a row, a citation
-resolves to a row. None of them looks at what the checker does. A row naming
+Leg b, a ratchet on skill lines claiming a tool behaviour with no rule id, is
+deleted (sd:3484): it caught no real claim and cost two gate rounds.
+
+**Leg d is why the others are worth anything.** Legs a and c landed first and
+each asserted a *link*: a row is taught, a citation resolves to a row. Neither
+looks at what the checker does. A row naming
 `sd_lib.repo_root` -- the resolver by which its own rule would be violated --
 passed every one of them, and the only reason it is not in the table today is
 that a human reviewer read it. Leg d is that reader made mechanical: the row
 states the mutation, and this module executes it.
 
-**Every population here is enumerated, never listed.** The pack nouns come
-from `bin/` and `tests/` as they are on disk, the corpus comes from the git
-index, and the skills come from `skills/`. A roster written down by hand is
+**Every population here is enumerated, never listed.** The corpus comes from
+the git index, and the skills come from `skills/`. A roster written down by hand is
 the thing this whole item exists to stop: two items closed the same week were
 a generated list of twenty skills of which fourteen did not exist, and a pair
 of hand-written field tuples that silently dropped keys.
@@ -88,7 +86,7 @@ ARCHIVE = "docs/work/archive/"
 #: This file, as the index names it. See the module docstring.
 SELF = "tests/test_rule_registry.py"
 
-#: Where the skills live, and the only scope leg b reads.
+#: Where the skills live.
 SKILLS = "skills/"
 
 #: The module the code rules' checkers are declared in, as the index names
@@ -125,60 +123,6 @@ def ceilings_read_by(checker: str) -> set[str]:
 #: their mutation differently. See
 #: `test_every_mutation_touches_what_its_rows_checker_names`.
 TESTS = "tests/"
-
-#: The four verbs that turn a sentence into an enforcement claim. Narrowed
-#: from every occurrence of them -- 4,652 lines of tracked markdown on
-#: `cddd3b98` carry one
-#: -- by requiring a pack tool or a test on the same line, because *"never
-#: write into a shared checkout"* is an instruction to a reader rather than a
-#: claim about machinery, and it cites nothing because there is nothing to
-#: cite.
-ENFORCEMENT = re.compile(r"\b(refuses|never|always|cannot)\b")
-
-#: The runs a claim may occupy. sd:622 exists because these three were all
-#: defensible readings of one corpus and none of them had ever been written
-#: down as code, so "how many uncited claims are there" had no reproducible
-#: answer. `prd.md` pinned 263. The delivery note for steps 1 to 3 offered 8,
-#: 97 and 275 for the three shapes. Reconstructing those same three shapes
-#: independently on `239ff624` produced a third set of figures again, because
-#: each reconstruction had to invent the counting rule the original never
-#: recorded.
-#:
-#: So no rival number is quoted here, and none should be quoted anywhere else.
-#: The rejected readings are kept as code instead: `PARAGRAPH` and `DOCUMENT`
-#: are runnable, their answer is whatever they return on the day you run them,
-#: and `TheClaimPredicate` runs all three. The only figure this module records
-#: is `UNCITED_SKILL_CLAIMS`, which is a PROJECTION of `claims_in` and not its
-#: return value: `claims_in` yields every matching `(line, run, ids)` tuple, and
-#: `uncited_skill_claims` filters those to the ones with empty `ids` and counts
-#: them per document. Reading the dict as "what `claims_in` returns" is how the
-#: next baseline update goes to the wrong value.
-LINE = "line"
-PARAGRAPH = "paragraph"
-DOCUMENT = "document"
-CLAIM_SCOPES = (LINE, PARAGRAPH, DOCUMENT)
-
-#: **The reading in force, and the whole of it.** A claim is one line carrying
-#: an enforcement verb *and* naming a pack tool or a test.
-#:
-#: Three properties of that sentence were load-bearing and unrecorded, and each
-#: is now pinned by a test in `TheClaimPredicate` so that changing one is a
-#: decision somebody makes rather than a number that moves:
-#:
-#: 1. **The scope is one line**, not a paragraph and not a document. A verb and
-#:    a tool name in the same paragraph are not a claim about that tool.
-#: 2. **The verbs are matched as written**, in lower case. `ENFORCEMENT` carries
-#:    no `IGNORECASE`, so a bullet opening *"**Never accept a repo path**"* --
-#:    this pack's most common way of writing a rule -- is invisible to leg b.
-#:    Measured on `239ff624`, reading the verbs case-insensitively would find 12
-#:    claims where the shipped predicate finds 8. That is a false negative worth
-#:    naming and it is left standing: widening the predicate is a change to the
-#:    rule, not a recording of it, and `design.md` accepted false negatives in
-#:    writing because a ratchet with them still only moves one way.
-#: 3. **The subject is enumerated, never listed** -- `pack_nouns` reads `bin/`
-#:    and `tests/` off the index, so a tool built next month is covered the day
-#:    it is written.
-CLAIM_SCOPE = LINE
 
 #: A definition of a rule id, in every form this repository has written one.
 #: Until sd:431 slice S2 the grammar was one form -- a bold run *opening* with
@@ -414,25 +358,6 @@ DANGLING_RULE_IDS: frozenset[str] = frozenset()
 #: the same shape `DANGLING_RULE_IDS` has held since slice S2.
 STRANDED_RULE_IDS: frozenset[str] = frozenset()
 
-#: Tool-behaviour claims in skills that cite no rule id, per document.
-#: Measured on `cddd3b98`, and unchanged on `239ff624`, by `uncited_skill_claims`
-#: below -- which is to say by `claims_in`, and by nothing else. `CLAIM_SCOPE`
-#: says what that predicate is and which properties of it are load-bearing;
-#: this is only where its answer is written down. `skills/sd-handoff/SKILL.md`
-#: left the table when sd:10's 31(b1) cut the `stash_ref` field whose
-#: "never pushed" line was its one claim.
-#:
-#: Per document rather than as one total, so a new uncited claim in `sd-ship`
-#: fails even in a change that cleaned two out of `sd-plan`. One number for the
-#: whole tree would net them off and say nothing. `sd-tips` arrived with its
-#: floor claim when sd:3001 moved it in; `refuse_below_floor` in `bin/sd`
-#: enforces it, and no rule id covers it yet.
-UNCITED_SKILL_CLAIMS = {
-    "skills/sd-research-repo/templates/CLAUDE.md": 1,
-    "skills/sd-tips/SKILL.md": 1,
-}
-
-
 # --------------------------------------------------------------------------
 # Enumeration
 # --------------------------------------------------------------------------
@@ -469,7 +394,7 @@ def read_corpus(*pathspecs: str) -> list[tuple[str, str]]:
     **Never `continue` without recording.** The first draft swallowed `OSError`
     so that "a permission accident should not silently empty a baseline" -- and
     silently emptying a baseline is exactly what it did. A tracked file that
-    cannot be read drops out of leg b's measured set, the count falls, and an
+    cannot be read drops out of leg c's measured set, the count falls, and an
     equality baseline that only ever fires upward reports success on a smaller
     corpus. `tests/test_code_health.py` states the rule this now follows: *"The
     measurement must fail loudly rather than pass on a smaller corpus."*
@@ -503,103 +428,6 @@ def read_corpus(*pathspecs: str) -> list[tuple[str, str]]:
         except OSError as failure:
             UNREADABLE.append(f"{relative}: will not read ({failure})")
     return corpus
-
-
-def pack_nouns() -> frozenset[str]:
-    """Every name that could be the subject of a claim about this pack.
-
-    Enumerated from `bin/` and `tests/` on disk. A tool built next month is
-    covered the day it is written, with nobody updating anything -- which is
-    the property a hand-kept list does not have, and the property this whole
-    registry is about.
-    """
-
-    tools = {path.name for path in tracked_paths("bin")}
-    suites = {path.stem for path in tracked_paths("tests/test_*.py")}
-    return frozenset(tools | suites)
-
-
-def names_a_pack_noun() -> re.Pattern[str]:
-    """The pack-noun matcher, longest name first so `sd` cannot shadow `sd-plan`.
-
-    The boundaries are `[\\w-]` rather than `\\b`, because tool names carry
-    hyphens: plain `\\bsd-plan\\b` would also match inside `sd-planning`, and a
-    leading `\\b` would refuse to match `sd-status` written as `bin/sd-status`.
-    """
-
-    names = sorted(pack_nouns(), key=len, reverse=True)
-    alternation = "|".join(re.escape(name) for name in names)
-    return re.compile(rf"(?<![\w-])({alternation})(?![\w-])")
-
-
-def claim_spans(text: str, scope: str) -> list[tuple[int, str]]:
-    """The runs of `text` one claim may occupy, as `(first line, run)`.
-
-    The three readings of `CLAIM_SCOPE`, side by side and executable, so the
-    rejected ones stay reproducible instead of surviving as numbers in a
-    document. `TheClaimPredicate` runs all three over the live corpus.
-    """
-
-    if scope == LINE:
-        return list(enumerate(text.splitlines(), 1))
-    if scope == DOCUMENT:
-        return [(1, text)]
-    if scope != PARAGRAPH:
-        raise ValueError(f"{scope!r} is not one of {CLAIM_SCOPES}")
-    spans, start, block = [], 1, []
-    for number, line in enumerate(text.splitlines(), 1):
-        if line.strip():
-            if not block:
-                start = number
-            block.append(line)
-        elif block:
-            spans.append((start, "\n".join(block)))
-            block = []
-    if block:
-        spans.append((start, "\n".join(block)))
-    return spans
-
-
-def claims_in(text: str, subject: re.Pattern[str], *,
-              scope: str = CLAIM_SCOPE) -> list[tuple[int, str, list[str]]]:
-    """Every tool-behaviour claim in one document, as `(line, run, rule ids)`.
-
-    **This function is the definition.** Nothing else decides what a claim is:
-    `skill_claims` walks the corpus and hands each document here, and the
-    baseline is whatever this returns. See `CLAIM_SCOPE` for why that mattered
-    enough to be said out loud.
-    """
-
-    return [(number, run, sd_rules.RULE_ID.findall(run))
-            for number, run in claim_spans(text, scope)
-            if ENFORCEMENT.search(run) and subject.search(run)]
-
-
-def skill_claims(scope: str = CLAIM_SCOPE) -> list[tuple[str, int, str, list[str]]]:
-    """Every tool-behaviour claim in a skill, as `(path, line, text, rule ids)`.
-
-    The predicate is deliberately narrow and will have false negatives, which
-    the design accepted in writing: this is a ratchet on new claims, not an
-    audit of old ones, and a ratchet with false negatives still only moves one
-    way. A predicate wide enough to catch every claim reddens thousands of
-    lines on its first run, and a check that does that is not adopted, it is
-    disabled.
-    """
-
-    subject = names_a_pack_noun()
-    return [(relative, number, run.strip(), ids)
-            for relative, text in read_corpus(f"{SKILLS}*.md", f"{SKILLS}**/*.md")
-            for number, run, ids in claims_in(text, subject, scope=scope)]
-
-
-def uncited_skill_claims() -> dict[str, int]:
-    """Tool-behaviour claims citing no rule id at all, counted per document."""
-
-    counts: collections.Counter = collections.Counter()
-    for relative, _, _, ids in skill_claims():
-        if not ids:
-            counts[relative] += 1
-    return dict(counts)
 
 
 def cited_rule_ids(*, live_only: bool) -> set[str]:
@@ -1249,7 +1077,7 @@ citation so it sits outside the quotes.""")
 
         The measurement must fail loudly rather than pass on a smaller corpus,
         which is the rule `tests/test_code_health.py` states for its own walk.
-        A tracked file that cannot be read drops out of leg b's measured set
+        A tracked file that cannot be read drops out of leg c's measured set
         and the count falls, and an equality baseline reports success on the
         smaller corpus. A tracked symlink pointing out of the repository is the
         same hole from the other side: it reads a file of the tree's choosing
@@ -1334,198 +1162,6 @@ A registry row teaches from a section that does not exist.
 
 `teaches` is `path#heading`. Both halves are required, and the heading must be
 a real markdown heading in that document.""")
-
-
-# --------------------------------------------------------------------------
-# Leg b's predicate -- one recorded definition, not three readings
-# --------------------------------------------------------------------------
-
-
-class TheClaimPredicate(unittest.TestCase):
-    """sd:622. What counts as a claim, pinned instead of remembered.
-
-    Leg b's baseline was argued three ways before it landed and no reading of
-    it was ever written as code, so the number it produced could not be
-    reproduced from the repository -- which made it a claim about the
-    repository with nothing linking it to the machinery, the exact defect the
-    registry exists to end, committed by the registry.
-
-    These tests do not judge the predicate. They record it, so that widening it
-    is a change somebody signs rather than a baseline that moves.
-    """
-
-    #: A verb and a tool name, split across two lines. The only property that
-    #: matters is that neither line carries both, which is what separates the
-    #: line reading from the two wider ones.
-    SPLIT = "The report from sd-status is the one to read.\nIt refuses a second.\n"
-
-    #: The same two facts on one line.
-    JOINED = "The report from sd-status refuses a second.\n"
-
-    def test_a_claim_is_one_line_and_the_wider_readings_are_not_in_force(self):
-        """The scope in force is the line, and the fixture proves which.
-
-        `CLAIM_SCOPE == LINE` on its own is a constant asserting itself. The
-        fixture is what makes it evidence: the same two sentences are one claim
-        when they share a line and no claim when they do not, and a predicate
-        that had quietly become paragraph-scoped would say one both times.
-        """
-
-        subject = names_a_pack_noun()
-        self.assertEqual(CLAIM_SCOPE, LINE, "the shipped reading is the line")
-        self.assertEqual(claims_in(self.SPLIT, subject), [])
-        self.assertEqual(len(claims_in(self.JOINED, subject)), 1)
-        self.assertEqual(len(claims_in(self.SPLIT, subject, scope=PARAGRAPH)), 1)
-        self.assertEqual(len(claims_in(self.SPLIT, subject, scope=DOCUMENT)), 1)
-
-    def test_the_rejected_readings_stay_reproducible_and_stay_wider(self):
-        """All three readings run over the live corpus, and the shipped one is least.
-
-        The rejected readings are kept executable rather than remembered as
-        numbers. A number in a document is what sd:622 is about: 263, 97, 275,
-        63 and 176 were all offered for this corpus by predicates nobody wrote
-        down, and not one of them can be checked today. These can, on whatever
-        the corpus is at the time.
-
-        The assertion is containment, not a count, because a count here would
-        be a second baseline restating `UNCITED_SKILL_CLAIMS` -- and because
-        counts do not order across these scopes at all: a document read whole
-        is one span, so the widest reading yields the fewest *spans* while
-        reaching the most documents. That asymmetry is itself worth pinning,
-        since it is how two people measuring "the same thing" three ways got
-        three numbers and each believed the others had miscounted.
-        """
-
-        reached = {scope: {path for path, *_ in skill_claims(scope)}
-                   for scope in CLAIM_SCOPES}
-        self.assertLessEqual(reached[LINE], reached[PARAGRAPH], reached)
-        self.assertLessEqual(reached[PARAGRAPH], reached[DOCUMENT], reached)
-        self.assertEqual(reached[CLAIM_SCOPE], reached[LINE], reached)
-        self.assertTrue(reached[LINE], "the corpus carries no claims at all")
-
-    def test_an_enforcement_verb_is_matched_as_written(self):
-        """Lower case only, and the cost of that is named rather than found later.
-
-        `ENFORCEMENT` carries no `IGNORECASE`. A bullet opening *"**Never accept
-        a repo path**"* is therefore not a claim, and that shape is how this
-        pack most often writes a rule. The property is pinned here so that
-        widening it reads as a decision; the measured cost of leaving it is in
-        `CLAIM_SCOPE`.
-        """
-
-        self.assertIsNone(ENFORCEMENT.search("Never accept a repo path"))
-        self.assertIsNotNone(ENFORCEMENT.search("it never accepts a repo path"))
-        self.assertFalse(ENFORCEMENT.flags & re.IGNORECASE)
-
-    def test_the_subject_of_a_claim_is_enumerated_and_not_listed(self):
-        """`pack_nouns` reads the tree, so a new tool needs nobody to remember it.
-
-        A hand-kept roster of tool names is the listed-roster defect one layer
-        down, and it would make leg b quietly stop covering everything written
-        after the day the list was typed.
-
-        **The matcher is exercised, not just the enumeration.** The first form
-        of this test asserted only that `pack_nouns` reads the index, and
-        mutation caught it: hard-coding the roster inside `names_a_pack_noun`
-        -- the function that actually feeds the predicate -- left this test
-        green and reddened only the baseline, which is the wrong test failing
-        and sends the reader to a count instead of to the roster.
-
-        **And exercised against a name the tree does not have.** Asserting
-        that today's matcher covers today's names is satisfied by a roster
-        typed today: a hard-coded alternation carrying the same names passes
-        the subset assertion and misses every tool written tomorrow. So
-        `pack_nouns` is stubbed to a sentinel and the matcher must recognise
-        it -- which only a matcher that reads the enumeration can do.
-        """
-
-        nouns = pack_nouns()
-        self.assertIn("sd-status", nouns)
-        self.assertIn("test_rule_registry", nouns)
-        self.assertEqual(nouns, frozenset(
-            {path.name for path in tracked_paths("bin")}
-            | {path.stem for path in tracked_paths("tests/test_*.py")}))
-        subject = names_a_pack_noun()
-        missed = sorted(name for name in nouns
-                        if not subject.search(f"the {name} tool"))
-        self.assertEqual(missed, [], f"""
-The claim subject does not match every name enumerated from the tree.
-
-{_lines(missed)}
-
-`names_a_pack_noun` builds its alternation from `pack_nouns`. A name the
-enumeration carries and the matcher misses means the matcher has a roster of
-its own.""")
-        sentinel = "zz-tool-that-does-not-exist"
-        with mock.patch(f"{__name__}.pack_nouns",
-                        return_value=frozenset({sentinel})):
-            stubbed = names_a_pack_noun()
-        self.assertIsNotNone(
-            stubbed.search(f"the {sentinel} tool"),
-            "`names_a_pack_noun` does not read `pack_nouns`: a name the stub "
-            "returned is not matched, so the matcher carries its own roster.")
-        self.assertIsNone(
-            stubbed.search("the sd-status tool"),
-            "`names_a_pack_noun` matched a name the stubbed `pack_nouns` did "
-            "not return, so the matcher carries its own roster.")
-
-    def test_an_unknown_scope_is_refused_rather_than_silently_read(self):
-        """A typo must not fall through to whichever branch is last."""
-
-        with self.assertRaises(ValueError):
-            claim_spans("anything", "sentence")
-
-
-# --------------------------------------------------------------------------
-# Leg b -- every enforcement claim in a skill cites a rule
-# --------------------------------------------------------------------------
-
-
-class LegB(unittest.TestCase):
-    """Prose asserting an enforcement, with nothing linking it to the code."""
-
-    def test_no_skill_claim_cites_an_unknown_rule_id(self):
-        """A claim naming an id the registry does not carry fails at once.
-
-        No baseline, because no skill claim cites any id today. That is the
-        finding, not the exemption: of the tool-behaviour claims in `skills/`,
-        every single one asserts a behaviour with no rule id behind it.
-        """
-
-        registered = registered_rule_ids()
-        unknown = [f"{path}:{line} cites {identifier} -- {text}"
-                   for path, line, text, ids in skill_claims()
-                   for identifier in ids if identifier not in registered]
-        self.assertEqual(unknown, [], f"""
-A skill claims a tool behaviour and cites a rule id the registry does not carry.
-
-{_lines(unknown)}
-
-Add the rule to `bin/sd_rules.py`, or cite the id that already covers it.""")
-
-    def test_uncited_tool_behaviour_claims_match_their_baseline(self):
-        """The ratchet on claims with no rule id behind them.
-
-        Exactly, not at most, and the repository has already argued this out:
-        `test_the_shared_name_blind_spot_only_shrinks` uses equality because
-        `assertLessEqual` lets a record go stale -- a cleanup shrinks the
-        population while the constant stays at its old value forever. Equality
-        makes the record move with the thing it records, in the same change.
-
-        The count is of *violations*, never of the population. A new claim that
-        correctly cites a rule id does not appear here at all, which is what
-        separates a ratchet from a census: on a census, doing the right thing
-        would redden the build.
-        """
-
-        self.assertEqual(uncited_skill_claims(), UNCITED_SKILL_CLAIMS, """
-The uncited tool-behaviour claims in `skills/` no longer match their baseline.
-
-Above: measured first, baseline second. A count that rose is a new claim
-asserting a behaviour with nothing linking it to the code that performs it --
-cite a registry rule id on the line. A count that fell is the ordinary good
-case: lower the entry in `UNCITED_SKILL_CLAIMS` in the same change, and delete
-the entry outright when it reaches zero.""")
 
 
 # --------------------------------------------------------------------------
@@ -2107,15 +1743,6 @@ MUTATIONS: dict[str, Mutation] = {
         new="page being written. The pack ships 16 tools.",
         test="tests.test_prose_counts.ProseCounts"
              ".test_present_tense_counts_match_their_baseline",
-    ),
-    "tests/test_rule_registry.py::"
-    "test_uncited_tool_behaviour_claims_match_their_baseline": Mutation(
-        path=PROSE_RULES_PAGE,
-        old="The rows in `bin/sd_rules.py` state what each rule exempts;",
-        new="`sd-check` refuses a tree it did not measure.\n"
-            "The rows in `bin/sd_rules.py` state what each rule exempts;",
-        test="tests.test_rule_registry.LegB"
-             ".test_uncited_tool_behaviour_claims_match_their_baseline",
     ),
 }
 
