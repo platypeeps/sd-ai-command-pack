@@ -141,10 +141,13 @@ def run_child(argv: list[str], env: dict[str, str], cwd: pathlib.Path, timeout: 
     """`sd-check` as a process group's leader, so stopping this process stops it and frees its slot (sd:2978).
 
     `started` hears the group's id, as `sd_lib.run_group` gives it (sd:3361).
+    At its deadline, the stderr slot keeps what the child wrote, stdout then stderr (sd:3418).
     """
     try:
         result = sd_lib.run_group(argv, cwd=cwd, env=env, timeout=timeout, started=started)
-    except (OSError, subprocess.SubprocessError, sd_lib.GroupTimeout) as error:
+    except sd_lib.GroupTimeout as error:
+        return None, f"sd-check could not finish: {error}", error.stdout + error.stderr
+    except (OSError, subprocess.SubprocessError) as error:
         return None, f"sd-check could not finish: {error}", ""
     return result.returncode, result.stdout, result.stderr
 

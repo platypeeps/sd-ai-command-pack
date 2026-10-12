@@ -635,8 +635,8 @@ def subprocess_runner(
         finished = sd_lib.run_group(list(argv), cwd=cwd, env=dict(env), timeout=timeout, input_text=input_text)
     except FileNotFoundError:
         return Completed(127, "", f"{argv[0]}: not found on PATH", launched=False)
-    except sd_lib.GroupTimeout:
-        return Completed(124, "", f"{argv[0]}: timed out after {timeout}s", launched=False)
+    except sd_lib.GroupTimeout as error:  # what it wrote names where it hung (sd:3418); the timeout line stays last
+        return Completed(124, error.stdout, f"{error.stderr}{error}", launched=False)
     except OSError:
         return Completed(126, "", f"{argv[0]}: could not start", launched=False)
     return Completed(finished.returncode, finished.stdout or "", finished.stderr or "")
@@ -1544,8 +1544,8 @@ def classify_gate(checks: Any) -> dict[str, Any] | None:
 def gate_failure(checks: Any, detail: str) -> dict[str, Any]:
     """`classify_gate`, or, with no record to read, the runner's own timeout line for sd-check."""
     found = classify_gate(checks)
-    if found is None and not checks and (line := _TIMED_OUT.search(detail)):
-        found = {"reason": GATE_TIMED_OUT, "evidence": line.group(0), "entrypoint": "sd-check", "started": []}
+    if found is None and not checks and (lines := _TIMED_OUT.findall(detail)):  # the runner's line is the last (sd:3418)
+        found = {"reason": GATE_TIMED_OUT, "evidence": lines[-1], "entrypoint": "sd-check", "started": []}
     return found or {}
 
 

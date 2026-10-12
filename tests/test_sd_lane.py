@@ -356,6 +356,24 @@ class Runner(Lane):
         _, new = self.moved_above(3)
         self.assertEqual(sd_lane.retry(self.repo, 3, self.environ)["expected_head"], new)
 
+    def test_lane_list_gives_each_entry_its_enqueue_order(self) -> None:
+        """sd:3419. A reader of `lane list` takes an item's newest entry by `enqueue_seq`, not by its place after a move."""
+        import argparse  # noqa: PLC0415
+        sd_lane.enqueue_entry(self.feature, 1, "held", self.body, self.environ, claim="deliver")
+        sd_lane.set_hold(self.repo, 1, self.environ, held=True)
+        _, new = self.moved_above(2)
+        parser = argparse.ArgumentParser()
+        sd_lane.add_lane_verbs(parser.add_subparsers(dest="command"))
+        with contextlib.chdir(self.repo), mock.patch.dict(os.environ, self.environ), \
+                contextlib.redirect_stdout(io.StringIO()) as said:
+            self.assertEqual(sd_lane.lane_main(parser.parse_args(["lane", "list"])), 0)
+        listed = json.loads(said.getvalue())["entries"]
+        self.assertTrue(all(type(row.get("enqueue_seq")) is int for row in listed), listed)
+        self.assertEqual([row["item"] for row in sorted(listed, key=lambda row: row["enqueue_seq"])], [1, 2, 2])
+        newest = max((row for row in listed if row["item"] == 2), key=lambda row: row["enqueue_seq"])
+        self.assertEqual(newest["expected_head"], new)
+        self.assertNotEqual([row for row in listed if row["item"] == 2][-1]["expected_head"], new)
+
     def test_retry_refuses_a_newer_entry_written_between_its_read_and_its_write(self) -> None:
         """sd:3412. With no expected head, the write still finds the entry it read is no longer the item's newest."""
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")

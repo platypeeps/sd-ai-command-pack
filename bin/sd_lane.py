@@ -2223,10 +2223,13 @@ def lane_main(args: Any) -> int:
             result: Any = enqueue_entry(root, args.item, args.title, args.body_file, environ,
                                         expected_head=args.expected_head, manual=args.manual, claim=args.claim,
                                         acceptance_file=args.acceptance_file)
-        elif args.lane_command == "list":
-            entries = read_queue(queue_for(root, environ))
+        elif args.lane_command == "list":  # `enqueue_seq` orders an item's entries, as `newest_entry` does (sd:3419)
+            queue = queue_for(root, environ)
+            entries, order = on_hub(queue, lambda connection: (stored(connection, queue.repository),
+                                                               enqueue_order(connection, queue.repository)))
             result = {"queue": str(queue_path(root, environ)), "revision": queue_revision(entries),
-                      "entries": [shown(row) for row in entries], **({"import": imported} if imported else {})}
+                      "entries": [{**shown(row), "enqueue_seq": order[row["id"]]} for row in entries],
+                      **({"import": imported} if imported else {})}
         elif args.lane_command == "retry":
             result = retry(root, args.item, environ, manual=args.manual, expected_head=args.expected_head)
         elif args.lane_command == "cancel":
