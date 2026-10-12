@@ -24,7 +24,8 @@ Each DOCS entry:
     stand    optional   one-sentence standfirst
     meta     optional   provenance line (HTML allowed)
     vtitle   optional   heading for the verdict strip
-    figs     optional   [(number, "pass|fail|warn|flat", label, sub), ...]
+    figs     optional   [(number, "pass|fail|warn|flat", label, sub), ...];
+                        a state carries its glyph: pass ●, warn ▲, fail ■
     legend   optional   caption under the figures
     footer   optional   footer HTML
     skip     optional   ["Section title", ...] dropped from the rendered page
@@ -79,9 +80,25 @@ from sd_research_publish import (
     repo_home,
     trust_conf,
 )
-from sd_research_tokens import TOKENS_CSS
+from sd_research_tokens import THEME_JS, TOKENS_CSS
 
 CSS = TOKENS_CSS
+
+#: The foundation's state grammar: a glyph beside every state colour, with its
+#: name for a screen reader. `flat` and `inert` are counts, not states.
+GLYPHS = {
+    "pass": ("●", "Normal"),
+    "warn": ("▲", "Caution"),
+    "caution": ("▲", "Caution"),
+    "fail": ("■", "Warning"),
+}
+
+#: The foundation's theme control. theme.js marks the chosen button with
+#: `aria-pressed`; a page where it cannot run hides the control (PAGE_CSS).
+THEME_CONTROL = ('<div class="theme" role="group" aria-label="Theme">'
+                 + "".join('<button type="button" data-theme-choice="%s">%s</button>' % (c, c.title())
+                           for c in ("dark", "light", "system"))
+                 + "</div>")
 
 LIST_RE = re.compile(r"^\s*(?:[-*+]\s|\d+[.)]\s)")
 
@@ -154,12 +171,18 @@ def build_one(repo, cfg, project):
         m = re.match(r"^(\d+[a-z]?)[.)]\s*(.+)$", text)
         num, label = (m.group(1), m.group(2)) if m else ("", text)
         label = label.split(" — ")[0].split(": ")[0].split(" (")[0]
-        nav.append('<a href="#%s"><em>%s</em><span>%s</span></a>'
-                   % (item["id"], html.escape(num), html.escape(label, quote=False)))
+        nav.append('<a href="#%s" title="%s"><em>%s</em><span>%s</span></a>'
+                   % (item["id"], html.escape(label), html.escape(num), html.escape(label, quote=False)))
+
+    def glyph(state):
+        if state not in GLYPHS:
+            return ""
+        mark, name = GLYPHS[state]
+        return '<span class="g" role="img" aria-label="%s">%s</span>' % (name, mark)
 
     figs = "".join(
-        '<div class="fig"><span class="n is-%s">%s</span><span class="l">%s</span><span class="s">%s</span></div>'
-        % (t, html.escape(str(n)), label, html.escape(s))
+        '<div class="fig"><span class="n is-%s">%s%s</span><span class="l">%s</span><span class="s">%s</span></div>'
+        % (t, glyph(t), html.escape(str(n)), label, html.escape(s))
         for n, t, label, s in cfg.get("figs", []))
 
     verdict = ""
@@ -175,6 +198,10 @@ def build_one(repo, cfg, project):
     created, ver, updated = doc_version(repo, cfg["src"])
 
     parts = ["<title>%s</title>" % html.escape(cfg["title"]),
+             # In <head> and not deferred, so the stored theme applies before
+             # first paint. The one script a page carries: the dashboard runs
+             # it only once its policy pins this script's digest.
+             "<script>%s</script>" % THEME_JS,
              # Fonts are embedded, not linked. The dashboard serves documents under
              # `default-src 'none'`, which blocks an external stylesheet: a linked
              # Google Fonts page falls back to system fonts. See sd_research_fonts.
@@ -187,6 +214,7 @@ def build_one(repo, cfg, project):
              ('  <div class="railnote"><strong>Companions</strong>%s</div>' % sibling) if sibling else "",
              ('  <div class="railnote"><strong>Also here</strong>%s</div>' % links) if links else "",
              '  <div class="railnote"><strong>Source</strong><code>%s</code></div>' % html.escape(cfg["src"]),
+             "  " + THEME_CONTROL,
              "</aside>",
              "<main>",
              ('  <p class="eyebrow">%s</p>' % cfg["eyebrow"]) if cfg.get("eyebrow") else "",

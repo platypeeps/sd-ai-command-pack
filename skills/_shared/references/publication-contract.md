@@ -73,11 +73,15 @@ img-src data:; font-src data:`. An external stylesheet, script, font or image is
 blocked, and the page renders degraded rather than failing loudly.
 
 So a published page embeds what it needs. Fonts are data: URIs, images are data:
-URIs, styles are inline, and there is no script. The same page then opens
-identically over `file://` with no network, which is the other way these pages
-are read.
+URIs, styles are inline, and there is no script but one. The same page then
+opens identically over `file://` with no network, which is the other way these
+pages are read.
 
 `bin/sd_research_fonts.py` holds the vendored faces for the research renderer.
+The one script is the design foundation's theme control, inline and verbatim
+(`THEME_JS` in `bin/sd_research_tokens.py`). Where a policy blocks it, the page
+follows the reader's OS scheme and hides the control, so blocking it costs the
+choice and nothing else.
 A skill that emits its own HTML meets the same rule by itself.
 
 ## Registration
