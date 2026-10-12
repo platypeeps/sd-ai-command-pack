@@ -521,8 +521,9 @@ The rules for them:
   lane worktree it makes from `origin/<branch>` and removes once the entry
   ends. Its head is the queued head or prepare's catch-up of it: a clean
   merge of a commit on `origin`'s default branch, with no edit of its own.
-  A remote branch that moved otherwise skips the entry `head_moved`, a deleted
-  one `head_gone`, a local branch at another commit `branch_busy`; an
+  A remote branch, or the entry's own worktree on its branch, that moved
+  otherwise skips the entry `head_moved` (sd:3413), a deleted remote branch
+  `head_gone`, a local branch at another commit `branch_busy`; an
   `origin` that does not answer leaves it pending. A dead holder goes back to
   pending in prepare, failing at the third time, and fails in merge: on its
   own host once its pid is gone, on another once its lease passed. `lane

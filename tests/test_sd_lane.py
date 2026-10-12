@@ -1820,6 +1820,51 @@ class AnyHost(SharedQueue):
                 sd_lane.cancel(self.repo, item, self.environ)  # before the check, so a failure leaves no entry behind
                 self.assertEqual((entry["item"], entry["status"], entry["expected_head"]), (item, "pending", queued))
 
+    def test_an_own_worktree_that_moved_on_its_branch_skips_head_moved(self) -> None:
+        """sd:3413. The builder committed or amended after enqueue; the run never advises removing its branch."""
+        for amended in (False, True):
+            with self.subTest(amended=amended):
+                item = 1 + amended
+                tree, _ = self.committed(f"moved{item}", "work")
+                sd_lane.enqueue_entry(tree, item, "t", self.body, self.environ, manual=True, claim="deliver")
+                git(tree, "commit", "-q", *(["--amend"] if amended else []), "--allow-empty", "-m", "more")
+                sd_lane.run_lane(self.repo, self.environ, self.ship)
+                entry = self.entries()[-1]
+                self.assertEqual((entry["status"], entry.get("code"), self.calls), ("skipped", sd_lane.HEAD_MOVED, []))
+                self.assertIn(str(tree), entry["reason"])
+                self.assertFalse(self.made(item).exists())
+
+    def test_a_failing_branch_read_of_a_moved_own_worktree_leaves_the_entry_pending(self) -> None:
+        """sd:3413, unknown reads: the moved own worktree's branch read failed; not a skip, not a fall-through."""
+        tree, _ = self.committed("moved", "work")
+        sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, manual=True, claim="deliver")
+        git(tree, "commit", "-q", "--allow-empty", "-m", "more")
+        with self.failing("branch"):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], "holder" in entry, self.calls), ("pending", False, []))
+        self.assertIn("not skipped", answer["stopped"])
+
+    def test_an_entry_with_no_worktree_never_reads_the_runners_directory_as_its_own(self) -> None:
+        """sd:3413, codex review: `Path("")` is the current directory, which may hold the branch at another head."""
+        tree, [head] = self.committed("topic", "work")
+        sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.update(self.store(), lambda rows: rows[0].update(worktree=""))
+        git(self.repo, "worktree", "remove", "--force", str(tree))
+        git(self.repo, "branch", "-D", "topic")
+        decoy = self.tmp / "decoy"
+        git(self.tmp, "clone", "-q", "-b", "topic", str(self.origin), str(decoy))
+        git(decoy, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x")
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(decoy)
+        heads: list[str] = []
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            heads.append(git(pathlib.Path(argv[1]), "rev-parse", "HEAD"))
+            return self.ship(argv, log)
+        sd_lane.run_lane(self.repo, self.environ, ship)
+        self.assertEqual((self.entries()[0]["status"], heads[:1]), ("merged", [head]))
+
     def test_a_retry_never_starts_from_a_foreign_merge(self) -> None:
         """Review round 1, retry: the worktree's HEAD is a merge the lane did not make; the retry keeps the head."""
         tree = self.worktree("again")

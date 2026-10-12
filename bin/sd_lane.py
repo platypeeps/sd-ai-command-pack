@@ -1810,7 +1810,8 @@ def skip(code: str, reason: str) -> dict[str, Any]:
 def checkout_for(root: pathlib.Path, queue: Queue, entry: dict[str, Any]) -> dict[str, Any]:
     """Where this host runs `entry` (sd:3283): `{"tree"}`, with `made` for a lane worktree, or a skip's fields.
 
-    In order: the entry's own worktree, when it was enqueued here; any
+    In order: the entry's own worktree, when it was enqueued here, and a
+    `HEAD_MOVED` skip when that worktree moved on the branch (sd:3413); any
     worktree here with its branch at the head; else a lane worktree at
     `<lane folder>/worktrees/<item>` from the fetched `origin/<branch>`
     (`lane_tree`). The head is `expected_head` or its catch-up merges (`catch_up_of`). A
@@ -1823,8 +1824,12 @@ def checkout_for(root: pathlib.Path, queue: Queue, entry: dict[str, Any]) -> dic
         return {"status": "failed", "code": "no_branch", "reason": "the entry names no branch; queue it with "
                                                                     "`sd-ship lane enqueue`"}
     own = pathlib.Path(str(entry.get("worktree") or ""))
-    if entry.get("enqueued_on") == this_host() and own.is_dir() and at_head(own, expected):
-        return {"tree": own}
+    if entry.get("enqueued_on") == this_host() and entry.get("worktree") and own.is_dir():  # "" is the cwd
+        if at_head(own, expected):
+            return {"tree": own}
+        if read_git(own, "branch", "--show-current").stdout.strip() == branch:
+            return skip(HEAD_MOVED, f"{own} moved on {branch} from the queued head {expected}; enqueue the new "
+                                    "head from that worktree")
     main, lane = sd_lib.main_worktree_root(root), queue.lane / "worktrees" / str(entry["item"])
     listed = worktrees(main)
     for path, name in listed:
