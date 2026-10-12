@@ -555,15 +555,55 @@ class TheVersionRefusals(SchemaCase):
         set_schema_version(raw, version)
         raw.close()
 
+    def _checkout(self, *, detached):
+        """A git checkout for the library to run from, on `main` or detached as the serving tree is."""
+        checkout = self.home / "checkout"
+        checkout.mkdir()
+        for args in (["init", "-q", "-b", "main"],
+                     ["-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "--allow-empty",
+                      "-m", "fixture"],
+                     *([["checkout", "-q", "--detach"]] if detached else [])):
+            subprocess.run(["git", "-C", str(checkout), *args], check=True, capture_output=True)
+        return checkout
+
+    def _refusal(self, checkout):
+        """The refusal's text for a library that runs from `checkout`, on a machine whose home is `self.home`."""
+        with mock.patch("sd_db.errors._checkout", return_value=checkout), \
+                mock.patch.dict("os.environ", {"HOME": str(self.home)}):
+            return str(SchemaTooNew(SCHEMA_VERSION + 3, SCHEMA_VERSION))
+
     def test_a_newer_database_is_refused_on_open_naming_both(self):
         self._set(SCHEMA_VERSION + 3)
-        with self.assertRaises(SchemaTooNew) as raised:
+        with mock.patch("sd_db.errors._checkout", return_value=self._checkout(detached=False)), \
+                self.assertRaises(SchemaTooNew) as raised:
             connect(self.path)
         message = str(raised.exception)
         self.assertIn(str(SCHEMA_VERSION + 3), message)
         self.assertIn(str(SCHEMA_VERSION), message)
         # sd:1664, sd:3370: the pack runs `lib/` from its checkout, so the remedy is a pull.
         self.assertIn("pull --ff-only", message)
+
+    def test_a_detached_serving_tree_on_the_hub_is_moved_by_repo_sync_refresh(self):
+        """sd:3415: a detached tree cannot pull, and `sd-install --pull` refuses one."""
+        message = self._refusal(self._checkout(detached=True))
+        self.assertNotIn("pull --ff-only", message)
+        self.assertIn("`repo-sync.sh refresh` on the hub", message)
+
+    def test_a_detached_tree_on_a_satellite_is_moved_by_repo_sync_follow(self):
+        checkout = self._checkout(detached=True)
+        (self.home / ".config/sd").mkdir(parents=True)
+        (self.home / ".config/sd/hub.json").write_text('{"hub": "hub.example.test"}', encoding="utf-8")
+        message = self._refusal(checkout)
+        self.assertNotIn("pull --ff-only", message)
+        self.assertIn("`repo-sync.sh follow` on this satellite", message)
+
+    def test_a_checkout_whose_head_cannot_be_read_names_both_remedies(self):
+        """An unreadable HEAD is unknown, not a branch: the message names the pull and the repo-sync verb."""
+        checkout = self.home / "checkout"
+        (checkout / ".git").mkdir(parents=True)
+        message = self._refusal(checkout)
+        self.assertIn("pull --ff-only", message)
+        self.assertIn("repo-sync.sh refresh", message)
 
     def test_a_newer_database_is_refused_for_reading_too(self):
         """A wrong answer read quietly is worse than a process that stops."""
