@@ -105,16 +105,26 @@ OUTPUT_FOLDER = "sd-check-output"
 OUTPUT_KEEP = 20
 #: A shard the pack's `run-tests.sh` reports as failed: `shard <name>: <n>s exit=<code>`, code not 0.
 FAILED_SHARD = re.compile(r"^shard \S+: \d+s exit=(?!0$)\d+$", re.MULTILINE)
+#: A shard's first line, and the result line every shard that finished ends with.
+SHARD_START = re.compile(r"^shard (\S+): start$", re.MULTILINE)
+SHARD_RESULT = re.compile(r"^shard (\S+): \d+s exit=\d+$", re.MULTILINE)
+#: How a shard that started and never reported a result is named.
+UNFINISHED = "unfinished"
 FAILED_SHARDS_KEPT = 20
 
 
 def failed_shards(*texts: str) -> list[str]:
-    """Each failed-shard line in the whole output, in order, at most `FAILED_SHARDS_KEPT`.
+    """Each failed-shard line in the whole output, then each shard that never finished, at most `FAILED_SHARDS_KEPT`.
 
     A suite's summary ends a long run, so the shard that failed sits in the
-    middle, where the report's tail no longer reaches (sd:2558).
+    middle, where the report's tail no longer reaches (sd:2558). A run cut off
+    at its timeout names the shard that hung: it has a start line and no result (sd:3414).
     """
-    return [match.group(0) for text in texts for match in FAILED_SHARD.finditer(text)][:FAILED_SHARDS_KEPT]
+    failed = [match.group(0) for text in texts for match in FAILED_SHARD.finditer(text)]
+    finished = {match.group(1) for text in texts for match in SHARD_RESULT.finditer(text)}
+    unfinished = [f"shard {match.group(1)}: {UNFINISHED}" for text in texts for match in SHARD_START.finditer(text)
+                  if match.group(1) not in finished]
+    return [*failed, *dict.fromkeys(unfinished)][:FAILED_SHARDS_KEPT]
 
 
 #: A make target that failed: `make: *** [test] Error 1`, GNU make 4's `make[1]: *** [Makefile:12: lint] Error 2`.
@@ -157,12 +167,19 @@ def failure_excerpt(out: str, err: str, shards: list[str]) -> str:
     """The failing part of the output (sd:2608): each failed shard's own block, else each stream's failure lines and tail.
 
     A shard's block runs from its `shard <name>: start` line to its result
-    line, so a shard that failed early in a long run keeps its FAIL line and
-    assertion, which the report's tail no longer reaches.
+    line, or to the stream's end for one that never finished, so a shard that
+    failed early in a long run keeps its FAIL line and assertion, which the
+    report's tail no longer reaches.
     """
     parts = []
     for line in shards:
         for text in (out, err):
+            if line.endswith(f": {UNFINISHED}"):
+                start = text.rfind(f"shard {line.split()[1]} start")
+                if start >= 0:
+                    parts.append(_excerpt(text[start:]))
+                    break
+                continue
             end = text.find(line)
             if end < 0:
                 continue
@@ -262,8 +279,8 @@ def run_one(
         completed = sd_lib.run_group(  # fixed argv, no shell
             command, cwd=root, env=dict(os.environ if environ is None else environ), timeout=timeout
         )
-    except sd_lib.GroupTimeout:
-        return FAIL, None, time.monotonic() - started, "", "", f"timed out after {timeout}s"
+    except sd_lib.GroupTimeout as error:  # what it wrote names the step that hung (sd:3414)
+        return FAIL, None, time.monotonic() - started, error.stdout, error.stderr, f"timed out after {timeout}s"
     except OSError as error:
         return FAIL, None, time.monotonic() - started, "", "", f"cannot run {command[0]}: {error}"
     duration = time.monotonic() - started

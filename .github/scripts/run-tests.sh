@@ -459,6 +459,14 @@ on_signal() {
   # Nothing is published from here: a run that was interrupted has no complete
   # data, and the repo root still holds whatever the last finished run left.
   printf '%s\n' "error: test run interrupted; shard processes terminated." >&2
+  # sd:3414: the shard logs go with the work directory, so name each shard that
+  # had started and written no result; a gate cut off at its timeout then says
+  # which shard hung.
+  local log
+  for log in "$work_dir"/*.log; do
+    [ -f "$log" ] && [ "$log" != "$run_log" ] || continue
+    grep -q '^shard .*exit=' "$log" || head -n 1 "$log" >&2
+  done
   cleanup 143
   exit 143
 }
