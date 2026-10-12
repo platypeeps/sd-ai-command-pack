@@ -59,7 +59,7 @@ DECISION_HEADING_RE = re.compile(r"^#{1,6}\s+decision\b", re.IGNORECASE)
 # ledger quotes "no open `BLOCKING:` line" and which rule 2 then refused. An
 # open marker is a line that starts with the word, optionally as a list item.
 BLOCKING_RE = re.compile(r"^\s*(?:[-*]\s+)?BLOCKING\b")
-MARKDOWN_LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
+MARKDOWN_LINK_RE = re.compile(r"\]\(([^)\s]+)\)|^\s*\[[^\]]+\]:\s*(\S+)", re.MULTILINE)
 
 WORKABLE_STATUSES = ("ready", "in_progress")
 DECISION_STATUSES = ("proposed", "accepted", "superseded", "rejected")
@@ -72,8 +72,8 @@ class Report:
     def __init__(self) -> None:
         self.failures: list[str] = []
         self.notes: list[str] = []
-        # Advisory lines for stderr: something that should have answered did
-        # not. Never a failure, and never a change to the exit code.
+        # A rule that did not run, for stderr. Never a failure, but the final
+        # `clean` line counts them, so a skim of a log cannot read "all ran".
         self.warnings: list[str] = []
 
     def fail(self, location: str, message: str) -> None:
@@ -120,6 +120,8 @@ def check_shape(work_root: pathlib.Path, report: Report) -> None:
             continue
 
         for path in sorted(item.iterdir()):
+            if path.name.startswith("."):
+                continue  # `.DS_Store` or an editor swap file is not a document
             if path.is_dir():
                 report.fail(str(path), "a work item holds documents, not subdirectories")
             elif path.name not in ITEM_DOCUMENTS:
@@ -257,7 +259,7 @@ def status_source_note(statuses: sd_lib.Statuses) -> str:
 def check_decisions(decisions_root: pathlib.Path, report: Report) -> None:
     """Rule 3."""
     if not decisions_root.is_dir():
-        report.note(f"rule 3 decision shape: no {decisions_root} directory, nothing to check")
+        report.warn(f"rule 3 decision shape: no {decisions_root} directory, nothing to check")
         return
 
     records = sorted(path for path in decisions_root.rglob("*.md") if path.is_file())
@@ -302,7 +304,7 @@ def check_decisions(decisions_root: pathlib.Path, report: Report) -> None:
 def check_spec_index(spec_root: pathlib.Path, report: Report) -> None:
     """Rule 4."""
     if not spec_root.is_dir():
-        report.note(f"rule 4 spec index: no {spec_root} directory, nothing to check")
+        report.warn(f"rule 4 spec index: no {spec_root} directory, nothing to check")
         return
 
     directories = sorted(
@@ -320,12 +322,16 @@ def check_spec_index(spec_root: pathlib.Path, report: Report) -> None:
             continue
         if not pages:
             continue
+        # Resolved against the index's own directory: `../other/foo.md` is not
+        # this directory's `foo.md`, though the basenames agree.
         linked = {
-            target.split("#", 1)[0].rsplit("/", 1)[-1]
-            for target in MARKDOWN_LINK_RE.findall(index.read_text(encoding="utf-8"))
+            (directory / target.split("#", 1)[0]).resolve()
+            for pair in MARKDOWN_LINK_RE.findall(index.read_text(encoding="utf-8"))
+            for target in pair
+            if target
         }
         for page in pages:
-            if page not in linked:
+            if (directory / page).resolve() not in linked:
                 report.fail(str(index), f"index does not link {page}")
 
     report.note(f"rule 4 spec index: checked {len(directories)} spec directory(ies)")
@@ -353,7 +359,7 @@ def check_pr_privacy(body: str | None, report: Report) -> None:
     publish the body unchecked and say clean (sd:3490).
     """
     if body is None:
-        report.note("PR privacy: no --pr-body supplied, not run")
+        report.warn("PR privacy: no --pr-body supplied, not run")
         return
     remedy = "set sd.privacy_patterns, or write one ERE per line to that file"
     try:
@@ -428,7 +434,8 @@ def check_work_references(repo: pathlib.Path, work_dir: str, report: Report) -> 
         # Not a skip. An unanswerable enumeration checks nothing, and a rule
         # that reports a pass on nothing is the failure mode this whole item
         # exists to close.
-        report.fail(str(repo), "git could not list tracked markdown, so rule 7 read nothing")
+        report.fail(str(repo), "git could not list tracked markdown, so rule 7 read nothing; "
+                    "run it from inside a git checkout")
         return
     reference_re = re.compile(
         rf"(?<![\w/.-]){re.escape(work_dir)}/(?P<path>[A-Za-z0-9_./<>-]*[A-Za-z0-9_/<>-])"
@@ -625,20 +632,21 @@ def run(
         if pr_body is None:
             report.fail("--body-only", "needs --pr-body; the privacy rule reads it")
             return report
-        report.note("rules 1-4, 7: --body-only, not run")
+        report.warn("rules 1-4, 7: --body-only, not run")
         check_pr_privacy(pr_body, report)
         return report
     if keeps_work_local(repo, report):
-        report.note(f"rules 1-2, 7: mode: minimal keeps {work_dir} local; not run")
+        report.warn(f"rules 1-2, 7: mode: minimal keeps {work_dir} local; not run")
         check_decisions(repo / decisions_dir, report)
         check_spec_index(repo / spec_dir, report)
         check_pr_privacy(pr_body, report)
         return report
     if not work_root.is_dir():
         if work_dir_named:
-            report.fail(str(work_root), "the work directory does not exist")
+            report.fail(str(work_root), "the work directory does not exist; pass --work-dir "
+                        "the repo-relative root, or omit it where the repository keeps no work root")
             return report
-        report.note(f"rules 1-2: no {work_dir}; nothing to lint")
+        report.warn(f"rules 1-2: no {work_dir}; nothing to lint")
         check_decisions(repo / decisions_dir, report)
         check_spec_index(repo / spec_dir, report)
         check_pr_privacy(pr_body, report)
@@ -688,7 +696,7 @@ def check_work_items(repo: pathlib.Path, work_dir: str, report: Report, history:
     )
     report.note(f"rule 2 status source: {source}")
     if not history:
-        report.note(
+        report.warn(
             "rule 2 delivery: not asked; --no-history reads no commit history, "
             "and the lint sd-ship runs with the pull request body asks it"
         )
@@ -708,7 +716,7 @@ def check_branch_lines(
     """
     rows = statuses.rows
     if not rows.opened:
-        report.note("rule 2 branch line: not compared; no row to read here")
+        report.warn("rule 2 branch line: not compared; no row to read here")
         return
     compared = disagreeing = 0
     for item in item_directories(work_root):
@@ -839,7 +847,8 @@ def main(argv: list[str] | None = None) -> int:
     if report.failures:
         print(f"sd-docs-lint: {len(report.failures)} failure(s)", file=sys.stderr)
         return 1
-    print("sd-docs-lint: clean")
+    skipped = f" ({len(report.warnings)} skip(s) on stderr)" if report.warnings else ""
+    print(f"sd-docs-lint: clean{skipped}")
     return 0
 
 

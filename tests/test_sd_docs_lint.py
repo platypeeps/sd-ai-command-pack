@@ -439,6 +439,54 @@ class Rule2DesignOnlyTests(LintFixture):
         self.assertIn("1 of 1 active item(s) with a branch: line disagree", "\n".join(report.notes))
 
 
+class SkipsAndRemediesTests(LintFixture):
+    """sd:3491. A rule that did not run says so on the last line; a refusal names its fix."""
+
+    def cli(self, *argv: str) -> tuple[int, str, str]:
+        self.git("add", "-A")
+        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said, \
+                contextlib.redirect_stdout(io.StringIO()) as printed:
+            code = lint.main(list(argv))
+        return code, printed.getvalue(), said.getvalue()
+
+    def test_a_skipped_rule_goes_to_stderr_and_the_last_line_counts_it(self) -> None:
+        code, printed, said = self.cli("--no-history")
+        self.assertEqual(code, 0, said)
+        self.assertIn("PR privacy: no --pr-body supplied, not run", said)
+        self.assertNotIn("not run", printed)
+        skips = len([line for line in said.splitlines() if line])
+        self.assertGreater(skips, 1, said)
+        self.assertEqual(printed.splitlines()[-1], f"sd-docs-lint: clean ({skips} skip(s) on stderr)")
+
+    def test_red_a_named_work_directory_that_is_missing_names_the_flag(self) -> None:
+        shutil.rmtree(self.work)
+        report = self.run_lint()
+        self.assertEqual(len(report.failures), 1, report.failures)
+        self.assertIn("pass --work-dir the repo-relative root", report.failures[0])
+
+    def test_red_rule_7_without_git_names_the_fix(self) -> None:
+        report = lint.Report()
+        with mock.patch.object(lint.sd_lib, "git_output", return_value=None):
+            lint.check_work_references(self.repo, "docs/work", report)
+        self.assertIn("run it from inside a git checkout", "\n".join(report.failures))
+
+    def test_green_a_dotfile_in_an_item_is_not_a_document(self) -> None:
+        item = self.work / "2026-08-29-a-workable-item"
+        for name in (".DS_Store", ".prd.md.swp"):
+            (item / name).write_text("x", encoding="utf-8")
+        self.assert_clean()
+
+    def test_red_an_index_link_to_a_same_named_page_elsewhere_is_not_a_link(self) -> None:
+        self.write_spec("other", ["quality.md"])
+        index = "# backend\n\n- [quality](../other/quality.md)\n"
+        self.write_spec("backend", ["quality.md"], index=index)
+        self.assert_fails("index does not link quality.md")
+
+    def test_green_a_reference_style_link_is_a_link(self) -> None:
+        self.write_spec("backend", ["quality.md"], index="# backend\n\n- [quality][q]\n\n[q]: ./quality.md\n")
+        self.assert_clean()
+
+
 class Rule2StatusSourceTests(LintFixture):
     """The run says where rule 2 read its statuses, because a checkout with
     no database checks fewer items and prints the same `clean`."""
@@ -469,7 +517,7 @@ class Rule3DecisionTests(LintFixture):
     def test_green_absent_directory_is_not_a_failure(self) -> None:
         report = self.run_lint()
         self.assertEqual(report.failures, [])
-        self.assertTrue(any("rule 3" in note for note in report.notes))
+        self.assertTrue(any("rule 3" in warning for warning in report.warnings))
 
     def test_red_undated_filename(self) -> None:
         self.write_decision("json-config.md", GOOD_DECISION)
@@ -540,7 +588,7 @@ class BodyOnlyTests(LintFixture):
         report = self.run_lint("## Summary\n", body_only=True)
         self.assertEqual(report.failures, [])
         notes = "\n".join(report.notes)
-        self.assertIn("rules 1-4, 7: --body-only, not run", notes)
+        self.assertIn("rules 1-4, 7: --body-only, not run", "\n".join(report.warnings))
         for tree_rule in ("rules 1-2 work items", "rule 3 decision", "rule 4 spec", "rule 7 work"):
             self.assertNotIn(tree_rule, notes)
 
@@ -548,7 +596,8 @@ class BodyOnlyTests(LintFixture):
         # The mode is opt-in. A mistyped `--work-dir` on a full run stays a
         # failure by name rather than a body-only run nobody asked for.
         report = self.run_lint("## Summary\n")
-        self.assertEqual(report.failures, [f"{self.work.resolve()}: the work directory does not exist"])
+        self.assertEqual(len(report.failures), 1, report.failures)
+        self.assertTrue(report.failures[0].startswith(f"{self.work.resolve()}: the work directory does not exist"))
 
     def test_the_flag_without_a_body_is_a_failure_in_the_library_and_an_argument_error_at_the_cli(self) -> None:
         report = self.run_lint(None, body_only=True)
@@ -631,7 +680,7 @@ class NoDefaultWorkRootTests(LintFixture):
     def test_red_the_default_root_missing_is_a_skip_and_exit_0(self) -> None:
         code, printed, said = self.cli()
         self.assertEqual(code, 0, said)
-        self.assertIn("rules 1-2: no docs/work; nothing to lint", printed)
+        self.assertIn("rules 1-2: no docs/work; nothing to lint", said)
         self.assertIn("sd-docs-lint: clean", printed)
         self.assertNotIn("does not exist", said)
 
@@ -652,7 +701,7 @@ class NoDefaultWorkRootTests(LintFixture):
         code, printed, said = self.cli("--pr-body", str(body))
         self.assertEqual(code, 0, said)
         self.assertIn("PR privacy: 1 pattern(s) from", printed)
-        self.assertIn("rule 3 decision shape", printed)
+        self.assertIn("rule 3 decision shape", said)
 
     def test_an_explicit_work_dir_that_is_missing_still_fails(self) -> None:
         code, _, said = self.cli("--work-dir", "docs/work")
@@ -687,7 +736,7 @@ class MinimalModeTests(LintFixture):
     def test_green_work_rules_skip_with_a_note(self) -> None:
         report = self.run_lint()
         self.assertEqual(report.failures, [])
-        self.assertIn("rules 1-2, 7: mode: minimal keeps docs/work local; not run", report.notes)
+        self.assertIn("rules 1-2, 7: mode: minimal keeps docs/work local; not run", report.warnings)
 
     def test_red_the_same_tree_in_full_mode_still_fails_both_rules(self) -> None:
         self.write_mode("full")
