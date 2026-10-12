@@ -222,8 +222,8 @@ class TheKeyHelpNamesEveryFormTheLibraryAccepts(unittest.TestCase):
         parser the verb actually builds and asks the `key` action for its
         help, which is the text a reader gets.
 
-        Both actions that take a key are checked. `show` and `ack` are
-        registered by one loop today; a future edit that splits them could
+        Every action that takes a key is checked. `show`, `ack` and `dismiss`
+        are registered by one loop today; a future edit that splits them could
         leave one behind, and a test naming only `show` would not notice.
         """
         parser = argparse.ArgumentParser()
@@ -235,14 +235,14 @@ class TheKeyHelpNamesEveryFormTheLibraryAccepts(unittest.TestCase):
             if isinstance(action, argparse._SubParsersAction)
         )
         seen = {}
-        for name in ("show", "ack"):
+        for name in ("show", "ack", "dismiss"):
             key = next(
                 action for action in actions.choices[name]._actions
                 if action.dest == "key"
             )
             seen[name] = key.help
         self.assertEqual(
-            seen, {"show": sd_work.CONTRIBUTION_KEY_HELP, "ack": sd_work.CONTRIBUTION_KEY_HELP})
+            seen, dict.fromkeys(("show", "ack", "dismiss"), sd_work.CONTRIBUTION_KEY_HELP))
 
 
 if __name__ == "__main__":  # pragma: no cover

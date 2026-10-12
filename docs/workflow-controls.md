@@ -85,7 +85,14 @@ sd task contribution edit 42 --file changes.json --if-revision ITEM_REVISION --j
 sd task contribution list --json
 sd task contribution show item:42 --json
 sd task contribution ack item:42 --event EVENT_ID --if-revision CHECKPOINT_REVISION --json
+sd task contribution dismiss github:https://github.com/OWNER/REPO/pull/123 --if-revision CHECKPOINT_REVISION --json
 ```
+
+Use `dismiss` for an observed row with no item that will never settle, such as
+a pull request whose repository was re-created and now 404s. It acknowledges
+the row's active events and moves it to `closed`. New attention shows it again
+until acknowledged; a lifecycle change (open, closed, merged) ends the dismissal.
+Nothing dismisses a row automatically. A row with an item closes through its task.
 
 Use `edit` to attach metadata to an existing Task. Use `sd store item 42 --json`
 for its current item revision. A changes file is a UTF-8 JSON object, limited

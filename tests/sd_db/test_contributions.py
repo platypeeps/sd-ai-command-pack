@@ -1051,3 +1051,102 @@ class IssueDependencyTests(ContributionCase):
         ready = c.observe_dependencies(self.db, item, [merged, released, closed], observed_at=T1, expected_revision=before["revision"])
         self.assertTrue(ready["observation"]["satisfied"])
         self.assertEqual(c.projection(self.db)[0]["lane"], "newly_unblocked")
+
+
+class DismissTests(ContributionCase):
+    """The operator's Dismiss for a row with no item (sd:3432): a repository re-created upstream
+    left a pull request URL that 404s, so every observation holds and the row read open forever."""
+
+    def lanes(self):
+        return {row["key"]: row["lane"] for row in c.projection(self.db)}
+
+    def test_dismiss_moves_a_row_with_no_item_out_of_the_open_lanes(self):
+        key = "github:" + URL
+        observed = self.observe()
+        self.assertEqual(self.lanes(), {key: "awaiting_them"})
+        dismissed = c.dismiss(self.db, key, who="operator", expected_revision=observed["revision"])
+        self.assertEqual((dismissed["dismissed"]["by"], dismissed["dismissed"]["state"]), ("operator", "open"))
+        [row] = c.projection(self.db)
+        self.assertEqual((row["lane"], row["needs_you"], row["external_state"]), ("closed", False, "open"))
+        self.assertEqual(row["dismissed"], dismissed["dismissed"])
+        # A second dismissal is a no-op, so a double click cannot rewrite who dismissed it.
+        again = c.dismiss(self.db, key, who="someone-else", expected_revision=dismissed["revision"])
+        self.assertEqual(again["dismissed"], dismissed["dismissed"])
+
+    def test_dismiss_acknowledges_active_attention_and_its_pending_notifications(self):
+        key = "github:" + URL
+        observed = self.observe(events=[self.event()])
+        event = observed["attention"][0]["id"]
+        self.assertEqual(self.lanes(), {key: "awaiting_you"})
+        dismissed = c.dismiss(self.db, key, who="operator", expected_revision=observed["revision"])
+        self.assertEqual(dismissed["attention"], [])
+        self.assertIn(event, dismissed["acknowledged"])
+        self.assertEqual(dismissed["notifications"][event]["acknowledged_by"], "operator")
+        self.assertIsNone(c.claim_notification(self.db, key, event, owner="worker"))
+        self.assertEqual(self.lanes(), {key: "closed"})
+
+    def test_dismiss_refuses_an_item_row_an_unobserved_key_and_another_rows_revision(self):
+        other = URL.replace("12", "13")
+        registered = c.capture(self.db, title="Filed", changes={"pull_url": other}, who="operator")["item"]["id"]
+        filed = c.observe_pull(self.db, other, self.observation(), expected_revision=c.snapshot(self.db, "github:" + other)["revision"])
+        for key, revision in (("github:" + other, filed["revision"]),
+                              (f"item:{registered}", c.snapshot(self.db, f"item:{registered}")["revision"]),
+                              ("github:" + URL, c.snapshot(self.db, "github:" + URL)["revision"])):
+            with self.subTest(key=key), self.assertRaises(WorkflowError):
+                c.dismiss(self.db, key, who="operator", expected_revision=revision)
+        observed = self.observe()
+        with self.assertRaises(StaleItem):
+            c.dismiss(self.db, "github:" + URL, who="operator", expected_revision=filed["revision"])
+        stale = observed["revision"]
+        self.observe(observed_at=T1)
+        with self.assertRaises(StaleItem):
+            c.dismiss(self.db, "github:" + URL, who="operator", expected_revision=stale)
+        self.assertNotIn("dismissed", c.snapshot(self.db, "github:" + URL))
+
+    def test_dismissal_holds_across_held_and_same_state_observations_and_ends_on_a_state_change(self):
+        key = "github:" + URL
+        c.dismiss(self.db, key, who="operator", expected_revision=self.observe()["revision"])
+        held = c.observe_pull(self.db, URL, {"complete": False, "reason": "Not Found"},
+                              expected_revision=c.snapshot(self.db, key)["revision"])
+        self.assertIn("dismissed", held)
+        self.observe(observed_at=T1)
+        self.assertEqual(self.lanes(), {key: "closed"})
+        # New attention still reaches the operator; once acknowledged the row is dismissed again.
+        noticed = self.observe(observed_at=T2, events=[self.event()])
+        self.assertEqual(self.lanes(), {key: "awaiting_you"})
+        c.acknowledge(self.db, key, [noticed["attention"][0]["id"]], who="operator", expected_revision=noticed["revision"])
+        self.assertEqual(self.lanes(), {key: "closed"})
+        # A lifecycle change is new information: the dismissal ends, and the row follows its real state.
+        merged = self.observe(observed_at=T3, state="merged")
+        self.assertNotIn("dismissed", merged)
+        self.assertEqual(self.lanes(), {key: "merged"})
+
+    def test_an_issue_dismissal_ends_when_the_issue_reopens(self):
+        key = "issue:" + ISSUE
+
+        def observe(**changes):
+            return c.observe_issue(self.db, ISSUE, self.issue_observation(**changes),
+                                   expected_revision=c.snapshot(self.db, key)["revision"])
+
+        c.dismiss(self.db, key, who="operator", expected_revision=observe(state="closed", state_reason="completed")["revision"])
+        observe(observed_at=T1, state="closed", state_reason="completed")
+        self.assertIn("dismissed", c.snapshot(self.db, key))
+        observe(observed_at=T2)
+        self.assertNotIn("dismissed", c.snapshot(self.db, key))
+        self.assertEqual(self.lanes(), {key: "awaiting_them"})
+
+    def test_a_task_made_for_a_dismissed_row_shows_it_again(self):
+        key = "github:" + URL
+        c.dismiss(self.db, key, who="operator", expected_revision=self.observe()["revision"])
+        c.capture(self.db, title="Tracked after all", changes={"pull_url": URL}, who="operator")
+        [row] = c.projection(self.db)
+        self.assertEqual((row["lane"], row["dismissed"]), ("awaiting_them", None))
+
+    def test_a_checkpoint_never_dismissed_keeps_the_revision_it_had(self):
+        # A revision read before this change must still match afterwards: the body gains no default key.
+        observed = self.observe()
+        self.assertNotIn("dismissed", observed)
+        row = self.db.execute("SELECT id FROM state WHERE kind='checkpoint' AND key=? ORDER BY id DESC LIMIT 1",
+                              ("contribution:github:" + URL,)).fetchone()
+        body = {k: v for k, v in observed.items() if k not in {"key", "revision"}}
+        self.assertEqual(observed["revision"], c._digest({"key": "github:" + URL, "id": row["id"], "body": body}))

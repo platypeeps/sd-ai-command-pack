@@ -101,6 +101,20 @@ class ContributionAdapter(unittest.TestCase):
                 self.assertEqual(raised.exception.code, 2)
         self.assertEqual(self.core.acknowledge.call_count, 1)
 
+    def test_dismiss_requires_a_checkpoint_revision_and_delegates_it(self):
+        url_key = "github:https://github.com/example/project/pull/7"
+        self.row["key"] = url_key
+        self.core.dismiss.return_value = {**self.state, "key": url_key, "revision": "dismissed-revision"}
+        shown = json.loads(self.call("dismiss", url_key, "--if-revision", "checkpoint-revision", "--json"))
+        self.core.dismiss.assert_called_once_with(
+            self.connection, url_key, who="operator", expected_revision="checkpoint-revision")
+        self.assertEqual(shown["contribution"], self.row)
+        self.connect.assert_called_once_with(sd_db, write=True)
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as raised:
+            self.call("dismiss", url_key)
+        self.assertEqual(raised.exception.code, 2)
+        self.assertEqual(self.core.dismiss.call_count, 1)
+
     def test_show_joins_registered_item_and_separate_pull_attention_source(self):
         url_key = "github:https://github.com/example/project/pull/7"
         self.row.update({"item_id": 42, "attention_sources": [
@@ -248,6 +262,32 @@ class ContributionStoreCLI(unittest.TestCase):
         self.assertEqual(acknowledged["contribution"]["local_status"], "planning")
         self.call(*arguments, code=1)
         self.assertEqual(json.loads(self.call("show", key, "--json").stdout), acknowledged)
+
+    def test_dismiss_closes_an_observed_row_with_no_item_and_refuses_a_stale_checkpoint(self):
+        from sd_db import contributions
+
+        pull = "https://github.com/example/project/pull/8"
+        key = f"github:{pull}"
+        observation = {
+            "complete": True, "observed_at": "2026-09-09T01:00:00+00:00",
+            "operator": {"id": "1", "login": "operator"},
+            "author": {"id": "1", "login": "operator"}, "repo": "example/project",
+            "title": "Observed contribution", "state": "open", "head": "a" * 40, "base": "b" * 40,
+            "draft": False, "mergeable": "mergeable", "ci": "success", "ci_head": "a" * 40,
+            "ci_ids": ["check-run:10"], "why": ["author"], "blocking_labels": [],
+            "reviews": [], "events": [],
+        }
+        with sd_db.connect(sd_db.default_path(self.home)) as connection:
+            contributions.observe_pull(connection, pull, observation,
+                                       expected_revision=contributions.snapshot(connection, key)["revision"])
+        shown = json.loads(self.call("show", key, "--json").stdout)
+        self.assertEqual(shown["contribution"]["lane"], "awaiting_them")
+        arguments = ["dismiss", key, "--if-revision", shown["revision"], "--json"]
+        dismissed = json.loads(self.call(*arguments).stdout)
+        self.assertEqual(dismissed["contribution"]["lane"], "closed")
+        self.assertEqual(dismissed["dismissed"]["state"], "open")
+        self.call(*arguments, code=1)
+        self.assertEqual(json.loads(self.call("show", key, "--json").stdout), dismissed)
 
 
 class ContributionRendering(unittest.TestCase):
