@@ -736,7 +736,7 @@ def enqueue_order(connection: Any, repository: str) -> dict[str, int]:
         (len(prefix), prefix)).fetchall()}
 
 
-def newest_entry(connection: Any, repository: str, item: int) -> dict[str, Any] | None:
+def newest_entry(connection: Any, repository: str, item: int | None) -> dict[str, Any] | None:
     """`item`'s newest entry by `enqueue_order`, or None (sd:3412).
 
     Not the last by position: after a hold and `move top`, a newer entry
