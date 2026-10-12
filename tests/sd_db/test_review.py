@@ -321,7 +321,9 @@ class LabelAndWithdraw(ReviewCase):
         state = self.withdraw(item, ruled["ruling"]["id"])
         self.assertEqual(state["withdrawal"]["body"], f"Withdrawn: ruling #{ruled['ruling']['id']} on note #{note}")
         found = review.read(self.db, item)["questions"][0]
-        self.assertEqual((found["label"], found["resolved_at"]), (None, None))
+        self.assertEqual((found["label"], found["open"]), (None, True))
+        resolved = self.db.execute("SELECT resolved_at FROM note WHERE id = ?", (note,)).fetchone()[0]
+        self.assertIsNone(resolved)
         self.assertEqual([r["ruling"] for r in found["rulings"] if r["withdrawal"]], [ruled["ruling"]["id"]])
         # It can be ruled again.
         self.assertEqual(self.rule(item, 0, "deep")["ruling"]["body"], f"Ruling on note #{note}: deep")
@@ -557,7 +559,9 @@ class Apply(ReviewCase):
         self.assertEqual((result["expired"], result["closed"]), ([note], [item]))
         found = review.read(self.db, item)["questions"][1]
         self.assertEqual((found["label"], [c["text"] for c in found["comments"]]), (None, ["Expired, not ruled"]))
-        self.assertIsNotNone(found["resolved_at"])
+        self.assertEqual((found["open"], found["expired"]), (False, True))
+        resolved = self.db.execute("SELECT resolved_at FROM note WHERE id = ?", (note,)).fetchone()[0]
+        self.assertIsNotNone(resolved)
 
     def test_a_stop_after_one_expiry_reruns_to_a_closed_batch(self):
         item = self.file(nightly("2026-10-01", ["cap-retries", "split-gate"]))
@@ -596,6 +600,92 @@ class Apply(ReviewCase):
         self.assertEqual(review.apply(self.db, "nightly", who="tester"),
                          {"tasks": [], "existing": [], "expired": [], "closed": []})
         self.assertEqual(self.status(other), "planning")
+
+
+class FrozenAtClose(ReviewCase):
+    """Class pass (lane review on 2ab91c11d): labels come from the note history up to the first
+    close, never from a question's live `resolved_at`, so nothing after the close moves them."""
+
+    def hand_ruling(self, item: int, index: int, option: str) -> int:
+        """A ruling written as a decision note alone, as `sd task note` writes one: no resolution."""
+        note = review.read(self.db, item)["questions"][index]["note"]
+        return workflow.add_item_note(self.db, item, kind="decision", who="tester",
+                                      body=f"Ruling on note #{note}: {option}")["note"]["id"]
+
+    def close(self, item: int) -> None:
+        workflow.change_status(self.db, item, "done", who="tester", reason="closed for the test")
+
+    @staticmethod
+    def frozen(lines: list[dict]) -> list[dict]:
+        return [{k: v for k, v in line.items() if k != "exported_at"} for line in lines]
+
+    def test_resolving_a_question_after_the_close_moves_no_label(self):
+        item = self.file(batch())
+        self.rule(item, 0, "cheap")
+        self.hand_ruling(item, 1, "deep")
+        self.close(item)
+        before = self.frozen(review.export(self.db, item, who="tester"))
+        note = review.read(self.db, item)["questions"][1]["note"]
+        workflow.resolve_item_note(self.db, note, who="tester")
+        self.assertEqual(self.frozen(review.export(self.db, item, who="tester")), before)
+        workflow.change_status(self.db, item, "planning", who="tester")
+        self.assertEqual(self.frozen(review.export(self.db, item, who="tester")), before)
+        self.assertEqual([line["label"] for line in before[1:]], ["cheap", "deep"])
+
+    def test_reopening_a_question_after_the_close_moves_no_label(self):
+        item = self.file(batch())
+        self.rule(item, 0, "cheap")
+        self.rule(item, 1, "skip")
+        self.close(item)
+        before = self.frozen(review.export(self.db, item, who="tester"))
+        writes.reopen_note(self.db, review.read(self.db, item)["questions"][0]["note"])
+        self.assertEqual(self.frozen(review.export(self.db, item, who="tester")), before)
+        self.assertEqual((before[0]["labels"], before[0]["open"]), (2, 0))
+
+    def test_a_sealed_export_is_the_same_after_a_question_is_reopened(self):
+        item = self.file(sealed())
+        self.rule(item, 0, "cheap")
+        self.rule(item, 1, "deep")
+        before = self.frozen(review.export(self.db, item, key=KEY_A, who="tester"))
+        writes.reopen_note(self.db, review.read(self.db, item)["questions"][1]["note"])
+        self.assertEqual(self.frozen(review.export(self.db, item, key=KEY_A, who="tester")), before)
+
+    def test_a_rejection_still_suppresses_after_its_question_is_reopened(self):
+        first = self.file(nightly("2026-10-11", ["cap-retries"]))
+        self.rule(first, 0, "Reject")
+        self.close(first)
+        writes.reopen_note(self.db, review.read(self.db, first)["questions"][0]["note"])
+        result = review.file(self.db, nightly("2026-10-12", ["cap-retries", "split-gate"]), who="tester")
+        self.assertEqual([d["subject"] for d in result["dropped"]], ["cap-retries"])
+
+    def test_apply_does_not_expire_a_question_a_ruling_settled(self):
+        item = self.file(nightly("2026-10-01", ["cap-retries", "split-gate"]))
+        self.rule(item, 0, "Reject")
+        self.hand_ruling(item, 1, "Approve")
+        later = (datetime.now(UTC) + timedelta(days=8)).isoformat(timespec="seconds")
+        result = review.apply(self.db, "nightly", who="tester", now=later)
+        self.assertEqual((result["expired"], len(result["tasks"]), result["closed"]), ([], 1, [item]))
+        self.assertEqual(review.read(self.db, item)["questions"][1]["label"], "Approve")
+
+    def test_apply_leaves_a_batch_once_closed_and_reopened_alone(self):
+        item = self.file(nightly("2026-10-01", ["cap-retries", "split-gate"]))
+        self.rule(item, 0, "Approve")
+        self.close(item)
+        workflow.change_status(self.db, item, "planning", who="tester")
+        before = self.counts()
+        later = (datetime.now(UTC) + timedelta(days=8)).isoformat(timespec="seconds")
+        self.assertEqual(review.apply(self.db, "nightly", who="tester", now=later),
+                         {"tasks": [], "existing": [], "expired": [], "closed": []})
+        self.assertEqual(self.counts(), before)
+
+    def test_an_expiry_after_the_close_settles_nothing(self):
+        item = self.file(batch())
+        self.rule(item, 0, "cheap")
+        self.close(item)
+        note = review.read(self.db, item)["questions"][1]["note"]
+        workflow.add_item_note(self.db, item, who="tester", body=f"On note #{note}: Expired, not ruled")
+        found = review.read(self.db, item)
+        self.assertEqual((found["open"], found["questions"][1]["expired"]), (1, False))
 
 
 class ABenchmarkPlugIn(ReviewCase):
@@ -699,7 +789,7 @@ class TheVerb(unittest.TestCase):
         key = str(self.write("key.csv", KEY_A.decode()))
         missing = self.home / "absent" / "labels.jsonl"
         refused = self.sd_db("review", "export", str(item), "--key", key, "--out", str(missing), expect=1)
-        self.assertIn("is done, and the same command writes it again", refused.stderr)
+        self.assertIn("is closed, and the same command writes it again", refused.stderr)
         out = self.home / "labels.jsonl"
         self.sd_db("review", "export", str(item), "--key", key, "--out", str(out))
         self.assertEqual(json.loads(out.read_text().splitlines()[1])["key"]["tier"], "cheap")

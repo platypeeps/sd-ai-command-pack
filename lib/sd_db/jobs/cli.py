@@ -402,7 +402,7 @@ def _review_export(item: int, key_path: str | None, out: Path) -> int:
     try:
         review.write(lines, out)
     except OSError as failure:
-        print(f"sd-db review export: cannot write {out}: {failure.strerror}; sd:{item} is {manifest['status']}, "
+        print(f"sd-db review export: cannot write {out}: {failure.strerror}; sd:{item} is {'closed' if manifest['closed'] else 'open'}, "
               f"and the same command writes it again", file=sys.stderr)
         return 1
     print(f"sd-db: exported sd:{item}: {manifest['questions']} questions, {manifest['labels']} labels, "

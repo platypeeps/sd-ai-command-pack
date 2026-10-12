@@ -26,9 +26,10 @@ options only (the dashboard's job, not this module's); `sealed` is blind plus
 a key the producer keeps outside the store, whose SHA-256 the header holds.
 A sealed export refuses another key and an open question, and commits the
 batch's close before it parses the key. A batch once closed refuses every
-ruling and withdrawal through `rule` and `withdraw`; one written after the
-close by another path (`sd task note`, a reopen) is read as `late` and moves
-no label.
+ruling and withdrawal through `rule` and `withdraw`. Every label, and whether
+a question is open, is read from the note history up to the first close and
+never from a question's `resolved_at`: a note written after the close by
+another path (`sd task note`, a reopen) is read as `late` and moves nothing.
 """
 
 from __future__ import annotations
@@ -227,7 +228,7 @@ def _parse_question(note: dict) -> dict:
             subject = tagged[2]
     return {"note": note["id"], "subject": subject, "text": "\n".join(text).strip(), "evidence": evidence,
             "options": options, "sha256": hashlib.sha256(note["body"].encode("utf-8")).hexdigest(),
-            "asked_at": note["timestamp"], "resolved_at": note["resolved_at"]}
+            "asked_at": note["timestamp"]}
 
 
 def _batch(row: dict, notes: list[dict]) -> dict:
@@ -242,10 +243,12 @@ def _batch(row: dict, notes: list[dict]) -> dict:
     if len(asked) < header["questions"] or header["questions"] < 0:
         raise ReviewError(f"sd:{row['id']}'s header counts {header['questions']} questions; "
                           f"{len(asked)} follow it")
-    questions = {note["id"]: {**_parse_question(note), "rulings": [], "comments": [], "late": []}
+    questions = {note["id"]: {**_parse_question(note), "rulings": [], "comments": [], "late": [], "expired": False}
                  for note in asked[:header["questions"]]}
-    # The first close ends the batch: a ruling or withdrawal written after it,
-    # by hand or after a reopen, is kept as `late` and moves no label.
+    # Every label is read from this note history up to the first close, never
+    # from a question's `resolved_at`, which a writer may change after it: a
+    # ruling, withdrawal or comment written after the close is kept as `late`
+    # and moves nothing (lane review on 2ab91c11d).
     closed = next((note["id"] for note in notes if note["kind"] == "status_change"
                    and CLOSE.match(note["body"] or "")), None)
     rulings: dict[int, dict] = {}
@@ -273,18 +276,22 @@ def _batch(row: dict, notes: list[dict]) -> dict:
             ruling.update(withdrawal=note["id"], withdrawn_at=note["timestamp"])
         elif note["kind"] == "comment" and note["id"] > first["id"] and (said := COMMENT.fullmatch(body)):
             question = questions.get(int(said[1]))
-            if question is not None:
+            if question is not None and late:
+                question["late"].append({"note": note["id"], "body": body, "at": note["timestamp"]})
+            elif question is not None:
+                question["expired"] = question["expired"] or said[2] == EXPIRED
                 question["comments"].append({"note": note["id"], "text": said[2], "by": note["session"],
                                              "at": note["timestamp"]})
     for question in questions.values():
         standing = [ruling for ruling in question["rulings"] if ruling["withdrawal"] is None]
-        live = standing[-1] if standing and question["resolved_at"] is not None else None
+        live = standing[-1] if standing else None
         question.update(label=live and live["option"], ruling=live and live["ruling"],
                         ruled_by=live and live["by"], ruled_at=live and live["at"],
-                        position=live and question["options"].index(live["option"]) + 1)
+                        position=live and question["options"].index(live["option"]) + 1,
+                        open=live is None and not question["expired"])
     found = list(questions.values())
     return {"item": row, "ref": row["external_id"], "header": header, "questions": found, "closed": closed,
-            "open": sum(question["resolved_at"] is None for question in found),
+            "open": sum(question["open"] for question in found),
             "labels": sum(question["label"] is not None for question in found)}
 
 
@@ -401,8 +408,9 @@ def rule(connection: sqlite3.Connection, item: int, note: int, option: str, *,
         question = next((question for question in found["questions"] if question["note"] == note), None)
         if question is None:
             raise ReviewError(f"note {note} is not a question of sd:{item}")
-        if question["resolved_at"] is not None:
-            raise ReviewError(f"note {note} was ruled or closed at {question['resolved_at']}")
+        if not question["open"]:
+            raise ReviewError(f"note {note} is settled: ruled by note #{question['ruling']}"
+                              if question["ruling"] else f"note {note} is settled: it expired")
         if option not in question["options"]:
             raise ReviewError(f"note {note} offers no option {option!r}")
         ruled = workflow.add_item_note(connection, item, kind="decision", who=who,
@@ -475,7 +483,7 @@ def _lines(found: dict, key: bytes | None, rows: dict[str, dict] | None, now: st
     manifest = {
         "kind": "manifest", "schema": SCHEMA, "batch": found["item"]["id"], "ref": found["ref"],
         "queue": header["queue"], "name": header["batch"], "title": found["item"]["title"],
-        "status": found["item"]["status"], "source": header["source"], "mode": header["mode"],
+        "closed": found["closed"], "source": header["source"], "mode": header["mode"],
         "seal": header["seal"], "digest": header["digest"],
         "exported_by": f"sd-ai-command-pack@{_pack_commit()}",
         "exported_at": _moment(now).astimezone(UTC).isoformat(timespec="seconds"),
@@ -491,7 +499,7 @@ def _lines(found: dict, key: bytes | None, rows: dict[str, dict] | None, now: st
                 "question_sha256": question["sha256"], "evidence": question["evidence"], "options": question["options"],
                 "label": question["label"], "position": question["position"], "ruling": question["ruling"],
                 "ruled_by": question["ruled_by"], "ruled_at": question["ruled_at"],
-                "resolved_at": question["resolved_at"],
+                "expired": question["expired"],
                 "withdrawn": [{"ruling": held["ruling"], "option": held["option"], "withdrawal": held["withdrawal"],
                                "at": held["withdrawn_at"]}
                               for held in question["rulings"] if held["withdrawal"] is not None],
@@ -527,7 +535,7 @@ def export(connection: sqlite3.Connection, item: int, *, who: str, key: bytes | 
                 count = found["open"]
                 raise ReviewError(f"sd:{item} has {count} question{'s' if count != 1 else ''} open; "
                                   f"a sealed export waits until every question is ruled")
-            if found["item"]["status"] != "done":
+            if found["closed"] is None:
                 workflow.change_status(connection, item, "done", who=who,
                                        reason="sealed export: closed before the key is read")
         rows = _key_rows(key)
@@ -570,10 +578,10 @@ def _approved_task(connection: sqlite3.Connection, batch: dict, question: dict, 
 
 
 def _expire(connection: sqlite3.Connection, item: int, note: int, who: str) -> bool:
-    """Resolve one unruled question as expired; False when a ruling landed first."""
+    """Settle one unruled question as expired; False when a ruling or a close landed first."""
     with transaction(connection):
-        current = connection.execute("SELECT resolved_at FROM note WHERE id = ?", (note,)).fetchone()
-        if current is None or current["resolved_at"] is not None:
+        found = read(connection, item)
+        if found["closed"] is not None or not any(q["note"] == note and q["open"] for q in found["questions"]):
             return False
         add_note(connection, item, "comment", f"On note #{note}: {EXPIRED}", session=who)
         resolve_note(connection, note)
@@ -587,7 +595,7 @@ def _close(connection: sqlite3.Connection, item: int, who: str, reason: str) -> 
         waiting = any(question["label"] == APPROVE
                       and writes.item_by_external(connection, REF_SOURCE, f"{APPROVED}:{question['note']}") is None
                       for question in found["questions"])
-        if found["open"] or waiting or found["item"]["status"] == "done":
+        if found["open"] or waiting or found["closed"] is not None:
             return False
         workflow.change_status(connection, item, "done", who=who, reason=reason)
         return True
@@ -604,7 +612,7 @@ def apply(connection: sqlite3.Connection, queue: str, *, who: str, now: str | No
     """
     _name(queue, "queue")
     moment = _moment(now)
-    batches = [found for found in _queue(connection, queue) if found["item"]["status"] != "done"]
+    batches = [found for found in _queue(connection, queue) if found["closed"] is None]
     for found in batches:
         for question in found["questions"]:
             if question["options"] != [APPROVE, REJECT]:
@@ -625,7 +633,7 @@ def apply(connection: sqlite3.Connection, queue: str, *, who: str, now: str | No
         if found["open"] and opened > moment - timedelta(days=EXPIRE_DAYS):
             continue
         for question in found["questions"]:
-            if question["resolved_at"] is None and _expire(connection, item, question["note"], who):
+            if question["open"] and _expire(connection, item, question["note"], who):
                 result["expired"].append(question["note"])
         reason = "every question ruled" if not found["open"] else f"unruled after {EXPIRE_DAYS} days"
         if _close(connection, item, who, f"review apply: {reason}"):
