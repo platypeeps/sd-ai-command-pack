@@ -284,6 +284,7 @@ class TheStateCheckKind(SchemaCase):
             connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES (?, ?, 't', '{}')", (kind, f"k-{kind}"))
         self.assertIn("check", STATE_KINDS)
         self.assertIn("snooze", STATE_KINDS)
+        self.assertIn("view", STATE_KINDS)
 
 
 class TheLatestStateByKindAndKey(SchemaCase):
@@ -1629,6 +1630,119 @@ class TheSnoozeKind(SchemaCase):
         self.assertEqual(self._shape(raw), self._shape(self._reference(26)))
         result = migrate(self.path)
         self.assertEqual((result.before, result.applied), (26, list(range(27, SCHEMA_VERSION + 1))))
+
+
+class TheViewKind(SchemaCase):
+    """Migration 28 (sd:3430). `view` joins the `state` kinds: a Documents
+    file pinned, hidden or tagged. The table is rebuilt as 27 rebuilt it, so
+    every row comes through with its id and all four indexes come back. A
+    failed rebuild leaves the file at 27, and the reverse returns it to 27's
+    shape without the view rows."""
+
+    ROWS = [(7, "heartbeat", "runner", "t1", "{}", None),
+            (9, "restore", "2026-09-01", "t2", "{}", "t3"),
+            (11, "check", "run-1", "t4", "{}", None),
+            (12, "snooze", "today:job:x:1", "t5", "{}", None)]
+
+    def _at_version_twenty_seven(self):
+        connection = connect(self.path, create=True, write=True)
+        try:
+            paths.install(connection)
+            for version, path in schema_module.migrations():
+                # 27 literally, for the reason `_at_version_nine` gives.
+                if version > 27:
+                    break
+                connection.executescript(
+                    f"BEGIN;\n{path.read_text(encoding='utf-8')}\n"
+                    f"PRAGMA user_version = {version};\nCOMMIT;")
+            connection.executemany(
+                "INSERT INTO state (id, kind, key, timestamp, body, resolved_at) VALUES (?, ?, ?, ?, ?, ?)", self.ROWS)
+            connection.commit()
+        finally:
+            connection.close()
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(
+            "SELECT id, kind, key, timestamp, body, resolved_at FROM state ORDER BY id")]
+
+    def _shape(self, connection):
+        from sd_db.backup import _schema_objects
+
+        return ([tuple(row) for row in connection.execute("PRAGMA table_info(state)")],
+                _schema_objects(connection, ["state"]))
+
+    def _reference(self, upto):
+        reference = sqlite3.connect(":memory:")
+        self.addCleanup(reference.close)
+        paths.install(reference)
+        for version, path in schema_module.migrations():
+            if version <= upto:
+                reference.executescript(path.read_text(encoding="utf-8"))
+        return reference
+
+    def test_rows_survive_the_rebuild_and_a_view_is_accepted(self):
+        self._at_version_twenty_seven()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied), (27, list(range(28, SCHEMA_VERSION + 1))))
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.ROWS)
+        self.assertEqual(self._shape(connection), self._shape(self._reference(27)))
+        connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('view', 'system/index.html', 't6', '{}')")
+        connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('view', 'system/index.html', 't7', '{}')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('bored', 'x', 't8', '{}')")
+        # The heartbeat's and the check's one-row-per-key indexes came back with the table.
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('heartbeat', 'runner', 't9', '{}')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('check', 'run-1', 't9', '{}')")
+        self.assertEqual(connection.execute(
+            "SELECT count(*) FROM sqlite_master WHERE name LIKE 'state_before_%'").fetchone()[0], 0)
+
+    def test_a_failed_rebuild_leaves_the_file_at_twenty_seven_and_a_rerun_finishes_it(self):
+        self._at_version_twenty_seven()
+        # A row the new CHECK refuses fails the copy, after the rename and the
+        # new table: the one way the rebuild can stop half done.
+        raw = sqlite3.connect(self.path)
+        raw.execute("PRAGMA ignore_check_constraints = ON")
+        raw.execute("INSERT INTO state (id, kind, key, timestamp) VALUES (20, 'bored', 'x', 't9')")
+        raw.commit()
+        raw.close()
+        with self.assertRaises(sqlite3.IntegrityError):
+            migrate(self.path)
+        raw = sqlite3.connect(self.path)
+        self.assertEqual(schema_version(raw), 27)
+        self.assertEqual(self._rows(raw), self.ROWS + [(20, "bored", "x", "t9", None, None)])
+        self.assertEqual(self._shape(raw), self._shape(self._reference(27)))
+        self.assertEqual(raw.execute(
+            "SELECT count(*) FROM sqlite_master WHERE name LIKE 'state_before_%'").fetchone()[0], 0)
+        raw.execute("DELETE FROM state WHERE id = 20")
+        raw.commit()
+        raw.close()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied), (27, list(range(28, SCHEMA_VERSION + 1))))
+
+    def test_the_reverse_returns_the_file_to_twenty_seven_without_the_views(self):
+        self._at_version_twenty_seven()
+        migrate(self.path)
+        connection = connect(self.path, write=True)
+        connection.execute(
+            "INSERT INTO state (id, kind, key, timestamp, body) VALUES (30, 'view', 'system/index.html', 't6', '{}')")
+        connection.commit()
+        connection.close()
+        text = dict(schema_module.migrations())[28].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), 27)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        with self.assertRaises(sqlite3.IntegrityError):
+            raw.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('view', 'system/index.html', 't7', '{}')")
+        # A backup restore compares the table and its indexes to 27's shape.
+        self.assertEqual(self._shape(raw), self._shape(self._reference(27)))
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied), (27, list(range(28, SCHEMA_VERSION + 1))))
 
 
 class TheConnection(SchemaCase):

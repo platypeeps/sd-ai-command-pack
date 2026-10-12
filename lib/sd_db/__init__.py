@@ -86,6 +86,7 @@ from .writes import (
     set_bill_cap,
     set_item_fields,
     set_provider_state,
+    set_view,
     skill_use_since,
     snooze,
     snoozed,
@@ -97,6 +98,7 @@ from .writes import (
     upsert_item,
     upsert_repo,
     upsert_shadow,
+    views,
 )
 
 __version__ = "0.1.0"
@@ -176,6 +178,7 @@ __all__ = [
     "set_bill_cap",
     "set_item_fields",
     "set_provider_state",
+    "set_view",
     "settle",
     "Sitting",
     "skill_use_since",
@@ -201,4 +204,5 @@ __all__ = [
     "upsert_repo",
     "upsert_shadow",
     "verify_migration",
+    "views",
 ]

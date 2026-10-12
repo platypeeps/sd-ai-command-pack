@@ -877,14 +877,14 @@ def one_migration_back(database):
     """
     raw = sqlite3.connect(database, isolation_level=None)
     try:
-        # The reverse of 027_state_snooze.sql, which its header carries as
-        # `--   ` lines: `state` loses the `snooze` kind and the version goes to 26. The helper is rewritten with every migration: a
+        # The reverse of 028_state_view.sql, which its header carries as
+        # `--   ` lines: `state` loses the `view` kind and the version goes to 27. The helper is rewritten with every migration: a
         # migration that adds a table or a column would be refused if left in
         # place.
-        text = (SCHEMA_DIR / "027_state_snooze.sql").read_text()
+        text = (SCHEMA_DIR / "028_state_view.sql").read_text()
         script = "\n".join(line[4:] for line in text.splitlines() if line.startswith("--   "))
-        assert "PRAGMA user_version = 26" in script, \
-            "027's reverse is not where this helper expects it"
+        assert "PRAGMA user_version = 27" in script, \
+            "028's reverse is not where this helper expects it"
         raw.executescript(script)
         assert raw.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION - 1
     finally:

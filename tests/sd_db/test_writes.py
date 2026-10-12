@@ -1,5 +1,6 @@
 """Every write is a named function, and a status change carries its note."""
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -16,6 +17,7 @@ from sd_db import (
     record_state,
     resolve_state,
     set_item_fields,
+    set_view,
     skill_use_since,
     snooze,
     snoozed,
@@ -26,6 +28,7 @@ from sd_db import (
     update_assignment,
     upsert_repo,
     upsert_shadow,
+    views,
 )
 from sd_db.errors import SdDbError
 from sd_db.migrate import initialise
@@ -232,6 +235,66 @@ class TheSnooze(WriteCase):
                           ("today:g", '{"until": "2026-10-11T08:00:00Z", "seen": ""}')):
             record_state(self.connection, "snooze", key=key, body=body, timestamp=self.NOW)
         self.assertEqual(snoozed(self.connection, now=self.NOW), {})
+
+
+class TheView(WriteCase):
+    """A Documents file pinned, hidden or tagged (sd:3430): a `view` state row
+    per write, keyed `<root key>/<file>`, the latest per key the answer. A
+    field the call leaves out keeps its value, so Undo is the same call with
+    the value the page showed before. Nothing expires a row."""
+
+    KEY = "system/index.html"
+
+    def test_each_field_is_set_alone_and_the_others_keep_their_value(self):
+        self.assertEqual(set_view(self.connection, self.KEY, pinned=True),
+                         {"pinned": True, "hidden": False, "tags": []})
+        self.assertEqual(set_view(self.connection, self.KEY, tags=["plan", " review ", "plan"]),
+                         {"pinned": True, "hidden": False, "tags": ["plan", "review"]})
+        self.assertEqual(set_view(self.connection, self.KEY, hidden=True),
+                         {"pinned": True, "hidden": True, "tags": ["plan", "review"]})
+        self.assertEqual(views(self.connection), {self.KEY: {"pinned": True, "hidden": True, "tags": ["plan", "review"]}})
+        row = self.connection.execute("SELECT kind, key, body, resolved_at FROM state ORDER BY id DESC").fetchone()
+        self.assertEqual(tuple(row), ("view", self.KEY,
+                                      '{"hidden": true, "pinned": true, "tags": ["plan", "review"]}', None))
+
+    def test_unpin_unhide_and_untag_clear_and_a_cleared_key_is_not_listed(self):
+        set_view(self.connection, self.KEY, pinned=True, hidden=True, tags=["plan"])
+        set_view(self.connection, "pack/report.html", tags=["ship"])
+        self.assertEqual(set_view(self.connection, self.KEY, pinned=False),
+                         {"pinned": False, "hidden": True, "tags": ["plan"]})
+        self.assertEqual(set_view(self.connection, self.KEY, hidden=False, tags=[]),
+                         {"pinned": False, "hidden": False, "tags": []})
+        self.assertEqual(views(self.connection), {"pack/report.html": {"pinned": False, "hidden": False, "tags": ["ship"]}})
+        # Undo of the clear is the same call with what the page showed before.
+        set_view(self.connection, self.KEY, pinned=True)
+        self.assertEqual(views(self.connection)[self.KEY], {"pinned": True, "hidden": False, "tags": []})
+
+    def test_a_bad_key_flag_or_tag_is_refused_and_writes_nothing(self):
+        for key in ("", "  ", None, 7, "x" * 513):
+            with self.subTest(key=key), self.assertRaises(SdDbError):
+                set_view(self.connection, key, pinned=True)
+        for fields in ({"pinned": 1}, {"hidden": "yes"}, {"tags": "plan"}, {"tags": [7]}, {"tags": [" "]},
+                       {"tags": ["x" * 65]}, {"tags": [f"t{n}" for n in range(17)]}, {}):
+            with self.subTest(fields=fields), self.assertRaises(SdDbError):
+                set_view(self.connection, self.KEY, **fields)
+        self.assertEqual(self.connection.execute("SELECT count(*) FROM state").fetchone()[0], 0)
+
+    def test_a_body_the_reader_cannot_parse_is_no_state_and_a_write_starts_from_clear(self):
+        """An unreadable view is not a view: it pins, hides and tags nothing, and the next write replaces it."""
+        for key, body in (("r/a", "not json"), ("r/b", '["pinned"]'), ("r/c", None),
+                          ("r/d", '{"pinned": 1, "hidden": false, "tags": []}'),
+                          ("r/e", '{"pinned": true, "hidden": false, "tags": "plan"}'),
+                          ("r/f", '{"pinned": true, "hidden": false}'),
+                          ("r/g", '{"pinned": true, "hidden": false, "tags": [""]}'),
+                          ("r/h", '{"pinned": true, "hidden": false, "tags": ["%s"]}' % ("x" * 65)),
+                          ("r/i", json.dumps({"pinned": True, "hidden": False, "tags": [f"t{n}" for n in range(17)]}))):
+            record_state(self.connection, "view", key=key, body=body)
+        self.assertEqual(views(self.connection), {})
+        self.assertEqual(set_view(self.connection, "r/f", hidden=True), {"pinned": False, "hidden": True, "tags": []})
+        # A partial write never carries tags the writer itself would refuse.
+        for key in ("r/g", "r/h", "r/i"):
+            self.assertEqual(set_view(self.connection, key, pinned=True), {"pinned": True, "hidden": False, "tags": []})
+
 
 if __name__ == "__main__":
     unittest.main()
