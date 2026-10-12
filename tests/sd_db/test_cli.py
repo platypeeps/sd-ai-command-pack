@@ -155,6 +155,26 @@ class TheVerbs(CliCase):
             "sd-db: unresolved restore snapshot at 2026-10-06T00:06:00Z",
         ])
 
+    def test_status_names_the_file_size_free_pages_and_a_stray_copy_beside_the_store(self):
+        """Nothing named the growth: 1.7 GB with 874 MB free and two stale copies beside it (sd:3472)."""
+        self.sd_db("init")
+        store = self.home / ".local/share/sd/sd.db"
+        (store.parent / "sd.db.pre-1429").write_bytes(b"x" * 4096)
+        (store.parent / "sd.db.serve.lock").write_bytes(b"")
+        raw = sqlite3.connect(store, isolation_level=None)
+        raw.execute("CREATE TABLE filler (body TEXT)")
+        raw.execute("INSERT INTO filler SELECT zeroblob(65536) FROM (SELECT 1 UNION SELECT 2 UNION SELECT 3)")
+        raw.execute("DROP TABLE filler")
+        raw.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        pages, size = raw.execute("PRAGMA freelist_count").fetchone()[0], raw.execute("PRAGMA page_size").fetchone()[0]
+        raw.close()
+        self.assertGreater(pages, 0)
+        out = self.sd_db("status").stdout
+        self.assertIn(f"sd-db: {store.stat().st_size:,} bytes on disk; {pages} free page(s), "
+                      f"{pages * size:,} bytes, that only VACUUM returns", out)
+        self.assertIn("sd-db: sd.db.pre-1429 beside the store is not the store's (4,096 bytes)", out)
+        self.assertNotIn("sd.db.serve.lock", out)
+
 
 
 class MigrationVerbCase(CliCase):
