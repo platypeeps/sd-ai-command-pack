@@ -33,7 +33,10 @@ database and runs it under one runner lock per repository:
            whose prepare or merge met a hub fault goes
            back to pending, at most `HUB_RETRIES` times, and the run stops
            (sd:3239, below);
-  watch    print each gate end a lane or builder log records, once.
+  watch    print each gate end a lane or builder log records, once; with
+           `--item N`, repeated, wait until each item's newest entry that is
+           not cancelled ends, print one line each, and exit 0 only when all
+           merged (sd:3565).
 
 The verbs are the queue's only writers, each in one hub database
 transaction, so a terminal and a dashboard reorder it the same way. A change
@@ -198,6 +201,8 @@ CANCEL_SECONDS = 10
 #: failure, and the system repository's check script.
 GATE_END = re.compile(r"run-tests: end head=|check\.sh: every suite passed|make: \*\*\*")
 WATCH_MINUTES = 3
+#: How often `watch --item` reads the queue again (sd:3565).
+WATCH_PAUSE = 30
 #: Prepare's delivery choices; an entry carries one and forwards it unchanged.
 CLAIMS = ("deliver", "associate-only")
 #: The relative places `move` takes besides a 1-based position among pending entries.
@@ -736,14 +741,16 @@ def enqueue_order(connection: Any, repository: str) -> dict[str, int]:
         (len(prefix), prefix)).fetchall()}
 
 
-def newest_entry(connection: Any, repository: str, item: int | None) -> dict[str, Any] | None:
-    """`item`'s newest entry by `enqueue_order`, or None (sd:3412).
+def newest_entry(connection: Any, repository: str, item: int | None,
+                 skip: tuple[str, ...] = ()) -> dict[str, Any] | None:
+    """`item`'s newest entry by `enqueue_order` whose status is not in `skip`, or None (sd:3412).
 
     Not the last by position: after a hold and `move top`, a newer entry
     sits above older finished ones.
     """
     order = enqueue_order(connection, repository)
-    return max((row for row in stored(connection, repository) if row.get("item") == item),
+    return max((row for row in stored(connection, repository) if row.get("item") == item
+                and row.get("status") not in skip),
                key=lambda row: order.get(row["id"], 0), default=None)
 
 
@@ -2146,6 +2153,48 @@ def gate_ends(root: pathlib.Path, seen: set[str], minutes: int = WATCH_MINUTES) 
     return found
 
 
+def watch_pause() -> None:
+    """The wait between two reads of `watch --item`; a suite replaces it."""
+    time.sleep(WATCH_PAUSE)
+
+
+def watch_items(queue: Queue, items: list[int], write: Callable[[str], Any] = print) -> int:
+    """Wait until each item's newest entry that is not cancelled ends; 0 when every one merged (sd:3565).
+
+    It reads the hub alone, through `queue`, resolved once: the merge may
+    remove the worktree it started in. One line per item as it ends; an item
+    with no such entry ends at once. A read the hub did not answer is no end:
+    it reads again after the pause, and a hub that refuses this build stops it.
+    """
+    left, merged = list(dict.fromkeys(items)), True
+    while True:
+        try:
+            newest = on_hub(queue, lambda connection: {
+                item: newest_entry(connection, queue.repository, item, skip=("cancelled",)) for item in left})
+        except BuildRefused:
+            raise
+        except LaneError as error:
+            if error.code != HUB_UNAVAILABLE:
+                raise
+            write(f"hub unavailable: {error}; reading again")
+            newest = {}
+        for item, entry in newest.items():
+            status = entry.get("status") if entry else "none"
+            if status in ("pending", "running"):
+                continue
+            if entry is None:
+                write(f"sd:{item} none: no lane entry that is not cancelled")
+            elif status == "merged":
+                write(f"sd:{item} merged at {str(entry.get('merge_commit') or '')[:12]}")
+            else:
+                write(f"sd:{item} {status}: {entry.get('reason') or entry.get('code') or 'no reason recorded'}")
+            left.remove(item)
+            merged = merged and status == "merged"
+        if not left:
+            return 0 if merged else 1
+        watch_pause()
+
+
 def watch(root: pathlib.Path, *, once: bool, write: Callable[[str], Any] = print) -> int:
     seen: set[str] = set()
     while True:
@@ -2205,19 +2254,24 @@ def add_lane_verbs(commands: Any) -> None:
                         help="run the lane of each repository this machine hosts, one after another (sd:3003)")
     watcher = verbs.add_parser("watch", help="print each gate end a log under the lane root records, once")
     watcher.add_argument("--once", action="store_true", help="scan once and exit")
+    watcher.add_argument("--item", type=int, action="append", dest="items",
+                         help=f"instead wait until this item's newest entry that is not cancelled ends, reading "
+                              f"every {WATCH_PAUSE}s; repeat it; exit 0 only when every one merged (sd:3565)")
 
 
 def lane_main(args: Any) -> int:
     """The `sd-ship lane` verbs; prints JSON and exits 0, or 3 with the refusal."""
     environ = dict(os.environ)
     try:
-        if args.lane_command == "watch":
+        if args.lane_command == "watch" and not getattr(args, "items", None):
             return watch(lane_root(environ), once=args.once)
         if args.lane_command == "run" and args.hosted:  # from any folder: it reads the repo table, not the cwd
             return succeed(run_hosted(environ))
         root = sd_lib.repo_root(None)  # a git that gave no answer says why, as a ConfigError (sd:2986)
         if root is None:
             raise LaneError("cwd is not inside a Git repository")
+        if args.lane_command == "watch":
+            return watch_items(queue_for(root, environ), args.items)
         imported = {} if args.lane_command == "run" else import_file_queue(root, queue_for(root, environ))
         if args.lane_command == "enqueue":
             result: Any = enqueue_entry(root, args.item, args.title, args.body_file, environ,

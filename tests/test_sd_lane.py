@@ -2657,6 +2657,66 @@ class Watch(Lane):
             handle.write("make: *** [test] Error 1\n")
         self.assertEqual(sd_lane.gate_ends(self.root, seen), ["GATE-END lane/make-check.log: make: *** [test] Error 1"])
 
+    def watch_items(self, cwd: pathlib.Path, *items: int) -> tuple[int, list[str]]:
+        import argparse  # noqa: PLC0415
+        parser = argparse.ArgumentParser()
+        sd_lane.add_lane_verbs(parser.add_subparsers(dest="command"))
+        argv = ["lane", "watch", *[word for item in items for word in ("--item", str(item))]]
+        with contextlib.chdir(cwd), mock.patch.dict(os.environ, self.environ), \
+                contextlib.redirect_stdout(io.StringIO()) as said:
+            code = sd_lane.lane_main(parser.parse_args(argv))
+        return code, said.getvalue().splitlines()
+
+    def test_watch_item_waits_for_each_item_and_outlives_the_worktree_it_started_in(self) -> None:
+        """sd:3565. A hand-run loop of `lane list` from a builder worktree broke once the merge removed it."""
+        one, two = self.worktree("one"), self.worktree("two")
+        sd_lane.enqueue_entry(one, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        del self.answers[(1, "prepare")]
+        sd_lane.retry(self.repo, 1, self.environ)  # the failed entry is older: it ends nothing
+        sd_lane.enqueue_entry(two, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(2, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        pauses: list[int] = []
+
+        def pause() -> None:
+            pauses.append(len(pauses))
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+            git(self.repo, "worktree", "remove", "--force", str(one))
+        with mock.patch.object(sd_lane, "watch_pause", pause):
+            code, lines = self.watch_items(one, 1, 2)
+        self.assertEqual((code, pauses), (1, [0]))
+        self.assertEqual(lines, ["sd:1 merged at merged-1", "sd:2 failed: a blocking finding"])
+        self.assertEqual(self.watch_items(self.repo, 1), (0, ["sd:1 merged at merged-1"]))
+
+    def test_watch_item_skips_cancelled_entries_and_ends_an_item_with_none_at_once(self) -> None:
+        sd_lane.enqueue_entry(self.feature, 3, "three", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        sd_lane.enqueue_entry(self.feature, 3, "three", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.cancel(self.repo, 3, self.environ)
+        sd_lane.enqueue_entry(self.feature, 4, "four", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.cancel(self.repo, 4, self.environ)
+        with mock.patch.object(sd_lane, "watch_pause", side_effect=AssertionError("waited")):
+            code, lines = self.watch_items(self.repo, 3, 4, 5)
+        self.assertEqual(code, 1)
+        self.assertEqual(lines, ["sd:3 merged at merged-3", "sd:4 none: no lane entry that is not cancelled",
+                                 "sd:5 none: no lane entry that is not cancelled"])
+
+    def test_watch_item_reads_again_after_a_hub_fault(self) -> None:
+        """A read the hub did not answer is unknown, not an end."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        on_hub, faults = sd_lane.on_hub, [sd_lane.LaneError("down", code=sd_lane.HUB_UNAVAILABLE)]
+
+        def flaky(queue: sd_lane.Queue, work: Any) -> Any:
+            if faults:
+                raise faults.pop()
+            return on_hub(queue, work)
+        with mock.patch.object(sd_lane, "on_hub", flaky), mock.patch.object(
+                sd_lane, "watch_pause", lambda: sd_lane.run_lane(self.repo, self.environ, self.ship)):
+            code, lines = self.watch_items(self.repo, 1)
+        self.assertEqual(code, 0)
+        self.assertEqual(lines, ["hub unavailable: down; reading again", "sd:1 merged at merged-1"])
+
 
 class Bounds(unittest.TestCase):
     def test_prepare_and_merge_bounds_cover_a_gates_slot_wait(self) -> None:

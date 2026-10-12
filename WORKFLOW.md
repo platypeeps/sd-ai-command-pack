@@ -534,7 +534,9 @@ The rules for them:
   down every lane verb refuses `hub_unavailable`. Each prepare and merge keeps its whole output under
   `<lane>/logs/`. `list` and `cancel` read and edit the queue; `list` gives each entry
   `enqueue_seq`, an integer that orders an item's entries by enqueue and no `move` changes; `watch` prints
-  each gate end a log under `sd.lane_root` records, once. While an entry
+  each gate end a log under `sd.lane_root` records, once; `watch --item N`,
+  repeated, waits until each item's newest entry that is not cancelled ends,
+  prints one line each, and exits 0 only when all merged (sd:3565). While an entry
   the runner may merge ships, the runner gates the next entry on its
   predicted landing in the background, and waits for that gate after the
   merge, so the next prepare reuses its receipt (sd:2586). That needs the
