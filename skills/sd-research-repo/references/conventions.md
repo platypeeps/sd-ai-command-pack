@@ -232,9 +232,9 @@ current working directory and nowhere else.
 
 Each repo supplies a `research.conf.py` naming `PROJECT` and a `DOCS` list;
 per-doc keys are `src out title h1 eyebrow stand meta vtitle figs legend footer
-skip links sibling notion drive`. The visual identity is shared and lives in the
-renderer, so
-every repo renders the same way.
+skip links sibling notion drive`. The visual identity is the shared design
+foundation (OKLCH tokens, IBM Plex, a Dark · Light · System control) and lives
+in the renderer, so every repo renders the same way.
 
 One form is written per document. `docs/dashboard/<name>.html` is standalone,
 opens with `file://`, and is the form the dashboard's Documents tab lists and
@@ -414,9 +414,10 @@ never writes it, so the repo keeps owning its own output.
 The Documents tab serves under `default-src 'none'; style-src 'unsafe-inline';
 img-src data:; font-src data:`. The renderer already meets it — fonts are
 embedded as data: URIs by `bin/sd_research_fonts.py`, styles are inline, and
-there is no script. Do not add a `<link>`, a `<script>` or a remote image to a
-rendered page: it will not load, and the page will render degraded rather than
-fail visibly.
+the one script, the foundation's theme control, degrades to the reader's OS
+scheme where it is blocked. Do not add a `<link>`, another `<script>` or a
+remote image to a rendered page: it will not load, and the page will render
+degraded rather than fail visibly.
 
 `90-scratch/` is not published. Neither is working state — ledgers, receipts,
 handoff packets. Publish what a reader is meant to read.

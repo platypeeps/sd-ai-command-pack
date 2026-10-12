@@ -141,8 +141,10 @@ the shape the vault uses.
 `default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`.
 A `<link>`, a `<script>` or a remote image does not load, and the page renders
 degraded rather than failing visibly -- which is why the renderer embeds its
-fonts (`bin/sd_research_fonts.py`) instead of linking them. A skill that emits
-its own HTML meets the same rule by itself.
+fonts (`bin/sd_research_fonts.py`) instead of linking them. Its one script, the
+foundation's theme control, is inline; blocked, the page follows the OS scheme
+and hides the control. A skill that emits its own HTML meets the same rule by
+itself.
 
 The contract is a shared reference, so it reaches an installed skill only if
 that skill's `SKILL.md` cites `references/publication-contract.md`. A new

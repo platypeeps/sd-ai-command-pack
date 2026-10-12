@@ -236,6 +236,101 @@ class InlinedStylesheetTests(unittest.TestCase):
         self.assertEqual(list((REPO_ROOT / "bin").glob("*.css")), [])
 
 
+#: SHA-256 of ui-design's `foundation/tokens.css` and `foundation/theme.js`,
+#: which the renderer carries verbatim (sd:3584). When the foundation changes,
+#: paste the new file into `bin/sd_research_tokens.py` and re-pin here with
+#: `shasum -a 256 tokens.css theme.js` in that folder.
+FOUNDATION_TOKENS_SHA256 = "3c2b8c08778582910c59f0e37d2cca84446e00a248a454314853d1ae5a586f60"
+FOUNDATION_THEME_SHA256 = "3d4cf4fc4b54c168212325d12c5d60b5487feee78329131c9e4ea17d029b3a24"
+
+#: A colour written as a value rather than a token: hex, a colour function, or
+#: the two named colours a hand-written rule reaches for.
+RAW_COLOUR = re.compile(
+    r"#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(|(?<![\w-])(?:white|black)(?![\w-])")
+CUSTOM_PROPERTY = re.compile(r"(--[\w-]+)\s*:")
+
+
+class FoundationStylesheetTests(unittest.TestCase):
+    """The rendered page wears the shared foundation, unchanged (sd:3584).
+
+    The foundation's token block is the only place a colour value may appear,
+    and it must arrive byte for byte: a page that restates a value inline, or
+    edits one in its copy, has forked the design language.
+    """
+
+    page: str
+    styles: str
+    tokens: types.ModuleType
+    fonts: types.ModuleType
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        load_publish()
+
+        class Converter:
+            """python-markdown is not in the gate's environment; the page
+            shell and its stylesheet are what these tests read."""
+
+            def __init__(self, **_options: object) -> None:
+                self.toc_tokens = [{"level": 2, "id": "one", "name": "1. One", "children": []}]
+
+            def convert(self, _text: str) -> str:
+                return '<h2 id="one">1. One</h2><p>Body text.</p><table><tr><td>x</td></tr></table>'
+
+        fake = types.ModuleType("markdown")
+        fake.Markdown = Converter  # type: ignore[attr-defined]
+        with unittest.mock.patch.dict(sys.modules, {"markdown": fake}):
+            render = load_kit().load("sd_research_render")
+        cls.tokens = load_kit().load("sd_research_tokens")
+        cls.fonts = load_kit().load("sd_research_fonts")
+        figs = [("1", "pass", "held", ""), ("2", "warn", "open", ""), ("3", "fail", "broken", ""),
+                ("4", "caution", "watch", ""), ("5", "flat", "count", "")]
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "doc.md").write_text("# Title\n\nBody text.\n", encoding="utf-8")
+            with unittest.mock.patch("sys.stdout", io.StringIO()):
+                page = render.build_one(tmp, dict(src="doc.md", out="doc", title="Title", figs=figs), "TEST")
+            cls.page = Path(page).read_text(encoding="utf-8")
+        styles = re.findall(r"<style>(.*?)</style>", cls.page, re.S)
+        cls.styles = "\n".join(s for s in styles if s != cls.fonts.FONTS_CSS)
+
+    def test_the_token_block_is_the_foundation_copy(self) -> None:
+        block = self.tokens.FOUNDATION_TOKENS_CSS
+        self.assertEqual(hashlib.sha256(block.encode("utf-8")).hexdigest(), FOUNDATION_TOKENS_SHA256,
+                         "the token block differs from the foundation copy")
+        self.assertIn(block, self.styles)
+
+    def outside_the_token_block(self) -> str:
+        block = getattr(self.tokens, "FOUNDATION_TOKENS_CSS", "")
+        return self.styles.replace(block, "") if block else self.styles
+
+    def test_no_raw_colour_outside_the_token_block(self) -> None:
+        self.assertEqual(RAW_COLOUR.findall(self.outside_the_token_block()), [])
+
+    def test_no_rule_redefines_a_foundation_token(self) -> None:
+        ours = set(CUSTOM_PROPERTY.findall(self.tokens.FOUNDATION_TOKENS_CSS))
+        rest = self.outside_the_token_block()
+        self.assertEqual(ours & set(CUSTOM_PROPERTY.findall(rest)), set())
+
+    def test_the_page_loads_the_foundation_theme_control(self) -> None:
+        script = self.tokens.THEME_JS
+        self.assertEqual(hashlib.sha256(script.encode("utf-8")).hexdigest(), FOUNDATION_THEME_SHA256)
+        head = self.page.split("</head>", 1)[0]
+        self.assertIn("<script>%s</script>" % script, head)
+        for choice in ("dark", "light", "system"):
+            self.assertIn('data-theme-choice="%s"' % choice, self.page)
+
+    def test_the_faces_are_ibm_plex_and_the_old_identity_is_gone(self) -> None:
+        families = set(re.findall(r"font-family:'([^']+)'", self.fonts.FONTS_CSS))
+        self.assertEqual(families, {"IBM Plex Sans", "IBM Plex Sans Condensed", "IBM Plex Mono"})
+        for gone in ("Archivo", "Source Serif", "Mezmo"):
+            self.assertNotIn(gone, self.page)
+
+    def test_every_state_figure_carries_its_glyph(self) -> None:
+        for state, glyph in (("pass", "●"), ("warn", "▲"), ("fail", "■"), ("caution", "▲")):
+            self.assertRegex(self.page, r'class="n is-%s"><span class="g"[^>]*>%s</span>' % (state, glyph))
+        self.assertRegex(self.page, r'class="n is-flat">5<')
+
+
 class CacheVenvTests(unittest.TestCase):
     def test_the_bootstrap_venv_never_lands_beside_the_script(self) -> None:
         kit = load_kit()
