@@ -321,6 +321,17 @@ class Reading(unittest.TestCase):
         self.assertEqual(reading["summary"], "sd-check pass (check pass)")
         self.assertIsNone(sd_gate_run.check_reading(0, "not json")["report"])
 
+    def test_a_child_past_its_deadline_keeps_what_it_wrote(self) -> None:
+        """sd:3418: the timeout dropped `sd-check`'s output, so the reading could not name where it hung."""
+        code, output, errors = sd_gate_run.run_child(
+            ["sh", "-c", "echo 'shard x: start'; echo 'waiting for a slot' >&2; sleep 30"],
+            {"PATH": "/usr/bin:/bin"}, pathlib.Path("."), 2)
+        self.assertEqual((code, output), (None, "sd-check could not finish: sh: timed out after 2s"))
+        self.assertEqual(errors, "shard x: start\nwaiting for a slot\n")
+        reading = sd_gate_run.check_reading(code, output, errors)
+        self.assertEqual(reading["summary"], output)
+        self.assertIn("waiting for a slot", reading["stderr"])
+
     def test_a_failed_precheck_is_named_first(self) -> None:
         """sd:2604: the checks after a failed precheck did not run, so the summary names the precheck."""
         stopped = ('{"status": "fail", "precheck": {"name": "precheck", "status": "fail"},'

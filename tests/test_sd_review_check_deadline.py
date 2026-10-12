@@ -103,3 +103,21 @@ class TheGateDeadlineEndsTheGroup(ReviewFixture):
         pids = self.started(root / "pids")
         self.assertEqual(report["status"], "pass")
         self.assertEqual(self.survivors(pids), [], f"left running after the gate passed: {pids}")
+
+
+class TheTimeoutKeepsTheOutput(ReviewFixture):
+    """sd:3418: the runner dropped what a timed-out child wrote, so nobody could name where it hung."""
+
+    def test_the_runner_keeps_both_streams_and_ends_with_its_own_line(self) -> None:
+        result = sd_review.subprocess_runner(
+            ["sh", "-c", "echo 'shard x: start'; echo 'waiting for a slot' >&2; sleep 30"],
+            {"PATH": "/usr/bin:/bin"}, pathlib.Path("."), 2)
+        self.assertEqual((result.exit_code, result.launched, result.stdout), (124, False, "shard x: start\n"))
+        self.assertEqual(result.stderr, "waiting for a slot\nsh: timed out after 2s")
+
+    def test_the_evidence_is_the_runners_line_not_an_earlier_one_in_the_output(self) -> None:
+        """What sd-check wrote can name a step's own timeout; the runner's line, last, names the bound that stopped it."""
+        runner = lambda argv, env, cwd, limit: sd_review.Completed(  # noqa: E731
+            124, "", "check: timed out after 5s\npython3: timed out after 2s", False)
+        report = sd_review.run_check(self.make_repo(), runner, self.environment(), 2)
+        self.assertEqual((report["reason"], report["evidence"]), ("timed_out", "timed out after 2s"))
