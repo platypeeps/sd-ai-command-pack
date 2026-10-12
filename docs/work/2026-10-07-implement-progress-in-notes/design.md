@@ -61,7 +61,7 @@ landed it in pack #1267 (`40e1d08b`). A repository declares
 `.github/sd-check-scope.json` with `docs_paths` and `docs_command`. When every
 changed path matches, `sd-check --base REF` runs only `docs_command`
 (`decide` in `bin/sd_check_scope.py`). On 2026-10-07 one repository under
-`~/repos` declares it: `mezmo-world-simulator`. The pack and system do not.
+`~/repos` declares it: `example-simulator`. The pack and system do not.
 
 **Jev's skip tier does not cover the gate.** `skip` is a review tier, not a
 gate tier. `route` in `bin/sd_route.py` plans `skip` when every path is in

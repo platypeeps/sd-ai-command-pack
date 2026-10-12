@@ -2,7 +2,7 @@
 
 A tree failure already on the default branch made every prepare there fail,
 whatever the branch changed (hoa #135, anomaly-metric-creator #454,
-rwbp-coordinator #307, rwbp-website #344 on 2026-09-26). Now a failed lint is
+example-coordinator #307, example-website #344 on 2026-09-26). Now a failed lint is
 run again against `origin/<base>`: a failure the base already has comes back
 as a warning, and only the failures the branch introduces refuse.
 

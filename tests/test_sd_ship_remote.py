@@ -327,7 +327,7 @@ RULESET = {"id": 42, "name": "main", "enforcement": "active", "bypass_actors": [
 def ruleset_rules(**changes: Any) -> list[dict]:
     """The rules `repos/{slug}/rules/branches/main` lists for a ruleset that
     gates a merge the way the classic fixture does: a review rule and a
-    strict, app-bound check. Shaped as answerbook/log-distiller's `main`
+    strict, app-bound check. Shaped as example-org/log-tool's `main`
     answered on 2026-09-22, ids and names aside."""
     rules: dict[str, dict] = {
         "deletion": {"type": "deletion", "ruleset_id": 42},
@@ -617,7 +617,7 @@ class RulesetCase(unittest.TestCase):
     def test_a_bypass_list_not_shown_is_unknown_and_refuses_while_an_empty_one_validates(self) -> None:
         """GitHub returns `bypass_actors` only to a caller who can edit the
         ruleset: absent on log-distiller read with `maintain`, `[]` on
-        mezmo-world-simulator read with `admin` (2026-09-22). The pair is the
+        example-simulator read with `admin` (2026-09-22). The pair is the
         proof the default was not merely inverted: `[]` is nobody and
         validates; absent, or `null`, is unknown and refuses, as a failed
         prerequisite and not as a protection defect, because what is missing
@@ -651,7 +651,7 @@ class RulesetCase(unittest.TestCase):
                                  DECLARATION)
 
     def test_a_ruleset_that_gates_no_merge_leaves_the_declaration_true(self) -> None:
-        """`deletion` and `non_fast_forward` alone -- answerbook/mezmo-world-simulator's
+        """`deletion` and `non_fast_forward` alone -- example-org/simulator's
         ruleset 21772988 -- gate nothing a pull request must satisfy, so the
         branch is as unprotected as one with no ruleset: the declared gap holds."""
         rules = ruleset_rules(pull_request=None, required_status_checks=None)

@@ -52,7 +52,7 @@ shows the need.
       directory reports that checkout's root; without `-C` it reports the
       current one. (`tests/test_lane_chdir.py`; and from the ui-design
       checkout, `sd-review-ack -C ~/repos/system --pr 7 --check --json`
-      reported `"root": "/Users/sven/repos/system"`.)
+      reported `"root": "/Users/example/repos/system"`.)
 - [x] Each of the five commands with `-C <empty non-repository directory>`
       fails with the "not inside a git repository" message naming that
       directory, which proves the change of directory happened before

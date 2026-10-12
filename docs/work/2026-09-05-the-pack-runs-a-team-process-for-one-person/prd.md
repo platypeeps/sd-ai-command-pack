@@ -36,7 +36,7 @@ Four signals say the process serves nobody:
 
 - **The framework gets the work, not the work.** In the same eight days the
   operator's own commits split 327 to 62: pack 244, system 48, writing pack 35,
-  against 55 in `mezmo-world-simulator` and about seven in `mcp-research`. Those
+  against 55 in `example-simulator` and about seven in `mcp-research`. Those
   two repositories are the stated priority. Five commits on the tool for every
   one on the thing the tool is for.
 - **Nobody reads the artifacts.** `docs/work/archive/` holds 487 items. A full
@@ -74,7 +74,7 @@ is decided.
 
 **Not "remove the gates".** The adversarial review lane is the single measured
 win in the pack's history: it took one branch from fifteen remote review rounds
-down to three, and seven passes on `mezmo-world-simulator` found real defects
+down to three, and seven passes on `example-simulator` found real defects
 each time. What is wrong is not that reviews exist; it is that they have no
 cap, so a finished artifact can always be reviewed once more instead of sent.
 
@@ -819,8 +819,8 @@ backlog, and B names one surface for later work.
 ### Requirement 6 — nothing personal reaches a shared repository, and ownership decides
 
 A shared repository is one where somebody else also merges. Ownership decides
-the mode; the organisation name does not. `mezmo-world-simulator` sits in the
-`answerbook` organisation, has one author, and runs `full` with its triad
+the mode; the organisation name does not. `example-simulator` sits in the
+`example-org` organisation, has one author, and runs `full` with its triad
 pushed and Notion mirrors for its audience. That is intended and stays.
 
 - The `Work:` line appears in a pull request body only when the pull request
@@ -843,8 +843,8 @@ pushed and Notion mirrors for its audience. That is intended and stays.
   push or higher on it, direct collaborators, organisation members and
   teams counted the same way, from A's round twenty-six; the questions
   ask who can merge and who can read, never whose name the namespace
-  carries, which is what keeps `mezmo-world-simulator` `full` under
-  `answerbook`. Any other answer, and any failure to answer, returns `guest`
+  carries, which is what keeps `example-simulator` `full` under
+  `example-org`. Any other answer, and any failure to answer, returns `guest`
   for the artifact question while leaving the merge question to the policy
   above, which is off unless set. A personal fork of a shared upstream and a
   personally owned repository with collaborators both resolve to `guest`.
@@ -953,14 +953,14 @@ Usage counts cannot decide what stays, because none exist. Cohesion can.
 
 Internal GitHub issues stop being the place new work is filed. Two are open
 across repositories the operator contributes to (`sd-ai-command-pack` 1,
-`mezmo_benchmark` 1). They are shadowed, not imported: `sd shadow sync` keeps
+`example-benchmark` 1). They are shadowed, not imported: `sd shadow sync` keeps
 their state, both stay open on GitHub, and neither is closed with a pointer,
-from the operator's decision of 2026-09-05. `mezmo_benchmark` is
-`answerbook`'s and eight people can read it, so an issue closed with a pointer
+from the operator's decision of 2026-09-05. `example-benchmark` is
+`example-org`'s and eight people can read it, so an issue closed with a pointer
 to a database only the operator can reach would take information away from
 every other reader and give them nothing. "Owns" was wrong of both
 repositories here before that decision: the operator owns
-`sd-ai-command-pack` and is the main contributor to `mezmo_benchmark`, which
+`sd-ai-command-pack` and is the main contributor to `example-benchmark`, which
 belongs to the employer.
 
 `sd-suggest` is the one way to file, for the operator and for the agent. It
@@ -1173,7 +1173,7 @@ Two requirements of the first draft are gone, recorded here so the trail holds.
 - **The writing pipeline** (was requirement 10) moves to C,
   `2026-09-05-the-writing-pipeline-runs-on-the-row`, created 2026-09-05
   in `sd-writing-pack`. Blog writing is
-  third in priority behind `mezmo-world-simulator` and `mcp-research`, and its
+  third in priority behind `example-simulator` and `mcp-research`, and its
   ideas and pieces belong in the database, which does not exist yet. The four
   cuts it named (`sdw-review-push`, `sdw-review-pull`, `sdw-help`,
   `sdw-blog-research` folding into `sdw-research`) go with it.
@@ -1776,7 +1776,7 @@ from a number the operator types.
   and unfixable by counting; the twelve-of-82 figure is withdrawn and no figure
   replaces it, and requirement 10 now installs by path rather than by count.
 - **2026-09-05** — Second interview, on the operator's goals rather than the
-  pack's defects. Priorities: `mezmo-world-simulator` and `mcp-research` first,
+  pack's defects. Priorities: `example-simulator` and `mcp-research` first,
   blog writing third. The operator is visual, forgets commands, tinkers, and
   wants tools perfect before use; the framework has been the rabbit hole, at
   327 commits to 62. Twenty-three decisions taken, and the item split into
@@ -1791,12 +1791,12 @@ from a number the operator types.
   dashboard, migrations, the vault crons stopping, and the multiplexer wrapper.
 
   This week's deliverables, outside this item: the six `mcp-research` drafts
-  filed, and `mezmo-world-simulator` Phase 1 to `done`. The seven
-  `mezmo-world-simulator` passes are scored before any new code review runs.
+  filed, and `example-simulator` Phase 1 to `done`. The seven
+  `example-simulator` passes are scored before any new code review runs.
   *(That last sentence is what the interview decided on 2026-09-05 and is kept
   as the record. It no longer holds: the operator cut the back-scoring gate on
   2026-09-07, and the scoring is parked behind Phase 1 rather than in front of
-  any review. See the 2026-09-07 log entry "Criterion 7's `mezmo-world-simulator` scoring is cut by the operator".)*
+  any review. See the 2026-09-07 log entry "Criterion 7's `example-simulator` scoring is cut by the operator".)*
 
   One decision from the interview is corrected here. The 104 Codex sessions
   that run from the Obsidian vault are not scheduled jobs: no launchd job or
@@ -2364,8 +2364,8 @@ from a number the operator types.
 - **2026-09-05** — Planning review, round twenty-six of forty: two
   blocking findings, addressed.
   - C-51, requirement 6: the first of the three questions asked whether
-    the owner is the operator, which `mezmo-world-simulator` under the
-    `answerbook` organisation can never answer yes, and round twenty-five
+    the owner is the operator, which `example-simulator` under the
+    `example-org` organisation can never answer yes, and round twenty-five
     had made the live answer override a stored `full`, so the contract
     demoted the repository the requirement names as staying `full`.
     Addressed: the questions ask about access, admin permission for the
@@ -2719,8 +2719,8 @@ from a number the operator types.
   recorded here.
   - **C-88, requirement 11 called both repositories the operator's own.** It
     read "Two are open across repositories the operator owns
-    (`sd-ai-command-pack` 1, `mezmo_benchmark` 1)". `mezmo_benchmark`'s
-    remote is `git@github.com:answerbook/mezmo_benchmark.git`: the employer's
+    (`sd-ai-command-pack` 1, `example-benchmark` 1)". `example-benchmark`'s
+    remote is `git@github.com:example-org/benchmark.git`: the employer's
     repository, eight contributors, of which the operator is the main one but
     not the owner. Corrected in place, and the distinction now stated rather
     than assumed. Severity: material. It mattered because the sentence
@@ -5172,10 +5172,10 @@ from a number the operator types.
   checkout — `commands.yaml` is item B's and the writing manifest is another
   repository's — and PR 8d claims neither.
 
-- **2026-09-07** — **Criterion 7's `mezmo-world-simulator` scoring is cut by
+- **2026-09-07** — **Criterion 7's `example-simulator` scoring is cut by
   the operator; the no-threshold rule it was carrying stays.** The operator
   does not want the benchmark worked in parallel right now, so the clause
-  requiring the seven passes already run on `mezmo-world-simulator` to be
+  requiring the seven passes already run on `example-simulator` to be
   back-scored — and requiring that scoring *before the code review point runs
   on any new pull request* — is removed from criterion 7 and from requirement
   3's prose. The gate was the only thing on this item that could not close
@@ -5199,7 +5199,7 @@ from a number the operator types.
   decision is still recorded, still not a threshold.
 
   Parked rather than dropped. Owner: the operator. Trigger:
-  `mezmo-world-simulator` Phase 1 reaching `done`, at which point the seven
+  `example-simulator` Phase 1 reaching `done`, at which point the seven
   passes can be scored as evidence rather than as a gate. The interview record
   at `:1744` still says the passes are scored before any new code review runs;
   that line is what was decided on 2026-09-05 and is left standing as a record,
@@ -5261,7 +5261,7 @@ from a number the operator types.
   deferred. That was wrong; see the next entry.)
 
   **Criterion 7.** The 2026-09-07 entry above removed only the back-scoring of
-  the seven `mezmo-world-simulator` passes. It kept the forward experiment on
+  the seven `example-simulator` passes. It kept the forward experiment on
   purpose: the other vendor reviews the next ten code pull requests, a report
   goes on this item, and the code review point stays or goes by a recorded
   decision. No pass log, report or decision was ever recorded here. On

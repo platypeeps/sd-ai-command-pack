@@ -196,7 +196,7 @@ The ceiling is what checks this, not this paragraph.
       disposition in a later `## Log` paragraph rather than on the row. Three
       ways out, none of them free: carry the 58; teach the scanner that item's
       shape; or make the class non-abnormal so it reports without asserting.
-      **Resolved on Sven's word: teach the scanner the shape.** Read, the 58
+      **Resolved on the operator's word: teach the scanner the shape.** Read, the 58
       turned out not to be a shape problem at all but the sixth vocabulary
       `design.md` named and declined to add -- `Corrected.`, `Recorded rather
       than silently recounted.`, `Noted in the registry block`, `superseded

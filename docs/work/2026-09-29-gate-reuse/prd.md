@@ -13,7 +13,7 @@ each ran the repository's full check on the same head. Prepare's run was
 bounded by the reviewers' 1800-second phase, while the merge gate allows 3600
 seconds; on 2026-09-28 a branch that needed 1449 s alone risked a prepare
 timeout. A Markdown-only pull request paid the full check twice too: 16 to 25
-minutes of Rust tests in mezmo-world-simulator for a one-line docs change.
+minutes of Rust tests in example-simulator for a one-line docs change.
 
 This item bundles sd:2041, sd:1912 (the PRD in
 `docs/work/2026-09-28-check-receipts-on-the-item-lane/`) and sd:2072.

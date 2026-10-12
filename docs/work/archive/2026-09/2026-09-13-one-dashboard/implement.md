@@ -42,7 +42,7 @@ before starting step 2.
       `local-sd-db/sd_db/shadow_jira.py` (343 lines) and
       `local-sd-db/tests/test_shadow_jira.py` (187). Steps 4 to 9 remain.
       Verify: `git ls-tree origin/main -r --name-only | grep shadow_jira` in
-      `/Users/sven/repos/system` returns both paths — it does today — and
+      `/Users/example/repos/system` returns both paths — it does today — and
       `python -c "import sd_db; print(sd_db.TRACKERS)"` in the pack's venv prints
       `('github', 'jira')`, which is step 4's own verification. **Today it raises
       `AttributeError: module 'sd_db' has no attribute 'TRACKERS'`** — measured
@@ -61,7 +61,7 @@ before starting step 2.
       `python -c "import sd_db; print(sd_db.TRACKERS)"` prints
       `('github', 'jira')`, and the installed library reports `SCHEMA_VERSION`
       9 where the paragraph above measured 8. `git ls-tree a5347185 -r
-      --name-only | grep shadow_jira` in `/Users/sven/repos/system` still
+      --name-only | grep shadow_jira` in `/Users/example/repos/system` still
       returns both paths. The measurement behind steps 8 and 9 is sd:361's
       note 2522; the owner's check of the issues tab, LOG-23929 in the jira
       section, is its note 2542. Both are recorded on that item and not
@@ -108,17 +108,17 @@ before starting step 2.
       the machine safer rather than tidier.
 
       Verify, and the important half is a negative:
-      `launchctl list | grep com.sven.sd-dashboard` still lists the label
+      `launchctl list | grep local.system-tools.sd-dashboard` still lists the label
       after the change; the PID it prints beside the label is the PID
       `lsof -nP -iTCP:8767 -sTCP:LISTEN` prints for the listener, the two read
       at one moment, which is what ties the port to the LaunchAgent; and
-      `plutil -extract ProgramArguments json -o - ~/Library/LaunchAgents/com.sven.sd-dashboard.plist`
+      `plutil -extract ProgramArguments json -o - ~/Library/LaunchAgents/local.system-tools.sd-dashboard.plist`
       still prints the system `dashboard.sh` as element 0 — asserted **after**
       the change and before it, so the pair is evidence rather than a hope. The
       PID is never compared across runs: it was 37095 when this plan was
       measured and 76442 when step 1 landed, and every owner-approved restart
       changes it (review-909 N3). Then
-      `grep -rn "com.sven.sd-dashboard" bin/ dashboard/ tests/` prints nothing:
+      `grep -rn "local.system-tools.sd-dashboard" bin/ dashboard/ tests/` prints nothing:
       the pack no longer names a label it does not own. Then
       `grep -rn "sd-dashboard serve\|sd-dashboard install" . --include='*.md'
       --include='*.py' --include='*.sh'` outside `docs/work/archive/` prints
@@ -132,7 +132,7 @@ before starting step 2.
       register an `install` parser again, alone, and
       `test_index_is_the_only_verb` in `tests/test_sd_dashboard.py` reddens;
       revert and the tree is identical to the commit. An earlier draft said the
-      `com.sven.sd-dashboard` grep would redden instead. It cannot: the parser
+      `local.system-tools.sd-dashboard` grep would redden instead. It cannot: the parser
       registration never named the label, so that grep stays silent under this
       mutation, which is why the verb set is asserted by a test.
 
@@ -149,9 +149,9 @@ before starting step 2.
       nothing in the pack changes. When this step was planned, `queues` was the
       one of the six legacy views with no system-side path — the other five
       already rendered, four through the `collect` at
-      /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:83
+      /Users/example/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:83
       and `ports` in-process through the `_collect` at
-      /Users/sven/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py:32.
+      /Users/example/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py:32.
       The plan left open whether `queues` would join `VIEWS` or take its own
       screen, because it reads module state in `collectors.py` rather than a
       `collect_*` function; the system repository decided, and the landed
@@ -179,7 +179,7 @@ before starting step 2.
       `tests/test_code_health.py` still stand, repointed to
       `dashboard/actions.py` as the step said. System
       commit first, and it is not nothing: **remove the `tabs` and `tile` keys
-      from `/Users/sven/repos/system/sd-plugin.json`.** They are the system half
+      from `/Users/example/repos/system/sd-plugin.json`.** They are the system half
       of this step because they advertise a discovery contract to the registry,
       so they must stop advertising it before the loader that honours them is
       deleted — the same system-first order every other step follows, and an
@@ -343,13 +343,13 @@ before starting step 2.
       Pin commit, its own pull request, **and it lands before the pack commit
       above, not after it.** The order in this step is: system commit, library
       merge, pin, venv reinstall, an owner-run restart of the
-      `com.sven.sd-dashboard` LaunchAgent, verify the new view on :8767,
+      `local.system-tools.sd-dashboard` LaunchAgent, verify the new view on :8767,
       *then* the pack deletion. A merged system commit is not a running view while
       the process on :8767 serves the old library, so deleting the pack's tracker path first
       would leave the operator with neither. `.github/workflows/tests.yml` moves to
       the squash SHA of the system commit. **And the pin is not only CI's.** The
       running dashboard's own `/health` reports its `library` as
-      `/Users/sven/repos/platypeeps/sd-ai-command-pack/.venv/lib/python3.13/site-packages/sd_db/__init__.py`
+      `/Users/example/repos/platypeeps/sd-ai-command-pack/.venv/lib/python3.13/site-packages/sd_db/__init__.py`
       — measured on pull request #898 at `d0ad6542`. The surviving dashboard
       imports `sd_db` from *the pack's* virtualenv, so a system-side view that
       needs a newer library is gated on the pack's venv being reinstalled, not
@@ -360,10 +360,10 @@ before starting step 2.
       row shows its number — the same assertion sd:361 step 7b makes about the
       page it replaces. `select tracker, count(*) from shadow group by tracker`
       returns both trackers. Then the criterion 2 grep over
-      `/Users/sven/repos/system/local-project-dashboard/` still returns exactly
+      `/Users/example/repos/system/local-project-dashboard/` still returns exactly
       one hit and that hit is still the name of
       `test_no_sqlite3_connect_in_the_dashboard` at
-      /Users/sven/repos/system/local-project-dashboard/tests/test_markup.py:188 —
+      /Users/example/repos/system/local-project-dashboard/tests/test_markup.py:188 —
       asserted **after** the views arrive, because the whole risk of this step is
       that a ported view brings a connection with it. Then
       `~/.cache/sd-ai-command-pack/index.sqlite` is deleted by hand and both
@@ -913,7 +913,7 @@ before starting step 2.
 **Named before the work starts.**
 
 - **The negative that matters most is step 1's.** After `serve` and `install` are
-  gone, `launchctl list | grep com.sven.sd-dashboard` still lists the label,
+  gone, `launchctl list | grep local.system-tools.sd-dashboard` still lists the label,
   the PID beside it is the PID `lsof -nP -iTCP:8767 -sTCP:LISTEN` reports,
   the two read at one moment, and the plist's `ProgramArguments[0]` is still
   the system `dashboard.sh`. Asserted before and after, because "it still
@@ -933,7 +933,7 @@ before starting step 2.
 - **Every deletion is proved by an enumeration, never by a search for what was
   typed.** `git ls-files dashboard/` for the directory,
   `classify()` for the citations, `sd plugin list --json` for the manifest keys,
-  `grep -rn "com.sven.sd-dashboard"` for the label. Each asks the filesystem or
+  `grep -rn "local.system-tools.sd-dashboard"` for the label. Each asks the filesystem or
   the registry rather than confirming a string the author already knew.
 
 **What cannot be verified from either repository, stated rather than invented:**

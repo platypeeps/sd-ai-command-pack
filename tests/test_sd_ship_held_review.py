@@ -106,6 +106,20 @@ class HeldReview(unittest.TestCase):
         self.assertEqual(self.hub.state["reviewed_head"], HEAD)
         self.assertEqual(self.held_files(), [])
 
+    def test_a_held_review_of_a_moved_head_resumes_under_the_head_it_covers(self):
+        """sd:3379: the resumed review records the head sd-review reviewed, not the one prepare had read."""
+        moved = "e" * 40
+        changes = {"subject": {"head": moved, "base": provider_tests.BASE}}
+        self.review_done_then_hub_down(report_changes=changes)
+        review, process = self.prepare(report_changes=changes)
+        with self.assertRaises(ship.Refusal) as caught:
+            self.run_review(review)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "review_head_moved")
+        self.assertEqual(process.call_count, 0)
+        stored = self.hub.state["passes"][-1]
+        self.assertEqual((stored["head"], stored["reserved_head"], self.hub.state["reviewed_head"]), (moved, HEAD, moved))
+        self.assertEqual(self.held_files(), [])
+
     def test_the_held_review_resumes_under_retry_review_too(self):
         """The lane's one automatic retry passes --retry-review; the held review still spends no pass."""
         self.review_done_then_hub_down()

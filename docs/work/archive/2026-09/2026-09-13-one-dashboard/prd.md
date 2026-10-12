@@ -58,11 +58,11 @@ until step 3 deleted the loader.
 
 **Only in the system:** its sections, which a reader should enumerate from
 `SECTIONS` at
-/Users/sven/repos/system/local-project-dashboard/sd_dashboard/pages.py:41 rather
+/Users/example/repos/system/local-project-dashboard/sd_dashboard/pages.py:41 rather
 than from a list in prose. Eight entries today, seven of them in the nav and
 `item` deliberately not. Its Operations areas are a second declaration, `AREAS`
 at
-/Users/sven/repos/system/local-project-dashboard/sd_dashboard/operations_screen.py:14,
+/Users/example/repos/system/local-project-dashboard/sd_dashboard/operations_screen.py:14,
 eight of them. **The runner and the palette are not sections and this document
 does not call them that:** the runner renders as panels inside other screens and
 the palette is a dialog plus two API endpoints, whose read-only history is one of
@@ -75,7 +75,7 @@ two facts the two programs already share.
 once for reads and once for writes, against a cache at
 `~/.cache/sd-ai-command-pack/index.sqlite`. The system package opens none, by a
 stated contract in its own package docstring, at
-/Users/sven/repos/system/local-project-dashboard/sd_dashboard/\_\_init\_\_.py:4-6:
+/Users/example/repos/system/local-project-dashboard/sd_dashboard/\_\_init\_\_.py:4-6:
 
 > Nothing in this package opens a database of its own; the only `sqlite3`
 > connection opened anywhere is `sd_db.database`'s, which is requirement 2 and
@@ -83,7 +83,7 @@ stated contract in its own package docstring, at
 
 That contract is enforced and not merely stated: the grep runs as
 `test_no_sqlite3_connect_in_the_dashboard` at
-/Users/sven/repos/system/local-project-dashboard/tests/test_markup.py:188, whose
+/Users/example/repos/system/local-project-dashboard/tests/test_markup.py:188, whose
 docstring reads "Criterion 2: the library is the only thing that opens the
 database." Run today over the whole directory it returns one hit, and the hit is
 the name of the test itself.
@@ -103,7 +103,7 @@ The fear this plan has to answer is a broken front door mid-port. It does not
 arise, and the reason is worth stating before the ordering section leans on it.
 
 `DEFAULT_PORT` (in `dashboard/server.py`, retired at sd:719 step 6) is 8767. The process listening on 8767
-is PID 37095, which `launchctl` runs under the label `com.sven.sd-dashboard`,
+is PID 37095, which `launchctl` runs under the label `local.system-tools.sd-dashboard`,
 and whose `ProgramArguments[0]` is the system repository's
 `local-project-dashboard/dashboard.sh`. Measured by sd:705's followup note #1331,
 and independently re-measured on pull request #898 at `d0ad6542`. So the pack
@@ -116,7 +116,7 @@ operator was reading.
 
 ### And the pack's installer would stop the surviving dashboard
 
-`LABEL` (line 52 of `bin/sd-dashboard` at `e80153ee`) declares `com.sven.sd-dashboard` as the one
+`LABEL` (line 52 of `bin/sd-dashboard` at `e80153ee`) declares `local.system-tools.sd-dashboard` as the one
 LaunchAgent the pack owns, and `PLIST` (line 53 of `bin/sd-dashboard` at `e80153ee`) renders to that
 name. `cmd_install` (line 139 of `bin/sd-dashboard` at `e80153ee`) writes that file and then boots the
 label out and bootstraps its own, at lines 163-164 of that commit. Run then, it
@@ -162,15 +162,15 @@ divide.
    goes through the contract:
 
    - The tuple `VIEWS`, declared at
-     /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:24,
+     /Users/example/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:24,
      was `(("toolbox", …), ("briefs", …), ("vault", …), ("research", …))` — four
      of the six, until step 2 added `queues` — and the `collect` below it, at
-     /Users/sven/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:83,
+     /Users/example/repos/system/local-project-dashboard/sd_dashboard/reports_screen.py:83,
      spawns `sd_tile.py` by a fixed sibling path under `VIEW_SECONDS`, 5 s per
      view, and a shared 64 KB read (sd:758) — an 18-second wait and a
      65,537-byte read when this was written.
    - The `_collect` at
-     /Users/sven/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py:32
+     /Users/example/repos/system/local-project-dashboard/sd_dashboard/ports_screen.py:32
      loads `collectors.py` by path through `importlib` and calls `collect_ports`
      **in-process**, with `timeout=12`.
 
@@ -301,7 +301,7 @@ decision whose evidence has been deleted cannot be reviewed later.
 ## Acceptance criteria
 
 - [ ] `cmd_serve` and `cmd_install` are gone from `bin/sd-dashboard`, and after
-      the change the `com.sven.sd-dashboard` plist's `ProgramArguments[0]` is
+      the change the `local.system-tools.sd-dashboard` plist's `ProgramArguments[0]` is
       still the system repository's `local-project-dashboard/dashboard.sh` and
       the `:8767` listener is still that LaunchAgent's process. Not a PID: the
       PID changes on every owner-approved restart (37095 at planning, 76442
@@ -356,7 +356,7 @@ decision whose evidence has been deleted cannot be reviewed later.
   LaunchAgent and port facts taken from sd:705 note #1331 and pull request
   #898's re-measurement at `d0ad6542`, not re-run here. System facts read from
   `origin/main` at `b05d684a`, because the working checkout at
-  `/Users/sven/repos/system` lags it and a probe against the working tree
+  `/Users/example/repos/system` lags it and a probe against the working tree
   reported `shadow_jira.py` absent when it is on `main`.
 - 2026-09-13 requirement 3 was written the other way round in the first draft —
   keep the contract, move the loader — and the measurement overturned it. Five

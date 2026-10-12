@@ -119,7 +119,7 @@ class PrescreenAcceptanceTests(unittest.TestCase):
         self.assertEqual(self.refusals("Set GITHUB_TOKEN before running this."), set())
 
     def test_a_skill_that_mentions_an_address(self) -> None:
-        self.assertEqual(self.refusals("File it under sven@example.test."), set())
+        self.assertEqual(self.refusals("File it under user@example.test."), set())
 
     def test_the_clean_candidate(self) -> None:
         self.assertEqual(self.refusals(CLEAN), set())

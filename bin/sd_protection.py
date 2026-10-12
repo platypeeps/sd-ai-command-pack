@@ -10,7 +10,7 @@ gate has that from `owned()` before it reads; `sd-status` asks the repository
 object and reports the classic side unknown otherwise. And
 `repos/{slug}/rules/branches/{b}` lists the rules every *ruleset* evaluates
 for the branch while saying nothing about classic protection: measured
-2026-09-22 on answerbook/mezmo_benchmark, whose classic object requires
+2026-09-22 on example-org/benchmark, whose classic object requires
 reviews and the `CI Result` check, the rules endpoint listed only its
 ruleset's `deletion` and `non_fast_forward`. A reader of either endpoint
 alone is blind to the other (sd:1323, sd:1327), so the callers read classic
@@ -33,7 +33,7 @@ is `True` only when that holds for every rule the branch requires.
 
 The rules come back one per applied rule, each with `type`, `ruleset_id`
 and, for the rule types that carry any, `parameters`; sampled on
-answerbook/log-distiller `main` (ruleset 21102575): a `pull_request` rule
+example-org/log-tool `main` (ruleset 21102575): a `pull_request` rule
 with `required_approving_review_count`, `dismiss_stale_reviews_on_push`,
 `require_code_owner_review`, `require_last_push_approval` and
 `allowed_merge_methods`, and a `required_status_checks` rule with
@@ -42,7 +42,7 @@ with `required_approving_review_count`, `dismiss_stale_reviews_on_push`,
 carries `enforcement` and, only for a caller who can edit the ruleset,
 `bypass_actors`: measured 2026-09-22, the key is absent on log-distiller read
 with a token that has `maintain` but not `admin` there, and `[]` on
-answerbook/mezmo-world-simulator 21772988 read with `admin`. An absent key is
+example-org/simulator 21772988 read with `admin`. An absent key is
 therefore *unknown*, never "nobody": the synthesized object carries it as
 `None` beside a real `[]`, and a gate refuses on it (sd:1327's review).
 

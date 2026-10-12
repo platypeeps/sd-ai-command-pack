@@ -2444,7 +2444,7 @@ class WorkItemInventoryTests(InventoryFixture):
 
         The defect, in one item. `idle-planning` aged an item by the date it
         dated itself, so the number it printed could only ever go up: 21 of
-        mezmo_benchmark's 24 planning items read past the threshold on birth
+        example-benchmark's 24 planning items read past the threshold on birth
         dates while every one of them had been triaged live the day before.
         Its finding says the item has been planning for N days and its remedy
         is start it, park it or archive it -- all three of which assume
@@ -2463,7 +2463,7 @@ class WorkItemInventoryTests(InventoryFixture):
         A `row` checkout records a triage decision as a note against the item
         and touches no file, so the item tree is byte-identical before and
         after -- which is why this fixture commits nothing. The four decision
-        notes on mezmo_benchmark's items were exactly this shape.
+        notes on example-benchmark's items were exactly this shape.
 
         The stamp arrives on the work section, where `work_section` puts it
         from `WorkItem.activity`; `RowActivity` in `tests/test_sd_lib.py` is
@@ -4917,7 +4917,7 @@ class MirrorSyncPendingTests(InventoryFixture):
 class RulesetProtectionCase(unittest.TestCase):
     """`protection_section` when classic protection is a 404 and a ruleset applies.
 
-    Measured on rwbp-website 2026-09-22 (sd:1323): the section read
+    Measured on example-website 2026-09-22 (sd:1323): the section read
     `branches/main/protection` alone and reported a branch enforcing four
     ruleset rules as `protected: false`. It now reads `rules/branches/main`
     after the 404 and, when an active ruleset carries a merge-gating rule,
