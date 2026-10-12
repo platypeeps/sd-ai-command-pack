@@ -105,13 +105,16 @@ class LintFixture(unittest.TestCase):
         # What a row would say, by item directory name. An item not named here
         # reads whatever the database-free path answers.
         self.row_status: dict[str, str] = {}
+        # The row's `branch` column, by the same key; absent is no row answer.
+        self.row_branch: dict[str, str] = {}
         real = lint.sd_lib.status_report
 
         def status_report(item, *, statuses=None):
-            said = self.row_status.get(pathlib.Path(item).name)
+            name = pathlib.Path(item).name
+            said = self.row_status.get(name)
             if said is None:
                 return real(item, statuses=statuses)
-            return lint.sd_lib.StatusReport(said, False)
+            return lint.sd_lib.StatusReport(said, False, branch=self.row_branch.get(name))
 
         patched = mock.patch.object(lint.sd_lib, "status_report", status_report)
         patched.start()
@@ -122,6 +125,14 @@ class LintFixture(unittest.TestCase):
         item = parent / name
         item.mkdir(parents=True, exist_ok=True)
         (item / "prd.md").write_text(prd, encoding="utf-8")
+        return item
+
+    def write_design(self, name: str, body: str = "# Design\n") -> pathlib.Path:
+        """A design-only item (sd:3000): frontmatter naming its row, then `body`."""
+        item = self.work / name
+        item.mkdir(parents=True, exist_ok=True)
+        (item / "design.md").write_text(
+            f"---\ntitle: A design\nitem: sd:361\n---\n\n{body}", encoding="utf-8")
         return item
 
     def write_spec(self, area: str, pages: list[str], *, index: str | None = None) -> None:
@@ -373,6 +384,47 @@ class Rule2ReadyTests(LintFixture):
             "rules 1-2 work items: checked 2 item(s), 1 of them workable by rule 2",
             "\n".join(report.notes),
         )
+
+
+class Rule2DesignOnlyTests(LintFixture):
+    """sd:3489. Rule 2 reads a design-only item, which it once skipped whole."""
+
+    def test_red_a_ready_design_without_acceptance_criteria(self) -> None:
+        self.write_design("2026-08-30-a-design")
+        self.row_status["2026-08-30-a-design"] = "ready"
+        failures = self.assert_fails("a ready item states acceptance criteria")
+        self.assertTrue(any("a-design/design.md" in failure for failure in failures), failures)
+
+    def test_red_a_ready_design_with_an_open_blocking_line(self) -> None:
+        self.write_design("2026-08-30-a-design", "## Acceptance criteria\n\nBLOCKING: no API yet.\n")
+        self.row_status["2026-08-30-a-design"] = "ready"
+        self.assert_fails("a ready item has no open BLOCKING line")
+
+    def test_red_an_in_progress_design_whose_row_names_no_branch(self) -> None:
+        self.write_design("2026-08-30-a-design", "## Acceptance criteria\n")
+        self.row_status["2026-08-30-a-design"] = "in_progress"
+        self.row_branch["2026-08-30-a-design"] = ""
+        self.assert_fails("an in_progress item records the branch it lives on")
+
+    def test_green_an_in_progress_design_takes_its_branch_from_the_row(self) -> None:
+        """A design.md carries no `branch:` line; the row's column answers."""
+        self.write_design("2026-08-30-a-design", "## Acceptance criteria\n")
+        self.row_status["2026-08-30-a-design"] = "in_progress"
+        self.row_branch["2026-08-30-a-design"] = "feat/a-design"
+        report = self.run_lint()
+        self.assertEqual(report.failures, [])
+        self.assertIn("1 of them workable by rule 2", "\n".join(report.notes))
+
+    def test_the_branch_line_advisory_reads_a_design(self) -> None:
+        item = self.write_design("2026-08-30-a-design")
+        design = item / "design.md"
+        design.write_text(design.read_text(encoding="utf-8").replace(
+            "item: sd:361\n", "item: sd:361\nbranch: feat/old\n"), encoding="utf-8")
+        rows = mock.Mock(opened=True)
+        rows.item.return_value = {"branch": "feat/new"}
+        report = lint.Report()
+        lint.check_branch_lines(self.work, report, mock.Mock(rows=rows))
+        self.assertIn("1 of 1 active item(s) with a branch: line disagree", "\n".join(report.notes))
 
 
 class Rule2StatusSourceTests(LintFixture):

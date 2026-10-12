@@ -201,14 +201,17 @@ def check_ready(
     """
     workable = 0
     for item in item_directories(work_root):
-        prd = item / "prd.md"
+        # `prd.md`, else `design.md`: a design-only item is whole (sd:3000), and
+        # reading `prd.md` alone skipped every one of them (sd:3489).
+        prd = sd_lib.item_document(item)
         if not prd.is_file():
             continue
         text = prd.read_text(encoding="utf-8")
         fields = parse_frontmatter(text)
         if fields is None:
             continue
-        status = sd_lib.status_report(item, statuses=statuses).status
+        said = sd_lib.status_report(item, statuses=statuses)
+        status = said.status
         if status not in WORKABLE_STATUSES:
             continue
         workable += 1
@@ -218,7 +221,10 @@ def check_ready(
         for number, line in enumerate(text.split("\n"), start=1):
             if BLOCKING_RE.search(line):
                 report.fail(f"{prd}:{number}", f"a {status} item has no open BLOCKING line")
-        if status == "in_progress" and not fields.get("branch"):
+        # The row's branch or the `branch:` line: a design.md carries no line,
+        # so the line alone would fail every design-only item on its first day.
+        branch = (said.branch or "").strip() or fields.get("branch", "").strip()
+        if status == "in_progress" and not branch:
             report.fail(str(prd), "an in_progress item records the branch it lives on")
     return workable
 
@@ -708,7 +714,7 @@ def check_branch_lines(
         # directory of that name is still active (#1177 review).
         if is_archived(item, work_root):
             continue
-        prd = item / "prd.md"
+        prd = sd_lib.item_document(item)
         if not prd.is_file():
             continue
         fields = parse_frontmatter(prd.read_text(encoding="utf-8"))
