@@ -33,7 +33,7 @@ STATUS_CHANGE = "status_change"
 
 #: The `state` kinds. The `CHECK` in the schema is the enforcement; this is
 #: the list callers name, so a typo is an error here and not a silent row.
-STATE_KINDS = ("checkpoint", "verified", "restore", "watermark", "heartbeat", "check", "snooze")
+STATE_KINDS = ("checkpoint", "verified", "restore", "watermark", "heartbeat", "check", "snooze", "view")
 #: The kinds whose NULL `resolved_at` is open work; the rest are logs and
 #: cursors read latest-per-key, where NULL means nothing (sd:2849).
 OPEN_STATE_KINDS = ("restore", "verified", "check")
@@ -587,6 +587,104 @@ def snoozed(connection: sqlite3.Connection, *, now: str) -> dict[str, dict[str, 
         if moment > at and isinstance(seen, str) and seen:
             found[row["key"]] = {"until": moment.isoformat(timespec="seconds"), "seen": seen}
     return found
+
+
+#: A view key is a Documents root key and a file under it (`system/index.html`).
+VIEW_KEY_LENGTH = 512
+#: A tag is a word or two the operator types, and a file carries a few.
+VIEW_TAG_LENGTH = 64
+VIEW_TAGS = 16
+#: A file with no view row reads as this: shown, unpinned, untagged.
+VIEW_CLEAR: dict[str, Any] = {"pinned": False, "hidden": False, "tags": []}
+
+
+def set_view(
+    connection: sqlite3.Connection,
+    key: str,
+    *,
+    pinned: bool | None = None,
+    hidden: bool | None = None,
+    tags: list[str] | None = None,
+) -> dict[str, Any]:
+    """Pin, hide or tag the Documents file `key`, or clear any of them (sd:3430).
+
+    One `view` row per write, through `record_state`: the latest row for a
+    key is the answer (`views`). A field left `None` keeps the value the
+    latest row holds, read in the same transaction, so Undo is the same call
+    with the value the page showed before. Tags are trimmed and kept once, in
+    the order given; `tags=[]` untags. Nothing expires a row. Returns the
+    state written, the shape `views` reads.
+    """
+    if not isinstance(key, str) or not key.strip() or len(key) > VIEW_KEY_LENGTH:
+        raise SdDbError(f"a view needs the file's key, 1 to {VIEW_KEY_LENGTH} characters")
+    if pinned is None and hidden is None and tags is None:
+        raise SdDbError("a view write needs pinned, hidden or tags")
+    for name, flag in (("pinned", pinned), ("hidden", hidden)):
+        if flag is not None and not isinstance(flag, bool):
+            raise SdDbError(f"{name} is true or false")
+    if tags is not None:
+        tags = _view_tags(tags)
+        if tags is None:
+            raise SdDbError(f"tags is a list of up to {VIEW_TAGS} words of 1 to {VIEW_TAG_LENGTH} characters")
+    with transaction(connection):
+        row = connection.execute(
+            "SELECT body FROM state WHERE kind = 'view' AND key = ? ORDER BY id DESC LIMIT 1", (key,)
+        ).fetchone()
+        state = (_view(row["body"]) if row else None) or VIEW_CLEAR
+        state = {
+            "pinned": state["pinned"] if pinned is None else pinned,
+            "hidden": state["hidden"] if hidden is None else hidden,
+            "tags": list(state["tags"]) if tags is None else tags,
+        }
+        record_state(connection, "view", key=key, body=state)
+    return state
+
+
+def views(connection: sqlite3.Connection) -> dict[str, dict[str, Any]]:
+    """Every Documents file pinned, hidden or tagged: its `pinned`, `hidden` and `tags`.
+
+    The latest `view` row per key, read through `state_by_kind_key`. A key
+    whose latest row clears all three is not listed, and neither is one
+    whose body this cannot read: an unreadable view pins, hides and tags
+    nothing.
+    """
+    found: dict[str, dict[str, Any]] = {}
+    for row in connection.execute(
+        "SELECT key, body FROM state WHERE id IN "
+        "(SELECT max(id) FROM state WHERE kind = 'view' GROUP BY key)"
+    ):
+        state = _view(row["body"])
+        if state and state != VIEW_CLEAR:
+            found[row["key"]] = state
+    return found
+
+
+def _view(body: str | None) -> dict[str, Any] | None:
+    """A view row's body, or `None` when it is not one `set_view` would write.
+
+    The tags pass the writer's own check, so a partial write never carries
+    forward a tag the writer would refuse.
+    """
+    try:
+        state = json.loads(body or "")
+    except ValueError:
+        return None
+    if not isinstance(state, dict) or not all(isinstance(state.get(name), bool) for name in ("pinned", "hidden")):
+        return None
+    tags = _view_tags(state.get("tags"))
+    if tags is None:
+        return None
+    return {"pinned": state["pinned"], "hidden": state["hidden"], "tags": tags}
+
+
+def _view_tags(tags: Any) -> list[str] | None:
+    """`tags` trimmed and kept once, in the order given; `None` when they break a limit."""
+    if not isinstance(tags, list) or not all(isinstance(tag, str) for tag in tags):
+        return None
+    kept = list(dict.fromkeys(tag.strip() for tag in tags))
+    if any(not tag or len(tag) > VIEW_TAG_LENGTH for tag in kept) or len(kept) > VIEW_TAGS:
+        return None
+    return kept
 
 
 # ---------------------------------------------------------------- shadow
