@@ -329,6 +329,50 @@ class Runner(Lane):
                          [("failed", shown), ("failed", moved)])
         self.assertEqual(sd_lane.retry(self.repo, 1, self.environ, expected_head=moved)["expected_head"], moved)
 
+    def moved_above(self, item: int) -> tuple[str, str]:
+        """`item` fails at one head, then again at a newer one that `move top` put above it; both heads."""
+        tree = self.worktree(f"topic{item}")
+        heads = []
+        for message in ("first", "second"):
+            git(tree, "commit", "-q", "--allow-empty", "-m", message)
+            heads.append(git(tree, "rev-parse", "HEAD"))
+            sd_lane.enqueue_entry(tree, item, "t", self.body, self.environ, claim="deliver")
+            if message == "second":
+                sd_lane.move(self.repo, item, "top", self.environ)
+            self.answers[(item, "prepare")] = {"ok": False, "error": f"{message} failure"}
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([row["expected_head"] for row in self.entries() if row["item"] == item], heads[::-1])
+        return heads[0], heads[1]
+
+    def test_retry_takes_the_newest_entry_when_a_move_put_it_above_older_ones(self) -> None:
+        """sd:3412. After a hold and `move top`, the newest entry sits above an older finished one."""
+        sd_lane.enqueue_entry(self.feature, 1, "held", self.body, self.environ, claim="deliver")
+        sd_lane.set_hold(self.repo, 1, self.environ, held=True)
+        old, new = self.moved_above(2)
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, 2, self.environ, expected_head=old)
+        self.assertEqual(refused.exception.code, sd_lane.STALE_HEAD)
+        self.assertEqual(sd_lane.retry(self.repo, 2, self.environ, expected_head=new)["expected_head"], new)
+        _, new = self.moved_above(3)
+        self.assertEqual(sd_lane.retry(self.repo, 3, self.environ)["expected_head"], new)
+
+    def test_retry_refuses_a_newer_entry_written_between_its_read_and_its_write(self) -> None:
+        """sd:3412. With no expected head, the write still finds the entry it read is no longer the item's newest."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        self.answers[(1, "prepare")] = {"ok": False, "error": "a failure"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        real = sd_lane.require_published
+
+        def another_entry_ends_first(*args: Any) -> None:
+            real(*args)
+            sd_lane.update(self.store(), lambda rows: rows.insert(
+                0, {**rows[0], "id": "later", "position": 0, "status": "skipped"}))
+        with mock.patch.object(sd_lane, "require_published", another_entry_ends_first):
+            with self.assertRaises(sd_lane.LaneError) as refused:
+                sd_lane.retry(self.repo, 1, self.environ)
+        self.assertEqual(refused.exception.code, sd_lane.SUPERSEDED)
+        self.assertEqual([row["status"] for row in self.entries()], ["skipped", "failed"])
+
     def test_a_queue_write_that_fails_changes_nothing_and_says_hub_unavailable(self) -> None:
         """sd:3282: a write is one hub transaction; a fault in it leaves the entry as it was."""
         sd_lane.enqueue_entry(self.feature, 1, "t", self.body, self.environ, manual=True, claim="deliver")
@@ -1776,6 +1820,51 @@ class AnyHost(SharedQueue):
                 sd_lane.cancel(self.repo, item, self.environ)  # before the check, so a failure leaves no entry behind
                 self.assertEqual((entry["item"], entry["status"], entry["expected_head"]), (item, "pending", queued))
 
+    def test_an_own_worktree_that_moved_on_its_branch_skips_head_moved(self) -> None:
+        """sd:3413. The builder committed or amended after enqueue; the run never advises removing its branch."""
+        for amended in (False, True):
+            with self.subTest(amended=amended):
+                item = 1 + amended
+                tree, _ = self.committed(f"moved{item}", "work")
+                sd_lane.enqueue_entry(tree, item, "t", self.body, self.environ, manual=True, claim="deliver")
+                git(tree, "commit", "-q", *(["--amend"] if amended else []), "--allow-empty", "-m", "more")
+                sd_lane.run_lane(self.repo, self.environ, self.ship)
+                entry = self.entries()[-1]
+                self.assertEqual((entry["status"], entry.get("code"), self.calls), ("skipped", sd_lane.HEAD_MOVED, []))
+                self.assertIn(str(tree), entry["reason"])
+                self.assertFalse(self.made(item).exists())
+
+    def test_a_failing_branch_read_of_a_moved_own_worktree_leaves_the_entry_pending(self) -> None:
+        """sd:3413, unknown reads: the moved own worktree's branch read failed; not a skip, not a fall-through."""
+        tree, _ = self.committed("moved", "work")
+        sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, manual=True, claim="deliver")
+        git(tree, "commit", "-q", "--allow-empty", "-m", "more")
+        with self.failing("branch"):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], "holder" in entry, self.calls), ("pending", False, []))
+        self.assertIn("not skipped", answer["stopped"])
+
+    def test_an_entry_with_no_worktree_never_reads_the_runners_directory_as_its_own(self) -> None:
+        """sd:3413, codex review: `Path("")` is the current directory, which may hold the branch at another head."""
+        tree, [head] = self.committed("topic", "work")
+        sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.update(self.store(), lambda rows: rows[0].update(worktree=""))
+        git(self.repo, "worktree", "remove", "--force", str(tree))
+        git(self.repo, "branch", "-D", "topic")
+        decoy = self.tmp / "decoy"
+        git(self.tmp, "clone", "-q", "-b", "topic", str(self.origin), str(decoy))
+        git(decoy, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x")
+        self.addCleanup(os.chdir, os.getcwd())
+        os.chdir(decoy)
+        heads: list[str] = []
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            heads.append(git(pathlib.Path(argv[1]), "rev-parse", "HEAD"))
+            return self.ship(argv, log)
+        sd_lane.run_lane(self.repo, self.environ, ship)
+        self.assertEqual((self.entries()[0]["status"], heads[:1]), ("merged", [head]))
+
     def test_a_retry_never_starts_from_a_foreign_merge(self) -> None:
         """Review round 1, retry: the worktree's HEAD is a merge the lane did not make; the retry keeps the head."""
         tree = self.worktree("again")
@@ -2221,8 +2310,11 @@ class RetryCancelled(SharedQueue):
         self.assertEqual((self.entries()[-1]["status"], self.entries()[-1]["code"], self.calls),
                          ("skipped", sd_lane.HEAD_MOVED, []))
 
-    def test_a_cancelled_entry_with_a_successor_moved_above_it_is_refused(self) -> None:
-        """Failure table, read: a newer entry of the item ended at a position above the cancelled one."""
+    def test_a_successor_moved_above_a_cancelled_entry_is_the_one_retried(self) -> None:
+        """Failure table, read: a newer entry of the item ended at a position above the cancelled one.
+
+        The retry takes that newer entry, the item's last by enqueue order (sd:3412), never the cancelled one.
+        """
         sd_lane.enqueue_entry(self.committed("topic-2", "work")[0], 2, "t", self.body, self.environ, claim="deliver")
         _, head = self.cancelled(1)
         sd_lane.enqueue_entry(self.tmp / "topic-1", 1, "one", self.body, self.environ, manual=True, claim="deliver")
@@ -2231,11 +2323,10 @@ class RetryCancelled(SharedQueue):
                                                    if row["item"] == 1 and row["status"] == "pending"])
         self.assertEqual([(row["item"], row["status"]) for row in self.entries() if row["item"] == 1][-1],
                          (1, "cancelled"))
-        before = self.rows()
-        with self.assertRaises(sd_lane.LaneError) as refused:
-            sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
-        self.assertEqual(refused.exception.code, sd_lane.SUPERSEDED)
-        self.assertEqual(self.rows(), before)
+        retried = sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
+        self.assertEqual((retried["retried"]["status"], retried["expected_head"]), ("failed", head))
+        self.assertEqual([row["status"] for row in self.entries() if row["item"] == 1],
+                         ["failed", "cancelled", "pending"])
 
     def test_a_successor_written_between_the_read_and_the_write_is_refused(self) -> None:
         """Failure table, write: the transaction finds the item's entry it read is no longer its newest."""
