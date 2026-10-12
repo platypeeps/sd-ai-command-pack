@@ -62,7 +62,7 @@ A row is a pull request, an upstream issue, or local work that is neither filed 
 An issue row carries `issue_url`; an issue you have written up but not filed carries `target_repo`, `draft_title`, `draft_path` and `draft_verified` instead, and filing it keeps the item ID.
 Read event IDs and their revision with `sd task contribution show KEY --json`.
 Use `sd task contribution ack KEY --event EVENT --if-revision REVISION` to acknowledge an event explicitly.
-Use `sd task contribution dismiss KEY --if-revision REVISION` to close a row with no item that will never settle; only the operator dismisses.
+Use `sd task contribution dismiss KEY --if-revision REVISION` to close a row with no item that will not settle; only the operator dismisses.
 Acknowledgement records attention separately from notification delivery and local task completion.
 
 **A class that could not be asked prints `unchecked` and is not counted
