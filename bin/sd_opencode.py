@@ -177,6 +177,13 @@ PERMISSION: list[dict[str, str]] = [
     {"action": "list", "resource": "*", "effect": "allow"},
 ]
 
+#: opencode's own rules that may follow the map's `*: deny`, each measured
+#: from a neutral launch dir. Only an exact entry passes; any other rule after
+#: the deny, a narrowing included, still refuses. `browser` arrived in 2.0.25.
+OPENCODE_OWN: tuple[dict[str, str], ...] = (
+    {"action": "browser", "resource": "*", "effect": "deny"},
+)
+
 #: The one major version this confinement is measured against. Any other is
 #: refused before a review starts: its flags, merge order and probe are unmeasured.
 SUPPORTED_MAJOR = 2
@@ -227,7 +234,7 @@ def assert_isolated_launch(launch_dir: pathlib.Path, checkout: pathlib.Path) -> 
 def confined_rules() -> list[dict[str, str]]:
     """The ruleset opencode must resolve from the last `*: deny` on: this map,
     in order. 2.x puts its own defaults, tool-output allowance included, before
-    the deny (measured), so nothing of its own follows ours."""
+    the deny (measured); the few it puts after ours are `OPENCODE_OWN`."""
     return [dict(rule) for rule in PERMISSION]
 
 
@@ -313,7 +320,7 @@ def _tail_breach(rules: list[dict[str, str]]) -> str | None:
     deny = PERMISSION[0]
     if deny not in rules:
         return "opencode resolved sd-review with no `*: deny`; no review was started."
-    tail = rules[len(rules) - 1 - rules[::-1].index(deny):]
+    tail = [rule for rule in rules[len(rules) - 1 - rules[::-1].index(deny):] if rule not in OPENCODE_OWN]
     expected = confined_rules()
     if tail == expected:
         return None

@@ -472,6 +472,13 @@ class TheResolvedConfinementIsChecked(unittest.TestCase):
                      {"action": "grep", "resource": "*", "effect": "deny"}):
             self.assertIsNotNone(self.breach(rule), rule)
 
+    def test_opencodes_own_measured_rules_pass_and_nothing_near_them(self) -> None:
+        """2.0.25 resolves a `browser: deny` after the map from a neutral dir."""
+        browser = {"action": "browser", "resource": "*", "effect": "deny"}
+        self.assertIsNone(self.breach(browser))
+        for rule in ({**browser, "effect": "allow"}, {**browser, "resource": "x"}):
+            self.assertIsNotNone(self.breach(rule), rule)
+
     def test_a_resolution_without_the_default_deny_refuses(self) -> None:
         stdout = json.dumps({"version": "opencode v2.0.20", "plugins": [],
                              "agent": {"permissions": [{"action": "*", "resource": "*", "effect": "allow"}]}})
