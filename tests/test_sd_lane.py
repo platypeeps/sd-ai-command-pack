@@ -70,6 +70,7 @@ class Lane(unittest.TestCase):
         self.answers: dict[tuple[int, str], dict] = {}
         # A landing notes its item (sd:2568); no test writes to a real workflow database.
         self.notes: list[tuple[int, str, pathlib.Path]] = []
+        self.note_kinds: list[str] = []
         patcher = mock.patch.object(sd_lane, "default_note", self.note)
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -83,8 +84,9 @@ class Lane(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-    def note(self, item: int, body: str, main: pathlib.Path) -> str:
+    def note(self, item: int, body: str, main: pathlib.Path, kind: str = "comment") -> str:
         self.notes.append((item, body, main))
+        self.note_kinds.append(kind)
         return "written"
 
     def worktree(self, name: str) -> pathlib.Path:
@@ -1207,6 +1209,82 @@ class Landing(Lane):
         self.assertEqual(entry["status"], "merged")
         self.assertIn("the store is locked", entry["note"])
         self.assertIn("fast-forward", entry["fast_forward"])
+
+    def post_merge(self, *recipe: str) -> None:
+        """A stub Makefile in the main checkout with a `post-merge` target, untracked, as an install step would be."""
+        lines = ["VERSION := 1", "post-merge:", *(f"\t{line}" for line in recipe), "other:", "\t@echo other"]
+        (self.repo / "Makefile").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    def test_post_merge_runs_once_per_run_after_the_runner_lock_is_released(self) -> None:
+        """sd:3566. The system target's `repo-sync.sh refresh` waits for every lane's runner lock; under this
+        lane's own it waited out its 45-minute bound. So the target runs once the run released the lock."""
+        first, first_head = self.topic()
+        second, second_head = self.topic("second")
+        landed = self.advance_origin_main()
+        lock = self.store().lock_file
+        self.post_merge(f'"{sys.executable}" -c "import fcntl, sys; '
+                        f'fcntl.flock(open(sys.argv[1], \'a\'), fcntl.LOCK_EX | fcntl.LOCK_NB)" "{lock}"',
+                        "git rev-parse HEAD >> post-merge.out")
+        self.merge_lands(first, 1, first_head)
+        self.merge_lands(second, 2, second_head)
+        answer = self.drain()
+        self.assertEqual([row["status"] for row in self.entries()], ["merged", "merged"])
+        self.assertEqual(answer["post_merge"], f"make post-merge passed in {self.repo}")
+        self.assertEqual((self.repo / "post-merge.out").read_text(encoding="utf-8").splitlines(), [landed])
+        self.assertEqual([(item, body) for item, body, _ in self.notes if body.startswith("Post-merge")],
+                         [(1, f"Post-merge: make post-merge passed in {self.repo}"),
+                          (2, f"Post-merge: make post-merge passed in {self.repo}")])
+        self.assertEqual(self.note_kinds[-2:], ["comment", "comment"])
+
+    def test_a_makefile_without_the_target_runs_nothing_and_notes_nothing(self) -> None:
+        tree, head = self.topic()
+        (self.repo / "Makefile").write_text("post-merge-later:\n\ttouch ran\npost-merge := 1\n", encoding="utf-8")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertEqual((self.entries()[0]["status"], "post_merge" in answer, len(self.notes)), ("merged", False, 1))
+        self.assertFalse((self.repo / "ran").exists())
+
+    def test_a_run_that_merged_nothing_runs_no_post_merge(self) -> None:
+        tree, head = self.topic()
+        self.post_merge("touch ran")
+        self.merge_lands(tree, 1, head)
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        answer = self.drain()
+        self.assertEqual((self.entries()[0]["status"], "post_merge" in answer), ("failed", False))
+        self.assertFalse((self.repo / "ran").exists())
+
+    def test_a_failing_or_slow_post_merge_never_fails_the_merged_entry_and_files_a_followup(self) -> None:
+        tree, head = self.topic()
+        self.post_merge("@echo the install broke >&2", "@exit 3")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertEqual(self.entries()[0]["status"], "merged")
+        self.assertTrue(answer["post_merge"].startswith(f"make post-merge failed (exit 2) in {self.repo}:"), answer)
+        self.assertIn("the install broke", answer["post_merge"])
+        self.assertEqual((self.notes[-1][1], self.note_kinds[-1]), (f"Post-merge: {answer['post_merge']}", "followup"))
+        tree, head = self.topic("slow")
+        self.post_merge("sleep 60")
+        self.merge_lands(tree, 2, head)
+        started = time.monotonic()
+        with mock.patch.object(sd_lane, "POST_MERGE_SECONDS", 1):
+            answer = self.drain()
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual((self.entries()[-1]["status"], answer["post_merge"]),
+                         ("merged", f"make post-merge timed out after 1s in {self.repo}"))
+        self.assertEqual(self.note_kinds[-1], "followup")
+
+    def test_a_checkout_that_did_not_fast_forward_skips_the_post_merge_and_says_why(self) -> None:
+        tree, head = self.topic()
+        git(self.repo, "switch", "-q", "-c", "elsewhere")
+        self.post_merge("touch ran")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertFalse((self.repo / "ran").exists())
+        self.assertEqual(self.entries()[0]["status"], "merged")
+        self.assertTrue(answer["post_merge"].startswith("make post-merge skipped: the main checkout did not "
+                                                        "fast-forward (fast-forward skipped: the main checkout is on "
+                                                        "elsewhere"), answer["post_merge"])
+        self.assertEqual((self.notes[-1][1], self.note_kinds[-1]), (f"Post-merge: {answer['post_merge']}", "followup"))
 
 class Killed(BaseException):
     """A process killed between two steps: nothing after the raise runs, and no `except Exception` catches it."""
@@ -2656,6 +2734,66 @@ class Watch(Lane):
         with log.open("a", encoding="utf-8") as handle:
             handle.write("make: *** [test] Error 1\n")
         self.assertEqual(sd_lane.gate_ends(self.root, seen), ["GATE-END lane/make-check.log: make: *** [test] Error 1"])
+
+    def watch_items(self, cwd: pathlib.Path, *items: int) -> tuple[int, list[str]]:
+        import argparse  # noqa: PLC0415
+        parser = argparse.ArgumentParser()
+        sd_lane.add_lane_verbs(parser.add_subparsers(dest="command"))
+        argv = ["lane", "watch", *[word for item in items for word in ("--item", str(item))]]
+        with contextlib.chdir(cwd), mock.patch.dict(os.environ, self.environ), \
+                contextlib.redirect_stdout(io.StringIO()) as said:
+            code = sd_lane.lane_main(parser.parse_args(argv))
+        return code, said.getvalue().splitlines()
+
+    def test_watch_item_waits_for_each_item_and_outlives_the_worktree_it_started_in(self) -> None:
+        """sd:3565. A hand-run loop of `lane list` from a builder worktree broke once the merge removed it."""
+        one, two = self.worktree("one"), self.worktree("two")
+        sd_lane.enqueue_entry(one, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        del self.answers[(1, "prepare")]
+        sd_lane.retry(self.repo, 1, self.environ)  # the failed entry is older: it ends nothing
+        sd_lane.enqueue_entry(two, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(2, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        pauses: list[int] = []
+
+        def pause() -> None:
+            pauses.append(len(pauses))
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+            git(self.repo, "worktree", "remove", "--force", str(one))
+        with mock.patch.object(sd_lane, "watch_pause", pause):
+            code, lines = self.watch_items(one, 1, 2)
+        self.assertEqual((code, pauses), (1, [0]))
+        self.assertEqual(lines, ["sd:1 merged at merged-1", "sd:2 failed: a blocking finding"])
+        self.assertEqual(self.watch_items(self.repo, 1), (0, ["sd:1 merged at merged-1"]))
+
+    def test_watch_item_skips_cancelled_entries_and_ends_an_item_with_none_at_once(self) -> None:
+        sd_lane.enqueue_entry(self.feature, 3, "three", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        sd_lane.enqueue_entry(self.feature, 3, "three", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.cancel(self.repo, 3, self.environ)
+        sd_lane.enqueue_entry(self.feature, 4, "four", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.cancel(self.repo, 4, self.environ)
+        with mock.patch.object(sd_lane, "watch_pause", side_effect=AssertionError("waited")):
+            code, lines = self.watch_items(self.repo, 3, 4, 5)
+        self.assertEqual(code, 1)
+        self.assertEqual(lines, ["sd:3 merged at merged-3", "sd:4 none: no lane entry that is not cancelled",
+                                 "sd:5 none: no lane entry that is not cancelled"])
+
+    def test_watch_item_reads_again_after_a_hub_fault(self) -> None:
+        """A read the hub did not answer is unknown, not an end."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        on_hub, faults = sd_lane.on_hub, [sd_lane.LaneError("down", code=sd_lane.HUB_UNAVAILABLE)]
+
+        def flaky(queue: sd_lane.Queue, work: Any) -> Any:
+            if faults:
+                raise faults.pop()
+            return on_hub(queue, work)
+        with mock.patch.object(sd_lane, "on_hub", flaky), mock.patch.object(
+                sd_lane, "watch_pause", lambda: sd_lane.run_lane(self.repo, self.environ, self.ship)):
+            code, lines = self.watch_items(self.repo, 1)
+        self.assertEqual(code, 0)
+        self.assertEqual(lines, ["hub unavailable: down; reading again", "sd:1 merged at merged-1"])
 
 
 class Bounds(unittest.TestCase):

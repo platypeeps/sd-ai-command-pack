@@ -17,6 +17,16 @@ its snapshot restored and compared, and never before. What the table says:
                      with a partial index; every other key accumulates a row
                      per tick, and the newest is the only one any reader asks
                      for.
+    checkpoint rows  one per key, once the key sat a week (sd:3472).  For
+                     the keys `NEWEST_ONLY_CHECKPOINTS` names every reader
+                     takes the newest row (`ship.read`, `LIMIT 1`, `MAX(id)`),
+                     yet `ship.save` appends one before each side effect: 24k
+                     `ship:` rows held 700 MB on 2026-10-12. A key whose
+                     newest row is younger than `CHECKPOINT_IDLE_AGE` keeps
+                     every row, so a live ship's phases stay readable, and
+                     the hourly backups keep a dropped row a week more.
+                     `KEPT_CHECKPOINTS` names every other checkpoint key a
+                     writer uses, and why it stays whole.
     clean reports    seven days in `planning`, then `done`.  `reporting.ingest`
                      opens every report as `planning`; an attention report
                      carries a followup and waits for a person, a clean one
@@ -87,6 +97,27 @@ from .writes import add_note, set_item_fields, transition
 #: How long an `exec` note keeps its output file.
 EXEC_OUTPUT_AGE = timedelta(days=90)
 
+#: How long a checkpoint key goes unwritten before its older rows go.
+CHECKPOINT_IDLE_AGE = timedelta(days=7)
+
+#: Checkpoint key prefixes whose every reader takes the newest row per key.
+#: All but the last two are written through `ship.save` and read through
+#: `ship.read`.
+NEWEST_ONLY_CHECKPOINTS = (
+    "ship:", "ship-review-no-item:", "ship-review-no-item-index:", "ship-adjudication:",
+    "ship-adjudication-no-item:", "sd-gate-receipt:", "sd-check-receipt:", "contribution:", "provider-orders:",
+)
+
+#: Checkpoint keys retention never compacts, and why. A backup run id has no
+#: prefix: it is 32 hex digits, one row per run.
+KEPT_CHECKPOINTS = {
+    "lane:": "`sd_lane.enqueue_order` reads each key's first row as the queue order",
+    "operator-action": "`reporting.metrics` counts every row by week",
+    "operations:": "each row is a request or a cancel the operator made",
+    "contribution-refresh-queue": "`removal` reads the newest resolved row, which need not be the newest",
+    "<backup run id>": "one row per run; `backup.passed` finds it by key",
+}
+
 #: How long a clean run report waits in `planning` for an acknowledgement
 #: before retention settles it.
 CLEAN_REPORT_AGE = timedelta(days=7)
@@ -130,15 +161,17 @@ class Pruned:
     clean_reports: int
     report: int
     parked: int = 0
+    checkpoints: int = 0
 
     @property
     def counts(self) -> dict[str, int]:
         return {"exec_outputs": self.exec_outputs, "heartbeats": self.heartbeats,
-                "clean_reports": self.clean_reports, "parked": self.parked}
+                "checkpoints": self.checkpoints, "clean_reports": self.clean_reports, "parked": self.parked}
 
     def __str__(self) -> str:
         return (f"{self.exec_outputs} exec output(s) expired, "
                 f"{self.heartbeats} stale heartbeat row(s) removed, "
+                f"{self.checkpoints} superseded checkpoint row(s) removed, "
                 f"{self.clean_reports} clean report(s) settled, "
                 f"{self.parked} untouched P4 item(s) parked")
 
@@ -222,6 +255,25 @@ def compact_heartbeats(connection) -> int:
             "DELETE FROM state WHERE kind='heartbeat' AND id NOT IN ("
             "  SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY key ORDER BY timestamp DESC, id DESC) AS rank"
             "                  FROM state WHERE kind='heartbeat') WHERE rank = 1)")
+    return cursor.rowcount
+
+
+def compact_checkpoints(connection, *, now: datetime) -> int:
+    """One row per `NEWEST_ONLY_CHECKPOINTS` key whose newest row is older than `CHECKPOINT_IDLE_AGE`.
+
+    Newest is the highest id, the row `ship.read` takes, so the revision a
+    `ship.save` compares against is never the one removed. `substr`, not
+    `LIKE`: `LIKE` folds case and reads `_` as a wildcard.
+    """
+    match = " OR ".join("substr(key, 1, ?) = ?" for _ in NEWEST_ONLY_CHECKPOINTS)
+    prefixes = [value for prefix in NEWEST_ONLY_CHECKPOINTS for value in (len(prefix), prefix)]
+    with transaction(connection):
+        cursor = connection.execute(
+            "DELETE FROM state WHERE id IN ("
+            "  SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY key ORDER BY id DESC) AS rank,"
+            "                         MAX(timestamp) OVER (PARTITION BY key) AS newest"
+            f"                  FROM state WHERE kind='checkpoint' AND ({match}))"
+            "  WHERE rank > 1 AND newest < ?)", (*prefixes, _cutoff(now, CHECKPOINT_IDLE_AGE)))
     return cursor.rowcount
 
 
@@ -318,10 +370,11 @@ def prune(connection, backup: Snapshot, *, now: datetime | None = None) -> Prune
     stamp = now.astimezone(UTC).isoformat(timespec="seconds")
     exec_outputs = expire_exec_outputs(connection, now=now)
     heartbeats = compact_heartbeats(connection)
+    checkpoints = compact_checkpoints(connection, now=now)
     clean_reports = settle_clean_reports(connection, now=now)
     parked = park_untouched_p4(connection, now=now)
     result = Pruned(exec_outputs=exec_outputs, heartbeats=heartbeats, clean_reports=clean_reports, report=0,
-                    parked=len(parked))
+                    parked=len(parked), checkpoints=checkpoints)
     text = (f"sd-db prune after backup {backup.directory.name} ({backup.run_id}): {result}; "
             f"cost rows and exec notes are never pruned.\n")
     if parked:
@@ -345,4 +398,4 @@ def prune(connection, backup: Snapshot, *, now: datetime | None = None) -> Prune
                              exit_code=0, text=text, source_path=str(backup.directory), removed=result.counts,
                              **attention)
     return Pruned(exec_outputs=exec_outputs, heartbeats=heartbeats, clean_reports=clean_reports,
-                  report=state["item"]["id"], parked=len(parked))
+                  report=state["item"]["id"], parked=len(parked), checkpoints=checkpoints)

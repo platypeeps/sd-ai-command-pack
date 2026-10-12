@@ -91,6 +91,16 @@ class TheSnapshot(BackupCase):
         ).fetchone()[0]
         self.assertEqual(found, 1)
 
+    def test_the_checkpoint_row_body_is_a_json_object_naming_when(self):
+        """The proof row was a bare timestamp, the one checkpoint body not JSON (sd:3578)."""
+        when = datetime(2026, 9, 6, 3, tzinfo=UTC)
+        snapshot = run(home=self.home, when=when)
+        connection = self.open()
+        body = connection.execute(
+            "SELECT body FROM state WHERE kind = 'checkpoint' AND key = ?", (snapshot.run_id,)).fetchone()[0]
+        self.assertEqual(json.loads(body), {"at": when.isoformat()})
+        self.assertTrue(passed(connection, snapshot))
+
     def test_two_runs_in_a_day_do_not_overwrite_each_other(self):
         when = datetime(2026, 9, 6, tzinfo=UTC)
         first = run(home=self.home, when=when)

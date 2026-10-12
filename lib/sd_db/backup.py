@@ -1066,7 +1066,7 @@ def run(
         source = Path(connection.execute("PRAGMA database_list").fetchone()[2])
         if checkpointed:
             try:
-                record_state(connection, "checkpoint", key=run_id, body=when.isoformat())
+                record_state(connection, "checkpoint", key=run_id, body={"at": when.isoformat()})
             except sqlite3.Error as error:
                 raise BackupError(f"the checkpoint row was not written: {error}") from None
         try:

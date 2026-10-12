@@ -27,7 +27,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-from sd_db import reads, reporting, retention, runner, runner_exec, runner_journal, workflow
+from sd_db import reads, reporting, retention, runner, runner_exec, runner_journal, ship, workflow
 from sd_db.backup import Snapshot, passed, run
 from sd_db.database import connect, transaction
 from sd_db.migrate import initialise
@@ -150,7 +150,7 @@ class TheSeededExcess(PruneCase):
 
         pruned = prune(self.db, snapshot, now=NOW)
 
-        self.assertEqual(pruned.counts, {"exec_outputs": 1, "heartbeats": 6, "clean_reports": 0, "parked": 0})
+        self.assertEqual(pruned.counts, {"exec_outputs": 1, "heartbeats": 6, "checkpoints": 0, "clean_reports": 0, "parked": 0})
         self.assertFalse(old_log.exists())
         self.assertFalse(old_log.with_suffix(".receipt.json").exists())
         self.assertTrue(young_log.exists())
@@ -169,10 +169,10 @@ class TheSeededExcess(PruneCase):
         self.assertEqual(report["kind"], "report")
         self.assertEqual(report["external_id"], f"{JOB}:{snapshot.run_id}")
         provenance = json.loads(report["fields"])["report"]
-        self.assertEqual(provenance["removed"], {"exec_outputs": 1, "heartbeats": 6, "clean_reports": 0, "parked": 0})
+        self.assertEqual(provenance["removed"], {"exec_outputs": 1, "heartbeats": 6, "checkpoints": 0, "clean_reports": 0, "parked": 0})
         self.assertEqual(provenance["source_path"], str(snapshot.directory))
         self.assertIn(report["id"], [row["id"] for row in reporting.reports(self.db)])
-        self.assertIn("1 exec output(s) expired, 6 stale heartbeat row(s) removed, 0 clean report(s) settled",
+        self.assertIn("1 exec output(s) expired, 6 stale heartbeat row(s) removed, 0 superseded checkpoint row(s) removed, 0 clean report(s) settled",
                       json.loads(report["body"])["text"])
 
     def test_a_second_night_finds_nothing_more_to_take_and_the_next_backup_still_passes(self):
@@ -182,7 +182,7 @@ class TheSeededExcess(PruneCase):
         # The expired note has no file now; the next backup's evidence check must know why.
         later = run(home=self.home, when=NOW + timedelta(days=1))
         self.assertEqual(prune(self.db, later, now=NOW + timedelta(days=1)).counts,
-                         {"exec_outputs": 0, "heartbeats": 0, "clean_reports": 0, "parked": 0})
+                         {"exec_outputs": 0, "heartbeats": 0, "checkpoints": 0, "clean_reports": 0, "parked": 0})
 
 
 @hub_only
@@ -294,7 +294,7 @@ class TheJob(PruneCase):
                                    input="", env=environment, check=False)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertIn("pruned: 0 exec output(s) expired, 2 stale heartbeat row(s) removed, "
-                      "0 clean report(s) settled, 0 untouched P4 item(s) parked (report #", completed.stdout)
+                      "0 superseded checkpoint row(s) removed, 0 clean report(s) settled, 0 untouched P4 item(s) parked (report #", completed.stdout)
         self.assertEqual(stubs.calls("notify"), [])
         self.assertEqual(len(self.heartbeat_rows()), 1)
         self.assertEqual(self.db.execute("SELECT count(*) FROM item WHERE kind='report' AND source='cron-report'").fetchone()[0], 1)
@@ -444,14 +444,14 @@ class TheCleanReport(PruneCase):
         pruned = prune(self.db, snapshot, now=NOW)
 
         self.assertEqual(pruned.clean_reports, 1)
-        self.assertEqual(pruned.counts, {"exec_outputs": 0, "heartbeats": 0, "clean_reports": 1, "parked": 0})
+        self.assertEqual(pruned.counts, {"exec_outputs": 0, "heartbeats": 0, "checkpoints": 0, "clean_reports": 1, "parked": 0})
         self.assertEqual([self.status_of(item) for item in (old, young, flagged)], ["done", "planning", "planning"])
         report = self.db.execute("SELECT * FROM item WHERE id=?", (pruned.report,)).fetchone()
         self.assertEqual(json.loads(report["fields"])["report"]["removed"]["clean_reports"], 1)
         self.assertIn("1 clean report(s) settled", json.loads(report["body"])["text"])
         # The prune's own report is clean and opened tonight, so it waits its week too.
         self.assertEqual(report["status"], "planning")
-        self.assertEqual(str(pruned), "0 exec output(s) expired, 0 stale heartbeat row(s) removed, 1 clean report(s) settled, "
+        self.assertEqual(str(pruned), "0 exec output(s) expired, 0 stale heartbeat row(s) removed, 0 superseded checkpoint row(s) removed, 1 clean report(s) settled, "
                                       "0 untouched P4 item(s) parked")
 
     def test_the_age_is_the_table_s(self):
@@ -542,7 +542,7 @@ class AnUnreadableReport(PruneCase):
         pruned = prune(self.db, snapshot, now=NOW)
         row = self.db.execute("SELECT * FROM item WHERE id=?", (pruned.report,)).fetchone()
         text = (f"sd-db prune after backup {snapshot.directory.name} ({snapshot.run_id}): 0 exec output(s) expired, "
-                f"0 stale heartbeat row(s) removed, 1 clean report(s) settled, 0 untouched P4 item(s) parked; "
+                f"0 stale heartbeat row(s) removed, 0 superseded checkpoint row(s) removed, 1 clean report(s) settled, 0 untouched P4 item(s) parked; "
                 f"cost rows and exec notes are never pruned.\n")
         stamp = NOW.isoformat(timespec="seconds")
         self.assertEqual(json.loads(row["body"])["text"], text)
@@ -550,7 +550,7 @@ class AnUnreadableReport(PruneCase):
             "job": JOB, "run_id": snapshot.run_id, "started": stamp, "ended": stamp, "exit_code": 0,
             "source_path": str(snapshot.directory), "truncated": False,
             "text_sha256": hashlib.sha256(text.encode()).hexdigest(), "attention_basis": "explicit report",
-            "removed": {"exec_outputs": 0, "heartbeats": 0, "clean_reports": 1, "parked": 0}}})
+            "removed": {"exec_outputs": 0, "heartbeats": 0, "checkpoints": 0, "clean_reports": 1, "parked": 0}}})
         self.assertEqual(row["title"], f"{JOB}: run report")
         self.assertEqual(self.status_of(clean), "done")
 
@@ -590,6 +590,116 @@ class AnUnreadableReport(PruneCase):
         self.assertTrue(line.startswith("1001 report(s) in planning have unreadable fields: "), line)
         self.assertEqual([int(item) for item in re.findall(r"#(\d+)", line)], broken[:1000])
         self.assertTrue(line.endswith(" and 1 more"), line)
+
+
+class TheCheckpointRows(PruneCase):
+    """One row per newest-only checkpoint key once the key sat a week (sd:3472)."""
+
+    def rows(self, key, *, days, count=3):
+        """`count` receipts under `key`, the newest written `days` ago; returns their ids, oldest first."""
+        return [record_state(self.db, "checkpoint", key=key, body={"protocol": 1, "step": step},
+                             timestamp=ago(days=days, hours=count - 1 - step)) for step in range(count)]
+
+    def ids(self, key):
+        return [row[0] for row in self.db.execute("SELECT id FROM state WHERE key=? ORDER BY id", (key,))]
+
+    def test_an_idle_newest_only_key_keeps_its_newest_row_and_ship_read_still_answers(self):
+        idle, live = self.rows("ship:idle", days=8), self.rows("ship:live", days=6)
+        receipt = self.rows("sd-gate-receipt:v1:idle", days=30, count=2)
+        removed = retention.compact_checkpoints(self.db, now=NOW)
+        self.assertEqual(removed, 3)
+        self.assertEqual(self.ids("ship:idle"), idle[-1:])
+        self.assertEqual(self.ids("ship:live"), live)
+        self.assertEqual(self.ids("sd-gate-receipt:v1:idle"), receipt[-1:])
+        self.assertEqual(ship.read(self.db, "ship:idle"), (idle[-1], {"protocol": 1, "step": 2}))
+        # The revision a waiting `ship.save` holds is the row that stayed.
+        self.assertGreater(ship.save(self.db, "ship:idle", idle[-1], {"step": 3}), idle[-1])
+        self.assertEqual(retention.compact_checkpoints(self.db, now=NOW), 0)
+
+    def test_a_kept_key_and_a_lookalike_keep_every_row(self):
+        lane = self.rows("lane:v1:example/repo:entry", days=30)
+        operator = self.rows("operator-action", days=30)
+        lookalike = self.rows("Ship:upper", days=30) + self.rows("shipX:wildcard", days=30)
+        self.assertEqual(retention.compact_checkpoints(self.db, now=NOW), 0)
+        self.assertEqual(self.ids("lane:v1:example/repo:entry"), lane)
+        self.assertEqual(self.ids("operator-action"), operator)
+        self.assertEqual(self.ids("Ship:upper") + self.ids("shipX:wildcard"), lookalike)
+
+    @hub_only
+    def test_the_prune_compacts_them_and_its_report_counts_them(self):
+        kept = self.rows("ship:idle", days=10)[-1]
+        pruned = prune(self.db, self.backup(), now=NOW)
+        self.assertEqual(pruned.counts["checkpoints"], 2)
+        self.assertEqual(self.ids("ship:idle"), [kept])
+        report = self.db.execute("SELECT * FROM item WHERE id=?", (pruned.report,)).fetchone()
+        self.assertEqual(json.loads(report["fields"])["report"]["removed"]["checkpoints"], 2)
+        self.assertIn("2 superseded checkpoint row(s) removed", json.loads(report["body"])["text"])
+
+    @hub_only
+    def test_a_prune_stopped_after_the_compaction_is_finished_by_the_next_run(self):
+        """The compaction commits alone; a stop before the report leaves one row per key, and the rerun reports."""
+        kept = self.rows("ship:idle", days=10)[-1]
+        snapshot = self.backup()
+        with mock.patch.object(retention, "settle_clean_reports", side_effect=KeyboardInterrupt):
+            with self.assertRaises(KeyboardInterrupt):
+                prune(self.db, snapshot, now=NOW)
+        self.assertEqual(self.ids("ship:idle"), [kept])
+        self.assertEqual(self.db.execute("SELECT count(*) FROM item WHERE kind='report'").fetchone()[0], 0)
+        pruned = prune(self.db, snapshot, now=NOW)
+        self.assertEqual((pruned.counts["checkpoints"], self.ids("ship:idle")), (0, [kept]))
+        self.assertTrue(pruned.report)
+
+
+class EveryCheckpointWriter(unittest.TestCase):
+    """Every file that writes a checkpoint names its key prefixes, and retention classifies each one.
+
+    A new writer fails here until its prefixes go in `NEWEST_ONLY_CHECKPOINTS`,
+    which compacts them, or `KEPT_CHECKPOINTS`, which says why not (sd:3472).
+    """
+
+    ROOT = Path(__file__).resolve().parents[2]
+    WRITE = re.compile(r"record_state\(\s*\w+,\s*[\"']checkpoint[\"']|VALUES\s*\(\s*'checkpoint'|\b(?:ship|store)\.save\(")
+    WRITERS = {
+        "bin/sd-ship": ("ship:",),
+        "bin/sd_check_receipts.py": ("sd-check-receipt:",),
+        "bin/sd_gate_receipts.py": ("sd-gate-receipt:",),
+        "bin/sd_lane.py": ("lane:",),
+        "bin/sd_ship_dispositions.py": ("ship-adjudication:", "ship-adjudication-no-item:"),
+        "bin/sd_ship_no_item.py": ("ship:", "ship-review-no-item:", "ship-review-no-item-index:",
+                                   "ship-adjudication-no-item:"),
+        "bin/sd_ship_review.py": ("ship:", "ship-review-no-item:"),
+        "lib/sd_db/backup.py": ("<backup run id>",),
+        "lib/sd_db/contribution_sync.py": ("contribution-refresh-queue",),
+        "lib/sd_db/contributions.py": ("contribution:",),
+        "lib/sd_db/operations.py": ("operations:",),
+        "lib/sd_db/provider_controls.py": ("provider-orders:",),
+        "lib/sd_db/reporting.py": ("operator-action",),
+        "lib/sd_db/services.py": ("operations:",),
+        "lib/sd_db/ship.py": ("ship:",),
+    }
+
+    def sources(self):
+        for path in sorted([*(self.ROOT / "lib").rglob("*.py"), *(self.ROOT / "bin").iterdir()]):
+            if path.is_file() and not path.is_symlink():
+                text = path.read_text(encoding="utf-8", errors="replace")
+                if path.suffix == ".py" or text.startswith("#!/usr/bin/env python"):
+                    yield path.relative_to(self.ROOT).as_posix(), text
+
+    def test_every_writer_is_listed(self):
+        found = sorted(name for name, text in self.sources() if self.WRITE.search(text))
+        self.assertEqual(found, sorted(self.WRITERS))
+
+    def test_every_prefix_is_classified_once_and_every_class_entry_has_a_writer(self):
+        written = {prefix for prefixes in self.WRITERS.values() for prefix in prefixes}
+        compacted, kept = set(retention.NEWEST_ONLY_CHECKPOINTS), set(retention.KEPT_CHECKPOINTS)
+        self.assertEqual(compacted & kept, set())
+        self.assertEqual(written, compacted | kept)
+
+    def test_every_listed_prefix_is_spelled_in_the_tree(self):
+        text = "\n".join(text for _, text in self.sources())
+        for prefix in {prefix for prefixes in self.WRITERS.values() for prefix in prefixes} - {"<backup run id>"}:
+            with self.subTest(prefix=prefix):
+                self.assertIn(prefix, text)
 
 
 @hub_only

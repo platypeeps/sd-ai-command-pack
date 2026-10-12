@@ -534,7 +534,9 @@ The rules for them:
   down every lane verb refuses `hub_unavailable`. Each prepare and merge keeps its whole output under
   `<lane>/logs/`. `list` and `cancel` read and edit the queue; `list` gives each entry
   `enqueue_seq`, an integer that orders an item's entries by enqueue and no `move` changes; `watch` prints
-  each gate end a log under `sd.lane_root` records, once. While an entry
+  each gate end a log under `sd.lane_root` records, once; `watch --item N`,
+  repeated, waits until each item's newest entry that is not cancelled ends,
+  prints one line each, and exits 0 only when all merged (sd:3565). While an entry
   the runner may merge ships, the runner gates the next entry on its
   predicted landing in the background, and waits for that gate after the
   merge, so the next prepare reuses its receipt (sd:2586). That needs the
@@ -569,7 +571,11 @@ The rules for them:
   branch <branch> <tip>. Remove: <command>` Last, it fast-forwards the main
   checkout when it is on the default branch. When that checkout holds the
   running `sd-ship`, it first tries every other lane's runner lock once and
-  skips if one is held; the next landing retries.
+  skips if one is held; the next landing retries. Once a run that merged
+  releases its runner lock, a `post-merge:` rule in that checkout's Makefile
+  runs there once as `make post-merge`, bounded to 10 minutes, if the last
+  landing fast-forwarded it. The run's `post_merge` and a note on each merged
+  item give the outcome: a comment when it passed, else a followup (sd:3566).
 - **Clean up after a merge, once its builder has stopped.** Remove the clean
   worktree, its local branches, its build output and agents nothing uses; keep
   unpushed unmerged work. A live builder holds its worktree open, and a
