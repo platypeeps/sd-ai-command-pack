@@ -681,6 +681,29 @@ class TaskCLI(unittest.TestCase):
         said = " ".join(self.call("task", "add", "--help").stdout.split())
         self.assertIn("refuse unless this is a checkout registered in the sd database", said)
 
+    def test_add_belongs_to_files_the_item_into_another_checkout_in_one_call(self):
+        """sd:3567. Filing into another repository took an add and then an edit."""
+        first, second, stranger = self._checkout("first"), self._checkout("second"), self._checkout("stranger")
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.repos.add(connection, first, home=self.home)
+            sd_db.repos.add(connection, second, home=self.home)
+        linked = self.home / "first-linked"
+        subprocess.run(["git", "worktree", "add", "-q", "-b", "side", str(linked)],
+                       cwd=str(first), check=True, capture_output=True, text=True, env=clean_environment())
+        filed = json.loads(self.call("task", "add", "For the other repo", "--belongs-to", linked,
+                                     "--json", cwd=second).stdout)
+        self.assertEqual(filed["item"]["repo"], sd_lib.stored_repo(first))
+        here = json.loads(self.call("task", "add", "Here", "--belongs-to", ".", "--json", cwd=second).stdout)
+        self.assertEqual(here["item"]["repo"], sd_lib.stored_repo(second))
+        before = json.loads(self.call("store", "items", "--json").stdout)
+        refused = self.call("task", "add", "Nowhere", "--belongs-to", stranger, code=1)
+        self.assertIn("not registered", refused.stderr)
+        personal = self.call("task", "add", "Mine", "--kind", "personal", "--belongs-to", first, code=1)
+        self.assertIn("--belongs-to: a personal item carries no repository", personal.stderr)
+        self.assertEqual(json.loads(self.call("store", "items", "--json").stdout), before)
+        for other in ("--here", "--no-repo"):
+            self.call("task", "add", "Both", "--belongs-to", first, other, code=2)
+
     def test_belongs_to_and_no_repo_are_the_same_field_and_cannot_both_be_given(self):
         state = json.loads(self.call("task", "add", "One or the other", "--json").stdout)
         self.call("task", "edit", state["item"]["id"], "--belongs-to", self.home,
