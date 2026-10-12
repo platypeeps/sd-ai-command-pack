@@ -126,7 +126,7 @@ VENV_BIN = $(VENV)/bin
 SETUP_VENV = $(if $(filter command line environment,$(origin VENV)),$(VENV),.venv)
 SETUP_PYTHON = $(SETUP_VENV)/bin/python
 
-.PHONY: setup hooks fonts test lint precheck audit docs-lint check gate-env
+.PHONY: setup hooks fonts test lint precheck audit docs-lint check gate-env post-merge
 
 # The record BORROWED reads lives inside the environment, so `rm -rf .venv`
 # takes both and a record can never outlive what it describes. The rest of
@@ -476,3 +476,13 @@ lint precheck audit docs-lint test: $(GATE_ENV)
 
 gate-env:
 	"$(PYTHON)" .github/scripts/provision-gate-env.py "$(PYTHON)"
+
+# The lane runs `make post-merge` in the hub checkout after a pack merge, once
+# its runner lock is released (sd:3566): move the checkout to the merge, then
+# report service health so a stale build shows (sd:3647). The tools live in
+# the `system` checkout; SYSTEM_REPO names it when it is not ~/repos/system.
+SYSTEM_REPO ?= $(HOME)/repos/system
+
+post-merge:
+	sh "$(SYSTEM_REPO)/local-repo-sync/repo-sync.sh" refresh "$(CURDIR)"
+	sh "$(SYSTEM_REPO)/local-project-dashboard/dashboard.sh" health
