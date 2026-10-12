@@ -1,7 +1,7 @@
 # The workflow database: hub, lane host and judgments
 
 `bin/sd-db` runs the workflow database's verbs from this checkout's `lib/`.
-This page covers the hub and its satellites, the refusals, the lane host, `judgments`, the item kinds, and renaming a repository by hand.
+This page covers the hub and its satellites, the refusals, the lane host, `judgments`, the review queue, the item kinds, and renaming a repository by hand.
 The module docstrings under `lib/sd_db/` hold the detail.
 
 ## One hub, many satellites: `serve` and `hub.json`
@@ -310,6 +310,26 @@ Each disagreement reads `old→arm`: 1 or 0 for a noul, a position for a choice,
 A pair whose old answer is not a number is counted and not compared.
 Examples are a `--fallback` marker, or a noul asked under a `--gate` other than 0.5.
 A stage with no such pair says `no paired samples with the old mechanism`.
+
+## `review`: one queue of small questions
+
+`bin/sd-db review` is the plumbing behind one review queue that any repository or experiment files into (sd:3635).
+A producer writes one batch file and files it; the operator answers each question with one option; the producer exports the labels.
+The design is system's `docs/work/2026-10-12-review-queue/design.md`; `lib/sd_db/review.py` holds the note formats.
+
+    bin/sd-db review file batch.json                      # file a batch; the same file again is a no-op
+    bin/sd-db review export 4242 --out labels.jsonl       # labels with provenance, as JSONL
+    bin/sd-db review export 4242 --key key.csv --out labels.jsonl  # sealed: closes the batch, then joins the key
+    bin/sd-db review apply nightly                        # approvals to tasks; close or expire each batch
+
+A batch is one task under the ref `review:<queue>:<batch>`, so a second filing finds the first.
+Its first comment is the header; each question is a `question` note in the Decisions format, with one `Subject:` line.
+A label is the Decisions ruling, `Ruling on note #N: <option>`; an undo is a `Withdrawn: ruling #M on note #N` decision.
+A sealed export refuses a key whose SHA-256 is not the header's seal, and refuses while a question is open.
+It closes the batch before it writes the key's rows, and a closed batch refuses every ruling and withdrawal.
+The key is CSV; its first column names the subject.
+`apply` acts only on questions that offer `Approve` and `Reject`; each approval files one task under `review-approved:<note>`.
+It resolves a batch's open questions as `Expired, not ruled` after 7 days.
 
 ## The item kinds, and the two words called `followup`
 

@@ -473,6 +473,12 @@ def resolve_note(connection: sqlite3.Connection, note: int) -> None:
         )
 
 
+def reopen_note(connection: sqlite3.Connection, note: int) -> None:
+    """Undo `resolve_note`: the review queue's withdrawal reopens a ruled question (sd:3635)."""
+    with transaction(connection):
+        connection.execute("UPDATE note SET resolved_at = NULL WHERE id = ?", (note,))
+
+
 # ---------------------------------------------------------------- state
 
 

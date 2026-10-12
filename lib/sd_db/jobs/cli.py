@@ -21,7 +21,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from .. import credentials, judgment, removal, usage
+from .. import credentials, judgment, removal, review, usage
 from ..backup import restore as restore_snapshot
 from ..database import connect, default_path, schema_version, tables
 from ..errors import SdDbError
@@ -315,6 +315,93 @@ def _judgments_unlabelled(argv: list[str]) -> int:
         print(f"{row['id']}  {row['timestamp']}  {row['arm']}  "
               f"{row['question_id'] or '-'}  answer {row['answer'] or '-'}  "
               f"confidence {'-' if row['confidence'] is None else row['confidence']}")
+    return 0
+
+
+REVIEW_USAGE = ("sd-db review: takes `file <batch.json>`, "
+                "`export <item> [--key <file>] --out <path>` or `apply <queue>`")
+
+
+def command_review(argv: list[str]) -> int:
+    """`review file|export|apply`: the review queue's plumbing (`sd_db.review`, sd:3635).
+
+    `file` files a batch file and prints what it dropped; `export` writes the
+    batch's labels as JSONL through a `.part` file, and with `--key` closes a
+    sealed batch first; `apply` turns a queue's approvals into tasks and
+    closes or expires its batches. A refusal exits 1 and names its reason.
+    """
+    action, rest = (argv[0], argv[1:]) if argv else ("", [])
+    if action == "file" and len(rest) == 1:
+        return _review_file(Path(rest[0]))
+    if action == "export":
+        options: dict[str, str] = {}
+        item = rest.pop(0) if rest else ""
+        while len(rest) >= 2 and rest[0] in ("--key", "--out") and rest[0][2:] not in options:
+            options[rest[0][2:]] = rest[1]
+            rest = rest[2:]
+        if item.isdigit() and not rest and "out" in options:
+            return _review_export(int(item), options.get("key"), Path(options["out"]))
+    if action == "apply" and len(rest) == 1:
+        connection = _open_for_write()
+        try:
+            result = review.apply(connection, rest[0], who=getpass.getuser())
+        finally:
+            connection.close()
+        for task in result["tasks"]:
+            print(f"sd-db: approved note #{task['note']} filed sd:{task['item']} ({task['subject']})")
+        for note in result["existing"]:
+            print(f"sd-db: approved note #{note} has its task already")
+        for note in result["expired"]:
+            print(f"sd-db: note #{note} expired, not ruled")
+        for item in result["closed"]:
+            print(f"sd-db: closed sd:{item}")
+        if not any(result.values()):
+            print(f"sd-db: nothing to apply in queue {rest[0]}")
+        return 0
+    print(REVIEW_USAGE, file=sys.stderr)
+    return 1
+
+
+def _review_file(path: Path) -> int:
+    try:
+        batch = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as failure:
+        print(f"sd-db review file: cannot read {path}: {failure.strerror}", file=sys.stderr)
+        return 1
+    except ValueError as failure:
+        print(f"sd-db review file: {path} is not JSON: {failure}; nothing filed", file=sys.stderr)
+        return 1
+    connection = _open_for_write()
+    try:
+        result = review.file(connection, batch, who=getpass.getuser())
+    finally:
+        connection.close()
+    for dropped in result["dropped"]:
+        print(f"sd-db: dropped {dropped['subject']}: {dropped['reason']}")
+    if result["item"] is None:
+        print(f"sd-db: nothing to file for {result['ref']}")
+    elif result["created"]:
+        print(f"sd-db: filed sd:{result['item']} {result['ref']}, {result['filed']} questions")
+    else:
+        print(f"sd-db: sd:{result['item']} {result['ref']} is filed already; unchanged")
+    return 0
+
+
+def _review_export(item: int, key_path: str | None, out: Path) -> int:
+    try:
+        key = None if key_path is None else Path(key_path).read_bytes()
+    except OSError as failure:
+        print(f"sd-db review export: cannot read the key {key_path}: {failure.strerror}", file=sys.stderr)
+        return 1
+    connection = _open_for_write()
+    try:
+        lines = review.export(connection, item, key=key, who=getpass.getuser())
+    finally:
+        connection.close()
+    review.write(lines, out)
+    manifest = lines[0]
+    print(f"sd-db: exported sd:{item}: {manifest['questions']} questions, {manifest['labels']} labels, "
+          f"{manifest['open']} open, to {out}")
     return 0
 
 
@@ -828,6 +915,7 @@ COMMANDS = {
     "work": command_work,
     "usage": command_usage,
     "judgments": command_judgments,
+    "review": command_review,
     "credentials": command_credentials,
 }
 
