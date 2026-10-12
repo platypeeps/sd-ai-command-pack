@@ -1545,8 +1545,9 @@ def post_merge(root: pathlib.Path, environ: dict[str, str], answer: dict[str, An
 def make_post_merge(main: pathlib.Path, environ: dict[str, str], moved: str) -> str | None:
     """`make post-merge` in the main checkout the last landing fast-forwarded, when its Makefile has that rule.
 
-    None without the rule. A checkout that did not fast-forward holds the old
-    code, so the target is skipped and the reason given. A failure or the
+    None without the rule. A branch checkout that did not fast-forward holds the
+    old code, so the target is skipped and the reason given; a pinned one is
+    left for the target to move. A failure or the
     `POST_MERGE_SECONDS` bound is reported; the run group ends the target's
     children at the bound.
     """
@@ -1557,7 +1558,10 @@ def make_post_merge(main: pathlib.Path, environ: dict[str, str], moved: str) -> 
         return None
     except OSError as error:  # unknown, not "no rule": say so
         return f"make post-merge unknown: {main / 'Makefile'} could not be read: {error}"
-    if not moved.startswith("fast-forwarded"):
+    # A pinned (detached) checkout is never fast-forwarded: `repo-sync.sh refresh`, which the target runs,
+    # moves it instead (sd:3647). Any other state that did not fast-forward holds the old code.
+    pinned = not lane_git(main, "branch", "--show-current") and lane_git(main, "rev-parse", "--verify", "HEAD")
+    if not (moved.startswith("fast-forwarded") or pinned):
         return f"make post-merge skipped: the main checkout did not fast-forward ({moved})"
     try:
         done = sd_lib.run_group(["make", "post-merge"], cwd=main, env={**os.environ, **environ},

@@ -478,11 +478,16 @@ gate-env:
 	"$(PYTHON)" .github/scripts/provision-gate-env.py "$(PYTHON)"
 
 # The lane runs `make post-merge` in the hub checkout after a pack merge, once
-# its runner lock is released (sd:3566): move the checkout to the merge, then
-# report service health so a stale build shows (sd:3647). The tools live in
-# the `system` checkout; SYSTEM_REPO names it when it is not ~/repos/system.
+# its runner lock is released (sd:3566), whether the checkout is pinned
+# (detached) or on the default branch (sd:3647). `refresh` moves and installs
+# a pinned checkout and leaves a branch alone; the lane already fast-forwarded
+# that one, so the install runs here. Then service health shows a stale build.
+# The tools live in the `system` checkout; SYSTEM_REPO names it when it is not
+# ~/repos/system.
 SYSTEM_REPO ?= $(HOME)/repos/system
+POST_MERGE_SETUP ?= $(MAKE) setup
 
 post-merge:
 	sh "$(SYSTEM_REPO)/local-repo-sync/repo-sync.sh" refresh "$(CURDIR)"
+	if git symbolic-ref -q HEAD >/dev/null 2>&1; then $(POST_MERGE_SETUP); fi
 	sh "$(SYSTEM_REPO)/local-project-dashboard/dashboard.sh" health

@@ -1286,6 +1286,18 @@ class Landing(Lane):
                                                         "elsewhere"), answer["post_merge"])
         self.assertEqual((self.notes[-1][1], self.note_kinds[-1]), (f"Post-merge: {answer['post_merge']}", "followup"))
 
+    def test_a_pinned_detached_checkout_runs_the_post_merge_that_refreshes_it(self) -> None:
+        """sd:3647. The hub's main checkout is pinned (detached): the fast-forward skips it, and `repo-sync.sh
+        refresh`, which the target runs, moves only a pinned checkout. So the target must run for it."""
+        tree, head = self.topic()
+        git(self.repo, "switch", "-q", "--detach")
+        self.post_merge("touch ran")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertEqual(self.entries()[0]["status"], "merged")
+        self.assertEqual(answer.get("post_merge"), f"make post-merge passed in {self.repo}")
+        self.assertTrue((self.repo / "ran").exists())
+
 class Killed(BaseException):
     """A process killed between two steps: nothing after the raise runs, and no `except Exception` catches it."""
 
