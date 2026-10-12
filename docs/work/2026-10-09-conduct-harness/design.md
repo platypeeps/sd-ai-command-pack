@@ -1,6 +1,10 @@
-# Design — conduct harness (sd:1149)
-
+---
+title: Conduct harness
+created: 2026-10-09
 item: sd:1149
+---
+
+# Design — conduct harness (sd:1149)
 
 ## Status
 

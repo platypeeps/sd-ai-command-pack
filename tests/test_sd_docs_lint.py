@@ -179,8 +179,24 @@ class Rule1ShapeTests(LintFixture):
         """sd:3000. One design.md is a whole work item; prd.md is legacy."""
         item = self.work / "2026-08-30-a-design"
         item.mkdir(parents=True)
-        (item / "design.md").write_text("# Design\n", encoding="utf-8")
+        (item / "design.md").write_text(
+            "---\ntitle: A design\ncreated: 2026-08-30\nitem: sd:361\n---\n\n# Design\n", encoding="utf-8")
         self.assert_clean()
+
+    def test_red_design_alone_without_frontmatter(self) -> None:
+        """sd:3416. sd-status finds a design-only folder's row by its `item:` key; without one it reads no status."""
+        item = self.work / "2026-08-30-a-design"
+        item.mkdir(parents=True)
+        (item / "design.md").write_text("# Design\n\nitem: sd:361\n", encoding="utf-8")
+        self.assertTrue(any("a-design/design.md" in failure for failure in
+                            self.assert_fails("design.md opens with a --- frontmatter block naming item: sd:<id>")))
+
+    def test_red_design_alone_without_an_item_key(self) -> None:
+        item = self.work / "2026-08-30-a-design"
+        item.mkdir(parents=True)
+        (item / "design.md").write_text("---\ntitle: A design\ncreated: 2026-08-30\n---\n\n# Design\n",
+                                        encoding="utf-8")
+        self.assert_fails("design.md opens with a --- frontmatter block naming item: sd:<id>")
 
     def test_red_no_document(self) -> None:
         (self.work / "2026-08-30-empty").mkdir(parents=True)

@@ -4,7 +4,8 @@
 Five tree rules and one body rule. Numbers are stable: rules 5, 6 and 8 retired.
 
 1. Shape         -- a work item is a `<YYYY-MM-DD>-<slug>` directory holding a
-                    `design.md` (sd:3000). A legacy `prd.md` has a title and a date
+                    `design.md` (sd:3000) whose frontmatter names its row as
+                    `item: sd:<id>` (sd:3416). A legacy `prd.md` has a title and a date
                     agreeing with the directory; an active one carries no
                     `status:` line, because the row is the status, and an
                     archived one keeps a known `status:`.
@@ -128,8 +129,12 @@ def check_shape(work_root: pathlib.Path, report: Report) -> None:
 
         if not prd.is_file():
             # sd:3000: design.md alone is a whole item. Its status is the row's,
-            # so only an `item:` key, when there is one, has a shape to check.
-            check_item_key(design, parse_frontmatter(design.read_text(encoding="utf-8")) or {}, report)
+            # which sd-status finds by the `item:` key alone, so the key is required (sd:3416).
+            fields = parse_frontmatter(design.read_text(encoding="utf-8"))
+            if fields is None or sd_lib.ITEM_KEY not in fields:
+                report.fail(str(design), "design.md opens with a --- frontmatter block naming item: sd:<id>")
+            else:
+                check_item_key(design, fields, report)
             continue
         check_legacy_prd(prd, match.group("date"), is_archived(item, work_root), report)
 
