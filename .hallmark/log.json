@@ -1,0 +1,12 @@
+[
+  {
+    "date": "2026-10-12",
+    "macrostructure": "Long Document",
+    "theme": "ui-design foundation (instrument panel)",
+    "theme_axes": "dark / grotesk-sans / cool",
+    "enrichment": "none",
+    "nav": "N3 side-rail",
+    "footer": "provenance line",
+    "brief": "Research renderer (bin/sd_research_tokens.py): foundation tokens, theme control, IBM Plex, state glyphs, 31rem reading measure (sd:3584)"
+  }
+]

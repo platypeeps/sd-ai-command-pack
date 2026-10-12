@@ -37,9 +37,9 @@ MODULE = HERE / "sd_research_fonts.py"
 #: The families the renderer's tokens name, as a css2 `family=` spec each.
 #: Changing this list is the only edit this file expects; rerun `make fonts`.
 FAMILIES = [
-    "Archivo:wght@400..700",
-    "IBM+Plex+Mono:wght@400;500;600",
-    "Source+Serif+4:wght@400..600",
+    "IBM+Plex+Sans:wght@400..600",
+    "IBM+Plex+Sans+Condensed:wght@500;600",
+    "IBM+Plex+Mono:wght@400;500",
 ]
 
 #: Google serves woff2 only to a browser it recognises. Without this it returns
@@ -132,8 +132,8 @@ def build_fonts() -> int:
         "because the dashboard serves documents under `default-src 'none'`, which\n"
         "blocks an external stylesheet: a linked page falls back to system fonts.\n"
         "\n"
-        "One @font-face per unique file. Archivo and Source Serif 4 are variable, so\n"
-        "their weight ranges collapse into a single face instead of one copy each.\n"
+        "One @font-face per unique file. IBM Plex Sans is variable, so its weight\n"
+        "range collapses into a single face instead of one copy per weight.\n"
         '"""\n'
         "\n"
         'FONTS_CSS = """%s"""\n' % "".join(rules),

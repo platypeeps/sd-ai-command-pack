@@ -5,150 +5,341 @@ Inlined rather than shipped beside the renderer as `tokens.css`, because
 Makefile's git-enumerated lint target both read that directory expecting it.
 A stylesheet living here as data is the form that survives both.
 
-Edit the CSS in this string. It is the source, not a copy of one: the
-standalone `tokens.css` in `~/repos/system/local-research-kit` was deleted when
-the kit moved into the pack, so there is no second file to drift from.
+The identity is the shared foundation in ui-design (`foundation/`), adopted
+whole (sd:3584): its OKLCH tokens, its Dark · Light · System control and its
+IBM Plex faces (`sd_research_fonts`). Two strings here are verbatim copies of
+foundation files, and `tests/test_sd_research_kit.py` pins each by SHA-256:
+
+    FOUNDATION_TOKENS_CSS   foundation/tokens.css -- never edit a value here
+    THEME_JS                foundation/theme.js
+
+When the foundation changes, paste the new file over its string and re-pin.
+`PAGE_CSS` is the research page shell and the only part to edit; it names
+tokens and never a colour value, which the same test enforces. `TOKENS_CSS`
+stays the one name callers read: the renderer, and the system repo's design
+documents, which reuse this stylesheet.
 """
 
-TOKENS_CSS = """/* Mezmo research — single visual identity. Edit here, never per-repo. */
+FOUNDATION_TOKENS_CSS = """/* Hallmark · route: custom (bespoke) · structure: rail + annunciator + ranked ledger + evidence drawer · idea: "dark cockpit"
+ * paper: dark oklch(17% 0.014 250) / light oklch(96% 0.006 250) · accent: cyan oklch(78% 0.11 210) / oklch(52% 0.115 215)
+ * display: IBM Plex Sans · body: IBM Plex Sans · data: IBM Plex Mono · icons: Lucide
+ * axes: dark / grotesk-sans / cool · gates: pass (see products/system/README.md § Slop test) · studied: no
+ *
+ * Instrument-panel foundation tokens. The default for personal dashboards,
+ * development and tracking UIs (see principles.md). Copy this file; do not
+ * restate its values inline.
+ *
+ * Theme: dark by default. Every colour token is light-dark(LIGHT, DARK), so
+ * one list names both palettes. `color-scheme` picks the side:
+ *   <html>                     dark (default)
+ *   <html data-theme="dark">   dark
+ *   <html data-theme="light">  light
+ *   <html data-theme="system"> follows the OS
+ * theme.js sets the attribute from the viewer's stored choice.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Surfaces: blue-grey paper, raised panel, recessed well. */
+  --color-paper:     light-dark(oklch(96%   0.006 250), oklch(17%   0.014 250));
+  --color-panel:     light-dark(oklch(98.6% 0.004 250), oklch(20.5% 0.016 250));
+  --color-well:      light-dark(oklch(93%   0.008 250), oklch(14.5% 0.013 250));
+  --color-rule:      light-dark(oklch(84%   0.010 250), oklch(33%   0.018 250));
+  --color-rule-2:    light-dark(oklch(90%   0.008 250), oklch(26%   0.016 250));
+
+  /* Text. */
+  --color-ink:       light-dark(oklch(21%   0.014 255), oklch(93%   0.010 250));
+  --color-ink-2:     light-dark(oklch(38%   0.014 255), oklch(80%   0.014 250));
+  --color-muted:     light-dark(oklch(49%   0.014 250), oklch(68%   0.018 250));
+
+  /* Accent: cyan, the avionics colour for "selected". Selection, focus, live only. */
+  --color-accent:     light-dark(oklch(52%  0.115 215), oklch(78%  0.11  210));
+  --color-accent-bg:  light-dark(oklch(92%  0.035 210), oklch(29%  0.05  220));
+  --color-accent-ink: light-dark(oklch(97%  0.005 210), oklch(17%  0.014 250));
+  --color-focus:      light-dark(oklch(55%  0.19  215), oklch(80%  0.15  210));
+  --color-scrim:      light-dark(oklch(21%  0.014 255 / 0.28), oklch(8% 0.012 250 / 0.6));
+
+  /* State: the only other hues on the screen. Lamp = fill, text = on paper. */
+  --color-ok:               light-dark(oklch(52% 0.12 150), oklch(76% 0.13 150));
+  --color-ok-lamp:          light-dark(oklch(90% 0.06 150), oklch(32% 0.06 150));
+  --color-caution:          light-dark(oklch(50% 0.11 70),  oklch(82% 0.13 85));
+  --color-caution-lamp:     light-dark(oklch(89% 0.10 85),  oklch(31% 0.06 75));
+  --color-caution-lamp-ink: light-dark(oklch(24% 0.02 70),  oklch(86% 0.12 85));
+  --color-warning:          light-dark(oklch(50% 0.19 25),  oklch(70% 0.17 25));
+  --color-warning-lamp:     light-dark(oklch(50% 0.19 25),  oklch(50% 0.17 25));
+  --color-warning-ink:      light-dark(oklch(97% 0.01 25),  oklch(97% 0.01 25));
+  --color-unknown:          light-dark(oklch(49% 0.014 250), oklch(68% 0.018 250));
+  --color-hatch:            light-dark(oklch(80% 0.010 250), oklch(38% 0.016 250));
+
+  /* Charts: neutral series; state and accent keep their meaning (patterns.md § Charts). */
+  --color-series-1:  light-dark(oklch(38%   0.014 255), oklch(84%   0.014 250));
+  --color-series-2:  light-dark(oklch(58%   0.014 250), oklch(62%   0.018 250));
+  --color-series-3:  light-dark(oklch(76%   0.010 250), oklch(42%   0.016 250));
+  --color-grid:      var(--color-rule-2);
+
+  /* Type: two registers. */
+  --font-ui:    "IBM Plex Sans", ui-sans-serif, sans-serif;
+  --font-label: "IBM Plex Sans Condensed", "IBM Plex Sans", ui-sans-serif, sans-serif;
+  --font-data:  "IBM Plex Mono", ui-monospace, monospace;
+
+  /* Scale: minor third (1.2) from 16px; data rows sit at --text-sm. */
+  --text-2xs: 0.694rem;
+  --text-xs:  0.75rem;
+  --text-sm:  0.875rem;
+  --text-base:1rem;
+  --text-md:  1.2rem;
+  --text-lg:  1.44rem;
+  --text-xl:  1.728rem;
+  --text-2xl: 2.074rem;
+
+  /* Space: 4pt. */
+  --space-3xs: 0.125rem;
+  --space-2xs: 0.25rem;
+  --space-xs:  0.5rem;
+  --space-sm:  0.75rem;
+  --space-md:  1rem;
+  --space-lg:  1.5rem;
+  --space-xl:  2rem;
+  --space-2xl: 3rem;
+  --space-3xl: 4rem;
+
+  --row:        2.25rem;   /* desktop data row */
+  --row-touch:  2.75rem;   /* 44px: any row that is a control on touch */
+  --rail:       13.5rem;
+  --drawer:     26rem;
+  --bulk-bar:   3.5rem;    /* sticky bulk-action bar */
+
+  /* Icons: Lucide, stroked in currentColor. */
+  --icon-sm:     1rem;     /* inline with --text-sm, help icons */
+  --icon-md:     1.25rem;  /* buttons, row actions */
+  --icon-stroke: 1.75;
+
+  --rule-hair:  1px;
+  --rule-lamp:  3px;
+  --radius-sm:  3px;
+  --radius-md:  5px;
+
+  /* Shadows: only a floating layer casts one (popover, menu, toast, bulk bar, dialog; the bottom sheet casts upward). */
+  --shadow-overlay: 0 8px 24px oklch(0% 0 0 / 0.3);
+  --shadow-sheet:   0 -8px 32px oklch(0% 0 0 / 0.35);
+
+  --ease-out:    cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in:     cubic-bezier(0.64, 0, 0.78, 0);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast:  120ms;
+  --dur-base:  180ms;
+  --dur-lamp:  420ms;
+  --delay-help: 600ms;     /* hover preview of a help popover; focus and tap show at once */
+}
+
+:root[data-theme="light"]  { color-scheme: light; }
+:root[data-theme="system"] { color-scheme: light dark; }
+"""
+
+THEME_JS = """// Theme control for foundation UIs: dark (default), light or system.
+// Load it in <head> without defer, so the stored choice applies before first paint.
+// Any element with data-theme-choice="dark|light|system" becomes a control;
+// the selected one gets aria-pressed="true".
+(() => {
+  const KEY = 'theme';
+  const CHOICES = ['dark', 'light', 'system'];
+  const root = document.documentElement;
+
+  const read = () => {
+    try { const v = localStorage.getItem(KEY); return CHOICES.includes(v) ? v : 'dark'; }
+    catch { return 'dark'; }
+  };
+  const mark = (choice) => {
+    document.querySelectorAll('[data-theme-choice]').forEach((el) =>
+      el.setAttribute('aria-pressed', String(el.dataset.themeChoice === choice)));
+  };
+  const apply = (choice) => {
+    root.dataset.theme = choice;
+    try { localStorage.setItem(KEY, choice); } catch { /* storage blocked: choice lasts this page */ }
+    mark(choice);
+  };
+
+  root.dataset.theme = read();
+  document.addEventListener('DOMContentLoaded', () => mark(root.dataset.theme));
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('[data-theme-choice]');
+    if (el && CHOICES.includes(el.dataset.themeChoice)) apply(el.dataset.themeChoice);
+  });
+})();
+"""
+
+PAGE_CSS = """/* Hallmark · redesign · macrostructure: Long Document (rail + reading column) · tone: instrument panel, calm
+ * theme: ui-design foundation, tokens above unchanged · display + body: IBM Plex Sans
+ * labels: IBM Plex Sans Condensed · data: IBM Plex Mono · axes: dark / grotesk-sans / cool
+ * pre-emit critique: P4 H4 E4 S4 R5 V3 · studied: no
+ *
+ * The research page shell, on the foundation's tokens only: no colour value
+ * below this line, only a token name. */
 :root{
-  --ground:#EEF2F2; --surface:#FFFFFF; --surface-2:#F5F8F8; --surface-sunk:#E9EFEF;
-  --line:#D3DEDE; --line-soft:#E3EAEA;
-  --ink:#0F1617; --ink-soft:#465658; --ink-faint:#6D7F81;
-  --accent:#0E7C86; --accent-deep:#0A5A62; --accent-soft:#DFEEEF; --accent-line:#B6D7DA;
-  --pass:#2F6F52; --pass-bg:#E2EFE8;
-  --warn:#8E6412; --warn-bg:#FAF3E4;
-  --fail:#A63C39; --fail-bg:#FBEDEC;
-  --sans:"Archivo","Helvetica Neue",Arial,sans-serif;
-  --serif:"Source Serif 4",Georgia,"Times New Roman",serif;
-  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+  --measure:31rem;  /* long text: about 70 characters of Plex Sans a line */
+  /* Older names a page shell outside this pack still reads (the system repo's
+     design-document diagram figure). Drop them once that shell reads the
+     foundation names. */
+  --surface:var(--color-panel); --line:var(--color-rule); --line-soft:var(--color-rule-2);
+  --sans:var(--font-ui); --ink-faint:var(--color-muted);
 }
-@media (prefers-color-scheme:dark){ :root:not([data-theme="light"]){
-  --ground:#0C1112; --surface:#131A1B; --surface-2:#182122; --surface-sunk:#0F1516;
-  --line:#2A3637; --line-soft:#212C2D;
-  --ink:#E3EAE9; --ink-soft:#A1B2B1; --ink-faint:#7A8C8C;
-  --accent:#3FB3BC; --accent-deep:#6FD0D6; --accent-soft:#15292B; --accent-line:#244447;
-  --pass:#5FA57E; --pass-bg:#14231C;
-  --warn:#D2A04A; --warn-bg:#211C13;
-  --fail:#E0736E; --fail-bg:#241716;
-}}
-:root[data-theme="dark"]{
-  --ground:#0C1112; --surface:#131A1B; --surface-2:#182122; --surface-sunk:#0F1516;
-  --line:#2A3637; --line-soft:#212C2D;
-  --ink:#E3EAE9; --ink-soft:#A1B2B1; --ink-faint:#7A8C8C;
-  --accent:#3FB3BC; --accent-deep:#6FD0D6; --accent-soft:#15292B; --accent-line:#244447;
-  --pass:#5FA57E; --pass-bg:#14231C;
-  --warn:#D2A04A; --warn-bg:#211C13;
-  --fail:#E0736E; --fail-bg:#241716;
-}
+/* theme.js always sets data-theme. Without it the script did not run (a page
+   served under a policy that blocks it), so there is no control to offer:
+   follow the reader's OS instead of holding them to dark. */
+:root:not([data-theme]){color-scheme:light dark}
+:root:not([data-theme]) .theme{display:none}
 
 *{box-sizing:border-box}
-body{background:var(--ground);color:var(--ink);font-family:var(--serif);
-  font-size:16.5px;line-height:1.6;-webkit-font-smoothing:antialiased;margin:0}
-.wrap{max-width:78rem;margin:0 auto;padding:0 1.75rem 6rem;
-  display:grid;grid-template-columns:15rem minmax(0,1fr);gap:3.5rem}
+html,body{overflow-x:clip}
+body{margin:0;background:var(--color-paper);color:var(--color-ink);font-family:var(--font-ui);
+  font-size:var(--text-base);line-height:1.6;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+::selection{background:var(--color-accent-bg);color:var(--color-ink)}
+:focus-visible{outline:2px solid var(--color-focus);outline-offset:2px}
+.wrap{display:grid;grid-template-columns:var(--rail) minmax(0,1fr);gap:var(--space-2xl);
+  max-width:84rem;margin:0 auto;padding:0 var(--space-xl) var(--space-3xl)}
 
 /* rail */
-.rail{position:sticky;top:0;align-self:start;max-height:100vh;overflow-y:auto;padding:3.5rem 0 2rem}
-.rail .badge{display:flex;align-items:baseline;gap:.5rem;margin-bottom:1.75rem}
-.rail .badge b{font-family:var(--sans);font-size:1.05rem;font-weight:700;color:var(--accent);letter-spacing:-.01em}
-.rail .badge span{font-family:var(--mono);font-size:.64rem;letter-spacing:.15em;
-  text-transform:uppercase;color:var(--ink-faint)}
-.rail nav{display:flex;flex-direction:column;gap:.1rem;margin-bottom:1.75rem}
-.rail nav a{display:flex;gap:.6rem;padding:.3rem .5rem;border-radius:3px;text-decoration:none;
-  font-family:var(--sans);font-size:.8rem;line-height:1.35;color:var(--ink-soft)}
-.rail nav a:hover{background:var(--surface-2);color:var(--ink)}
-.rail nav a em{font-family:var(--mono);font-style:normal;font-size:.7rem;color:var(--ink-faint);
-  min-width:1.4rem;font-variant-numeric:tabular-nums}
-.railnote{font-family:var(--mono);font-size:.68rem;line-height:1.65;color:var(--ink-faint);
-  padding-top:.9rem;margin-top:.9rem;border-top:1px solid var(--line-soft)}
-.railnote strong{display:block;font-weight:600;color:var(--ink-soft);letter-spacing:.08em;
-  text-transform:uppercase;font-size:.62rem;margin-bottom:.25rem}
-.railnote a{color:var(--accent);text-decoration:none}
+.rail{position:sticky;top:0;align-self:start;max-height:100vh;overflow-y:auto;
+  padding:var(--space-xl) 0 var(--space-lg)}
+.rail .badge{display:flex;align-items:baseline;gap:var(--space-xs);padding-bottom:var(--space-sm);
+  margin:0 var(--space-xs) var(--space-sm);border-bottom:var(--rule-hair) solid var(--color-rule)}
+.rail .badge b{font-family:var(--font-label);font-size:var(--text-md);font-weight:600;color:var(--color-ink);
+  overflow-wrap:anywhere;min-width:0}
+.rail .badge span{font-family:var(--font-data);font-size:var(--text-2xs);color:var(--color-muted)}
+.rail nav{display:grid;gap:1px;margin-bottom:var(--space-sm)}
+.rail nav a{display:flex;align-items:center;gap:var(--space-xs);min-height:2rem;padding:0 var(--space-xs);
+  border-radius:var(--radius-sm);text-decoration:none;font-size:var(--text-sm);line-height:1.3;color:var(--color-ink-2)}
+.rail nav a:hover{background:var(--color-well);color:var(--color-ink)}
+.rail nav a:focus-visible{outline-offset:-2px}
+.rail nav a em{flex:none;min-width:1.5rem;font-family:var(--font-data);font-style:normal;font-size:var(--text-xs);
+  color:var(--color-muted);font-variant-numeric:tabular-nums}
+.rail nav a span{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.railnote{font-family:var(--font-data);font-size:var(--text-2xs);line-height:1.7;color:var(--color-muted);
+  margin:0 var(--space-xs);padding-top:var(--space-sm);margin-top:var(--space-sm);
+  border-top:var(--rule-hair) solid var(--color-rule-2);overflow-wrap:anywhere}
+.railnote strong{display:block;font-family:var(--font-label);font-size:var(--text-xs);font-weight:600;
+  color:var(--color-ink-2);margin-bottom:var(--space-3xs)}
+.railnote a{color:var(--color-ink-2);text-underline-offset:2px}
+.railnote code{font-family:var(--font-data)}
 
-main{padding-top:3.5rem;min-width:0}
-.eyebrow{font-family:var(--mono);font-size:.7rem;font-weight:500;letter-spacing:.15em;
-  text-transform:uppercase;color:var(--accent);margin:0 0 1rem}
-h1{font-family:var(--sans);font-weight:600;font-size:clamp(2rem,4.6vw,2.9rem);line-height:1.04;
-  letter-spacing:-.026em;text-wrap:balance;margin:0 0 .8rem;max-width:22ch}
-.subtitle{font-family:var(--mono);font-size:.72rem;color:var(--ink-faint);margin:0 0 1.4rem}
-.subtitle b{font-weight:600;color:var(--ink-soft)}
-.standfirst{font-size:1.14rem;line-height:1.5;color:var(--ink-soft);max-width:60ch;margin:0 0 1.6rem}
-.meta{font-family:var(--mono);font-size:.72rem;line-height:1.8;color:var(--ink-faint);
-  background:var(--surface-2);border:1px solid var(--line-soft);border-radius:4px;
-  padding:.9rem 1.1rem;margin-bottom:2.5rem}
+/* theme control: Dark · Light · System (foundation patterns.md) */
+.theme{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:2px;padding:2px;
+  margin:var(--space-lg) var(--space-xs) 0;border:var(--rule-hair) solid var(--color-rule);border-radius:var(--radius-md)}
+.theme button{display:inline-flex;align-items:center;justify-content:center;min-height:2rem;
+  padding:0 var(--space-2xs);border:0;border-radius:var(--radius-sm);background:transparent;color:var(--color-muted);
+  font:500 var(--text-2xs)/1 var(--font-ui);white-space:nowrap;cursor:pointer}
+.theme button:hover{color:var(--color-ink);background:var(--color-well)}
+.theme button[aria-pressed="true"]{color:var(--color-ink);background:var(--color-panel);
+  box-shadow:inset 0 0 0 1px var(--color-rule)}
+
+/* masthead */
+main{padding-top:var(--space-xl);min-width:0}
+.eyebrow{font-family:var(--font-label);font-size:var(--text-sm);font-weight:500;color:var(--color-muted);
+  margin:0 0 var(--space-xs)}
+h1{font-family:var(--font-ui);font-style:normal;font-weight:600;
+  font-size:clamp(var(--text-xl),1rem + 2.4vw,var(--text-2xl));line-height:1.15;letter-spacing:-.01em;
+  text-wrap:balance;overflow-wrap:anywhere;min-width:0;max-width:var(--measure);margin:0 0 var(--space-sm)}
+.subtitle{font-family:var(--font-data);font-size:var(--text-xs);color:var(--color-muted);
+  font-variant-numeric:tabular-nums;margin:0 0 var(--space-lg)}
+.subtitle b{font-weight:500;color:var(--color-ink-2)}
+.standfirst{font-size:var(--text-md);line-height:1.5;color:var(--color-ink-2);max-width:var(--measure);
+  margin:0 0 var(--space-lg)}
+.meta{font-family:var(--font-data);font-size:var(--text-xs);line-height:1.75;color:var(--color-ink-2);
+  background:var(--color-well);border:var(--rule-hair) solid var(--color-rule-2);border-radius:var(--radius-md);
+  padding:var(--space-sm) var(--space-md);margin-bottom:var(--space-xl);overflow-wrap:anywhere}
+.meta a{color:var(--color-ink)}
 .meta code{background:none;border:0;padding:0}
 
-/* verdict strip */
-.verdict{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
-  border-radius:4px;padding:1.4rem 1.6rem;margin-bottom:3rem}
-.verdict h2{font-family:var(--sans);font-size:1rem;font-weight:600;margin:0 0 1.1rem;border:0;padding:0}
-.figs{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:1.25rem}
-.fig{display:flex;flex-direction:column;gap:.15rem}
-.fig .n{font-family:var(--sans);font-size:1.5rem;font-weight:600;letter-spacing:-.02em;line-height:1}
-.fig .n.is-pass{color:var(--pass)} .fig .n.is-fail{color:var(--fail)}
-.fig .n.is-warn{color:var(--warn)} .fig .n.is-flat{color:var(--ink)}
-.fig .l{font-size:.88rem;color:var(--ink-soft);line-height:1.35}
-.fig .s{font-family:var(--mono);font-size:.66rem;color:var(--ink-faint)}
-.legend{font-family:var(--mono);font-size:.68rem;color:var(--ink-faint);margin-top:1.1rem;
-  padding-top:.9rem;border-top:1px solid var(--line-soft)}
+/* verdict strip: the state grammar, a glyph beside every state colour */
+.verdict{background:var(--color-panel);border:var(--rule-hair) solid var(--color-rule);border-radius:var(--radius-md);
+  padding:var(--space-md) var(--space-lg);margin-bottom:var(--space-xl)}
+.verdict h2{font-family:var(--font-label);font-size:var(--text-sm);font-weight:600;color:var(--color-ink-2);
+  margin:0 0 var(--space-sm);border:0;padding:0}
+.figs{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,10rem),1fr));gap:var(--space-md) var(--space-lg)}
+.fig{display:flex;flex-direction:column;gap:var(--space-3xs);min-width:0}
+.fig .n{display:flex;align-items:baseline;gap:var(--space-2xs);font-family:var(--font-data);font-size:var(--text-xl);
+  font-weight:500;line-height:1.1;font-variant-numeric:tabular-nums;color:var(--color-ink)}
+.fig .n .g{font-size:var(--text-sm);line-height:1}
+.fig .n.is-pass{color:var(--color-ok)}
+.fig .n.is-warn,.fig .n.is-caution{color:var(--color-caution)}
+.fig .n.is-fail{color:var(--color-warning)}
+.fig .n.is-flat,.fig .n.is-inert{color:var(--color-ink)}
+.fig .l{font-size:var(--text-sm);line-height:1.35;color:var(--color-ink-2)}
+.fig .s{font-family:var(--font-data);font-size:var(--text-2xs);line-height:1.5;color:var(--color-muted)}
+.legend{font-family:var(--font-data);font-size:var(--text-2xs);line-height:1.7;color:var(--color-muted);
+  margin-top:var(--space-md);padding-top:var(--space-sm);border-top:var(--rule-hair) solid var(--color-rule-2)}
+/* :where keeps the base at one class, so each state rule below wins */
+:where(.legend) .chip{display:inline-flex;align-items:baseline;gap:var(--space-2xs);font-family:var(--font-data);
+  font-size:var(--text-2xs);font-weight:500;padding:var(--space-3xs) var(--space-xs);margin:var(--space-3xs) var(--space-xs) var(--space-3xs) 0;
+  border:var(--rule-hair) solid var(--color-rule);border-radius:var(--radius-sm);color:var(--color-ink-2)}
+.chip--pass{color:var(--color-ok)}
+.chip--pass::before{content:"●" / ""}
+.chip--hyp,.chip--caution{background:var(--color-caution-lamp);color:var(--color-caution-lamp-ink);border-color:transparent}
+.chip--hyp::before,.chip--caution::before{content:"▲" / ""}
+.chip--fail{background:var(--color-warning-lamp);color:var(--color-warning-ink);border-color:transparent}
+.chip--fail::before{content:"■" / ""}
+.chip--acc{color:var(--color-unknown);border-style:dashed;border-color:var(--color-hatch)}
+.chip--acc::before{content:"▨" / ""}
 
-/* document body */
-.doc{max-width:68ch}
-.doc h2{font-family:var(--sans);font-weight:600;font-size:1.28rem;letter-spacing:-.012em;
-  margin:3.2rem 0 1rem;padding-bottom:.45rem;border-bottom:2px solid var(--accent);scroll-margin-top:1.5rem}
-.doc h3{font-family:var(--sans);font-weight:600;font-size:1.02rem;margin:2.1rem 0 .6rem;scroll-margin-top:1.5rem}
-.doc h4{font-family:var(--mono);font-weight:600;font-size:.78rem;letter-spacing:.08em;
-  text-transform:uppercase;color:var(--ink-faint);margin:1.7rem 0 .5rem}
-.doc p{margin:0 0 .95rem}
-.doc strong{font-weight:600;color:var(--ink)}
-.doc a{color:var(--accent-deep);text-decoration:none;border-bottom:1px solid var(--accent-line)}
-.doc a:hover{border-bottom-color:var(--accent)}
-.doc ul,.doc ol{margin:0 0 1.1rem;padding-left:1.3rem}
-.doc li{margin-bottom:.4rem}
-.doc code{font-family:var(--mono);font-size:.84em;background:var(--surface-2);
-  border:1px solid var(--line-soft);border-radius:3px;padding:.06em .3em;word-break:break-word}
-.doc blockquote{margin:1.3rem 0;padding:.2rem 0 .2rem 1.1rem;border-left:3px solid var(--accent-line);
-  color:var(--ink-soft);font-style:italic}
-.doc hr{border:0;border-top:1px solid var(--line);margin:2.6rem 0}
+/* document body: tables and code take the column, long text keeps the measure */
+.doc :is(p,ul,ol,dl,blockquote,h2,h3,h4){max-width:var(--measure)}
+.doc h2,.doc h3,.doc h4{font-style:normal;text-wrap:balance;scroll-margin-top:var(--space-lg)}
+.doc h2{font-size:var(--text-lg);font-weight:600;line-height:1.25;margin:var(--space-2xl) 0 var(--space-sm);
+  padding-bottom:var(--space-xs);border-bottom:var(--rule-hair) solid var(--color-rule)}
+.doc h3{font-size:var(--text-md);font-weight:600;line-height:1.3;margin:var(--space-xl) 0 var(--space-xs)}
+.doc h4{font-family:var(--font-label);font-size:var(--text-base);font-weight:600;color:var(--color-ink-2);
+  margin:var(--space-lg) 0 var(--space-2xs)}
+.doc p{margin:0 0 var(--space-md)}
+.doc strong{font-weight:600;color:var(--color-ink)}
+.doc a{color:var(--color-ink);text-decoration:underline;text-decoration-color:var(--color-muted);
+  text-underline-offset:.2em;overflow-wrap:anywhere}
+.doc a:hover{text-decoration-color:var(--color-ink)}
+.doc ul,.doc ol{margin:0 0 var(--space-md);padding-left:var(--space-lg)}
+.doc li{margin-bottom:var(--space-2xs)}
+.doc li::marker{color:var(--color-muted)}
+.doc code{font-family:var(--font-data);font-size:.875em;background:var(--color-well);
+  border:var(--rule-hair) solid var(--color-rule-2);border-radius:var(--radius-sm);padding:0 .3em;overflow-wrap:anywhere}
+.doc blockquote{margin:var(--space-lg) 0;padding:var(--space-2xs) 0 var(--space-2xs) var(--space-md);
+  border-left:var(--rule-lamp) solid var(--color-rule);color:var(--color-ink-2)}
+.doc hr{border:0;border-top:var(--rule-hair) solid var(--color-rule);margin:var(--space-2xl) 0}
 
-.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:4px;
-  background:var(--surface);margin:1.5rem 0}
-.doc table{border-collapse:collapse;width:100%;font-family:var(--sans);font-size:.86rem}
-.doc th{font-family:var(--mono);font-size:.64rem;font-weight:600;letter-spacing:.11em;
-  text-transform:uppercase;color:var(--ink-faint);text-align:left;padding:.8rem 1rem;
-  background:var(--surface-2);border-bottom:1px solid var(--line);white-space:nowrap}
-.doc td{padding:.6rem 1rem;border-bottom:1px solid var(--line-soft);vertical-align:top;
-  color:var(--ink-soft);font-variant-numeric:tabular-nums}
+.table-wrap{overflow-x:auto;border:var(--rule-hair) solid var(--color-rule);border-radius:var(--radius-md);
+  background:var(--color-panel);margin:var(--space-lg) 0}
+.doc table{border-collapse:collapse;width:100%;font-size:var(--text-sm);line-height:1.45}
+.doc th{font-family:var(--font-label);font-size:var(--text-xs);font-weight:600;color:var(--color-ink-2);
+  text-align:left;padding:var(--space-xs) var(--space-sm);background:var(--color-well);
+  border-bottom:var(--rule-hair) solid var(--color-rule);white-space:nowrap}
+.doc td{padding:var(--space-xs) var(--space-sm);border-bottom:var(--rule-hair) solid var(--color-rule-2);
+  vertical-align:top;color:var(--color-ink-2);font-variant-numeric:tabular-nums}
 .doc tr:last-child td{border-bottom:none}
-.doc td:first-child{color:var(--ink)}
+.doc td:first-child{color:var(--color-ink)}
 .doc td code{background:none;border:0;padding:0}
 
-.doc pre{overflow-x:auto;background:var(--surface-sunk);border:1px solid var(--line-soft);
-  border-radius:3px;padding:1.1rem 1.25rem;margin:1.5rem 0}
-.doc pre code{background:none;border:0;padding:0;font-size:.76rem;line-height:1.5;
-  color:var(--ink-soft);white-space:pre}
+.doc pre{overflow-x:auto;background:var(--color-well);border:var(--rule-hair) solid var(--color-rule-2);
+  border-radius:var(--radius-md);padding:var(--space-sm) var(--space-md);margin:var(--space-lg) 0}
+.doc pre code{background:none;border:0;padding:0;font-size:var(--text-xs);line-height:1.55;
+  color:var(--color-ink-2);white-space:pre;overflow-wrap:normal}
 
-footer{max-width:68ch;margin-top:4.5rem;padding-top:1.3rem;border-top:1px solid var(--line);
-  font-family:var(--mono);font-size:.7rem;line-height:1.75;color:var(--ink-faint)}
-footer a{color:var(--accent);text-decoration:none}
+footer{max-width:var(--measure);margin-top:var(--space-3xl);padding-top:var(--space-sm);
+  border-top:var(--rule-hair) solid var(--color-rule);font-family:var(--font-data);font-size:var(--text-xs);
+  line-height:1.75;color:var(--color-muted)}
+footer a{color:var(--color-ink-2)}
 
-a:focus-visible,.rail nav a:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
-@media (max-width:900px){
-  .wrap{grid-template-columns:minmax(0,1fr);gap:0;padding:0 1.35rem 5rem}
-  .rail{position:static;max-height:none;padding:2rem 0 .5rem}
+@media (max-width:899px){
+  .wrap{grid-template-columns:minmax(0,1fr);gap:0;padding:0 var(--space-md) var(--space-2xl)}
+  .rail{position:static;max-height:none;padding:var(--space-lg) 0 0}
   .rail nav{display:none}
-  main{padding-top:1rem}
+  .rail .badge{border-bottom:0;margin-bottom:0}
+  .theme{max-width:16rem}
+  main{padding-top:var(--space-lg)}
+}
+@media (pointer:coarse){.rail nav a,.theme button{min-height:var(--row-touch)}}
+@media (forced-colors:active){
+  .verdict,.table-wrap,.chip,.theme{border-color:CanvasText}
+  .theme button[aria-pressed="true"]{outline:2px solid Highlight}
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
-
-/* figure-status aliases and legend chips (used by evidence-graded briefs) */
-.fig .n.is-inert{color:var(--ink)}
-.fig .n.is-caution{color:var(--warn)}
-.legend .chip{display:inline-block;font-family:var(--mono);font-size:.64rem;font-weight:600;
-  letter-spacing:.04em;padding:.16rem .5rem;border-radius:3px;margin:.15rem .4rem .15rem 0}
-.chip--pass{background:var(--pass-bg);color:var(--pass)}
-.chip--fail{background:var(--fail-bg);color:var(--fail)}
-.chip--hyp,.chip--caution{background:var(--warn-bg);color:var(--warn)}
-.chip--acc{background:var(--accent-soft);color:var(--accent-deep)}
 """
+
+TOKENS_CSS = FOUNDATION_TOKENS_CSS + "\n" + PAGE_CSS
