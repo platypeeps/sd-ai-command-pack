@@ -755,9 +755,12 @@ class RuleTwoReadsTheRow(Fixture):
 
     def test_the_three_checks_survive_the_retire(self) -> None:
         """Without the row, `check_ready` finds no workable item once the
-        lines are gone and its three checks stop running everywhere at once."""
+        lines are gone and its three checks stop running everywhere at once.
+
+        The row names no branch here: a branch on the row satisfies the
+        branch check as the `branch:` line does (sd:3489)."""
         self.write(prd(None, criteria=False))
-        self.seed("in_progress")
+        self.seed("in_progress", branch=None)
         failures = self.lint()
         self.assertTrue(
             any("states acceptance criteria" in f for f in failures), failures
@@ -765,6 +768,12 @@ class RuleTwoReadsTheRow(Fixture):
         self.assertTrue(
             any("records the branch it lives on" in f for f in failures), failures
         )
+
+    def test_a_branch_on_the_row_records_the_branch(self) -> None:
+        """sd:3489. A design.md carries no `branch:` line; the row's column answers."""
+        self.write(prd(None))
+        self.seed("in_progress", branch="feat/the-thing")
+        self.assertEqual([f for f in self.lint() if "records the branch" in f], [])
 
     def test_a_blocked_row_is_not_workable(self) -> None:
         self.write(prd(None, criteria=False))
@@ -783,7 +792,8 @@ class RuleTwoComparesTheBranchLine(Fixture):
 
     def notes(self) -> tuple[list[str], list[str]]:
         report = lint.run(self.root, "docs/work", "docs/spec", "docs/decisions", None)
-        found = [n for n in report.notes if n.startswith("rule 2 branch line")]
+        # A skip ("not compared") is a warning since sd:3491; the comparisons are notes.
+        found = [n for n in report.notes + report.warnings if n.startswith("rule 2 branch line")]
         return found, report.failures
 
     def test_a_line_naming_another_branch_is_named(self) -> None:
@@ -1336,7 +1346,7 @@ class TheMakeCheckLintReadsNoHistory(Fixture):
         done, names = self.traced(self.recipe())
         self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
         self.assertEqual([name for name in names if name in self.HISTORY], [], names)
-        self.assertIn("rule 2 delivery: not asked", done.stdout)
+        self.assertIn("rule 2 delivery: not asked", done.stderr)  # a skip goes to stderr (sd:3491)
         return done
 
     def test_the_control_without_the_flag_does_fetch_and_log(self) -> None:

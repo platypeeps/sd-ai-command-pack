@@ -460,7 +460,13 @@ roles:
         # child asked the live endpoint, about 0.85 s a prepare, and a CI
         # runner has no `jev`, so the fixture now answers the same everywhere
         # (sd:1605).
+        # The body lint fails with no privacy-pattern file (sd:3490), so the
+        # fixture holds its own and never reads the operator's.
+        patterns = self.home / ".config/system/privacy-patterns"
+        patterns.parent.mkdir(parents=True, exist_ok=True)
+        patterns.write_text("secret-host\\.example\\.test\n", encoding="utf-8")
         self.environment = {**os.environ, "HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config"),
+                            "SYSTEM_TOOLS_CONFIG": str(patterns.parent),
                             "JEV_SD_REVIEW": "0", "JEV_SD_DOCS_LINT": "0", "JEV_SD_REVIEW_TRIAGE": "0",
                             "SHIP_DOUBLE": self.double.base_url,
                             "PATH": str(self.programs) + os.pathsep + os.environ["PATH"]}

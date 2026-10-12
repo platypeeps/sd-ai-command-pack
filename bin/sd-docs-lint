@@ -60,6 +60,8 @@ DECISION_HEADING_RE = re.compile(r"^#{1,6}\s+decision\b", re.IGNORECASE)
 # open marker is a line that starts with the word, optionally as a list item.
 BLOCKING_RE = re.compile(r"^\s*(?:[-*]\s+)?BLOCKING\b")
 MARKDOWN_LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
+# `[name]: target`, the reference-style form; rule 4 reads both.
+REFERENCE_LINK_RE = re.compile(r"^[ ]{0,3}\[[^\]]+\]:[ \t]*<?([^\s>]+)>?", re.MULTILINE)
 
 WORKABLE_STATUSES = ("ready", "in_progress")
 DECISION_STATUSES = ("proposed", "accepted", "superseded", "rejected")
@@ -72,8 +74,8 @@ class Report:
     def __init__(self) -> None:
         self.failures: list[str] = []
         self.notes: list[str] = []
-        # Advisory lines for stderr: something that should have answered did
-        # not. Never a failure, and never a change to the exit code.
+        # A rule that did not run, for stderr. Never a failure, but the final
+        # `clean` line counts them, so a skim of a log cannot read "all ran".
         self.warnings: list[str] = []
 
     def fail(self, location: str, message: str) -> None:
@@ -120,6 +122,8 @@ def check_shape(work_root: pathlib.Path, report: Report) -> None:
             continue
 
         for path in sorted(item.iterdir()):
+            if path.name.startswith("."):
+                continue  # `.DS_Store` or an editor swap file is not a document
             if path.is_dir():
                 report.fail(str(path), "a work item holds documents, not subdirectories")
             elif path.name not in ITEM_DOCUMENTS:
@@ -201,14 +205,17 @@ def check_ready(
     """
     workable = 0
     for item in item_directories(work_root):
-        prd = item / "prd.md"
+        # `prd.md`, else `design.md`: a design-only item is whole (sd:3000), and
+        # reading `prd.md` alone skipped every one of them (sd:3489).
+        prd = sd_lib.item_document(item)
         if not prd.is_file():
             continue
         text = prd.read_text(encoding="utf-8")
         fields = parse_frontmatter(text)
         if fields is None:
             continue
-        status = sd_lib.status_report(item, statuses=statuses).status
+        said = sd_lib.status_report(item, statuses=statuses)
+        status = said.status
         if status not in WORKABLE_STATUSES:
             continue
         workable += 1
@@ -218,7 +225,10 @@ def check_ready(
         for number, line in enumerate(text.split("\n"), start=1):
             if BLOCKING_RE.search(line):
                 report.fail(f"{prd}:{number}", f"a {status} item has no open BLOCKING line")
-        if status == "in_progress" and not fields.get("branch"):
+        # The row's branch or the `branch:` line: a design.md carries no line,
+        # so the line alone would fail every design-only item on its first day.
+        branch = (said.branch or "").strip() or fields.get("branch", "").strip()
+        if status == "in_progress" and not branch:
             report.fail(str(prd), "an in_progress item records the branch it lives on")
     return workable
 
@@ -251,7 +261,7 @@ def status_source_note(statuses: sd_lib.Statuses) -> str:
 def check_decisions(decisions_root: pathlib.Path, report: Report) -> None:
     """Rule 3."""
     if not decisions_root.is_dir():
-        report.note(f"rule 3 decision shape: no {decisions_root} directory, nothing to check")
+        report.warn(f"rule 3 decision shape: no {decisions_root} directory, nothing to check")
         return
 
     records = sorted(path for path in decisions_root.rglob("*.md") if path.is_file())
@@ -296,7 +306,7 @@ def check_decisions(decisions_root: pathlib.Path, report: Report) -> None:
 def check_spec_index(spec_root: pathlib.Path, report: Report) -> None:
     """Rule 4."""
     if not spec_root.is_dir():
-        report.note(f"rule 4 spec index: no {spec_root} directory, nothing to check")
+        report.warn(f"rule 4 spec index: no {spec_root} directory, nothing to check")
         return
 
     directories = sorted(
@@ -314,12 +324,15 @@ def check_spec_index(spec_root: pathlib.Path, report: Report) -> None:
             continue
         if not pages:
             continue
+        # Resolved against the index's own directory: `../other/foo.md` is not
+        # this directory's `foo.md`, though the basenames agree.
+        text = index.read_text(encoding="utf-8")
         linked = {
-            target.split("#", 1)[0].rsplit("/", 1)[-1]
-            for target in MARKDOWN_LINK_RE.findall(index.read_text(encoding="utf-8"))
+            (directory / target.split("#", 1)[0]).resolve()
+            for target in MARKDOWN_LINK_RE.findall(text) + REFERENCE_LINK_RE.findall(text)
         }
         for page in pages:
-            if page not in linked:
+            if (directory / page).resolve() not in linked:
                 report.fail(str(index), f"index does not link {page}")
 
     report.note(f"rule 4 spec index: checked {len(directories)} spec directory(ies)")
@@ -342,24 +355,26 @@ def check_pr_privacy(body: str | None, report: Report) -> None:
     """The body rule (sd:2999): a public pull request body matches no privacy pattern.
 
     `grep -E` matches, as `local-leak-guard` does, and a failure names line
-    numbers, never the text. A machine with no pattern file has nothing to
-    check against, so the rule says so and passes.
+    numbers, never the text. A body with no pattern file, or an empty one, to
+    check against fails: a fresh machine without the file would otherwise
+    publish the body unchecked and say clean (sd:3490).
     """
     if body is None:
-        report.note("PR privacy: no --pr-body supplied, not run")
+        report.warn("PR privacy: no --pr-body supplied, not run")
         return
+    remedy = "set sd.privacy_patterns, or write one ERE per line to that file"
     try:
         path = privacy_file()
         lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
-        report.note(f"PR privacy: no pattern file at {path}; not run")
+        report.fail(str(path), f"no privacy-pattern file, so the body is unchecked; {remedy}")
         return
     except (OSError, UnicodeDecodeError, sd_lib.ConfigError) as error:
         report.fail("privacy patterns", f"cannot be read: {error}")
         return
     patterns = [line for line in lines if line.strip() and not line.lstrip().startswith("#")]
     if not patterns:
-        report.note(f"PR privacy: {path} holds no pattern; not run")
+        report.fail(str(path), f"holds no privacy pattern, so the body is unchecked; {remedy}")
         return
     argv = ["grep", "-n", "-E", *(arg for pattern in patterns for arg in ("-e", pattern))]
     done = subprocess.run(argv, input=body.encode("utf-8"), capture_output=True, timeout=60, check=False)
@@ -420,7 +435,8 @@ def check_work_references(repo: pathlib.Path, work_dir: str, report: Report) -> 
         # Not a skip. An unanswerable enumeration checks nothing, and a rule
         # that reports a pass on nothing is the failure mode this whole item
         # exists to close.
-        report.fail(str(repo), "git could not list tracked markdown, so rule 7 read nothing")
+        report.fail(str(repo), "git could not list tracked markdown, so rule 7 read nothing; "
+                    "run it from inside a git checkout")
         return
     reference_re = re.compile(
         rf"(?<![\w/.-]){re.escape(work_dir)}/(?P<path>[A-Za-z0-9_./<>-]*[A-Za-z0-9_/<>-])"
@@ -617,20 +633,21 @@ def run(
         if pr_body is None:
             report.fail("--body-only", "needs --pr-body; the privacy rule reads it")
             return report
-        report.note("rules 1-4, 7: --body-only, not run")
+        report.warn("rules 1-4, 7: --body-only, not run")
         check_pr_privacy(pr_body, report)
         return report
     if keeps_work_local(repo, report):
-        report.note(f"rules 1-2, 7: mode: minimal keeps {work_dir} local; not run")
+        report.warn(f"rules 1-2, 7: mode: minimal keeps {work_dir} local; not run")
         check_decisions(repo / decisions_dir, report)
         check_spec_index(repo / spec_dir, report)
         check_pr_privacy(pr_body, report)
         return report
     if not work_root.is_dir():
         if work_dir_named:
-            report.fail(str(work_root), "the work directory does not exist")
+            report.fail(str(work_root), "the work directory does not exist; pass --work-dir "
+                        "the repo-relative root, or omit it where the repository keeps no work root")
             return report
-        report.note(f"rules 1-2: no {work_dir}; nothing to lint")
+        report.warn(f"rules 1-2: no {work_dir}; nothing to lint")
         check_decisions(repo / decisions_dir, report)
         check_spec_index(repo / spec_dir, report)
         check_pr_privacy(pr_body, report)
@@ -680,7 +697,7 @@ def check_work_items(repo: pathlib.Path, work_dir: str, report: Report, history:
     )
     report.note(f"rule 2 status source: {source}")
     if not history:
-        report.note(
+        report.warn(
             "rule 2 delivery: not asked; --no-history reads no commit history, "
             "and the lint sd-ship runs with the pull request body asks it"
         )
@@ -700,7 +717,7 @@ def check_branch_lines(
     """
     rows = statuses.rows
     if not rows.opened:
-        report.note("rule 2 branch line: not compared; no row to read here")
+        report.warn("rule 2 branch line: not compared; no row to read here")
         return
     compared = disagreeing = 0
     for item in item_directories(work_root):
@@ -708,7 +725,7 @@ def check_branch_lines(
         # directory of that name is still active (#1177 review).
         if is_archived(item, work_root):
             continue
-        prd = item / "prd.md"
+        prd = sd_lib.item_document(item)
         if not prd.is_file():
             continue
         fields = parse_frontmatter(prd.read_text(encoding="utf-8"))
@@ -831,7 +848,8 @@ def main(argv: list[str] | None = None) -> int:
     if report.failures:
         print(f"sd-docs-lint: {len(report.failures)} failure(s)", file=sys.stderr)
         return 1
-    print("sd-docs-lint: clean")
+    skipped = f" ({len(report.warnings)} skip(s) on stderr)" if report.warnings else ""
+    print(f"sd-docs-lint: clean{skipped}")
     return 0
 
 
