@@ -1288,12 +1288,14 @@ def run_contribution(args: argparse.Namespace) -> int:
                 connection, args.item, changes, who=who, expected_revision=args.if_revision)
         elif args.verb == "list":
             result = contributions.projection(connection)
-        elif args.verb in {"show", "ack"}:
+        elif args.verb in {"show", "ack", "dismiss"}:
             if args.verb == "show":
                 result = contributions.snapshot(connection, args.key)
-            else:
+            elif args.verb == "ack":
                 result = contributions.acknowledge(
                     connection, args.key, args.event, who=who, expected_revision=args.if_revision)
+            else:
+                result = contributions.dismiss(connection, args.key, who=who, expected_revision=args.if_revision)
             result = {**result, "contribution": next(
                 (row for row in contributions.projection(connection)
                  if row["key"] == result["key"] or f"item:{row.get('item_id')}" == result["key"]
@@ -1326,7 +1328,7 @@ CONTRIBUTION_KEY_HELP = (
 def _register_contributions(verbs: Any) -> None:
     group = verbs.add_parser("contribution", help="track local work and upstream contribution attention")
     actions = group.add_subparsers(dest="verb", required=True)
-    for action in ("add", "edit", "list", "show", "ack"):
+    for action in ("add", "edit", "list", "show", "ack", "dismiss"):
         parser = actions.add_parser(action)
         parser.add_argument("--json", action="store_true", help="machine-readable")
         parser.set_defaults(handler=run_contribution)
@@ -1337,10 +1339,11 @@ def _register_contributions(verbs: Any) -> None:
             else:
                 parser.add_argument("item", type=int)
                 parser.add_argument("--if-revision", help="item revision from sd store item")
-        if action in {"show", "ack"}:
+        if action in {"show", "ack", "dismiss"}:
             parser.add_argument("key", help=CONTRIBUTION_KEY_HELP)
         if action == "ack":
             parser.add_argument("--event", action="append", required=True, help="observed event ID; repeat as needed")
+        if action in {"ack", "dismiss"}:
             parser.add_argument("--if-revision", required=True, help="checkpoint revision from contribution show")
 
 

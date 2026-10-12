@@ -513,6 +513,12 @@ def _publish_attention(connection, state, attention, item=None) -> None:
         state["notifications"][event["id"]] = notice
 
 
+def _undismiss(state, value) -> None:
+    """A lifecycle change is news the dismissal never saw, so the row returns to its real lane."""
+    if state.get("dismissed") and state["dismissed"].get("state") != value["state"]:
+        del state["dismissed"]
+
+
 def observe_pull(connection, url, observation, *, expected_revision) -> dict:
     url = _url(url)
     with transaction(connection):
@@ -561,6 +567,7 @@ def observe_pull(connection, url, observation, *, expected_revision) -> dict:
         contexts = _context_ids(value, state)
         attention, baseline = _pull_attention(value, state, contexts)
         state["context_events"] = contexts
+        _undismiss(state, value)
         state["observation"] = value
         state["ci_baseline"] = baseline
         if value["mergeable"] != "unknown":
@@ -653,6 +660,7 @@ def observe_issue(connection, url, observation, *, expected_revision) -> dict:
         if registered and value.get("blocking_labels", []) != registered[1].get("blocking_labels", []):
             raise StaleItem("blocking-label policy changed; recollect with the current configuration")
         attention = _issue_attention(value, state)
+        _undismiss(state, value)
         state["observation"] = value
         _publish_attention(connection, state, attention, item)
         result = _save(connection, state)
@@ -786,6 +794,8 @@ def _freshness(heartbeats, sources) -> dict:
 def _projection_row(heartbeats, row, metadata, sources) -> dict:
     source = next((s for s in sources if _observed_url(s["key"])), sources[0])
     observation = source["observation"] or {}
+    # A task made for the URL later is the operator tracking it again, so only a row with no item reads it.
+    dismissed = None if row.get("id") else source.get("dismissed")
     url = metadata.get("pull_url") or metadata.get("issue_url") or _observed_url(source["key"])
     active = [{"key": s["key"], "revision": s["revision"], "event_ids": [e["id"] for e in s["attention"]],
                "reasons": [e["reason"] for e in s["attention"]]} for s in sources if s["attention"]]
@@ -794,10 +804,11 @@ def _projection_row(heartbeats, row, metadata, sources) -> dict:
     waiting = bool(metadata.get("blocked_on") or metadata.get("depends_on"))
     needs_you = bool(active) or (not url and not waiting)
     # An issue or a pull request closed without merge awaits no one; a later
-    # observation that reads `open` returns the row to live work.
-    closed = observation.get("state") == "closed"
-    lane = "awaiting_you" if needs_you else "closed" if closed \
-        else "merged" if observation.get("state") == "merged" else "awaiting_them"
+    # observation that reads `open` returns the row to live work. A dismissed
+    # row (sd:3432) is closed too, until new attention or a lifecycle change.
+    closed = observation.get("state") == "closed" or bool(dismissed)
+    lane = "awaiting_you" if needs_you else "merged" if observation.get("state") == "merged" \
+        else "closed" if closed else "awaiting_them"
     if any(e["kind"] == "newly_unblocked" for s in sources for e in s["attention"]):
         lane = "newly_unblocked"
     try:
@@ -832,7 +843,7 @@ def _projection_row(heartbeats, row, metadata, sources) -> dict:
             "local_clone": metadata.get("local_clone"), "local_branch": metadata.get("local_branch"),
             "tested_commit": metadata.get("tested_commit"), "evidence": metadata.get("evidence", []), "evidence_verified": verified,
             "issue_url": metadata.get("issue_url"), "target_repo": target, "draft_title": metadata.get("draft_title"),
-            "draft_path": draft, "draft_verified": draft_verified,
+            "draft_path": draft, "draft_verified": draft_verified, "dismissed": dismissed,
             "notification_state": {s["key"]: s["notifications"] for s in sources}}
 
 
@@ -912,12 +923,42 @@ def acknowledge(connection, key, event_ids, *, who, expected_revision) -> dict:
         active = {event["id"] for event in state["attention"]}
         if not set(event_ids) <= active:
             raise WorkflowError("acknowledgement includes an event that is no longer active")
-        for identifier in event_ids:
-            notice = state["notifications"][identifier]
-            if notice.get("note_id"):
-                resolve_note(connection, notice["note_id"])
-            notice["acknowledged_by"] = who
-            notice["acknowledged_at"] = now()
-        state["acknowledged"] = sorted(set(state["acknowledged"]) | set(event_ids))
-        state["attention"] = [event for event in state["attention"] if event["id"] not in event_ids]
+        _acknowledge(connection, state, event_ids, who)
+        return _save(connection, state)
+
+
+def _acknowledge(connection, state, event_ids, who) -> None:
+    for identifier in event_ids:
+        notice = state["notifications"][identifier]
+        if notice.get("note_id"):
+            resolve_note(connection, notice["note_id"])
+        notice["acknowledged_by"] = who
+        notice["acknowledged_at"] = now()
+    state["acknowledged"] = sorted(set(state["acknowledged"]) | set(event_ids))
+    state["attention"] = [event for event in state["attention"] if event["id"] not in event_ids]
+
+
+def dismiss(connection, key, *, who, expected_revision) -> dict:
+    """The operator's close for an observed row with no item (sd:3432); never automatic.
+
+    A pull request whose repository was re-created 404s, so every observation
+    holds and the row read open forever. Dismissing acknowledges what is
+    active and moves the row to `closed`; `_undismiss` ends it on a lifecycle
+    change. A row with an item closes through the item instead.
+    """
+    who = _text(who, "who")
+    key = _key(key)
+    url = _observed_url(key)
+    if url is None:
+        raise WorkflowError("dismiss takes an observed github: or issue: key; close an item through its task")
+    with transaction(connection):
+        state = _checked(connection, key, expected_revision)
+        if not connection.execute("SELECT 1 FROM state WHERE kind='checkpoint' AND key=?", ("contribution:" + key,)).fetchone():
+            raise WorkflowError("no observed contribution has this key")
+        if any(url in (metadata.get("pull_url"), metadata.get("issue_url")) for _, metadata in _registered(connection)):
+            raise WorkflowError("this contribution belongs to an item; close the item instead")
+        if state.get("dismissed"):
+            return state
+        _acknowledge(connection, state, [event["id"] for event in state["attention"]], who)
+        state["dismissed"] = {"by": who, "at": now(), "state": (state["observation"] or {}).get("state")}
         return _save(connection, state)
