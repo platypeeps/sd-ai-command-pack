@@ -105,13 +105,16 @@ class LintFixture(unittest.TestCase):
         # What a row would say, by item directory name. An item not named here
         # reads whatever the database-free path answers.
         self.row_status: dict[str, str] = {}
+        # The row's `branch` column, by the same key; absent is no row answer.
+        self.row_branch: dict[str, str] = {}
         real = lint.sd_lib.status_report
 
         def status_report(item, *, statuses=None):
-            said = self.row_status.get(pathlib.Path(item).name)
+            name = pathlib.Path(item).name
+            said = self.row_status.get(name)
             if said is None:
                 return real(item, statuses=statuses)
-            return lint.sd_lib.StatusReport(said, False)
+            return lint.sd_lib.StatusReport(said, False, branch=self.row_branch.get(name))
 
         patched = mock.patch.object(lint.sd_lib, "status_report", status_report)
         patched.start()
@@ -124,6 +127,14 @@ class LintFixture(unittest.TestCase):
         (item / "prd.md").write_text(prd, encoding="utf-8")
         return item
 
+    def write_design(self, name: str, body: str = "# Design\n") -> pathlib.Path:
+        """A design-only item (sd:3000): frontmatter naming its row, then `body`."""
+        item = self.work / name
+        item.mkdir(parents=True, exist_ok=True)
+        (item / "design.md").write_text(
+            f"---\ntitle: A design\nitem: sd:361\n---\n\n{body}", encoding="utf-8")
+        return item
+
     def write_spec(self, area: str, pages: list[str], *, index: str | None = None) -> None:
         directory = self.spec / area
         directory.mkdir(parents=True, exist_ok=True)
@@ -134,6 +145,18 @@ class LintFixture(unittest.TestCase):
             links = "\n".join(f"- [{page}](./{page})" for page in pages)
             body = f"# {area}\n\n{links}\n"
         (directory / "index.md").write_text(body, encoding="utf-8")
+
+    def write_patterns(self, text: str = "secret-host\\.example\\.test\n") -> pathlib.Path:
+        """A privacy-pattern file outside the repository, read through `SYSTEM_TOOLS_CONFIG`."""
+        config = self.repo.parent / f"{self.repo.name}-config"
+        (config / "system").mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, config, True)
+        patterns = config / "system" / "privacy-patterns"
+        patterns.write_text(text, encoding="utf-8")
+        env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config), "SYSTEM_TOOLS_CONFIG": str(config / "system")})
+        env.start()
+        self.addCleanup(env.stop)
+        return patterns
 
     def git(self, *args: str) -> None:
         subprocess.run(
@@ -375,6 +398,95 @@ class Rule2ReadyTests(LintFixture):
         )
 
 
+class Rule2DesignOnlyTests(LintFixture):
+    """sd:3489. Rule 2 reads a design-only item, which it once skipped whole."""
+
+    def test_red_a_ready_design_without_acceptance_criteria(self) -> None:
+        self.write_design("2026-08-30-a-design")
+        self.row_status["2026-08-30-a-design"] = "ready"
+        failures = self.assert_fails("a ready item states acceptance criteria")
+        self.assertTrue(any("a-design/design.md" in failure for failure in failures), failures)
+
+    def test_red_a_ready_design_with_an_open_blocking_line(self) -> None:
+        self.write_design("2026-08-30-a-design", "## Acceptance criteria\n\nBLOCKING: no API yet.\n")
+        self.row_status["2026-08-30-a-design"] = "ready"
+        self.assert_fails("a ready item has no open BLOCKING line")
+
+    def test_red_an_in_progress_design_whose_row_names_no_branch(self) -> None:
+        self.write_design("2026-08-30-a-design", "## Acceptance criteria\n")
+        self.row_status["2026-08-30-a-design"] = "in_progress"
+        self.row_branch["2026-08-30-a-design"] = ""
+        self.assert_fails("an in_progress item records the branch it lives on")
+
+    def test_green_an_in_progress_design_takes_its_branch_from_the_row(self) -> None:
+        """A design.md carries no `branch:` line; the row's column answers."""
+        self.write_design("2026-08-30-a-design", "## Acceptance criteria\n")
+        self.row_status["2026-08-30-a-design"] = "in_progress"
+        self.row_branch["2026-08-30-a-design"] = "feat/a-design"
+        report = self.run_lint()
+        self.assertEqual(report.failures, [])
+        self.assertIn("1 of them workable by rule 2", "\n".join(report.notes))
+
+    def test_the_branch_line_advisory_reads_a_design(self) -> None:
+        item = self.write_design("2026-08-30-a-design")
+        design = item / "design.md"
+        design.write_text(design.read_text(encoding="utf-8").replace(
+            "item: sd:361\n", "item: sd:361\nbranch: feat/old\n"), encoding="utf-8")
+        rows = mock.Mock(opened=True)
+        rows.item.return_value = {"branch": "feat/new"}
+        report = lint.Report()
+        lint.check_branch_lines(self.work, report, mock.Mock(rows=rows))
+        self.assertIn("1 of 1 active item(s) with a branch: line disagree", "\n".join(report.notes))
+
+
+class SkipsAndRemediesTests(LintFixture):
+    """sd:3491. A rule that did not run says so on the last line; a refusal names its fix."""
+
+    def cli(self, *argv: str) -> tuple[int, str, str]:
+        self.git("add", "-A")
+        with in_directory(self.repo), contextlib.redirect_stderr(io.StringIO()) as said, \
+                contextlib.redirect_stdout(io.StringIO()) as printed:
+            code = lint.main(list(argv))
+        return code, printed.getvalue(), said.getvalue()
+
+    def test_a_skipped_rule_goes_to_stderr_and_the_last_line_counts_it(self) -> None:
+        code, printed, said = self.cli("--no-history")
+        self.assertEqual(code, 0, said)
+        self.assertIn("PR privacy: no --pr-body supplied, not run", said)
+        self.assertNotIn("not run", printed)
+        skips = len([line for line in said.splitlines() if line])
+        self.assertGreater(skips, 1, said)
+        self.assertEqual(printed.splitlines()[-1], f"sd-docs-lint: clean ({skips} skip(s) on stderr)")
+
+    def test_red_a_named_work_directory_that_is_missing_names_the_flag(self) -> None:
+        shutil.rmtree(self.work)
+        report = self.run_lint()
+        self.assertEqual(len(report.failures), 1, report.failures)
+        self.assertIn("pass --work-dir the repo-relative root", report.failures[0])
+
+    def test_red_rule_7_without_git_names_the_fix(self) -> None:
+        report = lint.Report()
+        with mock.patch.object(lint.sd_lib, "git_output", return_value=None):
+            lint.check_work_references(self.repo, "docs/work", report)
+        self.assertIn("run it from inside a git checkout", "\n".join(report.failures))
+
+    def test_green_a_dotfile_in_an_item_is_not_a_document(self) -> None:
+        item = self.work / "2026-08-29-a-workable-item"
+        for name in (".DS_Store", ".prd.md.swp"):
+            (item / name).write_text("x", encoding="utf-8")
+        self.assert_clean()
+
+    def test_red_an_index_link_to_a_same_named_page_elsewhere_is_not_a_link(self) -> None:
+        self.write_spec("other", ["quality.md"])
+        index = "# backend\n\n- [quality](../other/quality.md)\n"
+        self.write_spec("backend", ["quality.md"], index=index)
+        self.assert_fails("index does not link quality.md")
+
+    def test_green_a_reference_style_link_is_a_link(self) -> None:
+        self.write_spec("backend", ["quality.md"], index="# backend\n\n- [quality][q]\n\n[q]: ./quality.md\n")
+        self.assert_clean()
+
+
 class Rule2StatusSourceTests(LintFixture):
     """The run says where rule 2 read its statuses, because a checkout with
     no database checks fewer items and prints the same `clean`."""
@@ -405,7 +517,7 @@ class Rule3DecisionTests(LintFixture):
     def test_green_absent_directory_is_not_a_failure(self) -> None:
         report = self.run_lint()
         self.assertEqual(report.failures, [])
-        self.assertTrue(any("rule 3" in note for note in report.notes))
+        self.assertTrue(any("rule 3" in warning for warning in report.warnings))
 
     def test_red_undated_filename(self) -> None:
         self.write_decision("json-config.md", GOOD_DECISION)
@@ -470,12 +582,13 @@ class BodyOnlyTests(LintFixture):
     def setUp(self) -> None:
         super().setUp()
         shutil.rmtree(self.work)
+        self.write_patterns()
 
     def test_green_every_tree_rule_says_it_did_not_run(self) -> None:
         report = self.run_lint("## Summary\n", body_only=True)
         self.assertEqual(report.failures, [])
         notes = "\n".join(report.notes)
-        self.assertIn("rules 1-4, 7: --body-only, not run", notes)
+        self.assertIn("rules 1-4, 7: --body-only, not run", "\n".join(report.warnings))
         for tree_rule in ("rules 1-2 work items", "rule 3 decision", "rule 4 spec", "rule 7 work"):
             self.assertNotIn(tree_rule, notes)
 
@@ -483,7 +596,8 @@ class BodyOnlyTests(LintFixture):
         # The mode is opt-in. A mistyped `--work-dir` on a full run stays a
         # failure by name rather than a body-only run nobody asked for.
         report = self.run_lint("## Summary\n")
-        self.assertEqual(report.failures, [f"{self.work.resolve()}: the work directory does not exist"])
+        self.assertEqual(len(report.failures), 1, report.failures)
+        self.assertTrue(report.failures[0].startswith(f"{self.work.resolve()}: the work directory does not exist"))
 
     def test_the_flag_without_a_body_is_a_failure_in_the_library_and_an_argument_error_at_the_cli(self) -> None:
         report = self.run_lint(None, body_only=True)
@@ -512,14 +626,7 @@ class PullRequestPrivacyTests(LintFixture):
 
     def setUp(self) -> None:
         super().setUp()
-        config = self.repo.parent / f"{self.repo.name}-config"
-        (config / "system").mkdir(parents=True)
-        self.patterns = config / "system" / "privacy-patterns"
-        self.patterns.write_text("# a comment\nsecret-host\\.example\\.test\n", encoding="utf-8")
-        env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config), "SYSTEM_TOOLS_CONFIG": str(config / "system")})
-        env.start()
-        self.addCleanup(env.stop)
-        self.addCleanup(shutil.rmtree, config, True)
+        self.patterns = self.write_patterns("# a comment\nsecret-host\\.example\\.test\n")
 
     def test_red_a_line_matching_a_pattern_is_named_by_number(self) -> None:
         report = self.run_lint("## Summary\n\n- reach secret-host.example.test\n", body_only=True)
@@ -531,11 +638,23 @@ class PullRequestPrivacyTests(LintFixture):
         body = "Work: sd:1\nWork: sd:2\nWork:\n\n## Summary\n\n- touches .github/workflows\n"
         self.assertEqual(self.run_lint(body, body_only=True).failures, [])
 
-    def test_no_pattern_file_is_a_note(self) -> None:
+    def test_red_no_pattern_file_fails_and_names_the_remedy(self) -> None:
+        """sd:3490. A machine without the file published bodies unchecked and said clean."""
         self.patterns.unlink()
         report = self.run_lint("## Summary\n", body_only=True)
-        self.assertEqual(report.failures, [])
-        self.assertIn(f"PR privacy: no pattern file at {self.patterns}; not run", report.notes)
+        self.assertEqual(report.failures, [
+            f"{self.patterns}: no privacy-pattern file, so the body is unchecked; "
+            "set sd.privacy_patterns, or write one ERE per line to that file"])
+
+    def test_red_a_pattern_file_with_no_pattern_fails(self) -> None:
+        self.patterns.write_text("# only a comment\n\n", encoding="utf-8")
+        report = self.run_lint("## Summary\n", body_only=True)
+        self.assertEqual(len(report.failures), 1, report.failures)
+        self.assertIn("holds no privacy pattern, so the body is unchecked", report.failures[0])
+
+    def test_green_no_body_needs_no_pattern_file(self) -> None:
+        self.patterns.unlink()
+        self.assertEqual(self.run_lint().failures, [])
 
 
 class NoDefaultWorkRootTests(LintFixture):
@@ -561,7 +680,7 @@ class NoDefaultWorkRootTests(LintFixture):
     def test_red_the_default_root_missing_is_a_skip_and_exit_0(self) -> None:
         code, printed, said = self.cli()
         self.assertEqual(code, 0, said)
-        self.assertIn("rules 1-2: no docs/work; nothing to lint", printed)
+        self.assertIn("rules 1-2: no docs/work; nothing to lint", said)
         self.assertIn("sd-docs-lint: clean", printed)
         self.assertNotIn("does not exist", said)
 
@@ -578,10 +697,11 @@ class NoDefaultWorkRootTests(LintFixture):
     def test_the_other_rules_still_run_without_the_default_root(self) -> None:
         body = self.repo / "body.md"
         body.write_text("## Summary\n", encoding="utf-8")
+        self.write_patterns()
         code, printed, said = self.cli("--pr-body", str(body))
         self.assertEqual(code, 0, said)
-        self.assertIn("PR privacy: no pattern file at", printed)
-        self.assertIn("rule 3 decision shape", printed)
+        self.assertIn("PR privacy: 1 pattern(s) from", printed)
+        self.assertIn("rule 3 decision shape", said)
 
     def test_an_explicit_work_dir_that_is_missing_still_fails(self) -> None:
         code, _, said = self.cli("--work-dir", "docs/work")
@@ -616,7 +736,7 @@ class MinimalModeTests(LintFixture):
     def test_green_work_rules_skip_with_a_note(self) -> None:
         report = self.run_lint()
         self.assertEqual(report.failures, [])
-        self.assertIn("rules 1-2, 7: mode: minimal keeps docs/work local; not run", report.notes)
+        self.assertIn("rules 1-2, 7: mode: minimal keeps docs/work local; not run", report.warnings)
 
     def test_red_the_same_tree_in_full_mode_still_fails_both_rules(self) -> None:
         self.write_mode("full")

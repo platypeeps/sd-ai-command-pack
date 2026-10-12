@@ -516,28 +516,20 @@ RULES: tuple[Rule, ...] = (
         scope="prose",
         teaches="skills/sd-check/SKILL.md#Prose rules",
     ),
-    #: Nothing new is enforced by this row. Leg b's predicate is `claims_in`
-    #: and its baseline is `UNCITED_SKILL_CLAIMS`, both in
-    #: `tests/test_rule_registry.py`, and both have run since step 2; the row
-    #: is what lets a skill cite the rule it is held to, which leg a then
-    #: requires of the section named here.
+    #: Repealed with leg b of `tests/test_rule_registry.py` (operator
+    #: decision, sd:3484): the ratchet caught no real claim and cost two
+    #: gate rounds, firing on `sd:N` ids and code spans.
     Rule(
         id="R13-D3",
         subject="a line of a skill that asserts a tool behaviour -- an "
                 "enforcement verb, `refuses`, `never`, `always` or `cannot`, "
                 "with a pack tool or a test on the same line -- cites a rule "
-                "id the registry carries, beyond the entries "
-                "`UNCITED_SKILL_CLAIMS` carries per document, and that "
-                "baseline only shrinks",
-        checker="tests/test_rule_registry.py::"
-                "test_uncited_tool_behaviour_claims_match_their_baseline",
-        proof="add a line naming `sd-check` with `refuses` and no rule id to "
-              "`skills/sd-check/SKILL.md`; that document gains an uncited "
-              "claim its baseline does not carry and "
-              "`test_uncited_tool_behaviour_claims_match_their_baseline` "
-              "goes red",
+                "id the registry carries",
+        checker=None,
+        proof=None,
         scope="prose",
-        teaches="skills/sd-check/SKILL.md#Prose rules",
+        teaches=None,
+        state=REPEALED,
     ),
     #: sd-ship's protection-gap policy (sd:1451), registered by sd:1460 so the
     #: skill can cite it. #1167 reworded the skill's line instead, because no
