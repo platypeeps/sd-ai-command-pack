@@ -59,7 +59,9 @@ DECISION_HEADING_RE = re.compile(r"^#{1,6}\s+decision\b", re.IGNORECASE)
 # ledger quotes "no open `BLOCKING:` line" and which rule 2 then refused. An
 # open marker is a line that starts with the word, optionally as a list item.
 BLOCKING_RE = re.compile(r"^\s*(?:[-*]\s+)?BLOCKING\b")
-MARKDOWN_LINK_RE = re.compile(r"\]\(([^)\s]+)\)|^\s*\[[^\]]+\]:\s*(\S+)", re.MULTILINE)
+MARKDOWN_LINK_RE = re.compile(r"\]\(([^)\s]+)\)")
+# `[name]: target`, the reference-style form; rule 4 reads both.
+REFERENCE_LINK_RE = re.compile(r"^[ ]{0,3}\[[^\]]+\]:[ \t]*<?([^\s>]+)>?", re.MULTILINE)
 
 WORKABLE_STATUSES = ("ready", "in_progress")
 DECISION_STATUSES = ("proposed", "accepted", "superseded", "rejected")
@@ -324,11 +326,10 @@ def check_spec_index(spec_root: pathlib.Path, report: Report) -> None:
             continue
         # Resolved against the index's own directory: `../other/foo.md` is not
         # this directory's `foo.md`, though the basenames agree.
+        text = index.read_text(encoding="utf-8")
         linked = {
             (directory / target.split("#", 1)[0]).resolve()
-            for pair in MARKDOWN_LINK_RE.findall(index.read_text(encoding="utf-8"))
-            for target in pair
-            if target
+            for target in MARKDOWN_LINK_RE.findall(text) + REFERENCE_LINK_RE.findall(text)
         }
         for page in pages:
             if (directory / page).resolve() not in linked:
