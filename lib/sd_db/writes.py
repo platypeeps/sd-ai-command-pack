@@ -465,12 +465,14 @@ def add_note(
     return int(cursor.lastrowid)
 
 
-def resolve_note(connection: sqlite3.Connection, note: int) -> None:
+def resolve_note(connection: sqlite3.Connection, note: int) -> int:
+    """Close an open note; the count it closed, 0 for an id that is absent or already closed (sd:3502)."""
     with transaction(connection):
-        connection.execute(
+        cursor = connection.execute(
             "UPDATE note SET resolved_at = ? WHERE id = ? AND resolved_at IS NULL",
             (now(), note),
         )
+    return cursor.rowcount
 
 
 def reopen_note(connection: sqlite3.Connection, note: int) -> None:

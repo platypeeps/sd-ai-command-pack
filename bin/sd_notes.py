@@ -68,15 +68,22 @@ def note_lines(note) -> list[str]:
 
 def cmd_resolve(args, out=None, err=None) -> int:
     out = sys.stdout if out is None else out
+    err = sys.stderr if err is None else err
     sd_db = sd_handoff_rows.library()
     connection = sd_handoff_rows.connect(sd_db, write=True)
     try:
-        sd_db.resolve_note(connection, args.note)
+        closed = sd_db.resolve_note(connection, args.note)
     finally:
         connection.close()
-    # `resolve_note` is a no-op on an id that is absent or already closed, and
-    # says which. Reporting "resolved" either way would be a lie only in the
-    # case nobody can act on, so the line names the id and not an outcome.
+    # sd:3502: an id that is absent or already closed resolves nothing, and a
+    # caller retrying after a refusal must not read that as success. A hub
+    # that sends no count (-1) is an unknown, not a success.
+    if closed == 0:
+        print(f"no open note {args.note}", file=err)
+        return 1
+    if closed < 0:
+        print(f"note {args.note}: the store did not say whether it closed", file=err)
+        return 1
     print(f"resolved note {args.note}", file=out)
     return 0
 
