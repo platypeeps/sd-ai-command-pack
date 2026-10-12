@@ -348,24 +348,26 @@ def check_pr_privacy(body: str | None, report: Report) -> None:
     """The body rule (sd:2999): a public pull request body matches no privacy pattern.
 
     `grep -E` matches, as `local-leak-guard` does, and a failure names line
-    numbers, never the text. A machine with no pattern file has nothing to
-    check against, so the rule says so and passes.
+    numbers, never the text. A body with no pattern file, or an empty one, to
+    check against fails: a fresh machine without the file would otherwise
+    publish the body unchecked and say clean (sd:3490).
     """
     if body is None:
         report.note("PR privacy: no --pr-body supplied, not run")
         return
+    remedy = "set sd.privacy_patterns, or write one ERE per line to that file"
     try:
         path = privacy_file()
         lines = path.read_text(encoding="utf-8").splitlines()
     except FileNotFoundError:
-        report.note(f"PR privacy: no pattern file at {path}; not run")
+        report.fail(str(path), f"no privacy-pattern file, so the body is unchecked; {remedy}")
         return
     except (OSError, UnicodeDecodeError, sd_lib.ConfigError) as error:
         report.fail("privacy patterns", f"cannot be read: {error}")
         return
     patterns = [line for line in lines if line.strip() and not line.lstrip().startswith("#")]
     if not patterns:
-        report.note(f"PR privacy: {path} holds no pattern; not run")
+        report.fail(str(path), f"holds no privacy pattern, so the body is unchecked; {remedy}")
         return
     argv = ["grep", "-n", "-E", *(arg for pattern in patterns for arg in ("-e", pattern))]
     done = subprocess.run(argv, input=body.encode("utf-8"), capture_output=True, timeout=60, check=False)

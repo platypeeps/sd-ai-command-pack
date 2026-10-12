@@ -146,6 +146,18 @@ class LintFixture(unittest.TestCase):
             body = f"# {area}\n\n{links}\n"
         (directory / "index.md").write_text(body, encoding="utf-8")
 
+    def write_patterns(self, text: str = "secret-host\\.example\\.test\n") -> pathlib.Path:
+        """A privacy-pattern file outside the repository, read through `SYSTEM_TOOLS_CONFIG`."""
+        config = self.repo.parent / f"{self.repo.name}-config"
+        (config / "system").mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, config, True)
+        patterns = config / "system" / "privacy-patterns"
+        patterns.write_text(text, encoding="utf-8")
+        env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config), "SYSTEM_TOOLS_CONFIG": str(config / "system")})
+        env.start()
+        self.addCleanup(env.stop)
+        return patterns
+
     def git(self, *args: str) -> None:
         subprocess.run(
             ["git", "-C", str(self.repo), *args], check=True, capture_output=True
@@ -522,6 +534,7 @@ class BodyOnlyTests(LintFixture):
     def setUp(self) -> None:
         super().setUp()
         shutil.rmtree(self.work)
+        self.write_patterns()
 
     def test_green_every_tree_rule_says_it_did_not_run(self) -> None:
         report = self.run_lint("## Summary\n", body_only=True)
@@ -564,14 +577,7 @@ class PullRequestPrivacyTests(LintFixture):
 
     def setUp(self) -> None:
         super().setUp()
-        config = self.repo.parent / f"{self.repo.name}-config"
-        (config / "system").mkdir(parents=True)
-        self.patterns = config / "system" / "privacy-patterns"
-        self.patterns.write_text("# a comment\nsecret-host\\.example\\.test\n", encoding="utf-8")
-        env = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config), "SYSTEM_TOOLS_CONFIG": str(config / "system")})
-        env.start()
-        self.addCleanup(env.stop)
-        self.addCleanup(shutil.rmtree, config, True)
+        self.patterns = self.write_patterns("# a comment\nsecret-host\\.example\\.test\n")
 
     def test_red_a_line_matching_a_pattern_is_named_by_number(self) -> None:
         report = self.run_lint("## Summary\n\n- reach secret-host.example.test\n", body_only=True)
@@ -583,11 +589,23 @@ class PullRequestPrivacyTests(LintFixture):
         body = "Work: sd:1\nWork: sd:2\nWork:\n\n## Summary\n\n- touches .github/workflows\n"
         self.assertEqual(self.run_lint(body, body_only=True).failures, [])
 
-    def test_no_pattern_file_is_a_note(self) -> None:
+    def test_red_no_pattern_file_fails_and_names_the_remedy(self) -> None:
+        """sd:3490. A machine without the file published bodies unchecked and said clean."""
         self.patterns.unlink()
         report = self.run_lint("## Summary\n", body_only=True)
-        self.assertEqual(report.failures, [])
-        self.assertIn(f"PR privacy: no pattern file at {self.patterns}; not run", report.notes)
+        self.assertEqual(report.failures, [
+            f"{self.patterns}: no privacy-pattern file, so the body is unchecked; "
+            "set sd.privacy_patterns, or write one ERE per line to that file"])
+
+    def test_red_a_pattern_file_with_no_pattern_fails(self) -> None:
+        self.patterns.write_text("# only a comment\n\n", encoding="utf-8")
+        report = self.run_lint("## Summary\n", body_only=True)
+        self.assertEqual(len(report.failures), 1, report.failures)
+        self.assertIn("holds no privacy pattern, so the body is unchecked", report.failures[0])
+
+    def test_green_no_body_needs_no_pattern_file(self) -> None:
+        self.patterns.unlink()
+        self.assertEqual(self.run_lint().failures, [])
 
 
 class NoDefaultWorkRootTests(LintFixture):
@@ -630,9 +648,10 @@ class NoDefaultWorkRootTests(LintFixture):
     def test_the_other_rules_still_run_without_the_default_root(self) -> None:
         body = self.repo / "body.md"
         body.write_text("## Summary\n", encoding="utf-8")
+        self.write_patterns()
         code, printed, said = self.cli("--pr-body", str(body))
         self.assertEqual(code, 0, said)
-        self.assertIn("PR privacy: no pattern file at", printed)
+        self.assertIn("PR privacy: 1 pattern(s) from", printed)
         self.assertIn("rule 3 decision shape", printed)
 
     def test_an_explicit_work_dir_that_is_missing_still_fails(self) -> None:
