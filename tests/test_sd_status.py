@@ -586,6 +586,21 @@ class ProtectionGapTests(unittest.TestCase):
         self.assertIn("no pull-request review is required on main", found[0]["gap"])
 
 
+class SoleOperatorReviewTests(unittest.TestCase):
+    """sd:3497: one maintainer cannot approve their own pull request; the runner merges."""
+
+    def test_under_the_local_gate_the_reviews_gap_says_gate(self) -> None:
+        protection = ProtectionGapTests.enforcing(self, required_pull_request_reviews={"required_approving_review_count": 0})
+        found, _ = status._protection_gaps(protection, "main", {"lint"}, [], local=True)
+        self.assertEqual(found[0]["gap"], "a pull request is required but no approving review is: "
+                                          "0 approvals, so one with a green gate self-merges")
+
+    def test_the_merge_settings_carry_no_lane_b_vocabulary(self) -> None:
+        text = json.dumps(status._merge_settings({}))
+        self.assertNotIn("carrier branch", text)
+        self.assertIn("a builder's `wip:` subjects", text)
+
+
 class GapVocabularyTests(unittest.TestCase):
     """The pack owns the gap vocabulary, and the system's collector must agree (sd:1372).
 
@@ -1637,6 +1652,19 @@ class BackendTests(StatusFixture):
         self.assertTrue(rows["registry"].startswith("unreadable ("), rows)
 
 
+class CodexAuthTests(unittest.TestCase):
+    """sd:3497: codex keeps auth.json under CODEX_HOME, as sd-review reads it."""
+
+    def test_codex_auth_is_read_where_codex_home_points(self) -> None:
+        codex = SimpleNamespace(name="codex", enabled=True, kind="start", start="git", env=())
+        with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as moved:
+            (pathlib.Path(moved) / "auth.json").write_text("{}", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"HOME": home, "CODEX_HOME": moved}):
+                self.assertEqual(status._provider_row(codex)["state"], "present")
+            with mock.patch.dict(os.environ, {"HOME": home, "CODEX_HOME": ""}):
+                self.assertEqual(status._provider_row(codex)["state"], "unauthenticated")
+
+
 class RepoResolutionTests(StatusFixture):
     """R10-D6, asserted against the parser rather than only against --help."""
 
@@ -2080,7 +2108,7 @@ class JiraSectionTests(StatusFixture):
         self.assertEqual(result["issues"], {"available": False, "reason": "no GitHub remote",
                                             "needs_you": [], "other": []})
         completed = self.run_tool(SD_STATUS)
-        self.assertIn("\nissues (this repo, from the index)\n  ! no GitHub remote\n", completed.stdout)
+        self.assertIn("\nissues (this repo, shared database)\n  ! no GitHub remote\n", completed.stdout)
         self.assertIn("LOG-9", self.section(completed.stdout))
 
     def test_no_shared_database_is_a_reported_gap(self) -> None:
@@ -2249,10 +2277,10 @@ class ClassTableTests(unittest.TestCase):
                 "branch-already-merged", "in-progress-without-branch",
                 "branch-unresolvable", "status-unreadable", "unresolved-concern",
                 "pr-check-failing", "pr-check-missing", "dirty-tree-with-open-pr",
-                "protection-gap", "accepted-gap-standing", "issue-needs-you",
+                "protection-gap", "accepted-gap-standing",
                 "pr-needs-action", "unmerged-branch",
                 "parked-concern", "idle-planning", "undated-planning",
-                "issue-open", "source-marker", "unreadable-concern-row",
+                "source-marker", "unreadable-concern-row",
                 "undisclosed-tool", "mirror-sync-pending", "lane-entry-failed",
             },
         )
@@ -2668,7 +2696,8 @@ class AdapterInventoryTests(InventoryFixture):
         self.assertEqual(found[0]["key"], "main#enforce_admins")
         self.assertIn(".github/sd-status.json", found[0]["suggest"])
 
-    def test_an_indexed_issue_becomes_a_row_keyed_on_its_permanent_number(self) -> None:
+    def test_an_issue_in_the_section_is_context_not_a_row(self) -> None:
+        """sd:3497: the two issue classes could never fire from the shared database; they are gone."""
         issues = {
             "available": True,
             "needs_you": [{
@@ -2678,8 +2707,8 @@ class AdapterInventoryTests(InventoryFixture):
             }],
             "other": [],
         }
-        found = self.by_check(self.rows(issues=issues), "issue-needs-you")
-        self.assertEqual([row["key"] for row in found], ["acme/widget#4"])
+        self.assertEqual([], [row for row in self.rows(issues=issues) if row["check"].startswith("issue-")])
+        self.assertNotIn("issue-open", status.BY_CHECK)
 
     def test_a_branch_on_origin_with_no_pull_request_is_an_open_thread(self) -> None:
         remote = self.base / "origin.git"
@@ -4174,14 +4203,14 @@ class ReportSectionTests(InventoryFixture):
         "abnormalities", "pending", "next", "open threads", "work items",
         "contributions (this repo, shared database order)",
         "open pull requests", "merge lane (this repo, shared database)", "detected setup",
-        "issues (this repo, from the index)",
+        "issues (this repo, shared database)",
         "jira (shared database, all repositories)", "protection",
         "resumable handoffs", "backends", "legacy residue",
     ]
 
     # -- the skeleton -------------------------------------------------------
 
-    def test_fourteen_headings_print_in_order_when_there_is_nothing_to_report(
+    def test_every_heading_prints_in_order_when_there_is_nothing_to_report(
         self,
     ) -> None:
         """The skeleton is fixed, so a missing section is a missing section.
@@ -4192,7 +4221,7 @@ class ReportSectionTests(InventoryFixture):
         """
         self.assertEqual(self.ORDER, self.headings(self.report()))
 
-    def test_the_same_fourteen_print_in_the_same_order_with_findings(self) -> None:
+    def test_the_same_headings_print_in_the_same_order_with_findings(self) -> None:
         self.item("2026-08-01-alpha", status="in_progress")
         self.assertEqual(self.ORDER, self.headings(self.report()))
 
@@ -5113,6 +5142,26 @@ class RulesetProtectionCase(unittest.TestCase):
             result = status.protection_section(pathlib.Path(directory), self.GH)
         result["_seen"] = seen
         return result
+
+    def test_a_runner_merged_repository_reports_zero_approvals_as_an_ok_flag(self) -> None:
+        """sd:3497: one maintainer cannot approve their own pull request.
+
+        Under `repo.runner_merge = auto` the runner merges, so zero approvals is
+        the setting, not a gap. A runner-merge read that cannot tell keeps the gap.
+        """
+        import sd_lane  # noqa: PLC0415
+
+        rules = self.gating_rules()
+        rules[1]["parameters"]["required_approving_review_count"] = 0
+        with mock.patch.object(sd_lane, "default_runner_merge", return_value="auto"):
+            result = self.section(rules)
+        self.assertNotIn("reviews", [gap["id"] for gap in result["gaps"]])
+        self.assertIn({"id": "reviews", "value": "0 approvals; repo.runner_merge is auto, the runner merges",
+                       "flagged": False, "gap": ""}, result["merge_settings"])
+        for answer in ({"return_value": "manual"}, {"side_effect": sd_lane.LaneError("the hub is down")}):
+            with mock.patch.object(sd_lane, "default_runner_merge", **answer):
+                result = self.section(rules)
+            self.assertIn("reviews", [gap["id"] for gap in result["gaps"]], answer)
 
     def test_ci_local_expects_the_local_gate_in_place_of_workflow_contexts(self) -> None:
         """sd:1843: a `repo.ci = local` repository produces `sd/local-gate` and

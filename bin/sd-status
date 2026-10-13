@@ -612,7 +612,8 @@ def _apply_acknowledgements(
 
 
 def _protection_gaps(
-    protection: dict[str, Any], default_branch: str, produced: set[str], notes: list[str]
+    protection: dict[str, Any], default_branch: str, produced: set[str], notes: list[str],
+    local: bool = False,
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     gaps: list[dict[str, str]] = []
     checks = protection.get("required_status_checks") or {}
@@ -680,7 +681,8 @@ def _protection_gaps(
                 _gap(
                     "reviews",
                     "a pull request is required but no approving review is: "
-                    "0 approvals, so one with green CI self-merges",
+                    "0 approvals, so one with "
+                    + ("a green gate" if local else "green CI") + " self-merges",
                 )
             )
     detail = {
@@ -756,8 +758,8 @@ def _merge_settings(repo: dict[str, Any]) -> list[dict[str, Any]]:
     """The two r7 merge-settings flags, reported beside the protection gaps.
 
     They are not branch protection -- they are what the merge button does when
-    a human presses it -- but they decide whether `wip:` subjects from a Lane B
-    carrier branch reach main's history, so they are reported here or nowhere.
+    a human presses it -- but they decide whether a builder's `wip:` subjects
+    reach main's history, so they are reported here or nowhere.
     """
     title = str(repo.get("squash_merge_commit_title") or "")
     message = str(repo.get("squash_merge_commit_message") or "")
@@ -767,8 +769,8 @@ def _merge_settings(repo: dict[str, Any]) -> list[dict[str, Any]]:
             "value": f"{title or '?'} / {message or '?'}",
             "flagged": title != "PR_TITLE" or message == "COMMIT_MESSAGES",
             "gap": (
-                f"squash commits are built from {title or '?'} / {message or '?'}, so a "
-                "carrier branch's `wip:` subjects land in main's history when the merge "
+                f"squash commits are built from {title or '?'} / {message or '?'}, so "
+                "a builder's `wip:` subjects land in main's history when the merge "
                 "runs through the web UI; set the title to PR_TITLE and the message to "
                 "PR_BODY or BLANK"
             ),
@@ -986,7 +988,8 @@ def _protection_reading(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any
         ruleset_detail = {"source": sd_protection.RULESET_SOURCE, "rulesets": synthesized["rulesets"],
                           "classic_visibility": result["detail"]["classic_visibility"]}
     result["protected"] = True
-    gaps, detail = _protection_gaps(protection, default_branch, produced, notes)
+    gaps, detail = _protection_gaps(protection, default_branch, produced, notes, sd_lib.ci_mode(root) == "local")
+    gaps = _sole_operator_reviews(root, protection, gaps, detail, result["merge_settings"])
     still_open, accepted = _apply_acknowledgements(
         gaps, _observed_state(protection), acknowledgements
     )
@@ -996,6 +999,33 @@ def _protection_reading(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any
     detail.update(ruleset_detail)
     result["detail"] = detail
     return result
+
+
+def _sole_operator_reviews(root: pathlib.Path, protection: dict[str, Any], gaps: list[dict[str, str]],
+                           detail: dict[str, Any], merge_settings: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """`gaps` less the zero-approvals one when the runner merges (sd:3497).
+
+    One maintainer cannot approve their own pull request, and under
+    `repo.runner_merge = auto` the runner merges: zero approvals is the
+    setting, reported beside the merge flags, not a gap. A missing review
+    requirement stays a gap whatever merges.
+    """
+    if not (isinstance(protection.get("required_pull_request_reviews"), dict)
+            and not detail["required_approving_review_count"] and _runner_merges(root)):
+        return gaps
+    merge_settings.append({"id": "reviews", "flagged": False, "gap": "",
+                           "value": "0 approvals; repo.runner_merge is auto, the runner merges"})
+    return [gap for gap in gaps if gap["id"] != "reviews"]
+
+
+def _runner_merges(root: pathlib.Path) -> bool:
+    """Whether `repo.runner_merge` is `auto` here; a read that cannot tell is no."""
+    import sd_lane  # noqa: PLC0415 - only this and the lane section read the lane
+
+    try:
+        return sd_lane.default_runner_merge(root) == "auto"
+    except sd_lane.LaneError:
+        return False
 
 
 def _classic_unknown(error: str, admin: bool, branch: str, slug: str) -> str:
@@ -1171,7 +1201,7 @@ def _provider_row(provider: Any) -> dict[str, str]:
         # A CLI keeps its own credentials, so a declared variable does not say
         # whether it is signed in. Codex is the one that answers from a local
         # file, which costs nothing to read.
-        if not (pathlib.Path.home() / ".codex" / "auth.json").is_file():
+        if not ((sys.modules.get("sd_review") or _sibling("sd-review", "sd_review")).codex_home() / "auth.json").is_file():
             state = "unauthenticated"
     return {"backend": provider.name, "command": executable, "state": state}
 
@@ -1531,8 +1561,6 @@ CLASSES = (
     Class("accepted-gap-standing", "g", False, 45,
           ".github/sd-status.json accepted_gaps[]",
           "a written acceptance whose until condition nothing re-reads"),
-    Class("issue-needs-you", "i", False, 50, "dashboard index",
-          "an indexed issue the index says is waiting on you"),
     Class("pr-needs-action", "p", False, 60, "open pull requests",
           "an open pull request waiting on a review or a merge"),
     Class("mirror-sync-pending", "n", False, 75, "~/.claude/pending-mirror-syncs/",
@@ -1548,8 +1576,6 @@ CLASSES = (
           "an item idle in planning past the 45-day threshold"),
     Class("undated-planning", "w", True, 100, "work item",
           "a planning item with no date to age it by"),
-    Class("issue-open", "i", False, 110, "dashboard index",
-          "an indexed issue open against this repository"),
     Class("source-marker", "t", False, 120, "marker scan over the index",
           "a marker left in tracked source"),
     Class("unreadable-concern-row", "c", True, 20,
@@ -1573,7 +1599,7 @@ EXCLUDED = (
     "closed by where they live; their review ledgers are still read",
     "concerns disposed addressed or rebutted -- two of the four dispositions "
     "are closures",
-    "Jira rows in the dashboard index -- no committed fact ties a Jira project "
+    "Jira rows in the shared database -- no committed fact ties a Jira project "
     "key to a checkout, which is the exclusion `issues_section` already makes",
     "docs/review-learnings.md -- narrative history with no disposition field, "
     "so nothing in it can ever be marked handled",
@@ -1724,7 +1750,6 @@ def actionable_inventory(
     rows += _lane_rows(lane)
     rows += _pull_rows(root, pulls, protection, lane)
     rows += _protection_rows(protection)
-    rows += _issue_rows(sections.get("issues") or {})
     rows += _branch_rows(root, pulls, protection, lane)
     rows += _marker_rows(root)
     rows += _tool_rows(root, unchecked)
@@ -2801,31 +2826,6 @@ def _protection_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def _issue_rows(issues: dict[str, Any]) -> list[dict[str, Any]]:
-    """Indexed issues for this repository, read from the section that has them.
-
-    Jira rows never arrive here: `issues_section` does not return them, for the
-    reason it states and `EXCLUDED` repeats.
-    """
-    rows: list[dict[str, Any]] = []
-    if issues.get("source") == "database":
-        # A cached open issue is context, not an instruction to close it or a
-        # blocker for local work. Explicit local tasks carry their own status.
-        return rows
-    for check, found in (("issue-needs-you", issues.get("needs_you")),
-                         ("issue-open", issues.get("other"))):
-        for issue in found or []:
-            why = ", ".join(issue.get("why") or [])
-            rows.append(_row(
-                check, f"{issue['repo']}#{issue['number']}",
-                f"#{issue['number']} {issue['title']}",
-                f"{issue['state']} since {issue['updated_at']}"
-                + (f", why: {why}" if why else ""),
-                f"answer or close {issue['url']}",
-            ))
-    return rows
-
-
 def _origin_heads(root: pathlib.Path) -> set[str] | None:
     """Every branch origin publishes right now, or None when it cannot be asked.
 
@@ -3585,7 +3585,7 @@ def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
 
 
 def _render_issues(issues: dict[str, Any], write: Any) -> None:
-    write("\nissues (this repo, from the index)\n")
+    write("\nissues (this repo, shared database)\n")
     if not issues["available"]:
         write(f"  ! {issues['reason']}\n")
         return

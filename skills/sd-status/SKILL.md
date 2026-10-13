@@ -47,7 +47,7 @@ opens with sixteen top-level lines; the fifteen below are the sections.
 | `open pull requests` | open pull requests, via the same code path as `sd-pr-state` |
 | `merge lane (this repo, shared database)` | each item's newest lane entry that has not merged or been cancelled, with its state; `sd-ship lane list` is the full view |
 | `detected setup` | mode, lowering reason, shared-tree paths to move, and detected check entrypoints |
-| `issues (this repo, from the index)` | indexed issues for this repository, split into the ones the index says need you and the rest |
+| `issues (this repo, shared database)` | open GitHub issues for this repository from the shared database, as context; no row in `pending` comes from them |
 | `jira (shared database, all repositories)` | the operator's Jira involvement from the shared database, across every repository: one line per ticket, key and state, open rows first, then rows closed within seven days. Not scoped to the checkout |
 | `protection` | branch-protection **enforcement**, gap by gap, plus the merge-settings and fleet-baseline flags |
 | `resumable handoffs` | the pending local packet for this directory (**read, never consumed**) |
@@ -97,14 +97,12 @@ predict `pending` from this table before running the command.
 | 30 | `dirty-tree-with-open-pr` | `p` | yes | `git + open PRs` | uncommitted work on a branch that already has a pull request |
 | 40 | `protection-gap` | `g` | yes | `protection` | an enforcement leg missing on the default branch |
 | 45 | `accepted-gap-standing` | `g` | no | `.github/sd-status.json accepted_gaps[]` | a written acceptance whose until condition nothing re-reads |
-| 50 | `issue-needs-you` | `i` | no | `dashboard index` | an indexed issue the index says is waiting on you |
 | 60 | `pr-needs-action` | `p` | no | `open pull requests` | an open pull request waiting on a review or a merge |
 | 75 | `mirror-sync-pending` | `n` | no | `~/.claude/pending-mirror-syncs/` | a published document whose designated mirror is not written yet |
 | 80 | `unmerged-branch` | `b` | no | `origin heads` | a branch on origin with no open pull request carrying it |
 | 90 | `parked-concern` | `c` | no | `## Review ledger` | a concern parked behind a trigger nobody is watching |
 | 100 | `idle-planning` | `w` | yes | `item activity + idle threshold` | an item idle in planning past the 45-day threshold |
 | 100 | `undated-planning` | `w` | yes | `work item` | a planning item with no date to age it by |
-| 110 | `issue-open` | `i` | no | `dashboard index` | an indexed issue open against this repository |
 | 120 | `source-marker` | `t` | no | `marker scan over the index` | a marker left in tracked source |
 | 125 | `undisclosed-tool` | `k` | no | `skill claims bin/<tool>` | a skill disclosing a tool that is not built |
 
