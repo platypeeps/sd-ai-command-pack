@@ -1278,7 +1278,7 @@ def compare(
     report = []
     for name in sorted(stages):
         arms = []
-        for (arm, provider), entry in sorted(
+        for _, entry in sorted(
                 stages[name].items(),
                 key=lambda item: (MODEL_ARMS.index(item[0][0]), item[0][1])):
             ms, server, dp, scores = (entry.pop("_ms"), entry.pop("_server"),

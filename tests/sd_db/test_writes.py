@@ -1,6 +1,7 @@
 """Every write is a named function, and a status change carries its note."""
 
 import json
+import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
@@ -122,7 +123,7 @@ class TheOtherWrites(WriteCase):
     def test_an_exec_note_carries_the_run_and_others_may_not(self):
         item = create_item(self.connection, kind="task", title="Run it")
         add_note(self.connection, item, "exec", "ran", started="a", ended="b", exit_code=0)
-        with self.assertRaises(Exception):
+        with self.assertRaisesRegex(sqlite3.IntegrityError, "CHECK constraint failed"):
             add_note(self.connection, item, "comment", "no", exit_code=1)
 
     def test_one_tracker_re_reading_a_url_updates_its_own_row(self):

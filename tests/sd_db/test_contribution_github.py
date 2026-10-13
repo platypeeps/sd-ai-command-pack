@@ -509,7 +509,7 @@ class IssueCollection(unittest.TestCase):
                                ("labels", [{"name": "bug"}])):
             api = IssueApi()
             count = []
-            def detail():
+            def detail(api=api, count=count, field=field, changed=changed):
                 count.append(True)
                 return api.issue if len(count) == 1 else {**api.issue, field: changed}
             api.rows[ROOT + "/issues/9"] = detail

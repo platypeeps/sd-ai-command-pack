@@ -9,7 +9,6 @@ are the properties that run proves nothing about.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import socket
@@ -127,7 +126,7 @@ class TheSurface(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(surface.SurfaceViolation):
                 getattr(connection, name)
         with self.assertRaises(surface.SurfaceViolation):
-            connection.execute("SELECT 1").description
+            _ = connection.execute("SELECT 1").description
 
     def test_a_library_write_passes_inside_the_surface(self):
         connection = database.connect(self.path)
