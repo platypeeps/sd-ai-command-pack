@@ -171,11 +171,16 @@ class RegisterTests(Fixture):
         self.assertIn("left alone", said)
         self.assertEqual(len(self.roots()), 2)
         self.assertIn("~/elsewhere", self.roots()[1])
+        # sd:3515: the refusal names the next step and the file it is in.
+        self.assertIn("rename", said)
+        self.assertIn(str(self.conf), said)
 
     def test_no_dashboard_is_reported_not_raised(self) -> None:
         PUBLISH.DASHBOARD_CONFIG = self.root / "absent"
         said = PUBLISH.register_root(self.repo, "MINE", self.repo / "build")
         self.assertIn("not registered", said)
+        # sd:3515: the refusal names the next step.
+        self.assertIn("SYSTEM_TOOLS_CONFIG", said)
 
 
 class DashboardConfigTests(unittest.TestCase):
@@ -728,6 +733,36 @@ class ObsidianTests(Fixture):
         written = (self.briefs() / "a.md").read_text(encoding="utf-8")
         self.assertEqual(written.count("source_repo:"), 1)
 
+    def test_a_same_named_checkout_does_not_overwrite_the_vault_copy(self) -> None:
+        """sd:3513: the vault folder is keyed on the checkout's name, so a
+        second checkout with that name replaced the first one's copy and no
+        report said so. It is reported and the first copy stays."""
+        PUBLISH.write_obsidian(self.repo, self.docs())
+        kept = (self.briefs() / "a.md").read_text(encoding="utf-8")
+        other = self.root / "elsewhere" / "my-research"
+        (other / "10-x").mkdir(parents=True)
+        (other / "10-x" / "a.md").write_text("# Other\n", encoding="utf-8")
+        said = PUBLISH.write_obsidian(other, [dict(src="10-x/a.md", out="a", title="A")])
+        self.assertEqual((self.briefs() / "a.md").read_text(encoding="utf-8"), kept)
+        self.assertTrue(any("a.md" in line and str(self.repo) in line for line in said), said)
+
+    def test_a_copy_written_before_the_checkout_was_recorded_is_replaced(self) -> None:
+        """A vault copy an earlier version wrote names no checkout, so the
+        next render takes it over rather than refusing every document."""
+        self.briefs().mkdir(parents=True)
+        (self.briefs() / "a.md").write_text(
+            "---\nsource_repo: my-research\nsource_path: 10-x/a.md\n---\n\nold\n", encoding="utf-8")
+        PUBLISH.write_obsidian(self.repo, self.docs())
+        self.assertIn("# A", (self.briefs() / "a.md").read_text(encoding="utf-8"))
+
+    def test_a_copy_that_cannot_be_read_is_left_alone(self) -> None:
+        """Whose copy it is stays unknown, and unknown is not ours."""
+        self.briefs().mkdir(parents=True)
+        (self.briefs() / "a.md").write_bytes(b"\xff\xfe not text")
+        said = PUBLISH.write_obsidian(self.repo, self.docs())
+        self.assertEqual((self.briefs() / "a.md").read_bytes(), b"\xff\xfe not text")
+        self.assertTrue(any("cannot read" in line for line in said), said)
+
     def test_no_vault_is_reported_and_does_not_fail_the_render(self) -> None:
         """A machine with no vault still publishes to the dashboard, the same
         way one with no dashboard checkout still renders."""
@@ -1073,6 +1108,87 @@ class ReceiptTests(ReceiptFixture):
         said = PUBLISH.enqueue(self.repo, self.doc())
         self.assertTrue((PUBLISH.QUEUE / "my-research.a.notion.json").is_file())
         self.assertTrue(any("queued a" in line for line in said), said)
+
+
+class PublishedUrlTests(ReceiptFixture):
+    """sd:3514: where a mirror landed reaches the receipt, with its item.
+
+    A request carried page and file ids and never an item, and `delivered`
+    took no URL, so nothing said where an item's brief was published.
+    """
+
+    NAME = "my-research.a.notion.json"
+    URL = "https://www.notion.so/example-3c9f52b1578281a7a466fb0e2df4d928"
+
+    def fingerprint(self) -> str:
+        return json.loads((PUBLISH.QUEUE / self.NAME).read_text())["fingerprint"]
+
+    def receipt(self) -> dict:
+        return json.loads((PUBLISH.receipts() / self.NAME).read_text())
+
+    def test_the_request_carries_the_item_the_designation_names(self) -> None:
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=3465)])
+        self.assertEqual(json.loads((PUBLISH.QUEUE / self.NAME).read_text())["item"], 3465)
+
+    def test_delivered_records_the_url_and_the_item(self) -> None:
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=3465)])
+        status = PUBLISH.delivered_main([self.NAME, self.fingerprint(), "--url", self.URL])
+        self.assertEqual(status, 0)
+        self.assertEqual(self.receipt()["url"], self.URL)
+        self.assertEqual(self.receipt()["item"], 3465)
+
+    def test_a_url_that_is_not_a_web_address_is_refused(self) -> None:
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        status = PUBLISH.delivered_main([self.NAME, self.fingerprint(), "--url", "file:///tmp/a"])
+        self.assertEqual(status, 2)
+        self.assertNotIn("delivered", self.receipt())
+        self.assertTrue((PUBLISH.QUEUE / self.NAME).is_file())
+
+    def test_an_item_that_is_not_a_number_is_reported_and_not_carried(self) -> None:
+        self.source("first\n")
+        said = PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item="sd:3465")])
+        self.assertTrue(any("item=" in line for line in said), said)
+        self.assertNotIn("item", json.loads((PUBLISH.QUEUE / self.NAME).read_text()))
+
+    def test_naming_an_item_does_not_queue_a_delivered_document_again(self) -> None:
+        """The item is where the URL goes, not part of the mirror."""
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain()
+        said = PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=3465)])
+        self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
+        self.assertTrue(any("unchanged" in line for line in said), said)
+
+
+class MirrorDryRunTests(ReceiptFixture):
+    """sd:3515: `SD_MIRROR_DRY_RUN=1` says what a render would queue and
+    writes neither the request nor its receipt."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_MIRROR_DRY_RUN="1")
+
+    def test_a_dry_run_reports_the_request_and_writes_nothing(self) -> None:
+        self.source("first\n")
+        said = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue(any("would queue a" in line for line in said), said)
+        self.assertFalse((PUBLISH.QUEUE / "my-research.a.notion.json").exists())
+        self.assertFalse((PUBLISH.receipts() / "my-research.a.notion.json").exists())
+
+    def test_a_dry_run_leaves_a_pending_request_as_it_was(self) -> None:
+        self.source("first\n")
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_MIRROR_DRY_RUN="")
+        PUBLISH.enqueue(self.repo, self.doc())
+        path = PUBLISH.QUEUE / "my-research.a.notion.json"
+        before = path.read_bytes()
+        self.source("second\n")
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_MIRROR_DRY_RUN="1")
+        said = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue(any("would queue a" in line for line in said), said)
+        self.assertEqual(path.read_bytes(), before)
 
 
 class MirrorHoldTests(ReceiptFixture):
