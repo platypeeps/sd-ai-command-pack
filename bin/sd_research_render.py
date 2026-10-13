@@ -64,7 +64,6 @@ import re
 import subprocess
 import sys
 from pathlib import Path
-from typing import Any
 
 try:
     import markdown
@@ -73,13 +72,7 @@ except ImportError:
 
 from sd_lib import GIT_TIMEOUT_SECONDS
 from sd_research_fonts import FONTS_CSS
-from sd_research_publish import (
-    automatic_render,
-    conf_trusted,
-    publish,
-    repo_home,
-    trust_conf,
-)
+from sd_research_publish import execute_conf, project_label, publish
 from sd_research_tokens import THEME_JS, TOKENS_CSS
 
 CSS = TOKENS_CSS
@@ -255,32 +248,16 @@ def main():
     # `render [repo_dir]` before it moved here, which is the shape that lets a
     # session act on a checkout nobody pointed it at.
     repo = os.getcwd()
-    conf = os.path.join(repo, "research.conf.py")
-    if not os.path.exists(conf):
+    ns = execute_conf(Path(repo), "render")
+    if ns is None:
         sys.exit("no research.conf.py in %s" % repo)
-    ns: dict[str, Any] = {}
-    # nosec B102 - research.conf.py is a file in the repo being rendered, at the
-    # same trust level as this script, and the format needs execution: at least
-    # one live config builds its DOCS list with a loop.
-    with open(conf, "rb") as handle:
-        source = handle.read()
-    # A render nobody typed executes only a config a render by hand recorded,
-    # checked on the bytes it is about to execute, and records nothing: only
-    # the operator's own render says the config has been read (sd:1376).
-    trigger = automatic_render()
-    if trigger and not conf_trusted(Path(repo), source):
-        sys.exit("%s: no render by hand has executed this research.conf.py, and "
-                 "a render executes it; read it, then run `sd-research-kit "
-                 "render`. docs/dashboard/ is stale until then" % trigger)
-    exec(compile(source, conf, "exec"), ns)  # nosec B102
-    if not trigger:
-        trust_conf(Path(repo), source)
-    # The fallback badge comes from the repository's name, not the checkout's:
-    # a worktree is called after its branch, and its name is nobody's project.
-    project = ns.get("PROJECT", repo_home(Path(repo)).name.split("-")[0].upper())
+    # `publish()` takes PROJECT as written and owns the fallback, so the
+    # badge and the dashboard label are one value (sd:3513).
+    project = ns.get("PROJECT")
+    badge = project_label(Path(repo), project)
     print("%s  ->  docs/dashboard/" % os.path.basename(repo))
     for cfg in ns["DOCS"]:
-        build_one(repo, cfg, project)
+        build_one(repo, cfg, badge)
 
     # Publication is the default, not a step the user asks for: a document
     # nobody can find was not delivered. Registration is idempotent and

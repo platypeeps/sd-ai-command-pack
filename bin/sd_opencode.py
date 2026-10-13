@@ -76,9 +76,10 @@ check above names by file (`.opencode/` is not one of them). So the run is
 also refused unless opencode's own resolution agrees: `confinement_breach`
 asks a private opencode server, started with the review's environment and
 launch dir, for the resolved sd-review agent, and requires every rule after
-the last `*: deny` to be exactly this map's, in order. Nothing is filtered by
-name: a rule of any source, key or shape that is not ours refuses the run,
-including a narrowing. On 1.18.30 the hostile checkout, resolved from inside
+the last `*: deny` to be this map's, in order, or a deny. Nothing is filtered
+by name: a rule of any source, key or shape that is not ours and does not
+deny refuses the run. A deny grants nothing under last-match evaluation, so
+it is accepted and named in the outcome (sd:3498). On 1.18.30 the hostile checkout, resolved from inside
 it, put `bash` and `mutator_mutate` allowances right after the deny, which
 is the escape read back from opencode instead of inferred from its loader.
 
@@ -177,13 +178,6 @@ PERMISSION: list[dict[str, str]] = [
     {"action": "list", "resource": "*", "effect": "allow"},
 ]
 
-#: opencode's own rules that may follow the map's `*: deny`, each measured
-#: from a neutral launch dir. Only an exact entry passes; any other rule after
-#: the deny, a narrowing included, still refuses. `browser` arrived in 2.0.25.
-OPENCODE_OWN: tuple[dict[str, str], ...] = (
-    {"action": "browser", "resource": "*", "effect": "deny"},
-)
-
 #: The one major version this confinement is measured against. Any other is
 #: refused before a review starts: its flags, merge order and probe are unmeasured.
 SUPPORTED_MAJOR = 2
@@ -234,7 +228,7 @@ def assert_isolated_launch(launch_dir: pathlib.Path, checkout: pathlib.Path) -> 
 def confined_rules() -> list[dict[str, str]]:
     """The ruleset opencode must resolve from the last `*: deny` on: this map,
     in order. 2.x puts its own defaults, tool-output allowance included, before
-    the deny (measured); the few it puts after ours are `OPENCODE_OWN`."""
+    the deny (measured); a deny it puts among or after ours is accepted."""
     return [dict(rule) for rule in PERMISSION]
 
 
@@ -289,12 +283,14 @@ def foreign_plugins(report: Mapping[str, Any]) -> list[str] | None:
 
 
 def confinement_breach(runner: Callable[..., Any], start: str, env: Mapping[str, str],
-                       launch_dir: pathlib.Path, timeout: int) -> str | None:
+                       launch_dir: pathlib.Path, timeout: int,
+                       accepted: list[dict[str, str]] | None = None) -> str | None:
     """Why the confinement opencode resolved is not this map, or None.
 
     Asked of opencode itself, in the review's own environment and launch dir,
     so a widening from any source -- the checkout's config, an inherited
-    variable, an ancestor, a plugin -- is refused without this file naming the source."""
+    variable, an ancestor, a plugin -- is refused without this file naming the source.
+    Each deny accepted beside the map is appended to `accepted`, for the receipt."""
     seconds = min(timeout, 60)
     result = runner(probe_argv(start, max(seconds - 5, 5)), env, launch_dir, seconds)
     report = probe_report(result.stdout) if result.exit_code == 0 else None
@@ -312,19 +308,35 @@ def confinement_breach(runner: Callable[..., Any], start: str, env: Mapping[str,
         return (f"opencode loaded plugins that are not built in: {'; '.join(plugins)[:400]}. 2.x has "
                 "no way to run without them, and a plugin can rewrite the agent or allow what it "
                 "asks; no review was started.")
-    return _tail_breach(rules)
+    return _tail_breach(rules, accepted if accepted is not None else [])
 
 
-def _tail_breach(rules: list[dict[str, str]]) -> str | None:
-    """Why the rules from the last `*: deny` on are not exactly this map, or None."""
+def _tail_breach(rules: list[dict[str, str]], accepted: list[dict[str, str]]) -> str | None:
+    """Why the rules from the last `*: deny` on are not this map, or None.
+
+    Judged by effect, not by a pinned list (sd:3498): opencode takes the last
+    matching rule, so a deny anywhere after the map's `*: deny` grants nothing.
+    Each such deny is appended to `accepted`. Every map rule must appear in
+    order; any other rule -- allow, ask or an effect this does not know --
+    refuses. A patch release that appended `browser: deny` refused every
+    review while the pinned list lacked it."""
     deny = PERMISSION[0]
     if deny not in rules:
         return "opencode resolved sd-review with no `*: deny`; no review was started."
-    tail = [rule for rule in rules[len(rules) - 1 - rules[::-1].index(deny):] if rule not in OPENCODE_OWN]
+    tail = rules[len(rules) - 1 - rules[::-1].index(deny):]
     expected = confined_rules()
-    if tail == expected:
+    matched, foreign, denies = 0, [], []
+    for rule in tail:
+        if matched < len(expected) and rule == expected[matched]:
+            matched += 1
+        elif rule.get("effect") == "deny":
+            denies.append(rule)
+        else:
+            foreign.append(rule)
+    if matched == len(expected) and not foreign:
+        accepted.extend(denies)
         return None
-    foreign = [rule for rule in tail if rule not in expected] or tail
+    foreign = foreign or tail
     return ("opencode resolved sd-review wider than, or different from, the confined map: "
             f"{json.dumps(foreign)[:400]} after `*: deny`. A setting from outside this run -- the "
             "reviewed checkout's config or the inherited environment -- reached the agent; "
