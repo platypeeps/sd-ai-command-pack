@@ -11,6 +11,17 @@ The item's row holds status, progress and decisions; this page holds the shape.
 Citations are on `origin/main` at 403abbf17.
 The sd:3519 branch (`ship-fixes-3519`) adds `refuse_design_delivery` to prepare; nothing here conflicts with it.
 
+## Status
+
+Agreed 2026-10-13. The operator took the recommended option on each question:
+
+- Part 1: `Closes:` plus `Delivers:` trailers on the branch's own commits, stored at prepare with the head; the title
+  closes nothing, and prepare warns per title id (sd:3704 note #17806).
+- Part 2: `passed: false` plus `waived {reason, decision}`, the note on this item quoting the criterion, listed in
+  the delivery note (note #17816).
+- Part 3: no new close path; `delivery.md` documents the trailer paths (note #17816).
+- Build order: PR A, then PR B.
+
 ## Problem
 
 The lane closes or refuses items on the wrong evidence, in three ways.
