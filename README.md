@@ -29,11 +29,10 @@ this repository, versioned, documented, and not installed. `sd skill try
 <name>` installs one for thirty days and writes down when it started; if
 nothing used it by then, the next install run removes it and says so.
 
-The split is not a ranking. Nothing decided it by usage, because no usage
-counts existed — three ways of counting the same eight days of history gave
-six skills, thirteen, and eighty-one. What a path can say is which skills are
-steps in one sequence somebody actually runs, and that is what these three
-say. A skill in `contrib/` is one command away, and use is what moves it.
+The split is not a ranking. A path says which skills are steps in one
+sequence somebody actually runs, and that is what these three say.
+`sd skill list --usage` prints each skill's recorded uses. A skill in
+`contrib/` is one command away, and use is what moves it.
 
 A repository can extend the framework from the other side. `sd plugin add`
 registers a **domain pack** — its own manifest, its own `<prefix>-*` skills, its

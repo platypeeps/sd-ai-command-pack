@@ -3248,6 +3248,9 @@ def build_parser() -> argparse.ArgumentParser:
     skill_lister = trying.add_parser(
         "list",
         help="what each path names, what is in contrib/, and what is on trial")
+    skill_lister.add_argument(
+        "--usage", action="store_true",
+        help="print each skill's recorded uses beside its status")
     skill_lister.set_defaults(handler=sd_skill.skill_list)
 
     # Promotion and demotion queue one task each and open nothing
