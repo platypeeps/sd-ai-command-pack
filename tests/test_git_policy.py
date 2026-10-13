@@ -68,6 +68,8 @@ VARIANTS = {
     "bin/sd_ship_review.py": "pipes a byte-exact `git diff --binary` into `git patch-id` on stdin (sd:1485)",
     "bin/sd_lane.py": "publish_git tells git's exit 1 (no such commit, not an ancestor) from a failure, which "
                       "git_output folds into one None, and a fetch or push outlasts 15 s (sd:3282)",
+    "bin/sd_skill_intake.py": "reads untrusted blobs as bytes, raises git's stderr as the refusal, and a "
+                              "fetch from GitHub outlasts 15 s (sd:3560)",
 }
 
 
