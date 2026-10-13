@@ -11,6 +11,12 @@ tools:
   - Bash
   - ToolSearch
   - Skill
+hooks:
+  PreToolUse:
+    - matcher: "^Bash$|Monitor"
+      hooks:
+        - type: command
+          command: sd-builder-guard
 ---
 
 # Slice builder
@@ -80,6 +86,8 @@ Check each class your change touches before you commit.
 - Run tests in the foreground only, in runs of 10 minutes or less: pick the focused modules your change touches.
   The lane runs the full `make check`. Never use Bash `run_in_background`, `Monitor` or a wrapped `sleep` to wait:
   a background exit did not wake idle builders, and they sat about 4 hours unreported.
+- Give every Bash call `timeout: 600000`. The `sd-builder-guard` hook denies a background call, a shorter timeout,
+  a leading `sleep` and `Monitor`.
 
 ## Report
 
