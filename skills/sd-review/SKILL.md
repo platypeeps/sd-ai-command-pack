@@ -120,6 +120,7 @@ sd-review --scope branch --gate-check main > "$LOG/review-<item>-rN.log" 2>&1; e
    Never wait with `Monitor` or `sleep`: `Monitor` stops at 30 minutes and leaves the agent idle.
 4. Use these names and no others.
    `sd-ship lane watch` scans every `*.log` under the lane root for gate ends, so a fixed name keeps each round findable.
+   To wait on lane items, run `sd-ship lane watch --item <id>`: a bare watch never exits.
 
 The chain adds no verb and no PR body check.
 
