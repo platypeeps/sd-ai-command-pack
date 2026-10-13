@@ -194,13 +194,63 @@ class Run(QueueFixture):
         self.assertEqual(seen.read_text(), "0", "the command must run with SD_GATE_SLOTS=0")
         self.assertTrue(slot_free(self.slots / "slot.1.lock"))
 
-    def test_run_times_out_with_124_and_leaves_no_ticket(self):
-        self.hold()
-        argv = [sys.executable, str(SLOTS), "run", "--timeout", "1", "--", sys.executable, "-c", "pass"]
-        done = subprocess.run(argv, env=self.env(SD_GATE_SLOTS="1"), capture_output=True, text=True, timeout=60)
-        self.assertEqual(done.returncode, sd_gate_slots.RUN_TIMED_OUT, done.stderr)
-        self.assertIn("waiting for a gate slot", done.stderr)
+    def max_wait(self, seconds: str, ran: pathlib.Path) -> subprocess.Popen:
+        argv = [sys.executable, str(SD), "gate", "run", "--max-wait", seconds, "--label", "bounded", "--",
+                sys.executable, "-c", f"open({str(ran)!r}, 'w').close()"]
+        process = subprocess.Popen(argv, env=self.env(SD_GATE_SLOTS="1"), stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True)
+        self.processes.append(process)
+        return process
+
+    def test_max_wait_gives_up_with_its_own_code_names_the_queue_and_leaves_nothing(self):
+        """sd:3996. A builder's run waited over 550 s for a slot and outlived its 600 s bound; `timeout` exits 124."""
+        holder = self.run_gate(self.env(SD_GATE_SLOTS="1"), sys.executable, "-c", "import time; time.sleep(600)",
+                               label="holder-x")
+        lock = self.slots / "slot.1.lock"
+        self.assertTrue(wait_for(lambda: lock.exists() and not slot_free(lock)))
+        ran = self.tmp / "ran"
+        _, err = self.max_wait("1", ran).communicate(timeout=60)
+        self.assertNotEqual(sd_gate_slots.RUN_NO_SLOT, 124, "timeout(1) owns 124")
+        self.assertEqual(self.processes[-1].returncode, sd_gate_slots.RUN_NO_SLOT, err)
+        self.assertRegex(err, r"gave up waiting for a gate slot after [0-9]+s at place 1 of 1 in the queue: "
+                              r"1 of 1 in use; slot 1 held by holder-x")
+        head = self.run_gate(self.env(SD_GATE_SLOTS="1"), sys.executable, "-c", "pass", label="head")
+        self.assertTrue(wait_for(lambda: len(self.tickets()) == 1))
+        _, err = self.max_wait("1", ran).communicate(timeout=60)
+        self.assertEqual(self.processes[-1].returncode, sd_gate_slots.RUN_NO_SLOT, err)
+        self.assertRegex(err, r"gave up waiting for a gate slot after [0-9]+s at place 2 of 2 in the queue; "
+                              r"slot 1 held by holder-x")
+        self.assertFalse(ran.exists(), "a run that gave up must not start its command")
+        self.assertEqual(len(self.tickets()), 1, "only the head's ticket may stay")
+        holder.kill()
+        holder.wait()
+        _, err = head.communicate(timeout=60)
+        self.assertEqual(head.returncode, 0, err)
         self.assertEqual(self.tickets(), [])
+        self.assertTrue(slot_free(lock))
+
+    def test_a_slot_that_frees_inside_max_wait_runs_the_command(self):
+        holder = self.hold()
+        ran = self.tmp / "ran"
+        waiter = self.max_wait("60", ran)
+        self.assertTrue(wait_for(lambda: len(self.tickets()) == 1))
+        holder.kill()
+        holder.wait()
+        _, err = waiter.communicate(timeout=60)
+        self.assertEqual(waiter.returncode, 0, err)
+        self.assertTrue(ran.exists())
+        self.assertEqual(self.tickets(), [])
+
+    def test_max_wait_takes_a_finite_number_and_the_old_timeout_flag_is_refused(self):
+        ran = self.tmp / "ran"
+        for flag in (["--max-wait", "nan"], ["--max-wait", "-1"], ["--timeout", "1"]):
+            with self.subTest(flag=flag):
+                argv = [sys.executable, str(SD), "gate", "run", *flag, "--", sys.executable, "-c",
+                        f"open({str(ran)!r}, 'w').close()"]
+                done = subprocess.run(argv, env=self.env(SD_GATE_SLOTS="1"), capture_output=True, text=True,
+                                      timeout=60)
+                self.assertEqual(done.returncode, 2, done.stderr)
+                self.assertFalse(ran.exists())
 
     def test_a_sigkilled_holder_frees_its_slot_for_the_next_waiter(self):
         holder = self.run_gate(self.env(SD_GATE_SLOTS="1"), sys.executable, "-c", "import time; time.sleep(600)")
