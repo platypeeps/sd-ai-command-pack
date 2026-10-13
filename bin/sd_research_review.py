@@ -128,7 +128,7 @@ def work_items(repo):
     """
     work = os.path.join(repo, "docs", "work")
     try:
-        tracked = subprocess.run(["git", "ls-files", "-z", "--", "docs/work"],
+        tracked = subprocess.run(["git", "ls-files", "--deduplicate", "-z", "--", "docs/work"],
                                  cwd=repo, capture_output=True, text=True)
     except OSError:
         tracked = None

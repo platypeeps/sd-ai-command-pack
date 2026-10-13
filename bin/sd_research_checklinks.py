@@ -25,7 +25,7 @@ PATH = re.compile(r"`([0-9]{2}-[a-z]+/[A-Za-z0-9._-]+\.md)`")
 def markdown(repo):
     """The Markdown files to read: git's tracked ones, or every one on disk outside git."""
     try:
-        listed = subprocess.run(["git", "ls-files", "-z", "--", "*.md"], cwd=repo, capture_output=True, text=True)
+        listed = subprocess.run(["git", "ls-files", "--deduplicate", "-z", "--", "*.md"], cwd=repo, capture_output=True, text=True)
     except OSError:
         listed = None
     if listed is not None and listed.returncode == 0:
