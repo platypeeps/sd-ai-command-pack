@@ -211,10 +211,10 @@ ROOT_VARIABLE = "SD_LANE_ROOT"
 PREPARE_SECONDS = 3 * 3600 + sd_lib.GATE_SLOT_SECONDS
 MERGE_SECONDS = 3 * 3600 + sd_lib.GATE_SLOT_SECONDS
 MERGE_WAIT_SECONDS = 2100
-#: After this long a run starts no new entry (sd:3287). The lane-run cron job's
-#: JOB_TIMEOUT is 120 minutes, and one entry takes 30 to 45, so an entry started
-#: just inside the budget still finishes before the job limit TERMs the runner.
-RUN_BUDGET_SECONDS = 55 * 60
+#: The lane-run cron job's JOB_TIMEOUT, at which it TERMs the runner (sd:3287).
+JOB_SECONDS = 120 * 60
+#: The longest entry seen, claim to end: a gate that timed out at one hour took 61 to 64 minutes (sd:3481).
+ENTRY_SECONDS = 65 * 60
 #: How long a stopped run waits for its cancelled speculative gate, once after
 #: SIGTERM and once after SIGKILL (sd:3361).
 CANCEL_SECONDS = 10
@@ -301,6 +301,12 @@ RECLAIMS = 3
 LANDING_SECONDS = 1800
 #: The bound on the main checkout's `make post-merge` after a run that merged (sd:3566).
 POST_MERGE_SECONDS = 600
+#: After this long a run starts no new entry (sd:3287): one started just inside it, the longest entry seen,
+#: then `make post-merge` and five minutes of the run's own reads and landings end before the job TERMs the
+#: runner. A 55-minute budget assumed 30 to 45 minutes an entry, and runners died mid-merge (sd:3481).
+RUN_BUDGET_SECONDS = JOB_SECONDS - ENTRY_SECONDS - POST_MERGE_SECONDS - 5 * 60
+#: A claim's lease beyond its prepare's bound: the checkout before it and the writes after (sd:3481).
+LEASE_SLACK_SECONDS = 1800
 #: A `post-merge` rule in a Makefile, not a `post-merge :=` variable.
 POST_MERGE_RULE = re.compile(r"^post-merge\s*:(?!=)", re.MULTILINE)
 #: The bound on one `git` step of a publish: a fetch or a push crosses the network.
@@ -1232,12 +1238,14 @@ def answered_retryable(answer: dict[str, Any]) -> bool:
             and type(spent) is int and spent == 0)
 
 
-def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[], None]) -> dict[str, Any]:
+def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[], None],
+            renewed: Callable[[], None] = lambda: None) -> dict[str, Any]:
     """One entry, start to end; the fields to record on it.
 
     The body and acceptance texts go to private temporary files for prepare.
     `advance` is the before-merge write (`step: merge`); it raises `Stop`
     when the claim is lost or the hub stays down, and no merge starts.
+    `renewed` renews the claim's lease before a second prepare (`renew`).
     """
     worktree, item, logs = pathlib.Path(entry["worktree"]), entry["item"], queue.lane / "logs"
     if not at_head(worktree, entry["expected_head"]):
@@ -1256,6 +1264,7 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
         prepared = ship(argv, prepare_log)
         # sd:3037. An incomplete review gets the one retry an operator would give it, and no second.
         if blocker_code(prepared) == "review_incomplete":
+            renewed()
             prepare_log = logs / f"prepare-{item}-{stamp}-retry.log"
             prepared = ship([*argv, "--retry-review"], prepare_log)
     fields: dict[str, Any] = {"prepare_log": str(prepare_log), "log_host": this_host(), "head": prepared.get("head")}
@@ -1835,13 +1844,27 @@ def claim_entry(queue: Queue, token: str, reclaimed: list[dict[str, Any]] | None
             if runnable(row):
                 row.update(status="running", started_at=stamp_now(), step="prepare",
                            holder={"host": host, "pid": os.getpid(), "token": token},
-                           lease_until=stamp_at(time.time() + 2 * PREPARE_SECONDS))
+                           lease_until=prepare_lease())
                 return dict(row)
         return None
     claimed = runner_write(queue, claim_first, check=host_check(queue))
     if reclaimed is not None:  # only once the claim's transaction landed
         reclaimed.extend(found)
     return claimed
+
+
+def prepare_lease() -> str:
+    """A prepare's lease: its own bound and `LEASE_SLACK_SECONDS`; `renew` sets it again before a second prepare.
+
+    It was two prepares long, 14 hours, so a satellite runner that died held
+    its lane on the hub for most of a day (sd:3481).
+    """
+    return stamp_at(time.time() + PREPARE_SECONDS + LEASE_SLACK_SECONDS)
+
+
+def renew(queue: Queue, entry: dict[str, Any], token: str) -> None:
+    """A new prepare lease while `token` holds `entry`, before its `--retry-review` prepare (sd:3481)."""
+    runner_write(queue, lambda entries: held(entries, entry, token).update(lease_until=prepare_lease()))
 
 
 class Moved(Stop):
@@ -2277,7 +2300,8 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
             built = {"lane_worktree": True, "builder_worktree": entry.get("worktree"),
                      "builder_host": entry.get("enqueued_on")}
             local = {**entry, "worktree": str(tree), **(built if found.get("made") else {})}
-            outcome = process(local, queue, ship, functools.partial(advance, queue, local, token))
+            outcome = process(local, queue, ship, functools.partial(advance, queue, local, token),
+                              functools.partial(renew, queue, local, token))
             if outcome.get("moved"):
                 put_back(queue, entry, token, pushed_catch_up(tree, str(entry.get("branch") or ""),
                                                               entry["expected_head"]),
@@ -2316,7 +2340,8 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     (`run_lane` answers `busy`), and a refusal in one lane leaves the next to run.
     Every other checkout here, hosted or not, has its file queue imported and
     its dead holders reclaimed under its runner lock (sd:3282). The lanes share
-    one run budget, `RUN_BUDGET_SECONDS` from the start (sd:3287).
+    one run budget, `RUN_BUDGET_SECONDS` from the start (sd:3287), and the
+    lane that waited longest runs first (`longest_waiting_first`, sd:3481).
     """
     deadline = clock() + RUN_BUDGET_SECONDS
     imported = sd_lib.import_sd_db()
@@ -2358,12 +2383,30 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
             settled = refusal(error)
         if settled:
             lanes.append({"path": path, "settled": settled})
-    for path, checkout in hosted:
+    for path, checkout in longest_waiting_first(hosted, environ):
         try:
             lanes.append({"path": path, **run_lane(checkout, environ, ship, gate, note, deadline)})
         except (LaneError, sd_lib.ConfigError, OSError) as error:
             lanes.append({"path": path, **refusal(error)})
     return {"lanes": lanes}
+
+
+def longest_waiting_first(hosted: list[tuple[str, pathlib.Path]],
+                          environ: dict[str, str]) -> list[tuple[str, pathlib.Path]]:
+    """`hosted`, the lane whose oldest runnable entry was enqueued first leading (sd:3481).
+
+    In path order, a lane that kept refilling drained to the run's deadline,
+    and a lane after it waited 90 minutes untouched. A lane with nothing to
+    run, or whose queue cannot be read, keeps its path order after the rest;
+    `run_lane` reads it again and says what it met.
+    """
+    def oldest(lane: tuple[str, pathlib.Path]) -> str:
+        try:
+            rows = read_queue(queue_for(lane[1], environ))
+        except (LaneError, sd_lib.ConfigError, OSError):
+            return "~"  # after every stamp
+        return min((str(row.get("enqueued_at") or "~") for row in rows if runnable(row)), default="~")
+    return sorted(hosted, key=oldest)
 
 
 def gate_ends(root: pathlib.Path, seen: set[str], minutes: int = WATCH_MINUTES) -> list[str]:

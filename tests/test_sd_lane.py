@@ -7,6 +7,7 @@ so nothing reaches GitHub or a review.
 
 from __future__ import annotations
 
+import calendar
 import contextlib
 import fcntl
 import importlib.util
@@ -697,7 +698,7 @@ class Runner(Lane):
         now = [0.0]
 
         def slow(argv: list[str], log: pathlib.Path) -> dict:
-            now[0] += 40 * 60  # one entry on a busy lane
+            now[0] += 30 * 60  # one entry on a busy lane
             return self.ship(argv, log)
 
         with mock.patch.object(sd_lane, "clock", lambda: now[0]):
@@ -709,6 +710,25 @@ class Runner(Lane):
         self.assertEqual((spent["ran"], len(self.calls)), ([], 2), "a hosted run's later lane started an entry")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([row["status"] for row in self.entries()], ["prepared"] * 3)
+
+    def test_a_claim_leases_one_prepare_and_renews_it_before_the_retry(self) -> None:
+        """sd:3481. A claim leased two prepares, 14 hours, so a dead satellite runner held its lane most of a day."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        leases: list[float] = []
+
+        def incomplete_once(argv: list[str], log: pathlib.Path) -> dict:
+            [row] = self.entries()
+            leases.append(calendar.timegm(time.strptime(row["lease_until"], "%Y-%m-%dT%H:%M:%SZ")) - time.time())
+            sd_lane.update(self.store(), lambda rows: rows[0].update(lease_until="2020-01-01T00:00:00Z"))
+            self.ship(argv, log)
+            if "--retry-review" in argv:
+                return {"ok": True, "phase": "ready_to_send", "head": "head-1"}
+            return {"ok": False, "error": "incomplete", "workflow": {"blocker": {"code": "review_incomplete"}}}
+        sd_lane.run_lane(self.repo, self.environ, incomplete_once)
+        self.assertEqual(len(leases), 2)
+        for lease in leases:  # the retry's prepare runs under a renewed lease, not the old one
+            self.assertGreater(lease, sd_lane.sd_lib.GATE_SLOT_SECONDS)
+            self.assertLess(lease, 8 * 3600)
 
     def test_a_loaded_machine_claims_no_entry_until_load5_falls_below_the_gate_limit(self) -> None:
         """sd:3479. Six gates timed out at one hour under load, and a retry ran the same gate under the same load."""
@@ -3118,7 +3138,39 @@ class Watch(Lane):
         self.assertEqual(lines, ["hub unavailable: down; reading again", "sd:1 merged at merged-1"])
 
 
+class HostedOrder(Lane):
+    def test_the_lane_that_waited_longest_runs_first(self) -> None:
+        """sd:3481. Lanes ran in path order; one that kept refilling held a later lane's entries for 90 minutes."""
+        later = self.tmp / "zeta"
+        later.mkdir()
+        git(later, "init", "-q", "-b", "main")
+        git(later, "remote", "add", "origin", "https://github.com/example/zeta.git")
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            for path, remote in ((self.repo, "pack"), (later, "zeta")):
+                sd_db.upsert_repo(connection, str(path), remote=f"https://github.com/example/{remote}.git", managed=1)
+        finally:
+            connection.close()
+        for checkout, item, stamp in ((self.repo, 1, "2026-10-12T21:00:00Z"), (later, 2, "2026-10-12T20:35:00Z")):
+            sd_lane.add_entry(sd_lane.queue_for(checkout, self.environ),
+                              {"id": f"e{item}", "item": item, "status": "pending", "enqueued_at": stamp})
+        order: list[pathlib.Path] = []
+
+        def recorded(checkout: pathlib.Path, *args: Any) -> dict:
+            order.append(checkout)
+            return {"ran": []}
+        with mock.patch.object(sd_lane, "run_lane", recorded):
+            sd_lane.run_hosted(self.environ, self.ship)
+        self.assertEqual(order, [later, self.repo])
+
+
 class Bounds(unittest.TestCase):
+    def test_an_entry_started_inside_the_budget_ends_before_the_job_limit(self) -> None:
+        """sd:3481. The longest entry seen took 64.3 minutes; the lane-run job TERMs its runner at 120."""
+        longest_seen, job_limit = 64.3 * 60, 120 * 60
+        self.assertLess(sd_lane.RUN_BUDGET_SECONDS + longest_seen + sd_lane.POST_MERGE_SECONDS, job_limit)
+
     def test_prepare_and_merge_bounds_cover_a_gates_slot_wait(self) -> None:
         """sd:2611: the gate under them queues for up to `GATE_SLOT_SECONDS` before its check starts."""
         for bound in (sd_lane.PREPARE_SECONDS, sd_lane.MERGE_SECONDS):
