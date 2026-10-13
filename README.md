@@ -70,7 +70,8 @@ else is. Its executables write these paths, and no others:
   if `CLAUDE.local.md` turns out to be tracked, rather than edit a file under
   version control.
 - `.github/workflows/sd-review-route.yml` — the routing lane, from `sd-review
-  setup-github`, which runs only in a `full`-mode repository. **Tracked.** With
+  setup-github`. **Tracked.** A `repo.ci = local` repository gets none; see
+  [WORKFLOW.md § No-CI mode](WORKFLOW.md#no-ci-mode). With
   `--remove-legacy` it also deletes the three files the old `sd-github-review`
   installer left. `--remove` deletes the workflow and its Dependabot guard.
 - The fleet stamp, from `sd fleet stamp`, into the checkout you stand in, which
@@ -123,9 +124,9 @@ else is. Its executables write these paths, and no others:
 Two skills add paths of their own, both tracked. Invoking either is the approval
 to write, and neither writes anywhere else:
 
-- `sd-plan` — `docs/work/<YYYY-MM-DD>-<slug>/`: `prd.md`, plus `README.md` when
-  the directory is new, plus `design.md` and `implement.md` only when you ask
-  for them. `--work-dir` selects a root other than `docs/work`; `--decision`
+- `sd-plan` — a work item is a row (`sd task add`); it writes
+  `docs/work/<YYYY-MM-DD>-<slug>/design.md` only when the shape needs agreement.
+  `--work-dir` selects a root other than `docs/work`; `--decision`
   writes `docs/decisions/<YYYY-MM-DD>-<slug>.md` instead of a work item.
 - `sd-spec` — `docs/spec/**`, rewritten in place on the branch so the
   correction lands with the change, plus the learnings page under `--retro`.
@@ -198,20 +199,13 @@ A local `reviewers` list restricts recipients; an explicit empty value denies re
 Machine `sd.external_reviews deny` vetoes local consent. Missing machine policy requires explicit local consent.
 The installer preserves restrictions and refuses malformed answers. It cannot recover historical empty answers whose keys were erased.
 
-`controlled` lets the assistant merge active, in-scope PR work in repositories the user controls without asking.
-It merges only through `sd-ship prepare` then `sd-ship merge`, so the review lane and required CI still gate it.
-It never permits a merge that skips the review lane, such as a raw `gh pr merge`; an `sd-ship` refusal is a stop.
-An explicit instruction to wait overrides it. `ask`, or an absent setting, means ask the operator first.
-The setting is read by the assistant, not by `sd-ship`: `sd config` validates and stores it, and no tool in `bin/` consults it.
-Ownership, review, CI, protection, and runner gates remain mandatory. This setting starts no background work.
-
 `sd.copilot_review` says when `sd-ship` requests a GitHub Copilot review by itself: `deep` on deep-tier changes only, `always` on every reviewing tier, `never` on none.
 Unset reads `deep`, so every repository gets Copilot on deep changes without a per-repository file.
 A repository's `.github/sd-review.json` `copilot_review.automatic_deep` overrides `deep` and `always` when the file names the key; a file that does not name it inherits.
 A machine `never` wins over the file.
 `sd-review --explain` reports the effective policy and its source (`repository`, `machine config`, `machine default`) under `remote_reviews.copilot`.
 `sd-ship` applies the setting as it stands at dispatch to the tiers the retained passes recorded, so a change takes effect without another review.
-`sd-ship --copilot-review request|skip` still overrides both for one prepare.
+`sd-ship prepare --copilot-review request|skip` still overrides both for one prepare.
 See [the workflow policy](WORKFLOW.md#standing-authorization) for resolution and limits.
 
 ## Daily workflow
@@ -282,8 +276,7 @@ separately from local progress.
 Repository work uses `sd work register`, `sd work relink`, `sd work cancel`,
 and `sd work deliver`. `sd work register docs/work/<item>/prd.md` makes the row
 that owns a planning folder already on disk, reading its title and date from
-the file's own frontmatter; it applies only where the repository's status
-source is the database, and refuses a repository whose files still own status.
+the file's own frontmatter.
 Run from a linked worktree, it files the row under the worktree's main checkout.
 The row's branch is the branch the work happens on — the checkout's own local
 branch when that is not the default, and otherwise nothing at all, never a
@@ -516,7 +509,7 @@ make precheck   # lint + the always-run test modules, about a minute
 This repository has `repo.ci = local`: it carries no GitHub Actions workflow.
 `sd-ship merge` runs `sd-check` (here `make precheck`, then `make check`) in a fresh worktree and
 posts the result as the `sd/local-gate` status on the head commit. The gate
-installs `sd_db` from the worktree's own `lib/`.
+reads `sd_db` from the worktree's own `lib/`.
 `sd-ship prepare` checks the public pull request body against the privacy patterns with `sd-docs-lint --body-only`.
 WORKFLOW.md "No-CI mode" describes the gate.
 
@@ -550,13 +543,6 @@ provided, which is 3.2. Nothing is shipped now; what it still protects is this
 repo's own three scripts under `.github/scripts/`, which `make check` runs
 through `/bin/bash` on macOS. The CI job that built bash 3.2 from source to
 run the same gate on Linux was cut for that reason (sd:10, criterion 17).
-
-**No macOS CI leg currently runs.** It was dropped to save runner cost, which
-GitHub bills at ten times the Linux rate. macOS-specific behaviour is covered
-only by the maintainer's local `make check` — one machine, not a gate. The leg
-returns when the maintainer restores it by hand at the end of the
-artifacts-as-product rollout. No date is set, so this paragraph stands until a
-macOS CI job actually reports — that, not a promise, is what ends it.
 
 ### Where the work happens
 

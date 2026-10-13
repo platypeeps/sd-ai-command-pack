@@ -2413,6 +2413,9 @@ class WorkItemInventoryTests(InventoryFixture):
         self.assertEqual(len(found), 1)
         self.assertTrue(found[0]["abnormal"])
         self.assertIn("2026-08-01-alpha", found[0]["detail"])
+        # The branch is a column on the row; no frontmatter line holds it.
+        self.assertNotIn("prd.md", found[0]["suggest"])
+        self.assertIn("sd task status", found[0]["suggest"])
 
     def test_a_branch_no_ref_carries_is_a_finding_and_a_live_one_is_not(self) -> None:
         self.item("2026-08-01-alpha", status="in_progress", extra="branch: gone/away\n")
@@ -2421,6 +2424,9 @@ class WorkItemInventoryTests(InventoryFixture):
         found = self.by_check(self.rows(), "branch-unresolvable")
         self.assertEqual([row["title"] for row in found], ["alpha"])
         self.assertEqual(found[0]["key"], "2026-08-01-alpha")
+        self.assertNotIn("prd.md", found[0]["suggest"])
+        self.assertIn("sd task edit", found[0]["suggest"])
+        self.assertIn("--clear-branch", found[0]["suggest"])
 
     def test_a_done_items_deleted_branch_is_no_finding(self) -> None:
         """A merge deletes the squashed branch, so a done item's branch is history (sd:2729)."""
@@ -2556,6 +2562,7 @@ class WorkItemInventoryTests(InventoryFixture):
         self.assertEqual(row["title"], "undated-thing")
         # The age sweep was cut; the repair names the reader that ages it.
         self.assertIn("so idle-planning can age it", row["suggest"])
+        self.assertNotIn("prd.md", row["suggest"])
 
     def test_archived_items_contribute_no_rows(self) -> None:
         archived = self.repo / "docs" / "work" / "archive" / "2026-08"

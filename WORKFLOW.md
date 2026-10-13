@@ -69,13 +69,6 @@ These run without being asked.
   whose trailer names the item, and runs `git fetch -p`. The repository
   setting `delete_branch_on_merge` removes
   the remote branch.
-  A pack merge that changes `lib/` also installs
-  `sd_db` at the merge commit into the pack's virtualenv, so the dashboard's
-  next restart finds the library it expects (sd:2108, sd:3278). An installed copy that
-  is not an ancestor of the merge commit is kept. Every install holds one
-  machine-wide lock across that check and pip, so concurrent reconciles
-  cannot interleave. The receipt's `library`
-  says whether the install worked, or why it was skipped.
   After each confirmed in-scope merge, follow `skills/sd-ship/references/post-merge-closeout.md`.
 - Expected branch protection requires pull requests, current CI, and up-to-date branches, with no required approvals.
   Configure it deliberately in GitHub; installation does not grant a protection exception.

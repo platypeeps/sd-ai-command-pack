@@ -42,7 +42,7 @@ opens with sixteen top-level lines; the fifteen below are the sections.
 | `pending` | at most ten actionable rows by rank, with the line above them stating the denominator — `10 of 123, by rank`. A class with a cap shows at most that many rows, and a line under the list says how many of its rows the list does not show |
 | `next` | one row: the top-ranked id and its `suggest`. Not a menu, not three options |
 | `open threads` | a count per `source`, then the exclusions named in full, so the counts are never read as a total of everything that exists |
-| `work items` | derived item status from `docs/work`, counted, archived ones counted and not listed |
+| `work items` | item status from each item's row, counted, archived ones counted and not listed |
 | `contributions (this repo, shared database order)` | upstream activity, local evidence, and dependency readiness from the shared contribution projection |
 | `open pull requests` | open pull requests, via the same code path as `sd-pr-state` |
 | `merge lane (this repo, shared database)` | each item's newest lane entry that has not merged or been cancelled, with its state; `sd-ship lane list` is the full view |
@@ -88,7 +88,7 @@ predict `pending` from this table before running the command.
 | 10 | `branch-already-merged` | `w` | yes | `work item + git` | an open item with delivery evidence in the default branch |
 | 10 | `in-progress-without-branch` | `w` | yes | `work item` | status: in_progress with no branch: field to work on |
 | 10 | `branch-unresolvable` | `w` | yes | `work item + git` | a non-done item's branch: field naming a ref no local or remote head carries |
-| 10 | `status-unreadable` | `w` | yes | `work item` | an item whose prd.md will not yield a status |
+| 10 | `status-unreadable` | `w` | yes | `work item` | an item whose authoritative source will not yield a status |
 | 20 | `unresolved-concern` | `c` | yes | `## Review ledger` | a review concern left open by its own ledger row |
 | 20 | `unreadable-concern-row` | `c` | yes | `ledger row nothing can classify` | a C- row whose disposition this reader does not recognise |
 | 25 | `lane-entry-failed` | `l` | yes | `merge lane queue` | an item whose newest lane entry failed or was skipped short of a merge |
