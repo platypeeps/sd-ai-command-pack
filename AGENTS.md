@@ -186,9 +186,6 @@ To see which wrappers this repository actually has, list the installed skills
 rather than relying on a list written down somewhere: they are the pack's
 `sd-*` skills, and the pack's own help surface enumerates them at runtime.
 
-Nothing verifies or rewrites this block any more. The machine-scope installer
-never edits a tracked repository file, `AGENTS.md` included, so what follows is
-hand-maintained like the rest of the document. It deliberately names no
-individual command: the block routes by intent, so there is nothing in it that a
-change to the command set could make false.
+Nothing verifies or rewrites this block; it is hand-maintained. It names no
+individual command, so a change to the command set cannot make it false.
 <!-- SD-AI-COMMAND-PACK:ROUTING:END -->

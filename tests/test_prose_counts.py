@@ -78,14 +78,10 @@ MEASURED_AGAINST = re.compile(
 FENCE = re.compile(r"^\s*(?:```|~~~)")
 CODE_SPAN = re.compile(r"`[^`\n]*`")
 
-#: Present-tense count claims per document, measured on `ef7c0c7b` by
-#: `present_tense_counts` below. A ratchet on violations: each entry may fall
-#: and may not rise, and an entry at zero is deleted. Both lines held here
-#: are the predicate's own edges rather than claims about the pack -- one
-#: describes a test's coverage points, the other reads `surfaces` as a verb --
-#: and they stay because exempting them would need a parser the design
-#: declined. Per document, so a new claim in one page cannot be netted off
-#: against a cleanup in another.
+#: Present-tense count claims per document, measured by `present_tense_counts` below.
+#: A ratchet: an entry may fall, not rise, and an entry at zero is deleted.
+#: Per document, so a new claim in one page cannot be netted off against a cleanup in another.
+#: Both lines are the predicate's own edges: one describes a test's coverage points, the other reads `surfaces` as a verb.
 PRESENT_TENSE_COUNTS = {
     "docs/spec/backend/quality-guidelines.md": 1,
     "skills/sd-status/SKILL.md": 1,
