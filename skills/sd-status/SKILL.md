@@ -28,13 +28,13 @@ vault and the dashboard's Documents tab by default, and reaches an
 outward destination — Notion, Google Drive — only where the user designated that
 document for it.
 
-## The fourteen sections, in output order
+## The fifteen sections, in output order
 
 Above them all sits the banner — two lines, `sd-status: <repo path>` and the
 `pack:` line naming the checkout these tools came from with its branch and
 head. It is a header rather than a section: it names where the report ran and
 what ran it, and nothing under it is a finding. Count it and the report
-opens with fifteen top-level lines; the fourteen below are the sections.
+opens with sixteen top-level lines; the fifteen below are the sections.
 
 | Section | What it shows |
 |---|---|
@@ -45,6 +45,7 @@ opens with fifteen top-level lines; the fourteen below are the sections.
 | `work items` | derived item status from `docs/work`, counted, archived ones counted and not listed |
 | `contributions (this repo, shared database order)` | upstream activity, local evidence, and dependency readiness from the shared contribution projection |
 | `open pull requests` | open pull requests, via the same code path as `sd-pr-state` |
+| `merge lane (this repo, shared database)` | each item's newest lane entry that has not merged or been cancelled, with its state; `sd-ship lane list` is the full view |
 | `detected setup` | mode, lowering reason, shared-tree paths to move, and detected check entrypoints |
 | `issues (this repo, from the index)` | indexed issues for this repository, split into the ones the index says need you and the rest |
 | `jira (shared database, all repositories)` | the operator's Jira involvement from the shared database, across every repository: one line per ticket, key and state, open rows first, then rows closed within seven days. Not scoped to the checkout |
@@ -90,6 +91,7 @@ predict `pending` from this table before running the command.
 | 10 | `status-unreadable` | `w` | yes | `work item` | an item whose prd.md will not yield a status |
 | 20 | `unresolved-concern` | `c` | yes | `## Review ledger` | a review concern left open by its own ledger row |
 | 20 | `unreadable-concern-row` | `c` | yes | `ledger row nothing can classify` | a C- row whose disposition this reader does not recognise |
+| 25 | `lane-entry-failed` | `l` | yes | `merge lane queue` | an item whose newest lane entry failed or was skipped short of a merge |
 | 30 | `pr-check-failing` | `p` | yes | `open pull requests` | an open pull request with a failing check |
 | 30 | `pr-check-missing` | `p` | yes | `open PRs + protection` | an open pull request reporting no check the branch requires |
 | 30 | `dirty-tree-with-open-pr` | `p` | yes | `git + open PRs` | uncommitted work on a branch that already has a pull request |

@@ -2217,6 +2217,7 @@ class InventoryFixture(StatusFixture):
             "pull_requests": {"repo": "acme/widget", "pull_requests": []},
             "protection": {"default_branch": "main", "gaps": [], "detail": {}},
             "issues": {"available": False, "needs_you": [], "other": []},
+            "lane": {"available": True, "reason": "", "entries": []},
         }
         base.update(overrides)
         return base
@@ -2252,7 +2253,7 @@ class ClassTableTests(unittest.TestCase):
                 "pr-needs-action", "unmerged-branch",
                 "parked-concern", "idle-planning", "undated-planning",
                 "issue-open", "source-marker", "unreadable-concern-row",
-                "undisclosed-tool", "mirror-sync-pending",
+                "undisclosed-tool", "mirror-sync-pending", "lane-entry-failed",
             },
         )
 
@@ -2756,6 +2757,109 @@ class AdapterInventoryTests(InventoryFixture):
         self.assertIn("git fetch --prune", found[0]["suggest"])
 
 
+class LaneTests(InventoryFixture):
+    """sd:3495: the merge lane is the one merge path, and the report knew nothing of it."""
+
+    PULL = {"failing": [], "checks_total": 0, "checks": {}, "head": "task/queued"}
+    REQUIRED = {"default_branch": "main", "gaps": [], "detail": {"required_contexts": ["sd/local-gate"]}}
+
+    def lane(self, *entries: dict[str, Any]) -> dict[str, Any]:
+        return {"available": True, "reason": "", "repository": "acme/widget", "entries": list(entries)}
+
+    def test_a_failed_lane_entry_is_an_abnormal_row(self) -> None:
+        lane = self.lane({"item": 12, "branch": "task/twelve", "status": "failed", "step": "prepare",
+                          "reason": "the gate failed"})
+        found = self.by_check(self.rows(lane=lane), "lane-entry-failed")
+        self.assertEqual([row["key"] for row in found], ["sd:12"])
+        self.assertTrue(found[0]["abnormal"])
+        self.assertIn("failed at prepare: the gate failed", found[0]["detail"])
+        self.assertIn("sd-ship lane retry 12", found[0]["suggest"])
+        pending = self.lane({"item": 13, "branch": "task/thirteen", "status": "pending"})
+        self.assertEqual([], self.by_check(self.rows(lane=pending), "lane-entry-failed"))
+
+    def test_an_unreadable_lane_is_unchecked_not_clear(self) -> None:
+        inventory = self.inventory(lane={"available": False, "reason": "the hub is down", "entries": []})
+        self.assertEqual(inventory.unchecked["lane-entry-failed"], "the hub is down")
+
+    def test_a_queued_pull_request_waits_on_the_lane_not_on_anyone(self) -> None:
+        pulls = {"repo": "acme/widget", "pull_requests": [self.pull(**self.PULL)]}
+        lane = self.lane({"item": 14, "branch": "task/queued", "status": "pending"})
+        rows = self.rows(pull_requests=pulls, protection=self.REQUIRED, lane=lane)
+        self.assertEqual([], self.by_check(rows, "pr-check-missing"))
+        self.assertEqual([], self.by_check(rows, "pr-needs-action"))
+        rows = self.rows(pull_requests=pulls, protection=self.REQUIRED)
+        self.assertEqual(len(self.by_check(rows, "pr-check-missing")), 1)
+
+    def test_local_ci_suggestions_name_the_gate_not_workflows(self) -> None:
+        pulls = {"repo": "acme/widget", "pull_requests": [
+            self.pull(**self.PULL), self.pull(number=8, head="task/failing")]}
+        self.enterContext(mock.patch.object(status.sd_lib, "ci_mode", return_value="local"))
+        rows = self.rows(pull_requests=pulls, protection=self.REQUIRED)
+        missing = self.by_check(rows, "pr-check-missing")[0]["suggest"]
+        failing = self.by_check(rows, "pr-check-failing")[0]["suggest"]
+        self.assertIn("sd/local-gate at prepare", missing)
+        self.assertNotIn("workflows", missing)
+        self.assertIn("sd-ship lane retry", failing)
+        self.assertNotIn("re-run the failing checks", failing)
+
+    def test_a_branch_the_lane_holds_is_not_an_unmerged_branch(self) -> None:
+        remote = self.base / "origin.git"
+        self.git("init", "-q", "--bare", str(remote))
+        self.set_origin(str(remote))
+        self.git("branch", "task/queued")
+        self.git("push", "-q", "origin", "main", "task/queued")
+        self.git("fetch", "-q", "origin")
+        self.assertEqual(len(self.by_check(self.rows(), "unmerged-branch")), 1)
+        lane = self.lane({"item": 15, "branch": "task/queued", "status": "pending"})
+        self.assertEqual([], self.by_check(self.rows(lane=lane), "unmerged-branch"))
+
+    def test_origin_is_asked_without_a_prompt(self) -> None:
+        real = subprocess.run
+        seen: list[dict[str, str]] = []
+
+        def recording(argv: Any, *args: Any, **kwargs: Any) -> Any:
+            if "ls-remote" in argv:
+                seen.append(kwargs.get("env") or {})
+            return real(argv, *args, **kwargs)
+
+        self.enterContext(mock.patch.object(status.subprocess, "run", side_effect=recording))
+        status._origin_heads(self.repo)
+        self.assertEqual([env.get("GIT_TERMINAL_PROMPT") for env in seen], ["0"])
+
+    def test_the_section_shows_each_items_newest_unmerged_entry(self) -> None:
+        import sd_db
+        import sd_lane
+
+        self.set_origin("https://github.com/acme/widget.git")
+        sd_db.initialise(home=self.home)
+        connection = sd_db.connect(home=self.home)
+        try:
+            with connection:
+                for entry in (
+                    {"id": "a1", "item": 20, "branch": "task/twenty", "status": "failed", "reason": "old"},
+                    {"id": "a2", "item": 20, "branch": "task/twenty", "status": "pending"},
+                    {"id": "b1", "item": 21, "branch": "task/twenty-one", "status": "merged"},
+                    {"id": "c1", "item": 22, "branch": "task/twenty-two", "status": "skipped",
+                     "code": "head_moved", "body": "long text"},
+                ):
+                    sd_lane.store(connection, "acme/widget", entry)
+        finally:
+            connection.close()
+        section = status.lane_section(self.repo, {"HOME": str(self.home)})
+        self.assertTrue(section["available"], section)
+        self.assertEqual([(entry["item"], entry["status"]) for entry in section["entries"]],
+                         [(20, "pending"), (22, "skipped")])
+        self.assertNotIn("body", section["entries"][1])
+        stream = io.StringIO()
+        status._render_lane(section, stream.write)
+        self.assertIn("  sd:22 skipped at head_moved  task/twenty-two\n", stream.getvalue())
+
+    def test_a_repository_with_no_github_origin_has_no_lane(self) -> None:
+        section = status.lane_section(self.repo, {"HOME": str(self.home)})
+        self.assertFalse(section["available"])
+        self.assertIn("has no lane", section["reason"])
+
+
 class LowYieldProducerTests(InventoryFixture):
     def test_a_marker_in_tracked_source_is_found_and_one_in_docs_is_not(self) -> None:
         # Spelled in halves so this repository's own scan stays at zero, which
@@ -3200,6 +3304,7 @@ class BannerTests(InventoryFixture):
             "pr-check-failing", "pr-check-missing", "dirty-tree-with-open-pr",
         },
         "protection": {"pr-check-missing", "protection-gap"},
+        "lane": {"lane-entry-failed"},
     }
 
     def test_the_table_declares_exactly_the_dependencies_the_design_states(
@@ -4068,7 +4173,7 @@ class ReportSectionTests(InventoryFixture):
     ORDER = [
         "abnormalities", "pending", "next", "open threads", "work items",
         "contributions (this repo, shared database order)",
-        "open pull requests", "detected setup",
+        "open pull requests", "merge lane (this repo, shared database)", "detected setup",
         "issues (this repo, from the index)",
         "jira (shared database, all repositories)", "protection",
         "resumable handoffs", "backends", "legacy residue",
@@ -4098,19 +4203,19 @@ class ReportSectionTests(InventoryFixture):
     ) -> None:
         """`all N checks clear` printed beside `1 finding` contradicts itself.
 
-        The head and the tail describe the same twelve classes. Saying every
+        The head and the tail describe the same thirteen classes. Saying every
         one is clear while naming a class that fired hands a skimmer the
         opposite of the answer, and the tail is the half people skim.
         """
         self.item("2026-08-01-alpha", status="in_progress")
         summary = status.banner(self.inventory())["summary"]
         self.assertIn("1 finding across 1 check;", summary)
-        self.assertIn("the other 11 checks clear", summary)
-        self.assertNotIn("all 12 checks clear", summary)
+        self.assertIn("the other 12 checks clear", summary)
+        self.assertNotIn("all 13 checks clear", summary)
 
     def test_nothing_found_still_says_all_of_them_are_clear(self) -> None:
         summary = status.banner(self.inventory())["summary"]
-        self.assertEqual("no findings; all 12 checks clear", summary)
+        self.assertEqual("no findings; all 13 checks clear", summary)
 
     def test_a_blind_class_keeps_the_word_out_even_when_others_fired(self) -> None:
         """The never-say-clear rule outranks the new middle tail.

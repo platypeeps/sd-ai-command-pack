@@ -13,6 +13,7 @@ Fourteen sections, in output order, under the `pack` banner naming the checkout 
                  flag stale status lines and done rows without closing evidence
   contributions  the shared contribution projection for this repo
   prs            open pull requests through the sd-pr-state code path
+  lane           this repo's merge-lane queue: each item's newest unmerged entry
   setup          mode and detected check entrypoints
   issues         indexed issues for this repository
   jira           the operator's Jira rows from the shared database, every repository
@@ -44,6 +45,7 @@ import pathlib
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 from typing import Any, NamedTuple, TextIO
 
@@ -1301,6 +1303,50 @@ def _shared_connection(library: str, *modules: str) -> tuple[Any, str]:
         return None, f"shared database unreadable: {error}"
 
 
+#: A lane entry in one of these states is done with; `sd-ship lane list` keeps it as history.
+LANE_SETTLED = ("merged", "cancelled")
+#: A lane entry in one of these states stopped short of a merge and waits on the operator.
+LANE_FAILED = ("failed", "skipped")
+#: What the section shows of an entry; the body and acceptance texts stay in `sd-ship lane list`.
+LANE_FIELDS = ("item", "branch", "status", "step", "code", "reason", "held", "expected_head")
+
+
+def lane_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
+    """This repository's merge-lane queue: each item's newest entry that has not merged or been cancelled.
+
+    The lane is the one merge path (WORKFLOW.md), and this report knew
+    nothing of it (sd:3495). Read-only, over the connection the database
+    sections share, with the queue's own readers, `sd_lane.stored` and
+    `sd_lane.enqueue_order`; `sd-ship lane list` is the full view. An entry
+    retried later is superseded by the newer one, as `newest_entry` decides.
+    """
+    import sd_lane  # noqa: PLC0415 - only this section reads the lane
+
+    try:
+        repository = sd_lane.queue_for(root, environ).repository
+    except (sd_lane.LaneError, sd_lib.ConfigError) as error:
+        return {"available": False, "reason": str(error), "entries": []}
+    connection, reason = _shared_connection("workflow database library")
+    if connection is None:
+        return {"available": False, "reason": reason, "entries": []}
+    try:
+        try:
+            rows = sd_lane.stored(connection, repository)
+            order = sd_lane.enqueue_order(connection, repository)
+        finally:
+            connection.close()
+    except Exception as error:
+        return {"available": False, "reason": f"lane queue unreadable: {error}", "entries": []}
+    newest: dict[Any, dict[str, Any]] = {}
+    for row in rows:
+        seen = newest.get(row.get("item"))
+        if seen is None or order.get(row["id"], 0) > order.get(seen["id"], 0):
+            newest[row.get("item")] = row
+    entries = [{key: row.get(key) for key in LANE_FIELDS} for row in rows
+               if newest.get(row.get("item")) is row and row.get("status") not in LANE_SETTLED]
+    return {"available": True, "reason": "", "repository": repository, "entries": entries}
+
+
 def _database_issues(slug: str) -> dict[str, Any]:
     """The shared database, and every absence a reported reason in one shape.
 
@@ -1470,6 +1516,8 @@ CLASSES = (
           "an item whose authoritative source will not yield a status"),
     Class("unresolved-concern", "c", True, 20, "## Review ledger",
           "a review concern left open by its own ledger row"),
+    Class("lane-entry-failed", "l", True, 25, "merge lane queue",
+          "an item whose newest lane entry failed or was skipped short of a merge", ("lane",)),
     Class("pr-check-failing", "p", True, 30, "open pull requests",
           "an open pull request with a failing check", ("pull_requests",)),
     Class("pr-check-missing", "p", True, 30, "open PRs + protection",
@@ -1672,10 +1720,12 @@ def actionable_inventory(
     unchecked: dict[str, str] = {}
     rows: list[dict[str, Any]] = []
     rows += _work_rows(root, work, day)
-    rows += _pull_rows(root, pulls, protection)
+    lane = sections.get("lane") or {}
+    rows += _lane_rows(lane)
+    rows += _pull_rows(root, pulls, protection, lane)
     rows += _protection_rows(protection)
     rows += _issue_rows(sections.get("issues") or {})
-    rows += _branch_rows(root, pulls, protection)
+    rows += _branch_rows(root, pulls, protection, lane)
     rows += _marker_rows(root)
     rows += _tool_rows(root, unchecked)
     rows += _mirror_rows(root, day, env)
@@ -2648,7 +2698,8 @@ def _accepted_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _pull_rows(
-    root: pathlib.Path, pulls: dict[str, Any], protection: dict[str, Any]
+    root: pathlib.Path, pulls: dict[str, Any], protection: dict[str, Any],
+    lane: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """The four pull-request classes, shaped from `sd-pr-state`'s own rows.
 
@@ -2665,6 +2716,11 @@ def _pull_rows(
     some ran and one is absent.
     """
     required = (protection.get("detail") or {}).get("required_contexts") or []
+    # Under the local gate `sd/local-gate` is posted at prepare and the runner
+    # merges, so a queued pull request is waiting on the lane, not on anyone,
+    # and no workflow exists to re-run (sd:3495).
+    local = sd_lib.ci_mode(root) == "local"
+    queued = _lane_branches(lane or {})
     dirty = bool(sd_lib.git_output(
         ["--no-optional-locks", "status", "--porcelain"], root
     ))
@@ -2678,14 +2734,16 @@ def _pull_rows(
             rows.append(_row(
                 "pr-check-failing", key, title,
                 "failing: " + ", ".join(pull["failing"]),
-                f"fix or re-run the failing checks on {pull['url']}",
+                f"fix what the local gate failed on {pull['url']}, then `sd-ship lane retry <item>`"
+                if local else f"fix or re-run the failing checks on {pull['url']}",
             ))
-        if required and not pull["checks_total"]:
+        if required and not pull["checks_total"] and pull["head"] not in queued:
             rows.append(_row(
                 "pr-check-missing", key, title,
                 f"{pull['base']} requires {len(required)} context(s) and this "
                 "pull request reports no check at all",
-                f"check that the workflows triggered on {pull['url']}",
+                f"the gate posts sd/local-gate at prepare; queue {pull['url']} with `sd-ship lane enqueue`"
+                if local else f"check that the workflows triggered on {pull['url']}",
             ))
         if dirty and here and pull["head"] == here:
             rows.append(_row(
@@ -2693,13 +2751,35 @@ def _pull_rows(
                 f"the tree is dirty on {here}, which already has this pull request",
                 "commit or stash the working tree before the pull request moves",
             ))
-        if not pull["draft"]:
+        if not pull["draft"] and pull["head"] not in queued:
             rows.append(_row(
                 "pr-needs-action", key, title,
                 f"{pull['mergeable']}/{pull['merge_state']}, review "
                 f"{pull['review_decision']}",
                 f"review or merge {pull['url']}",
             ))
+    return rows
+
+
+def _lane_branches(lane: dict[str, Any]) -> set[str]:
+    """The branches the lane queue holds: its pull request waits on the runner, not on anyone."""
+    return {str(entry["branch"]) for entry in lane.get("entries") or [] if entry.get("branch")}
+
+
+def _lane_rows(lane: dict[str, Any]) -> list[dict[str, Any]]:
+    """Each item whose newest lane entry stopped short of a merge (sd:3495)."""
+    rows: list[dict[str, Any]] = []
+    for entry in lane.get("entries") or []:
+        if entry.get("status") not in LANE_FAILED:
+            continue
+        item = entry.get("item")
+        why = entry.get("code") or entry.get("step") or ""
+        rows.append(_row(
+            "lane-entry-failed", f"sd:{item}", f"sd:{item} {entry.get('branch') or ''}".rstrip(),
+            str(entry.get("status")) + (f" at {why}" if why else "")
+            + (f": {entry['reason']}" if entry.get("reason") else ""),
+            f"fix it, then `sd-ship lane retry {item}`; `sd-ship lane list` shows the entry",
+        ))
     return rows
 
 
@@ -2755,9 +2835,19 @@ def _origin_heads(root: pathlib.Path) -> set[str] | None:
     that has outlived its branch, is not a move this tool can make. One call
     per root, never one per item.
     """
-    listing = sd_lib.git_output(["ls-remote", "--heads", "origin"], root)
-    if listing is None:
+    # Bounded and without a prompt: a dead network or a credential helper
+    # must not hang a read-only report (sd:3495).
+    try:
+        done = subprocess.run(  # fixed argv, no shell
+            ["git", "ls-remote", "--heads", "origin"], cwd=str(root), capture_output=True, text=True,
+            timeout=sd_lib.GIT_TIMEOUT_SECONDS, check=False,
+            env={**sd_lib.without_fsmonitor(os.environ), "GIT_TERMINAL_PROMPT": "0"},
+        )
+    except (OSError, subprocess.SubprocessError):
         return None
+    if done.returncode:
+        return None
+    listing = done.stdout
     return {
         line.split("refs/heads/", 1)[1]
         for line in listing.splitlines() if "refs/heads/" in line
@@ -2777,7 +2867,8 @@ STALE_REFS = "origin could not be asked; read from this checkout's refs"
 
 
 def _branch_rows(
-    root: pathlib.Path, pulls: dict[str, Any], protection: dict[str, Any]
+    root: pathlib.Path, pulls: dict[str, Any], protection: dict[str, Any],
+    lane: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Branches on origin that no open pull request is carrying.
 
@@ -2799,7 +2890,8 @@ def _branch_rows(
     subject. Origin decides which names survive; the refs describe them.
     """
     default = protection.get("default_branch") or "main"
-    carried = {str(pull["head"]) for pull in pulls.get("pull_requests") or []}
+    # `lane enqueue` pushes the branch before prepare opens its pull request.
+    carried = {str(pull["head"]) for pull in pulls.get("pull_requests") or []} | _lane_branches(lane or {})
     published = _origin_heads(root)
     listing = sd_lib.git_output(
         ["for-each-ref",
@@ -3150,6 +3242,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "issues": issues_section(root),
         "jira": jira_section(),
         "contributions": contributions_section(root),
+        "lane": lane_section(root, environ),
     }
     inventory = actionable_inventory(root, result, environ=environ)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
@@ -3402,6 +3495,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
 
     write("\nopen pull requests\n")
     pr_state.render_pulls(result["pull_requests"], stream)
+    _render_lane(result.get("lane"), write)
 
     setup = result["setup"]
     write("\ndetected setup\n")
@@ -3452,6 +3546,21 @@ CONTRIBUTION_ORDER = (
     "tested_commit", "target_repo", "draft_title", "draft_path", "draft_verified",
     "evidence", "evidence_verified", "notification_state", "attention_sources",
 )
+
+
+def _render_lane(section: dict[str, Any] | None, write: Any) -> None:
+    write("\nmerge lane (this repo, shared database)\n")
+    if not section or not section["available"]:
+        write(f"  ! {section['reason'] if section else 'not collected'}\n")
+        return
+    if not section["entries"]:
+        write("  nothing queued\n")
+    for entry in section["entries"]:
+        why = entry.get("code") or entry.get("step") or ""
+        write(f"  sd:{entry['item']} {entry['status']}" + (f" at {why}" if why else "")
+              + (" (held)" if entry.get("held") else "") + (f"  {entry['branch']}" if entry.get("branch") else "") + "\n")
+        if entry.get("reason") and entry["status"] in LANE_FAILED:
+            write(f"    {entry['reason']}\n")
 
 
 def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
