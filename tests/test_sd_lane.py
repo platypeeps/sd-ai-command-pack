@@ -1214,6 +1214,18 @@ class Landing(Lane):
         self.assertEqual(git(self.repo, "rev-parse", "HEAD"), before)
         self.assertIn("on elsewhere, not the default branch", self.entries()[0]["fast_forward"])
 
+    def test_a_branch_checkout_that_deploys_by_post_merge_is_not_moved(self) -> None:
+        # REGRESSION sd:3647 review: the lane moved the code, then post-merge refused the install,
+        # leaving new code on old dependencies; the refusal must come before the move.
+        tree, head = self.topic()
+        (self.repo / "Makefile").write_text("post-merge:\n\ttrue\n", encoding="utf-8")
+        before = git(self.repo, "rev-parse", "HEAD")
+        self.advance_origin_main()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), before)
+        self.assertIn("switch --detach", self.entries()[0]["fast_forward"])
+
     def test_origin_head_names_the_default_branch_over_the_usual_names(self) -> None:
         tree, head = self.topic()
         git(self.repo, "remote", "set-head", "origin", "main")
@@ -1268,17 +1280,18 @@ class Landing(Lane):
         lane's own it waited out its 45-minute bound. So the target runs once the run released the lock."""
         first, first_head = self.topic()
         second, second_head = self.topic("second")
-        landed = self.advance_origin_main()
+        self.advance_origin_main()
+        git(self.repo, "switch", "-q", "--detach")  # a deploying checkout is pinned (sd:3647)
         lock = self.store().lock_file
         self.post_merge(f'"{sys.executable}" -c "import fcntl, sys; '
                         f'fcntl.flock(open(sys.argv[1], \'a\'), fcntl.LOCK_EX | fcntl.LOCK_NB)" "{lock}"',
-                        "git rev-parse HEAD >> post-merge.out")
+                        "echo ran >> post-merge.out")
         self.merge_lands(first, 1, first_head)
         self.merge_lands(second, 2, second_head)
         answer = self.drain()
         self.assertEqual([row["status"] for row in self.entries()], ["merged", "merged"])
         self.assertEqual(answer["post_merge"], f"make post-merge passed in {self.repo}")
-        self.assertEqual((self.repo / "post-merge.out").read_text(encoding="utf-8").splitlines(), [landed])
+        self.assertEqual((self.repo / "post-merge.out").read_text(encoding="utf-8").splitlines(), ["ran"])
         self.assertEqual([(item, body) for item, body, _ in self.notes if body.startswith("Post-merge")],
                          [(1, f"Post-merge: make post-merge passed in {self.repo}"),
                           (2, f"Post-merge: make post-merge passed in {self.repo}")])
@@ -1303,6 +1316,7 @@ class Landing(Lane):
 
     def test_a_failing_or_slow_post_merge_never_fails_the_merged_entry_and_files_a_followup(self) -> None:
         tree, head = self.topic()
+        git(self.repo, "switch", "-q", "--detach")  # a deploying checkout is pinned (sd:3647)
         self.post_merge("@echo the install broke >&2", "@exit 3")
         self.merge_lands(tree, 1, head)
         answer = self.drain()
