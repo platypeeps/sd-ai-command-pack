@@ -2406,6 +2406,7 @@ def watch(root: pathlib.Path, *, once: bool, write: Callable[[str], Any] = print
 
 
 def add_lane_verbs(commands: Any) -> None:
+    import sd_notes  # noqa: PLC0415 -- the one item id spelling, 234, sd:234 or item:234 (sd:3715)
     lane = commands.add_parser("lane", help="a serial ship queue per repository, run under one lock (sd:2524)")
     verbs = lane.add_subparsers(dest="lane_command", required=True)
     adder = verbs.add_parser("enqueue", help="queue this worktree's item for prepare and merge")
@@ -2425,7 +2426,7 @@ def add_lane_verbs(commands: Any) -> None:
                                              "did (sd:3412), when it failed, skipped or stopped prepared, at its "
                                              "head with its body text (sd:3254); a cancelled one needs "
                                              "--expected-head (sd:3389)")
-    retrier.add_argument("item", type=int)
+    retrier.add_argument("item", type=sd_notes.item_id, help=sd_notes.ITEM_HELP)
     retrier.add_argument("--manual", action="store_true",
                          help="authorize the runner to merge when repo.runner_merge is manual, as enqueue --manual")
     retrier.add_argument("--expected-head", help=f"refuse with {STALE_HEAD} unless the item's newest entry is at "
@@ -2434,18 +2435,18 @@ def add_lane_verbs(commands: Any) -> None:
                                                  f"and refuses {HEAD_MOVED} when its branch moved and "
                                                  f"{ALREADY_MERGED} at a merged head (sd:3389)")
     canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled, or release a stuck running one")
-    canceller.add_argument("item", type=int)
+    canceller.add_argument("item", type=sd_notes.item_id, help=sd_notes.ITEM_HELP)
     canceller.add_argument("--expected-claim", metavar="TOKEN:STEP",
                            help=f"release only the running claim `lane list` printed, its holder.token and step; "
                                 f"else refuse with {STALE_CLAIM}, checked in the write's transaction (sd:3330)")
     mover = verbs.add_parser("move", help="move a pending entry; the runner reads the new order at the next item")
-    mover.add_argument("item", type=int)
+    mover.add_argument("item", type=sd_notes.item_id, help=sd_notes.ITEM_HELP)
     mover.add_argument("where", type=position, help="up, down, top, or a position from 1 among the pending entries")
     editors = [canceller, mover]
     for name, text in (("hold", "skip a pending entry, keeping its place, until it is released"),
                        ("release", "let a held entry run again")):
         editors.append(verbs.add_parser(name, help=text))
-        editors[-1].add_argument("item", type=int)
+        editors[-1].add_argument("item", type=sd_notes.item_id, help=sd_notes.ITEM_HELP)
     for editor in editors:
         editor.add_argument("--expected-revision", help=f"refuse with {STALE_REVISION} unless `lane list` still prints "
                                                         "this revision, checked in the write's transaction")
