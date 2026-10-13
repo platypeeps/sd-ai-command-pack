@@ -1312,11 +1312,6 @@ class OneItemIdSpelling(unittest.TestCase):
     worked, and `sd task contribution show 1429` refused a bare id.
     """
 
-    #: Groups whose parsers this test does not yet hold, each with its reason.
-    #: `lane`: bin/sd_lane.py is in the merge lane; its four `item` positionals
-    #: move to `item_id` in sd:3715.
-    EXEMPT = {"lane"}
-
     setUp = TaskCLI.setUp
     call = TaskCLI.call
 
@@ -1333,15 +1328,18 @@ class OneItemIdSpelling(unittest.TestCase):
                     found.append((" ".join(path), action.type))
 
         walk(sd.build_parser(), ())
+        # `sd-ship lane` builds its own parser (sd:3715).
+        walk(sd_lib.sibling("sd_ship_under_item_ids", "sd-ship").parser(), ("sd-ship",))
         return found
 
     def test_every_item_positional_takes_item_id(self):
         import sd_notes
 
         found = self.item_positionals()
-        self.assertIn("task show", [path for path, _ in found], "the walk missed a verb that exists")
-        wrong = [path for path, kind in found
-                 if kind is not sd_notes.item_id and path.split()[0] not in self.EXEMPT]
+        paths = [path for path, _ in found]
+        self.assertIn("task show", paths, "the walk missed a verb that exists")
+        self.assertIn("sd-ship lane retry", paths, "the walk missed sd-ship's lane verbs")
+        wrong = [path for path, kind in found if kind is not sd_notes.item_id]
         self.assertEqual(wrong, [])
 
     def test_item_id_reads_three_spellings_and_refuses_others(self):
