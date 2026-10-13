@@ -308,6 +308,26 @@ class SplitModuleFixtures(unittest.TestCase):
                          {f"tests.{name}.part{part}of2" for name in SPLIT_NAMES for part in (1, 2)})
         self.assertEqual([status for _, _, status in summaries], ["0"] * 6)
 
+    def test_the_run_ends_with_its_ten_slowest_shards(self) -> None:
+        """sd:3487. The gate's own log says which shards dominate, slowest first,
+        indented so no `^shard` parse reads them as a shard's own end line."""
+        for index in range(9):
+            (self.root / "tests" / f"test_extra_{index}.py").write_text(PLAIN)
+        (self.root / "tests" / "test_slow.py").write_text(
+            "import time\nimport unittest\n\n\nclass Slow(unittest.TestCase):\n"
+            "    def test_sleeps(self):\n        time.sleep(2)\n")
+        result = self.run_harness()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("test runner: workers=2 shards=16", result.stdout)
+        self.assertIn("\nslowest shards:\n", result.stdout)
+        tail = result.stdout.rsplit("\nslowest shards:\n", 1)[1].splitlines()
+        timed = [re.fullmatch(r"  shard (\S+): (\d+)s exit=(\d+)", line) for line in tail]
+        self.assertTrue(all(timed), tail)
+        self.assertEqual(len(timed), 10, tail)
+        self.assertEqual(timed[0].group(1) if timed[0] else None, "tests.test_slow", tail)
+        seconds = [int(match.group(2)) for match in timed if match]
+        self.assertEqual(seconds, sorted(seconds, reverse=True), tail)
+
     def test_the_sd_db_suite_runs_as_shards_of_its_own(self) -> None:
         """sd:3323: `tests/sd_db/`, the library's suite, runs in `make test` beside `tests/test_*.py`."""
         library = self.root / "tests" / "sd_db"
