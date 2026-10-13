@@ -165,6 +165,7 @@ The next prepare at that head records it with no provider call, `--retry-review`
 It then goes on as with any recorded pass: `--provider` is checked against it, and an additional request is dispatched.
 A file for another record, head, reserved pass or review tool binding, or a damaged one, is set aside, and the review runs as before.
 `sd-ship lane run` puts such an entry back in its queue, stops, and retries it on its next run.
+It does the same once for any other retryable prepare refusal whose `passes_spent` is 0, such as `timing_plan_invalid`; `gate_failed` is not retried (sd:3478).
 
 The repository gate runs after a review that does not block.
 A blocking review runs no gate; its refusal says so, and its `check.status` is `not_run`.

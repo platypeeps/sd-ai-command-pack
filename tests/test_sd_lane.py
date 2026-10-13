@@ -499,6 +499,58 @@ class Runner(Lane):
     HUB_FAULT = {"ok": False, "phase": "prepare", "error": "the sd hub at hub.example.test:8769 is unreachable: "
                  "[Errno 32] Broken pipe", "workflow": {"blocker": {"code": "hub_unavailable", "retryable": True}}}
 
+    #: `sd-ship`'s answer to a prepare whose review planning failed before it reserved a pass (sd:3478).
+    NO_PLAN = {"ok": False, "phase": "prepare", "passes_spent": 0,
+               "error": "local review emitted no valid timing plan; no provider pass was reserved",
+               "workflow": {"blocker": {"code": "timing_plan_invalid", "retryable": True}}}
+
+    def test_a_retryable_refusal_that_spent_no_pass_is_put_back_and_the_next_run_ships_it(self) -> None:
+        """sd:3478. Five entries failed on this refusal in 10 to 13 s each; seven retries by hand shipped them."""
+        sd_lane.enqueue_entry(self.worktree("topic"), 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = self.NO_PLAN
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([(c[2], c[4]) for c in self.calls], [("prepare", "1")])
+        self.assertIn("sd:1", answer["stopped"])
+        one, two = self.entries()
+        self.assertEqual((one["status"], one["retryable_retries"], one["retryable_fault"]["step"], two["status"]),
+                         ("pending", 1, "prepare", "pending"))
+        self.assertIn("timing plan", one["retryable_fault"]["reason"])
+        self.assertNotIn("hub_retries", one)
+        del self.answers[(1, "prepare")]
+        self.calls.clear()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([(c[2], c[4]) for c in self.calls],
+                         [("prepare", "1"), ("merge", "1"), ("prepare", "2"), ("merge", "2")])
+        self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "merged"])
+
+    def test_a_retryable_refusal_fails_the_entry_on_its_second_time(self) -> None:
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = self.NO_PLAN
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry["step"], entry["retryable_retries"], len(self.calls)),
+                         ("failed", "prepare", sd_lane.RETRYABLE_RETRIES, sd_lane.RETRYABLE_RETRIES + 1))
+        self.assertIn("timing plan", entry["reason"])
+
+    def test_a_refusal_that_spent_a_pass_or_does_not_say_or_is_not_retryable_fails_at_once(self) -> None:
+        """sd:3478. An unknown spend is not "none"; a failed gate is not run again unasked."""
+        blocker = self.NO_PLAN["workflow"]["blocker"]
+        cases = {"spent": {"passes_spent": 1}, "unsaid": {"passes_spent": None}, "true": {"passes_spent": True},
+                 "text": {"passes_spent": "0"},
+                 "not retryable": {"workflow": {"blocker": {**blocker, "retryable": False}}},
+                 "gate": {"workflow": {"blocker": {**blocker, "code": "gate_failed"}}}}
+        for item, (case, change) in enumerate(cases.items(), start=1):
+            with self.subTest(case=case):
+                answer = {key: value for key, value in {**self.NO_PLAN, **change}.items() if value is not None}
+                sd_lane.enqueue_entry(self.feature, item, "one", self.body, self.environ, manual=True, claim="deliver")
+                self.answers[(item, "prepare")] = answer
+                self.calls.clear()
+                sd_lane.run_lane(self.repo, self.environ, self.ship)
+                entry = self.entries()[-1]
+                self.assertEqual((entry["status"], "retryable_retries" in entry, len(self.calls)), ("failed", False, 1))
+
     def test_a_hub_fault_puts_the_entry_back_and_the_next_run_ships_it(self) -> None:
         """sd:3239. A hub upgrade broke prepare's session; the entry failed as a policy block and was lost."""
         tree = self.worktree("topic")
@@ -564,10 +616,12 @@ class Runner(Lane):
 
         Failure table, put-back (sd:3283): the catch-up is only in the worktree, so `expected_head` stays at
         the published head, and this host's worktree rule accepts the catch-up. Pushed, the entry moves to it.
+        A retryable refusal's put-back takes the same path (sd:3478).
         """
-        for builder, pushed in ((False, False), (True, False), (False, True)):
-            with self.subTest(builder=builder, pushed=pushed):
-                name = f"topic-{builder}-{pushed}"
+        for builder, pushed, fault in ((False, False, "hub"), (True, False, "hub"), (False, True, "hub"),
+                                       (False, False, "retryable"), (False, True, "retryable")):
+            with self.subTest(builder=builder, pushed=pushed, fault=fault):
+                name = f"topic-{builder}-{pushed}-{fault}"
                 tree = self.worktree(name)
                 queued = sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True,
                                                claim="deliver")["expected_head"]
@@ -575,15 +629,16 @@ class Runner(Lane):
                 git(self.repo, "push", "-q", "origin", "main")  # prepare merges `origin/<default>`
 
                 def catch_up_then_fault(argv: list[str], log: pathlib.Path, tree: pathlib.Path = tree,
-                                        name: str = name, pushed: bool = pushed) -> dict:
+                                        name: str = name, pushed: bool = pushed, fault: str = fault) -> dict:
                     git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
                     if pushed:
                         git(tree, "push", "-q", "origin", f"HEAD:refs/heads/{name}")
                     self.ship(argv, log)
-                    return self.HUB_FAULT
+                    return self.HUB_FAULT if fault == "hub" else self.NO_PLAN
                 sd_lane.run_lane(self.repo, self.environ, catch_up_then_fault)
                 caught_up = git(tree, "rev-parse", "HEAD")
-                self.assertEqual(self.entries()[-1]["expected_head"], caught_up if pushed else queued)
+                self.assertEqual((self.entries()[-1]["status"], self.entries()[-1]["expected_head"]),
+                                 ("pending", caught_up if pushed else queued))
                 if builder:
                     git(tree, "commit", "-q", "--allow-empty", "-m", "the builder's")
                 sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -1881,6 +1936,25 @@ class ClaimAndLease(SharedQueue):
         self.make_dead()
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual((answer["reclaimed"][0]["status"], self.entries()[0]["status"]), ("pending", "merged"))
+
+    def test_a_retryable_put_back_that_fails_to_write_is_reclaimed_and_counts_nothing(self) -> None:
+        """Failure table, sd:3478 put-back: the write of the count fails; the entry stays running, a reclaim
+        puts it back with no count, and the next prepare still has its one retry."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = Runner.NO_PLAN
+        with self.failing_store(lambda entry: "retryable_retries" in entry):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertIn("the hub went away", answer["stopped"])
+        self.assertEqual((self.entries()[0]["status"], "retryable_retries" in self.entries()[0]), ("running", False))
+        self.make_dead()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((answer["reclaimed"][0]["status"], entry["status"], entry["retryable_retries"]),
+                         ("pending", "pending", 1))
+        del self.answers[(1, "prepare")]
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.entries()[0]["status"], [c[2] for c in self.calls]),
+                         ("merged", ["prepare", "prepare", "prepare", "merge"]))
 
     def test_a_runner_write_is_tried_again_until_the_hub_answers(self) -> None:
         """The 10-minute write retry: two faults, then the write lands and the entry merges."""

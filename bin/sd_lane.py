@@ -35,7 +35,8 @@ database and runs it under one runner lock per repository:
            is gone, and lists it as `reclaimed` (sd:2821, below). An entry
            whose prepare or merge met a hub fault goes
            back to pending, at most `HUB_RETRIES` times, and the run stops
-           (sd:3239, below);
+           (sd:3239, below); so does one whose prepare refused retryably
+           and spent no review pass, once (sd:3478, below);
   watch    print each gate end a lane or builder log records, once; with
            `--item N`, repeated, wait until each item's newest entry that is
            not cancelled ends, print one line each, and exit 0 only when all
@@ -166,6 +167,15 @@ as the entry's head; any other move still skips the entry.
 The retry's prepare reuses a review that cleared before the fault, as at any
 head the ship receipt records reviewed; a review whose report the fault kept
 from the receipt is incomplete, and spends the one `--retry-review`.
+
+A retryable prepare refusal that spent no review pass is retried once
+(sd:3478): an invalid timing plan failed five entries in 10 to 13 s each,
+and a rerun by hand passed every time. `sd-ship prepare` says what a
+refusal spent (`passes_spent`); when it says 0 and the blocker is
+`retryable`, the runner puts the entry back with its `retryable_retries`
+count and stops, as after a hub fault. A refusal that does not say spent an
+unknown count and fails the entry, and so does `gate_failed`
+(`NOT_PUT_BACK`): a failed gate runs again only when asked.
 """
 
 from __future__ import annotations
@@ -230,6 +240,10 @@ RUNNER_MERGE_UNKNOWN = "runner_merge_unknown"
 REASON_CHARS = 2000
 #: The runs that put an entry back after a hub fault before the next fault fails it (sd:3239).
 HUB_RETRIES = 2
+#: The runs that put an entry back after a retryable prepare refusal that spent no review pass (sd:3478).
+RETRYABLE_RETRIES = 1
+#: Retryable refusals the lane does not put back: a failed gate runs again only when asked (sd:3478).
+NOT_PUT_BACK = frozenset({"gate_failed"})
 #: The ends short of a merge: `retry` queues such an entry again, with its texts (sd:3254), and a cancelled
 #: one at the head the caller read (sd:3389).
 BLOCKED = ("failed", "skipped", "prepared")
@@ -290,8 +304,8 @@ POST_MERGE_RULE = re.compile(r"^post-merge\s*:(?!=)", re.MULTILINE)
 #: The bound on one `git` step of a publish: a fetch or a push crosses the network.
 PUBLISH_SECONDS = 300
 #: The longest chain of catch-up merges an entry's head may carry: one per prepare that pushed a catch-up
-#: and was then reclaimed or put back after a hub fault, so every reclaim and hub retry fits (sd:3283).
-CATCH_UPS = RECLAIMS + HUB_RETRIES + 1
+#: and was then reclaimed or put back, so every reclaim, hub retry and retryable retry fits (sd:3283, sd:3478).
+CATCH_UPS = RECLAIMS + HUB_RETRIES + RETRYABLE_RETRIES + 1
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1202,6 +1216,17 @@ def answered_hub_fault(answer: dict[str, Any]) -> bool:
     return blocker_code(answer) == sd_ship_workflow.HUB_UNAVAILABLE
 
 
+def answered_retryable(answer: dict[str, Any]) -> bool:
+    """Whether prepare refused retryably and says it spent no review pass; the next run retries it once (sd:3478).
+
+    A refusal that does not say what it spent spent an unknown count, so it is not retried.
+    """
+    blocker = (answer.get("workflow") or {}).get("blocker") or {}
+    spent = answer.get("passes_spent")
+    return (blocker.get("retryable") is True and blocker.get("code") not in NOT_PUT_BACK
+            and type(spent) is int and spent == 0)
+
+
 def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[], None]) -> dict[str, Any]:
     """One entry, start to end; the fields to record on it.
 
@@ -1232,7 +1257,8 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
     if not (prepared.get("ok") and prepared.get("phase") == "ready_to_send"):
         return {**fields, "status": "failed", "step": "prepare", "phase": prepared.get("phase"),
                 "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:REASON_CHARS],
-                **({"hub_fault": True} if answered_hub_fault(prepared) else {})}
+                **({"hub_fault": True} if answered_hub_fault(prepared) else
+                   {"retryable": True} if answered_retryable(prepared) else {})}
     refused = merge_refusal(entry)
     if refused is not None:
         return {**fields, "status": "prepared", **refused}
@@ -2062,21 +2088,27 @@ def lane_tree(main: pathlib.Path, lane: pathlib.Path, branch: str, expected: str
     return {"tree": lane, "made": True, "branch_made": None if local else branch}
 
 
-def requeue(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, Any]) -> bool:
-    """Put a running entry back as pending after a hub fault, or False once its retries are spent (sd:3239).
+def requeue(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, Any]) -> str | None:
+    """Put a running entry back as pending; what it met, or None once its retries are spent.
 
-    It keeps its place, and `hub_fault` says what failed where; a later
-    outcome writes its own fields beside it. Its `expected_head` moves only
-    to a catch-up merge prepare pushed (`pushed_catch_up`, sd:3283).
+    A hub fault puts it back `HUB_RETRIES` times (sd:3239), and a retryable
+    prepare refusal that spent no review pass `RETRYABLE_RETRIES` times
+    (sd:3478), each with its own count. It keeps its place, and `hub_fault`
+    or `retryable_fault` says what failed where; a later outcome writes its
+    own fields beside it. Its `expected_head` moves only to a catch-up merge
+    prepare pushed (`pushed_catch_up`, sd:3283).
     """
-    retries = int(entry.get("hub_retries") or 0)
-    if not outcome.pop("hub_fault", False) or retries >= HUB_RETRIES:
-        return False
+    hub, retryable = outcome.pop("hub_fault", False), outcome.pop("retryable", False)
+    count, limit, record, met = (("hub_retries", HUB_RETRIES, "hub_fault", "a hub fault") if hub else
+                                 ("retryable_retries", RETRYABLE_RETRIES, "retryable_fault", "a retryable refusal"))
+    retries = int(entry.get(count) or 0)
+    if not (hub or retryable) or retries >= limit:
+        return None
     expected = pushed_catch_up(pathlib.Path(entry["worktree"]), str(entry.get("branch") or ""), entry["expected_head"])
     fault: dict[str, Any] = {key: outcome[key] for key in ("step", "reason", "prepare_log", "merge_log", "log_host")
                              if key in outcome}
-    put_back(queue, entry, token, expected, hub_retries=retries + 1, hub_fault={**fault, "at": stamp_now()})
-    return True
+    put_back(queue, entry, token, expected, **{count: retries + 1, record: {**fault, "at": stamp_now()}})
+    return met
 
 
 def settle_checkout(root: pathlib.Path, queue: Queue) -> dict[str, Any]:
@@ -2221,9 +2253,10 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
                          moved_off={"host": this_host(), "at": stamp_now(), "step": "merge"})
                 return ({"item": entry["item"], **outcome, "status": "pending"},
                         f"{outcome['moved']} sd:{entry['item']} is pending again at its place, for that host.")
-            if requeue(queue, local, token, outcome):
+            met = requeue(queue, local, token, outcome)
+            if met is not None:
                 return ({"item": entry["item"], **outcome, "status": "pending"},
-                        f"sd:{entry['item']} met a hub fault in {outcome.get('step')}; "
+                        f"sd:{entry['item']} met {met} in {outcome.get('step')}; "
                         "it is pending again, and the next run retries it")
             outcome.update(settle(local, outcome, environ, note, queue.lock_file, root))
     except Stop as error:
