@@ -54,7 +54,8 @@ other halves are, is in [domain packs](docs/domain-packs.md).
 - `~/.claude/agents/sd-*.md` — and `--user` removes a hand-placed agent that
   one of them replaces, such as `slice-builder.md` for `sd-slice-builder`,
   when its digest is a known copy; an edited copy stays and is reported.
-  `AGENT_PREDECESSORS` in `bin/sd_install.py` is the list.
+  `AGENT_PREDECESSORS` in `bin/sd_install.py` is the list. `sd-slice-builder`'s
+  frontmatter runs the `sd-builder-guard` hook by name, through the link below.
 - `~/.local/bin/sd` and `~/.local/bin/sd-*` — one symlink per executable in
   `bin/`, so the commands resolve from any directory; `--bin-dir DIR` puts them
   elsewhere. The installer never edits `PATH`: `--user` warns when the link
@@ -263,10 +264,10 @@ refusal: the grammar, the anchor, the due date and the kinds that may recur.
 
 A row another source raises carries a reference to the occurrence that raised it:
 `sd task add "repo-sync failed" --kind followup --ref job:repo-sync:42`.
-A second add with the same reference updates that row's title, and any body,
-priority or due date it names, and keeps its status, so a retried delivery
-never reopens work that is done; the next run's failure names a new reference
-and files a new row. `sd task show` prints the reference as `ref:`, and
+A second add with the same reference refuses, names the row and its status,
+and leaves the row as it was, done or open; `sd task edit` changes a row, and
+the next run's failure names a new reference and files a new row (sd:3703).
+`sd task show` prints the reference as `ref:`, and
 `sd today --json` and every `--json` row carry it as `ref`. Only a task or a
 followup takes `--ref`, and not with `--recur`.
 

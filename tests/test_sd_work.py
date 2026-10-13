@@ -842,37 +842,42 @@ class TaskRef(unittest.TestCase):
     def test_help_lists_ref(self):
         self.assertIn("--ref", self.call("task", "add", "--help").stdout)
 
-    def test_a_second_add_with_the_same_ref_updates_the_one_row(self):
+    def test_a_second_add_with_the_same_ref_refuses_and_leaves_the_row(self):
+        """sd:3703. Two items filed with `--ref sd:3399` overwrote sd:3407 twice; an add files, an edit changes."""
         first = self.add("repo-sync failed", "--kind", "followup", "--ref", "job:repo-sync:42",
                          "--body", "log at line 9")
-        second = self.add("repo-sync failed: core", "--kind", "followup", "--ref", "job:repo-sync:42")
+        refused = self.call("task", "add", "repo-sync failed: core", "--kind", "followup",
+                            "--ref", "job:repo-sync:42", "--body", "", code=1)
+        item = first["item"]["id"]
+        self.assertIn(f"sd:{item} (planning) already carries --ref job:repo-sync:42", refused.stderr)
+        self.assertIn(f"sd task edit {item}", refused.stderr)
         self.assertEqual(len(self.rows()), 1)
-        self.assertEqual(second["item"]["id"], first["item"]["id"])
-        self.assertIs(second["created"], False)
-        self.assertEqual(second["item"]["title"], "repo-sync failed: core")
-        self.assertEqual(second["item"]["body"], first["item"]["body"])
-        self.assertEqual(second["item"]["ref"], "job:repo-sync:42")
-        shown = self.call("task", "show", first["item"]["id"]).stdout
-        self.assertIn("  ref: job:repo-sync:42", shown)
+        shown = json.loads(self.call("store", "item", item, "--json").stdout)
+        self.assertEqual((shown["item"]["title"], shown["item"]["body"], shown["revision"]),
+                         (first["item"]["title"], first["item"]["body"], first["revision"]))
+        self.assertIn("  ref: job:repo-sync:42", self.call("task", "show", item).stdout)
 
-    def test_an_explicit_empty_body_clears_the_body_on_re_add(self):
-        """sd:2899: `--body ''` on a second add clears the body; no `--body` keeps it (above)."""
-        first = self.add("repo-sync failed", "--ref", "job:42", "--body", "stale")
-        cleared = self.add("repo-sync failed", "--ref", "job:42", "--body", "")
-        self.assertEqual(cleared["item"]["id"], first["item"]["id"])
-        fresh = self.add("repo-sync failed", "--ref", "job:43")
-        self.assertEqual(cleared["item"]["body"], fresh["item"]["body"])
-        self.assertNotEqual(cleared["item"]["body"], first["item"]["body"])
+    def test_a_done_or_cancelled_row_is_never_overwritten(self):
+        for status, ref in (("done", "job:repo-sync:42"), ("cancelled", "job:repo-sync:43")):
+            with self.subTest(status=status):
+                first = self.add("repo-sync failed", "--kind", "followup", "--ref", ref)
+                item = first["item"]["id"]
+                if status == "done":
+                    self.call("task", "status", item, "done")
+                else:
+                    self.call("task", "cancel", item, "--reason", "not needed")
+                before = json.loads(self.call("store", "item", item, "--json").stdout)
+                refused = self.call("task", "add", "other work", "--kind", "followup", "--ref", ref, code=1)
+                self.assertIn(f"sd:{item} ({before['item']['status']}) already carries", refused.stderr)
+                self.assertEqual(json.loads(self.call("store", "item", item, "--json").stdout), before)
+        later = self.add("repo-sync failed", "--kind", "followup", "--ref", "job:repo-sync:44")
+        self.assertNotIn(later["item"]["id"], [row["id"] for row in self.rows()[:2]])
+        self.assertEqual(len(self.rows()), 3)
 
-    def test_a_done_row_stays_done_and_the_next_run_files_a_new_row(self):
-        first = self.add("repo-sync failed", "--kind", "followup", "--ref", "job:repo-sync:42")
-        self.call("task", "status", first["item"]["id"], "done")
-        again = self.add("repo-sync failed", "--kind", "followup", "--ref", "job:repo-sync:42")
-        self.assertEqual((again["item"]["id"], again["item"]["status"]), (first["item"]["id"], "done"))
-        self.assertEqual(len(self.rows()), 1)
-        later = self.add("repo-sync failed", "--kind", "followup", "--ref", "job:repo-sync:43")
-        self.assertNotEqual(later["item"]["id"], first["item"]["id"])
-        self.assertEqual(len(self.rows()), 2)
+    def test_add_prints_the_new_id_first(self):
+        """sd:3703. sd:3161 was a second add made to read the first one's id back."""
+        shown = self.call("task", "add", "one row").stdout
+        self.assertRegex(shown.splitlines()[0], r"^#\d+  planning  one row$")
 
     def test_today_carries_the_ref(self):
         state = self.add("HOA alarm follow-up", "--ref", "hoa:a2-vsd")

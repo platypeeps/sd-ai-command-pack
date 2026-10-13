@@ -1387,6 +1387,20 @@ roles:
             self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(self.operation().state["copilot_reviews"][0]["status"], "completed")
 
+    def test_a_pending_refusal_names_who_did_review_the_head(self):
+        """sd:3499. A renamed Copilot bot's review read as pending forever,
+        with "wait, then retry"; the refusal names the logins that reviewed the head."""
+        self.enable_automatic_copilot()
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+        review = {"state": "COMMENTED", "submitted_at": "2026-09-19T20:00:00Z", "body": ""}
+        self.double.review_payload["reviews"] = [
+            {**review, "user": {"login": "copilot-renamed[bot]"}, "commit_id": head},
+            {**review, "user": {"login": "earlier-reviewer"}, "commit_id": "0" * 40}]
+        with self.assertRaisesRegex(ship.Refusal, r"has not completed.*copilot-renamed\[bot\]") as caught:
+            self.merge()
+        self.assertNotIn("earlier-reviewer", str(caught.exception))
+
     def test_later_push_keeps_one_automatic_review_but_requires_exact_head_review(self):
         # The later push edits `src.py`, the shipped surface. It was an empty
         # commit until sd:1366, which is now the case a reviewed ancestor
@@ -2607,6 +2621,30 @@ roles:
         self.unanswered("--deliver").prepare()
         with patch.object(ship.time, "sleep"):
             self.assert_closed_by_merge(self.merge())
+
+    def test_a_design_only_branch_cannot_deliver_its_build_item(self):
+        """sd:3519. PR #260 changed docs/work/ and CLAUDE.md, merged with
+        `--deliver`, and closed two build items nobody built. A branch of
+        design records and instruction files associates; the build delivers."""
+        self.tiered_branch({"docs/work/2026-10-12-example/design.md": "---\nitem: sd:1\n---\n\ndesign\n",
+                            "CLAUDE.md": "rules\n"})
+        self.task_item("task")
+        self.connection.execute("UPDATE item SET branch = 'tiered' WHERE id = ?", (self.item,))
+        self.connection.commit()
+        with self.assertRaisesRegex(ship.Refusal, r"design records.*--associate-only") as caught:
+            self.unanswered("--deliver", "--title", "design").prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "design_only_delivery")
+        self.assertEqual(receipts.read(self.connection, receipts.receipt_key(self.remote.slug, "tiered", self.item)), (0, {}))
+        self.assertFalse([call for call in self.remote.calls if call.method in ("POST", "PUT", "PATCH")])
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.unanswered("--associate-only", "--title", "design").prepare()
+        self.assertFalse(self.operation().state["deliver"])
+
+    def test_design_only_needs_a_design_record_and_nothing_built(self):
+        self.assertTrue(ship.design_only(["docs/work/x/design.md", "AGENTS.md", ".claude/rules/a.md"]))
+        for paths in (["CLAUDE.md"], ["docs/work/x/design.md", "bin/sd"], ["docs/work/x/design.md", "README.md"], []):
+            with self.subTest(paths=paths):
+                self.assertFalse(ship.design_only(paths))
 
     def test_prepare_names_other_work_on_the_item_or_its_files_and_refuses_nothing(self):
         """sd:1151. #1120 and #1122 fixed one defect from two sessions; both

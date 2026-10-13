@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""PreToolUse hook for `sd-slice-builder`: a builder never waits in the background.
+
+A Bash call that outlives its timeout (120 s by default) moves to the
+background, and so does one the builder starts with `run_in_background`.
+Either way its exit never wakes an idle builder: one lost about 2.5 hours on
+2026-10-13 (sd:3995). The agent's frontmatter registers this hook, so it runs
+for builders only and the lead's own background watches keep working.
+
+- Bash asking for the background, or for a timeout below 600000 ms (none
+  means the 120 s default): denied, naming the two fields to re-run with.
+- Bash whose command starts with `sleep`: denied.
+- Any tool whose name holds `Monitor`: denied.
+
+It denies rather than rewriting the input with `updatedInput`. Every matching
+PreToolUse hook runs in parallel and the last `updatedInput` to arrive wins, so
+a second rewriter on Bash, such as the rtk proxy hook copying the original
+`run_in_background: true`, put one live probe call back in the background.
+A deny always wins, and the corrected re-run passes every hook unchanged.
+
+Malformed input fails open: no decision, a warning on stderr, exit 0. A broken
+hook must not stop a builder.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import sys
+
+TIMEOUT_MS = 600000
+
+FOREGROUND = (
+    "A builder runs every Bash call in the foreground: re-run this call with "
+    f"run_in_background false and timeout {TIMEOUT_MS}. A background exit "
+    "never wakes an idle builder."
+)
+
+WAIT = (
+    "A builder never waits in the background: no Monitor and no sleep. Run "
+    f"the command itself in the foreground with timeout {TIMEOUT_MS}."
+)
+
+SLEEP = re.compile(r"\s*sleep(\s|;|&|\||$)")
+
+
+def reason(payload: dict) -> str | None:
+    """Why this call is denied, or None to let it pass unchanged."""
+    name = payload["tool_name"]
+    if "Monitor" in name:
+        return WAIT
+    if name != "Bash":
+        return None
+    tool_input = payload["tool_input"]
+    if SLEEP.match(tool_input["command"]):
+        return WAIT
+    timeout = tool_input.get("timeout")
+    if tool_input.get("run_in_background") or not isinstance(timeout, (int, float)) or timeout < TIMEOUT_MS:
+        return FOREGROUND
+    return None
+
+
+def builder_guard_main() -> int:
+    try:
+        why = reason(json.load(sys.stdin))
+    except (ValueError, KeyError, TypeError, AttributeError) as error:
+        print(f"sd-builder-guard: unreadable input, allowing: {error!r}", file=sys.stderr)
+        return 0
+    if why is not None:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": why,
+        }}))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(builder_guard_main())

@@ -89,7 +89,8 @@ STATUS_LINE = re.compile(r"^Status:\s*(.+?)(?=\n\n)", re.MULTILINE | re.DOTALL)
 
 def register_path(environ: dict[str, str] | None = None) -> Path:
     env = os.environ if environ is None else environ
-    named = env.get("SD_REGISTER") or config.read_env("sd-db", env).get("SD_REGISTER")
+    # An exported value wins over the file, an empty one too, as `st_source_env` keeps it (sd:3970).
+    named = env["SD_REGISTER"] if "SD_REGISTER" in env else config.read_env("sd-db", env).get("SD_REGISTER")
     if named:
         return Path(os.path.expanduser(named))
     root = Path(os.path.expanduser(env.get("SD_REPO_ROOT") or "~/repos"))
