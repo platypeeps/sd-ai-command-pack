@@ -1126,16 +1126,19 @@ def drop_imported_bodies(queue: Queue) -> None:
 
 
 def ship_process(argv: list[str], log: pathlib.Path, timeout: int) -> dict[str, Any]:
-    """Run `sd-ship` with `--json`; its whole output goes to `log`, its answer comes back."""
+    """Run `sd-ship` with `--json`; its whole output goes to `log`, its answer comes back.
+
+    It leads a process group of its own (`sd_lib.run_group`), so the timeout
+    ends its review, `sd-check` and test shards too, which held the gate slot
+    when only `sd-ship` was killed (sd:3480).
+    """
     log.parent.mkdir(parents=True, exist_ok=True)
     try:
-        done = subprocess.run([sys.executable, str(BIN / "sd-ship"), *argv], capture_output=True, text=True,
-                              timeout=timeout, check=False)
+        done = sd_lib.run_group([sys.executable, str(BIN / "sd-ship"), *argv], cwd=pathlib.Path("."),
+                                env=dict(os.environ), timeout=timeout)
         out, err = done.stdout, done.stderr
-    except subprocess.TimeoutExpired as error:
-        def decoded_output(value: str | bytes | None) -> str:
-            return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
-        out, err = decoded_output(error.stdout), f"timed out after {timeout} s\n{decoded_output(error.stderr)}"
+    except sd_lib.GroupTimeout as error:
+        out, err = error.stdout, f"timed out after {timeout} s\n{error.stderr}"
     log.write_text(f"$ sd-ship {' '.join(argv)}\n{out}\n--- stderr ---\n{err}", encoding="utf-8")
     try:
         answer = json.loads(out)

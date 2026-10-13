@@ -2980,6 +2980,35 @@ class ShipProcess(Lane):
         self.assertEqual((answer["ok"], answer["entries"]), (True, []))
         self.assertTrue(log.read_text(encoding="utf-8").startswith(f"$ sd-ship -C {self.repo} lane list\n{{"))
 
+    def test_the_timeout_ends_what_sd_ship_started(self) -> None:
+        """sd:3480. The timeout killed `sd-ship` alone; its gate's children ran on and held the gate slot."""
+        fake, child = self.tmp / "bin", self.tmp / "child.pid"
+        fake.mkdir()
+        (fake / "sd-ship").write_text(
+            "import pathlib, subprocess, sys, time\n"
+            "spawned = subprocess.Popen(['sleep', '60'])\n"
+            f"pathlib.Path({str(child)!r}).write_text(str(spawned.pid))\n"
+            "print('started', flush=True)\n"
+            "time.sleep(60)\n", encoding="utf-8")
+        log = self.tmp / "logs/step.log"
+        with mock.patch.object(sd_lane, "BIN", fake):
+            answer = sd_lane.ship_process(["prepare", "--json"], log, 2)
+        pid = int(child.read_text(encoding="utf-8"))
+        alive = True
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                alive = False
+                break
+            time.sleep(0.1)
+        if alive:
+            os.kill(pid, signal.SIGKILL)
+        self.assertFalse(alive, "sd-ship's child outlived the step's timeout")
+        self.assertEqual(answer["ok"], False)
+        self.assertIn("timed out after 2", log.read_text(encoding="utf-8"))
+        self.assertIn("started", log.read_text(encoding="utf-8"))
+
 
 class Resolution(unittest.TestCase):
     def test_a_git_that_gave_no_answer_is_reported_as_itself(self) -> None:
