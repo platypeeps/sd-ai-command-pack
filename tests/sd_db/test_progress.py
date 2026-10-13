@@ -15,7 +15,9 @@ from sd_db.progress import (
     relink_artifact, task_guard, tracker_freshness, tracker_items,
 )
 from sd_db.shadow_sync import write_watermark
-from sd_db.workflow import StaleItem, WorkflowError, allowed_statuses, change_status, edit_item, item_state
+from sd_db.workflow import (
+    StaleItem, WorkflowError, allowed_statuses, change_status, edit_item, item_state, register_work_item,
+)
 from sd_db.writes import TransitionRefused, record_state, transition, upsert_shadow
 
 
@@ -72,6 +74,19 @@ class ArtifactIdentity(ProgressCase):
         self.assertIn("Relinked artifact", result["notes"][-1]["body"])
         self.assertEqual(item_for_artifact(self.db, str(self.repo), result["item"]["path"])["id"], self.item)
         self.assertIsNone(item_for_artifact(self.db, str(self.repo), "docs/work/original/prd.md"))
+
+    def test_register_after_relink_returns_the_linked_row(self):
+        # A relink keeps the row's source key, so a later register at the new
+        # path must find the row by its path and not file a second one (sd:3512).
+        artifact = self.repo / "docs/work/renamed/prd.md"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_text("# Same work, moved\n")
+        relink_artifact(self.db, self.item, "docs/work/renamed/prd.md", who="operator")
+        result = register_work_item(self.db, repo=str(self.repo), path="docs/work/renamed/prd.md",
+                                    title="Stable work", created_at="2026-10-12", who="operator")
+        self.assertFalse(result["created"])
+        self.assertEqual(result["item"]["id"], self.item)
+        self.assertEqual(item_for_artifact(self.db, str(self.repo), "docs/work/renamed/prd.md")["id"], self.item)
 
     def test_archive_resolution_uses_original_identity_without_title_matching(self):
         found = item_for_artifact(self.db, str(self.repo), "docs/work/archive/2026-09/original/prd.md")
