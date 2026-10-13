@@ -530,7 +530,8 @@ class TheAssignmentLedger(unittest.TestCase):
         self.blocked = create_assignment(self.connection, role="author", status="blocked", item=self.item)
 
     def test_the_filters_and_the_order(self):
-        ids = lambda rows: [row["id"] for row in rows]
+        def ids(rows):
+            return [row["id"] for row in rows]
         self.assertEqual(ids(reads.assignment_ledger(self.connection)), [self.blocked, self.queued, self.done])
         self.assertEqual(ids(reads.assignment_ledger(self.connection, role="merge")), [self.done])
         self.assertEqual(ids(reads.assignment_ledger(self.connection, exclude_role="merge", limit=1)), [self.blocked])

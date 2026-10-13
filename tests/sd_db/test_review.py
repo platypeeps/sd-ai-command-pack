@@ -7,13 +7,11 @@ store; none reads or writes the live database.
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import os
 import sqlite3
 import subprocess
-import sys
 import tempfile
 import unittest
 from datetime import UTC, datetime, timedelta

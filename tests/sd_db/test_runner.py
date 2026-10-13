@@ -462,7 +462,8 @@ class UrlAuthor(unittest.TestCase):
         # not kept, so `retain` sees the body while the run still has no outcome.
         request = self.claim()
         seen = []
-        retain = lambda body: seen.append((runner.run_state(self.db, request['run']['id'])['outcome'], body))
+        def retain(body):
+            seen.append((runner.run_state(self.db, request['run']['id'])['outcome'], body))
         answered = self.answer(request, Wire((200, answer(1000, 500))), retain=retain)
         self.assertEqual(seen, [(None, answered['body'])])
         self.assertEqual(runner.run_state(self.db, request['run']['id'])['outcome'], 'done')

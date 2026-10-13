@@ -448,7 +448,7 @@ def _matrix_names(matrix: list[str]) -> tuple[list[str], bool]:
             tuple(values)
             for values in itertools.product(*axes.values())
             if not any(
-                entry and all(dict(zip(axes, values)).get(k) == v for k, v in entry.items())
+                entry and all(dict(zip(axes, values, strict=True)).get(k) == v for k, v in entry.items())
                 for entry in excludes
             )
         ]
@@ -596,7 +596,7 @@ def _gated_needs(body: list[str], needs: list[str]) -> list[str]:
     block = [" ".join(line.split()) for line in _children(body, keys[0])]
     if len(block) != len(_AGGREGATE_LOOP):
         return []
-    if not all(pattern.match(line) for pattern, line in zip(_AGGREGATE_LOOP, block)):
+    if not all(pattern.match(line) for pattern, line in zip(_AGGREGATE_LOOP, block, strict=True)):
         return []
     return list(needs)
 
