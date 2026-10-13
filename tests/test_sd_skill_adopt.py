@@ -28,6 +28,7 @@ import io
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -123,6 +124,14 @@ class PrescreenAcceptanceTests(unittest.TestCase):
 
     def test_the_clean_candidate(self) -> None:
         self.assertEqual(self.refusals(CLEAN), set())
+
+    def test_a_long_word_run_is_read_in_linear_time(self) -> None:
+        # The address pattern once retried every start inside one run, so a
+        # 2 MiB file of letters took hours (sd:3560); an address still counts.
+        started = time.monotonic()
+        findings = adopt.prescreen("x" * 100_000 + " mail me at user@example.test")
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertIn("user-identity", {f.rule for f in findings})
 
     def test_an_unpinned_install_warns_rather_than_refuses(self) -> None:
         findings = adopt.prescreen("Run `pip install ruff` first.")
