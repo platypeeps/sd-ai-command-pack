@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import sd_handoff_rows
+from sd_notes import ITEM_HELP, item_id
 from sd_work import WorkRefusal
 
 #: What the bulk apply records as the acting program, beside the login name
@@ -162,7 +163,7 @@ def register(groups: Any) -> None:
             if action == "configure":
                 command.add_argument("--file", required=True, help="JSON containing revision, enabled flags and both role orders")
             if action == "acknowledge":
-                command.add_argument("item", type=int, nargs="?")
+                command.add_argument("item", type=item_id, nargs="?", help=ITEM_HELP)
                 command.add_argument("--if-revision")
                 command.add_argument("--all-clean", action="store_true",
                                      help="every clean planning report filed before --before, as retention "

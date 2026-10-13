@@ -10,6 +10,7 @@ import pathlib
 from typing import Any
 
 import sd_handoff_rows
+from sd_notes import ITEM_HELP, item_id
 
 TRIAL_DAYS = 30
 CONTRIB_DIR = "contrib"
@@ -81,7 +82,7 @@ def register_extra(verbs: Any) -> None:
     review = verbs.add_parser("review", help="queue one independent review of a skill")
     review.add_argument("name")
     applying = verbs.add_parser("apply", help="queue one isolated change from accepted proposal notes")
-    applying.add_argument("item", type=int)
+    applying.add_argument("item", type=item_id, help=ITEM_HELP)
     applying.add_argument("notes", nargs="+", type=int)
     for parser in (review, applying):
         parser.add_argument("--if-revision")

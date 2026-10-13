@@ -147,10 +147,9 @@ class Controls(unittest.TestCase):
         self.assertIn("resolve the report's followups", refused.stderr)
         self.assertNotIn("Traceback", refused.stderr)
         [followup] = [note for note in state["notes"] if note["kind"] == "followup"]
-        resolved = self.cli(
-            "task", "resolve", str(followup["id"]), "--if-revision", state["revision"], "--json"
-        )
+        resolved = self.cli("note", "resolve", str(followup["id"]))
         self.assertEqual(resolved.returncode, 0, resolved.stderr)
+        resolved = self.cli("task", "show", report, "--json")
 
         result = self.cli(
             "reports",

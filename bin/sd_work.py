@@ -25,6 +25,7 @@ from typing import Any
 import sd_handoff_rows
 import sd_jev_shadow
 import sd_lib
+from sd_notes import ITEM_HELP, item_id
 
 
 class WorkRefusal(Exception):
@@ -1035,6 +1036,14 @@ def _items(sd_db: Any, workflow: Any, args: argparse.Namespace, connection: Any)
             and (not args.status or row["status"] == args.status)]
 
 
+def _note_text(args: argparse.Namespace) -> str:
+    """The note text, given as TEXT or as the older `--body`, and not both (sd:3500)."""
+    if (args.text is None) == (args.body is None):
+        raise WorkRefusal("give the note text as TEXT or --body TEXT, not both" if args.text is not None
+                          else "give the note text: sd task note ITEM TEXT")
+    return args.text if args.text is not None else args.body
+
+
 def run(args: argparse.Namespace) -> int:
     sd_db, workflow = _library()
     write = args.work_action not in {"today", "items", "item"}
@@ -1067,13 +1076,11 @@ def run(args: argparse.Namespace) -> int:
         elif action == "status":
             result, following = _change_status(workflow, connection, args, who)
         elif action == "note":
+            body = _note_text(args)
             _done_advisory(workflow, connection, args.item)
             result = workflow.add_item_note(
-                connection, args.item, body=args.body, kind=args.kind, who=who,
+                connection, args.item, body=body, kind=args.kind, who=who,
                 expected_revision=revision)
-        elif action == "resolve":
-            result = workflow.resolve_item_note(
-                connection, args.note, who=who, expected_revision=revision)
         elif action == "register":
             result = _register(sd_db, connection, args, who)
         elif action in {"relink", "cancel", "cancel-task", "deliver"}:
@@ -1328,7 +1335,7 @@ def run_contribution(args: argparse.Namespace) -> int:
 #: derived is a cost, named here rather than hidden: if the library grows a
 #: fourth form, this string is the place that will not know.
 CONTRIBUTION_KEY_HELP = (
-    "item:ID, github:https://github.com/OWNER/REPO/pull/NUMBER, "
+    "an item id (234, sd:234 or item:234), github:https://github.com/OWNER/REPO/pull/NUMBER, "
     "or issue:https://github.com/OWNER/REPO/issues/NUMBER"
 )
 
@@ -1345,7 +1352,7 @@ def _register_contributions(verbs: Any) -> None:
             if action == "add":
                 parser.add_argument("title")
             else:
-                parser.add_argument("item", type=int)
+                parser.add_argument("item", type=item_id, help=ITEM_HELP)
                 parser.add_argument("--if-revision", help="item revision from sd store item")
         if action in {"show", "ack", "dismiss"}:
             parser.add_argument("key", help=CONTRIBUTION_KEY_HELP)
@@ -1368,7 +1375,7 @@ def register(groups: Any, store: Any) -> None:
     items.add_argument("--status", help="filter by workflow status")
     _output(items, "items")
     item = store.add_parser("item", help="one workspace item, notes, and revision")
-    item.add_argument("item", type=int)
+    item.add_argument("item", type=item_id, help=ITEM_HELP)
     _output(item, "item")
 
     task = groups.add_parser("task", help="capture and manage work without files or GitHub")
@@ -1402,7 +1409,7 @@ def register(groups: Any, store: Any) -> None:
     _output(add, "add")
 
     edit = verbs.add_parser("edit", help="change a task's or followup's details, or any hand-filed item's kind")
-    edit.add_argument("item", type=int)
+    edit.add_argument("item", type=item_id, help=ITEM_HELP)
     edit.add_argument("--title")
     edit.add_argument("--body")
     priority = edit.add_mutually_exclusive_group()
@@ -1433,7 +1440,7 @@ def register(groups: Any, store: Any) -> None:
     _output(edit, "edit", revision=True)
 
     status = verbs.add_parser("status", help="change status with an atomic history entry")
-    status.add_argument("item", type=int)
+    status.add_argument("item", type=item_id, help=ITEM_HELP)
     status.add_argument("status")
     reason = status.add_mutually_exclusive_group()
     reason.add_argument("--reason", help="recorded on the transition; on a row worked on "
@@ -1454,34 +1461,34 @@ def register(groups: Any, store: Any) -> None:
 
     cancel = verbs.add_parser(
         "cancel", help="close a task or followup nobody will do: done, with a cancelled receipt")
-    cancel.add_argument("item", type=int)
+    cancel.add_argument("item", type=item_id, help=ITEM_HELP)
     cancel.add_argument("--reason", required=True)
     _output(cancel, "cancel-task", revision=True)
 
     note = verbs.add_parser("note", help="add an item note or follow-up")
-    note.add_argument("item", type=int)
-    note.add_argument("--body", required=True)
+    note.add_argument("item", type=item_id, help=ITEM_HELP)
+    # sd:3500: positional id, then positional value. `--body` is the old
+    # spelling, kept for one release; `_note_text` takes exactly one of the two.
+    note.add_argument("text", nargs="?", help="the note text")
+    note.add_argument("--body", help="the note text, the old spelling of TEXT")
     note.add_argument("--kind", default="comment",
                       choices=("comment", "followup", "question", "decision", "proposal"),
                       help="note kind (default: comment)")
     _output(note, "note", revision=True)
-    resolve = verbs.add_parser("resolve", help="resolve an item note")
-    resolve.add_argument("note", type=int)
-    _output(resolve, "resolve", revision=True)
     # A read alias (sd:1112): the same operation as `sd store item`, which
     # stays the canonical read for every kind, so both print the same thing.
     show = verbs.add_parser("show", help="one item, notes, and revision (as `sd store item`)")
-    show.add_argument("item", type=int)
+    show.add_argument("item", type=item_id, help=ITEM_HELP)
     _output(show, "item")
 
     work = groups.add_parser("work", help="maintain artifact links and verified completion")
     working = work.add_subparsers(dest="verb", required=True)
     relink = working.add_parser("relink", help="link a moved artifact without changing item identity")
-    relink.add_argument("item", type=int)
+    relink.add_argument("item", type=item_id, help=ITEM_HELP)
     relink.add_argument("path", help="existing artifact path relative to the item's repository")
     _output(relink, "relink", revision=True)
     cancel = working.add_parser("cancel", help="record a deliberate cancellation, with a reason")
-    cancel.add_argument("item", type=int)
+    cancel.add_argument("item", type=item_id, help=ITEM_HELP)
     cancel.add_argument("--reason", required=True)
     _output(cancel, "cancel", revision=True)
     register_verb = working.add_parser(
@@ -1492,7 +1499,7 @@ def register(groups: Any, store: Any) -> None:
     _output(register_verb, "register")
 
     deliver = working.add_parser("deliver", help="verify a delivery commit and complete its item")
-    deliver.add_argument("item", type=int)
+    deliver.add_argument("item", type=item_id, help=ITEM_HELP)
     deliver.add_argument("commit", help="full commit SHA carrying the item's Delivers trailer")
     deliver.add_argument("--associated", action="store_true",
                          help="accept a merge whose trailer block carries `Item:` for the item "

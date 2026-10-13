@@ -1,5 +1,6 @@
 """The real CLI operates on a scratch database, without repository ceremony."""
 
+import argparse
 import getpass
 import importlib
 import importlib.machinery
@@ -61,11 +62,12 @@ class TaskCLI(unittest.TestCase):
         self.assertIn("changed", refused.stderr)
         readback = json.loads(self.call("store", "item", item, "--json").stdout)
         self.assertEqual(readback, edited)
-        noted = json.loads(self.call("task", "note", item, "--body", "Verify on iPad",
+        noted = json.loads(self.call("task", "note", item, "Verify on iPad",
                                      "--json").stdout)
-        resolved = json.loads(self.call("task", "resolve", noted["note"]["id"],
-                                        "--json").stdout)
-        self.assertTrue(resolved["note"]["resolved_at"])
+        self.call("note", "resolve", noted["note"]["id"])
+        resolved = json.loads(self.call("task", "show", item, "--json").stdout)
+        self.assertTrue(next(note for note in resolved["notes"]
+                             if note["id"] == noted["note"]["id"])["resolved_at"])
         completed = json.loads(self.call("task", "status", item, "done", "--json").stdout)
         self.assertEqual(completed["item"]["status"], "done")
         self.assertEqual(json.loads(self.call("store", "items", "--open", "--json").stdout), [])
@@ -1305,3 +1307,78 @@ class NoSelfInstall(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OneItemIdSpelling(unittest.TestCase):
+    """sd:3500. Every positional named `item` reads 234, sd:234 and item:234.
+
+    `sd task show sd:3432` was an invalid int while `sd note list sd:3432`
+    worked, and `sd task contribution show 1429` refused a bare id.
+    """
+
+    #: Groups whose parsers this test does not yet hold, each with its reason.
+    #: `lane`: bin/sd_lane.py is in the merge lane; its four `item` positionals
+    #: move to `item_id` in sd:3715.
+    EXEMPT = {"lane"}
+
+    setUp = TaskCLI.setUp
+    call = TaskCLI.call
+
+    def item_positionals(self):
+        sd = sd_lib.sibling("sd_under_item_ids", "sd")
+        found = []
+
+        def walk(parser, path):
+            for action in parser._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    for name, child in action.choices.items():
+                        walk(child, (*path, name))
+                elif not action.option_strings and action.dest == "item":
+                    found.append((" ".join(path), action.type))
+
+        walk(sd.build_parser(), ())
+        return found
+
+    def test_every_item_positional_takes_item_id(self):
+        import sd_notes
+
+        found = self.item_positionals()
+        self.assertIn("task show", [path for path, _ in found], "the walk missed a verb that exists")
+        wrong = [path for path, kind in found
+                 if kind is not sd_notes.item_id and path.split()[0] not in self.EXEMPT]
+        self.assertEqual(wrong, [])
+
+    def test_item_id_reads_three_spellings_and_refuses_others(self):
+        import sd_notes
+
+        self.assertEqual({sd_notes.item_id(text) for text in ("234", "sd:234", "item:234")}, {234})
+        for text in ("x234", "sd:", "item:-1", "issue:234"):
+            with self.assertRaises(argparse.ArgumentTypeError, msg=text):
+                sd_notes.item_id(text)
+
+    def test_task_show_takes_sd_and_item_spellings(self):
+        item = json.loads(self.call("task", "add", "Spell me", "--json").stdout)["item"]["id"]
+        for spelling in (f"sd:{item}", f"item:{item}"):
+            shown = json.loads(self.call("task", "show", spelling, "--json").stdout)
+            self.assertEqual(shown["item"]["id"], item)
+
+    def test_note_body_is_positional_and_body_flag_still_works(self):
+        item = json.loads(self.call("task", "add", "Note me", "--json").stdout)["item"]["id"]
+        positional = json.loads(self.call("task", "note", item, "Positional text", "--json").stdout)
+        self.assertEqual(positional["note"]["body"], "Positional text")
+        flagged = json.loads(self.call("task", "note", item, "--body", "Flag text", "--json").stdout)
+        self.assertEqual(flagged["note"]["body"], "Flag text")
+        both = self.call("task", "note", item, "One", "--body", "Two", code=1)
+        self.assertIn("not both", both.stderr)
+        neither = self.call("task", "note", item, code=1)
+        self.assertIn("the note text", neither.stderr)
+
+    def test_task_resolve_is_gone(self):
+        refused = self.call("task", "resolve", "1", code=2)
+        self.assertIn("invalid choice: 'resolve'", refused.stderr)
+
+    def test_contribution_key_takes_a_bare_or_sd_id(self):
+        import sd_db.contributions as contributions
+
+        for spelling in ("1429", "sd:1429", "item:1429"):
+            self.assertEqual(contributions._key(spelling), "item:1429")

@@ -223,7 +223,7 @@ Capture a task without a checkout or planning document:
 sd task add "Investigate the delayed pipeline" --priority 1
 sd today
 sd task status 42 in_progress
-sd task note 42 --body "Reproduced with the staging input"
+sd task note 42 "Reproduced with the staging input"
 sd task status 42 done
 ```
 

@@ -645,7 +645,7 @@ class IssueTests(ContributionCase):
             c._url(ISSUE)
         self.assertEqual(c._key("issue:" + ISSUE.replace("upstream/project", "Upstream/Project")), "issue:" + ISSUE)
         for key in ("issues:" + ISSUE, "item:0", ISSUE):
-            with self.assertRaisesRegex(WorkflowError, "item:ID, github:PR-URL or issue:ISSUE-URL"):
+            with self.assertRaisesRegex(WorkflowError, r"item:234\), github:PR-URL or issue:ISSUE-URL"):
                 c._key(key)
         with self.assertRaisesRegex(WorkflowError, "canonical GitHub issue URL"):
             c._key("issue:" + URL)

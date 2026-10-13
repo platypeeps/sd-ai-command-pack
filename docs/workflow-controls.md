@@ -22,7 +22,7 @@ progress belongs to the database.
 | Reclassify an item filed as the wrong kind | A task's item screen, or `sd task edit ID --kind KIND` — the kinds are `sd_db.workflow.HAND_KINDS`, the same five `sd task add --kind` offers. A move to `personal`, `work-idea` or `personal-idea` carries no repository, so a row that has one needs `--no-repo` in the same command. A `followup` keeps its repository (sd:809). `edit_item` refuses a produced row (a contribution or skill-review task), an `idea` that is a writing piece, and a row with a queued, running or ending assignment, and records every change as a "Changed kind" note naming who made it |
 | Change task status | Item screen, or `sd task status ID STATUS` |
 | Close a task or followup nobody will do | `sd task cancel ID --reason TEXT` — `done` with a `cancelled` receipt, as `sd work cancel` writes; a finding carried to the row reopens |
-| Record and resolve a followup | Item notes, or `sd task note ID --kind followup --body TEXT` / `sd task resolve NOTE_ID` — a note on a done item prints an advisory naming its delivery, and still lands |
+| Record and resolve a followup | Item notes, or `sd task note ID TEXT --kind followup` / `sd note resolve NOTE_ID` — a note on a done item prints an advisory naming its delivery, and still lands |
 | See the same inventory as the dashboard | `sd today --json`, `sd store items --json` |
 | Register a planning folder as a row (row-status repositories only) | `sd work register docs/work/<item>/prd.md` — the row's branch is the local branch the checkout is on when it is not the default, and otherwise nothing |
 | Relink a moved work artifact | Item screen, or `sd work relink ID PATH` |

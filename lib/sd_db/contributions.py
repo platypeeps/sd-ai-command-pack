@@ -76,9 +76,12 @@ def _key(key: str) -> str:
         return "github:" + _url(key[len("github:"):])
     if isinstance(key, str) and key.startswith("issue:"):
         return "issue:" + _issue_url(key[len("issue:"):])
-    if isinstance(key, str) and re.fullmatch(r"item:[1-9][0-9]*", key):
-        return key
-    raise WorkflowError("contribution key must be item:ID, github:PR-URL or issue:ISSUE-URL")
+    # sd:3500: an item reads as every `item` positional reads it, 234, sd:234 or item:234.
+    found = re.fullmatch(r"(?:item:|sd:)?([1-9][0-9]*)", key) if isinstance(key, str) else None
+    if found:
+        return f"item:{found[1]}"
+    raise WorkflowError("contribution key must be an item id (234, sd:234 or item:234), "
+                        "github:PR-URL or issue:ISSUE-URL")
 
 
 def _observed_url(key: str) -> str | None:

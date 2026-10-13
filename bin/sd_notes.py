@@ -30,15 +30,22 @@ import sd_handoff_rows
 LARGEST_ID = 2**63 - 1
 
 
+#: The spellings of one item id every `item` positional reads (sd:3500).
+ITEM_PREFIXES = ("sd:", "item:")
+
+
 def item_id(text: str) -> int:
-    """An item id as the brief prints it, `sd:234`, or bare, `234`."""
-    digits = text[3:] if text.startswith("sd:") else text
-    if not digits.isdigit():
-        raise argparse.ArgumentTypeError(f"not an item id: {text!r} (expected 234 or sd:234)")
+    """An item id as the brief prints it, `sd:234`, as a contribution key names it, `item:234`, or bare, `234`."""
+    digits = next((text[len(prefix):] for prefix in ITEM_PREFIXES if text.startswith(prefix)), text)
+    if not (digits.isascii() and digits.isdigit()):
+        raise argparse.ArgumentTypeError(f"not an item id: {text!r} (expected 234, sd:234 or item:234)")
     value = int(digits)
     if value > LARGEST_ID:
         raise argparse.ArgumentTypeError(f"not an item id: {text!r} (larger than any row id)")
     return value
+
+
+ITEM_HELP = "the item id, as 234, sd:234 or item:234"
 
 
 def note_id(text: str) -> int:
@@ -119,7 +126,7 @@ def add_verbs(verbs: Any) -> None:
     close.add_argument("note", type=note_id, help="the id the write printed")
     close.set_defaults(handler=cmd_resolve)
     listing = verbs.add_parser("list", help="print every note on one item, oldest first")
-    listing.add_argument("item", type=item_id, help="the item id, as 234 or sd:234")
+    listing.add_argument("item", type=item_id, help=ITEM_HELP)
     listing.set_defaults(handler=cmd_list)
 
 
