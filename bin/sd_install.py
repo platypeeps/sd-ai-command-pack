@@ -15,7 +15,7 @@ Two rules constrain every write here, and both are load-bearing:
     digest no longer matches is refused unless forced, and a link is removed
     only while it is still a symlink resolving to its recorded target, so a
     file someone edited or a link someone retargeted by hand is never silently
-    deleted.
+    deleted. `--user` refuses to overwrite one for the same reason.
   * **It never edits a tracked repository file.** The single exception outside
     a platform home is the one SessionStart stanza in `~/.claude/settings.json`
     for `sd-handoff-restore`, which is recorded in `owned` like any other write
@@ -757,14 +757,34 @@ def write_render_plan(planned: list, dry_run: bool) -> list[Written]:
     return written
 
 
-def policy_collisions(planned: list, previous: list[dict]) -> None:
-    """New generated companions cannot overwrite an unowned or modified file."""
-    owned = {row["path"]: row.get("sha256") for row in previous if isinstance(row.get("path"), str)}
-    for target, _, kind in planned:
-        if kind != "invocation-policy:codex" or not (target.exists() or target.is_symlink()):
+def render_collisions(planned: list, previous: list[dict], legacy: list[tuple[Path, str]]) -> None:
+    """No render overwrites an unowned or modified file (sd:3492).
+
+    `make setup` runs this unattended, so an overwrite would lose an edit with
+    nobody watching. Owned is a receipt row, or a row of the old fleet
+    installer's receipt, whose digest still matches; a file that already holds
+    the planned bytes loses nothing, so a lost receipt over an unchanged
+    payload still installs.
+    """
+    owned: dict[str, str | None] = {str(path): sha for path, sha in legacy}
+    owned.update(
+        (row["path"], row.get("sha256")) for row in previous if isinstance(row.get("path"), str))
+    refused = []
+    for target, body, _ in planned:
+        if not (target.exists() or target.is_symlink()):
             continue
-        if target.is_symlink() or not target.is_file() or owned.get(str(target)) != digest(target.read_bytes()):
-            raise MetadataRefused(f"{target}: invocation metadata is unowned or modified")
+        if target.is_symlink() or not target.is_file():
+            refused.append(f"{target}: not a regular file")
+            continue
+        actual = digest(target.read_bytes())
+        if actual == digest(body) or owned.get(str(target)) == actual:
+            continue
+        why = "modified since it was installed" if str(target) in owned else "not installed by this pack"
+        refused.append(f"{target}: {why}")
+    if refused:
+        raise MetadataRefused(
+            "refusing to overwrite; move it aside or delete it, then re-run:\n  "
+            + "\n  ".join(refused))
 
 
 def restore_policies(backups: list, out) -> None:
@@ -2017,7 +2037,7 @@ def cmd_user(ctx: Context, out) -> int:
     try:
         render_files = render_plan(surfaces, ctx.homes, "skill")
         render_files += render_plan(agents, ctx.agents, "agent")
-        policy_collisions(render_files, owned_entries(recorded))
+        render_collisions(render_files, owned_entries(recorded), legacy_targets(ctx.home, ctx.environ))
     except (MetadataRefused, OSError) as problem:
         print(f"error: {problem}", file=out)
         return 1

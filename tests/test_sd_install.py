@@ -396,6 +396,57 @@ class ReconciliationTests(InstallerHarness):
         self.assertTrue(edited.exists(), "an edited file was deleted")
         self.assertIn("modified since it was installed", output)
 
+    def test_a_hand_edited_live_render_refuses_the_install(self):
+        """sd:3492: `make setup` runs unattended, so an edit is refused by name, not overwritten."""
+        checkout = self.make_checkout("sd-kept")
+        self.install(checkout)
+        edited = self.rendered("sd-kept")[0]
+        edited.write_text("someone edited this\n", encoding="utf-8")
+        skill = checkout / "skills" / "sd-kept" / sd_install.SKILL_FILE
+        skill.write_text("---\nname: sd-kept\n---\n\nnew payload\n", encoding="utf-8")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 1)
+        self.assertEqual(edited.read_text(encoding="utf-8"), "someone edited this\n")
+        self.assertIn(f"{edited}: modified since it was installed", out.getvalue())
+        self.assertIn("move it aside", out.getvalue())
+
+    def test_an_unowned_file_at_a_render_path_refuses_the_install(self):
+        """sd:3492: a file no receipt names is somebody's, whatever its kind."""
+        checkout = self.make_checkout("sd-kept")
+        foreign = self.rendered("sd-kept")[0]
+        foreign.parent.mkdir(parents=True)
+        foreign.write_text("not ours\n", encoding="utf-8")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 1)
+        self.assertEqual(foreign.read_text(encoding="utf-8"), "not ours\n")
+        self.assertIn(f"{foreign}: not installed by this pack", out.getvalue())
+
+    def test_an_unowned_file_that_already_holds_the_render_is_adopted(self):
+        """A lost receipt over an unchanged payload loses nothing, so it installs."""
+        checkout = self.make_checkout("sd-kept")
+        self.install(checkout)
+        receipt = self.context(checkout).receipt
+        receipt.unlink()
+        self.install(checkout)
+        self.assertTrue(receipt.exists())
+
+    def test_a_legacy_render_with_its_recorded_digest_is_overwritten(self):
+        """The old fleet installer's receipt counts as ownership; its edits do not."""
+        checkout = self.make_checkout("sd-kept")
+        ctx = self.context(checkout)
+        target = self.rendered("sd-kept")[0]
+        target.parent.mkdir(parents=True)
+        target.write_text("legacy render\n", encoding="utf-8")
+        with unittest.mock.patch.object(
+            sd_install, "legacy_targets",
+            return_value=[(target, sd_install.digest(b"legacy render\n"))],
+        ):
+            self.install(checkout)
+            self.assertIn("probe surface", target.read_text(encoding="utf-8"))
+            target.write_text("legacy render, edited\n", encoding="utf-8")
+            ctx.receipt.unlink()
+            self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 1)
+
     def test_a_retired_render_that_could_not_be_removed_is_tried_again(self):
         """sd:2927: the receipt keeps a row whose removal failed, so the next install retries it."""
         checkout = self.make_checkout("sd-kept", "sd-retired")
@@ -4376,11 +4427,11 @@ class CodexMetadataTests(InstallerHarness):
         target.mkdir()
         planned = [(target, b"data", "invocation-policy:codex")]
         with self.assertRaises(sd_install.MetadataRefused):
-            sd_install.policy_collisions(planned, [])
+            sd_install.render_collisions(planned, [], [])
         target.rmdir()
         target.symlink_to(self.home / "missing")
         with self.assertRaises(sd_install.MetadataRefused):
-            sd_install.policy_collisions(planned, [])
+            sd_install.render_collisions(planned, [], [])
         surface.skill.write_bytes(b"---\ndisable-model-invocation: invalid\n---\n")
         self.assertEqual(sd_install.cmd_user(self.context_for(self.home / "checkout"), io.StringIO()), 1)
 
