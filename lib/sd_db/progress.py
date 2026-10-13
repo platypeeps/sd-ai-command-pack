@@ -201,7 +201,7 @@ def relink_artifact(
         ).fetchone()
         if other:
             raise WorkflowError(f"artifact is already linked to item {other['id']}; "
-                                f"`sd work relink {other['id']} <path>` moves that link first")
+                                f"relink item {other['id']} to another path first")
         if relative == row["path"]:
             return state
         fields = _fields(row["fields"])

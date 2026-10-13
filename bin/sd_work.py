@@ -578,7 +578,7 @@ def _first_line(text: Any, width: int = 100) -> str:
     return line if len(line) <= width else line[:width - 1] + "…"
 
 
-def _attention_reports(connection: Any) -> list[dict[str, Any]]:
+def _attention_reports(sd_db: Any, connection: Any) -> list[dict[str, Any]]:
     """Open reports whose fields say they need attention; unreadable fields count, as an unknown is no pass."""
     from sd_db import reporting
 
@@ -597,7 +597,7 @@ def _attention_reports(connection: Any) -> list[dict[str, Any]]:
 
 def _print_today(sd_db: Any, connection: Any, work: list[dict[str, Any]]) -> None:
     """`sd today` as the dashboard's Today reads (sd:3501): the short sections first, so `head -40` shows them."""
-    reports = _attention_reports(connection)
+    reports = _attention_reports(sd_db, connection)
     decisions = [note for note in sd_db.reads.open_notes(connection, "question")
                  if len(OPTION_LINE.findall(note["body"])) >= 2]
     # A report's own followup is the report's line already.
