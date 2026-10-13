@@ -193,13 +193,15 @@ def relink_artifact(
         root = paths.expand(row["repo"]).resolve()
         target = (root / relative).resolve()
         if not target.is_relative_to(root) or not target.is_file():
-            raise WorkflowError("artifact must be an existing file inside its registered repository")
+            raise WorkflowError(f"artifact {relative!r} must be an existing file inside its registered "
+                                f"repository {root}; give the path relative to that root")
         other = connection.execute(
             "SELECT id FROM item WHERE repo = ? AND path = ? AND id != ? LIMIT 1",
             (row["repo"], relative, item),
         ).fetchone()
         if other:
-            raise WorkflowError(f"artifact is already linked to item {other['id']}")
+            raise WorkflowError(f"artifact is already linked to item {other['id']}; "
+                                f"`sd work relink {other['id']} <path>` moves that link first")
         if relative == row["path"]:
             return state
         fields = _fields(row["fields"])

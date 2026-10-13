@@ -453,28 +453,53 @@ class TheResolvedConfinementIsChecked(unittest.TestCase):
             self.assertIn("unconfirmed", outcome.detail)
             self.assertEqual(len(runner.calls), 1)
 
-    def breach(self, *extra: dict, **report: Any) -> str | None:
+    def breach(self, *extra: dict, accepted: list | None = None, **report: Any) -> str | None:
         from tests.test_sd_review import resolved_agent
         stdout = resolved_agent(*extra, **report)
         return sd_opencode.confinement_breach(
-            lambda *args: sd_review.Completed(0, stdout, ""), "opencode run", {"HOME": "/h"}, pathlib.Path("/x"), 60)
+            lambda *args: sd_review.Completed(0, stdout, ""), "opencode run", {"HOME": "/h"}, pathlib.Path("/x"),
+            60, accepted=accepted)
 
-    def test_only_the_exact_map_passes(self) -> None:
+    def test_only_the_map_and_trailing_denies_pass(self) -> None:
         self.assertIsNone(self.breach())
         # Not a list of known keys: an unknown tool, a re-opened MCP read and
-        # even a narrowing all differ from the map, and all refuse.
+        # an external directory all allow, and all refuse.
         for rule in (self.SHELL, {"action": "mutator_mutate", "resource": "*", "effect": "allow"},
                      {"action": "read", "resource": "mcp:*", "effect": "allow"},
-                     {"action": "external_directory", "resource": "*", "effect": "allow"},
-                     {"action": "grep", "resource": "*", "effect": "deny"}):
+                     {"action": "external_directory", "resource": "*", "effect": "allow"}):
             self.assertIsNotNone(self.breach(rule), rule)
 
-    def test_opencodes_own_measured_rules_pass_and_nothing_near_them(self) -> None:
-        """2.0.25 resolves a `browser: deny` after the map from a neutral dir."""
+    def test_a_rule_after_the_deny_is_judged_by_its_effect(self) -> None:
+        """sd:3498: 2.0.25 appended `browser: deny` after the map, and the
+        pinned list refused every review until it was named. Under last-match
+        a deny grants nothing, so any deny passes and is named; allow, ask
+        and an unknown effect refuse."""
         browser = {"action": "browser", "resource": "*", "effect": "deny"}
-        self.assertIsNone(self.breach(browser))
-        for rule in ({**browser, "effect": "allow"}, {**browser, "resource": "x"}):
-            self.assertIsNotNone(self.breach(rule), rule)
+        for rule in (browser, {**browser, "resource": "x"},
+                     {"action": "grep", "resource": "*", "effect": "deny"}):
+            accepted: list = []
+            self.assertIsNone(self.breach(rule, accepted=accepted), rule)
+            self.assertEqual(accepted, [rule])
+        for effect in ("allow", "ask", "maybe", ""):
+            self.assertIsNotNone(self.breach({**browser, "effect": effect}), effect)
+
+    def test_a_map_rule_that_is_missing_refuses(self) -> None:
+        from tests.test_sd_review import resolved_agent
+        report = json.loads(resolved_agent())
+        glob = {"action": "glob", "resource": "*", "effect": "allow"}
+        report["agent"]["permissions"].remove(glob)
+        stdout = json.dumps(report)
+        breach = sd_opencode.confinement_breach(
+            lambda *args: sd_review.Completed(0, stdout, ""), "opencode run", {"HOME": "/h"}, pathlib.Path("/x"), 60)
+        self.assertIsNotNone(breach)
+
+    def test_an_accepted_deny_is_named_in_the_outcome(self) -> None:
+        """The ruling's receipt: the outcome report carries what was accepted."""
+        from tests.test_sd_review import resolved_agent
+        narrowing = {"action": "browser", "resource": "x", "effect": "deny"}
+        outcome, runner = self.run_with(sd_review.Completed(0, resolved_agent(narrowing), ""))
+        self.assertEqual(outcome.status, sd_review.CLEAN, outcome.detail)
+        self.assertEqual(outcome.outcome_report()["diagnostic"], {"accepted_after_deny": [narrowing]})
 
     def test_a_resolution_without_the_default_deny_refuses(self) -> None:
         stdout = json.dumps({"version": "opencode v2.0.20", "plugins": [],

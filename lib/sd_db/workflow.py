@@ -486,6 +486,13 @@ def register_work_item(
         ).fetchone()
         if existing is not None:
             return {**item_state(connection, existing["id"]), "created": False}
+        # A relink moves `path` and keeps `external_id`, so the folder may
+        # already belong to a row under another key (sd:3512). Imported here:
+        # `progress` imports this module.
+        from .progress import item_for_artifact
+        linked = item_for_artifact(connection, repo, path)
+        if linked is not None:
+            return {**item_state(connection, linked["id"]), "created": False}
         item = create_item(
             connection, kind="work", status="planning", title=title, repo=repo,
             branch=branch, path=path, source="docs/work", external_id=external_id,
