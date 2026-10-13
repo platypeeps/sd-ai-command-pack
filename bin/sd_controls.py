@@ -141,6 +141,11 @@ def run(args: argparse.Namespace) -> int:
             if before is not None and not args.apply and not args.json:
                 print(bulk_preview(result))
                 return 0
+        elif args.control_action == "reopen":
+            # The dashboard's Undo (sd:3504): `done` back to the status it was acknowledged from.
+            revision = args.if_revision or workflow.item_state(connection, args.item)["revision"]
+            result = reporting.reopen(connection, args.item, expected_revision=revision, who=getpass.getuser(),
+                                      reason=args.reason)
         else:
             result = reporting.ingest_log(connection, job=args.job, run_id=args.run_id, started=args.started,
                 ended=args.ended, exit_code=args.exit_code, log_path=args.log, offset=args.offset)
@@ -156,7 +161,7 @@ def register(groups: Any) -> None:
     for name in ("providers", "reports"):
         group = groups.add_parser(name, help=f"inspect and control {name} through the workflow database")
         verbs = group.add_subparsers(dest="verb", required=True)
-        for action in (("list", "configure") if name == "providers" else ("list", "ingest", "acknowledge")):
+        for action in (("list", "configure") if name == "providers" else ("list", "ingest", "acknowledge", "reopen")):
             command = verbs.add_parser(action)
             command.set_defaults(handler=run, control_group=name, control_action=action)
             command.add_argument("--json", action="store_true")
@@ -181,6 +186,10 @@ def register(groups: Any) -> None:
                                           "(session cron, the text derived from the report's own fields), in "
                                           "the same transaction; a followup a person wrote still blocks, and "
                                           "the refusal names each followup, which `sd note resolve <id>` closes")
+            if action == "reopen":
+                command.add_argument("item", type=item_id, help=ITEM_HELP)
+                command.add_argument("--if-revision")
+                command.add_argument("--reason", help="recorded on the transition after 'reopened: '")
             if action == "ingest":
                 command.add_argument("job")
                 for option in ("run-id", "started", "ended", "log"):
