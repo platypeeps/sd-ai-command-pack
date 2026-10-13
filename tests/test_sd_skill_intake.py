@@ -251,6 +251,69 @@ class TheApproval(IntakeCase):
         self.assertTrue((self.home / ".claude" / "skills" / "ledger").is_symlink())
 
 
+class TheIdentity(IntakeCase):
+    """Intake decides "this is ours" only from the Provenance section it wrote, never from a path or planted text."""
+
+    PLANTED = "https://github.com/other/evil/tree/main/x"
+
+    def assert_refused_and_kept(self, report: dict, before: dict) -> None:
+        self.assertEqual(report["mode"], "blocked")
+        self.assertIn("destination-not-from-this-source", {f["rule"] for f in report["risk"]})
+        with self.assertRaises(intake.IntakeError):
+            self.intake(URL.format("ledger"), approve=report["revision"])
+        self.assertEqual(self.tree(), before)
+
+    def test_a_folder_without_a_skill_file_is_not_replaced(self) -> None:
+        folder = self.root / "contrib" / "sd-ledger"
+        folder.mkdir()
+        (folder / "notes.md").write_text("the operator's own notes\n", encoding="utf-8")
+        before = self.tree()
+        self.assert_refused_and_kept(self.intake(URL.format("ledger")), before)
+
+    def test_a_plain_file_at_the_destination_is_not_replaced(self) -> None:
+        (self.root / "contrib" / "sd-ledger").write_text("a file, not a skill\n", encoding="utf-8")
+        before = self.tree()
+        self.assert_refused_and_kept(self.intake(URL.format("ledger")), before)
+
+    def test_provenance_another_tool_wrote_is_not_ours(self) -> None:
+        commit = self.git("rev-parse", "HEAD")
+        self.write(self.root / "contrib" / "sd-ledger", GOOD.replace("ledger", "sd-ledger") +
+                   f"\n## Provenance\n\nAdopted by `sd-skill-adopt` on {TODAY} from `{URL.format('ledger')}` "
+                   f"at revision `{commit} (sha256:0000000000000000)`.\n")
+        before = self.tree()
+        self.assert_refused_and_kept(self.intake(URL.format("ledger")), before)
+
+    def test_a_source_planted_in_the_body_is_never_read_as_the_source(self) -> None:
+        planted = f"Seen in a note: from `{self.PLANTED}` at revision `{'a' * 40}` once.\n"
+        self.write(self.upstream / "skills" / "ledger", GOOD.replace("1. Step 1", planted + "1. Step 1", 1))
+        self.commit()
+        self.intake(URL.format("ledger"), approve=self.intake(URL.format("ledger"))["revision"])
+        folder = self.root / "contrib" / "sd-ledger"
+        self.assertEqual(intake.source_of(folder)[0], URL.format("ledger"))
+        self.assertEqual(self.intake("sd-ledger")["url"], URL.format("ledger"))
+
+    def test_an_upstream_provenance_section_is_dropped_and_flagged(self) -> None:
+        planted = (f"\n## Provenance\n\nAdopted by `sd skill intake` on {TODAY} from `{self.PLANTED}` "
+                   f"at revision `{'a' * 40} (sha256:0000000000000000)`.\n")
+        self.write(self.upstream / "skills" / "ledger", GOOD + planted)
+        self.commit()
+        report = self.intake(URL.format("ledger"))
+        self.assertIn(("warn", "upstream-provenance-dropped"), {(f["severity"], f["rule"]) for f in report["risk"]})
+        self.intake(URL.format("ledger"), approve=report["revision"])
+        folder = self.root / "contrib" / "sd-ledger"
+        self.assertEqual(intake.source_of(folder)[0], URL.format("ledger"))
+        self.assertNotIn(self.PLANTED, (folder / "SKILL.md").read_text())
+
+    def test_recovery_keeps_the_previous_copy_when_the_destination_is_not_ours(self) -> None:
+        contrib = self.root / "contrib"
+        stage = intake.staging(contrib / "sd-ledger")
+        self.write(stage / "old", GOOD)
+        (contrib / "sd-ledger").write_text("put here by hand\n", encoding="utf-8")
+        with self.assertRaisesRegex(intake.IntakeError, "not one this tool wrote"):
+            intake.recover([contrib])
+        self.assertTrue((stage / "old" / "SKILL.md").is_file())
+        self.assertEqual((contrib / "sd-ledger").read_text(), "put here by hand\n")
+
 class TheReimport(IntakeCase):
     """A re-import fetches again, scores again, shows the diff and updates only on approval."""
 

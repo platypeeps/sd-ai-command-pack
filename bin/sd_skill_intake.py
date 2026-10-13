@@ -40,8 +40,12 @@ ADOPT = sd_lib.sibling("sd_skill_adopt", "sd-skill-adopt")
 GITHUB = "https://github.com/"
 SKILL_FILE = "SKILL.md"
 PACK_NAME_RE = re.compile(r"sd-[a-z0-9-]+")
-PROVENANCE_RE = re.compile(r"from `(https://github\.com/[^`\s]+)` at revision `([0-9a-f]{40})\b")
 TOOL = "sd skill intake"
+#: The one line `with_provenance` writes for this tool, matched whole. Nothing
+#: else in a skill names its source: the body is upstream's text.
+PROVENANCE_LINE_RE = re.compile(
+    r"Adopted by `sd skill intake` on \d{4}-\d{2}-\d{2} from `(https://github\.com/[^`\s]+)` "
+    r"at revision `([0-9a-f]{40}) \(sha256:[0-9a-f]{16}\)`\.")
 
 #: The catalog's own limits (`skills_catalog._snapshot`), so an installed
 #: skill never breaks `sd skill list`.
@@ -86,7 +90,7 @@ class IntakeError(Exception):
 def parse_url(url: str) -> tuple[str, list[str], str]:
     """`(clone URL, the parts after tree/ or blob/, kind)` for a GitHub skill URL."""
 
-    if not url.startswith(GITHUB) or any(ch.isspace() for ch in url):
+    if not url.startswith(GITHUB) or any(ch.isspace() or ch == "`" for ch in url):
         raise IntakeError(f"not a GitHub URL: {url!r}; give https://github.com/<owner>/<repo>/tree/<ref>/<path>")
     parts = [part for part in url[len(GITHUB):].split("?")[0].split("#")[0].split("/") if part]
     if len(parts) < 2 or any(part in (".", "..") for part in parts):
@@ -212,6 +216,10 @@ def risk(candidate: dict[str, Any]) -> list[dict[str, Any]]:
         found += _file_risk(name, mode, body)
     text = candidate["files"][SKILL_FILE][1].decode("utf-8", "replace")
     head = text.split("\n---", 1)[0] if text.startswith("---\n") else ""
+    dropped = text.find("\n" + ADOPT.PROVENANCE_HEADING)
+    if dropped != -1:
+        # `with_provenance` cuts here: what follows never lands, and never reads as ours.
+        found.append(_finding(ADOPT.WARN, "upstream-provenance-dropped", SKILL_FILE, text.count("\n", 0, dropped) + 2))
     if re.search(r"(?m)^hooks\s*:", head):
         found.append(_finding(ADOPT.REFUSE, "declares-hooks", SKILL_FILE, 1))
     fields = sd_lib.parse_frontmatter(text) or {}
@@ -303,13 +311,27 @@ def _landing(files: dict[str, bytes], scope: str) -> list[dict[str, Any]]:
 
 
 def source_of(skill_dir: pathlib.Path) -> tuple[str, str] | None:
-    """`(URL, commit)` from an installed skill's Provenance line, or None."""
+    """`(URL, commit)` this tool recorded for an installed skill, or None.
+
+    Read from the trailing Provenance section alone, from the last line there
+    that is this tool's line whole; a line after it is a local edit.
+    `with_provenance` cuts the text at the first Provenance heading before it
+    writes its own, so a skill this tool installed holds exactly one, at the
+    end; a phrase planted anywhere in upstream's body is never read as the
+    source. A linked folder is never this tool's: it writes none.
+    """
 
     path = skill_dir / SKILL_FILE
-    if path.is_symlink() or not path.is_file():
+    if skill_dir.is_symlink() or path.is_symlink() or not path.is_file():
         return None
-    found = PROVENANCE_RE.search(path.read_text(encoding="utf-8", errors="replace"))
-    return (found[1], found[2]) if found else None
+    text = path.read_text(encoding="utf-8", errors="replace")
+    heading = "\n" + ADOPT.PROVENANCE_HEADING
+    start = text.find(heading)
+    if start == -1 or text.rfind(heading) != start or not text[start + len(heading):].startswith("\n"):
+        return None
+    entries = [found for line in text[start + len(heading):].splitlines()
+               if (found := PROVENANCE_LINE_RE.fullmatch(line))]
+    return (entries[-1][1], entries[-1][2]) if entries else None
 
 
 def scope_roots(scope: str, root: pathlib.Path, home: pathlib.Path) -> list[pathlib.Path]:
@@ -462,6 +484,9 @@ def recover(roots: list[pathlib.Path]) -> list[str]:
             if _present(stage / "old") and not _present(destination):
                 os.replace(stage / "old", destination)
                 done.append(f"undid a stopped install of {destination}: the previous copy is back")
+            elif _present(stage / "old") and source_of(destination) is None:
+                raise IntakeError(f"{destination} is not one this tool wrote, and the previous copy waits in "
+                                  f"{stage / 'old'}; move one of them by hand")
             elif _present(stage / "old"):
                 done.append(f"finished a stopped install of {destination}: dropped the previous copy")
             elif (stage / "new").exists():
@@ -481,12 +506,17 @@ def _target(claimed: str, scope: str, url: str, root: pathlib.Path, home: pathli
     roots = scope_roots(scope, root, home)
     taken = {path.parent.name for each in roots for path in ADOPT.skill_files(each)}
     name = claimed if scope == "user" or claimed.startswith(ADOPT.PREFIX) else ADOPT.PREFIX + claimed
-    destination = next((each / name for each in roots if (each / name).exists()), roots[0] / name)
+    destination = next((each / name for each in roots if _present(each / name)), roots[0] / name)
     own = source_of(destination)
-    if own and own[0] == url:
+    ours = own is not None and own[0] == url
+    if ours:
         taken.discard(name)
     _name, collisions = ADOPT.canonical_name(claimed, scope, taken)
     found = [_finding(f.severity, f.rule, SKILL_FILE, f.line) for f in collisions]
+    if _present(destination) and not ours:
+        # Whatever stands there, a folder with no SKILL.md, a file or another
+        # tool's skill, an install would replace and then delete it.
+        found.append(_finding(ADOPT.REFUSE, "destination-not-from-this-source", name))
     if scope == "pack" and not PACK_NAME_RE.fullmatch(name):
         found.append(_finding(ADOPT.REFUSE, "pack-name-shape", SKILL_FILE, 1))
     if destination.is_symlink():
