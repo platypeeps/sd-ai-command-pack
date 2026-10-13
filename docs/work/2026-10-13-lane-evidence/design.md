@@ -17,8 +17,8 @@ Agreed 2026-10-13. The operator took the recommended option on each question:
 
 - Part 1: `Closes:` plus `Delivers:` trailers on the branch's own commits, stored at prepare with the head; the title
   closes nothing, and prepare warns per title id (sd:3704 note #17806).
-- Part 2: `passed: false` plus `waived {reason, decision}`, the note on this item quoting the criterion, listed in
-  the delivery note (note #17816).
+- Part 2: `passed: false` plus `waived {reason, decision}`, the note on this item, listed in the delivery note
+  (note #17816). Lane review then made the link exact: the note holds a `Waive:` line equal to the criterion.
 - Part 3: no new close path; `delivery.md` documents the trailer paths (note #17816).
 - Build order: PR A, then PR B.
 
@@ -92,17 +92,22 @@ two, because a body is editable until prepare.
 
 ### 2. A waived row names its reason and the decision note that waived it
 
-Evidence the lane trusts: a `decision` note on this item that quotes the waived criterion. The waiver is the
-owner's ruling, recorded in the workflow database where `sd task show` and the dashboard show it. Free text in the
+Evidence the lane trusts: a `decision` note on this item that states the waiver in a `Waive:` line equal to the
+row's criterion. The waiver is the owner's ruling, recorded in the workflow database where `sd task show` and the dashboard show it. Free text in the
 acceptance file is written by whoever prepares, so on its own it proves nothing.
 
 - A row is accepted when `passed` is `true`, or when `passed` is `false` and
   `waived = {"reason": "<text>", "decision": <note id>}`. `criterion` and `evidence` stay required. `evidence`
   says what was measured.
-- Prepare reads the note: it must exist, have `item` equal to the claimed item and `kind = 'decision'`, and its
-  body must contain the row's `criterion` text (whitespace and case folded). The stored claim keeps the note's
-  body with its id. A failed read refuses (unknown, not a pass). A note on another item, or one that does not
-  quote the criterion, refuses: a decision about something else cannot waive this row.
+- The operator or the lead writes the note: `sd task note N $'<ruling>\nWaive: <criterion text>' --kind decision`.
+  One `Waive:` line per waived criterion; a line starts with `Waive:` at column zero.
+- Prepare reads the note: it must exist, have `item` equal to the claimed item and `kind = 'decision'`, and hold a
+  `Waive:` line whose value equals the row's `criterion`. Both sides are compared after whitespace normalisation
+  (strip, runs of whitespace to one space), exact and case-sensitive, never as a substring. The stored claim keeps
+  the note's id, body and `session` with the row. A failed read refuses (unknown, not a pass).
+- Refusals, each by name: a note on another item; a note of another kind; a note with no `Waive:` line equal to the
+  criterion. So "Do not waive X" waives nothing (no `Waive:` line), and `Waive: p95 under 2 s` does not waive
+  "p95 under 2 s on memory4k" (not equal).
 - `complete: true` still means "every criterion has a row". Waived rows count as rows.
 - The delivery record names the waiver in one transaction. `deliver_work(..., waived=[{criterion, decision}])` adds
   `waived` to the completion record and appends "; waived: <n> criteria (decision #<id>, ...)" to its
@@ -158,6 +163,7 @@ Part 2 writes once, in the delivery's one transaction. Part 3 changes only `deli
 | Web merge or reconcile closes each item | rows move to done | One close fails (row done by hand, `Delivers:` dropped from the landed message) | `delivery_pending` with `closes_failed`, from the stored set; `reconcile` retries. | Extend `test_a_web_merge_without_the_closes_trailers_leaves_those_items_open` with a trailer-only item. |
 | Rollback to the previous commit | receipt keeps `closing` | Old merge ignores it: trailer items stay open, title items close | Accepted. Name the open ones in the next `--deliver` PR's `Closes:`; reopen a wrongly closed one by hand. The new prepare already warned about each title id. | None: old code. |
 | Prepare reads the decision note | nothing yet | Database read fails | Prepare refuses; no claim stored. | Closed connection; prepare refuses. |
+| Prepare matches the `Waive:` line | nothing yet | The note mentions the criterion without waiving it, or waives a shorter or longer criterion | Prepare refuses `waiver_not_exact`; no claim stored. The operator or the lead writes a note with the exact line. | Three notes on the item: "Do not waive X", `Waive: X` for a row whose criterion is "X on Y", and `Waive:  X ` for row "X"; the first two refuse, the third passes. |
 | Delivery writes `waived` | completion record and note | Transaction fails | Rolls back whole; `delivery_pending`, reconcile retries with the stored claim. | Fail inside the transaction; the row stays open with no note. |
 
 ## Slices
@@ -182,9 +188,10 @@ which PR A edits anyway.
 - An associate-only PR whose branch commit carries `Delivers: sd:B` refuses `closes_need_delivery`.
 - A receipt whose `closing.head` differs from the merged head, or an unsent one that lacks the field, refuses
   `closing_set_stale`.
-- An acceptance file with one row `passed: false`, a reason and a decision note on the item that quotes the
-  criterion passes prepare. The delivery `status_change` note names it as waived. The same row citing another
-  item's note, or a note that does not quote the criterion, refuses.
+- An acceptance file with one row `passed: false`, a reason and a decision note on the item holding
+  `Waive: <criterion>` passes prepare. The delivery `status_change` note names it as waived. The same row citing
+  another item's note, a note with no `Waive:` line, or a `Waive:` line that only contains or is contained in the
+  criterion, refuses.
 - `python3 -m unittest tests.test_sd_ship tests.test_sd_ship_lane` passes with 0 failures on each PR, and
   `make check` passes in the lane.
 
@@ -196,8 +203,9 @@ which PR A edits anyway.
 - **A stray `Delivers:` on a branch commit closes an item.** That is the intent, but a copied commit message can
   carry one. The prepare result lists the closing set, and `refuse_unclosable` keeps it to this repository.
 - **A waiver is only as good as the decision note.** Any session can write a `decision` note, so the check ties the
-  waiver to a recorded ruling on the item that quotes the criterion, not to the owner's identity. We accept that
-  under the single-operator threat model.
+  waiver to a recorded ruling on the item with an exact `Waive:` line, not to the writer's identity; the claim
+  keeps the note's `session` so a reader can see who wrote it. We accept that under the single-operator
+  threat model.
 - **Evidence ties.** The closing set is tied to the reviewed head (`closing.head`). The waiver is tied to the
-  claimed item through `note.item` and to the row through the quoted criterion. An umbrella close stays tied to the
+  claimed item through `note.item` and to the row through an exact `Waive:` line. An umbrella close stays tied to the
   item through a trailer that names it.
