@@ -63,24 +63,14 @@ from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-#: Ceilings. Each is a per-function measure, not a per-directory total, because
-#: a total is what made the old cap grow with the work it was meant to govern.
-#:
-#: The numbers come from the corpus's own distribution, which is the derivation
-#: the old cap never had -- it was set equal to the measurement every time, so
-#: it always bound at exactly zero and always had to move. These sit near the
-#: 95th percentile instead: high enough that ordinary code never sees them, low
-#: enough that the tail has to argue.
+#: Ceilings. Each is a per-function measure, not a per-directory total, which grows with the work.
+#: They sit near the corpus's 95th percentile, so ordinary code never sees them and the tail has to argue:
 #:
 #:   complexity   median 5,  p95 18, p99 34, max 97  -> 20, and 30 are baselined
 #:   length       median 8,  p95 38, p99 75, max 138 -> 50, and 16 are baselined
 #:   depth        median 1,  p95 3,  p99 4,  max 5   -> 5,  and none are
 #:
-#: Depth is the one ceiling that equals the corpus maximum, which is the shape
-#: the old cap had and the reason it never said no. It is kept anyway, because
-#: five levels of indentation is a limit that stands on its own argument rather
-#: than on this repository's current state -- the agreement is a coincidence,
-#: and if a sixth level ever arrives it should have to be defended.
+#: Depth equals the corpus maximum; a sixth level of indentation should have to be defended.
 COMPLEXITY_CEILING = 20
 LENGTH_CEILING = 50
 DEPTH_CEILING = 5
@@ -96,7 +86,7 @@ SHEBANG_LIMIT = 4096
 
 #: How many public functions the dead-code check cannot speak for, because
 #: another function in the corpus carries the same name. Downward only.
-AMBIGUOUS_CEILING = 110  # 112 until sd:3014 deleted the attribution code; 114 until sd:3050 deleted bin/sd_runner.py; 116 until sd:719 step 7
+AMBIGUOUS_CEILING = 110  # measured; lower it with the count
 
 
 def tracked(*pathspecs: str, root: pathlib.Path = REPO_ROOT) -> list[pathlib.Path]:

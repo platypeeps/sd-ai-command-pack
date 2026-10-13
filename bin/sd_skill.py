@@ -59,7 +59,8 @@ def run(args: argparse.Namespace) -> int:
             print(json.dumps(result, ensure_ascii=False))
         elif args.verb == "list":
             for skill in result["skills"]:
-                print(f"{skill['name']}  {skill['status']}  {skill['description']}")
+                used = f"  uses={sum(use['count'] for use in skill['uses'])}" if getattr(args, "usage", False) else ""
+                print(f"{skill['name']}  {skill['status']}{used}  {skill['description']}")
         elif args.verb == "try":
             print(f"{args.name} on trial until {result['trial']['expires'][:10]}")
             print("Run sd-install to render it. The trial does not change installed files by itself.")

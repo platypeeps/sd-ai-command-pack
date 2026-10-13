@@ -54,6 +54,7 @@ __all__ = [
     "on_branch",
     "open_followups",
     "ready_to_send",
+    "revisions",
     "runner_board",
     "scorecard",
     "status_changes",
@@ -965,6 +966,50 @@ def item_notes(connection: sqlite3.Connection, item: int) -> list[sqlite3.Row]:
             (item,),
         ).fetchall()
     )
+
+
+#: Ids bound per statement: under 999, SQLite's variable limit before 3.32.
+_REVISION_CHUNK = 500
+
+
+def revisions(connection: sqlite3.Connection, items) -> dict[int, str]:
+    """Each item's `workflow.item_state` revision, read in one snapshot (sd:3963).
+
+    A screen of rows read each row's `item_state` for its revision alone: one
+    savepoint and two queries per row. This reads the same rows and notes for
+    many items, a chunk of ids per statement, and hashes each with the hash
+    `item_state` uses, so a value here is the one an edit's
+    `expected_revision` is checked against. An id `item_state` refuses is
+    refused here the same way, the missing item included.
+    """
+    from .workflow import MissingItem, _identifier, _revision  # workflow imports this module
+
+    ids = list(dict.fromkeys(items))
+    for item in ids:
+        _identifier(item, "item")
+    states: dict[int, dict] = {}
+    # One savepoint over every chunk, for the reason `item_state` takes one.
+    connection.execute("SAVEPOINT sd_reads_revisions")
+    try:
+        for start in range(0, len(ids), _REVISION_CHUNK):
+            chunk = ids[start:start + _REVISION_CHUNK]
+            marks = ", ".join("?" * len(chunk))
+            for row in connection.execute(
+                f"SELECT item.*, {_STATUS_SINCE} AS status_since FROM item WHERE item.id IN ({marks})",
+                chunk,
+            ):
+                states[row["id"]] = {"item": dict(row), "notes": []}
+            for note in connection.execute(
+                f"SELECT * FROM note WHERE item IN ({marks}) ORDER BY item, timestamp ASC, id ASC",
+                chunk,
+            ):
+                states[note["item"]]["notes"].append(dict(note))
+    finally:
+        connection.execute("RELEASE sd_reads_revisions")
+    for item in ids:
+        if item not in states:
+            raise MissingItem(f"no item {item}")
+    return {item: _revision(states[item]) for item in ids}
 
 
 def status_changes(connection: sqlite3.Connection, item: int) -> list[sqlite3.Row]:
