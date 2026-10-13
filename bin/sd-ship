@@ -1197,16 +1197,23 @@ class Ship(SharedReview):
                                 *, required: bool) -> tuple[list, list] | None:
         previous = ""
         for attempt in range(COPILOT_MATERIALIZATION_ATTEMPTS):
-            reviews = self.api.copilot_reviews(
-                self.api.pages(f"{self.api.prefix}/pulls/{number}/reviews"))
+            every = self.api.pages(f"{self.api.prefix}/pulls/{number}/reviews")
+            reviews = self.api.copilot_reviews(every)
             comments = self.api.copilot_comments(
                 self.api.pages(f"{self.api.prefix}/pulls/{number}/comments"))
             if not required and not (reviews or comments):
                 return None
             reviewed_head = self.copilot_reviewed_head(reviews, head) if required else None
             if required and reviewed_head is None:
+                # A Copilot review under a login `COPILOT_LOGINS` lacks reads
+                # as pending forever; naming who did review shows it (sd:3499).
+                logins = sorted({str((review.get("user") or {}).get("login") or "") for review in every
+                                 if isinstance(review, dict) and review.get("commit_id") == head
+                                 and review.get("submitted_at")} - {""})
                 raise Refusal(
-                    f"Copilot review has not completed for the exact merge head {head}",
+                    f"Copilot review has not completed for the exact merge head {head}"
+                    + (f"; reviews on that head came from {', '.join(logins)}, none a login this pack "
+                       "reads as Copilot" if logins else ""),
                     code="copilot_review_pending", boundary="review", state="retryable_failure",
                     next_action="Wait for the requested Copilot review, then retry merge.",
                 )

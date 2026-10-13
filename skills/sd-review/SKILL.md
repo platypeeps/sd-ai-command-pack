@@ -215,6 +215,7 @@ Only a render in the measured shape, a list of `message` items, counts as an ans
 `unknown` means the binary could not be asked; never read it as either answer.
 `not_probed` means no `codex-json` process started, and the `reason` says why.
 An actual `codex-json` run carries its own measurement in that outcome's `diagnostic.skill_suppression`.
+Its `version` is the first line `--version` printed, empty when the binary could not say; an `opencode-json` outcome's `diagnostic.version` is its probe's (sd:3499).
 An inert key warns and never refuses; decide whether to review on that binary.
 
 ## Policy

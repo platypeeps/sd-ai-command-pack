@@ -1387,6 +1387,20 @@ roles:
             self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(self.operation().state["copilot_reviews"][0]["status"], "completed")
 
+    def test_a_pending_refusal_names_who_did_review_the_head(self):
+        """sd:3499. A renamed Copilot bot's review read as pending forever,
+        with "wait, then retry"; the refusal names the logins that reviewed the head."""
+        self.enable_automatic_copilot()
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+        review = {"state": "COMMENTED", "submitted_at": "2026-09-19T20:00:00Z", "body": ""}
+        self.double.review_payload["reviews"] = [
+            {**review, "user": {"login": "copilot-renamed[bot]"}, "commit_id": head},
+            {**review, "user": {"login": "earlier-reviewer"}, "commit_id": "0" * 40}]
+        with self.assertRaisesRegex(ship.Refusal, r"has not completed.*copilot-renamed\[bot\]") as caught:
+            self.merge()
+        self.assertNotIn("earlier-reviewer", str(caught.exception))
+
     def test_later_push_keeps_one_automatic_review_but_requires_exact_head_review(self):
         # The later push edits `src.py`, the shipped surface. It was an empty
         # commit until sd:1366, which is now the case a reviewed ancestor

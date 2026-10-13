@@ -572,6 +572,9 @@ def codex_skill_state(provider: sd_registry.Provider, root: pathlib.Path, runner
     over a hardening flag. One limit: a build with no skill in any root prints
     no block either, and for this run both mean the same thing -- no `SKILL.md`
     body reaches the reviewing model on this argv.
+
+    The answer carries the first line `--version` prints, empty when the
+    binary cannot say, so a receipt ties a changed answer to an upgrade (sd:3499).
     """
 
     argv = codex_skill_probe_argv(provider.start or "")
@@ -586,7 +589,15 @@ def codex_skill_state(provider: sd_registry.Provider, root: pathlib.Path, runner
     child = child_environment(sd_registry.provider_environment(provider, env), provider.env)
     printable = shlex.join(argv)
     with tempfile.TemporaryDirectory() as scratch:  # codex leaves an empty `.tmpXXXXXX` in `TMPDIR` (sd:3078)
-        result = runner(argv, {**child, "CODEX_HOME": str(home), "TMPDIR": scratch}, root, timeout)
+        probe_env = {**child, "CODEX_HOME": str(home), "TMPDIR": scratch}
+        result = runner(argv, probe_env, root, timeout)
+        told = runner([*shlex.split(provider.start or "")[:-1], "--version"], probe_env, root, min(timeout, 10))
+    version = (told.stdout or "").strip().partition("\n")[0][:80] if told.launched and told.exit_code == 0 else ""
+    return {**codex_skill_answer(result, printable), "version": version}
+
+
+def codex_skill_answer(result: Completed, printable: str) -> dict[str, Any]:
+    """What the probe's render says about the key: `codex_skill_state`'s answer before its version."""
     if not result.launched or result.exit_code != 0:
         return skills_report(SKILLS_UNKNOWN, printable, f"the probe exited {result.exit_code}, so this "
                              "build cannot be asked whether the key took effect: "
@@ -1385,8 +1396,10 @@ def run_provider(
         argv = provider_argv(provider, root, workdir)
         launch_cwd = root
         # Denies opencode resolved beside the map: accepted, and named in the
-        # outcome so the receipt says what this run ran under (sd:3498).
+        # outcome so the receipt says what this run ran under (sd:3498), with
+        # the binary's version (sd:3499).
         accepted: list[dict[str, str]] = []
+        seen: dict[str, Any] = {}
         if provider.reader == "opencode-json":
             # An empty config dir of the run's own: on 2.x no switch drops the
             # operator's plugins and keeps the rest of its config (sd:2445).
@@ -1413,7 +1426,7 @@ def run_provider(
             # The neutral dir says where opencode looks; this asks what it
             # resolved, so a widening from any source refuses the run (sd:1375).
             breach = sd_opencode.confinement_breach(runner, provider.start or "", child, workdir, timeout,
-                                                    accepted=accepted)
+                                                    accepted=accepted, seen=seen)
             if breach:
                 return _outcome(provider.name, REFUSED, breach)
             launch_cwd = workdir
@@ -1439,7 +1452,7 @@ def run_provider(
         {"prompt_transport": "stdin", "prompt_bytes": len(prompt.encode()),
          "prompt_sha256": hashlib.sha256(prompt.encode()).hexdigest(),
          "skill_suppression": dict(skills) if skills is not None else None} if codex else
-        {"accepted_after_deny": accepted} if accepted else None))
+        {**seen, **({"accepted_after_deny": accepted} if accepted else {})} or None))
 
 
 # Disposition -- local, and only local
