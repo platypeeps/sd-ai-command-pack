@@ -2225,7 +2225,8 @@ class PullBehaviourTests(InstallerHarness):
         subprocess.run(["git", "-C", str(repo), "checkout", "-q", "--detach"], check=True, capture_output=True)
         out = io.StringIO()
         self.assertEqual(sd_install.cmd_pull(self.context(repo), out), 1)
-        self.assertIn("error: serving checkout is on HEAD, not main; --pull refuses to move it.", out.getvalue())
+        self.assertIn("error: serving checkout is detached; --pull refuses to move it. "
+                      "Run `make setup` in your working checkout.", out.getvalue())
 
     def test_a_dry_run_pull_does_not_touch_git(self):
         repo = self.make_main_checkout()
@@ -2401,6 +2402,36 @@ class ServeTests(InstallerHarness):
         self.assertEqual(rc, 0, output)
         self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.merged)
         self.assertEqual((self.tree / ".venv" / "built").read_text(encoding="utf-8").strip(), self.merged)
+
+    def test_status_and_verify_in_the_serving_tree_count_commits_behind_origin_main(self):
+        """sd:3493: `--verify` compared the tree with its own receipt, so a pin sat behind unseen."""
+        self.commit_origin("two")
+        self.commit_origin("three")
+        self.assertEqual(self.serve()[0], 0)
+        ctx = self.context(self.tree)
+        out = io.StringIO()
+        sd_install.cmd_status(ctx, out)
+        self.assertIn("serving tree: 2 commit(s) behind origin/main; run `make setup` in your working checkout",
+                      out.getvalue())
+        out = io.StringIO()
+        sd_install.cmd_verify(ctx, out, as_json=True)
+        self.assertEqual(json.loads(out.getvalue())["serving"], {"behind": 2})
+
+    def test_a_failed_fetch_reads_as_unknown_not_zero_behind(self):
+        self.assertEqual(self.serve()[0], 0)
+        self.git(self.tree, "remote", "set-url", "origin", str(self.home / "missing"))
+        out = io.StringIO()
+        sd_install.cmd_verify(self.context(self.tree), out)
+        self.assertIn("serving tree: behind origin/main unknown (fetch failed:", out.getvalue())
+
+    def test_a_failed_count_reads_as_unknown(self):
+        self.assertEqual(self.serve()[0], 0)
+        with unittest.mock.patch.object(sd_install, "_git", return_value=(128, "", "bad revision")):
+            self.assertEqual(sd_install.serving_behind(self.context(self.tree)),
+                             {"behind": None, "error": "count failed: bad revision"})
+
+    def test_a_working_checkout_reports_no_serving_count(self):
+        self.assertIsNone(sd_install.serving_behind(self.context()))
 
     def test_a_commit_origin_lacks_is_fetched_from_the_working_checkout(self):
         self.assertEqual(self.serve()[0], 0)

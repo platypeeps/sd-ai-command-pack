@@ -2448,14 +2448,47 @@ def cmd_verify(ctx: Context, out, *, as_json: bool = False) -> int:
     result = {"schema_version": 1, "status": "verified" if passed else "failed", "checks": checks,
               "smoke": {"status": "complete" if ready else "not_run",
                         "unsmoked": sorted(set(bin_commands(ctx.checkout)) - VERIFY_HELP_COMMANDS)}}
+    # Reported, never failed: the tree serves the working checkout's HEAD, so a
+    # pin sits behind origin on purpose (sd:3111); the count says how far (sd:3493).
+    behind = serving_behind(ctx)
+    if behind is not None:
+        result["serving"] = behind
     if as_json:
         print(json.dumps(result, sort_keys=True), file=out)
     else:
         print(f"installation: {result['status']}", file=out)
+        if behind is not None:
+            print(f"  {serving_line(behind)}", file=out)
         for check in checks:
             if check["status"] == "failed":
                 print(f"  {check['component']}: {check['code']}", file=out)
     return 0 if passed else 1
+
+
+def serving_behind(ctx: Context) -> dict | None:
+    """How far the serving tree sits behind `origin/main`, after a bounded fetch; None elsewhere.
+
+    `--verify` compares the receipt with the checkout it runs from, so a tree
+    many commits behind passed every check (sd:3493). A fetch or count that
+    fails is unknown, with its reason, never zero.
+    """
+    if ctx.checkout.resolve() != serving_tree(ctx.home, ctx.environ).resolve():
+        return None
+    quiet = {**os.environ, **ctx.environ, "GIT_TERMINAL_PROMPT": "0"}
+    code, _, err = _git_in(ctx.checkout, ["fetch", "--quiet", "origin", "main"], GIT_TIMEOUT, quiet)
+    if code:
+        return {"behind": None, "error": f"fetch failed: {err or 'no reason given'}"}
+    code, count, err = _git(ctx, ["rev-list", "--count", "HEAD..origin/main"])
+    if code or not count.isdigit():
+        return {"behind": None, "error": f"count failed: {err or count or 'no output'}"}
+    return {"behind": int(count)}
+
+
+def serving_line(behind: dict) -> str:
+    if behind["behind"] is None:
+        return f"serving tree: behind origin/main unknown ({behind['error']})"
+    return (f"serving tree: {behind['behind']} commit(s) behind origin/main; "
+            "run `make setup` in your working checkout to move it")
 
 
 def cmd_status(ctx: Context, out) -> int:
@@ -2474,6 +2507,9 @@ def cmd_status(ctx: Context, out) -> int:
         )
         if live["dirty"]:
             print("checkout is dirty", file=out)
+    behind = serving_behind(ctx)
+    if behind is not None:
+        print(serving_line(behind), file=out)
 
     surfaces = discover_surfaces(ctx.checkout)
     try:
@@ -2530,7 +2566,8 @@ def _git(ctx: Context, args: list[str], timeout: float = GIT_TIMEOUT) -> tuple[i
     return _git_in(ctx.checkout, args, timeout)
 
 
-def _git_in(directory: Path, args: list[str], timeout: float = GIT_TIMEOUT) -> tuple[int, str, str]:
+def _git_in(directory: Path, args: list[str], timeout: float = GIT_TIMEOUT,
+            environ: dict[str, str] | None = None) -> tuple[int, str, str]:
     """`_git` for a directory other than the checkout."""
     try:
         done = subprocess.run(  # nosec B603 - fixed argv, no shell
@@ -2539,6 +2576,7 @@ def _git_in(directory: Path, args: list[str], timeout: float = GIT_TIMEOUT) -> t
             text=True,
             timeout=timeout,
             check=False,
+            env=environ,
         )
     except (OSError, subprocess.SubprocessError) as error:
         return 1, "", f"could not finish: {error}"
@@ -2555,9 +2593,18 @@ def cmd_pull(ctx: Context, out) -> int:
     moves with `git checkout` and `make setup` instead (`cmd_serve`).
     """
     live = git_context(ctx.checkout)
+    if live["branch"] == "HEAD":
+        # `--serve` detaches the serving tree on purpose (sd:3111), and
+        # `rev-parse --abbrev-ref` names a detached HEAD `HEAD` (sd:3493).
+        print(
+            "error: serving checkout is detached; --pull refuses to move it. "
+            "Run `make setup` in your working checkout.",
+            file=out,
+        )
+        return 1
     if live["branch"] != "main":
         print(
-            f"error: serving checkout is on {live['branch'] or '(detached)'}, not main; "
+            f"error: serving checkout is on {live['branch'] or '(unknown)'}, not main; "
             "--pull refuses to move it.",
             file=out,
         )
