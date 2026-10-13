@@ -453,10 +453,14 @@ def _swap_in(destination: pathlib.Path, stage: pathlib.Path) -> None:
 
 
 def _drop(stage: pathlib.Path) -> None:
-    shutil.rmtree(stage)
+    """Remove the stage, with the staging folders above it that hold nothing else."""
+
+    top = stage
     for parent in (stage.parent, stage.parent.parent):
-        if parent.is_dir() and not any(parent.iterdir()):
-            parent.rmdir()
+        if list(parent.iterdir()) != [top]:
+            break
+        top = parent
+    shutil.rmtree(top)  # the intake's own staging folder, never a work item (sd:3560)
 
 
 def install(destination: pathlib.Path, files: dict[str, bytes]) -> None:
