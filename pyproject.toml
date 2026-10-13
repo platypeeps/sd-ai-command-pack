@@ -18,9 +18,7 @@ packages = []
 [tool.uv]
 package = false
 
-# `lib/` and `tests/sd_db/` are `sd_db` as copied from the system checkout
-# (sd:3278), which never ran Ruff over it. Excluded until it is linted on its
-# own terms; `force-exclude` keeps the pre-commit hook's file arguments out too.
+# `force-exclude` keeps the pre-commit hook's file arguments out of these too.
 [tool.ruff]
 line-length = 88
 force-exclude = true
@@ -35,13 +33,19 @@ extend-exclude = [
     ".ruff_cache",
     ".sd-ai-command-pack",
     ".venv",
-    "lib",
     "node_modules",
-    "tests/sd_db",
 ]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "I", "B"]
+
+# `lib/` and `tests/sd_db/` are `sd_db` as copied from the system checkout
+# (sd:3278), linted since sd:3485 with these rules off, each for its reason.
+[tool.ruff.lint.per-file-ignores]
+# I: sorting would rewrite the imports of 52 files (measured at sd:3485) that other work edits; no defect.
+"lib/**" = ["I"]
+# E701, E702: the suite puts short fixture steps on one line (142 sites at sd:3485); a style, no defect.
+"tests/sd_db/**" = ["I", "E701", "E702"]
 
 [tool.mypy]
 python_version = "3.13"

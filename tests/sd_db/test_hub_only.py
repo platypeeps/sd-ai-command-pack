@@ -141,7 +141,7 @@ class TheVerbs(OverTheWire):
         for verb, attempt in VERBS:
             with self.subTest(verb=verb, attempt=attempt.__code__.co_firstlineno):
                 before = state(self.served.database)
-                self.assertHubOnly(verb, lambda: attempt(self.connection, self))
+                self.assertHubOnly(verb, lambda attempt=attempt: attempt(self.connection, self))
                 self.assertEqual(state(self.served.database), before)
 
 
@@ -338,22 +338,23 @@ class TheMarks(unittest.TestCase):
             elsewhere = ship.LaneElsewhere.__init__
             try:
                 wire.install("127.0.0.1", served.port, served.token, marks=False)
+                hits = []
+
+                def hub_only(error, *args, **kwargs):
+                    hits.append(type(error).__name__)
+                    refuse(error, *args, **kwargs)
+
+                def ledger_refused(error, message, *args, **kwargs):
+                    if kwargs.get("scope") == "hub":
+                        hits.append(type(error).__name__)
+                    refused(error, message, *args, **kwargs)
+
+                def lane_elsewhere(error, *args, **kwargs):
+                    hits.append(type(error).__name__)
+                    elsewhere(error, *args, **kwargs)
+
                 for test in marked:
-                    hits = []
-
-                    def hub_only(error, *args, **kwargs):
-                        hits.append(type(error).__name__)
-                        refuse(error, *args, **kwargs)
-
-                    def ledger_refused(error, message, *args, **kwargs):
-                        if kwargs.get("scope") == "hub":
-                            hits.append(type(error).__name__)
-                        refused(error, message, *args, **kwargs)
-
-                    def lane_elsewhere(error, *args, **kwargs):
-                        hits.append(type(error).__name__)
-                        elsewhere(error, *args, **kwargs)
-
+                    hits.clear()
                     with (self.subTest(test=test.id()),
                           mock.patch.object(remote.HubOnly, "__init__", hub_only),
                           mock.patch.object(ship.LaneElsewhere, "__init__", lane_elsewhere),

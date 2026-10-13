@@ -343,7 +343,7 @@ test:
 # lane with E902 rather than being skipped. Excluded by directory and not by
 # extension, so a second binary asset lands in the same place or not at all.
 LINT_BIN := $(shell git ls-files --deduplicate -- bin ':(exclude)bin/fonts')
-LINT_RUFF_PATHS := $(LINT_BIN) tests
+LINT_RUFF_PATHS := $(LINT_BIN) lib tests
 LINT_MYPY_PATHS := $(LINT_BIN)
 
 .PHONY: lint-ruff-paths lint-mypy-paths
@@ -354,8 +354,10 @@ lint-mypy-paths:
 
 # Pass STRICT=1 to turn missing-tool skips below into hard errors, so the
 # ShellCheck lane cannot skip. Ruff and mypy cover the paths named in LINT_RUFF_PATHS and
-# LINT_MYPY_PATHS above: Ruff over the tracked bin/ files and tests/, mypy
-# over the tracked bin/ files. The installer
+# LINT_MYPY_PATHS above: Ruff over the tracked bin/ files, lib/ and tests/,
+# mypy over the tracked bin/ files. mypy's error count over lib/ and
+# tests/sd_db may not rise: MYPY_CEILING in tests/test_code_health.py, an
+# always-run module, holds it (sd:3485). The installer
 # package and the shipped payload that step 3e removed are not in either.
 #
 # The bash 3.2 lane survives 3e on a narrower rationale than it had, and the

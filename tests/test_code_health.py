@@ -47,6 +47,7 @@ the cap's ratchet, which could only rise.
 
 import ast
 import collections
+import contextlib
 import copy
 import functools
 import hashlib
@@ -55,11 +56,14 @@ import itertools
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 import tokenize
 import unittest
 from unittest import mock
+
+from tests.clean_env import clean_environment
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -1468,6 +1472,87 @@ class LintPaths(unittest.TestCase):
                     f"check` and by the lint job; drop it from the Makefile.")
 
 
+#: What `make lint` does not run mypy over yet: the `sd_db` library and its
+#: suite, copied from the system checkout (sd:3278) with its type errors.
+MYPY_RATCHET_PATHS = ("lib", "tests/sd_db")
+
+#: mypy's error count over those paths (sd:3485). A rise fails; a fall passes
+#: and prints a notice, so a builder who fixes errors is not failed for it.
+MYPY_CEILING = 508  # measured; lower it with the count
+
+MYPY_SUMMARY = re.compile(r"^(?:Found (\d+) errors? in \d+ files? \(checked (\d+) source files?\)"
+                          r"|Success: no issues found in (\d+) source files?)$", re.M)
+
+
+def mypy_error_count(result: subprocess.CompletedProcess, files: int) -> int:
+    """The errors a mypy run over `files` files reports.
+
+    A run that crashed, printed no summary, or checked another number of files
+    than it was given has no count: that raises, rather than reading as zero.
+    """
+
+    summary = MYPY_SUMMARY.search(result.stdout)
+    errors = int(summary[1] or 0) if summary else None
+    if summary is None or result.returncode != (1 if errors else 0):
+        raise AssertionError(f"mypy exited {result.returncode} with no count it can stand behind:\n"
+                             f"{result.stdout[-2000:]}{result.stderr[-2000:]}")
+    checked = int(summary[2] or summary[3])
+    if checked != files:
+        raise AssertionError(f"mypy checked {checked} source files of the {files} it was given")
+    return errors
+
+
+class MypyRatchet(unittest.TestCase):
+    """mypy's errors over `MYPY_RATCHET_PATHS` may not rise (sd:3485)."""
+
+    def test_the_sd_db_mypy_errors_only_come_down(self):
+        files = [str(path) for path in tracked(*MYPY_RATCHET_PATHS) if path.suffix == ".py"]
+        result = subprocess.run([sys.executable, "-m", "mypy", *files], cwd=REPO_ROOT, capture_output=True,
+                                text=True, timeout=300, env=clean_environment())
+        count = mypy_error_count(result, len(files))
+        self.assertLessEqual(count, MYPY_CEILING, (
+            f"mypy finds {count} errors over {' '.join(MYPY_RATCHET_PATHS)}, above the {MYPY_CEILING} "
+            f"recorded. Fix the new ones; `python -m mypy {' '.join(MYPY_RATCHET_PATHS)}` lists them all."))
+        if count < MYPY_CEILING:
+            print(f"mypy finds {count} errors over {' '.join(MYPY_RATCHET_PATHS)}, {MYPY_CEILING} recorded: "
+                  f"lower MYPY_CEILING to {count} in tests/test_code_health.py.", file=sys.stderr)
+
+    def test_a_count_needs_a_clean_summary_over_every_file(self):
+        def run(code, stdout, stderr=""):
+            return subprocess.CompletedProcess(["mypy"], code, stdout, stderr)
+
+        self.assertEqual(mypy_error_count(run(1, "a.py:1: error: x\nFound 1 error in 1 file (checked 3 source files)\n"), 3), 1)
+        self.assertEqual(mypy_error_count(run(1, "Found 508 errors in 91 files (checked 152 source files)\n"), 152), 508)
+        self.assertEqual(mypy_error_count(run(0, "Success: no issues found in 1 source file\n"), 1), 0)
+        for refused, files in ((run(2, "", "mypy: error: unrecognized arguments"), 3),
+                               (run(1, "", "No module named mypy"), 3),
+                               (run(0, "Found 4 errors in 2 files (checked 3 source files)\n"), 3),
+                               (run(1, "Success: no issues found in 3 source files\n"), 3),
+                               (run(1, "Found 4 errors in 2 files (checked 2 source files)\n"), 3)):
+            with self.subTest(stdout=refused.stdout, stderr=refused.stderr), self.assertRaises(AssertionError):
+                mypy_error_count(refused, files)
+
+    def test_a_fall_passes_with_a_notice_and_a_rise_fails(self):
+        """sd:3485. A builder who fixes errors in `lib/` must not fail the gate for it."""
+
+        real = subprocess.run
+
+        def three_errors(argv, **kwargs):
+            if argv[1:3] != ["-m", "mypy"]:
+                return real(argv, **kwargs)
+            return subprocess.CompletedProcess(
+                argv, 1, f"Found 3 errors in 1 file (checked {len(argv) - 3} source files)\n", "")
+
+        for ceiling, passes in ((4, True), (3, True), (2, False)):
+            result, said = unittest.TestResult(), io.StringIO()
+            with (self.subTest(ceiling=ceiling), mock.patch.object(subprocess, "run", three_errors),
+                  mock.patch.object(sys.modules[__name__], "MYPY_CEILING", ceiling),
+                  contextlib.redirect_stderr(said)):
+                MypyRatchet("test_the_sd_db_mypy_errors_only_come_down").run(result)
+            self.assertEqual(result.wasSuccessful(), passes, result.failures)
+            self.assertEqual("lower MYPY_CEILING to 3" in said.getvalue(), ceiling == 4, said.getvalue())
+
+
 #: `subprocess` entry points that start a child.
 SUBPROCESS_CALLS = frozenset({"run", "Popen", "check_output", "check_call", "call"})
 
@@ -1613,8 +1698,8 @@ class CleanEnvironment(unittest.TestCase):
 
     def test_no_test_module_starts_an_unshielded_child_beyond_its_entry(self):
         # The pack's own `tests/test_*.py`. `run-tests.sh` also runs the copied
-        # `tests/sd_db/` suite (sd:3323); it stays out here, as from Ruff, until it
-        # is held to the pack's rules, and its names would collide.
+        # `tests/sd_db/` suite (sd:3323); it stays out here until it is held to
+        # the pack's rules, and its names would collide.
         modules = {path.name: path for path in tracked("tests/test_*.py") if re.fullmatch(r"test_\w+\.py", path.name)}
         for name in sorted(set(modules) | set(UNSHIELDED)):
             with self.subTest(module=name):

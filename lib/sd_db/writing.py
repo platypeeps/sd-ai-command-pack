@@ -19,7 +19,7 @@ import unicodedata
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from . import paths as sdpaths
@@ -371,9 +371,9 @@ def _rewrite(text: str, changes: dict, *, remove: tuple[str, ...] = ()) -> str:
         replacement = f"{name}: {encoded}"
         if isinstance(value, dict):
             replacement = f"{name}:" + "".join(f"\n  {key}: {json.dumps(held, ensure_ascii=False)}" for key, held in value.items())
-        pattern = rf"(?m)^{re.escape(name)}:.*(?:\n[ \t]+[^\n]*)*"
-        if re.search(pattern, head):
-            head = re.sub(pattern, lambda _: replacement, head, count=1)
+        found = re.search(rf"(?m)^{re.escape(name)}:.*(?:\n[ \t]+[^\n]*)*", head)
+        if found:
+            head = head[:found.start()] + replacement + head[found.end():]
         else:
             head += "\n" + replacement
     return head + separator + body
@@ -1038,7 +1038,6 @@ def update_piece_metadata(connection: sqlite3.Connection, item: int, changes: di
         changes = {**changes, "title": _text(title, "title")}
     for name, value in changes.items():
         if name.endswith("_urls"):
-            targets = ({"gdrive"} | _manual_destinations()) if name == "published_urls" else {"gdocs", "gdocs_digest"}
             if not isinstance(value, dict) or any(not isinstance(key, str) for key in value):
                 raise WorkflowError(f"{name} must be a destination mapping")
             for target, url in value.items():
