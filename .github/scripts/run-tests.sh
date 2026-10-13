@@ -679,6 +679,11 @@ for shard in "${shards[@]}"; do
   fi
 done
 
+# sd:3487: the ten slowest shards end the log, so the gate's own log says which
+# dominate. Indented, so a `^shard` parse never reads one as a shard's end line.
+slowest="$(grep '^shard .*: [0-9]*s exit=' "$run_log" | sort -t ' ' -k 3,3rn | head -n 10 | sed 's/^/  /')"
+printf '\nslowest shards:\n%s\n' "$slowest" >> "$run_log" || assembly_status=1
+
 if [ "$assembly_status" -ne 0 ]; then
   printf '%s\n' \
     "error: could not assemble this run's log under $work_dir; nothing was published." >&2

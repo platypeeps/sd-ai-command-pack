@@ -58,7 +58,6 @@ class TheLibrary(unittest.TestCase):
             venv = pathlib.Path(tmp) / ".venv"
             venv.mkdir()
             with mock.patch.object(provision, "VENV", venv), \
-                    mock.patch.object(provision, "require_opencode", return_value="opencode"), \
                     mock.patch.object(provision, "clear_venv"), \
                     mock.patch.object(provision, "run", side_effect=seen.append), \
                     mock.patch("sys.stdout"):
@@ -72,27 +71,32 @@ class TheLibrary(unittest.TestCase):
         self.assertFalse((REPO_ROOT / ".sd-system-rev").exists())
 
 
-class TheOpencodePinIsWrittenOnce(unittest.TestCase):
-    """sd:1557. The opencode version and checksum live in one script."""
+class NoLiveThirdPartyBinary(unittest.TestCase):
+    """sd:3486. The gate never depends on which opencode the machine holds: a
+    missing binary or a new major failed every pack gate through the skip check."""
 
-    def test_the_opencode_version_and_checksum_are_written_once(self) -> None:
-        definitions = re.compile(r"(?m)^\s*(OPENCODE_VERSION|OPENCODE_SHA256)\s*[:=]")
-        found = sorted(
-            (str(path.relative_to(REPO_ROOT)), name)
-            for path in (REPO_ROOT / ".github").rglob("*")
-            if path.is_file()
-            for name in definitions.findall(path.read_text(encoding="utf-8", errors="replace")))
-        self.assertEqual(found, [(".github/scripts/install-opencode.sh", "OPENCODE_SHA256"),
-                                 (".github/scripts/install-opencode.sh", "OPENCODE_VERSION")])
+    def test_the_gate_environment_builds_without_opencode(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            venv = pathlib.Path(tmp) / ".venv"
+            venv.mkdir()
+            with mock.patch.object(provision, "VENV", venv), \
+                    mock.patch.object(provision.shutil, "which", return_value=None), \
+                    mock.patch.object(provision, "clear_venv"), \
+                    mock.patch.object(provision, "run"), \
+                    mock.patch("sys.stdout"), mock.patch("sys.stderr"):
+                self.assertEqual(provision.main(["provision-gate-env.py", sys.executable]), 0)
+
+    def test_no_gate_module_skips_on_an_installed_binary(self) -> None:
+        """A test that needs a third-party binary is an opt-in probe outside
+        `tests/test_*.py`, such as `tests/opencode_escape_probe.py`."""
+        gated = re.compile(r"^\s*@unittest\.skipUnless\(shutil\.which\(", re.MULTILINE)
+        modules = [*(REPO_ROOT / "tests").glob("test_*.py"), *(REPO_ROOT / "tests" / "sd_db").glob("test_*.py")]
+        found = sorted(path.name for path in modules if gated.search(path.read_text(encoding="utf-8")))
+        self.assertEqual(found, [])
+        self.assertTrue(gated.search((REPO_ROOT / "tests" / "opencode_escape_probe.py").read_text(encoding="utf-8")))
 
 
 class TheRefusals(unittest.TestCase):
-    def test_without_opencode_the_gate_fails_naming_the_installer(self) -> None:
-        done = subprocess.run([sys.executable, str(SCRIPT)], capture_output=True, text=True, check=False,
-                              env={**os.environ, "PATH": "/nonexistent"})
-        self.assertEqual(done.returncode, 1)
-        self.assertIn("install-opencode.sh", done.stderr)
-
     def test_a_linked_or_foreign_venv_is_refused_and_left_alone(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

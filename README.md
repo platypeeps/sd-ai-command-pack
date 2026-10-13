@@ -252,8 +252,8 @@ or a row on `main` or `master`, closes as before.
 
 A task that repeats carries a rule:
 `sd task add "File the weekly report" --due 2026-01-01 --recur FREQ=WEEKLY`.
-The rule is an RRULE subset (`FREQ`, `INTERVAL`, `BYMONTH`, `BYMONTHDAY`) and
-needs a due date. `--recur-anchor schedule`, the default, dates the next
+The rule is an RRULE subset (`FREQ`, `INTERVAL`, `BYMONTH`, `BYMONTHDAY`, and
+`BYDAY` weekdays on `WEEKLY`) and needs a due date. `--recur-anchor schedule`, the default, dates the next
 occurrence from the last due date; `completion` dates it from the day the task
 was done. Completing the task creates the next row and moves the rule to it,
 and `sd task status` prints `next occurrence: #N · due D`, or `recurrence
