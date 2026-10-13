@@ -1011,6 +1011,15 @@ class ConsentPromptTests(InstallerHarness):
         self.assertIn("no enabled reviewer entry", output)
         self.assertIsNone(self.consent_line(repo))
 
+    def test_an_unreadable_registry_names_its_reason_not_nobody_enabled(self):
+        """sd:3494: a typo in providers.yaml read as 'nobody is enabled'."""
+        self.seed_registry("providers: [\n")
+        reason = self.registry().read_or_report(self.home / sd_install.REGISTRY_RELATIVE)[1]
+        self.assertTrue(reason)
+        rc, output = self.run_cli("--repo", str(self.make_repo("typo")))
+        self.assertEqual(rc, 0)
+        self.assertIn(f"no enabled reviewer entry to offer ({reason})", output)
+
     # -- asked once, kept ever after -----------------------------------
 
     def test_a_rerun_keeps_the_answer_and_asks_nothing(self):
@@ -1776,14 +1785,14 @@ class HookEdgeCaseTests(InstallerHarness):
         path.write_text("[]", encoding="utf-8")
         with self.assertRaises(SystemExit) as caught:
             sd_install.install_hook(path, self.spec())
-        self.assertIn("not a JSON object", str(caught.exception))
+        self.assertIn("not a JSON object; fix or move it, then re-run.", str(caught.exception))
 
     def test_a_non_object_hooks_key_is_refused(self):
         path = self.settings_path()
         path.write_text(json.dumps({"hooks": []}), encoding="utf-8")
         with self.assertRaises(SystemExit) as caught:
             sd_install.install_hook(path, self.spec())
-        self.assertIn("non-object 'hooks'", str(caught.exception))
+        self.assertIn("non-object 'hooks' key; fix or move it, then re-run.", str(caught.exception))
 
     def test_a_non_list_session_start_is_refused(self):
         path = self.settings_path()
@@ -1929,6 +1938,33 @@ class StatusTests(InstallerHarness):
         target.unlink()
         _, output = self.run_cli("--status")
         self.assertIn("1 missing", output)
+
+    def test_status_counts_a_modified_agent(self):
+        """sd:3494: `--user` renders agents too, so `--status` compares them."""
+        self.install()
+        agent = next((self.home / ".claude" / "agents").glob("sd-*.md"))
+        agent.write_text("edited\n", encoding="utf-8")
+        _, output = self.run_cli("--status")
+        self.assertIn("0 missing, 1 modified", output)
+
+    def test_status_names_registry_entries_the_two_files_do_not_share(self):
+        """sd:3494: the registry is seeded once, so a shipped entry stayed unseen until merged by hand."""
+        self.install()
+        shipped = (REPO_ROOT / sd_install.REGISTRY_NAME).read_text(encoding="utf-8")
+        # An entry no role list names, so the renamed copy still parses.
+        providers = sd_install.sibling("sd_registry").parse(shipped).providers
+        name = sorted(key for key, entry in providers.items() if not entry.ranks)[0]
+        target = self.home / sd_install.REGISTRY_RELATIVE
+        head, _, tail = shipped.partition("\nproviders:")
+        target.write_text(head + "\nproviders:" + tail.replace(f"\n  {name}:", f"\n  {name}-local:", 1),
+                          encoding="utf-8")
+        _, output = self.run_cli("--status")
+        self.assertIn(f"registry: shipped, not in {target}: {name}; merge by hand, --user never overwrites it",
+                      output)
+        self.assertIn(f"registry: in {target}, not shipped: {name}-local", output)
+        target.write_text("providers: [\n", encoding="utf-8")
+        _, output = self.run_cli("--status")
+        self.assertIn("registry: not compared (", output)
 
     def test_metadata_refusal_reports_unknown_comparisons_without_cleanup_advice(self):
         checkout = self.committed_checkout()
@@ -2683,6 +2719,7 @@ class ServeTests(InstallerHarness):
         rc, output = self.serve()
         self.assertEqual(rc, 1)
         self.assertIn("has no origin remote", output)
+        self.assertIn("add one with `git remote add origin <url>`", output)
         self.assertFalse(self.tree.exists())
 
     def test_serve_refuses_a_path_that_is_not_a_clone(self):
@@ -4645,6 +4682,22 @@ class StrictVerificationTests(InstallerHarness):
         out = io.StringIO()
         self.assertEqual(sd_install.cmd_verify(self.ctx, out), 1)
         self.assertIn("receipt_missing_or_unreadable", out.getvalue())
+
+    def test_text_mode_names_the_detail_and_the_remedy(self):
+        """sd:3494: text mode printed `component: code` alone; JSON held the rest."""
+        data = json.loads(self.ctx.receipt.read_bytes())
+        data["checkout"] = "/foreign"
+        self.ctx.receipt.write_text(json.dumps(data))
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_verify(self.ctx, out), 1)
+        self.assertIn("  receipt: receipt_foreign_checkout (recorded=/foreign)\n    fix: ", out.getvalue())
+        data["checkout"] = str(self.ctx.checkout)
+        self.ctx.receipt.write_text(json.dumps(data))
+        render = self.home / ".claude" / "skills" / "sd-probe" / "SKILL.md"
+        render.write_text("edited\n", encoding="utf-8")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_verify(self.ctx, out), 1)
+        self.assertIn(f"  render: render_modified (path={render})\n    fix: move it aside", out.getvalue())
 
     def test_source_mismatch_dirty_and_unreadable_refuse_smoke(self):
         receipt = self.receipt

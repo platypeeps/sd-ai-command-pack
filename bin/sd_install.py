@@ -856,18 +856,18 @@ def install_hook(settings: Path, specs, *, dry_run: bool = False) -> bool:
             "fix or move it, then re-run."
         ) from None
     if not isinstance(data, dict):
-        raise SystemExit(f"error: {settings} is not a JSON object.")
+        raise SystemExit(f"error: {settings} is not a JSON object; fix or move it, then re-run.")
 
     hooks = data.setdefault("hooks", {})
     if not isinstance(hooks, dict):
-        raise SystemExit(f"error: {settings} has a non-object 'hooks' key.")
+        raise SystemExit(f"error: {settings} has a non-object 'hooks' key; fix or move it, then re-run.")
 
     changed = False
     for command, event, matchers in specs:
         groups = hooks.setdefault(event, [])
         if not isinstance(groups, list):
             raise SystemExit(
-                f"error: {settings} has a non-list '{event}' hook list."
+                f"error: {settings} has a non-list '{event}' hook list; fix or move it, then re-run."
             )
         for matcher in matchers:
             group = None
@@ -882,7 +882,7 @@ def install_hook(settings: Path, specs, *, dry_run: bool = False) -> bool:
             entries = group.setdefault("hooks", [])
             if not isinstance(entries, list):
                 raise SystemExit(
-                    f"error: {settings} {event}/{matcher} has a non-list 'hooks'."
+                    f"error: {settings} {event}/{matcher} has a non-list 'hooks'; fix or move it, then re-run."
                 )
             if any(
                 isinstance(entry, dict) and entry.get("command") == command
@@ -1687,11 +1687,15 @@ def standing_consent(repo: Path) -> str | None:
     return None if value == lib.parse_scalars(DEFAULT_BLOCK_BODY, comments=True).get(CONSENT_KEY) else value
 
 
-def consent_offers(ctx: Context) -> list:
-    """Every enabled reviewer entry beside the recipient it reaches today."""
+def consent_offers(ctx: Context) -> tuple[list, str]:
+    """Every enabled reviewer entry beside the recipient it reaches today, and why there are none.
+
+    The reason is the registry's refusal, empty when it read: a typo in
+    `providers.yaml` otherwise reads as nobody enabled (sd:3494).
+    """
     sd_registry = sibling("sd_registry")
-    found, _ = sd_registry.read_or_report(sd_registry.registry_path(ctx.home))
-    return [sd_registry.recipient(entry) for entry in found.order("reviewer")]
+    found, reason = sd_registry.read_or_report(sd_registry.registry_path(ctx.home))
+    return [sd_registry.recipient(entry) for entry in found.order("reviewer")], reason
 
 
 def reads_back(line: str, chosen: list) -> bool:
@@ -1768,9 +1772,10 @@ def repo_consent(ctx: Context, repo: Path, answer: str | None, out) -> str | Non
     if answer is None and sibling("sd_lib").core_setting("external_reviews", env) is not None:
         print("repository inherits the operator's external review policy", file=out)
         return None
-    offers = consent_offers(ctx)
+    offers, reason = consent_offers(ctx)
     if not offers:
-        print(f"no enabled reviewer entry to offer; no {CONSENT_KEY} line", file=out)
+        print(f"no enabled reviewer entry to offer{f' ({reason})' if reason else ''}; no {CONSENT_KEY} line",
+              file=out)
         if answer is not None:
             raise sibling("sd_lib").ConfigError("no offered reviewer matches; local block left unchanged")
         return None
@@ -1823,6 +1828,28 @@ def seed_registry(ctx: Context) -> tuple[bool, str]:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
     return True, f"provider registry seeded at {target}"
+
+
+def registry_drift(ctx: Context) -> list[str]:
+    """`--status` lines naming the entries the home registry and the shipped one do not share.
+
+    `seed_registry` copies the file once and never again, so a reviewer the
+    pack ships later stays unseen until merged by hand (sd:3494).
+    """
+    sd_registry = sibling("sd_registry")
+    target = ctx.home / REGISTRY_RELATIVE
+    try:
+        shipped = set(sd_registry.read_file(sd_registry.shipped_path(ctx.checkout)).providers)
+        here = set(sd_registry.read_file(target).providers)
+    except sd_registry.RegistryError as error:
+        return [f"registry: not compared ({error})"]
+    lines = []
+    if shipped - here:
+        lines.append(f"registry: shipped, not in {target}: {', '.join(sorted(shipped - here))}; "
+                     "merge by hand, --user never overwrites it")
+    if here - shipped:
+        lines.append(f"registry: in {target}, not shipped: {', '.join(sorted(here - shipped))}")
+    return lines
 
 
 def open_library(ctx: Context):
@@ -2255,6 +2282,14 @@ VERIFY_HELP_COMMANDS = frozenset({"sd", "sd-review", "sd-ship"})
 VERIFY_TIMEOUT = 5
 
 
+#: The next step for the failures an operator meets most; text mode prints it under the code (sd:3494).
+VERIFY_REMEDIES = {
+    "receipt_foreign_checkout": "the last install ran from the recorded checkout; verify there, or run --user here",
+    "source_commit_changed": "the checkout moved since the last install; run `make setup` to render it",
+    "render_modified": "move it aside, then run `make setup` to render it again",
+}
+
+
 def verify_result(component: str, code: str = "ok", **details) -> dict:
     return {"component": component, "status": "passed" if code == "ok" else "failed",
             "code": code, **details}
@@ -2290,7 +2325,7 @@ def verify_receipt(ctx: Context, receipt: dict) -> dict:
     if type(receipt.get("schema")) is not int or receipt.get("schema") != RECEIPT_SCHEMA:
         return verify_result("receipt", "receipt_schema_unsupported")
     if receipt.get("checkout") != str(ctx.checkout):
-        return verify_result("receipt", "receipt_foreign_checkout")
+        return verify_result("receipt", "receipt_foreign_checkout", recorded=receipt.get("checkout"))
     entries = receipt.get("owned")
     if not isinstance(entries, list) or not entries:
         return verify_result("receipt", "receipt_malformed")
@@ -2461,7 +2496,11 @@ def cmd_verify(ctx: Context, out, *, as_json: bool = False) -> int:
             print(f"  {serving_line(behind)}", file=out)
         for check in checks:
             if check["status"] == "failed":
-                print(f"  {check['component']}: {check['code']}", file=out)
+                extra = ", ".join(f"{key}={value}" for key, value in check.items()
+                                  if key not in ("component", "status", "code"))
+                print(f"  {check['component']}: {check['code']}" + (f" ({extra})" if extra else ""), file=out)
+                if check["code"] in VERIFY_REMEDIES:
+                    print(f"    fix: {VERIFY_REMEDIES[check['code']]}", file=out)
     return 0 if passed else 1
 
 
@@ -2513,10 +2552,14 @@ def cmd_status(ctx: Context, out) -> int:
 
     surfaces = discover_surfaces(ctx.checkout)
     try:
-        expected = {
-            str(item.path): item.sha256
-            for item in render(surfaces, ctx.homes, dry_run=True)
-        }
+        # What `--user` renders: agents too, and installed trials once the
+        # receipt is this checkout's (sd:3494).
+        if verify_receipt(ctx, receipt)["status"] == "passed":
+            planned = verification_payload(ctx, receipt)
+        else:
+            planned = (render_plan(surfaces, ctx.homes, "skill")
+                       + render_plan(discover_agents(ctx.checkout), ctx.agents, "agent"))
+        expected = {str(path): digest(data) for path, data, _ in planned}
     except MetadataRefused as error:
         print(f"surfaces: metadata cannot render ({error})", file=out)
         print(f"surfaces: {len(surfaces)} in checkout; rendered comparison unavailable", file=out)
@@ -2537,6 +2580,8 @@ def cmd_status(ctx: Context, out) -> int:
         file=out,
     )
     print(command_report(ctx.checkout, ctx.environ), file=out)
+    for line in registry_drift(ctx):
+        print(line, file=out)
 
     # A dry run of the retirement `--user` performs, so the two cannot disagree
     # about which copies count as unmodified.
@@ -2660,8 +2705,8 @@ def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
     """
     code, url, err = _git(ctx, ["remote", "get-url", "origin"])
     if code or not url:
-        print(f"error: {ctx.checkout} has no origin remote to clone the serving checkout from{': ' + err if err else ''}",
-              file=out)
+        print(f"error: {ctx.checkout} has no origin remote to clone the serving checkout from{': ' + err if err else ''}; "
+              "add one with `git remote add origin <url>`, then re-run.", file=out)
         return False
     # A relative local path, such as `../pack.git`, names a place from the
     # checkout, and the clone runs elsewhere (sd:2913). A `scheme://` URL and

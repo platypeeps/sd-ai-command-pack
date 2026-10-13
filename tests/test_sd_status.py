@@ -1626,8 +1626,15 @@ class BackendTests(StatusFixture):
         alone, so `gh` is not found either.
         """
         rows = self.backends()
-        self.assertEqual([entry["backend"] for entry in rows], ["copilot"])
-        self.assertEqual(rows[0]["state"], "absent")
+        self.assertEqual([entry["backend"] for entry in rows], ["registry", "copilot"])
+        self.assertTrue(rows[0]["state"].startswith("unreadable (no provider registry at "))
+        self.assertEqual(rows[1]["state"], "absent")
+
+    def test_an_unreadable_registry_says_why(self) -> None:
+        """sd:3494: a typo in providers.yaml listed no backend and said nothing."""
+        self.seed_registry().write_text("providers: [\n", encoding="utf-8")
+        rows = {entry["backend"]: entry["state"] for entry in self.backends()}
+        self.assertTrue(rows["registry"].startswith("unreadable ("), rows)
 
 
 class RepoResolutionTests(StatusFixture):

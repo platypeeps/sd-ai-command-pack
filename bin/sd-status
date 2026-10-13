@@ -1179,9 +1179,9 @@ def backends_section(root: pathlib.Path) -> list[dict[str, str]]:
 
     The lanes come from the provider registry at runtime, so a reviewer added
     to `providers.yaml` appears here without an edit and one removed stops
-    being claimed. An unreadable or absent registry reports no registry lane
-    rather than failing the section; `sd-review --explain` is where a missing
-    registry is a refusal.
+    being claimed. An unreadable or absent registry reports one `registry`
+    row with its reason rather than failing the section (sd:3494);
+    `sd-review --explain` is where a missing registry is a refusal.
 
     Deliberately shallow: this asks the filesystem and, for `gh`, the one local
     command that answers without a network call. It is not a substitute for the
@@ -1189,8 +1189,10 @@ def backends_section(root: pathlib.Path) -> list[dict[str, str]]:
     backend will actually run -- and which land with `sd-review` at step 3c.
     Authentication is reported as a state, never as a credential.
     """
-    registry, _reason = sd_registry.read_or_report(with_database=True)
+    registry, reason = sd_registry.read_or_report(with_database=True)
     found = [_provider_row(provider) for provider in registry.providers.values()]
+    if reason:
+        found.append({"backend": "registry", "command": "", "state": f"unreadable ({reason})"})
     for name, executable in UNREGISTERED:
         if shutil.which(executable) is None:
             state = "absent"
