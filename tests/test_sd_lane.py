@@ -1298,6 +1298,77 @@ class Landing(Lane):
         self.assertEqual(answer.get("post_merge"), f"make post-merge passed in {self.repo}")
         self.assertTrue((self.repo / "ran").exists())
 
+    def pin_at_a_base_without_the_target(self) -> str:
+        """The real bootstrap: origin/main tracks a Makefile with no `post-merge`; the main checkout is pinned there."""
+        (self.repo / "Makefile").write_text("other:\n\t@echo other\n", encoding="utf-8")
+        git(self.repo, "add", "Makefile")
+        git(self.repo, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "-m", "base")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(self.repo, "switch", "-q", "--detach")
+        return git(self.repo, "rev-parse", "HEAD")
+
+    def land_a_makefile_with_the_target(self) -> str:
+        upstream = self.tmp / "upstream"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(upstream)], check=True, env=clean_environment())
+        (upstream / "Makefile").write_text("post-merge:\n\ttouch ran\n", encoding="utf-8")
+        git(upstream, "add", "Makefile")
+        git(upstream, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "-m", "target")
+        git(upstream, "push", "-q", "origin", "main")
+        return git(upstream, "rev-parse", "HEAD")
+
+    def test_a_checkout_pinned_at_a_base_without_the_target_moves_to_the_merge_and_runs_it(self) -> None:
+        """sd:3647. The first landing cannot rely on the old Makefile: the lane moves a clean pinned checkout to
+        the merge first, then reads the target from the new Makefile."""
+        tree, head = self.topic()
+        base = self.pin_at_a_base_without_the_target()
+        landed = self.land_a_makefile_with_the_target()
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertNotEqual(base, landed)
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), landed)
+        self.assertEqual(git(self.repo, "branch", "--show-current"), "")
+        self.assertEqual(answer.get("post_merge"), f"make post-merge passed in {self.repo}")
+        self.assertTrue((self.repo / "ran").exists())
+
+    def left_alone(self, spoil, reason: str) -> None:
+        tree, head = self.topic()
+        self.pin_at_a_base_without_the_target()
+        landed = self.land_a_makefile_with_the_target()
+        spoil()
+        before = git(self.repo, "rev-parse", "HEAD")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertNotEqual(before, landed)
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), before)
+        self.assertTrue(answer["post_merge"].startswith("make post-merge skipped:"), answer["post_merge"])
+        self.assertIn(reason, answer["post_merge"])
+        self.assertFalse((self.repo / "ran").exists())
+        self.assertEqual(self.note_kinds[-1], "followup")
+
+    def test_a_pinned_checkout_the_tools_run_from_waits_for_a_busy_lane_and_never_blocks(self) -> None:
+        tree, head = self.topic()
+        base = self.pin_at_a_base_without_the_target()
+        self.land_a_makefile_with_the_target()
+        self.merge_lands(tree, 1, head)
+        other = self.root / "system/lane/queue/runner.lock"
+        other.parent.mkdir(parents=True)
+        with open(other, "a", encoding="utf-8") as held, mock.patch.object(sd_lane, "BIN", self.repo / "bin"):
+            fcntl.flock(held, fcntl.LOCK_EX)
+            started = time.monotonic()
+            answer = self.drain()
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), base)
+        self.assertIn("the system lane is running from", answer["post_merge"])
+        self.assertFalse((self.repo / "ran").exists())
+
+    def test_a_dirty_pinned_checkout_is_left_alone_and_says_why(self) -> None:
+        self.left_alone(lambda: (self.repo / "Makefile").write_text("edited\n", encoding="utf-8"),
+                        "uncommitted changes")
+
+    def test_a_pinned_checkout_that_is_not_an_ancestor_is_left_alone_and_says_why(self) -> None:
+        self.left_alone(lambda: git(self.repo, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit",
+                                    "-q", "--allow-empty", "-m", "local"), "not an ancestor")
+
 class Killed(BaseException):
     """A process killed between two steps: nothing after the raise runs, and no `except Exception` catches it."""
 

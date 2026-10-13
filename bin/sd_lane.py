@@ -1542,6 +1542,45 @@ def post_merge(root: pathlib.Path, environ: dict[str, str], answer: dict[str, An
     return {**answer, "post_merge": ran}
 
 
+def pin_forward(main: pathlib.Path, environ: dict[str, str]) -> str | None:
+    """Move a pinned checkout whose Makefile has no `post-merge` to origin's default branch when that one has it.
+
+    None when nothing needed moving or it moved; else the reason it stayed, as the
+    `make post-merge skipped` line. Only a clean checkout at an ancestor of the
+    tip moves, detached, as `repo-sync.sh refresh` would; anything else is left
+    for the operator. A failed read is an unknown answer, never "no target".
+    """
+    where = f"the pinned checkout {main}"
+    if lane_git(main, "fetch", "-q", "origin") is None:
+        return f"make post-merge unknown: git fetch failed in {where}"
+    names = [(lane_git(main, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or "").removeprefix("origin/"),
+             "main", "master"]
+    tip = next((ref for ref in (lane_git(main, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{name}")
+                                for name in names if name) if ref), None)
+    if tip is None:
+        return f"make post-merge unknown: no origin/HEAD, origin/main or origin/master in {where}"
+    listed = lane_git(main, "ls-tree", tip, "--", "Makefile")
+    shown = lane_git(main, "show", f"{tip}:Makefile") if listed else ""
+    if listed is None or shown is None:
+        return f"make post-merge unknown: origin's Makefile could not be read in {where}"
+    if not POST_MERGE_RULE.search(shown):
+        return None
+    head = lane_git(main, "rev-parse", "HEAD")
+    if head == tip:
+        return None
+    if lane_git(main, "merge-base", "HEAD", tip) != head:
+        return f"make post-merge skipped: {where} at {str(head)[:12]} is not an ancestor of origin's default branch"
+    if lane_git(main, "status", "--porcelain", "--untracked-files=no") != "":
+        return f"make post-merge skipped: {where} has uncommitted changes"
+    guarded = BIN.is_relative_to(main)  # the lanes run their tools from here, as in `fast_forward`
+    with other_lanes_idle(lane_root(environ)) if guarded else contextlib.nullcontext() as busy:
+        if busy:
+            return f"make post-merge skipped: the {busy} lane is running from {where}; the next landing retries"
+        if lane_git(main, "switch", "-q", "--detach", "--no-overwrite-ignore", tip) is None:
+            return f"make post-merge skipped: git switch to {tip[:12]} failed in {where}"
+    return None
+
+
 def make_post_merge(main: pathlib.Path, environ: dict[str, str], moved: str) -> str | None:
     """`make post-merge` in the main checkout the last landing fast-forwarded, when its Makefile has that rule.
 
@@ -1551,16 +1590,26 @@ def make_post_merge(main: pathlib.Path, environ: dict[str, str], moved: str) -> 
     `POST_MERGE_SECONDS` bound is reported; the run group ends the target's
     children at the bound.
     """
-    try:
-        if not POST_MERGE_RULE.search((main / "Makefile").read_text(encoding="utf-8", errors="replace")):
-            return None
-    except FileNotFoundError:
-        return None
-    except OSError as error:  # unknown, not "no rule": say so
-        return f"make post-merge unknown: {main / 'Makefile'} could not be read: {error}"
     # A pinned (detached) checkout is never fast-forwarded: `repo-sync.sh refresh`, which the target runs,
     # moves it instead (sd:3647). Any other state that did not fast-forward holds the old code.
     pinned = not lane_git(main, "branch", "--show-current") and lane_git(main, "rev-parse", "--verify", "HEAD")
+    makefile = main / "Makefile"
+    try:
+        has_rule = bool(POST_MERGE_RULE.search(makefile.read_text(encoding="utf-8", errors="replace")))
+    except FileNotFoundError:
+        has_rule = False
+    except OSError as error:  # unknown, not "no rule": say so
+        return f"make post-merge unknown: {makefile} could not be read: {error}"
+    if pinned and not has_rule:  # the pin may predate the target: it cannot upgrade itself (sd:3647)
+        skipped = pin_forward(main, environ)
+        if skipped is not None:
+            return skipped
+        try:
+            has_rule = bool(POST_MERGE_RULE.search(makefile.read_text(encoding="utf-8", errors="replace")))
+        except OSError as error:
+            return f"make post-merge unknown: {makefile} could not be read: {error}"
+    if not has_rule:
+        return None
     if not (moved.startswith("fast-forwarded") or pinned):
         return f"make post-merge skipped: the main checkout did not fast-forward ({moved})"
     try:
