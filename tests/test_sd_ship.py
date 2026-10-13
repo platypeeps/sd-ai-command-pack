@@ -2608,6 +2608,30 @@ roles:
         with patch.object(ship.time, "sleep"):
             self.assert_closed_by_merge(self.merge())
 
+    def test_a_design_only_branch_cannot_deliver_its_build_item(self):
+        """sd:3519. PR #260 changed docs/work/ and CLAUDE.md, merged with
+        `--deliver`, and closed two build items nobody built. A branch of
+        design records and instruction files associates; the build delivers."""
+        self.tiered_branch({"docs/work/2026-10-12-example/design.md": "---\nitem: sd:1\n---\n\ndesign\n",
+                            "CLAUDE.md": "rules\n"})
+        self.task_item("task")
+        self.connection.execute("UPDATE item SET branch = 'tiered' WHERE id = ?", (self.item,))
+        self.connection.commit()
+        with self.assertRaisesRegex(ship.Refusal, r"design records.*--associate-only") as caught:
+            self.unanswered("--deliver", "--title", "design").prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "design_only_delivery")
+        self.assertEqual(receipts.read(self.connection, receipts.receipt_key(self.remote.slug, "tiered", self.item)), (0, {}))
+        self.assertFalse([call for call in self.remote.calls if call.method in ("POST", "PUT", "PATCH")])
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.unanswered("--associate-only", "--title", "design").prepare()
+        self.assertFalse(self.operation().state["deliver"])
+
+    def test_design_only_needs_a_design_record_and_nothing_built(self):
+        self.assertTrue(ship.design_only(["docs/work/x/design.md", "AGENTS.md", ".claude/rules/a.md"]))
+        for paths in (["CLAUDE.md"], ["docs/work/x/design.md", "bin/sd"], ["docs/work/x/design.md", "README.md"], []):
+            with self.subTest(paths=paths):
+                self.assertFalse(ship.design_only(paths))
+
     def test_prepare_names_other_work_on_the_item_or_its_files_and_refuses_nothing(self):
         """sd:1151. #1120 and #1122 fixed one defect from two sessions; both
         branches were on origin first. Prepare names each overlap before the
