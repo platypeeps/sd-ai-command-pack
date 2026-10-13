@@ -371,9 +371,9 @@ def _rewrite(text: str, changes: dict, *, remove: tuple[str, ...] = ()) -> str:
         replacement = f"{name}: {encoded}"
         if isinstance(value, dict):
             replacement = f"{name}:" + "".join(f"\n  {key}: {json.dumps(held, ensure_ascii=False)}" for key, held in value.items())
-        pattern = rf"(?m)^{re.escape(name)}:.*(?:\n[ \t]+[^\n]*)*"
-        if re.search(pattern, head):
-            head = re.sub(pattern, lambda _: replacement, head, count=1)
+        found = re.search(rf"(?m)^{re.escape(name)}:.*(?:\n[ \t]+[^\n]*)*", head)
+        if found:
+            head = head[:found.start()] + replacement + head[found.end():]
         else:
             head += "\n" + replacement
     return head + separator + body
