@@ -2851,7 +2851,7 @@ class LaneTests(InventoryFixture):
                 seen.append(kwargs.get("env") or {})
             return real(argv, *args, **kwargs)
 
-        self.enterContext(mock.patch.object(status.subprocess, "run", side_effect=recording))
+        self.enterContext(mock.patch.object(status.sd_lib.subprocess, "run", side_effect=recording))
         status._origin_heads(self.repo)
         self.assertEqual([env.get("GIT_TERMINAL_PROMPT") for env in seen], ["0"])
 

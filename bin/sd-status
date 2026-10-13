@@ -45,7 +45,6 @@ import pathlib
 import re
 import shlex
 import shutil
-import subprocess
 import sys
 from typing import Any, NamedTuple, TextIO
 
@@ -2835,19 +2834,11 @@ def _origin_heads(root: pathlib.Path) -> set[str] | None:
     that has outlived its branch, is not a move this tool can make. One call
     per root, never one per item.
     """
-    # Bounded and without a prompt: a dead network or a credential helper
-    # must not hang a read-only report (sd:3495).
-    try:
-        done = subprocess.run(  # fixed argv, no shell
-            ["git", "ls-remote", "--heads", "origin"], cwd=str(root), capture_output=True, text=True,
-            timeout=sd_lib.GIT_TIMEOUT_SECONDS, check=False,
-            env={**sd_lib.without_fsmonitor(os.environ), "GIT_TERMINAL_PROMPT": "0"},
-        )
-    except (OSError, subprocess.SubprocessError):
+    # Through sd_lib's one git policy (timeout, no shell, failure is None): a dead
+    # network must not hang a read-only report (sd:3495).
+    listing = sd_lib.git_output(["ls-remote", "--heads", "origin"], root)
+    if listing is None:
         return None
-    if done.returncode:
-        return None
-    listing = done.stdout
     return {
         line.split("refs/heads/", 1)[1]
         for line in listing.splitlines() if "refs/heads/" in line
