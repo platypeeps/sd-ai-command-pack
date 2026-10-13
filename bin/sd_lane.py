@@ -5,8 +5,9 @@ shell scripts kept in its scratchpad. The chain died with the session, and a
 second chain started beside it raced it. This keeps the chain in the hub
 database and runs it under one runner lock per repository:
 
-  enqueue  publish the head, then add a worktree, its item, branch and head,
-           a title and the body text to the repository's queue;
+  enqueue  check the item as prepare would (sd:3473), publish the head, then
+           add a worktree, its item, branch and head, a title and the body
+           text to the repository's queue;
   list     print the queue, each body as its size;
   cancel   mark a pending entry cancelled, or release a stuck running one;
            `--expected-claim <holder token>:<step>` releases only the
@@ -612,8 +613,9 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     `claim` is prepare's delivery choice, `deliver` or `associate-only`, and
     is refused when absent as prepare refuses it; it reaches prepare
     unchanged. The entry holds the body and acceptance texts, not their
-    paths. The head is published first (`publish_head`); any answer but published
-    refuses, and nothing is queued.
+    paths. The item is checked as prepare checks it (`check_item`), then the
+    head is published (`publish_head`); any answer but published refuses,
+    and nothing is queued.
     """
     worktree = worktree.resolve()
     sd_lib.refuse_unmanaged(worktree, LaneError)  # its prepare would refuse; do not queue it
@@ -634,13 +636,52 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     # Read first: a hub that does not answer, or an item already queued, refuses before anything is pushed.
     if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in read_queue(queue)):
         raise LaneError(f"sd:{item} is already queued in this lane")
+    body = body_file.read_text(encoding="utf-8")
+    on_hub(queue, lambda connection: check_item(connection, worktree, item, title, body, claim))
     entry = {"id": entry_id(), "repository": queue.repository, "item": item, "branch": branch, "expected_head": head,
-             "title": title, "body": body_file.read_text(encoding="utf-8"),
+             "title": title, "body": body,
              "acceptance": acceptance_file.read_text(encoding="utf-8") if acceptance_file else None,
              "authority": "manual" if manual else None, "claim": claim, "enqueued_on": this_host(),
              "worktree": str(worktree), "status": "pending", "enqueued_at": stamp_now()}
     require_published(worktree, branch, head, f"{head} names no commit in {worktree}")
     return add_entry(queue, entry)
+
+
+def check_item(connection: Any, worktree: pathlib.Path, item: int, title: str, body: str, claim: str | None) -> None:
+    """Refuse what prepare refuses on the item before it reviews, so the entry never waits for it (sd:3473).
+
+    Each refused in seconds once the entry reached the head of the queue,
+    3 to 32 minutes after enqueue: an item with no registered repository
+    (`sd_db.ship.identity`), an item of another repository than `worktree`'s
+    origin (`foreign_item`), and a `Closes:` line or a title naming an item
+    the merge could not close (`sd_ship_body.refuse_unclosable`). These are
+    prepare's own reads, and prepare makes them again; a hub fault still
+    refuses `HUB_UNAVAILABLE` through `on_hub`.
+    """
+    require_sd_db()
+    import sd_ship_body  # noqa: PLC0415
+    from sd_db import ship  # noqa: PLC0415
+    from sd_db.workflow import WorkflowError  # noqa: PLC0415
+    from sd_ship_no_item import foreign_item  # noqa: PLC0415
+    from sd_ship_remote import Refusal, slug  # noqa: PLC0415
+
+    def github(remote: str) -> str | None:
+        try:
+            return slug(remote)
+        except Refusal:
+            return None
+    try:
+        info = ship.identity(connection, item)
+    except WorkflowError as error:
+        raise LaneError(f"sd:{item}: {error}; nothing was queued") from None
+    own = github(lane_git(worktree, "config", "--get", "remote.origin.url") or "")
+    registered = github(info["repo"]["remote"] or "")
+    try:
+        if registered is None or registered != own:
+            raise foreign_item(item, registered or info["repo"]["path"], str(own), "prepare")
+        sd_ship_body.refuse_unclosable(connection, item, info["item"]["repo"], body, title, claim == "deliver")
+    except Refusal as error:
+        raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
 
 
 def pending_entry(entries: list[dict[str, Any]], item: int) -> dict[str, Any]:
@@ -839,8 +880,9 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
 
     A new entry with the old one's branch, title, claim, texts and worktree
     hint, at its head, or at prepare's catch-up of it (`caught_up`) when the
-    worktree is on this host. The head is published now (`publish_head`); a
-    refusal queues nothing and the old entry stays blocked. `manual` grants
+    worktree is on this host. The item is checked as enqueue checks it
+    (`check_item`, sd:3473), and the head is published now (`publish_head`);
+    a refusal queues nothing and the old entry stays blocked. `manual` grants
     the merge as `enqueue --manual` does; an entry that had that grant keeps
     it. The old entry stays as history.
 
@@ -887,6 +929,8 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     if cancelled:
         branch_unmoved(root, last)
         check_unmerged(root, queue, last)
+    on_hub(queue, lambda connection: check_item(connection, root, item, str(last.get("title") or ""), last["body"],
+                                                last.get("claim")))
     worktree, head = pathlib.Path(str(last.get("worktree"))), last["expected_head"]
     if last.get("enqueued_on") == this_host() and worktree.is_dir():
         head = caught_up(worktree, head)

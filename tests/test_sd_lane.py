@@ -40,6 +40,8 @@ def git(root: pathlib.Path, *args: str) -> str:
 class Lane(unittest.TestCase):
     #: `repo.runner_merge` for a suite with no database (sd:3132); None reads the suite's own database.
     runner_merge: str | None = "manual"
+    #: Whether enqueue and retry read the item in the suite's database (sd:3473); most suites queue items it lacks.
+    checks_item = False
 
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
@@ -78,11 +80,26 @@ class Lane(unittest.TestCase):
             patcher = mock.patch.object(sd_lane, "default_runner_merge", lambda root: self.runner_merge)
             patcher.start()
             self.addCleanup(patcher.stop)
+        if not self.checks_item:
+            patcher = mock.patch.object(sd_lane, "check_item", lambda *args: None)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         # And each runs as the hub would, which hosts every lane whose `repo.lane_host` is NULL (sd:3003).
         if importlib.util.find_spec("sd_db") is not None:
             patcher = mock.patch("sd_db.database.served_by", lambda target, home=None: None, create=True)
             patcher.start()
             self.addCleanup(patcher.stop)
+
+    def register_items(self, count: int, remote: str = "https://github.com/example/pack.git") -> list[int]:
+        """This checkout as a repository with `remote`, and `count` items of it, as prepare reads them (sd:3473)."""
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            sd_db.upsert_repo(connection, str(self.repo), remote=remote, managed=1)
+            return [sd_db.create_item(connection, kind="task", title=f"item {number}", status="in_progress",
+                                      repo=str(self.repo)) for number in range(count)]
+        finally:
+            connection.close()
 
     def note(self, item: int, body: str, main: pathlib.Path, kind: str = "comment") -> str:
         self.notes.append((item, body, main))
@@ -112,6 +129,12 @@ class Lane(unittest.TestCase):
 
 
 class QueueOutlivesTheProcess(Lane):
+    checks_item = True  # the verbs run in a child process, which no patch here reaches
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.register_items(7)
+
     def sd_ship(self, cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
         env = {**os.environ, **self.environ}
         return subprocess.run([sys.executable, str(REPO_ROOT / "bin/sd-ship"), "lane", *args], cwd=cwd, env=env,
@@ -1541,6 +1564,80 @@ class Publishing(SharedQueue):
         with self.assertRaisesRegex(sd_lane.LaneError, "already queued"):
             sd_lane.enqueue_entry(self.feature, 1, "t", self.body, self.environ, claim="deliver")
         self.assertEqual(len(self.entries()), 1)
+
+
+class ItemChecks(SharedQueue):
+    """sd:3473. Enqueue refuses what prepare refuses on the item, before it pushes or queues anything.
+
+    Eight system entries waited 3 to 32 minutes at the queue's head, then
+    failed in seconds on an item of another repository, a `Closes:` item of
+    another repository, or an item with no registered repository.
+    """
+
+    checks_item = True
+
+    def setUp(self) -> None:
+        super().setUp()
+        [self.own] = self.register_items(1)
+        import sd_db
+        other = self.tmp / "other"
+        other.mkdir()
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            sd_db.upsert_repo(connection, str(other), remote="https://github.com/example/other.git", managed=1)
+            self.foreign = sd_db.create_item(connection, kind="task", title="theirs", status="in_progress", repo=str(other))
+            self.unregistered = sd_db.create_item(connection, kind="task", title="nowhere", status="in_progress")
+        finally:
+            connection.close()
+        self.tree, _ = self.committed("topic", "work")
+
+    def refused(self, item: int, title: str = "t", body: str = "Words.\n", claim: str = "deliver") -> sd_lane.LaneError:
+        self.body.write_text(body, encoding="utf-8")
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.enqueue_entry(self.tree, item, title, self.body, self.environ, claim=claim)
+        self.assertEqual((self.rows(), "push" in self.git_verbs, self.remote_tip("topic")), ([], False, None))
+        return refused.exception
+
+    def test_an_item_of_another_repository_is_refused_before_any_push(self) -> None:
+        refused = self.refused(self.foreign)
+        self.assertEqual(refused.code, "item_repository_mismatch")
+        self.assertIn(f"item sd:{self.foreign} belongs to example/other, not example/pack", str(refused))
+
+    def test_an_item_with_no_registered_repository_is_refused_before_any_push(self) -> None:
+        self.assertIn("requires an item with a registered repository", str(self.refused(self.unregistered)))
+
+    def test_a_closes_line_or_title_naming_another_repositorys_item_is_refused(self) -> None:
+        for title, body in (("t", f"Closes: sd:{self.foreign}\n"), (f"Two fixes (sd:{self.own}, sd:{self.foreign})", "")):
+            with self.subTest(title=title):
+                refused = self.refused(self.own, title, body)
+                self.assertEqual(refused.code, "closes_item_foreign")
+                self.assertIn(f"names sd:{self.foreign}, which belongs to another repository", str(refused))
+
+    def test_an_associate_only_claim_with_a_closes_line_is_refused(self) -> None:
+        refused = self.refused(self.own, body=f"Closes: sd:{self.own + 99}\n", claim="associate-only")
+        self.assertEqual(refused.code, "closes_need_delivery")
+
+    def test_an_item_of_this_repository_is_queued(self) -> None:
+        self.body.write_text(f"Closes: sd:{self.own}\n", encoding="utf-8")
+        entry = sd_lane.enqueue_entry(self.tree, self.own, f"One fix (sd:{self.own})", self.body, self.environ,
+                                      claim="deliver")
+        self.assertEqual(([row["item"] for row in self.entries()], entry["status"]), ([self.own], "pending"))
+
+    def test_retry_checks_the_item_again(self) -> None:
+        """A retry queues the same item again; one moved to another repository since refuses as enqueue does."""
+        sd_lane.enqueue_entry(self.tree, self.own, "t", self.body, self.environ, claim="deliver")
+        sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed"))
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            connection.execute("UPDATE item SET repo = (SELECT repo FROM item WHERE id = ?) WHERE id = ?",
+                               (self.foreign, self.own))
+        finally:
+            connection.close()
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, self.own, self.environ)
+        self.assertEqual(refused.exception.code, "item_repository_mismatch")
+        self.assertEqual([row["status"] for row in self.entries()], ["failed"])
 
 
 class ClaimAndLease(SharedQueue):
