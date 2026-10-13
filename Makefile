@@ -481,13 +481,14 @@ gate-env:
 # its runner lock is released (sd:3566), whether the checkout is pinned
 # (detached) or on the default branch (sd:3647). `refresh` moves and installs
 # a pinned checkout inside its own protection (consumers stopped, old SHA kept);
-# it leaves a branch checkout alone, and nothing installs one here, since setup
-# outside that protection would race live services and lanes. Then service
-# health shows a stale build.
+# it leaves a branch checkout alone. Setup here, outside that protection, would
+# race live services and lanes, so a branch checkout is refused with the step
+# that pins it.
 # The tools live in the `system` checkout; SYSTEM_REPO names it when it is not
 # ~/repos/system.
 SYSTEM_REPO ?= $(HOME)/repos/system
 
 post-merge:
+	@if git symbolic-ref -q HEAD >/dev/null 2>&1; then echo "post-merge: $(CURDIR) is on a branch, so refresh will not install it; pin it: git -C $(CURDIR) switch --detach && make post-merge" >&2; exit 1; fi
 	sh "$(SYSTEM_REPO)/local-repo-sync/repo-sync.sh" refresh "$(CURDIR)"
 	sh "$(SYSTEM_REPO)/local-project-dashboard/dashboard.sh" health
