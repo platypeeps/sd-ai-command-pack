@@ -123,7 +123,7 @@ class ArtifactIdentity(ProgressCase):
         other = create_item(self.db, kind="work", title="Other", repo=str(self.repo), path="other.md")
         with self.assertRaises(WorkflowError) as claimed:
             relink_artifact(self.db, self.item, "other.md", who="operator")
-        self.assertIn(f"sd work relink {other}", str(claimed.exception))
+        self.assertIn(f"relink item {other}", str(claimed.exception))
 
 
 class WorkCompletion(ProgressCase):
