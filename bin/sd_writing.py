@@ -17,6 +17,7 @@ from typing import Any
 
 import sd_handoff_rows
 import sd_lib
+from sd_notes import item_id
 from sd_work import WorkRefusal
 
 #: Verbs that write journals or publish, so they read only merged prose (sd:2024).
@@ -329,7 +330,7 @@ def register(groups: Any) -> None:
         elif action == "register":
             parser.add_argument("--path", help="relative index.md path for a parked piece")
         elif action == "promote":
-            parser.add_argument("item", type=int, help="the idea row to register as a piece")
+            parser.add_argument("item", type=item_id, help="the idea row to register as a piece, as 234, sd:234 or item:234")
             parser.add_argument("--slug", help="piece slug; default from the idea title")
         elif action == "stage":
             parser.add_argument("--stage", required=True)

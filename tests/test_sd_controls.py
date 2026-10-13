@@ -147,10 +147,9 @@ class Controls(unittest.TestCase):
         self.assertIn("resolve the report's followups", refused.stderr)
         self.assertNotIn("Traceback", refused.stderr)
         [followup] = [note for note in state["notes"] if note["kind"] == "followup"]
-        resolved = self.cli(
-            "task", "resolve", str(followup["id"]), "--if-revision", state["revision"], "--json"
-        )
+        resolved = self.cli("note", "resolve", str(followup["id"]))
         self.assertEqual(resolved.returncode, 0, resolved.stderr)
+        resolved = self.cli("task", "show", report, "--json")
 
         result = self.cli(
             "reports",
@@ -391,6 +390,21 @@ class Controls(unittest.TestCase):
         return state["item"]["status"], [(note["id"], note["session"], note["resolved_at"] is not None)
                                          for note in state["notes"] if note["kind"] == "followup"]
 
+    def test_reopen_undoes_an_acknowledge(self):
+        """sd:3504. The dashboard's Undo had no CLI: `sd reports reopen` is it."""
+        report, revision, _ = self.failed_run()
+        done = self.cli("reports", "acknowledge", report, "--if-revision", revision,
+                        "--resolve-ingest-followups", "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        stale = self.cli("reports", "reopen", f"sd:{report}", "--if-revision", revision, "--json")
+        self.assertEqual(stale.returncode, 1, stale.stdout)
+        self.assertIn("changed", stale.stderr)
+        reopened = self.cli("reports", "reopen", f"sd:{report}", "--reason", "too early", "--json")
+        self.assertEqual(reopened.returncode, 0, reopened.stderr)
+        state = json.loads(reopened.stdout)
+        self.assertEqual(state["item"]["status"], "planning")
+        self.assertIn("reopened: too early", state["notes"][-1]["body"])
+
     def test_the_flag_resolves_the_ingests_own_followup_and_is_off_by_default(self):
         # Every failure report is born with the followup the ingest wrote, so
         # without the flag the verb refuses it and names the note (sd:941).
@@ -398,7 +412,7 @@ class Controls(unittest.TestCase):
         refused = self.cli("reports", "acknowledge", report, "--if-revision", revision, "--json")
         self.assertEqual(refused.returncode, 1)
         self.assertIn(
-            f"resolve the report's followups before acknowledging it: sd note resolve {note}",
+            f"resolve the report's followups before acknowledging it: resolve followup {note}",
             refused.stderr,
         )
         self.assertNotIn("Traceback", refused.stderr)
@@ -428,8 +442,8 @@ class Controls(unittest.TestCase):
         owed = json.loads(noted.stdout)["note"]["id"]
         refused = self.cli("reports", "acknowledge", report, "--resolve-ingest-followups", "--json")
         self.assertEqual(refused.returncode, 1)
-        self.assertIn(f"sd note resolve {owed}", refused.stderr)
-        self.assertNotIn(f"sd note resolve {cron}", refused.stderr)
+        self.assertIn(f"resolve followup {owed}", refused.stderr)
+        self.assertNotIn(f"resolve followup {cron}", refused.stderr)
         self.assertNotIn("Traceback", refused.stderr)
         status, notes = self.followups(report)
         self.assertEqual(status, "planning")

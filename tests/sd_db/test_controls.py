@@ -547,7 +547,7 @@ class AnAcknowledgementResolvesTheIngestsOwnFollowup(unittest.TestCase):
         self.assertEqual((session, resolved), ("cron", False))
         with self.assertRaises(workflow.WorkflowError) as raised:
             reporting.acknowledge(self.db, item, expected_revision=revision, who="operator")
-        self.assertIn(f"sd note resolve {note}", str(raised.exception))
+        self.assertIn(f"resolve followup {note}", str(raised.exception))
         self.assertEqual(workflow.item_state(self.db, item)["item"]["status"], "planning")
         self.assertEqual(self.followups(item), [(note, "cron", False)])
 
@@ -569,8 +569,8 @@ class AnAcknowledgementResolvesTheIngestsOwnFollowup(unittest.TestCase):
         with self.assertRaises(workflow.WorkflowError) as raised:
             reporting.acknowledge(self.db, item, expected_revision=revision, who="operator",
                                   resolve_ingest_followups=True)
-        self.assertIn(f"sd note resolve {owed}", str(raised.exception))
-        self.assertNotIn(f"sd note resolve {cron}", str(raised.exception))
+        self.assertIn(f"resolve followup {owed}", str(raised.exception))
+        self.assertNotIn(f"resolve followup {cron}", str(raised.exception))
         self.assertEqual(workflow.item_state(self.db, item)["item"]["status"], "planning")
         self.assertEqual(self.followups(item), [(cron, "cron", False), (owed, "alex", False)])
 
@@ -588,7 +588,7 @@ class AnAcknowledgementResolvesTheIngestsOwnFollowup(unittest.TestCase):
         with self.assertRaises(workflow.WorkflowError) as raised:
             reporting.acknowledge(self.db, item, expected_revision=revision, who="operator",
                                   resolve_ingest_followups=True)
-        self.assertIn(f"sd note resolve {borrowed}", str(raised.exception))
+        self.assertIn(f"resolve followup {borrowed}", str(raised.exception))
         self.assertEqual(self.followups(item), [(cron, "cron", False), (borrowed, "cron", False)])
 
     def test_unreadable_fields_refuse_with_the_note_rather_than_resolving_on_a_guess(self):
@@ -605,7 +605,7 @@ class AnAcknowledgementResolvesTheIngestsOwnFollowup(unittest.TestCase):
         with self.assertRaises(workflow.WorkflowError) as raised:
             reporting.acknowledge(self.db, item, expected_revision=revision, who="operator",
                                   resolve_ingest_followups=True)
-        self.assertIn(f"sd note resolve {note}", str(raised.exception))
+        self.assertIn(f"resolve followup {note}", str(raised.exception))
         self.assertEqual(self.followups(item), [(note, "cron", False)])
         resolve_note(self.db, note)
         revision = workflow.item_state(self.db, item)["revision"]
