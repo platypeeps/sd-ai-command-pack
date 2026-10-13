@@ -5,8 +5,9 @@ shell scripts kept in its scratchpad. The chain died with the session, and a
 second chain started beside it raced it. This keeps the chain in the hub
 database and runs it under one runner lock per repository:
 
-  enqueue  publish the head, then add a worktree, its item, branch and head,
-           a title and the body text to the repository's queue;
+  enqueue  check the item as prepare would (sd:3473), publish the head, then
+           add a worktree, its item, branch and head, a title and the body
+           text to the repository's queue;
   list     print the queue, each body as its size;
   cancel   mark a pending entry cancelled, or release a stuck running one;
            `--expected-claim <holder token>:<step>` releases only the
@@ -124,9 +125,10 @@ write through a handle opened before removal is lost. The entry's `remove`
 holds the command that removes the worktree and its branch once the builder
 stops, and the note names the host that holds it.
 It notes the item with the merge commit, what the cleanup did, a `git
-branch` recover command and that command. A worktree `sd-ship merge` has
-already removed (sd:3006) is noted as such, from the lane's own checkout
-(sd:3096). Then it fast-forwards the main
+branch` recover command and that command. `sd-ship merge` keeps the
+checkout it runs in (sd:3477); a worktree already gone, as an older
+`sd-ship merge` removed it (sd:3006), is noted as such, from the lane's own
+checkout (sd:3096). Then it fast-forwards the main
 checkout. When that checkout holds the running `sd-ship`, as the pack's does
 for every lane, it tries each other lane's runner lock once and skips if one
 is held: a lane mid-prepare must not have its tools change under it, and no
@@ -223,6 +225,9 @@ Note = Callable[[int, str, pathlib.Path], str]
 #: The codes of an entry that stops `prepared` for want of merge authority (sd:3132).
 RUNNER_MERGE_MANUAL = "runner_merge_manual"
 RUNNER_MERGE_UNKNOWN = "runner_merge_unknown"
+#: How much of `sd-ship`'s refusal a failed entry keeps as its `reason`; a gate failure's leads with the
+#: failing test, which a 600-character cut lost (sd:3476). The step's log keeps the whole output.
+REASON_CHARS = 2000
 #: The runs that put an entry back after a hub fault before the next fault fails it (sd:3239).
 HUB_RETRIES = 2
 #: The ends short of a merge: `retry` queues such an entry again, with its texts (sd:3254), and a cancelled
@@ -612,8 +617,9 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     `claim` is prepare's delivery choice, `deliver` or `associate-only`, and
     is refused when absent as prepare refuses it; it reaches prepare
     unchanged. The entry holds the body and acceptance texts, not their
-    paths. The head is published first (`publish_head`); any answer but published
-    refuses, and nothing is queued.
+    paths. The item is checked as prepare checks it (`check_item`), then the
+    head is published (`publish_head`); any answer but published refuses,
+    and nothing is queued.
     """
     worktree = worktree.resolve()
     sd_lib.refuse_unmanaged(worktree, LaneError)  # its prepare would refuse; do not queue it
@@ -634,13 +640,52 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     # Read first: a hub that does not answer, or an item already queued, refuses before anything is pushed.
     if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in read_queue(queue)):
         raise LaneError(f"sd:{item} is already queued in this lane")
+    body = body_file.read_text(encoding="utf-8")
+    on_hub(queue, lambda connection: check_item(connection, worktree, item, title, body, claim))
     entry = {"id": entry_id(), "repository": queue.repository, "item": item, "branch": branch, "expected_head": head,
-             "title": title, "body": body_file.read_text(encoding="utf-8"),
+             "title": title, "body": body,
              "acceptance": acceptance_file.read_text(encoding="utf-8") if acceptance_file else None,
              "authority": "manual" if manual else None, "claim": claim, "enqueued_on": this_host(),
              "worktree": str(worktree), "status": "pending", "enqueued_at": stamp_now()}
     require_published(worktree, branch, head, f"{head} names no commit in {worktree}")
     return add_entry(queue, entry)
+
+
+def check_item(connection: Any, worktree: pathlib.Path, item: int, title: str, body: str, claim: str | None) -> None:
+    """Refuse what prepare refuses on the item before it reviews, so the entry never waits for it (sd:3473).
+
+    Each refused in seconds once the entry reached the head of the queue,
+    3 to 32 minutes after enqueue: an item with no registered repository
+    (`sd_db.ship.identity`), an item of another repository than `worktree`'s
+    origin (`foreign_item`), and a `Closes:` line or a title naming an item
+    the merge could not close (`sd_ship_body.refuse_unclosable`). These are
+    prepare's own reads, and prepare makes them again; a hub fault still
+    refuses `HUB_UNAVAILABLE` through `on_hub`.
+    """
+    require_sd_db()
+    import sd_ship_body  # noqa: PLC0415
+    from sd_db import ship  # noqa: PLC0415
+    from sd_db.workflow import WorkflowError  # noqa: PLC0415
+    from sd_ship_no_item import foreign_item  # noqa: PLC0415
+    from sd_ship_remote import Refusal, slug  # noqa: PLC0415
+
+    def github(remote: str) -> str | None:
+        try:
+            return slug(remote)
+        except Refusal:
+            return None
+    try:
+        info = ship.identity(connection, item)
+    except WorkflowError as error:
+        raise LaneError(f"sd:{item}: {error}; nothing was queued") from None
+    own = github(lane_git(worktree, "config", "--get", "remote.origin.url") or "")
+    registered = github(info["repo"]["remote"] or "")
+    try:
+        if registered is None or registered != own:
+            raise foreign_item(item, registered or info["repo"]["path"], str(own), "prepare")
+        sd_ship_body.refuse_unclosable(connection, item, info["item"]["repo"], body, title, claim == "deliver")
+    except Refusal as error:
+        raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
 
 
 def pending_entry(entries: list[dict[str, Any]], item: int) -> dict[str, Any]:
@@ -839,8 +884,9 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
 
     A new entry with the old one's branch, title, claim, texts and worktree
     hint, at its head, or at prepare's catch-up of it (`caught_up`) when the
-    worktree is on this host. The head is published now (`publish_head`); a
-    refusal queues nothing and the old entry stays blocked. `manual` grants
+    worktree is on this host. The item is checked as enqueue checks it
+    (`check_item`, sd:3473), and the head is published now (`publish_head`);
+    a refusal queues nothing and the old entry stays blocked. `manual` grants
     the merge as `enqueue --manual` does; an entry that had that grant keeps
     it. The old entry stays as history.
 
@@ -887,6 +933,8 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     if cancelled:
         branch_unmoved(root, last)
         check_unmerged(root, queue, last)
+    on_hub(queue, lambda connection: check_item(connection, root, item, str(last.get("title") or ""), last["body"],
+                                                last.get("claim")))
     worktree, head = pathlib.Path(str(last.get("worktree"))), last["expected_head"]
     if last.get("enqueued_on") == this_host() and worktree.is_dir():
         head = caught_up(worktree, head)
@@ -1183,7 +1231,7 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
     fields: dict[str, Any] = {"prepare_log": str(prepare_log), "log_host": this_host(), "head": prepared.get("head")}
     if not (prepared.get("ok") and prepared.get("phase") == "ready_to_send"):
         return {**fields, "status": "failed", "step": "prepare", "phase": prepared.get("phase"),
-                "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:600],
+                "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:REASON_CHARS],
                 **({"hub_fault": True} if answered_hub_fault(prepared) else {})}
     refused = merge_refusal(entry)
     if refused is not None:
@@ -1197,7 +1245,7 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
         return {**fields, "moved": str(merged.get("error") or "the lane moved")[:600]}  # a move, not a failure
     if not (merged.get("ok") and merged.get("phase") == "merged"):
         return {**fields, "status": "failed", "step": "merge", "phase": merged.get("phase"),
-                "reason": str(merged.get("error") or merged.get("code") or "merge did not confirm")[:600],
+                "reason": str(merged.get("error") or merged.get("code") or "merge did not confirm")[:REASON_CHARS],
                 **({"hub_fault": True} if answered_hub_fault(merged) else {})}
     return {**fields, "status": "merged", "merge_commit": merged.get("merge_commit")}
 
@@ -1476,9 +1524,10 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
          own_lock: pathlib.Path, root: pathlib.Path) -> dict[str, Any]:
     """After a merge: delete the remote branch, note the item with the removal and recover commands, fast-forward.
 
-    `root` is the repository the lane runs for. `sd-ship merge` removes a clean
-    worktree itself (sd:3006), and git cannot name the main checkout from a
-    directory that is gone, so the lane's own root answers (sd:3096).
+    `root` is the repository the lane runs for. `sd-ship merge` keeps the
+    worktree it runs in (sd:3477), but an older one removed it (sd:3006), and
+    git cannot name the main checkout from a directory that is gone, so the
+    lane's own root answers (sd:3096).
     """
     worktree = pathlib.Path(entry["worktree"])
     gone = not worktree.is_dir()
@@ -1542,30 +1591,69 @@ def post_merge(root: pathlib.Path, environ: dict[str, str], answer: dict[str, An
     return {**answer, "post_merge": ran}
 
 
+def origin_makefile(main: pathlib.Path) -> tuple[str, str | None]:
+    """`(text, reason)`: origin's default-branch Makefile for a pinned checkout, read without touching HEAD.
+
+    The text is empty when origin has none; `reason` is why it could not be
+    read, as the `make post-merge unknown` line. A failed fetch or read is an
+    unknown answer, never "no target" (sd:3647).
+    """
+    where = f"the pinned checkout {main}"
+    if lane_git(main, "fetch", "-q", "origin") is None:
+        return "", f"make post-merge unknown: git fetch failed in {where}"
+    names = [(lane_git(main, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or "").removeprefix("origin/"),
+             "main", "master"]
+    tip = next((ref for ref in (lane_git(main, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{name}")
+                                for name in names if name) if ref), None)
+    if tip is None:
+        return "", f"make post-merge unknown: no origin/HEAD, origin/main or origin/master in {where}"
+    listed = lane_git(main, "ls-tree", tip, "--", "Makefile")
+    shown = lane_git(main, "show", f"{tip}:Makefile") if listed else ""
+    if listed is None or shown is None:
+        return "", f"make post-merge unknown: origin's Makefile could not be read in {where}"
+    return shown, None
+
+
 def make_post_merge(main: pathlib.Path, environ: dict[str, str], moved: str) -> str | None:
     """`make post-merge` in the main checkout the last landing fast-forwarded, when its Makefile has that rule.
 
-    None without the rule. A checkout that did not fast-forward holds the old
-    code, so the target is skipped and the reason given. A failure or the
-    `POST_MERGE_SECONDS` bound is reported; the run group ends the target's
-    children at the bound.
+    None without the rule. A branch checkout that did not fast-forward holds the
+    old code, so the target is skipped and the reason given. A pinned (detached)
+    checkout is never fast-forwarded: the target's `repo-sync.sh refresh` moves
+    it. One whose Makefile predates the rule cannot name that target, so origin's
+    Makefile runs with the pin still checked out, and the recipe owns the move
+    and its rollback record (sd:3647). A failure or the `POST_MERGE_SECONDS`
+    bound is reported; the run group ends the target's children at the bound.
     """
+    pinned = not lane_git(main, "branch", "--show-current") and lane_git(main, "rev-parse", "--verify", "HEAD")
+    makefile = main / "Makefile"
     try:
-        if not POST_MERGE_RULE.search((main / "Makefile").read_text(encoding="utf-8", errors="replace")):
-            return None
+        has_rule = bool(POST_MERGE_RULE.search(makefile.read_text(encoding="utf-8", errors="replace")))
     except FileNotFoundError:
-        return None
+        has_rule = False
     except OSError as error:  # unknown, not "no rule": say so
-        return f"make post-merge unknown: {main / 'Makefile'} could not be read: {error}"
-    if not moved.startswith("fast-forwarded"):
-        return f"make post-merge skipped: the main checkout did not fast-forward ({moved})"
-    try:
-        done = sd_lib.run_group(["make", "post-merge"], cwd=main, env={**os.environ, **environ},
-                                timeout=POST_MERGE_SECONDS)
-    except sd_lib.GroupTimeout:
-        return f"make post-merge timed out after {POST_MERGE_SECONDS}s in {main}"
-    except OSError as error:
-        return f"make post-merge did not start in {main}: {error}"
+        return f"make post-merge unknown: {makefile} could not be read: {error}"
+    with tempfile.TemporaryDirectory(prefix="sd-lane-post-merge-") as scratch:
+        command = ["make", "post-merge"]
+        if pinned and not has_rule:
+            text, reason = origin_makefile(main)
+            if reason is not None:
+                return reason
+            if not POST_MERGE_RULE.search(text):
+                return None
+            origin_copy = pathlib.Path(scratch) / "Makefile"
+            origin_copy.write_text(text, encoding="utf-8")
+            command, has_rule = ["make", "-f", str(origin_copy), "post-merge"], True
+        if not has_rule:
+            return None
+        if not (moved.startswith("fast-forwarded") or pinned):
+            return f"make post-merge skipped: the main checkout did not fast-forward ({moved})"
+        try:
+            done = sd_lib.run_group(command, cwd=main, env={**os.environ, **environ}, timeout=POST_MERGE_SECONDS)
+        except sd_lib.GroupTimeout:
+            return f"make post-merge timed out after {POST_MERGE_SECONDS}s in {main}"
+        except OSError as error:
+            return f"make post-merge did not start in {main}: {error}"
     if done.returncode == 0:
         return f"make post-merge passed in {main}"
     return f"make post-merge failed (exit {done.returncode}) in {main}: {(done.stderr or done.stdout).strip()[-300:]}"

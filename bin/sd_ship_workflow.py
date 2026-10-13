@@ -15,7 +15,10 @@ def blocked(code: str, boundary: str, next_action: str, *, state: str = "policy_
 #: `sd_db` faults of the hub's transport or build, by class name (sd:3239): a dropped session, a write
 #: the hub says did not commit, and the refusals a hub upgrade leaves until the satellite's self-install
 #: or the hub's restart. `UnknownOutcome` is not one: its write may have committed, so nothing reruns it.
-HUB_FAULTS = frozenset({"HubUnreachable", "TransactionLost", "BuildMismatch", "HubRestartNeeded", "SchemaTooNew"})
+#: `SchemaTooOld` is the database a pack landing left behind its library until `sd-db migrate` runs; the
+#: entry is untouched, and the lane stops rather than fail every pending entry in turn (sd:3475).
+HUB_FAULTS = frozenset({"HubUnreachable", "TransactionLost", "BuildMismatch", "HubRestartNeeded", "SchemaTooNew",
+                        "SchemaTooOld"})
 #: The hub faults no retry in the same process can pass (sd:3359): a process keeps the `sd_db` build it
 #: loaded, so only a new one, after `repo-sync.sh follow` or `refresh`, gets past them. `HubRestartNeeded`
 #: is not one: the hub restarts itself.
@@ -36,8 +39,8 @@ def failure(phase: str, error: Exception) -> dict:
     if detail is None:
         detail = blocked("prerequisite_failed", "policy", "Inspect the error and resolve the failed prerequisite.")
         if is_hub_fault(error):
-            detail = blocked(HUB_UNAVAILABLE, "runtime", "Retry this command when the sd hub answers again.",
-                             state="retryable_failure")
+            detail = blocked(HUB_UNAVAILABLE, "runtime", "Retry this command when the sd hub answers again, "
+                             "or after the migration the error names.", state="retryable_failure")
         if getattr(error, "code", None) == LANE_ELSEWHERE:  # the ship lock's refusal; the lane reads it as a move
             detail = blocked(LANE_ELSEWHERE, "runtime", "Run it on the lane host, or move the lane back.",
                              state="operator_decision")

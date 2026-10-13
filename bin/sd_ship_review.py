@@ -474,12 +474,20 @@ class SharedReview:
         Only a clean or advisory receipt: a blocking one is cleared by
         dispositions bound to its own head. `carry_forward` decides; the
         receipt records what it found, and the output names it.
+
+        A review that cleared before its gate failed (`kept_gate_failure`)
+        carries too, and the gate runs alone at the new head (`rerun_gate`,
+        sd:3474). The lane prepares with `--catch-up`, so a busy base moved
+        the head before the retry, and 26 of 32 kept passes paid a full
+        review all the same. Such a pass names no reviewed head.
         """
         passes, base = self.history.native(self.state), self.state.get("base")
-        if not passes or not base or not self.state.get("reviewed_head"):
+        report = (passes[-1].get("report") or {}) if passes else {}
+        kept = kept_gate_failure(report)
+        if not passes or not base or not (self.state.get("reviewed_head") or kept):
             return False
-        report = passes[-1].get("report") or {}
-        if report.get("status") not in ("clean", "advisory") or not completed_depth(report) or self.binding_moved():
+        if (report.get("status") not in ("clean", "advisory") and not kept) or not completed_depth(report) \
+                or self.binding_moved():
             return False
         # A named reviewer is a selection a receipt from another cannot replace.
         requested = getattr(self.args, "provider", None)
@@ -488,11 +496,15 @@ class SharedReview:
         carried = carry_forward(self.root, passes[-1]["head"], head, f"refs/remotes/origin/{base}")
         if carried is None:
             return False
-        self.save(reviewed_head=head, review_carry_forward={**carried, "recorded_at": self.runtime.clock()})
-        self.check_review(head)
+        carried = {**carried, "recorded_at": self.runtime.clock()}
         print(f"sd-ship: {head[:12]} adds only clean merges of origin/{base} to reviewed {carried['from'][:12]}, "
-              "and the branch's own patch-id is unchanged; its review carries forward, no provider called",
-              file=sys.stderr)
+              "and the branch's own patch-id is unchanged; its review carries forward, no provider called"
+              + ("; the gate that failed after it runs again here" if kept else ""), file=sys.stderr)
+        if kept:
+            self.rerun_gate(head, carried)
+            return True
+        self.save(reviewed_head=head, review_carry_forward=carried)
+        self.check_review(head)
         return True
 
     def check_review(self, head: str, *, refresh_adjudication: bool = False, run_gate: bool = False) -> dict | None:
@@ -536,7 +548,7 @@ class SharedReview:
                           code="gate_failed", boundary="runtime", state="retryable_failure",
                           next_action="Fix the gate and prepare again; the fix is reviewed as a fix verification.")
 
-    def rerun_gate(self, head: str) -> None:
+    def rerun_gate(self, head: str, carried: dict | None = None) -> None:
         """sd:2721. The gate alone, at the head whose review cleared before its gate failed.
 
         `release_gate_failure` kept that pass, so a gate that fails under load
@@ -544,6 +556,10 @@ class SharedReview:
         review cleared with and this gate's check, keeping the failed one as
         `failed_check`; the report then reads as any cleared review does. A
         failure keeps the pass as it was.
+
+        `carried` is the `carry_forward` record when `head` is a clean
+        catch-up of the pass's head (sd:3474); it is saved with the pass in
+        one write, so a gate that fails or a killed run leaves no carry.
         """
         base = self.gate_check_base()
         check = adjudicated_check(self.root, head, base, self.database if base else None,
@@ -560,7 +576,8 @@ class SharedReview:
         report = passes[-1]["report"]
         passes[-1].update(exit_code=0, report={**report, "status": report["cleared_status"], "check": check,
                                                "failed_check": report["check"]})
-        self.save(passes=passes, reviewed_head=head, review_preflight_error=None)
+        self.save(passes=passes, reviewed_head=head, review_preflight_error=None,
+                  **({"review_carry_forward": carried} if carried else {}))
         self.check_review(head)
 
     def adjudicate(self) -> dict:
@@ -1189,15 +1206,16 @@ class SharedReview:
         evidence = "\n".join(failed + [f"gate output: {said}" if failed else said] * bool(said))
         # sd:2605. A pass that asked reviewers but kept no cleared status is
         # released too, and the next prepare reviews the fixed branch again.
-        when = ("after the review cleared; the review pass is kept, so the next prepare at this head runs only "
-                "the gate" if kept else
+        when = ("after the review cleared; the review pass is kept, so the next prepare at this head, or at a "
+                "clean catch-up merge of the base, runs only the gate" if kept else
                 "after the review cleared; the review pass was released, so the next prepare reviews again"
                 if report.get("outcomes") else "before any reviewer was asked; no review pass was spent")
         raise Refusal(f"the repository gate failed {when}: "
                       f"{evidence or 'no check output; sd-ship observe prints the ship receipt'}",
                       code="gate_failed", boundary="runtime", state="retryable_failure",
                       next_action=("Rerun prepare when the machine is less loaded: it runs only the gate at this head "
-                                   "(--review-timeout raises the limit). Or fix the gate and prepare again: the fix "
+                                   "or a clean catch-up of it (--review-timeout raises the limit). Or fix the gate "
+                                   "and prepare again: the fix "
                                    "is reviewed as a fix verification." if kept else
                                    "Fix the gate, or rerun prepare when the machine is less loaded "
                                    "(--review-timeout raises the limit); the next prepare reviews normally."))
@@ -1408,6 +1426,26 @@ def shard_lines(value: object) -> list:
 FAILING_TAIL_CHARS = 1200
 #: How many failed-shard lines a receipt row and a refusal carry.
 FAILED_SHARDS_NAMED = 20
+#: A line that says which test failed and why: unittest's `FAIL:`/`ERROR:`, a traceback, an exception (sd:3476).
+FAILING_LINE = re.compile(r"^(?:FAIL|ERROR): |^Traceback \(|^\w*(?:Error|Exception)\b")
+#: How many of those lines lead a failing check's entry, and how much of each.
+FAILING_LINES_NAMED, FAILING_LINE_CHARS = 8, 300
+
+
+def leading_lines(row: dict) -> list[str]:
+    """What leads one failing check's entry: its failed shards, the whole output's path, then its failing lines.
+
+    The failing lines are the last `FAILING_LINE`s of `sd-check`'s `failure`
+    excerpt and the streams (sd:3476). A run of many suites ends with
+    whichever finished last, so the tail of a failed `make check` read
+    `Ran 24 tests ... OK`, and the lane's cut of the refusal held nothing
+    else: 8 of 9 system gate failures needed the log opened.
+    """
+    found = [f"failed {line}" for line in shard_lines(row.get("failed_shards"))[:FAILED_SHARDS_NAMED]]
+    found += [f"whole output: {row['output_path']}"] * bool(row.get("output_path"))
+    text = "\n".join(str(row.get(key) or "") for key in ("failure", "stderr", "stdout"))
+    failing = [line.rstrip()[:FAILING_LINE_CHARS] for line in text.splitlines() if FAILING_LINE.search(line)]
+    return found + [f"failing: {line}" for line in list(dict.fromkeys(failing))[-FAILING_LINES_NAMED:]]
 
 
 def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]:
@@ -1420,7 +1458,8 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
 
     The failed shards and the file holding the whole output come first: a
     shard that failed early in a long run is in neither tail, and the tails
-    are what a lane log cuts again (sd:2558). Each other failed step, such as
+    are what a lane log cuts again (sd:2558). The lines that name the failing
+    test follow (`leading_lines`, sd:3476). Each other failed step, such as
     a make target, follows the tails, and then the failing lines the tails
     do not already hold (sd:2608).
     """
@@ -1428,8 +1467,7 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict) or row.get("status") != "fail":
             continue
-        found = [f"failed {line}" for line in shard_lines(row.get("failed_shards"))[:FAILED_SHARDS_NAMED]]
-        found += [f"whole output: {row['output_path']}"] * bool(row.get("output_path"))
+        found = leading_lines(row)
         streams = [(stream, str(row.get(stream) or "").strip()) for stream in ("stderr", "stdout")]
         said = [f"{stream}: {'...' if len(text) > limit else ''}{text[-limit:]}" for stream, text in streams if text]
         reason = str(row.get("reason") or "").strip()

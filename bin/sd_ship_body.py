@@ -196,6 +196,47 @@ def strip_closes(body: str) -> str:
     return "\n".join(text for number, text in enumerate(body.split("\n"), start=1) if number not in kept)
 
 
+def items_closed(body: str, title: str, item: int, deliver: bool) -> tuple[int, ...]:
+    """The items a merge closes beside `item`: each `Closes:` item, then each sd:N in the title.
+
+    A batched pull request names its items in its title, and the merge
+    closes each the way it closes a `Closes:` item (sd:3014). An
+    associate-only claim closes nothing: its title names context (sd:3365).
+    """
+    if not deliver:
+        return ()
+    named = (*closes_named(body, item), *map(int, re.findall(r"\bsd:([0-9]+)\b", title)))
+    return tuple(dict.fromkeys(number for number in named if number != item))
+
+
+def refuse_unclosable(connection, item: int, repo: str, body: str, title: str, deliver: bool) -> None:
+    """Refuse a co-delivered item the merge could not close; `repo` is `item`'s registered path.
+
+    One pull request claims one item; `Closes:` and the title name the
+    others it delivers, and the merge closes them (operator ruling
+    2026-10-03, sd:3014). `Refs:` names related items and is not read
+    here: they stay open. An associate-only claim closes nothing, so its
+    `Closes:` line is refused rather than dropped (sd:3365). `sd-ship
+    prepare` and `sd-ship lane enqueue` both read it (sd:3473).
+    """
+    if not deliver and closes_named(body, item):
+        raise Refusal(f"an associate-only claim on sd:{item} closes nothing, and the body has a Closes: line",
+                      code="closes_need_delivery", boundary="input", state="operator_decision",
+                      next_action="Move the Closes: items to Refs:, or name them on the item's --deliver pull request.")
+    for number in items_closed(body, title, item, deliver):
+        row = connection.execute("SELECT repo FROM item WHERE id = ?", (number,)).fetchone()
+        if row is None:
+            raise Refusal(f"Closes: or the title names sd:{number}, which is no item; "
+                          "the merge closes every item they name",
+                          code="closes_item_unknown", boundary="input", state="operator_decision",
+                          next_action="Correct the Closes: line or the title, or move a related item to Refs:.")
+        if row["repo"] != repo:
+            raise Refusal(f"Closes: or the title names sd:{number}, which belongs to another repository; "
+                          "a merge closes only this repository's items",
+                          code="closes_item_foreign", boundary="input", state="operator_decision",
+                          next_action="Close that item from its own repository, or move it to Refs:.")
+
+
 def published(body: str, item: int) -> str:
     """The body as `sd-ship` publishes it: normalized, then one `Work:` line."""
     return f"{body}\n\n{sd_lib.WORK_TRAILER} sd:{item}\n"
