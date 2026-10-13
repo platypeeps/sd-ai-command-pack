@@ -546,8 +546,7 @@ def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = No
         # makes the second call safe -- but a caller who cannot tell the two
         # apart will read "here is the row" as "I just made it".
         if value.get("created") is False:
-            print("already filed under this ref; updated, status kept" if value["item"].get("ref")
-                  else "already registered; nothing changed")
+            print("already registered; nothing changed")
         _print_notes(value, None if audit else audited)
         print(f"revision: {value['revision']}")
 
@@ -1027,14 +1026,18 @@ def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
     writes, which says what happened: captured as a task, then reclassified.
 
     A `--ref` (sd:1902) is read first, in the same transaction: a row that
-    already carries the reference is updated by `_refile` and no row is made.
+    already carries the reference refuses the add and is left as it was
+    (sd:3703). Updating it overwrote other work filed under one ref, done
+    and cancelled rows too; `sd task edit` is the verb that changes a row.
     """
     _ref_checked(args)
     with workflow.transaction(connection):
         if args.ref is not None:
             filed = sd_db.writes.item_by_external(connection, REF_SOURCE, args.ref)
             if filed is not None:
-                return {**_refile(workflow, connection, args, filed["id"], who), "created": False}
+                raise WorkRefusal(f"sd:{filed['id']} ({filed['status']}) already carries --ref {args.ref}; "
+                                  f"change it with `sd task edit {filed['id']}`, or file this occurrence "
+                                  "under its own ref")
         state = workflow.capture_task(
             connection, title=args.title, body=args.body or "", priority=args.priority,
             due=args.due, repo=_task_repo(args, connection, workflow),
@@ -1061,9 +1064,8 @@ REF_SOURCE = "task-ref"
 def _ref_checked(args: argparse.Namespace) -> None:
     """Refuse a `--ref` the upsert cannot keep to one row per reference.
 
-    Only `task` and `followup` rows take the update a second add makes:
-    `edit_item` refuses every other kind's details. A recurring row hands its
-    rule to a new row on completion, and a reference names one occurrence.
+    Only `task` and `followup` rows take one. A recurring row hands its rule
+    to a new row on completion, and a reference names one occurrence.
     """
     if args.ref is None:
         return
@@ -1074,25 +1076,6 @@ def _ref_checked(args: argparse.Namespace) -> None:
         raise WorkRefusal(f"--ref files a task or a followup, not a {args.kind}")
     if args.recur is not None:
         raise WorkRefusal("--ref names one occurrence, so it does not take --recur")
-
-
-def _refile(workflow: Any, connection: Any, args: argparse.Namespace,
-            item: int, who: str) -> dict:
-    """A second add with the same reference: update the row, whatever its status.
-
-    A retried delivery of one occurrence must not reopen work the operator
-    resolved or cancelled, so the status stays. The details the caller gave
-    replace the row's; a detail left out keeps its value. `edit_item` writes
-    no note when nothing changed.
-    """
-    changes: dict[str, Any] = {"title": args.title}
-    if args.body is not None:
-        changes["body"] = args.body
-    if args.priority is not None:
-        changes["priority"] = args.priority
-    if args.due is not None:
-        changes["due"] = args.due
-    return workflow.edit_item(connection, item, changes, who=who)
 
 
 def _items(sd_db: Any, workflow: Any, args: argparse.Namespace, connection: Any) -> list[dict[str, Any]]:
@@ -1228,10 +1211,10 @@ def _dedupe(inputs: tuple[Any, Any, dict] | None, env: Any = os.environ) -> None
 
 
 def _dedupe_ask(sd_db: Any, connection: Any, state: dict, env: Any) -> None:
-    """The hint itself. A `--ref` update made no new item, and an item with no
-    checkout has no repository whose visibility could make its titles sendable."""
+    """The hint itself. An item with no checkout has no repository whose
+    visibility could make its titles sendable."""
     item = state["item"]
-    if state.get("created") is False or not item.get("repo"):
+    if not item.get("repo"):
         return
     root = pathlib.Path(item["repo"]).expanduser()
     ready = sd_jev_shadow.shadow_ready(DEDUPE_STAGE, DEDUPE_CALLER, root, env, sys.stderr)
@@ -1479,7 +1462,6 @@ def register(groups: Any, store: Any) -> None:
     _register_contributions(verbs)
     add = verbs.add_parser("add", help="capture a standalone item, a task unless --kind says")
     add.add_argument("title")
-    # None, not "": a second `--ref` add tells "--body ''" (clear it) from no --body (keep it).
     add.add_argument("--body")
     add.add_argument("--priority", type=int, choices=range(1, 5))
     add.add_argument("--due", help="YYYY-MM-DD")
@@ -1492,7 +1474,7 @@ def register(groups: Any, store: Any) -> None:
     _recurrence_flags(add)
     add.add_argument("--ref", metavar="SOURCE:ID",
                      help="the occurrence that raised the item, such as job:repo-sync:42; a second "
-                          "add with the same reference updates that item, whatever its status")
+                          "add with the same reference refuses and names the item")
     where = add.add_mutually_exclusive_group()
     where.add_argument("--here", action="store_true",
                        help="refuse unless this is a checkout registered in the sd database "

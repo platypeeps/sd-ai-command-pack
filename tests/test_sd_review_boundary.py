@@ -945,11 +945,17 @@ class LineBudgetTests(unittest.TestCase):
         # 4770 -> 4777 is sd:2993 and sd:2978: `bin/sd_gate_run.py` +7 for the
         # gate's `core.fsmonitor=false` and its `sd-check` process group. That
         # branch was cut before sd:3013 lowered the cap.
+        #
+        # 4777 -> 4798 is sd:3499, under the operator's 4900 ceiling: receipts
+        # name the reviewer binary's version, `codex --version` beside the skill
+        # probe and the opencode probe's version in the outcome (`bin/sd-review`
+        # +13), and a probe that runs out of time names its stage and elapsed
+        # seconds and reads as a timeout, not a breach (`bin/sd_opencode.py` +24).
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4777,
+            4798,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

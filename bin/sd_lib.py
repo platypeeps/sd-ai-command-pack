@@ -346,6 +346,8 @@ def sibling(module_name: str, filename: str):
     if spec is None:  # pragma: no cover - a bin/ layout this broken cannot run
         raise ConfigError(f"cannot load {path}")
     module = importlib.util.module_from_spec(spec)
+    # A dataclass in the sibling looks its module up by name while it is built.
+    sys.modules[module_name] = module
     loader.exec_module(module)
     return module
 

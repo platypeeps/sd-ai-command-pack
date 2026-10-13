@@ -39,6 +39,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from sd_lib import git_output
+
 # Imported, not spelled again: the two spellings split once already.
 from sd_research_publish import DASHBOARD_DIR, execute_conf
 
@@ -121,9 +123,14 @@ def work_items(repo):
 
     The lint is run rather than merely advertised, because a gate nobody invokes
     is not a gate. A repository with no `docs/work/` never pays for it.
+
+    Only a tracked `docs/work/` counts (sd:3705): an ignored one held local
+    items, so the lint failed a developer checkout and passed its clean
+    worktree. Outside git the folder on disk answers, and the lint says why.
     """
     work = os.path.join(repo, "docs", "work")
-    if not os.path.isdir(work):
+    tracked = git_output(["ls-files", "--deduplicate", "-z", "--", "docs/work"], Path(repo))
+    if not (tracked if tracked is not None else os.path.isdir(work)):
         return 0
     lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sd-docs-lint")
     if not os.path.exists(lint):

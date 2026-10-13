@@ -178,3 +178,5 @@ uv.lock
 unittest-output.log
 # Generated HTML the local dashboard serves; never committed.
 docs/dashboard/
+# `sd skill intake` stages an install here; the next run finishes or undoes a stopped one.
+/.sd-skill-intake/

@@ -87,15 +87,18 @@ def cron_job_dirs(environ: dict[str, str] | None = None) -> list[Path]:
     `<config>/cron-jobs/jobs`; the first directory holding `<job>.job` defines
     it. `<host>` is `CRON_JOBS_HOST`, else the short host name, lower-cased;
     other hosts' folders are never listed. Both variables come from the
-    environment, else from `<config>/cron-jobs/.env`, as in the script.
+    environment, an exported empty value too, else from
+    `<config>/cron-jobs/.env`, as `st_source_env` leaves them (sd:3970).
     Change this, its twin in the checkout's `lib/system_tools_config.py` and `job_dirs` in
     `local-cron-jobs/cron-jobs.sh` together.
     """
     env = os.environ if environ is None else environ
     saved = read_env("cron-jobs", env)
-    extra = env.get("CRON_JOBS_EXTRA_DIRS") or saved.get("CRON_JOBS_EXTRA_DIRS") or ""
-    host = (env.get("CRON_JOBS_HOST") or saved.get("CRON_JOBS_HOST")
-            or socket.gethostname().split(".")[0]).lower()
+    def setting(name: str) -> str | None:
+        return env[name] if name in env else saved.get(name)
+
+    extra = setting("CRON_JOBS_EXTRA_DIRS") or ""
+    host = (setting("CRON_JOBS_HOST") or socket.gethostname().split(".")[0]).lower()
     jobs = config_dir("cron-jobs", env) / "jobs"
     return ([Path(os.path.expanduser(d)) for d in extra.split(":") if d]
             + ([jobs / host] if host else []) + [jobs])

@@ -34,6 +34,13 @@ sequence somebody actually runs, and that is what these three say.
 `sd skill list --usage` prints each skill's recorded uses. A skill in
 `contrib/` is one command away, and use is what moves it.
 
+`sd skill intake <GitHub URL>` judges an outside skill against the installed
+set: its risk, its overlap with installed skills and its value, then a verdict
+of install, fold or decline. It installs nothing until `--approve` names the
+revision the report printed; the skill then lands in `contrib/` and records its
+source URL and commit. `sd skill intake <name>` fetches that source again,
+shows the diff and updates only on the same kind of approval.
+
 A repository can extend the framework from the other side. `sd plugin add`
 registers a **domain pack** — its own manifest, its own `<prefix>-*` skills, its
 own rows — and three exist today. What a manifest may declare, and what the
@@ -257,10 +264,10 @@ refusal: the grammar, the anchor, the due date and the kinds that may recur.
 
 A row another source raises carries a reference to the occurrence that raised it:
 `sd task add "repo-sync failed" --kind followup --ref job:repo-sync:42`.
-A second add with the same reference updates that row's title, and any body,
-priority or due date it names, and keeps its status, so a retried delivery
-never reopens work that is done; the next run's failure names a new reference
-and files a new row. `sd task show` prints the reference as `ref:`, and
+A second add with the same reference refuses, names the row and its status,
+and leaves the row as it was, done or open; `sd task edit` changes a row, and
+the next run's failure names a new reference and files a new row (sd:3703).
+`sd task show` prints the reference as `ref:`, and
 `sd today --json` and every `--json` row carry it as `ref`. Only a task or a
 followup takes `--ref`, and not with `--recur`.
 
