@@ -728,6 +728,36 @@ class ObsidianTests(Fixture):
         written = (self.briefs() / "a.md").read_text(encoding="utf-8")
         self.assertEqual(written.count("source_repo:"), 1)
 
+    def test_a_same_named_checkout_does_not_overwrite_the_vault_copy(self) -> None:
+        """sd:3513: the vault folder is keyed on the checkout's name, so a
+        second checkout with that name replaced the first one's copy and no
+        report said so. It is reported and the first copy stays."""
+        PUBLISH.write_obsidian(self.repo, self.docs())
+        kept = (self.briefs() / "a.md").read_text(encoding="utf-8")
+        other = self.root / "elsewhere" / "my-research"
+        (other / "10-x").mkdir(parents=True)
+        (other / "10-x" / "a.md").write_text("# Other\n", encoding="utf-8")
+        said = PUBLISH.write_obsidian(other, [dict(src="10-x/a.md", out="a", title="A")])
+        self.assertEqual((self.briefs() / "a.md").read_text(encoding="utf-8"), kept)
+        self.assertTrue(any("a.md" in line and str(self.repo) in line for line in said), said)
+
+    def test_a_copy_written_before_the_checkout_was_recorded_is_replaced(self) -> None:
+        """A vault copy an earlier version wrote names no checkout, so the
+        next render takes it over rather than refusing every document."""
+        self.briefs().mkdir(parents=True)
+        (self.briefs() / "a.md").write_text(
+            "---\nsource_repo: my-research\nsource_path: 10-x/a.md\n---\n\nold\n", encoding="utf-8")
+        PUBLISH.write_obsidian(self.repo, self.docs())
+        self.assertIn("# A", (self.briefs() / "a.md").read_text(encoding="utf-8"))
+
+    def test_a_copy_that_cannot_be_read_is_left_alone(self) -> None:
+        """Whose copy it is stays unknown, and unknown is not ours."""
+        self.briefs().mkdir(parents=True)
+        (self.briefs() / "a.md").write_bytes(b"\xff\xfe not text")
+        said = PUBLISH.write_obsidian(self.repo, self.docs())
+        self.assertEqual((self.briefs() / "a.md").read_bytes(), b"\xff\xfe not text")
+        self.assertTrue(any("cannot read" in line for line in said), said)
+
     def test_no_vault_is_reported_and_does_not_fail_the_render(self) -> None:
         """A machine with no vault still publishes to the dashboard, the same
         way one with no dashboard checkout still renders."""

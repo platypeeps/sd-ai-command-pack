@@ -1728,34 +1728,95 @@ class HookTriggerTests(unittest.TestCase):
         return hashlib.sha256((self.repo / "research.conf.py").read_bytes()).hexdigest()
 
     def real_render(self, **env: str):
-        """Run the real `render` in-process, as the kit's `render` verb does.
+        """Run the real `render` in-process, as the kit's `render` verb does."""
 
-        `env` is added to an environment that carries neither marker of an
-        automatic render, so a run with no `env` is a render by hand even
-        when this suite itself runs under a git hook. Returns the render
-        module's `trust_conf` as a spy, and the exit it raised or None.
+        spy, stop, _ = self.by_verb("render", **env)
+        return spy, stop
+
+    def by_verb(self, verb: str, **env: str):
+        """Run `verb`'s read of research.conf.py in-process, as the kit does.
+
+        `render` and `publish` run whole; `review` runs `load_docs`, its one
+        read of the config. `env` is added to an environment that carries
+        neither marker of an automatic render, so a run with no `env` is a
+        run by hand even when this suite itself runs under a git hook.
+        Returns `trust_conf` as a spy, the exit raised or None, and the label
+        the dashboard was given or None. Every write `publish()` makes is
+        stubbed, so nothing reaches the machine's dashboard, vault or queue.
         """
 
-        load_publish()
+        publish = load_publish()
         with unittest.mock.patch.dict(sys.modules, {"markdown": types.ModuleType("markdown")}):
             render = load_kit().load("sd_research_render")
+        review = load_kit().load("sd_research_review")
+        run_verb = {"render": render.main, "publish": publish.publish_main,
+                    "review": lambda: review.load_docs(os.getcwd())}[verb]
         here = os.getcwd()
         os.chdir(self.repo)
         self.addCleanup(os.chdir, here)
         clean = {k: v for k, v in os.environ.items()
                  if k not in ("SD_RESEARCH_TRIGGER", "GIT_EXEC_PATH")}
-        spy = unittest.mock.Mock(wraps=render.trust_conf)
+        spy = unittest.mock.Mock(wraps=publish.trust_conf)
+        register = unittest.mock.Mock(return_value="")
         # DOCS is empty, so nothing is converted: an empty module stands in
         # for python-markdown, which the kit re-executes to find.
         with unittest.mock.patch.dict(os.environ, dict(clean, **env), clear=True), \
-                unittest.mock.patch.object(render, "publish", return_value=[]), \
-                unittest.mock.patch.object(render, "trust_conf", spy), \
+                unittest.mock.patch.multiple(
+                    publish, trust_conf=spy, register_root=register,
+                    write_obsidian=unittest.mock.Mock(return_value=[]),
+                    ignore_dashboard=unittest.mock.Mock(return_value=""),
+                    migrate_legacy_queue=unittest.mock.Mock(return_value=[]),
+                    enqueue=unittest.mock.Mock(return_value=[])), \
                 unittest.mock.patch("sys.stdout", io.StringIO()):
+            label = None
             try:
-                render.main()
+                run_verb()
             except SystemExit as stop:
-                return spy, stop
-        return spy, None
+                return spy, stop, label
+            if register.called:
+                label = register.call_args.args[1]
+        return spy, None, label
+
+    def test_publish_and_review_do_not_execute_an_unread_config(self) -> None:
+        """sd:3513: `publish` and `review` execute the config as `render` does,
+        so an automatic run of either refuses one no command by hand has
+        executed, and records nothing."""
+
+        trusted = self.record().read_text(encoding="utf-8")
+        self.a_config_change()
+        for verb in ("publish", "review"):
+            with self.subTest(verb=verb):
+                spy, stop, _ = self.by_verb(verb, SD_RESEARCH_TRIGGER="post-merge")
+                self.assertIsNotNone(stop)
+                self.assertIn("sd-research-kit render", str(stop.code))
+                spy.assert_not_called()
+        self.assertEqual(self.executions(), 0)
+        self.assertEqual(self.record().read_text(encoding="utf-8"), trusted)
+
+    def test_publish_and_review_by_hand_record_the_config(self) -> None:
+        """A `publish` or `review` by hand executes the config, so it records
+        it as read, and a later hook render renders it."""
+
+        self.a_config_change()
+        for verb in ("publish", "review"):
+            with self.subTest(verb=verb):
+                with (self.repo / "research.conf.py").open("a") as handle:
+                    handle.write("# read before %s\n" % verb)
+                self.record().unlink(missing_ok=True)
+                _, stop, _ = self.by_verb(verb)
+                self.assertIsNone(stop)
+                self.assertEqual(self.record().read_text(encoding="utf-8").strip(), self.digest())
+
+    def test_render_and_publish_give_the_dashboard_one_label(self) -> None:
+        """sd:3513: with no PROJECT, render and publish each fell back to a
+        label of their own, so alternating them relabelled the row on every
+        run. `publish()` owns the one fallback."""
+
+        (self.repo / "research.conf.py").write_text("DOCS = []\n")
+        self.trust()
+        labels = [self.by_verb(verb)[2] for verb in ("render", "publish")]
+        self.assertEqual(labels[0], labels[1])
+        self.assertEqual(labels[0], "REPO")
 
     def test_an_unrelated_commit_after_a_declined_pull_does_not_execute_the_config(self) -> None:
         """The second #1376 review. The pull is declined; the operator then

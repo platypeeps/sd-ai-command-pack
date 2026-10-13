@@ -281,6 +281,46 @@ def trust_conf(repo: Path, source: bytes) -> None:
         (Path(repo) / record).write_text(hashlib.sha256(source).hexdigest() + "\n", encoding="utf-8")
 
 
+def execute_conf(repo: Path, verb: str) -> dict[str, Any] | None:
+    """The namespace `repo`'s research.conf.py builds, or None when it has none.
+
+    The one place a verb executes the config: `render`, `publish` and
+    `review` all did, and only `render` checked the record (sd:1376), so a
+    `publish` after a pull ran a config nobody read (sd:3513). A run nobody
+    typed executes only a recorded config, checked on the bytes it executes,
+    and records nothing; a run by hand records what it executed.
+    """
+    conf = Path(repo) / "research.conf.py"
+    if not conf.is_file():
+        return None
+    source = conf.read_bytes()
+    trigger = automatic_render()
+    if trigger and not conf_trusted(repo, source):
+        raise SystemExit(
+            "%s: no command by hand has executed this research.conf.py, and "
+            "`sd-research-kit %s` executes it; read it, then run `sd-research-kit "
+            "render`. docs/dashboard/ is stale until then" % (trigger, verb))
+    ns: dict[str, Any] = {}
+    # nosec B102 - research.conf.py is a file in the repo being rendered, at the
+    # same trust level as this script, and the format needs execution: at least
+    # one live config builds its DOCS list with a loop.
+    exec(compile(source, str(conf), "exec"), ns)  # nosec B102
+    if not trigger:
+        trust_conf(repo, source)
+    return ns
+
+
+def project_label(repo: Path, project: str | None) -> str:
+    """The research badge and dashboard label: `PROJECT`, or one fallback.
+
+    One fallback for every verb: `render` and `publish` each had their own,
+    so alternating them relabelled the dashboard row on every run (sd:3513).
+    The repository's name, not the checkout's: a worktree is called after
+    its branch, and its name is nobody's project.
+    """
+    return project or repo_home(repo).name.split("-")[0].upper()
+
+
 def repo_home(repo: Path) -> Path:
     """The checkout that names this repository: `repo`, unless it is a linked
     worktree, in which case the main checkout it was added from.
@@ -658,6 +698,30 @@ def vault_folder(repo: Path) -> Path | None:
     return Path(VAULT).expanduser() / BRIEFS / repo_home(repo).name
 
 
+def vault_owner(target: Path) -> str | None:
+    """The checkout a vault copy's frontmatter names: "" when it names none,
+    None when the copy cannot be read.
+
+    The folder is keyed on the checkout's name, so two checkouts with one name
+    share it (sd:3513). A missing copy, or one an earlier version wrote, names
+    no checkout and is taken over. An unreadable one is unknown, not ours.
+    """
+    try:
+        lines = target.read_text(encoding="utf-8").split("\n")
+    except FileNotFoundError:
+        return ""
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not lines or lines[0] != "---":
+        return ""
+    for line in lines[1:]:
+        if line == "---":
+            break
+        if line.startswith("source_checkout: "):
+            return line[len("source_checkout: "):].strip()
+    return ""
+
+
 def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     """Write every document's Markdown into the vault, under its repo folder.
 
@@ -680,6 +744,7 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
 
     rev = revision(repo)
     home = repo_home(repo)
+    checkout = _shown(home)
     reports: list[str] = []
     written = 0
     for cfg in docs:
@@ -701,15 +766,25 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
         front = "\n".join([
             "---",
             "source_repo: %s" % home.name,
+            "source_checkout: %s" % checkout,
             "source_path: %s" % src,
             "revision: %s" % rev,
             "rendered_by: sd-research-kit",
             "---",
             "",
         ])
+        target = folder / (out + ".md")
+        owner = vault_owner(target)
+        if owner is None:
+            reports.append("obsidian: cannot read %s to see whose copy it is; left alone" % target)
+            continue
+        if owner and owner != checkout:
+            reports.append("obsidian: %s.md in %s belongs to %s; left alone. Rename one "
+                           "checkout, or delete that copy to move it here" % (out, folder, owner))
+            continue
         try:
             folder.mkdir(parents=True, exist_ok=True)
-            (folder / (out + ".md")).write_text(front + body, encoding="utf-8")
+            target.write_text(front + body, encoding="utf-8")
         except OSError as problem:
             reports.append("obsidian: cannot write %s.md (%s)" % (out, problem))
             continue
@@ -1236,7 +1311,7 @@ def queued_report(out: str, target: str, what: str, carried: str, reverted: bool
     return "mirror: queued %s -> %s%s" % (out, target, notes)
 
 
-def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
+def publish(repo: Path, project: str | None, docs: list[dict[str, Any]]) -> list[str]:
     """Every job, in the order the contract states them.
 
     Local copies first, outward queue last. The order is the contract's: the
@@ -1246,7 +1321,7 @@ def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
     reports = write_obsidian(repo, docs)
     reports.append(ignore_dashboard(repo))
     reports.append(register_root(
-        repo, project or repo_home(repo).name, repo / DASHBOARD_DIR))
+        repo, project_label(repo, project), repo / DASHBOARD_DIR))
     # Before enqueueing, and here rather than inside `enqueue`: a repo that
     # designates nothing still runs on the machine holding the stranded queue,
     # and `enqueue` returns before touching the directory when it has no
@@ -3078,15 +3153,11 @@ def publish_main() -> int:
     only.
     """
     repo = Path.cwd()
-    conf = repo / "research.conf.py"
-    if not conf.is_file():
+    ns = execute_conf(repo, "publish")
+    if ns is None:
         print("no research.conf.py in %s" % repo, file=sys.stderr)
         return 2
-    ns: dict[str, Any] = {}
-    # nosec B102 - same trust level as the render it mirrors; see sd_research_render.
-    exec(compile(conf.read_text(encoding="utf-8"), str(conf), "exec"), ns)  # nosec B102
-    project = ns.get("PROJECT", repo.name)
-    for line in publish(repo, project, ns.get("DOCS", [])):
+    for line in publish(repo, ns.get("PROJECT"), ns.get("DOCS", [])):
         print(line)
     return 0
 
