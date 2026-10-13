@@ -2802,27 +2802,166 @@ roles:
         self.assertTrue((tree / "sub/scratch.txt").exists())
         self.assertEqual(cleanup.get("kept", {}).get(str(tree)), "it has uncommitted changes", cleanup)
 
-    def test_a_merge_closes_every_item_its_title_names(self):
-        """sd:3014, operator ruling 2026-10-08. A batched pull request names its
-        items in its title. The merge closes each one as it closes a `Closes:`
-        item, with the merge commit in the reason; the claimed item keeps its
-        own delivery path."""
+    def delivering_commits(self, *numbers: int) -> str:
+        """One branch commit per item, each carrying `Delivers: sd:<n>`, as a builder writes them; the new head."""
+        for number in numbers:
+            _git(self.root, "commit", "--allow-empty", "-m", f"fix for sd:{number}\n\nDelivers: sd:{number}")
+        return _git(self.root, "rev-parse", "HEAD")
+
+    def status_of(self, number: int) -> str:
+        return self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0]
+
+    def test_a_merge_closes_the_items_its_branch_commits_deliver(self):
+        """sd:3704. A consumer repo's PR #366 carried `Delivers: sd:3674` and
+        `Delivers: sd:3690` on its commits, its title named only sd:3655, and the
+        two stayed open. A branch commit's trailer is tied to the reviewed head;
+        prepare stores the closing set with that head, and the merge closes it."""
         self.task_item("task")
         batched = self.closes_items()
-        title = "Three fixes (" + ", ".join(f"sd:{number}" for number in (self.item, *batched)) + ")"
-        self.unanswered("--deliver", "--title", title).prepare()
+        head = self.delivering_commits(*batched)
+        self.unanswered("--deliver", "--title", "One change").prepare()
+        self.assertEqual(self.operation().state["closing"], {"head": head, "items": list(batched)})
         with patch.object(ship.time, "sleep"):
             result = self.merge()
         self.assert_closed_by_merge(result)
         self.assertEqual(result.get("closed_items"), [f"sd:{number}" for number in batched])
-        commit = result["merge_commit"]
+        block = ship.sd_lib.trailer_block(_git(self.remote.path, "log", "-1", "--format=%B", "main")).splitlines()
         for number in batched:
             with self.subTest(item=number):
-                self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0], "done")
-        for number in batched[:2]:
-            reasons = [row[0] for row in self.connection.execute(
-                "SELECT body FROM note WHERE item = ? AND kind = 'status_change'", (number,))]
-            self.assertIn(f"planning -> done by sd-ship: delivered at {commit} on origin/main", reasons)
+                self.assertIn(f"Delivers: sd:{number}", block)
+                self.assertEqual(self.status_of(number), "done")
+
+    def test_a_title_closes_nothing_and_prepare_names_each_id_it_leaves_open(self):
+        """sd:3704, replacing the sd:3014 title close. A title is prose: it names
+        context (#353), and the merge read it live from GitHub. The items it names
+        stay open, and prepare says so for each one."""
+        self.task_item("task")
+        batched = self.closes_items()
+        title = "Three fixes (" + ", ".join(f"sd:{number}" for number in (self.item, *batched)) + ")"
+        self.unanswered("--deliver", "--title", title).prepare()
+        warnings = self.operation().state["warnings"]
+        for number in batched:
+            self.assertIn(f"the title names sd:{number}, which this merge leaves open; add `Closes: sd:{number}`, "
+                          "a `Delivers:` commit trailer, or `Refs:`", warnings)
+        self.assertFalse([line for line in warnings if f"sd:{self.item}," in line])
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assert_closed_by_merge(result)
+        self.assertFalse(result.get("closed_items"))
+        block = ship.sd_lib.trailer_block(_git(self.remote.path, "log", "-1", "--format=%B", "main")).splitlines()
+        for number in batched:
+            with self.subTest(item=number):
+                self.assertNotIn(f"Delivers: sd:{number}", block)
+                self.assertEqual(self.status_of(number), "planning")
+
+    def test_an_associate_only_prepare_refuses_a_branch_commit_that_delivers(self):
+        """sd:3704, as sd:3365 refuses a `Closes:` line: an associate-only claim
+        closes nothing, so a commit that says it delivers an item stops the prepare."""
+        self.task_item("task")
+        other = self.closes_items()[0]
+        self.delivering_commits(other)
+        with self.assertRaises(ship.Refusal) as caught:
+            self.unanswered("--associate-only", "--title", "A slice").prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closes_need_delivery")
+        self.assertIn(f"Delivers: sd:{other}", str(caught.exception))
+        self.assertFalse(self.remote.pull_requests)
+
+    def test_a_branch_commit_delivering_no_item_or_another_repositorys_item_refuses(self):
+        self.task_item("task")
+        elsewhere = self.directory / "elsewhere"
+        upsert_repo(self.connection, str(elsewhere), remote="https://github.com/example/elsewhere")
+        foreign = create_item(self.connection, kind="task", title="another repository", status="planning", repo=str(elsewhere))
+        self.delivering_commits(99999)
+        for number, code in ((99999, "closes_item_unknown"), (foreign, "closes_item_foreign")):
+            with self.subTest(code=code):
+                _git(self.root, "commit", "-q", "--amend", "--allow-empty", "-m", f"fix\n\nDelivers: sd:{number}")
+                with self.assertRaises(ship.Refusal) as caught:
+                    self.unanswered("--deliver", "--title", "A change").prepare()
+                self.assertEqual(caught.exception.workflow["blocker"]["code"], code)
+        self.assertFalse(self.remote.pull_requests)
+
+    def test_a_branch_commit_delivering_a_done_item_is_left_out_with_a_warning(self):
+        """A branch stacked on a squashed one still carries its commits and their
+        `Delivers:`; the item they name is already done, so the merge leaves it."""
+        from sd_db.workflow import change_status
+        self.task_item("task")
+        done = self.closes_items()[0]
+        change_status(self.connection, done, "done", who="operator")
+        head = self.delivering_commits(done)
+        self.unanswered("--deliver", "--title", "A change").prepare()
+        state = self.operation().state
+        self.assertEqual(state["closing"], {"head": head, "items": []})
+        self.assertIn(f"a branch commit carries `Delivers: sd:{done}`, which is already done; this merge leaves it",
+                      state["warnings"])
+
+    def test_a_failed_trailer_read_refuses_prepare_and_stores_no_closing_set(self):
+        """Failure table, row 1: a failed read is unknown, not an empty set."""
+        self.task_item("task")
+        self.delivering_commits(self.closes_items()[0])
+        real = ship.git
+
+        def failing(root, *args):
+            if args[:2] == ("log", "--no-merges"):
+                raise ship.Refusal("fatal: bad revision", code="command_failed", boundary="runtime",
+                                   state="retryable_failure")
+            return real(root, *args)
+        with patch.object(ship, "git", failing), self.assertRaises(ship.Refusal) as caught:
+            self.unanswered("--deliver", "--title", "A change").prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "command_failed")
+        self.assertNotIn("closing", self.operation().state)
+        self.assertFalse(self.remote.pull_requests)
+
+    def test_a_closing_set_read_at_another_head_refuses_the_merge(self):
+        """Failure table, row 3: the stored set names the head it was read at."""
+        self.task_item("task")
+        number = self.unanswered("--deliver", "--title", "A change").prepare()["pull_request"]["number"]
+        operation = self.operation()
+        operation.state["closing"] = {**operation.state["closing"], "head": "0" * 40}
+        operation.save()
+        with patch.object(ship.time, "sleep"), self.assertRaises(ship.Refusal) as caught:
+            self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closing_set_stale")
+        self.assertIsNone(getattr(self.remote.pull(number), "merged_head", None))
+
+    def test_an_older_unsent_receipt_without_a_closing_set_refuses_the_merge(self):
+        """Failure table, row 4: a receipt prepared under the title rule is prepared again, not merged."""
+        self.task_item("task")
+        number = self.unanswered("--deliver", "--title", "A change").prepare()["pull_request"]["number"]
+        operation = self.operation()
+        del operation.state["closing"]
+        operation.save()
+        with patch.object(ship.time, "sleep"), self.assertRaises(ship.Refusal) as caught:
+            self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closing_set_stale")
+        self.assertIn("prepare", caught.exception.workflow["next_action"])
+        self.assertIsNone(getattr(self.remote.pull(number), "merged_head", None))
+
+    def test_an_older_receipt_at_merge_dispatch_closes_what_its_title_named(self):
+        """Failure table, row 5: prepare routes `merge_dispatch` to reconcile, so it
+        cannot add the field. That receipt keeps the title rule it was sent under."""
+        self.task_item("task")
+        batched = self.closes_items()[:1]
+        self.unanswered("--deliver", "--title", f"A change (sd:{batched[0]})").prepare()
+        operation = self.operation()
+        del operation.state["closing"]
+        operation.state["phase"] = "merge_dispatch"
+        operation.save()
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assert_closed_by_merge(result)
+        self.assertEqual(result.get("closed_items"), [f"sd:{batched[0]}"])
+
+    def test_a_lost_merge_response_still_closes_the_trailer_items(self):
+        """Failure table, row 6: the `PUT` lands and its answer is lost; reconcile closes the stored set."""
+        self.task_item("task")
+        batched = self.closes_items()[:1]
+        self.delivering_commits(*batched)
+        self.unanswered("--deliver", "--title", "A change").prepare()
+        self.double.lose_merge = True
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        self.assertEqual(self.status_of(batched[0]), "done")
 
     def test_a_web_merge_without_the_closes_trailers_leaves_those_items_open(self):
         """A pull request merged on GitHub lands whatever message the web form
@@ -2837,7 +2976,12 @@ roles:
         named = (*closes, by_hand)
         body = self.directory / "body.md"
         body.write_text("Fixes in one change.\n\nCloses: " + ", ".join(f"sd:{number}" for number in named) + "\n")
-        self.unanswered("--deliver", "--body-file", str(body)).prepare()
+        # sd:3704: an item a branch commit delivers is held to the landed message the same way.
+        trailed = create_item(self.connection, kind="task", title="delivered by a commit", status="planning",
+                              repo=str(self.operator))
+        self.delivering_commits(trailed)
+        named = (*named, trailed)
+        self.unanswered("--deliver", "--body-file", str(body), "--title", "Fixes").prepare()
         change_status(self.connection, by_hand, "done", who="operator")
         saved = self.double._route
 
@@ -2864,6 +3008,8 @@ roles:
         self.assertIn("Delivers", failed[f"sd:{closes[2]}"])
         self.assertNotEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (closes[2],)).fetchone()[0], "done")
         self.assertIn(f"item {by_hand} is done without delivery evidence for {commit}", failed[f"sd:{by_hand}"])
+        self.assertEqual(failed[f"sd:{trailed}"], f"{commit} carries no `Delivers: sd:{trailed}` trailer")
+        self.assertEqual(self.status_of(trailed), "planning")
 
     def test_an_associate_only_merge_closes_no_item_its_title_names(self):
         """sd:3365, owner ruling 2026-10-11. A link-only pull request whose title
@@ -2923,9 +3069,6 @@ roles:
                 with self.assertRaises(ship.Refusal) as caught:
                     self.unanswered("--deliver", "--body-file", str(body)).prepare()
                 self.assertEqual(caught.exception.workflow["blocker"]["code"], names)
-        with self.assertRaises(ship.Refusal) as caught:  # sd:3014: the title's items are closed the same way
-            self.unanswered("--deliver", "--title", "A change (sd:99999)").prepare()
-        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closes_item_unknown")
         self.assertFalse(self.remote.pull_requests)
 
     def test_a_title_closes_only_a_whole_sd_token(self):
@@ -2941,19 +3084,21 @@ roles:
             with self.subTest(item=number):
                 self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (number,)).fetchone()[0], "planning")
 
-    def test_a_live_title_naming_another_repositorys_item_is_refused_before_the_merge(self):
-        """Review of sd:3013: a title edited after prepare reached the squash unchecked."""
+    def test_a_live_title_edited_after_prepare_closes_nothing(self):
+        """Review of sd:3013 refused a title edited after prepare that named another
+        repository's item. Since sd:3704 a title closes nothing, so the edit cannot
+        reach the closing set: the merge goes out and the item stays open."""
         self.task_item("task")
         elsewhere = self.directory / "elsewhere"
         upsert_repo(self.connection, str(elsewhere), remote="https://github.com/example/elsewhere")
         foreign = create_item(self.connection, kind="task", title="another repository", status="planning", repo=str(elsewhere))
         number = self.unanswered("--deliver").prepare()["pull_request"]["number"]
         self.remote.pull(number).title = f"A change (sd:{foreign})"
-        with patch.object(ship.time, "sleep"), self.assertRaises(ship.Refusal) as caught:
-            self.merge()
-        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closes_item_foreign")
-        self.assertIsNone(getattr(self.remote.pull(number), "merged_head", None))
-        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (foreign,)).fetchone()[0], "planning")
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assert_closed_by_merge(result)
+        self.assertNotIn(f"Delivers: sd:{foreign}", _git(self.remote.path, "log", "-1", "--format=%B", "main"))
+        self.assertEqual(self.status_of(foreign), "planning")
 
     def test_a_refs_item_stays_open_after_the_merge(self):
         """`Refs:` names a related or partial item, which stays open (sd:1481).

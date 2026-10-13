@@ -1346,12 +1346,18 @@ class Ship(SharedReview):
             if not self.args.no_item and self.state.get("deliver") != deliver:
                 raise Refusal("existing PR delivery claim differs; reconcile the prepared scope first")
         self.assert_scope()
+        closing: dict | None = None
+        closing_warnings: list[str] = []
         if not self.args.no_item:
-            self.check_closes(body, title, deliver)
+            named, closing_warnings = self.branch_delivers(base, head)
+            self.check_closes(body, named, deliver)
+            items = list(self.closing(body, named, deliver))
+            closing = {"head": head, "items": items}
+            closing_warnings += self.title_left_open(title, items, deliver)
         if not self.state:
             self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
         self.persist_copilot_direction()
-        fields = {} if self.args.no_item else {"deliver": deliver, "acceptance": claim}
+        fields = {} if self.args.no_item else {"deliver": deliver, "acceptance": claim, "closing": closing}
         self.save(title=title, body=body, base=base, invoker=self.invoker(), **fields)
         # Rules 5 and 8 read the pull request body, and the body is built by
         # now. Without it the rules report themselves not run and CI is the
@@ -1386,7 +1392,7 @@ class Ship(SharedReview):
         # sd:2998. A docs-only or pin-bump branch gets the gate alone; any other gets the review.
         if not self.gate_only(head):
             self.review(head)
-        self.save(warnings=lint_warnings + claims + self.commit_warnings(head))
+        self.save(warnings=lint_warnings + claims + closing_warnings + self.commit_warnings(head))
         self.assert_scope()
         # Artifact exposure is checked again against the actual push target.
         mode = self.resolve_mode()
@@ -1748,8 +1754,9 @@ class Ship(SharedReview):
         if not self.args.no_item:
             body += f"{sd_lib.ITEM_TRAILER} sd:{self.args.item}\n"
             delivered = ([self.args.item] if self.state.get("deliver") else []) + list(self.co_delivered())
-            # Each `Closes:` item is co-delivered, so it gets the `Delivers:` its
-            # close and every git reader require (sd:1481).
+            # Each co-delivered item, from `Closes:` or a branch commit's
+            # `Delivers:`, gets the `Delivers:` its close and every git reader
+            # require (sd:1481, sd:3704).
             for number in delivered:
                 body += f"{sd_lib.DELIVERS_TRAILER} sd:{number}\n"
             # The message is fixed before GitHub picks the squash parent,
@@ -1759,20 +1766,76 @@ class Ship(SharedReview):
                 body += f"{sd_lib.REVIEWED_BASE_TRAILER} {reviewed_base}\n"
         return body
 
-    def closing(self, body: str, title: str, deliver: bool) -> tuple[int, ...]:
+    def closing(self, body: str, named: tuple[int, ...], deliver: bool) -> tuple[int, ...]:
         """The items a merge closes beside the claimed one (`sd_ship_body.items_closed`); none without an item."""
         if self.args.no_item:
             return ()
-        return sd_ship_body.items_closed(body, title, self.args.item, deliver)
+        return sd_ship_body.items_closed(body, named, self.args.item, deliver)
 
     def co_delivered(self) -> tuple[int, ...]:
-        """The items the prepared body and title co-deliver (sd:1481, sd:3014)."""
-        return self.closing(self.state.get("body") or "", self.state.get("title") or "", bool(self.state.get("deliver")))
+        """The closing set prepare stored with its head (sd:3704).
 
-    def check_closes(self, body: str, title: str, deliver: bool) -> None:
+        A receipt prepared before sd:3704 has none and keeps the rule it was
+        prepared and sent under: `Closes:` and the title's ids (sd:3014).
+        `check_closing` lets such a receipt merge only from `merge_dispatch`.
+        """
+        if self.args.no_item:
+            return ()
+        stored = self.state.get("closing")
+        if stored is not None:
+            return tuple(stored["items"])
+        return self.closing(self.state.get("body") or "", sd_ship_body.title_ids(self.state.get("title") or ""),
+                            bool(self.state.get("deliver")))
+
+    def check_closes(self, body: str, named: tuple[int, ...], deliver: bool) -> None:
         """Refuse a co-delivered item the merge could not close, before anything is published (`sd_ship_body.refuse_unclosable`)."""
         if not self.args.no_item:
-            sd_ship_body.refuse_unclosable(self.connection, self.args.item, self.item["repo"], body, title, deliver)
+            sd_ship_body.refuse_unclosable(self.connection, self.args.item, self.item["repo"], body, named, deliver)
+
+    def branch_delivers(self, base: str, head: str) -> tuple[tuple[int, ...], list[str]]:
+        """The items the branch's own commits deliver at `head`, and a warning per one already done (sd:3704).
+
+        Read through `git`, which raises on a failed call: a failed read is
+        unknown, not an empty set, and `sd_lib.commit_messages` answers `[]`.
+        A done item is left out: a branch stacked on a squashed one still
+        carries that branch's commits, and the item closed with its merge.
+        """
+        log = git(self.root, "log", "--no-merges", "--reverse", "--format=%B%x1e", f"refs/remotes/origin/{base}..{head}")
+        named, warnings = [], []
+        for number in sd_ship_body.delivers_named(log.split("\x1e")):
+            if number != self.args.item and self.item_status(number) == "done":
+                warnings.append(f"a branch commit carries `Delivers: sd:{number}`, which is already done; "
+                                "this merge leaves it")
+            else:
+                named.append(number)
+        return tuple(named), warnings
+
+    def title_left_open(self, title: str, closing: list[int], deliver: bool) -> list[str]:
+        """One warning per `sd:<n>` a delivering title names and the merge leaves open (sd:3704)."""
+        if not deliver:
+            return []
+        return [f"the title names sd:{number}, which this merge leaves open; add `Closes: sd:{number}`, "
+                "a `Delivers:` commit trailer, or `Refs:`"
+                for number in sd_ship_body.title_ids(title) if number != self.args.item and number not in closing]
+
+    def check_closing(self, head: str) -> None:
+        """Refuse a merge whose stored closing set was not read at `head` (sd:3704).
+
+        A receipt with no set was prepared before sd:3704; it merges only from
+        `merge_dispatch`, which prepare routes to reconcile and cannot
+        refresh. Either way the items are checked again, as prepare did.
+        """
+        if self.args.no_item:
+            return
+        stored = self.state.get("closing")
+        if (stored is None and self.state.get("phase") != "merge_dispatch") or (
+                stored is not None and stored.get("head") != head):
+            raise Refusal(f"the closing set this receipt holds was not read at {head}; prepare again to read it",
+                          code="closing_set_stale", boundary="input", state="retryable_failure",
+                          next_action="Run sd-ship prepare again at this head, then merge.")
+        named = (tuple(stored["items"]) if stored is not None
+                 else sd_ship_body.title_ids(self.state.get("title") or ""))
+        self.check_closes(self.state.get("body") or "", named, bool(self.state.get("deliver")))
 
     def item_status(self, number: int) -> str | None:
         row = self.connection.execute("SELECT status FROM item WHERE id = ?", (number,)).fetchone()
@@ -2002,6 +2065,7 @@ class Ship(SharedReview):
             raise Refusal("--expected-head must name the current exact reviewed commit")
         self.require_copilot_abandonment_authority()
         self.check_review(head)
+        self.check_closing(head)
         self.merge_authority()
         # The one validated reader of the `mode:` line, as `merge_ownership`
         # and `resolve_mode` read it: a word that is not a mode is named here
@@ -2032,9 +2096,8 @@ class Ship(SharedReview):
         self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed", protection=protection)
         reviewed = self.reviewed_base(head, base)
-        # The title that lands names the items the merge closes (sd:3014).
+        # The live title is the squash subject; it closes nothing (sd:3704).
         title = squash_title(observed, self.state["title"])
-        self.check_closes(self.state.get("body") or "", title, bool(self.state.get("deliver")))  # a title edited after prepare
         self.state["title"] = title
         body, closes = self.squash_message(reviewed)
         # The squash message is composed here and read by `git

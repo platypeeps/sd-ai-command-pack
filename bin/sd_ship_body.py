@@ -196,43 +196,72 @@ def strip_closes(body: str) -> str:
     return "\n".join(text for number, text in enumerate(body.split("\n"), start=1) if number not in kept)
 
 
-def items_closed(body: str, title: str, item: int, deliver: bool) -> tuple[int, ...]:
-    """The items a merge closes beside `item`: each `Closes:` item, then each sd:N in the title.
+#: An `sd:<n>` a title names: context for a reader, never a close (sd:3704).
+_TITLE_ID = re.compile(r"\bsd:([0-9]+)\b")
 
-    A batched pull request names its items in its title, and the merge
-    closes each the way it closes a `Closes:` item (sd:3014). An
-    associate-only claim closes nothing: its title names context (sd:3365).
+
+def title_ids(title: str) -> tuple[int, ...]:
+    """The whole `sd:<n>` tokens `title` names, in order, without repeats."""
+    return tuple(dict.fromkeys(int(number) for number in _TITLE_ID.findall(title)))
+
+
+def delivers_named(messages) -> tuple[int, ...]:
+    """The items the trailer blocks of `messages` name with `Delivers: sd:<n>`, in order, without repeats (sd:3704).
+
+    Only a whole `sd:<n>` value counts; a `docs/work` slug names no row here.
+    """
+    found: list[int] = []
+    for message in messages:
+        for line in sd_lib.trailer_block(message).splitlines():
+            key, _, value = line.partition(":")
+            if key.strip().lower() == "delivers" and re.fullmatch(r"sd:[1-9][0-9]*", value.strip()):
+                number = int(value.strip()[3:])
+                if number not in found:
+                    found.append(number)
+    return tuple(found)
+
+
+def items_closed(body: str, named, item: int, deliver: bool) -> tuple[int, ...]:
+    """The items a merge closes beside `item`: each `Closes:` item, then each of `named`.
+
+    `named` is what the branch's own commits deliver (sd:3704); a receipt
+    prepared before that passes its title's ids, the rule it was sent under
+    (sd:3014). An associate-only claim closes nothing (sd:3365).
     """
     if not deliver:
         return ()
-    named = (*closes_named(body, item), *map(int, re.findall(r"\bsd:([0-9]+)\b", title)))
-    return tuple(dict.fromkeys(number for number in named if number != item))
+    return tuple(dict.fromkeys(number for number in (*closes_named(body, item), *named) if number != item))
 
 
-def refuse_unclosable(connection, item: int, repo: str, body: str, title: str, deliver: bool) -> None:
+def refuse_unclosable(connection, item: int, repo: str, body: str, named, deliver: bool) -> None:
     """Refuse a co-delivered item the merge could not close; `repo` is `item`'s registered path.
 
-    One pull request claims one item; `Closes:` and the title name the
-    others it delivers, and the merge closes them (operator ruling
-    2026-10-03, sd:3014). `Refs:` names related items and is not read
-    here: they stay open. An associate-only claim closes nothing, so its
-    `Closes:` line is refused rather than dropped (sd:3365). `sd-ship
-    prepare` and `sd-ship lane enqueue` both read it (sd:3473).
+    One pull request claims one item; `Closes:` and the branch commits'
+    `Delivers:` trailers (`named`) name the others it delivers, and the merge
+    closes them (operator ruling 2026-10-03, sd:3704). `Refs:` names related
+    items and is not read here: they stay open. An associate-only claim
+    closes nothing, so its `Closes:` line or delivering commit is refused
+    rather than dropped (sd:3365). `sd-ship prepare` and `sd-ship lane
+    enqueue` both read it (sd:3473).
     """
-    if not deliver and closes_named(body, item):
-        raise Refusal(f"an associate-only claim on sd:{item} closes nothing, and the body has a Closes: line",
+    if not deliver and (closes_named(body, item) or named):
+        said = ([f"Closes: sd:{number}" for number in closes_named(body, item)]
+                + [f"Delivers: sd:{number}" for number in named])
+        raise Refusal(f"an associate-only claim on sd:{item} closes nothing, and the pull request says "
+                      f"{', '.join(f'`{line}`' for line in said)}",
                       code="closes_need_delivery", boundary="input", state="operator_decision",
-                      next_action="Move the Closes: items to Refs:, or name them on the item's --deliver pull request.")
-    for number in items_closed(body, title, item, deliver):
+                      next_action="Move the Closes: items to Refs: and drop the commits' Delivers: trailers, "
+                                  "or name them on the item's --deliver pull request.")
+    for number in items_closed(body, named, item, deliver):
         row = connection.execute("SELECT repo FROM item WHERE id = ?", (number,)).fetchone()
         if row is None:
-            raise Refusal(f"Closes: or the title names sd:{number}, which is no item; "
+            raise Refusal(f"Closes: or a branch commit's Delivers: names sd:{number}, which is no item; "
                           "the merge closes every item they name",
                           code="closes_item_unknown", boundary="input", state="operator_decision",
-                          next_action="Correct the Closes: line or the title, or move a related item to Refs:.")
+                          next_action="Correct the Closes: line or the commit's trailer, or move a related item to Refs:.")
         if row["repo"] != repo:
-            raise Refusal(f"Closes: or the title names sd:{number}, which belongs to another repository; "
-                          "a merge closes only this repository's items",
+            raise Refusal(f"Closes: or a branch commit's Delivers: names sd:{number}, which belongs to another "
+                          "repository; a merge closes only this repository's items",
                           code="closes_item_foreign", boundary="input", state="operator_decision",
                           next_action="Close that item from its own repository, or move it to Refs:.")
 

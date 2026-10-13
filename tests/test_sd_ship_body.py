@@ -140,6 +140,19 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(list(sd_lib.OWNED_TRAILERS), [line.key for line in sd_ship_body.owned_lines(body)])
 
 
+class ClosingTests(unittest.TestCase):
+    def test_only_a_whole_delivers_trailer_in_the_last_paragraph_names_an_item(self) -> None:
+        """sd:3704: the branch commits' trailers close items, so a mention in prose or a slug closes none."""
+        messages = ["fix\n\nDelivers: sd:4 says the plan\n\ndelivers: sd:5\nRefs: sd:6",
+                    "more\n\nDelivers: sd:5\nDelivers: sd:7",
+                    "docs\n\nDelivers: docs/work/x\nDelivers: sd:08",
+                    ""]
+        self.assertEqual((5, 7), sd_ship_body.delivers_named(messages))
+
+    def test_a_title_names_each_whole_token_once(self) -> None:
+        self.assertEqual((3, 4), sd_ship_body.title_ids("Fix sd:3 and sd:4 (sd:3, xsd:5, sd:6x)"))
+
+
 class TemplateTests(unittest.TestCase):
     def test_the_template_writes_no_owned_trailer_outside_a_comment(self) -> None:
         text = re.sub(r"<!--.*?-->", "", TEMPLATE.read_text(encoding="utf-8"), flags=re.DOTALL)

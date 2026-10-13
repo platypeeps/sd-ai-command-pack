@@ -663,7 +663,7 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in read_queue(queue)):
         raise LaneError(f"sd:{item} is already queued in this lane")
     body = body_file.read_text(encoding="utf-8")
-    on_hub(queue, lambda connection: check_item(connection, worktree, item, title, body, claim))
+    on_hub(queue, lambda connection: check_item(connection, worktree, item, body, claim))
     entry = {"id": entry_id(), "repository": queue.repository, "item": item, "branch": branch, "expected_head": head,
              "title": title, "body": body,
              "acceptance": acceptance_file.read_text(encoding="utf-8") if acceptance_file else None,
@@ -673,14 +673,14 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     return add_entry(queue, entry)
 
 
-def check_item(connection: Any, worktree: pathlib.Path, item: int, title: str, body: str, claim: str | None) -> None:
+def check_item(connection: Any, worktree: pathlib.Path, item: int, body: str, claim: str | None) -> None:
     """Refuse what prepare refuses on the item before it reviews, so the entry never waits for it (sd:3473).
 
     Each refused in seconds once the entry reached the head of the queue,
     3 to 32 minutes after enqueue: an item with no registered repository
     (`sd_db.ship.identity`), an item of another repository than `worktree`'s
-    origin (`foreign_item`), and a `Closes:` line or a title naming an item
-    the merge could not close (`sd_ship_body.refuse_unclosable`). These are
+    origin (`foreign_item`), and a `Closes:` line naming an item the merge
+    could not close (`sd_ship_body.refuse_unclosable`). These are
     prepare's own reads, and prepare makes them again; a hub fault still
     refuses `HUB_UNAVAILABLE` through `on_hub`.
     """
@@ -705,7 +705,10 @@ def check_item(connection: Any, worktree: pathlib.Path, item: int, title: str, b
     try:
         if registered is None or registered != own:
             raise foreign_item(item, registered or info["repo"]["path"], str(own), "prepare")
-        sd_ship_body.refuse_unclosable(connection, item, info["item"]["repo"], body, title, claim == "deliver")
+        # A title closes nothing (sd:3704). The branch commits' `Delivers:` wait for prepare:
+        # it reads them against `origin/<base>` just fetched; here a stale base would read
+        # the squashes already on it as this branch's.
+        sd_ship_body.refuse_unclosable(connection, item, info["item"]["repo"], body, (), claim == "deliver")
     except Refusal as error:
         raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
 
@@ -955,7 +958,7 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     if cancelled:
         branch_unmoved(root, last)
         check_unmerged(root, queue, last)
-    on_hub(queue, lambda connection: check_item(connection, root, item, str(last.get("title") or ""), last["body"],
+    on_hub(queue, lambda connection: check_item(connection, root, item, last["body"],
                                                 last.get("claim")))
     worktree, head = pathlib.Path(str(last.get("worktree"))), last["expected_head"]
     if last.get("enqueued_on") == this_host() and worktree.is_dir():
