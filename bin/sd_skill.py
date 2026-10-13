@@ -73,6 +73,16 @@ def run(args: argparse.Namespace) -> int:
         connection.close()
 
 
+def skill_intake(args: argparse.Namespace) -> int:
+    """`sd skill intake`: deferred, because only this verb fetches from GitHub."""
+    import sd_skill_intake  # noqa: PLC0415 - loads sd-skill-adopt as a sibling
+
+    try:
+        return sd_skill_intake.run_intake(args, checkout(), pathlib.Path.home())
+    except (sd_skill_intake.IntakeError, OSError) as error:
+        raise SkillRefusal(str(error)) from error
+
+
 skill_try = run
 skill_list = run
 skill_promote = run
@@ -85,6 +95,16 @@ def register_extra(verbs: Any) -> None:
     applying = verbs.add_parser("apply", help="queue one isolated change from accepted proposal notes")
     applying.add_argument("item", type=item_id, help=ITEM_HELP)
     applying.add_argument("notes", nargs="+", type=int)
+    intake = verbs.add_parser(
+        "intake",
+        help="judge a GitHub skill, or re-import an installed one, against the installed set; install only on approval")
+    intake.add_argument("source", help="a https://github.com/ skill URL, or the name of a skill installed from one")
+    intake.add_argument("--scope", choices=("pack", "user"),
+                        help="pack: contrib/ with the sd- prefix (default for a URL); user: ~/.claude/skills")
+    intake.add_argument("--approve", metavar="REVISION",
+                        help="install the revision the report printed; without it nothing is installed")
+    intake.add_argument("--json", action="store_true")
+    intake.set_defaults(handler=skill_intake)
     for parser in (review, applying):
         parser.add_argument("--if-revision")
         parser.add_argument("--json", action="store_true")

@@ -156,10 +156,10 @@ class EnvironmentTests(ReviewFixture):
             root, namespace(), runner, parent, self.chatgpt_home()
         )
         codex_calls = [call for call in runner.calls if call["argv"][0] == "codex"]
-        # Two now: the skill-suppression probe and the review. Asserted over
-        # every codex call rather than the first, so a third one cannot arrive
-        # unscrubbed behind a test that only ever read call zero.
-        self.assertEqual(len(codex_calls), 2, [call["argv"] for call in codex_calls])
+        # Three now: the skill-suppression probe, its `--version` read (sd:3499)
+        # and the review. Asserted over every codex call rather than the first,
+        # so another cannot arrive unscrubbed behind a test that only ever read call zero.
+        self.assertEqual(len(codex_calls), 3, [call["argv"] for call in codex_calls])
         for handed in (call["env"] for call in codex_calls):
             self.assertNotIn("CODEX_API_KEY", handed)
             self.assertNotIn("CODEX_ACCESS_TOKEN", handed)
@@ -309,6 +309,17 @@ class SkillSuppressionProbeTests(ReviewFixture):
         state, _ = self.probe(sd_review.Completed(0, self.LOADED, ""))
         self.assertEqual(state["state"], sd_review.SKILLS_UNSUPPRESSED)
         self.assertIn("<skills_instructions>", state["reason"])
+
+    def test_the_state_names_the_binary_version(self) -> None:
+        """sd:3499. The flags were measured on 0.155.1 and nothing read `codex --version`."""
+
+        def codex(argv, env, cwd, timeout):
+            return sd_review.Completed(0, "codex-cli 0.160.0\n" if argv[1:] == ["--version"] else self.SUPPRESSED, "")
+        state, runner = self.probe(codex)
+        self.assertEqual(state["version"], "codex-cli 0.160.0")
+        self.assertEqual(runner.calls[-1]["env"], runner.calls[0]["env"])
+        failed, _ = self.probe(sd_review.Completed(127, "", "codex: not found on PATH", launched=False))
+        self.assertEqual(failed["version"], "")
 
     def test_an_absent_block_reports_suppressed(self) -> None:
         state, _ = self.probe(sd_review.Completed(0, self.SUPPRESSED, ""))
@@ -485,7 +496,7 @@ class SkillSuppressionProbeTests(ReviewFixture):
         self.assertEqual(len(sessions), 1)
         self.assertNotIn("debug", sessions[0]["argv"])
         self.assertEqual([call["argv"][1:3] for call in runner.calls if call["argv"][0] == "codex"],
-                         [["debug", "prompt-input"], ["exec", "--sandbox"]])
+                         [["debug", "prompt-input"], ["--version"], ["exec", "--sandbox"]])
 
 
 if __name__ == "__main__":

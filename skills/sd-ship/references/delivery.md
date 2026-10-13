@@ -23,6 +23,7 @@ A body line `Refs: sd:A, sd:B` names related or partial items; the merge adds no
 The first prepare of an item names its claim, or it refuses.
 Give `--deliver` to the item's last PR and `--associate-only` to each earlier PR.
 A forgotten `--deliver` leaves the row open with its code on the default branch.
+A branch of design records (`docs/work/`) and instruction files alone cannot `--deliver`; it associates (sd:3519).
 A task or followup takes `--deliver` without an acceptance file.
 Its verified merge moves it to done with the sentence `sd task status ID done --delivered-by SHA` records.
 For a work item, use `prepare --deliver --acceptance-file FILE` only when every item acceptance criterion has evidence.

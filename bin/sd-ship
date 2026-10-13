@@ -184,6 +184,18 @@ def steers_agents(path: str) -> bool:
             or name in AGENT_INSTRUCTION_NAMES or name.endswith(AGENT_INSTRUCTION_SUFFIXES))
 
 
+def design_only(paths: list[str]) -> bool:
+    """Whether a branch changes design records and agent instructions alone, one record at least (sd:3519).
+
+    PR #260 changed `docs/work/` and `CLAUDE.md`, merged with `--deliver` and
+    closed two build items whose steps nobody built. A design associates with
+    its item; the build delivers it.
+    """
+    return any(path.startswith(DESIGN_RECORDS) for path in paths) and all(
+        path.startswith((DESIGN_RECORDS, ".claude/rules/")) or path.split("/")[-1].casefold() in AGENT_INSTRUCTION_NAMES
+        for path in paths)
+
+
 def capture_too_deep(data: bytes, limit: int = REVIEW_CAPTURE_DEPTH) -> bool:
     """Whether `data` nests containers deeper than `limit`, decided here.
 
@@ -1185,16 +1197,23 @@ class Ship(SharedReview):
                                 *, required: bool) -> tuple[list, list] | None:
         previous = ""
         for attempt in range(COPILOT_MATERIALIZATION_ATTEMPTS):
-            reviews = self.api.copilot_reviews(
-                self.api.pages(f"{self.api.prefix}/pulls/{number}/reviews"))
+            every = self.api.pages(f"{self.api.prefix}/pulls/{number}/reviews")
+            reviews = self.api.copilot_reviews(every)
             comments = self.api.copilot_comments(
                 self.api.pages(f"{self.api.prefix}/pulls/{number}/comments"))
             if not required and not (reviews or comments):
                 return None
             reviewed_head = self.copilot_reviewed_head(reviews, head) if required else None
             if required and reviewed_head is None:
+                # A Copilot review under a login `COPILOT_LOGINS` lacks reads
+                # as pending forever; naming who did review shows it (sd:3499).
+                logins = sorted({str((review.get("user") or {}).get("login") or "") for review in every
+                                 if isinstance(review, dict) and review.get("commit_id") == head
+                                 and review.get("submitted_at")} - {""})
                 raise Refusal(
-                    f"Copilot review has not completed for the exact merge head {head}",
+                    f"Copilot review has not completed for the exact merge head {head}"
+                    + (f"; reviews on that head came from {', '.join(logins)}, none a login this pack "
+                       "reads as Copilot" if logins else ""),
                     code="copilot_review_pending", boundary="review", state="retryable_failure",
                     next_action="Wait for the requested Copilot review, then retry merge.",
                 )
@@ -1336,6 +1355,8 @@ class Ship(SharedReview):
         if not title or re.match(r"(?i)wip\b", title):
             raise Refusal("provide a final --title; wip titles never reach the default branch")
         body, deliver, claim, local_work = self.publication_claim()
+        if self.args.deliver:
+            self.refuse_design_delivery(base, head)
         mode = self.resolve_mode()
         if self.args.copilot_review == "request" and mode != "full":
             raise Refusal("explicit Copilot review requires a full-owned repository")
@@ -1440,6 +1461,20 @@ class Ship(SharedReview):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
         return self.result("ready_to_send", copilot_review=copilot, invoker=self.state["invoker"],
                            body_source=self.body_source, normalized=list(self.body_normalized))
+
+    def refuse_design_delivery(self, base: str, head: str) -> None:
+        """Refuse `--deliver` on a branch `design_only` names, before anything is saved (sd:3519).
+
+        Only an explicit claim: a receipt that stored one before this check
+        keeps it, since an open pull request cannot change its claim.
+        """
+        paths = git(self.root, "diff", "--name-only", "--no-renames", "-z", f"origin/{base}...{head}").split("\0")
+        if design_only([path for path in paths if path]):
+            raise Refusal(f"this branch changes only design records (docs/work/) and instruction files, so it cannot "
+                          f"deliver sd:{self.args.item}; prepare it with --associate-only and deliver the build",
+                          code="design_only_delivery", boundary="input", state="operator_decision",
+                          next_action="Rerun prepare with --associate-only; a design that is the deliverable "
+                                      "takes its own item.")
 
     def claim_lines(self, base: str, head: str) -> list[str]:
         """Open pull requests and origin branches on this item or these files; advisory only."""

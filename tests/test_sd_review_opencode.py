@@ -499,7 +499,40 @@ class TheResolvedConfinementIsChecked(unittest.TestCase):
         narrowing = {"action": "browser", "resource": "x", "effect": "deny"}
         outcome, runner = self.run_with(sd_review.Completed(0, resolved_agent(narrowing), ""))
         self.assertEqual(outcome.status, sd_review.CLEAN, outcome.detail)
-        self.assertEqual(outcome.outcome_report()["diagnostic"], {"accepted_after_deny": [narrowing]})
+        self.assertEqual(outcome.outcome_report()["diagnostic"],
+                         {"version": "opencode v2.0.20", "accepted_after_deny": [narrowing]})
+
+    def test_the_receipt_names_the_binary_version(self) -> None:
+        """sd:3499. A refusal or a changed finding rate could not be tied to an upgrade from the receipts."""
+        from tests.test_sd_review import resolved_agent
+        outcome, _ = self.run_with(sd_review.Completed(0, resolved_agent(version="opencode v2.0.31"), ""))
+        self.assertEqual(outcome.status, sd_review.CLEAN, outcome.detail)
+        self.assertEqual(outcome.outcome_report()["diagnostic"], {"version": "opencode v2.0.31"})
+
+    def test_a_probe_timeout_reads_as_a_timeout_and_names_its_stage(self) -> None:
+        """sd:3499. A slow machine read as an unconfirmed confinement, with no stage or elapsed time."""
+        stalled = json.dumps({"version": "opencode v2.0.20", "agent": None, "plugins": None,
+                              "stage": "serve never listened", "elapsed": 55.2, "seconds": 55})
+        breach = sd_opencode.confinement_breach(
+            lambda *args: sd_review.Completed(0, stalled, ""), "opencode run", {"HOME": "/h"}, pathlib.Path("/x"), 60)
+        self.assertIn("timed out after 55.2 s of 55 s", breach or "")
+        self.assertIn("serve never listened", breach or "")
+        self.assertIn("not a breach", breach or "")
+        killed = sd_opencode.confinement_breach(
+            lambda *args: sd_review.Completed(124, "", "python3: timed out after 60s", launched=False),
+            "opencode run", {"HOME": "/h"}, pathlib.Path("/x"), 60)
+        self.assertIn("timed out after 60 s", killed or "")
+        self.assertIn("not a breach", killed or "")
+
+    def test_the_probe_reports_where_it_stalled(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            stub = pathlib.Path(raw) / "opencode"
+            stub.write_text('#!/bin/sh\n[ "$1" = --version ] && { echo "opencode v2.0.20"; exit 0; }\nexec sleep 30\n')
+            stub.chmod(0o755)
+            report = sd_opencode.resolve_probe([str(stub)], 1)
+        self.assertEqual((report["stage"], report["seconds"]), ("serve never listened", 1))
+        self.assertGreaterEqual(report["elapsed"], 1)
+        self.assertIsNone(report["agent"])
 
     def test_a_resolution_without_the_default_deny_refuses(self) -> None:
         stdout = json.dumps({"version": "opencode v2.0.20", "plugins": [],

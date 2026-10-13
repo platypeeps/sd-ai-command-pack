@@ -137,7 +137,9 @@ NETWORK_PATTERNS = (
 # which line feeds which, so the *combination* is what refuses.
 EXFIL_SUBJECT_PATTERNS = (
     (re.compile(r"\b[A-Z][A-Z0-9_]*_(?:TOKEN|KEY|SECRET|PASSWORD)\b"), "credential-env-name"),
-    (re.compile(r"git\s+config\s+(?:--\w+\s+)*user\.email|[\w.+-]+@[\w-]+\.[\w.]+"), "user-identity"),
+    # The lookbehind starts an address only where its run starts; without it a
+    # long run of letters is retried from every position, quadratic (sd:3560).
+    (re.compile(r"git\s+config\s+(?:--\w+\s+)*user\.email|(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.]+"), "user-identity"),
     (re.compile(r"~/\.claude\.json|~/\.config/|\bos\.environ\b|\$ENV\b"), "machine-state"),
 )
 
@@ -340,7 +342,7 @@ def recorded_source(source: str, home: pathlib.Path) -> str:
     return source
 
 
-def with_provenance(text: str, source: str, revision: str, today: str) -> str:
+def with_provenance(text: str, source: str, revision: str, today: str, tool: str = "sd-skill-adopt") -> str:
     """Stage 4. Append the record, or refresh it if one is already there.
 
     Re-adopting an updated skill should restate where it came from, not stack a
@@ -355,7 +357,7 @@ def with_provenance(text: str, source: str, revision: str, today: str) -> str:
         body = body[:index].rstrip("\n")
     block = (
         f"{PROVENANCE_HEADING}\n\n"
-        f"Adopted by `sd-skill-adopt` on {today} from `{source}` at revision "
+        f"Adopted by `{tool}` on {today} from `{source}` at revision "
         f"`{revision}`.\n"
     )
     return f"{body}\n\n{block}"
