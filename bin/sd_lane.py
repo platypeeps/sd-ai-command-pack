@@ -806,7 +806,7 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
             reclaim(running, released=True)
             return running
         row = pending_entry(entries, item)
-        row.update(status="cancelled", finished_at=stamp_now())
+        row.update(status="cancelled", finished_at=stamp_now(), reason=f"cancelled by the operator on {this_host()}")
         return row
     return update(queue_for(root, environ), mark)
 
@@ -2052,11 +2052,22 @@ def worktrees(main: pathlib.Path) -> list[tuple[pathlib.Path, str]]:
     return found
 
 
-def drop_lane_worktree(main: pathlib.Path, tree: pathlib.Path, branch: str | None) -> None:
-    """Remove a worktree the lane made under its folder, and `branch` with it; no builder writes there."""
+def drop_lane_worktree(main: pathlib.Path, tree: pathlib.Path, branch: str | None, *, made: bool = False,
+                       origin_tip: str = "") -> None:
+    """Remove a worktree the lane made under its folder, where no builder writes, and maybe `branch` with it.
+
+    The branch goes when this run made it from `origin` (`made`), or when
+    its tip is in `origin_tip`, the `origin/<branch>` just fetched. A killed
+    run's leftover may sit on a branch the lane did not make, and `branch -D`
+    lost its commits (sd:3483). Otherwise, or when the read fails, it stays;
+    git refuses one another worktree has checked out.
+    """
     publish_git(main, "worktree", "remove", "--force", str(tree))
     publish_git(main, "worktree", "prune")
-    if branch:
+    if branch and origin_tip and not made:
+        contained = publish_git(main, "merge-base", "--is-ancestor", f"refs/heads/{branch}", origin_tip)
+        made = contained is not None and contained.returncode == 0
+    if branch and made:
         publish_git(main, "branch", "-D", branch)
 
 
@@ -2092,7 +2103,7 @@ def checkout_for(root: pathlib.Path, queue: Queue, entry: dict[str, Any]) -> dic
     for path, name in listed:
         if branch and name == branch and path.is_dir() and at_head(path, expected):
             mine = path.resolve() == lane.resolve()  # a killed run's lane worktree at the head: reused, then removed
-            return {"tree": path, **({"made": True, "branch_made": name} if mine else {})}
+            return {"tree": path, **({"made": True} if mine else {})}  # its branch stays: the lane may not have made it
     return lane_tree(main, lane, branch, expected, listed)
 
 
@@ -2118,18 +2129,19 @@ def lane_tree(main: pathlib.Path, lane: pathlib.Path, branch: str, expected: str
     """A lane worktree at `lane` from the fetched `origin/<branch>`, or a skip; raises `PUBLISH_UNKNOWN`.
 
     A lane worktree a killed run left at another head is the lane's own, so
-    it goes with its branch. No `origin/<branch>` is `HEAD_GONE`; a tip past
-    the head and its catch-up is `HEAD_MOVED`; a local branch at another
-    commit, or one checked out elsewhere, is `BRANCH_BUSY`. A failed read or
-    fetch of `origin` is unknown, not a skip.
+    it goes, and its branch with it only when `origin/<branch>` holds the
+    branch's tip (`drop_lane_worktree`, sd:3483). No `origin/<branch>` is
+    `HEAD_GONE`; a tip past the head and its catch-up is `HEAD_MOVED`; a
+    local branch at another commit, or one checked out elsewhere, is
+    `BRANCH_BUSY`. A failed read or fetch of `origin` is unknown, not a skip.
     """
+    ref, tip = f"refs/heads/{branch}", fetched_tip(main, branch)
     for path, name in listed:
         if path.resolve() == lane.resolve():
-            drop_lane_worktree(main, path, name or None)
+            drop_lane_worktree(main, path, name or None, origin_tip=tip)
     listed = [(path, name) for path, name in listed if path.resolve() != lane.resolve()]
     if lane.exists():  # the lane's own folder, which git no longer lists: a killed run's, kept aside, never deleted
         lane.rename(lane.with_name(f"{lane.name}.stale-{entry_id()}"))
-    ref, tip = f"refs/heads/{branch}", fetched_tip(main, branch)
     if not tip:
         return skip(HEAD_GONE, f"origin/{branch} is gone; `sd-ship lane retry` publishes {expected} again from "
                                "a checkout that has it")
@@ -2307,7 +2319,7 @@ def run_entry(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: st
         return run_checkout(root, queue, entry, token, environ, ship, note, tree, found)
     finally:
         if tree is not None and found.get("made"):
-            drop_lane_worktree(sd_lib.main_worktree_root(root), tree, found.get("branch_made"))
+            drop_lane_worktree(sd_lib.main_worktree_root(root), tree, found.get("branch_made"), made=True)
 
 
 def unknown_checkout(queue: Queue, entry: dict[str, Any], token: str,
@@ -2587,8 +2599,10 @@ def lane_main(args: Any) -> int:
             queue = queue_for(root, environ)
             entries, order = on_hub(queue, lambda connection: (stored(connection, queue.repository),
                                                                enqueue_order(connection, queue.repository)))
+            rounds = item_rounds(entries, order)
             result = {"queue": str(queue_path(root, environ)), "revision": queue_revision(entries),
-                      "entries": [{**shown(row), "enqueue_seq": order[row["id"]]} for row in entries],
+                      "entries": [{**shown(row), "enqueue_seq": order[row["id"]], "round": rounds[row["id"]]}
+                                  for row in entries],
                       **({"import": imported} if imported else {})}
         elif args.lane_command == "retry":
             result = retry(root, args.item, environ, manual=args.manual, expected_head=args.expected_head)
@@ -2606,6 +2620,15 @@ def lane_main(args: Any) -> int:
         print(json.dumps({"ok": False, **refusal(error)}, indent=2, sort_keys=True))
         return 3
     return succeed(shown(result))
+
+
+def item_rounds(entries: list[dict[str, Any]], order: dict[str, int]) -> dict[str, int]:
+    """Each entry id's round: its place among its item's entries by `enqueue_order`, from 1 (sd:3483)."""
+    rounds: dict[str, int] = {}
+    seen: dict[Any, int] = {}
+    for row in sorted(entries, key=lambda row: order.get(row["id"], 0)):
+        seen[row.get("item")] = rounds[row["id"]] = seen.get(row.get("item"), 0) + 1
+    return rounds
 
 
 def refusal(error: Exception) -> dict[str, Any]:

@@ -399,6 +399,12 @@ class Runner(Lane):
         _, new = self.moved_above(3)
         self.assertEqual(sd_lane.retry(self.repo, 3, self.environ)["expected_head"], new)
 
+    def test_a_cancel_records_who_cancelled_it(self) -> None:
+        """sd:3483. Thirteen cancelled entries carried an empty reason, while a release says who released it."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(self.entries()[0]["reason"], f"cancelled by the operator on {sd_lane.this_host()}")
+
     def test_lane_list_gives_each_entry_its_enqueue_order(self) -> None:
         """sd:3419. A reader of `lane list` takes an item's newest entry by `enqueue_seq`, not by its place after a move."""
         import argparse  # noqa: PLC0415
@@ -413,6 +419,9 @@ class Runner(Lane):
         listed = json.loads(said.getvalue())["entries"]
         self.assertTrue(all(type(row.get("enqueue_seq")) is int for row in listed), listed)
         self.assertEqual([row["item"] for row in sorted(listed, key=lambda row: row["enqueue_seq"])], [1, 2, 2])
+        # sd:3483: each entry's round among its item's entries, so three blocking rounds need no counting by hand.
+        self.assertEqual([(row["item"], row.get("round")) for row in sorted(listed, key=lambda row: row["enqueue_seq"])],
+                         [(1, 1), (2, 1), (2, 2)])
         newest = max((row for row in listed if row["item"] == 2), key=lambda row: row["enqueue_seq"])
         self.assertEqual(newest["expected_head"], new)
         self.assertNotEqual([row for row in listed if row["item"] == 2][-1]["expected_head"], new)
@@ -2476,6 +2485,19 @@ class AnyHost(SharedQueue):
             return self.ship(argv, log)
         sd_lane.run_lane(self.repo, self.environ, ship)
         self.assertEqual((heads[:1], self.entries()[0]["status"]), ([head], "merged"))
+        self.assertFalse(self.made().exists())
+
+    def test_a_leftover_lane_worktree_keeps_a_branch_origin_lacks(self) -> None:
+        """sd:3483. A killed run's lane worktree went with `git branch -D`, though the lane may not have made the branch."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        self.made().parent.mkdir(parents=True, exist_ok=True)
+        git(self.repo, "worktree", "add", "-q", "-b", "topic", str(self.made()), "main")
+        git(self.made(), "commit", "-q", "--allow-empty", "-m", "on no remote")
+        unpushed = git(self.made(), "rev-parse", "HEAD")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry.get("code"), self.calls), ("skipped", sd_lane.BRANCH_BUSY, []))
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/topic"), unpushed)
         self.assertFalse(self.made().exists())
 
     def test_a_pending_entry_with_no_branch_fails_and_does_not_loop(self) -> None:
