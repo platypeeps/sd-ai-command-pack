@@ -356,7 +356,7 @@ lint-mypy-paths:
 # ShellCheck lane cannot skip. Ruff and mypy cover the paths named in LINT_RUFF_PATHS and
 # LINT_MYPY_PATHS above: Ruff over the tracked bin/ files, lib/ and tests/,
 # mypy over the tracked bin/ files. mypy's error count over lib/ and
-# tests/sd_db may only fall: MYPY_CEILING in tests/test_code_health.py, an
+# tests/sd_db may not rise: MYPY_CEILING in tests/test_code_health.py, an
 # always-run module, holds it (sd:3485). The installer
 # package and the shipped payload that step 3e removed are not in either.
 #
