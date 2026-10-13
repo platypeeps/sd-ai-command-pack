@@ -1,118 +1,21 @@
 """The line-count ceilings, enforced instead of remembered -- and their record.
 
-The design fixed a ceiling for each part of the replacement world -- the
-temporary `migrate-*` tools at 1,500, and `dashboard/` at 4,600 with 2,300 of
-it carrying code (R11-D24, with the total re-derived at R11-D29, at R11-D30
-and at R11-D38) -- and said in as many words that "caps are
-CI tests; a cap is never raised in the PR that busts it". That rule survived
-every re-derivation: 4,000 and 4,300 were each set in their own decision
-record by a change that fit under the ceiling it replaced, not in a pull
-request that did not fit. 4,350 was set the same way at R11-D29, by a change
-touching this file and one design record and nothing under `dashboard/`,
-while the directory stood at 4,190 against the 4,300 it replaced.
+`migrate-*` tools stay under `MIGRATE_CAP` (R11-D24). The `bin/` ceiling (R11-D48)
+and the `dashboard/` ceilings (sd:719 step 7) are retired; `CEILING_HISTORY` keeps
+their values as the evidence the retirements were decided on.
 
-**`bin/` no longer has one.** R11-D48 retired it on 2026-09-11; the record is
-the comment above `MIGRATE_CAP` below, where the derivation chain used to be.
-Its values stay in `CEILING_HISTORY` as a closed record, because that history
-is the evidence the retirement was decided on and deleting it would delete the
-argument along with the number.
+**R11-D41, 2026-09-06: the history shows every raise together.** Each raise was
+priced alone, and the history found not one fall and not one refusal.
 
-**`dashboard/` no longer has one either, because there is no `dashboard/`.
-sd:719 step 7, 2026-09-16.** The directory, `bin/sd-dashboard`, the three
-constants `DASHBOARD_CAP`, `DASHBOARD_CODE_CAP` and `DASHBOARD_CODE_SLACK`
-and the four tests that read them left in one commit; the record is the
-comment below `MIGRATE_CAP`, and the two histories stay in `CEILING_HISTORY`
-closed, the way `BIN_CAP`'s did. What those rules were, in the past tense
-because nothing enforces them now: downward-only attached to the code cap
-and not to the total, since 46% of `dashboard/` was comments, docstrings and
-blanks, house style, and one ceiling over both halves made a branch and a
-paragraph bid for the same line (R11-D17 said 4,000 could only fall;
-R11-D24 raised it in its own record and split the ceiling in two). From
-R11-D41 the code cap was payable in kind: it could rise when the same change
-removed or factored at least as many code lines from `dashboard/` as it
-added, and `DASHBOARD_CODE_SLACK` was the mechanical half -- the gap between
-the cap and what the directory measured could not widen, so a raise nobody
-paid for surfaced as a number rather than as a paragraph a reviewer had to
-weigh. The rule bound once, against PR 7's dashboard scope, which is the
-one refusal any ceiling here ever produced. Making the totals report rather
-than gate was considered at R11-D41 and not done, because a ceiling that
-only reports is what the retired stack had; the gate stayed for
-`dashboard/` until the directory did not.
+**R11-D49, 2026-09-13: a ceiling may be recorded coming down, on
+`DASHBOARD_CODE_CAP` only.** A fall on any other ceiling fails by name, and no
+ceiling repeats a value.
 
-**R11-D41, 2026-09-06: the code cap is payable in kind, and the ceilings
-record their own history.** Two changes followed one reading of these constants.
-`CEILING_HISTORY` holds every value from this file's own Git history.
-R11-D41 read six values through 2026-09-06.
-It found **not one downward move and not one refusal**.
-`bin/` went from 8,000 to 15,750 in seven days. That is the
-shape the paragraph below warns about -- 95,000 lines one defensible commit at a
-time -- arriving inside the mechanism built to prevent it, because each raise is
-priced in isolation and nothing ever looks at them together. R11-D48 is what
-that finding eventually produced: the ceiling it was written about is the one
-that was retired first, and the other two kept until sd:719 step 7.
+No count of moves is written here: `ceiling_moves()` produces it, and the test
+prints it when it fails.
 
-That finding is dated, and it stays as written because it is what one decision
-read on one day. It is no longer asserted. The test that asserted it is below,
-and what it asserts now is R11-D49's.
-
-**R11-D49, 2026-09-13: a ceiling may be recorded coming down.** Until this
-record, `test_the_recorded_history_is_raises_only` failed on any downward move
-in `CEILING_HISTORY`, and its docstring said what that failure was for: the day
-a ceiling came down, the R11-D41 paragraph above had to be rewritten. That day
-is sd:719, which retires `dashboard/` in steps. Each step deletes more code
-than `DASHBOARD_CODE_SLACK` lets a removal leave under an unmoved cap, so each
-must lower `DASHBOARD_CODE_CAP` and append the lower value to its history. The
-first append is the first fall the history records.
-
-This record is made in its own change, before the first fall, and not in the
-pull request that lowers the cap. That is R11-D24's clause in the mirror: a cap
-is never raised in the pull request that crossed it, and a ceiling is never
-lowered in the pull request that needed it.
-
-Three things follow, and nothing else moves:
-
-* A downward move is legal on `DASHBOARD_CODE_CAP` and on no other ceiling.
-  `DASHBOARD_CAP` is not named. It bounds a directory that only shrinks from
-  here, so it is never crossed on the way down, and it moves once, to nothing,
-  when it retires. A fall on any ceiling not named here fails the test by
-  name, date and both values, and needs its own record first.
-* No ceiling repeats a value, up or down. Every row after a ceiling's first
-  changes the number. That was the second assertion's real subject all along;
-  it read `upward` alone only because there had never been a `downward`.
-* The test keeps its name. sd:719's plan and design cite it by that name, and
-  the name is R11-D41's finding. The assertions are this record's.
-
-**No count of those moves is written in this file.** The nine above is dated
-and attributed because it is what one decision read on one day; every live
-figure is `ceiling_moves()` below, which counts recorded values and upward and
-downward transitions across every ceiling in `CEILING_HISTORY`, retired ones
-included, and `test_the_recorded_history_is_raises_only` prints all three when
-it fails. The reason is the defect this paragraph kept producing: the header
-said nine, the table said something else, the git log said a third thing and a
-review said a fourth, and each was defensible because each counted a different
-set -- which is precisely what made a stale number indistinguishable from a
-differently-scoped one. A reader who wants the number runs the test.
-
-Until R11-D24 they were prose. The retired stack this repository is replacing
-reached 95,000 lines one defensible commit at a time, and no single one of
-those commits looked like the problem, which is
-exactly why the bound has to be mechanical: a number in a design document is
-checked by whoever remembers to check it.
-
-Landing the test while every cap passes is deliberate. A cap introduced in the
-change that breaks it is a negotiation; a cap introduced with headroom is a
-guard, and the next pull request that would cross the line meets a red check
-instead of a reviewer's memory.
-
-**Enumerated from `git ls-files`, never from a list here.** Two reasons, both
-learned rather than assumed. A hand-written list of files cannot see the
-thirteenth one somebody adds next month -- the same trap the Makefile's lint
-paths carry, which is why `tests/test_code_health.py` reads them against the
-index. And walking the directory instead would count whatever is
-lying in it: `find bin -type f` once reported this repository at 8,862 lines,
-over its own cap, because it swept up `__pycache__/*.pyc`. The index holds
-tracked source and nothing else, so it answers the question actually being
-asked.
+Files are enumerated from `git ls-files`, never from a list here: a hand-kept
+list misses the next file, and a directory walk counts `__pycache__`.
 """
 
 # This module reads the whole checkout, so no changed-files fast path may
@@ -132,93 +35,17 @@ import unittest
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-# Each cap names the design decision it enforces, so a failure points at the
-# record rather than at a bare number.
+# Each cap names the design decision it enforces, so a failure points at the record.
 #
-# **R11-D48, 2026-09-11: the `bin/` ceiling is retired.** `BIN_CAP`, the
-# derivation chain that stood here, and `test_bin_stays_under_its_ceiling` are
-# deleted. `bin/` has no line-count ceiling and no successor mechanism; the
-# operator's decision was to remove it rather than to move it again.
-#
-# The evidence is `CEILING_HISTORY["BIN_CAP"]` below, which is why that entry
-# is kept after the constant it described is gone. Twenty-one recorded values,
-# 8,000 on 2026-08-30 to 20,803 on 2026-09-10: **eleven days, every move
-# upward, not one downward move and not one refusal.** R11-D41 read the six
-# values recorded through 2026-09-06 and kept the gate. It reasoned that a
-# reporting-only ceiling matched the retired stack.
-# Fifteen later raises did not change the result. The gate still never
-# returned "no", and what it returned instead is measurable:
-# each raise is a serialised preparatory pull request, and R11-D38 alone cost
-# an agent twenty-two minutes and blocked four units of work behind it.
-#
-# A control that has never once refused is not bounding anything; it is
-# charging a toll for the paperwork of agreeing. R11-D24's clause -- never
-# raise a cap in the pull request that crossed it -- is what made that toll
-# compulsory, and it is the clause being answered here: the way to stop paying
-# it is to stop having the cap, not to keep the cap and waive the clause.
-#
-# What was **not** retired with it, so this is not read wider than it is:
-#
-#   * `MIGRATE_CAP` below, on the temporary `migrate-*` tools.
-#   * `DASHBOARD_CAP`, `DASHBOARD_CODE_CAP` and `DASHBOARD_CODE_SLACK`. The
-#     dashboard ceilings had a code/prose split and a payable-in-kind rule
-#     that `bin/` never had, and they were a different argument -- one that
-#     ran to its end at sd:719 step 7, the record below this one.
-#   * The review lane's own ceiling in `tests/test_sd_review_boundary.py`,
-#     which is a separate number with a separate record.
-#
-# Nothing under `bin/` is touched by this change, so it lands as its own
-# preparatory commit in the shape R11-D24 asks for, against a tree that the
-# retired cap still passes.
+# **R11-D48, 2026-09-11: `bin/` has no ceiling.** Every one of its 21 recorded moves was a raise.
+
 MIGRATE_CAP = 1_500        # temporary tools, deleted at steps 7 and 11
 
-# **sd:719 step 7, 2026-09-16: the dashboard ceilings are retired.**
-# `DASHBOARD_CAP`, `DASHBOARD_CODE_CAP`, `DASHBOARD_CODE_SLACK`, the
-# derivation chain that stood here (R11-D29, R11-D30, R11-D38, the one raise
-# of 2026-09-07 and the four falls of sd:719 steps 3 to 6) and the four tests
-# that read them are deleted in the commit that deleted `dashboard/` and
-# `bin/sd-dashboard`. Not because the argument for them failed -- the code
-# cap said no once, to PR 7's dashboard scope, and the ceilings measured the
-# port down step by step -- but because the directory they bounded is gone:
-# the system dashboard serves every view it held, and a cap on nothing is
-# not a cap. The three tests opened on `dashboard/ enumeration matched no
-# tracked files`, so the directory and the ceilings had to go together.
-#
-# The evidence is `CEILING_HISTORY["DASHBOARD_CAP"]` and
-# `CEILING_HISTORY["DASHBOARD_CODE_CAP"]` below, kept the way `BIN_CAP`'s
-# entry was: six values each, the total only ever raised, the code cap raised
-# once and then recorded falling four times under R11-D49 -- 2,328 to 1,850
-# at step 3, 1,183 at step 4, 866 at step 5, 0 at step 6, each the
-# `code_line_count` of the finished commit plus the gap it stood at before.
-# Those rows are the measurement the port was argued from, and a decision
-# whose evidence has been deleted cannot be reviewed later.
-#
-# What is **not** retired: `MIGRATE_CAP` above, and the review lane's own
-# ceiling in `tests/test_sd_review_boundary.py`, which is a separate number
-# with a separate record.
-
-
-# Every value each ceiling has held, oldest first: read from this file's own
-# history with `git log -- tests/test_loc_caps.py` on 2026-09-06, and appended
-# by every raise since. Data, not prose: the docstring above records each raise
-# where it happened, and no reader of that many separate paragraphs can see the
-# shape they make together.
-# `bin/` nearly doubled in a week. When R11-D41 read this list nothing here had
-# ever fallen, and nothing here had ever refused. That is the finding R11-D41
-# was written from, and it is only visible in one place because this list
-# exists. R11-D49 is what let `DASHBOARD_CODE_CAP` record its falls here.
-#
-# The dates are the day the value landed on `main`, not the day its record was
-# written. While a ceiling was live, a new value went on the end in the same
-# change that moved the constant, and a test enforced it -- a history that may
-# be left behind is a history nobody can cite. Every ceiling here is closed
-# now, so the list is a record and no row is checked against a constant.
+# sd:719 step 7, 2026-09-16: the dashboard ceilings are retired with `dashboard/`.
+# R11-D49: the code cap fell four times (2,328 to 1,850, 1,183, 866, 0).
+# Dates are the day a value landed on `main`. Every ceiling here is closed.
 CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
-    # Closed. R11-D48 retired this ceiling on 2026-09-11 and the constant is
-    # gone, so nothing below checks this entry against a live value. It stays
-    # because these twenty-one rows -- every one a raise, none a refusal --
-    # are the evidence the retirement was argued from, and a decision whose
-    # evidence has been deleted cannot be reviewed later.
+    # Closed (R11-D48): the evidence for the retirement; no live value.
     "BIN_CAP": (
         ("2026-08-30", 8_000),
         ("2026-08-31", 14_000),
@@ -242,12 +69,7 @@ CEILING_HISTORY: dict[str, tuple[tuple[str, int], ...]] = {
         ("2026-09-10", 20_745),
         ("2026-09-10", 20_803),
     ),
-    # Closed. sd:719 step 7 retired both dashboard ceilings on 2026-09-16
-    # with the directory they bounded, and the constants are gone, so nothing
-    # below checks these two entries against a live value. They stay for the
-    # reason `BIN_CAP`'s rows do: the total's five raises and the code cap's
-    # one raise and four recorded falls are the measurement the port was
-    # argued from, and `ceiling_moves` still counts them.
+    # Closed (sd:719 step 7): the evidence for the retirement; no live value.
     "DASHBOARD_CAP": (
         ("2026-08-30", 2_500),
         ("2026-08-31", 4_000),

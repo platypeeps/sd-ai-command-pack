@@ -19,6 +19,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tests.clean_env import clean_environment
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -122,6 +124,37 @@ class TheTrialVerb(TrialCase):
         self.assertEqual(rc, 1)
         self.assertIn("available:", output)
         self.assertEqual(self.trial_rows(), [])
+
+
+class TheListVerb(TrialCase):
+    """`sd skill list --usage` prints each skill's recorded uses, so a roster decision reads the data."""
+
+    def run_list(self, *flags: str) -> tuple[int, str]:
+        done = subprocess.run(
+            [sys.executable, str(REPO_ROOT / "bin" / "sd"), "skill", "list", *flags],
+            capture_output=True,
+            text=True,
+            env=clean_environment(HOME=str(self.home)),
+            cwd=tempfile.gettempdir(),
+        )
+        return done.returncode, done.stdout + done.stderr
+
+    def line(self, output: str, name: str) -> str:
+        return next(line for line in output.splitlines() if line.startswith(f"{name}  "))
+
+    def test_usage_prints_the_count_recorded_for_each_skill(self):
+        for surface in ("claude", "claude", "codex"):
+            sd_db.record_skill_use(self.connection, "sd-plan", surface=surface)
+        rc, output = self.run_list("--usage")
+        self.assertEqual(rc, 0, output)
+        self.assertIn("uses=3", self.line(output, "sd-plan"))
+        self.assertIn("uses=0", self.line(output, "sd-ship"))
+
+    def test_the_default_listing_prints_no_count(self):
+        sd_db.record_skill_use(self.connection, "sd-plan", surface="claude")
+        rc, output = self.run_list()
+        self.assertEqual(rc, 0, output)
+        self.assertNotIn("uses=", output)
 
 
 class TheExpiry(TrialCase):

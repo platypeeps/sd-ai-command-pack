@@ -1990,7 +1990,7 @@ def _work_rows(
             rows.append(_row(
                 "in-progress-without-branch", item, slug,
                 f"{where} is in_progress with no branch: field",
-                f"set branch: in {where}/prd.md to the branch carrying this work",
+                f"the row for {where} has no branch; move the item back with `sd task status <id> planning`",
             ))
         # Not on a done item: its merge deleted the squashed branch, so the
         # field is history, and neither repair below applies (sd:2729).
@@ -1998,7 +1998,7 @@ def _work_rows(
             rows.append(_row(
                 "branch-unresolvable", item, slug,
                 f"{where} names branch {branch}, which no local or remote head has",
-                f"fetch, or correct the branch: field in {where}/prd.md",
+                "fetch the branch, or clear it with `sd task edit <id> --clear-branch`",
             ))
         if status not in ("done", "unknown"):
             if closing_items is None:
@@ -2043,7 +2043,7 @@ def _age_rows(
         return [_row(
             "undated-planning", item, slug,
             f"{where} is planning with no created: date and no dated directory",
-            f"add a created: date to {where}/prd.md so idle-planning can age it",
+            f"add a created: date to the item document in {where}, or prefix the folder with YYYY-MM-DD, so idle-planning can age it",
         )]
     age = _idle_days(entry, when, today, marks)
     if age <= IDLE_DAYS:
