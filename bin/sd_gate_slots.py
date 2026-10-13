@@ -85,8 +85,9 @@ CORES_PER_SLOT = 4
 #: Exit codes of the `wait` command.
 LAUNCHER_EXITED = 3
 TIMED_OUT = 4
-#: Exit codes of the `run` command, beside the command's own: as `timeout(1)`.
-RUN_TIMED_OUT = 124
+#: Exit codes of the `run` command, beside the command's own: as `timeout(1)`, except a wait past `--max-wait`,
+#: which exits `EX_TEMPFAIL` so a caller's own `timeout` keeps 124 for itself (sd:3996).
+RUN_NO_SLOT = 75
 RUN_NOT_STARTED = 125
 RUN_NOT_FOUND = 127
 
@@ -228,10 +229,11 @@ def utc_stamp(seconds: float) -> str:
 
 
 class Ticket:
-    """One waiter's place: its sequence number and the locked ticket file."""
+    """One waiter's place: its sequence number, the locked ticket file, and its place as the last `admit` read it."""
 
     def __init__(self, seq: int, path: pathlib.Path, fd: int | None) -> None:
         self.seq, self.path, self.fd = seq, path, fd
+        self.place: tuple[int, int] | None = None
 
     def drop(self) -> None:
         if self.fd is not None:
@@ -340,6 +342,7 @@ class Queue:
                 order = [entry["seq"] for entry in live]
                 if ticket.seq not in order:
                     order.append(ticket.seq)
+                ticket.place = (order.index(ticket.seq) + 1, len(order))
                 if order[0] != ticket.seq:
                     return None, f"place {order.index(ticket.seq) + 1} of {len(order)} in the queue"
                 # Only the head samples, under its own rule: callers may run
@@ -435,6 +438,14 @@ def launcher_watch(pid: int, ppid: int) -> Callable[[], bool]:
     return exited
 
 
+def place_line(ticket: Ticket | None, reason: str) -> str:
+    """Where a waiter stood when it gave up, and why when it headed the queue: behind the head, the place is the reason."""
+    place = ticket.place if ticket is not None else None
+    if place is None:
+        return f"no place in the queue: {reason}"
+    return f"place {place[0]} of {place[1]} in the queue" + (f": {reason}" if place[0] == 1 else "")
+
+
 def wait_for_slot(fds: Sequence[int], where: pathlib.Path, *, poll: float, stream: TextIO,
                   stop: Callable[[], bool] = lambda: False, deadline: float | None = None,
                   clock: Callable[[], float] = time.monotonic, rule: LoadRule | None = None,
@@ -446,8 +457,9 @@ def wait_for_slot(fds: Sequence[int], where: pathlib.Path, *, poll: float, strea
     takes nothing even when a slot frees during its sleep. While queued it
     says why on `stream` at once and every `REPORT_EVERY_SECONDS` after. With
     no `rule` the load is not read. Each report names who holds the slots
-    (sd:2522). A queue that cannot be written falls back to taking any free
-    slot, as before sd:2262.
+    (sd:2522), and so does the line that gives up, with the waiter's place
+    and how long it waited (sd:3996). A queue that cannot be written falls
+    back to taking any free slot, as before sd:2262.
     """
     rule = rule if rule is not None else LoadRule(0.0, 0.0, "none")
     queue = Queue(where)
@@ -482,6 +494,9 @@ def wait_for_slot(fds: Sequence[int], where: pathlib.Path, *, poll: float, strea
                 stream.flush()
                 reported = now
             if deadline is not None and now >= deadline:
+                stream.write(f"gave up waiting for a gate slot after {now - started:.0f}s at "
+                             f"{place_line(ticket, reason)}{held_by(queue)}\n")
+                stream.flush()
                 return None
             time.sleep(poll if deadline is None else max(0.0, min(poll, deadline - now)))
     finally:
@@ -594,8 +609,9 @@ def thread_caps(environ: Mapping[str, str]) -> dict[str, str]:
 
 
 def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int, rule: LoadRule, stream: TextIO,
-        label: str = "", timeout: float | None = None) -> int:
-    """Wait for a slot, run `command` with `SD_GATE_SLOTS=0`, free the slot, and return its exit code.
+        label: str = "", max_wait: float | None = None) -> int:
+    """Wait for a slot, at most `max_wait` seconds, run `command` with `SD_GATE_SLOTS=0`, free the slot,
+    and return its exit code; `RUN_NO_SLOT` when the wait ran out, with the command not started.
 
     The command runs in its own process group. SIGINT, SIGTERM and SIGHUP go
     to that whole group, and this process waits for the command to end. The
@@ -607,15 +623,16 @@ def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int,
         stream.write("error: name a command to run after --\n")
         return RUN_NOT_STARTED
     try:
-        slot = acquire(slots, environ, stream=stream, timeout=timeout, rule=rule, label=label or shlex.join(command))
+        slot = acquire(slots, environ, stream=stream, timeout=max_wait, rule=rule, label=label or shlex.join(command))
     except LauncherExited:
         stream.write("error: the process that started this gate exited while it waited for a slot\n")
         return RUN_NOT_STARTED
     except KeyboardInterrupt:
         return 128 + signal.SIGINT
     if slot is None:
-        stream.write(f"error: no gate slot came free within {timeout:g}s\n")
-        return RUN_TIMED_OUT
+        stream.write(f"error: no gate slot came free within --max-wait {max_wait:g}s; the command did not run "
+                     f"(exit {RUN_NO_SLOT})\n")
+        return RUN_NO_SLOT
     forwarded = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
     previous = {}
     try:
@@ -732,12 +749,18 @@ def render_queue(report: dict) -> str:
     return "\n".join(lines)
 
 
+def wait_seconds(text: str) -> float:
+    """A `--max-wait` value: a non-negative number, so never `nan`, which no deadline reaches."""
+    return parse_number(text, "--max-wait")
+
+
 def add_gate_verbs(verbs: argparse._SubParsersAction) -> None:
     """`run` and `status`, shared by this file and `sd gate`."""
     runner = verbs.add_parser("run", help="wait in the machine-wide gate queue, run a command, free the slot")
     runner.add_argument("--label", default="", help="what `status` shows for this gate (default: the command)")
-    runner.add_argument("--timeout", type=float, metavar="SECONDS",
-                        help=f"give up waiting after this long, exit {RUN_TIMED_OUT}")
+    runner.add_argument("--max-wait", type=wait_seconds, metavar="SECONDS",
+                        help=f"give up waiting for a slot after this long and exit {RUN_NO_SLOT}, the command not run; "
+                             "it does not bound the command itself (default: wait as long as it takes)")
     runner.add_argument("command", nargs=argparse.REMAINDER, help="-- then the command and its arguments")
     shower = verbs.add_parser("status", help="who holds a gate slot, who waits, and since when")
     shower.add_argument("--json", action="store_true", help="one machine-readable object")
@@ -751,7 +774,8 @@ def gate_verb(args: argparse.Namespace, environ: Mapping[str, str], slots: int, 
     command = list(args.command)
     if command[:1] == ["--"]:
         command = command[1:]
-    return run_gated(command, environ, slots=slots, rule=rule, stream=sys.stderr, label=args.label, timeout=args.timeout)
+    return run_gated(command, environ, slots=slots, rule=rule, stream=sys.stderr, label=args.label,
+                     max_wait=args.max_wait)
 
 
 def slot_command(argv: list[str] | None = None) -> int:

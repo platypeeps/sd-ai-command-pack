@@ -423,6 +423,8 @@ class SlotCount(unittest.TestCase):
         lines = stream.getvalue().splitlines()
         self.assertTrue(lines[0].startswith("waiting for a gate slot: 1 of 1 in use"), lines)
         self.assertTrue(any(line.startswith("still waiting for a gate slot after") for line in lines), lines)
+        self.assertTrue(lines[-1].startswith("gave up waiting for a gate slot after 150s at place 1 of 1 in the queue: "
+                                             "1 of 1 in use; slot 1 held by"), lines)
 
 
 class SignalForwarding(unittest.TestCase):
