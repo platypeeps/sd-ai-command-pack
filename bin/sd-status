@@ -1269,6 +1269,38 @@ def residue_section(root: pathlib.Path) -> list[dict[str, Any]]:
     return found
 
 
+#: What a missing database asks of the operator; on a satellite the file lives on the hub (sd:3496).
+NO_DATABASE_REMEDY = "run `sd-db init` on the hub"
+
+
+def _shared_connection(library: str, *modules: str) -> tuple[Any, str]:
+    """A read-only connection to the shared database, or `None` and a reason that names the next step.
+
+    One gate for the three database sections (sd:3496). On a satellite
+    `default_path()` is a `HubPath` whose `exists()` asks the hub and raises
+    `HubUnreachable` when it is down; that is a reported reason here, never
+    a traceback. `modules` are the `sd_db` submodules the caller reads, so a
+    copy that will not import them is named too.
+    """
+    imported = sd_lib.import_sd_db()  # puts the checkout's `lib/` first, before the import (sd:746)
+    try:
+        import sd_db
+        for module in modules:
+            importlib.import_module(f"sd_db.{module}")
+    except ImportError:  # a `lib/` copy that will not import is named, not called absent
+        return None, (imported.problem if imported.provisioned
+                      else f"{library} is not installed; run `make setup` in the pack checkout")
+    try:
+        if not sd_db.default_path().exists():
+            return None, f"no shared sd_db database yet; {NO_DATABASE_REMEDY}"
+        return sd_db.connect(write=False), ""
+    except Exception as error:
+        from sd_db.remote import HubUnreachable
+        if isinstance(error, HubUnreachable):
+            return None, f"{error}; check ~/.config/sd/hub.json and that the hub is up"
+        return None, f"shared database unreadable: {error}"
+
+
 def _database_issues(slug: str) -> dict[str, Any]:
     """The shared database, and every absence a reported reason in one shape.
 
@@ -1277,16 +1309,11 @@ def _database_issues(slug: str) -> dict[str, Any]:
     reported here the way `jira_section` reports it, naming the library the
     rows live in rather than a verb to run.
     """
-    imported = sd_lib.import_sd_db()  # puts the checkout's `lib/` first, before the import (sd:746)
+    connection, reason = _shared_connection("shared tracker library", "progress")
+    if connection is None:
+        return {"available": False, "reason": reason, "needs_you": [], "other": []}
+    from sd_db.progress import tracker_freshness, tracker_items
     try:
-        import sd_db
-        from sd_db.progress import tracker_freshness, tracker_items
-    except ImportError:  # a `lib/` copy that will not import is named, not called absent
-        return {"available": False, "reason": imported.problem if imported.provisioned else "shared tracker library is not installed", "needs_you": [], "other": []}
-    if not sd_db.default_path().exists():
-        return {"available": False, "reason": "no shared sd_db database yet", "needs_you": [], "other": []}
-    try:
-        connection = sd_db.connect(write=False)
         try:
             rows = tracker_items(connection, tracker="github", repo=slug, state="open")
             freshness = tracker_freshness(connection, "github")
@@ -1321,16 +1348,11 @@ def jira_section() -> dict[str, Any]:
     rule on closed rows is applied here and not in the renderer, so the
     `rows` list `--json` carries is the list the text prints.
     """
-    imported = sd_lib.import_sd_db()  # puts the checkout's `lib/` first, before the import (sd:746)
+    connection, reason = _shared_connection("shared tracker library", "progress")
+    if connection is None:
+        return {"available": False, "reason": reason, "freshness": None, "rows": []}
+    from sd_db.progress import tracker_freshness, tracker_items
     try:
-        import sd_db
-        from sd_db.progress import tracker_freshness, tracker_items
-    except ImportError:  # a `lib/` copy that will not import is named, not called absent
-        return {"available": False, "reason": imported.problem if imported.provisioned else "shared tracker library is not installed", "freshness": None, "rows": []}
-    if not sd_db.default_path().exists():
-        return {"available": False, "reason": "no shared database yet", "freshness": None, "rows": []}
-    try:
-        connection = sd_db.connect(write=False)
         try:
             rows = tracker_items(connection, tracker="jira", state=None)
             freshness = tracker_freshness(connection, "jira")
@@ -1364,20 +1386,15 @@ def _jira_row_is_current(row: dict[str, Any], cutoff: datetime.datetime) -> bool
 
 def contributions_section(root: pathlib.Path) -> dict[str, Any]:
     """Read the shared contribution projection without collecting or opening a writer."""
-    imported = sd_lib.import_sd_db()  # puts the checkout's `lib/` first, before the import (sd:746)
-    try:
-        import sd_db
-        from sd_db import contributions
-    except ImportError:  # a `lib/` copy that will not import is named, not called absent
-        return {"available": False, "reason": imported.problem if imported.provisioned else "shared contribution library is not installed", "rows": []}
-    if not sd_db.default_path().exists():
-        return {"available": False, "reason": "no shared database yet", "rows": []}
+    connection, reason = _shared_connection("shared contribution library", "contributions")
+    if connection is None:
+        return {"available": False, "reason": reason, "rows": []}
+    from sd_db import contributions
     identities = [sd_lib.stored_repo(root)]
     slug = pr_state.remote_slug(root)
     if slug:
         identities.append(slug)
     try:
-        connection = sd_db.connect(write=False)
         try:
             rows = contributions.projection(connection, repo=identities)
         finally:

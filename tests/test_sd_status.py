@@ -1808,7 +1808,7 @@ class IssueSectionTests(StatusFixture):
         completed = self.run_tool(tools / "sd-status")
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertNotIn("not importable from this checkout", completed.stdout)
-        self.assertIn("no shared sd_db database yet", completed.stdout)
+        self.assertIn(f"no shared sd_db database yet; {status.NO_DATABASE_REMEDY}", completed.stdout)
 
     def test_the_section_is_in_the_json_report(self) -> None:
         self.with_github(pulls=[])
@@ -1891,6 +1891,25 @@ class IssueSectionTests(StatusFixture):
         )
         self.assertEqual(answer["needs_you"], [])
         self.assertEqual(answer["other"], [])
+
+
+class HubUnreachableTests(StatusFixture):
+    """sd:3496: on a satellite `default_path().exists()` asks the hub, and a hub that is down raised a traceback."""
+
+    def test_every_database_section_names_the_unreachable_hub_and_the_remedy(self) -> None:
+        import sd_db
+        from sd_db.remote import HubUnreachable
+
+        class DownHub(type(pathlib.Path())):
+            def exists(self, *, follow_symlinks: bool = True) -> bool:
+                raise HubUnreachable("hub.example.test", 7000, "connection refused")
+
+        self.enterContext(mock.patch.object(sd_db, "default_path", return_value=DownHub(self.home / "sd.db")))
+        for answer in (status._database_issues("acme/widget"), status.jira_section(),
+                       status.contributions_section(self.repo)):
+            self.assertFalse(answer["available"])
+            self.assertEqual(answer["reason"], "the sd hub at hub.example.test:7000 is unreachable: connection refused; "
+                                               "check ~/.config/sd/hub.json and that the hub is up")
 
 
 class JiraSectionTests(StatusFixture):
@@ -2068,10 +2087,10 @@ class JiraSectionTests(StatusFixture):
         """The same gate `_database_issues` uses, in the same shape the other sections report."""
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual("  ! no shared database yet\n", self.section(completed.stdout))
+        reason = f"no shared sd_db database yet; {status.NO_DATABASE_REMEDY}"
+        self.assertEqual(f"  ! {reason}\n", self.section(completed.stdout))
         section = self.report()["jira"]
-        self.assertEqual(section, {"available": False, "reason": "no shared database yet",
-                                   "freshness": None, "rows": []})
+        self.assertEqual(section, {"available": False, "reason": reason, "freshness": None, "rows": []})
 
 
 class ReadOnlyTests(StatusFixture):
@@ -4436,7 +4455,7 @@ class ProvisionedButBrokenLibraryTests(StatusFixture):
         library_unimportable(self, self.CONTRIBUTIONS, provisioned="")
         answer = status.contributions_section(self.repo)
 
-        self.assertEqual(answer["reason"], "shared contribution library is not installed")
+        self.assertEqual(answer["reason"], "shared contribution library is not installed; run `make setup` in the pack checkout")
         self.assertEqual(answer["rows"], [])
 
 
