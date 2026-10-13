@@ -2224,9 +2224,10 @@ def clean_up_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
     """Remove a merged branch's clean worktrees, then its local and remote branch (sd:3006).
 
     `git worktree remove` takes the tree's ignored build output with it.
-    Whatever stays is named with its reason: the main checkout, uncommitted
-    changes, ignored files outside `BUILD_OUTPUT`, commits past the merged
-    head, or a process working inside.
+    Whatever stays is named with its reason: the main checkout, the checkout
+    this merge runs in (`MERGE_CHECKOUT`), uncommitted changes, ignored files
+    outside `BUILD_OUTPUT`, commits past the merged head, or a process
+    working inside.
     The merge stands whatever happens here, so a failed step is reported in
     the answer, never raised.
     """
@@ -2237,6 +2238,10 @@ def clean_up_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
 
 
 BUILD_OUTPUT = frozenset({"target", "node_modules", ".venv", "__pycache__"})
+#: Why the merge keeps the checkout it runs in (sd:3477). The lane merges in the builder's own worktree,
+#: and a builder whose harness resets its cwd between calls has no process inside to keep it: an idle
+#: builder lost its directory mid-task. The lane entry's `remove` command takes it once the builder stops.
+MERGE_CHECKOUT = "the merge ran in it, and its builder may still work there; remove it once the builder stops"
 # Config can hide untracked and ignored files from status, and `worktree
 # remove` deletes what status did not show, so cleanup pins the shape: every
 # untracked file, every submodule, and no fsmonitor or untracked cache.
@@ -2274,7 +2279,8 @@ def remove_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
               for block in git(root, "worktree", "list", "--porcelain").split("\n\n") if block.strip()]
     main = pathlib.Path(blocks[0]["worktree"])
     for path in (pathlib.Path(block["worktree"]) for block in blocks if block.get("branch") == f"refs/heads/{branch}"):
-        why = "the main checkout" if path == main else kept_because(path, merged)
+        why = "the main checkout" if path == main else MERGE_CHECKOUT if path.resolve() == root.resolve() \
+            else kept_because(path, merged)
         if why:
             kept[str(path)] = why
         else:

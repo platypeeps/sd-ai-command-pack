@@ -125,9 +125,10 @@ write through a handle opened before removal is lost. The entry's `remove`
 holds the command that removes the worktree and its branch once the builder
 stops, and the note names the host that holds it.
 It notes the item with the merge commit, what the cleanup did, a `git
-branch` recover command and that command. A worktree `sd-ship merge` has
-already removed (sd:3006) is noted as such, from the lane's own checkout
-(sd:3096). Then it fast-forwards the main
+branch` recover command and that command. `sd-ship merge` keeps the
+checkout it runs in (sd:3477); a worktree already gone, as an older
+`sd-ship merge` removed it (sd:3006), is noted as such, from the lane's own
+checkout (sd:3096). Then it fast-forwards the main
 checkout. When that checkout holds the running `sd-ship`, as the pack's does
 for every lane, it tries each other lane's runner lock once and skips if one
 is held: a lane mid-prepare must not have its tools change under it, and no
@@ -1523,9 +1524,10 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
          own_lock: pathlib.Path, root: pathlib.Path) -> dict[str, Any]:
     """After a merge: delete the remote branch, note the item with the removal and recover commands, fast-forward.
 
-    `root` is the repository the lane runs for. `sd-ship merge` removes a clean
-    worktree itself (sd:3006), and git cannot name the main checkout from a
-    directory that is gone, so the lane's own root answers (sd:3096).
+    `root` is the repository the lane runs for. `sd-ship merge` keeps the
+    worktree it runs in (sd:3477), but an older one removed it (sd:3006), and
+    git cannot name the main checkout from a directory that is gone, so the
+    lane's own root answers (sd:3096).
     """
     worktree = pathlib.Path(entry["worktree"])
     gone = not worktree.is_dir()
