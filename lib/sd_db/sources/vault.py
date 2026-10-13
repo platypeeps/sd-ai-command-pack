@@ -65,8 +65,11 @@ LIST_SECONDS = 120
 
 DUE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
-#: What marks a Meta Bind input line, as `grep -c 'INPUT\['` counts them.
-META_BIND = "INPUT["
+#: The Meta Bind status control, the whole line and nothing else: the dropdown
+#: the operator moved a row with, which `stage` replaces. A line that only
+#: holds `INPUT[`, or a control bound to another field, is content and stays.
+STATUS_CONTROL = re.compile(
+    r"\*\*Status:\*\* `INPUT\[inlineSelect\(option\([^()`]*\)(?:, option\([^()`]*\))*\):status\]`")
 
 #: Frontmatter keys a row keeps elsewhere: `status` is `stage`, `mirror-hash` is the mirror file's.
 NOT_FIELDS = frozenset({"status", "mirror-hash"})
@@ -198,6 +201,10 @@ class Reader:
             for path in found:
                 matter, body, removed = normalized(path)
                 dropped += removed
+                if "kind" in matter:
+                    raise MigrationRefused(
+                        f"{path} has a `kind:` in its frontmatter; the row's `fields.kind` "
+                        f"holds the declared kind {kind!r}, so rename that key before the import")
                 stage = str(matter.get("status") or "").strip()
                 if not stage:
                     raise MigrationRefused(
@@ -224,7 +231,7 @@ class Reader:
                     },
                 )
             notes.append(f"{SOURCE}: {len(found)} {kind} note(s) under {base.relative}, "
-                         f"{dropped} Meta Bind line(s) dropped")
+                         f"{dropped} Meta Bind status line(s) dropped")
         return Frozen(source=self.name, records=records, notes=notes)
 
     # ------------------------------------------------------------ import
@@ -250,6 +257,7 @@ class Reader:
                 stage=payload["stage"],
                 fields=_fields(kind, matter),
                 body={"markdown": body},
+                promoted_view=promoted_view,
             )
             counts.record(what)
         return counts
@@ -264,7 +272,7 @@ class Reader:
         # A promoted idea answers with the row it was promoted from (sd:1994).
         for promoted in promoted_rows(connection, SOURCE):
             origin = json.loads(promoted["fields"])["promoted_from"]
-            found.append({**origin["row"], "external_id": origin["external_id"]})
+            found.append({**promoted_view(origin["row"]), "external_id": origin["external_id"]})
         for row in found:
             held[row["external_id"]] = Record(
                 identity=row["external_id"],
@@ -285,13 +293,39 @@ def normalized(path: Path) -> tuple[dict[str, Any], str, int]:
     """`(frontmatter, body, dropped)` of one note, as both freeze and land read it.
 
     The frontmatter keeps `status`, which is the stage; `_fields` drops it.
-    `dropped` counts the Meta Bind lines the body lost. It splits on line
-    feeds alone, so a body with none comes back byte for byte.
+    `dropped` counts the status control lines the body lost.
     """
     matter, body = read_frontmatter(path.read_text(encoding="utf-8"))
+    return (matter, *_without_controls(body))
+
+
+def _without_controls(body: str) -> tuple[str, int]:
+    """`(body, dropped)`: the body less its `STATUS_CONTROL` lines.
+
+    It splits on line feeds alone, so a body with none comes back byte for byte.
+    """
     lines = body.split("\n")
-    kept = [line for line in lines if META_BIND not in line]
-    return matter, "\n".join(kept), len(lines) - len(kept)
+    kept = [line for line in lines if not STATUS_CONTROL.fullmatch(line)]
+    return "\n".join(kept), len(lines) - len(kept)
+
+
+def promoted_view(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """A promoted idea's `promoted_from.row` under the same normalization (sd:1994, sd:3972).
+
+    A piece promoted from a row an older import wrote keeps `status` in its
+    fields and the status control in its body. Read as it is, it would differ
+    from the normalized note though the note never changed. The view removes
+    those two and nothing else; any other value compares as stored.
+    """
+    view = dict(snapshot)
+    fields = json.loads(view["fields"]) if isinstance(view.get("fields"), str) else None
+    if isinstance(fields, dict):
+        view["fields"] = json.dumps({key: value for key, value in fields.items() if key not in NOT_FIELDS},
+                                    sort_keys=True)
+    body = json.loads(view["body"]) if isinstance(view.get("body"), str) else None
+    if isinstance(body, dict) and isinstance(body.get("markdown"), str):
+        view["body"] = json.dumps({**body, "markdown": _without_controls(body["markdown"])[0]}, sort_keys=True)
+    return view
 
 
 def _fields(kind: str, matter: dict[str, Any]) -> dict[str, Any]:

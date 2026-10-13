@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
+from collections.abc import Callable
 from typing import Any
 
 from . import paths
@@ -392,9 +393,13 @@ def upsert_item(
     status: str,
     who: str,
     created_at: str | None = None,
+    promoted_view: Callable[[dict], dict] | None = None,
     **columns: Any,
 ) -> tuple[int, str]:
     """Land a row a migration read from a source, once. Returns `(id, what)`.
+
+    `promoted_view`, when given, reads a promoted idea's snapshot the way the
+    source now reads its records, before the comparison (sd:3972).
 
     `what` is `inserted`, `updated` or `unchanged`, which is what makes the
     second run of a migration assertable: criterion 5 asks each one to report
@@ -424,6 +429,8 @@ def upsert_item(
         promoted = promoted_rows(connection, source, external_id)
         if promoted:
             snapshot = json.loads(promoted[0]["fields"])["promoted_from"]["row"]
+            if promoted_view is not None:
+                snapshot = promoted_view(snapshot)
             incoming = {"kind": kind, "title": title, "status": status, **columns}
             same = all(snapshot[key] == (_json(value) if key in ("fields", "body") and not isinstance(
                 value, (str, type(None))) else value) for key, value in incoming.items() if key in snapshot)

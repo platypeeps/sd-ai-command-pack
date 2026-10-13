@@ -161,14 +161,42 @@ class TheNormalization(VaultCase):
         self.assertNotIn("INPUT[", markdown)
         self.assertIn("the blog-idea body of first idea", markdown)
 
+    def test_only_the_exact_status_control_line_leaves_the_body(self):
+        """Review round 1: a line that merely holds `INPUT[` is content, not the status control."""
+        kept = [
+            "**My rating:** `INPUT[inlineSelect(option(1), option(2)):my-rating]`",
+            "Meta Bind writes a control as `INPUT[inlineSelect(...):status]` in a line of its own.",
+            "    `INPUT[inlineSelect(option(inbox)):status]`",
+            "**Status:** `INPUT[inlineSelect(option(inbox), option(drafting)):status]` (pick one)",
+            "**Status:** `INPUT[text:status]`",
+        ]
+        self.edit("System/Databases/Blog Ideas/first idea.md", "# ",
+                  "\n".join([META_BIND, *kept]) + "\n\n# ")
+        sitting = run(self.connection, self.reader())
+        self.assertTrue(sitting.clean, sitting.report())
+        markdown = json.loads(self.items()[self.IDEA]["body"])["markdown"]
+        self.assertNotIn(META_BIND + "\n", markdown)
+        for line in kept:
+            self.assertIn(line, markdown.split("\n"))
+        self.assertIn("vault: 3 blog-idea note(s) under System/Databases/Blog Ideas, "
+                      "1 Meta Bind status line(s) dropped", sitting.notes)
+
+    def test_a_body_with_no_status_control_lands_byte_for_byte(self):
+        """Class pass: the line split guesses nothing, blank runs and trailing spaces included."""
+        self.edit("System/Databases/Blog Ideas/first idea.md", "# ", "  \n\n\n\t`INPUT[` in prose  \n# ")
+        path = self.vault / "System/Databases/Blog Ideas/first idea.md"
+        _, body = read_frontmatter(path.read_text(encoding="utf-8"))
+        run(self.connection, self.reader())
+        self.assertEqual(json.loads(self.items()[self.IDEA]["body"])["markdown"], body)
+
     def test_the_sitting_reports_the_dropped_meta_bind_lines_per_kind(self):
         self.add_meta_bind("System/Databases/Blog Ideas/first idea.md", 2)
         self.add_meta_bind("System/Databases/Blog Ideas/second idea.md")
         sitting = run(self.connection, self.reader())
         self.assertIn("vault: 3 blog-idea note(s) under System/Databases/Blog Ideas, "
-                      "3 Meta Bind line(s) dropped", sitting.notes)
+                      "3 Meta Bind status line(s) dropped", sitting.notes)
         self.assertIn("vault: 2 topic note(s) under System/Databases/Topics, "
-                      "0 Meta Bind line(s) dropped", sitting.notes)
+                      "0 Meta Bind status line(s) dropped", sitting.notes)
 
     def test_fields_hold_neither_status_nor_mirror_hash(self):
         self.edit("System/Databases/Blog Ideas/first idea.md",
@@ -182,11 +210,13 @@ class TheNormalization(VaultCase):
         self.assertEqual(fields["content-type"], "blog-idea")
         self.assertEqual(row["stage"], "inbox")
 
-    def test_the_declared_kind_wins_over_a_frontmatter_kind(self):
+    def test_a_frontmatter_kind_refuses_rather_than_being_overwritten(self):
+        """Review round 1 class pass: `fields.kind` holds the declared kind, and a note's own `kind` is not dropped."""
         self.edit("System/Databases/Blog Ideas/first idea.md",
                   "status: inbox\n", "status: inbox\nkind: essay\n")
-        run(self.connection, self.reader())
-        self.assertEqual(json.loads(self.items()[self.IDEA]["fields"])["kind"], "blog-idea")
+        message = self.refused()
+        self.assertIn("first idea.md", message)
+        self.assertIn("`kind:`", message)
 
     def test_a_row_the_previous_import_left_is_rewritten_normalized(self):
         """Older state: a row landed with `status` in its fields and its Meta Bind lines."""
@@ -254,7 +284,7 @@ class EveryDeclaredKind(VaultCase):
         self.assertEqual((row["stage"], row["status"]), ("candidate", "planning"))
         self.assertEqual(json.loads(row["fields"])["kind"], "market")
         self.assertIn("vault: 1 market note(s) under System/Databases/Market Watch, "
-                      "1 Meta Bind line(s) dropped", sitting.notes)
+                      "1 Meta Bind status line(s) dropped", sitting.notes)
 
 
 class TheDueField(VaultCase):
