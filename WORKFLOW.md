@@ -69,13 +69,6 @@ These run without being asked.
   whose trailer names the item, and runs `git fetch -p`. The repository
   setting `delete_branch_on_merge` removes
   the remote branch.
-  A pack merge that changes `lib/` also installs
-  `sd_db` at the merge commit into the pack's virtualenv, so the dashboard's
-  next restart finds the library it expects (sd:2108, sd:3278). An installed copy that
-  is not an ancestor of the merge commit is kept. Every install holds one
-  machine-wide lock across that check and pip, so concurrent reconciles
-  cannot interleave. The receipt's `library`
-  says whether the install worked, or why it was skipped.
   After each confirmed in-scope merge, follow `skills/sd-ship/references/post-merge-closeout.md`.
 - Expected branch protection requires pull requests, current CI, and up-to-date branches, with no required approvals.
   Configure it deliberately in GitHub; installation does not grant a protection exception.
@@ -350,272 +343,78 @@ not reads, so a cache left from an earlier run still answers.
 ## Parallel work
 
 The harness fans work out only when a `CLAUDE.md` or a skill asks for it.
-These rules say when to ask. They hold wherever a pack skill runs. A skill
-that dispatches workers cites this section and restates nothing.
-The pack ships a writer for multi-file code: the `sd-slice-builder` agent,
-which the installer places in `~/.claude/agents`.
+These rules say when to ask. They hold wherever a pack skill runs.
+A skill that dispatches workers cites this section and restates nothing.
+The pack ships a writer for multi-file code: the `sd-slice-builder` agent, which the installer places in `~/.claude/agents`.
+
+This section holds rules. The mechanism is in the tools: `sd-ship lane --help`, `sd gate --help`, `sd-check --help`,
+[docs/sd-db.md](docs/sd-db.md) and `skills/sd-ship/references/recovery.md`.
 
 Four roles share the work:
 
-- **The lead plans and lands.** One lead session per machine plans, starts
-  builders, runs the merge lane and records state in `sd task note`; a
-  repository's lane runs on one machine (sd:3003), so a second lead races it.
-- **A builder writes code in its own worktree.** It runs only the suites its
-  change touches, never `make check`, and ends with commits, a pull-request
-  body file and a report; the lead's `sd-ship prepare` runs the one full gate.
-- **A reader is read-only and unlimited.** Investigation, review, planning
-  and audits fan out across readers; a reader changes no file, so it needs no
-  worktree.
-- **An integrator is a builder that merges several builders' work.** It
-  applies their commits or patches on one branch, so the lane lands one pull
-  request instead of several that conflict.
+- **The lead plans and lands.** One lead session per machine plans, starts builders, runs the merge lane and records state in `sd task note`.
+- **A builder writes code in its own worktree.** It runs only the suites its change touches, never `make check`,
+  and ends with commits, a pull-request body file and a report. The lead's `sd-ship prepare` runs the one full gate.
+- **A reader is read-only and unlimited.** Investigation, review, planning and audits fan out across readers; a reader needs no worktree.
+- **An integrator is a builder that merges several builders' work** on one branch, so the lane lands one pull request, not several that conflict.
 
-The rules for them:
+Workers:
 
-- **Run at most 6 code-writing builders per machine.** More starve the gates
-  and reviews they all wait on.
-- **Start no builder while load5 is above 40.** A machine that busy already
-  stretches every running builder past its deadline.
-- **A writer runs alone in its checkout.** One checkout holds one writer. An
-  agent or session that changes files works in its own git worktree or clone.
-  Prefer a patch-only worker: it returns a diff, and one integrator applies
-  it. Never start a second writer in a checkout that already has one.
-- **Make worktrees outside the repositories folder.** Use a sibling folder such
-  as `~/worktrees/<repository>-<branch>`: a tool that reads every folder under
-  the repositories folder as a checkout would take a worktree for one.
-- **One lane lands the work.** Several workers may produce patches or
-  pull requests. One lane merges them, one at a time. Metadata that orders
-  the landings — a session number, a journal or ledger entry, a changelog
-  position — is allocated when the work lands, never when the branch is cut,
-  because two branches cut in parallel would claim the same slot. An item id
-  is not that kind of metadata: `sd work register` allocates it at plan time,
-  before review and before any branch exists. Run `sd-ship prepare` and
-  `merge` back to back for one item; do not hold a prepared item while
-  another merges ahead of it, or its merge needs a catch-up and a new review
-  (sd:2339).
-- **No worker fails silently.** Every worker gets a budget, in wall clock or
-  tokens. It runs in the background and reports the moment its last step
-  ends, pass or fail. No report by the deadline is a failure, and so is a
-  worker gone idle without one. Do not poll, and do not assume success.
-  A missing report does not mean the worker stopped: cancel it and confirm
-  it is gone before starting a replacement, or two attempts run at once and
-  the second writer lands in a checkout the first still holds. When the
-  cancellation cannot be confirmed, escalate instead of respawning. Only a
-  read-only worker may be replaced on the deadline alone.
-- **Fan out only when three things hold.** The targets are independent, no
-  mutable state is shared, and the results are cheap to verify. Work on the
-  same files or the same metadata store stays in one lane, in sequence.
-- **Batch a repository's small items into one pull request.** Its small rows
-  (follow-ups, P3 and P4 fixes, same-area tasks) go to one worker, one branch
-  and one pull request, one commit per row, across folders too; rows that
-  change the same files always group. Each pull request costs a review, a
-  catch-up and a serial gate, and overlapping ones conflict. Keep a group near
-  300 changed lines. Name every grouped row in the pull request, and close
-  each one when it merges.
-- **Iterate on the fast path; gate once before the push.** While fixing, run
-  `make check CHANGED="<paths>"`, which runs only the tests those paths need
-  plus an always-run set. Before the push, run the full gate once: under
-  `repo.ci = local` that is `sd gate check --base main`, below; elsewhere
-  `make check`. Only the full gate counts as evidence; a narrowed run exits 2
-  to say so.
-- **Gate first, then review the same head (sd:2603).** `sd gate check --base
-  main` runs the full check in a clean worktree, takes a gate slot, and
-  records a pass for the head. Then review with
-  `sd-review --scope branch --gate-check main` within 30 minutes: that form reads the pass and runs no second check. Run both with
-  the same environment, since the receipt binds it; a one-off prefix such as
-  `TEST_WORKERS=6` on one of them makes the review run the full check again.
-  A fix commit moves the head, so the next round needs a new gate pass first.
-  Never run plain `sd-review --scope branch` there: it runs a second full
-  check in the checkout and reuses no pass.
-- **A change that moves state in steps carries a failure table before review
-  round 1.** Its `design.md` or pull-request body lists each step, the state
-  it moved, the failure, the recovery and the test, so round 1 reviews the
-  recovery paths and not only the success path.
-- **A repeating finding starts a class pass.** The trigger is two findings of
-  one class in different rounds, or three blocking rounds in a row; one more
-  single-finding fix lets the class come back next round. Name the class,
-  list every instance from the code rather than from the findings, add each
-  to the failure table, and fix each row that lacks a recovery or a test,
-  fail-first. The integrator names the class in the next round's brief and
-  records the trigger in `sd task note`. Split the pull request when the
-  table shows it does too much.
-- **Gates share the machine through slots.** Every `sd-check` run, and so
-  every gate `sd-ship prepare` or `merge` runs in any repository, first takes
-  one of `sd.gate_slots` machine-wide slots (unset: a quarter of the cores,
-  4 on 16). `SD_GATE_SLOTS` overrides it for one run, `0` lifts the cap, and
-  CI takes none. A queued gate prints `waiting for a gate slot` on stderr and
-  again each minute, naming each holder's label, pid, directory and start
-  time. The wait counts against `sd-check --timeout`, and each check gets the
-  rest; with `--slot-timeout`, the wait has its own bound and each check gets
-  the whole `--timeout`. `sd gate check`, the gate `sd-review` runs for
-  `sd-ship prepare`, and the merge gate queue that way for up to 4 hours
-  (sd:2607, sd:2611); the review plan counts that bound as its own phase. A holder runs its checks with `SD_GATE_SLOTS=0`, and names its cap
-  in `SD_GATE_POOL_SIZE`, so the pack's own `make test` inside a gate takes no
-  second slot and sizes its workers to the pool; run directly, `make test`
-  takes one of the same slots. Slots are kernel locks under
-  `$XDG_STATE_HOME/sd/gate-slots`, so a dead holder's slot is free at once.
-- **Each gate gets its share of the cores (sd:2726).** The slot count bounds
-  how many gates run, not the CPU each uses. Under a cap, a holder sets
-  `CARGO_BUILD_JOBS`, `RUST_TEST_THREADS` and `NEXTEST_TEST_THREADS` (sd:2872) in its checks to the cores over
-  `sd.gate_slots`, at least 1: 8 for 2 slots on 16 cores. A positive value the
-  caller set wins when it is lower; a higher one is lowered. The
-  `sd gate check` receipt binds these values, because a suite can pass on
-  one test thread and fail on eight. So a slot count that
-  changes the share misses reuse once and runs the check again. `MAKEFLAGS`
-  gets no `-j`, since it would run a Makefile's prerequisites at once; a
-  repository caps its own `make` pool, as the system repository's
-  `make check` does (sd:2719).
-- **A precheck runs before the slot wait (sd:2604).** When the repository's
-  Makefile defines `precheck`, `sd-check` runs `make precheck` first, outside
-  the pool. A failure stops the run there: no slot, no `check`, and the report
-  names the failing check. The pack's `precheck` is `lint` plus the always-run
-  test modules, about a minute. `--only` and a docs-only scope skip it, and
-  the checks get what the precheck left of `--timeout`.
-- **Wrap every other gate in the pool (sd:2522).** The pool is one per
-  machine, not one per repository. A plain `make check` in a repository whose
-  Makefile takes no slot runs as `sd gate run -- make check`, so it queues with
-  every `sd-check` and `sd-ship` gate. A per-repository `lockf` around a lane's
-  gate is then unnecessary: the pool already orders gates across every
-  repository, and a `lockf` only orders the gates of one.
-- **Gates wait in one queue (sd:2262).** Every waiter takes a place in one
-  machine-wide queue, and only the head starts: first to wait, first to
-  start, when a slot is free. Two starts are `sd.gate_settle_seconds` apart
-  (unset: 45). The slot count is the one limit (sd:2607): macOS counts disk
-  waits in the load average, so it misreads CPU pressure. So do not wait on the load average or wrap a gate in
-  `lockf`; the queue already orders every gate. `sd.gate_load_max` still adds
-  a load1 condition where a machine sets it (unset: none). While load5 is
-  above it, load1 must then stay below it for the settle time.
-  `SD_GATE_LOAD_MAX` and `SD_GATE_SETTLE_SECONDS` override them for one run;
-  `0` turns either off. To gate any other command, such as
-  another repository's `make check`, run `sd gate run -- make check`; it waits,
-  runs the command, and frees the slot when the command ends.
-  `sd gate status` shows who holds a slot and who waits, and since when.
-- **Reviews share the machine through their own slots (sd:2523).** Every
-  review takes one of `sd.review_slots` machine-wide review slots (unset: 2)
-  before its first reviewer starts, and frees it after the last, before the
-  gate.
-  `SD_REVIEW_SLOTS` overrides it for one run, and `0` lifts the cap. A waiting
-  review prints one `waiting for a review slot` line on stderr, naming each
-  holder. The wait spends what is left of the setup bound, counted from
-  the review's start; when that runs out, the review refuses with
-  `review_slot_busy`. Slots are kernel locks
-  under `$XDG_STATE_HOME/sd/review-slots`, so a dead holder's slot is free.
-- **Ship a run of items through one lane queue (sd:2524).** `sd-ship lane
-  enqueue --item N --title T --body-file F --deliver|--associate-only
-  [--acceptance-file A] [--manual]` adds a worktree's item to its
-  repository's queue in the hub database, which outlives the session
-  (sd:3282). The entry holds the branch and the body and acceptance texts;
-  enqueue first pushes `<head>:refs/heads/<branch>`, never with force, and a
-  failed or diverged push queues nothing. `sd-ship lane
-  run` drains it in order under one runner lock per repository: head check,
-  `prepare --catch-up` with the entry's delivery claim and acceptance file,
-  then `merge` when `repo.runner_merge` is `auto` or the entry was queued
-  with `--manual` (sd:3132); otherwise, or when the setting cannot be read,
-  the entry stops `prepared` and its `code` says why. An entry with no claim is
-  refused at enqueue, as prepare refuses it. A
-  failed entry is marked and the next one runs. A second runner exits at once
-  rather than wait. A claim takes a holder token and a lease and refuses
-  while another entry of the repository runs. The lane host runs any
-  entry, whichever host enqueued it (sd:3283): from the entry's own worktree
-  when it was enqueued there, from any worktree there at its head, or from a
-  lane worktree it makes from `origin/<branch>` and removes once the entry
-  ends. Its head is the queued head or prepare's catch-up of it: a clean
-  merge of a commit on `origin`'s default branch, with no edit of its own.
-  A remote branch, or the entry's own worktree on its branch, that moved
-  otherwise skips the entry `head_moved` (sd:3413), a deleted remote branch
-  `head_gone`, a local branch at another commit `branch_busy`; an
-  `origin` that does not answer leaves it pending. A dead holder goes back to
-  pending in prepare, failing at the third time, and fails in merge: on its
-  own host once its pid is gone, on another once its lease passed. `lane
-  cancel` on a stuck running entry releases it the same way.
-  `--expected-claim <holder token>:<step>`, from `lane list`, releases only
-  that claim and refuses `stale_claim` once its step moved, it ended, or a
-  new runner claimed the entry again (sd:3330). With the hub
-  down every lane verb refuses `hub_unavailable`. Each prepare and merge keeps its whole output under
-  `<lane>/logs/`. `list` and `cancel` read and edit the queue; `list` gives each entry
-  `enqueue_seq`, an integer that orders an item's entries by enqueue and no `move` changes; `watch` prints
-  each gate end a log under `sd.lane_root` records, once; `watch --item N`,
-  repeated, waits until each item's newest entry that is not cancelled ends,
-  prints one line each, and exits 0 only when all merged (sd:3565). While an entry
-  the runner may merge ships, the runner gates the next entry on its
-  predicted landing in the background, and waits for that gate after the
-  merge, so the next prepare reuses its receipt (sd:2586). That needs the
-  tree key above; the next entry's `speculation` field says what ran.
-  A run that stops ends that gate's process group and waits at most
-  20 seconds, so it frees its lock; `speculative_gate` says how (sd:3361).
-- **Reorder a lane queue between items (sd:2584).** `sd-ship lane move <item>
-  up|down|top|<position>` reorders the pending entries; `hold <item>` keeps an
-  entry in place but skips it, and its speculative gate, until `release
-  <item>`. These verbs edit the queue in one hub transaction and refuse a
-  running entry. The runner reads the queue's top before each item, so a change takes
-  effect at the next item, never mid-merge.
-- **The lead ships only through the lane.** It enqueues with `sd-ship lane
-  enqueue` and drains with `sd-ship lane run`; a hand-run prepare-and-merge
-  chain jumps the queue's order and leaves no log under `<lane>/logs/`.
-- **Stop an item's queued ship before its builder merges main.** Run
-  `sd-ship lane cancel <item>` first: the ship merges in the same worktree,
-  and its abort can discard the builder's merge.
-- **Stop a running ship chain by its process group** (`kill -- -<pgid>`).
-  A killed shell alone leaves its children holding a gate slot.
-- **After a lane merge, the runner lands the entry (sd:2568).** It deletes
-  the remote branch with `--force-with-lease` while the worktree's tip is
-  the merged head. Neither it nor `sd-ship merge`, which keeps the checkout
-  it runs in, removes the worktree or its local branch: no
-  lock excludes the builder, and a write through a file handle opened before
-  removal reaches an unlinked file and is lost. The cleanup names the host
-  that holds the worktree, and the entry's `remove` holds the command to run
-  there once the builder stops: `git -C <main> worktree remove
-  <worktree> && git -C <main> update-ref -d refs/heads/<branch> <tip>`.
-  `git worktree remove` refuses uncommitted or untracked files, and
-  `update-ref -d` refuses a branch that moved. The runner then notes the
-  item: `Landed: merged at <merge> (head <head>). Cleanup: …. Recover: git
-  branch <branch> <tip>. Remove: <command>` Last, it fast-forwards the main
-  checkout when it is on the default branch. When that checkout holds the
-  running `sd-ship`, it first tries every other lane's runner lock once and
-  skips if one is held; the next landing retries. Once a run that merged
-  releases its runner lock, a `post-merge:` rule in that checkout's Makefile
-  runs there once as `make post-merge`, bounded to 10 minutes, if the last
-  landing fast-forwarded it. The run's `post_merge` and a note on each merged
-  item give the outcome: a comment when it passed, else a followup (sd:3566).
-- **Clean up after a merge, once its builder has stopped.** Remove the clean
-  worktree, its local branches, its build output and agents nothing uses; keep
-  unpushed unmerged work. A live builder holds its worktree open, and a
-  removal under it loses its writes.
-- **Each lane runs on its lane host (sd:3003).** `repo.lane_host` names the
-  machine that runs a repository's lane; NULL means the hub. Off that host,
-  `sd-ship merge`, `reconcile`, `review`, `adjudicate --accept-dispositions`
-  and `lane run` refuse with `lane_elsewhere` before they read a row
-  (sd:2795); the text names the host, the dashboard's Move lane control, and
-  the verb. A host that cannot be read refuses with `lane_unknown` and never
-  counts as the hub. `prepare` runs everywhere without the ship lock
-  (sd:1938), and every other lane verb edits the shared queue from any host
-  (sd:3283), so pending entries follow a move. Every machine
-  runs the same scheduled `sd-ship lane run --hosted`: each lane it hosts, in
-  path order, skipping one whose runner is busy. The runner reads the host
-  again before each claim and before each merge: after a move the entry in
-  flight goes back to pending at its place, and the new host takes it first.
-  After 55
-  minutes a run claims no next entry and finishes the one it started, so the
-  job's 120-minute limit never stops a merge; the next run goes on (sd:3287). The lane
-  host gates and merges on its own machine; an entry's commits reach it
-  through `origin`. [docs/sd-db.md § Lane host](docs/sd-db.md#lane-host) covers the move.
-- **Large uncommitted data goes under the bulk root (sd:1792).** When
-  `sd.bulk_storage_root` names a folder, put run outputs, logs, captures,
-  agent scratch evidence and large downloaded fixtures under
-  `<root>/<repository>/`, not in the checkout. Keep build output, such as
-  Cargo's `target/` or `node_modules/`, and data whose mode or owner matters
-  on the system disk: a bulk volume may be ejected mid-build, and a volume
-  mounted `noowners` reports every file as yours. Unset, nothing moves.
+- **Run at most 6 code-writing builders per machine.** More starve the gates and reviews they wait on.
+- **Start no builder while load5 is above 40.**
+- **A writer runs alone in its checkout.** Any agent or session that changes files works in its own git worktree or clone.
+  Never start a second writer in a checkout that already has one.
+- **Make worktrees outside the repositories folder**, such as `~/worktrees/<repository>-<branch>`:
+  a tool that reads every folder there as a checkout takes a worktree for one.
+- **No worker fails silently.** Every worker gets a budget and reports the moment its last step ends, pass or fail.
+  No report by the deadline is a failure, and so is a worker gone idle without one. Do not poll; do not assume success.
+  Cancel a silent writer and confirm it stopped before starting a replacement; if you cannot confirm, escalate.
+  Only a read-only worker may be replaced on the deadline alone.
+- **Fan out only when the targets are independent, share no mutable state, and are cheap to verify.**
+- **Batch a repository's small items into one pull request**, one commit per row; rows that change the same files always group.
+  Keep a group near 300 changed lines. Name every grouped row in the pull request.
+- **Large uncommitted data goes under `sd.bulk_storage_root`**, as `<root>/<repository>/`. Build output and owner-sensitive data stay on the system disk.
 - **Test one version per language, the latest stable (Python 3.14, Node 26); no version matrices.**
 
-A session writes on its own branch in its own worktree, one writer per
-worktree: `sd-plan --worktree` puts a new branch in a worktree of its own, and
-`git worktree add` makes one for any other session. Merging is one lane:
-`sd-ship` merges one pull request per run.
+Gates and reviews:
 
-Before writing a fix, look on the remote for a branch or pull request that
-already claims it, by the item id or by the changed path. Two sessions that
-land one defect waste one session's work; sd:1151 records the case.
+- **Iterate on the fast path; gate once before the push.** `make check CHANGED="<paths>"` runs the tests those paths need.
+  Only the full gate counts as evidence.
+- **Gate first, then review the same head (sd:2603).** Run `sd gate check --base main`, then `sd-review --scope branch --gate-check main` within 30 minutes.
+  Run both with the same environment, since the receipt binds it. A fix commit moves the head, so it needs a new gate pass.
+  Never run plain `sd-review --scope branch` under `repo.ci = local`: it runs a second full check and reuses no pass.
+- **A change that moves state in steps carries a failure table before review round 1:**
+  each step, the state it moved, the failure, the recovery and the test.
+- **A repeating finding starts a class pass.** The trigger is two findings of one class in different rounds, or three blocking rounds in a row.
+  Name the class, list every instance from the code rather than the findings, add each to the failure table,
+  and fix each row that lacks a recovery or a test, fail-first. Record the trigger in `sd task note`. Split the pull request if the table shows it does too much.
+- **Gates share the machine through slots** (`sd.gate_slots`). Every `sd-check` run and every gate `sd-ship` runs queues in one machine-wide order.
+  Wrap any other gate as `sd gate run -- make check`. Use no per-repository `lockf` and do not wait on the load average. `sd gate status` shows holders and waiters.
+- **A repository's `precheck` target runs before the slot wait.** A failure stops the run there.
+- **Reviews take their own slots** (`sd.review_slots`) before the first reviewer starts.
+
+The merge lane:
+
+- **The lead ships only through the lane.** `sd-ship lane enqueue` adds an item; `sd-ship lane run` drains the queue in order.
+  A hand-run prepare-and-merge chain jumps the queue and leaves no log. Verbs: `enqueue|list|retry|cancel|move|hold|release|run|watch`.
+- **`lane retry <item>` queues a failed, skipped or prepared entry again** at its head; a cancelled one needs `--expected-head`.
+- **Keep one `sd-ship lane watch --item A --item B ...` naming every item the lead has in that lane.**
+  Restart it after each enqueue and after an sd outage. Treat an exit as done only when its output says `ok: true`:
+  a bare `lane watch` never exits, and a hub build mismatch ends a watch with `ok: false` and exit 0.
+- **Stop an item's queued ship before its builder merges main.** Run `sd-ship lane cancel <item>`: the ship merges in the same worktree, and its abort can discard the builder's merge.
+- **Stop a running ship chain by its process group** (`kill -- -<pgid>`). A killed shell alone leaves its children holding a gate slot.
+- **Metadata that orders landings** (a session number, a ledger entry, a changelog position) is allocated when the work lands, never when the branch is cut.
+  An item id is not that kind of metadata. Run `sd-ship prepare` and `merge` back to back for one item (sd:2339).
+- **After a lane merge, clean up once the builder has stopped.** The runner deletes the remote branch and notes the item with the command that removes the worktree.
+  It never removes a worktree: a live builder holds it open, and a removal loses its writes. Remove the clean worktree, its local branches and its build output; keep unpushed unmerged work.
+- **Each lane runs on its lane host** (`repo.lane_host`; NULL is the hub, sd:3003). Off that host the ship verbs refuse `lane_elsewhere`.
+  [docs/sd-db.md § Lane host](docs/sd-db.md#lane-host) covers the move.
+- **One hub holds the workflow database; a satellite reaches it over the network.**
+  A verb that needs a lock or a directory beside the database refuses with `HubOnly` off the hub: run it on the hub.
+  The list and the refusals are in [docs/sd-db.md § Hub-only verbs](docs/sd-db.md#hub-only-verbs).
+
+A session writes on its own branch in its own worktree, one writer per worktree: `sd-plan --worktree` puts a new branch in a worktree of its own, and `git worktree add` makes one for any other session.
+Before writing a fix, look on the remote for a branch or pull request that already claims it, by the item id or by the changed path.
 
 ## Modes
 

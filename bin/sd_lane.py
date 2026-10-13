@@ -36,7 +36,9 @@ database and runs it under one runner lock per repository:
            whose prepare or merge met a hub fault goes
            back to pending, at most `HUB_RETRIES` times, and the run stops
            (sd:3239, below); so does one whose prepare refused retryably
-           and spent no review pass, once (sd:3478, below);
+           and spent no review pass, once (sd:3478, below). It claims
+           nothing while load5 is at or above the gate's load limit,
+           `sd.gate_load_max` (`load_stop`, sd:3479);
   watch    print each gate end a lane or builder log records, once; with
            `--item N`, repeated, wait until each item's newest entry that is
            not cancelled ends, print one line each, and exit 0 only when all
@@ -209,10 +211,10 @@ ROOT_VARIABLE = "SD_LANE_ROOT"
 PREPARE_SECONDS = 3 * 3600 + sd_lib.GATE_SLOT_SECONDS
 MERGE_SECONDS = 3 * 3600 + sd_lib.GATE_SLOT_SECONDS
 MERGE_WAIT_SECONDS = 2100
-#: After this long a run starts no new entry (sd:3287). The lane-run cron job's
-#: JOB_TIMEOUT is 120 minutes, and one entry takes 30 to 45, so an entry started
-#: just inside the budget still finishes before the job limit TERMs the runner.
-RUN_BUDGET_SECONDS = 55 * 60
+#: The lane-run cron job's JOB_TIMEOUT, at which it TERMs the runner (sd:3287).
+JOB_SECONDS = 120 * 60
+#: The longest entry seen, claim to end: a gate that timed out at one hour took 61 to 64 minutes (sd:3481).
+ENTRY_SECONDS = 65 * 60
 #: How long a stopped run waits for its cancelled speculative gate, once after
 #: SIGTERM and once after SIGKILL (sd:3361).
 CANCEL_SECONDS = 10
@@ -299,6 +301,12 @@ RECLAIMS = 3
 LANDING_SECONDS = 1800
 #: The bound on the main checkout's `make post-merge` after a run that merged (sd:3566).
 POST_MERGE_SECONDS = 600
+#: After this long a run starts no new entry (sd:3287): one started just inside it, the longest entry seen,
+#: then `make post-merge` and five minutes of the run's own reads and landings end before the job TERMs the
+#: runner. A 55-minute budget assumed 30 to 45 minutes an entry, and runners died mid-merge (sd:3481).
+RUN_BUDGET_SECONDS = JOB_SECONDS - ENTRY_SECONDS - POST_MERGE_SECONDS - 5 * 60
+#: A claim's lease beyond its prepare's bound: the checkout before it and the writes after (sd:3481).
+LEASE_SLACK_SECONDS = 1800
 #: A `post-merge` rule in a Makefile, not a `post-merge :=` variable.
 POST_MERGE_RULE = re.compile(r"^post-merge\s*:(?!=)", re.MULTILINE)
 #: The bound on one `git` step of a publish: a fetch or a push crosses the network.
@@ -798,7 +806,7 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
             reclaim(running, released=True)
             return running
         row = pending_entry(entries, item)
-        row.update(status="cancelled", finished_at=stamp_now())
+        row.update(status="cancelled", finished_at=stamp_now(), reason=f"cancelled by the operator on {this_host()}")
         return row
     return update(queue_for(root, environ), mark)
 
@@ -1126,16 +1134,19 @@ def drop_imported_bodies(queue: Queue) -> None:
 
 
 def ship_process(argv: list[str], log: pathlib.Path, timeout: int) -> dict[str, Any]:
-    """Run `sd-ship` with `--json`; its whole output goes to `log`, its answer comes back."""
+    """Run `sd-ship` with `--json`; its whole output goes to `log`, its answer comes back.
+
+    It leads a process group of its own (`sd_lib.run_group`), so the timeout
+    ends its review, `sd-check` and test shards too, which held the gate slot
+    when only `sd-ship` was killed (sd:3480).
+    """
     log.parent.mkdir(parents=True, exist_ok=True)
     try:
-        done = subprocess.run([sys.executable, str(BIN / "sd-ship"), *argv], capture_output=True, text=True,
-                              timeout=timeout, check=False)
+        done = sd_lib.run_group([sys.executable, str(BIN / "sd-ship"), *argv], cwd=pathlib.Path("."),
+                                env=dict(os.environ), timeout=timeout)
         out, err = done.stdout, done.stderr
-    except subprocess.TimeoutExpired as error:
-        def decoded_output(value: str | bytes | None) -> str:
-            return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
-        out, err = decoded_output(error.stdout), f"timed out after {timeout} s\n{decoded_output(error.stderr)}"
+    except sd_lib.GroupTimeout as error:
+        out, err = error.stdout, f"timed out after {timeout} s\n{error.stderr}"
     log.write_text(f"$ sd-ship {' '.join(argv)}\n{out}\n--- stderr ---\n{err}", encoding="utf-8")
     try:
         answer = json.loads(out)
@@ -1227,10 +1238,11 @@ def answered_retryable(answer: dict[str, Any]) -> bool:
             and type(spent) is int and spent == 0)
 
 
-def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[], None]) -> dict[str, Any]:
+def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[], None],
+            renewed: Callable[[], None] = lambda: None) -> dict[str, Any]:
     """One entry, start to end; the fields to record on it.
 
-    The body and acceptance texts go to private temporary files for prepare.
+    `prepare_step` prepares, and `prepare_stop` reads its answer.
     `advance` is the before-merge write (`step: merge`); it raises `Stop`
     when the claim is lost or the hub stays down, and no merge starts.
     """
@@ -1238,27 +1250,13 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
     if not at_head(worktree, entry["expected_head"]):
         return {"status": "skipped", "code": HEAD_MOVED, "reason": "the worktree's HEAD moved from the queued head"}
     stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
-    prepare_log = logs / f"prepare-{item}-{stamp}.log"
-    with tempfile.TemporaryDirectory(prefix="sd-lane-texts-") as private:  # 0700, removed with the step
-        body = pathlib.Path(private) / "body.md"
-        body.write_text(str(entry.get("body") or ""), encoding="utf-8")
-        claim = [f"--{entry['claim']}"]
-        if isinstance(entry.get("acceptance"), str):
-            (pathlib.Path(private) / "acceptance.md").write_text(entry["acceptance"], encoding="utf-8")
-            claim += ["--acceptance-file", str(pathlib.Path(private) / "acceptance.md")]
-        argv = ["-C", str(worktree), "prepare", "--item", str(item), *claim, "--catch-up",
-                "--title", entry["title"], "--body-file", str(body), "--json"]
-        prepared = ship(argv, prepare_log)
-        # sd:3037. An incomplete review gets the one retry an operator would give it, and no second.
-        if blocker_code(prepared) == "review_incomplete":
-            prepare_log = logs / f"prepare-{item}-{stamp}-retry.log"
-            prepared = ship([*argv, "--retry-review"], prepare_log)
+    prepared, prepare_log = prepare_step(entry, worktree, logs / f"prepare-{item}-{stamp}", ship, renewed)
     fields: dict[str, Any] = {"prepare_log": str(prepare_log), "log_host": this_host(), "head": prepared.get("head")}
-    if not (prepared.get("ok") and prepared.get("phase") == "ready_to_send"):
-        return {**fields, "status": "failed", "step": "prepare", "phase": prepared.get("phase"),
-                "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:REASON_CHARS],
-                **({"hub_fault": True} if answered_hub_fault(prepared) else
-                   {"retryable": True} if answered_retryable(prepared) else {})}
+    stopped = prepare_stop(entry, worktree, prepared)
+    if stopped is not None and stopped.get("reconciled"):
+        advance()  # the claim still holds, and the lane is still here, before the landing (sd:3482)
+    if stopped is not None:
+        return {**fields, **stopped}
     refused = merge_refusal(entry)
     if refused is not None:
         return {**fields, "status": "prepared", **refused}
@@ -1274,6 +1272,63 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
                 "reason": str(merged.get("error") or merged.get("code") or "merge did not confirm")[:REASON_CHARS],
                 **({"hub_fault": True} if answered_hub_fault(merged) else {})}
     return {**fields, "status": "merged", "merge_commit": merged.get("merge_commit")}
+
+
+def prepare_step(entry: dict[str, Any], worktree: pathlib.Path, log: pathlib.Path, ship: Ship,
+                 renewed: Callable[[], None]) -> tuple[dict[str, Any], pathlib.Path]:
+    """`sd-ship prepare`'s answer and its log; the body and acceptance texts go to private temporary files.
+
+    An incomplete review gets the one `--retry-review` an operator would
+    give it, and no second (sd:3037); `renewed` renews the claim's lease
+    first (`renew`, sd:3481).
+    """
+    prepare_log = log.with_name(f"{log.name}.log")
+    with tempfile.TemporaryDirectory(prefix="sd-lane-texts-") as private:  # 0700, removed with the step
+        body = pathlib.Path(private) / "body.md"
+        body.write_text(str(entry.get("body") or ""), encoding="utf-8")
+        claim = [f"--{entry['claim']}"]
+        if isinstance(entry.get("acceptance"), str):
+            (pathlib.Path(private) / "acceptance.md").write_text(entry["acceptance"], encoding="utf-8")
+            claim += ["--acceptance-file", str(pathlib.Path(private) / "acceptance.md")]
+        argv = ["-C", str(worktree), "prepare", "--item", str(entry["item"]), *claim, "--catch-up",
+                "--title", entry["title"], "--body-file", str(body), "--json"]
+        prepared = ship(argv, prepare_log)
+        if blocker_code(prepared) == "review_incomplete":
+            renewed()
+            prepare_log = log.with_name(f"{log.name}-retry.log")
+            prepared = ship([*argv, "--retry-review"], prepare_log)
+    return prepared, prepare_log
+
+
+def prepare_stop(entry: dict[str, Any], worktree: pathlib.Path, prepared: dict[str, Any]) -> dict[str, Any] | None:
+    """The end prepare's answer gives the entry, or None at `ready_to_send`.
+
+    An answer `merged` reconciled a merge that landed before its runner died
+    at `step: merge` (sd:3482): the entry is merged at that commit, and no
+    merge runs, when the merged head is the entry's head or prepare's
+    catch-up of it. Any other head's merge, an earlier head's included, is
+    an earlier pull request's, and fails the entry; so does a read that
+    cannot tell.
+    """
+    if prepared.get("ok") and prepared.get("phase") == "merged":
+        merged_head, expected = str(prepared.get("head") or ""), str(entry["expected_head"])
+        try:
+            ours = bool(merged_head) and (merged_head == expected or catch_up_of(worktree, merged_head, expected))
+        except LaneError as error:  # unknown is not "ours"
+            return {"status": "failed", "step": "prepare", "phase": "merged",
+                    "reason": f"prepare answered sd-ship's merge of {merged_head}; whether it is of {expected} "
+                              f"is unknown: {error}"[:REASON_CHARS]}
+        if ours:
+            return {"status": "merged", "merge_commit": prepared.get("merge_commit"), "reconciled": True}
+        return {"status": "failed", "step": "prepare", "phase": "merged",
+                "reason": f"prepare answered sd-ship's merge of {merged_head or 'an unrecorded head'}, not this "
+                          f"entry's head {expected} or its catch-up; read the ship receipt before enqueueing it again"}
+    if prepared.get("ok") and prepared.get("phase") == "ready_to_send":
+        return None
+    return {"status": "failed", "step": "prepare", "phase": prepared.get("phase"),
+            "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:REASON_CHARS],
+            **({"hub_fault": True} if answered_hub_fault(prepared) else
+               {"retryable": True} if answered_retryable(prepared) else {})}
 
 
 class SpeculativeGate(threading.Thread):
@@ -1830,13 +1885,27 @@ def claim_entry(queue: Queue, token: str, reclaimed: list[dict[str, Any]] | None
             if runnable(row):
                 row.update(status="running", started_at=stamp_now(), step="prepare",
                            holder={"host": host, "pid": os.getpid(), "token": token},
-                           lease_until=stamp_at(time.time() + 2 * PREPARE_SECONDS))
+                           lease_until=prepare_lease())
                 return dict(row)
         return None
     claimed = runner_write(queue, claim_first, check=host_check(queue))
     if reclaimed is not None:  # only once the claim's transaction landed
         reclaimed.extend(found)
     return claimed
+
+
+def prepare_lease() -> str:
+    """A prepare's lease: its own bound and `LEASE_SLACK_SECONDS`; `renew` sets it again before a second prepare.
+
+    It was two prepares long, 14 hours, so a satellite runner that died held
+    its lane on the hub for most of a day (sd:3481).
+    """
+    return stamp_at(time.time() + PREPARE_SECONDS + LEASE_SLACK_SECONDS)
+
+
+def renew(queue: Queue, entry: dict[str, Any], token: str) -> None:
+    """A new prepare lease while `token` holds `entry`, before its `--retry-review` prepare (sd:3481)."""
+    runner_write(queue, lambda entries: held(entries, entry, token).update(lease_until=prepare_lease()))
 
 
 class Moved(Stop):
@@ -1993,11 +2062,22 @@ def worktrees(main: pathlib.Path) -> list[tuple[pathlib.Path, str]]:
     return found
 
 
-def drop_lane_worktree(main: pathlib.Path, tree: pathlib.Path, branch: str | None) -> None:
-    """Remove a worktree the lane made under its folder, and `branch` with it; no builder writes there."""
+def drop_lane_worktree(main: pathlib.Path, tree: pathlib.Path, branch: str | None, *, made: bool = False,
+                       origin_tip: str = "") -> None:
+    """Remove a worktree the lane made under its folder, where no builder writes, and maybe `branch` with it.
+
+    The branch goes when this run made it from `origin` (`made`), or when
+    its tip is in `origin_tip`, the `origin/<branch>` just fetched. A killed
+    run's leftover may sit on a branch the lane did not make, and `branch -D`
+    lost its commits (sd:3483). Otherwise, or when the read fails, it stays;
+    git refuses one another worktree has checked out.
+    """
     publish_git(main, "worktree", "remove", "--force", str(tree))
     publish_git(main, "worktree", "prune")
-    if branch:
+    if branch and origin_tip and not made:
+        contained = publish_git(main, "merge-base", "--is-ancestor", f"refs/heads/{branch}", origin_tip)
+        made = contained is not None and contained.returncode == 0
+    if branch and made:
         publish_git(main, "branch", "-D", branch)
 
 
@@ -2033,7 +2113,7 @@ def checkout_for(root: pathlib.Path, queue: Queue, entry: dict[str, Any]) -> dic
     for path, name in listed:
         if branch and name == branch and path.is_dir() and at_head(path, expected):
             mine = path.resolve() == lane.resolve()  # a killed run's lane worktree at the head: reused, then removed
-            return {"tree": path, **({"made": True, "branch_made": name} if mine else {})}
+            return {"tree": path, **({"made": True} if mine else {})}  # its branch stays: the lane may not have made it
     return lane_tree(main, lane, branch, expected, listed)
 
 
@@ -2059,18 +2139,19 @@ def lane_tree(main: pathlib.Path, lane: pathlib.Path, branch: str, expected: str
     """A lane worktree at `lane` from the fetched `origin/<branch>`, or a skip; raises `PUBLISH_UNKNOWN`.
 
     A lane worktree a killed run left at another head is the lane's own, so
-    it goes with its branch. No `origin/<branch>` is `HEAD_GONE`; a tip past
-    the head and its catch-up is `HEAD_MOVED`; a local branch at another
-    commit, or one checked out elsewhere, is `BRANCH_BUSY`. A failed read or
-    fetch of `origin` is unknown, not a skip.
+    it goes, and its branch with it only when `origin/<branch>` holds the
+    branch's tip (`drop_lane_worktree`, sd:3483). No `origin/<branch>` is
+    `HEAD_GONE`; a tip past the head and its catch-up is `HEAD_MOVED`; a
+    local branch at another commit, or one checked out elsewhere, is
+    `BRANCH_BUSY`. A failed read or fetch of `origin` is unknown, not a skip.
     """
+    ref, tip = f"refs/heads/{branch}", fetched_tip(main, branch)
     for path, name in listed:
         if path.resolve() == lane.resolve():
-            drop_lane_worktree(main, path, name or None)
+            drop_lane_worktree(main, path, name or None, origin_tip=tip)
     listed = [(path, name) for path, name in listed if path.resolve() != lane.resolve()]
     if lane.exists():  # the lane's own folder, which git no longer lists: a killed run's, kept aside, never deleted
         lane.rename(lane.with_name(f"{lane.name}.stale-{entry_id()}"))
-    ref, tip = f"refs/heads/{branch}", fetched_tip(main, branch)
     if not tip:
         return skip(HEAD_GONE, f"origin/{branch} is gone; `sd-ship lane retry` publishes {expected} again from "
                                "a checkout that has it")
@@ -2123,6 +2204,28 @@ def clock() -> float:
     return time.monotonic()
 
 
+def load_stop(environ: dict[str, str]) -> str | None:
+    """Why the runner claims no entry under this load, or None (sd:3479).
+
+    The gate's own limit, `sd.gate_load_max` or `SD_GATE_LOAD_MAX`
+    (`sd_gate_slots.load_rule`), read against load5: six gates timed out at
+    one hour under load, and a retry minutes later met the same load. Off
+    while the limit is 0, as the gate queue's rule is. A limit or a load
+    that cannot be read claims nothing: unknown is not low.
+    """
+    import sd_gate_slots  # noqa: PLC0415 -- stdlib only, and only the runner reads it
+    try:
+        limit = sd_gate_slots.load_rule(environ, sd_lib.core_setting("gate_load_max", environ)).limit
+        if limit <= 0:
+            return None
+        load5 = float(os.getloadavg()[1])
+    except (ValueError, OSError, sd_lib.ConfigError) as error:
+        return f"cannot read the load average ({error}); the next run takes the pending entries"
+    if load5 >= limit:
+        return f"load5 {load5:.1f} is at or above {limit:g}, the gate's load limit; the next run takes the pending entries"
+    return None
+
+
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
              gate: Gate = default_gate, note: Note | None = None, deadline: float | None = None) -> dict[str, Any]:
     """Drain this repository's queue in order under its runner lock; never wait for the lock.
@@ -2164,6 +2267,10 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
         while True:
             if clock() >= deadline:
                 answer["stopped"] = "the run spent its budget; the next run takes the pending entries"
+                break
+            loaded = load_stop(environ)
+            if loaded is not None:
+                answer["stopped"] = loaded
                 break
             token, reclaimed = secrets.token_hex(16), list[dict[str, Any]]()
             try:
@@ -2222,7 +2329,7 @@ def run_entry(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: st
         return run_checkout(root, queue, entry, token, environ, ship, note, tree, found)
     finally:
         if tree is not None and found.get("made"):
-            drop_lane_worktree(sd_lib.main_worktree_root(root), tree, found.get("branch_made"))
+            drop_lane_worktree(sd_lib.main_worktree_root(root), tree, found.get("branch_made"), made=True)
 
 
 def unknown_checkout(queue: Queue, entry: dict[str, Any], token: str,
@@ -2246,7 +2353,8 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
             built = {"lane_worktree": True, "builder_worktree": entry.get("worktree"),
                      "builder_host": entry.get("enqueued_on")}
             local = {**entry, "worktree": str(tree), **(built if found.get("made") else {})}
-            outcome = process(local, queue, ship, functools.partial(advance, queue, local, token))
+            outcome = process(local, queue, ship, functools.partial(advance, queue, local, token),
+                              functools.partial(renew, queue, local, token))
             if outcome.get("moved"):
                 put_back(queue, entry, token, pushed_catch_up(tree, str(entry.get("branch") or ""),
                                                               entry["expected_head"]),
@@ -2285,7 +2393,8 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     (`run_lane` answers `busy`), and a refusal in one lane leaves the next to run.
     Every other checkout here, hosted or not, has its file queue imported and
     its dead holders reclaimed under its runner lock (sd:3282). The lanes share
-    one run budget, `RUN_BUDGET_SECONDS` from the start (sd:3287).
+    one run budget, `RUN_BUDGET_SECONDS` from the start (sd:3287), and the
+    lane that waited longest runs first (`longest_waiting_first`, sd:3481).
     """
     deadline = clock() + RUN_BUDGET_SECONDS
     imported = sd_lib.import_sd_db()
@@ -2327,12 +2436,30 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
             settled = refusal(error)
         if settled:
             lanes.append({"path": path, "settled": settled})
-    for path, checkout in hosted:
+    for path, checkout in longest_waiting_first(hosted, environ):
         try:
             lanes.append({"path": path, **run_lane(checkout, environ, ship, gate, note, deadline)})
         except (LaneError, sd_lib.ConfigError, OSError) as error:
             lanes.append({"path": path, **refusal(error)})
     return {"lanes": lanes}
+
+
+def longest_waiting_first(hosted: list[tuple[str, pathlib.Path]],
+                          environ: dict[str, str]) -> list[tuple[str, pathlib.Path]]:
+    """`hosted`, the lane whose oldest runnable entry was enqueued first leading (sd:3481).
+
+    In path order, a lane that kept refilling drained to the run's deadline,
+    and a lane after it waited 90 minutes untouched. A lane with nothing to
+    run, or whose queue cannot be read, keeps its path order after the rest;
+    `run_lane` reads it again and says what it met.
+    """
+    def oldest(lane: tuple[str, pathlib.Path]) -> str:
+        try:
+            rows = read_queue(queue_for(lane[1], environ))
+        except (LaneError, sd_lib.ConfigError, OSError):
+            return "~"  # after every stamp
+        return min((str(row.get("enqueued_at") or "~") for row in rows if runnable(row)), default="~")
+    return sorted(hosted, key=oldest)
 
 
 def gate_ends(root: pathlib.Path, seen: set[str], minutes: int = WATCH_MINUTES) -> list[str]:
@@ -2406,6 +2533,7 @@ def watch(root: pathlib.Path, *, once: bool, write: Callable[[str], Any] = print
 
 
 def add_lane_verbs(commands: Any) -> None:
+    import sd_notes  # noqa: PLC0415 -- the one item id spelling, 234, sd:234 or item:234 (sd:3715)
     lane = commands.add_parser("lane", help="a serial ship queue per repository, run under one lock (sd:2524)")
     verbs = lane.add_subparsers(dest="lane_command", required=True)
     adder = verbs.add_parser("enqueue", help="queue this worktree's item for prepare and merge")
@@ -2425,7 +2553,7 @@ def add_lane_verbs(commands: Any) -> None:
                                              "did (sd:3412), when it failed, skipped or stopped prepared, at its "
                                              "head with its body text (sd:3254); a cancelled one needs "
                                              "--expected-head (sd:3389)")
-    retrier.add_argument("item", type=int)
+    retrier.add_argument("item", type=sd_notes.item_id, help=sd_notes.ITEM_HELP)
     retrier.add_argument("--manual", action="store_true",
                          help="authorize the runner to merge when repo.runner_merge is manual, as enqueue --manual")
     retrier.add_argument("--expected-head", help=f"refuse with {STALE_HEAD} unless the item's newest entry is at "
@@ -2434,18 +2562,18 @@ def add_lane_verbs(commands: Any) -> None:
                                                  f"and refuses {HEAD_MOVED} when its branch moved and "
                                                  f"{ALREADY_MERGED} at a merged head (sd:3389)")
     canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled, or release a stuck running one")
-    canceller.add_argument("item", type=int)
+    canceller.add_argument("item", type=sd_notes.item_id, help=sd_notes.ITEM_HELP)
     canceller.add_argument("--expected-claim", metavar="TOKEN:STEP",
                            help=f"release only the running claim `lane list` printed, its holder.token and step; "
                                 f"else refuse with {STALE_CLAIM}, checked in the write's transaction (sd:3330)")
     mover = verbs.add_parser("move", help="move a pending entry; the runner reads the new order at the next item")
-    mover.add_argument("item", type=int)
+    mover.add_argument("item", type=sd_notes.item_id, help=sd_notes.ITEM_HELP)
     mover.add_argument("where", type=position, help="up, down, top, or a position from 1 among the pending entries")
     editors = [canceller, mover]
     for name, text in (("hold", "skip a pending entry, keeping its place, until it is released"),
                        ("release", "let a held entry run again")):
         editors.append(verbs.add_parser(name, help=text))
-        editors[-1].add_argument("item", type=int)
+        editors[-1].add_argument("item", type=sd_notes.item_id, help=sd_notes.ITEM_HELP)
     for editor in editors:
         editor.add_argument("--expected-revision", help=f"refuse with {STALE_REVISION} unless `lane list` still prints "
                                                         "this revision, checked in the write's transaction")
@@ -2481,8 +2609,10 @@ def lane_main(args: Any) -> int:
             queue = queue_for(root, environ)
             entries, order = on_hub(queue, lambda connection: (stored(connection, queue.repository),
                                                                enqueue_order(connection, queue.repository)))
+            rounds = item_rounds(entries, order)
             result = {"queue": str(queue_path(root, environ)), "revision": queue_revision(entries),
-                      "entries": [{**shown(row), "enqueue_seq": order[row["id"]]} for row in entries],
+                      "entries": [{**shown(row), "enqueue_seq": order[row["id"]], "round": rounds[row["id"]]}
+                                  for row in entries],
                       **({"import": imported} if imported else {})}
         elif args.lane_command == "retry":
             result = retry(root, args.item, environ, manual=args.manual, expected_head=args.expected_head)
@@ -2500,6 +2630,15 @@ def lane_main(args: Any) -> int:
         print(json.dumps({"ok": False, **refusal(error)}, indent=2, sort_keys=True))
         return 3
     return succeed(shown(result))
+
+
+def item_rounds(entries: list[dict[str, Any]], order: dict[str, int]) -> dict[str, int]:
+    """Each entry id's round: its place among its item's entries by `enqueue_order`, from 1 (sd:3483)."""
+    rounds: dict[str, int] = {}
+    seen: dict[Any, int] = {}
+    for row in sorted(entries, key=lambda row: order.get(row["id"], 0)):
+        seen[row.get("item")] = rounds[row["id"]] = seen.get(row.get("item"), 0) + 1
+    return rounds
 
 
 def refusal(error: Exception) -> dict[str, Any]:

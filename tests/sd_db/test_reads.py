@@ -582,3 +582,58 @@ class TheSessionReads(unittest.TestCase):
         rows = reads.launch_notes(self.connection, "Fix: started a ")
         self.assertEqual([(first, task), (resolved, report)], [(row["id"], row["item"]) for row in rows])
         self.assertEqual("Fix: started a builder session in pane w1:p1", rows[0]["body"])
+
+
+class BatchedRevisions(unittest.TestCase):
+    """sd:3963. `revisions` reads many items' `item_state` revisions in one pass,
+    so a screen drops its read per row; each value must be the one an edit checks."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        path = Path(self.tmp.name) / "sd.db"
+        initialise(path)
+        self.connection = connect(path)
+        self.addCleanup(self.connection.close)
+
+    def test_each_revision_is_the_one_the_single_read_gives(self):
+        bare = create_item(self.connection, kind="task", title="No notes")
+        noted = create_item(self.connection, kind="task", title="Two notes", status="planning")
+        add_note(self.connection, noted, "comment", "first")
+        add_note(self.connection, noted, "followup", "second")
+        moved = create_item(self.connection, kind="task", title="Moved", status="planning")
+        transition(self.connection, moved, "in_progress", who="operator")
+        resolved = add_note(self.connection, moved, "question", "which?")
+        self.connection.execute("UPDATE note SET resolved_at = ? WHERE id = ?", (NOW, resolved))
+        self.connection.execute("UPDATE item SET fields = ? WHERE id = ?", (b'{"a": 1}', bare))
+        self.connection.commit()
+        items = [moved, bare, noted, bare]
+        self.assertEqual(reads.revisions(self.connection, items),
+                         {item: workflow.item_state(self.connection, item)["revision"] for item in items})
+
+    def test_a_missing_item_is_refused_as_the_single_read_refuses_it(self):
+        item = create_item(self.connection, kind="task", title="Here")
+        with self.assertRaises(workflow.MissingItem) as single:
+            workflow.item_state(self.connection, 999)
+        with self.assertRaises(workflow.MissingItem) as batched:
+            reads.revisions(self.connection, [item, 999])
+        self.assertEqual(str(batched.exception), str(single.exception))
+
+    def test_an_identifier_the_single_read_refuses_is_refused(self):
+        for bad in (0, -1, "1", True, None):
+            with self.subTest(bad=bad), self.assertRaises(workflow.WorkflowError):
+                reads.revisions(self.connection, [bad])
+
+    def test_no_items_is_no_revisions(self):
+        self.assertEqual(reads.revisions(self.connection, []), {})
+
+    def test_more_items_than_one_statement_may_bind_are_read_in_chunks(self):
+        # 999 was SQLite's limit before 3.32; set it so the test does not depend on the build.
+        self.connection.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER, 999)
+        items = [create_item(self.connection, kind="task", title=f"Item {n}") for n in range(1000)]
+        add_note(self.connection, items[-1], "comment", "last")
+        self.connection.commit()
+        found = reads.revisions(self.connection, items)
+        self.assertEqual(len(found), 1000)
+        self.assertEqual(found[items[-1]], workflow.item_state(self.connection, items[-1])["revision"])
+        self.assertEqual(found[items[0]], workflow.item_state(self.connection, items[0])["revision"])
