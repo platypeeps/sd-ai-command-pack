@@ -340,7 +340,7 @@ def recorded_source(source: str, home: pathlib.Path) -> str:
     return source
 
 
-def with_provenance(text: str, source: str, revision: str, today: str) -> str:
+def with_provenance(text: str, source: str, revision: str, today: str, tool: str = "sd-skill-adopt") -> str:
     """Stage 4. Append the record, or refresh it if one is already there.
 
     Re-adopting an updated skill should restate where it came from, not stack a
@@ -355,7 +355,7 @@ def with_provenance(text: str, source: str, revision: str, today: str) -> str:
         body = body[:index].rstrip("\n")
     block = (
         f"{PROVENANCE_HEADING}\n\n"
-        f"Adopted by `sd-skill-adopt` on {today} from `{source}` at revision "
+        f"Adopted by `{tool}` on {today} from `{source}` at revision "
         f"`{revision}`.\n"
     )
     return f"{body}\n\n{block}"

@@ -1898,5 +1898,15 @@ class RunGroupTimeoutTests(unittest.TestCase):
         self.assertEqual(raised.exception.stdout, "before the hang\n")
 
 
+class SiblingTests(unittest.TestCase):
+    """`sibling` loads a suffixless `bin/` tool that a caller shares."""
+
+    def test_a_sibling_that_defines_a_dataclass_loads(self) -> None:
+        # The dataclass decorator looks the module up by name while it is
+        # built; an unregistered module failed with AttributeError (sd:3560).
+        adopt = sd_lib.sibling("sd_skill_adopt", "sd-skill-adopt")
+        self.assertEqual(adopt.Finding("warn", "rule", 1).line, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
