@@ -20,7 +20,7 @@ from a neutral directory instead of inside the checkout.
   registers and does nothing; a test drops it into a config dir's `plugins/`
   to see whether opencode loads it and whether the probe refuses it.
 
-`tests/test_sd_review_opencode.py::TheEscapeIsClosedLive` builds a throwaway
+`tests/opencode_escape_probe.py::TheEscapeIsClosedLive` builds a throwaway
 checkout from these and launches opencode the way the reader does. The marker
 that the checkout's config loaded is its MCP server starting: the mutator
 writes `server-started` to `MUTATOR_EVIDENCE` during bootstrap. A control arm,
@@ -28,7 +28,9 @@ inside the checkout with project config on, shows the marker fires; the
 reader's launch, from a neutral dir with an inherited `PWD` naming the
 checkout, and from inside with project config off, never fires it. The class
 runs only against opencode 2.x, the major the reader accepts, and self-skips
-where the binary is absent or another major is installed.
+where the binary is absent or another major is installed. It is opt-in and
+outside `make test` (sd:3486): run `python3 -m unittest
+tests.opencode_escape_probe` by hand after an opencode upgrade.
 
 `TheEscapeIsClosedLive::test_opencode_resolves_the_map_and_the_probe_refuses_a_widening`
 runs the probe `sd_opencode.confinement_breach` runs before every review: a

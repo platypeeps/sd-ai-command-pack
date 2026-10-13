@@ -12,9 +12,9 @@ calls this first, and it builds `.venv` in the worktree:
   `--require-hashes`;
 * no `sd_db`: the suite and `bin/` read the worktree's own `lib/`, so a
   caller that still reads an installed copy fails here first;
-* nothing for opencode, which it cannot install on this platform: the live
-  confinement test needs it, a skip fails the suite anyway, and this says so
-  first, by name, instead of a whole suite later.
+* nothing for opencode: the live confinement check is the opt-in
+  `tests/opencode_escape_probe.py`, run by hand, so the gate does not depend
+  on which opencode the machine holds (sd:3486).
 
 A `.venv` that is a link, or a real one this script did not build, is refused
 and left alone: gate mode rebuilds its environment, and the operator's
@@ -37,15 +37,6 @@ REQUIREMENTS = ("requirements-dev.txt", "requirements-security.txt")
 
 class GateError(Exception):
     """A sentence for stderr; the gate fails rather than run on a guess."""
-
-
-def require_opencode() -> str:
-    found = shutil.which("opencode")
-    if not found:
-        raise GateError("opencode is not on PATH. The gate runs tests/test_sd_review_opencode.py live and never "
-                        "skips it. Install the pinned build (.github/scripts/install-opencode.sh; linux-x64) "
-                        "or put opencode on PATH, then retry")
-    return found
 
 
 def head() -> str:
@@ -72,7 +63,6 @@ def run(argv: list[str]) -> None:
 def main(argv: list[str]) -> int:
     python = argv[1] if len(argv) > 1 else sys.executable
     try:
-        opencode = require_opencode()
         ref = head()
         clear_venv()
         run([python, "-m", "venv", str(VENV)])
@@ -83,7 +73,7 @@ def main(argv: list[str]) -> int:
     except GateError as error:
         print(f"error: SD_LOCAL_GATE=1: {error}", file=sys.stderr)
         return 1
-    print(f"gate environment: {VENV.name} (no borrowing) at {ref}; sd_db is lib/, not installed; opencode {opencode}")
+    print(f"gate environment: {VENV.name} (no borrowing) at {ref}; sd_db is lib/, not installed")
     return 0
 
 
