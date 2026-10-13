@@ -710,6 +710,28 @@ class Runner(Lane):
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([row["status"] for row in self.entries()], ["prepared"] * 3)
 
+    def test_a_loaded_machine_claims_no_entry_until_load5_falls_below_the_gate_limit(self) -> None:
+        """sd:3479. Six gates timed out at one hour under load, and a retry ran the same gate under the same load."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        environ = {**self.environ, "SD_GATE_LOAD_MAX": "8"}
+        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (2.0, 9.5, 9.0)):
+            answer = sd_lane.run_lane(self.repo, environ, self.ship)
+        self.assertEqual((self.calls, [row["status"] for row in self.entries()]), ([], ["pending"]))
+        self.assertIn("load5 9.5 is at or above 8", answer["stopped"])
+        with mock.patch.object(sd_lane.os, "getloadavg", side_effect=OSError("no load")):
+            answer = sd_lane.run_lane(self.repo, environ, self.ship)
+        self.assertEqual((self.calls, answer["stopped"]), ([], "cannot read the load average (no load); "
+                                                                 "the next run takes the pending entries"))
+        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (9.0, 7.9, 9.0)):
+            sd_lane.run_lane(self.repo, environ, self.ship)
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
+
+    def test_no_gate_load_limit_claims_whatever_the_load(self) -> None:
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (99.0, 99.0, 99.0)):
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
+
     def left_running(self, pid: int | None, step: str = "prepare") -> None:
         """Item 1 claimed by the runner `pid` and never finished, as a killed runner leaves it (sd:2821)."""
         if not self.entries():

@@ -36,7 +36,9 @@ database and runs it under one runner lock per repository:
            whose prepare or merge met a hub fault goes
            back to pending, at most `HUB_RETRIES` times, and the run stops
            (sd:3239, below); so does one whose prepare refused retryably
-           and spent no review pass, once (sd:3478, below);
+           and spent no review pass, once (sd:3478, below). It claims
+           nothing while load5 is at or above the gate's load limit,
+           `sd.gate_load_max` (`load_stop`, sd:3479);
   watch    print each gate end a lane or builder log records, once; with
            `--item N`, repeated, wait until each item's newest entry that is
            not cancelled ends, print one line each, and exit 0 only when all
@@ -2126,6 +2128,28 @@ def clock() -> float:
     return time.monotonic()
 
 
+def load_stop(environ: dict[str, str]) -> str | None:
+    """Why the runner claims no entry under this load, or None (sd:3479).
+
+    The gate's own limit, `sd.gate_load_max` or `SD_GATE_LOAD_MAX`
+    (`sd_gate_slots.load_rule`), read against load5: six gates timed out at
+    one hour under load, and a retry minutes later met the same load. Off
+    while the limit is 0, as the gate queue's rule is. A limit or a load
+    that cannot be read claims nothing: unknown is not low.
+    """
+    import sd_gate_slots  # noqa: PLC0415 -- stdlib only, and only the runner reads it
+    try:
+        limit = sd_gate_slots.load_rule(environ, sd_lib.core_setting("gate_load_max", environ)).limit
+        if limit <= 0:
+            return None
+        load5 = float(os.getloadavg()[1])
+    except (ValueError, OSError, sd_lib.ConfigError) as error:
+        return f"cannot read the load average ({error}); the next run takes the pending entries"
+    if load5 >= limit:
+        return f"load5 {load5:.1f} is at or above {limit:g}, the gate's load limit; the next run takes the pending entries"
+    return None
+
+
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
              gate: Gate = default_gate, note: Note | None = None, deadline: float | None = None) -> dict[str, Any]:
     """Drain this repository's queue in order under its runner lock; never wait for the lock.
@@ -2167,6 +2191,10 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
         while True:
             if clock() >= deadline:
                 answer["stopped"] = "the run spent its budget; the next run takes the pending entries"
+                break
+            loaded = load_stop(environ)
+            if loaded is not None:
+                answer["stopped"] = loaded
                 break
             token, reclaimed = secrets.token_hex(16), list[dict[str, Any]]()
             try:
