@@ -19,7 +19,7 @@ from unittest.mock import patch
 
 from sd_db import connect
 from sd_db.migrate import initialise
-from sd_db.sources import MigrationRefused, run
+from sd_db.sources import MigrationRefused, digest, run
 from sd_db.sources.frontmatter import read as read_frontmatter
 from sd_db.sources.vault import SOURCE, Reader, plugin_entries, stages_in
 from sd_db.writes import upsert_item
@@ -146,99 +146,35 @@ META_BIND = "**Status:** `INPUT[inlineSelect(option(inbox), option(drafting)):st
 
 
 class TheNormalization(VaultCase):
-    """sd:3972: freeze and land share one normalization, so the verify stays exact."""
+    """sd:3972: bodies verbatim, `fields` without `status` and `mirror-hash`, the verify exact."""
 
     IDEA = "blog-idea:System/Databases/Blog Ideas/first idea.md"
 
     def add_meta_bind(self, relative, count=1):
         self.edit(relative, "# ", "\n".join([META_BIND] * count) + "\n\n# ")
 
-    def test_meta_bind_lines_leave_the_body_and_the_rest_stays(self):
-        self.add_meta_bind("System/Databases/Blog Ideas/first idea.md", 2)
-        sitting = run(self.connection, self.reader())
-        self.assertTrue(sitting.clean, sitting.report())
-        markdown = json.loads(self.items()[self.IDEA]["body"])["markdown"]
-        self.assertNotIn("INPUT[", markdown)
-        self.assertIn("the blog-idea body of first idea", markdown)
-
-    def test_only_the_exact_status_control_line_leaves_the_body(self):
-        """Review round 1: a line that merely holds `INPUT[` is content, not the status control."""
-        kept = [
-            "**My rating:** `INPUT[inlineSelect(option(1), option(2)):my-rating]`",
-            "Meta Bind writes a control as `INPUT[inlineSelect(...):status]` in a line of its own.",
-            "    `INPUT[inlineSelect(option(inbox)):status]`",
-            "**Status:** `INPUT[inlineSelect(option(inbox), option(drafting)):status]` (pick one)",
-            "**Status:** `INPUT[text:status]`",
-        ]
-        self.edit("System/Databases/Blog Ideas/first idea.md", "# ",
-                  "\n".join([META_BIND, *kept]) + "\n\n# ")
-        sitting = run(self.connection, self.reader())
-        self.assertTrue(sitting.clean, sitting.report())
-        markdown = json.loads(self.items()[self.IDEA]["body"])["markdown"]
-        self.assertNotIn(META_BIND + "\n", markdown)
-        for line in kept:
-            self.assertIn(line, markdown.split("\n"))
-        self.assertIn("vault: 3 blog-idea note(s) under System/Databases/Blog Ideas, "
-                      "1 Meta Bind status line(s) dropped", sitting.notes)
-
-    def body_after(self, *lines):
-        """The landed body of first idea with `lines` before its heading, and the raw body read."""
-        self.edit("System/Databases/Blog Ideas/first idea.md", "# ", "\n".join(lines) + "\n# ")
+    def test_a_body_with_status_controls_comes_back_byte_for_byte(self):
+        """Review round 3 ruling: the body is stored verbatim; nothing strips a line (sd:3972)."""
+        self.edit("System/Databases/Blog Ideas/first idea.md", "# ", "\n".join([
+            META_BIND, "", "```markdown", META_BIND, "\t```", META_BIND, "```", "~~~", META_BIND,
+            "<!--", META_BIND, "-->", "**My rating:** `INPUT[inlineSelect(option(1)):my-rating]`", META_BIND,
+        ]) + "\n# ")
         path = self.vault / "System/Databases/Blog Ideas/first idea.md"
         _, raw = read_frontmatter(path.read_text(encoding="utf-8"))
-        sitting = run(self.connection, self.reader())
+        reader = self.reader()
+        frozen = reader.freeze()
+        self.assertEqual(frozen.records[self.IDEA].payload["body"], digest({"markdown": raw}))
+        sitting = run(self.connection, reader)
         self.assertTrue(sitting.clean, sitting.report())
-        return json.loads(self.items()[self.IDEA]["body"])["markdown"], raw
-
-    def test_a_control_inside_a_backtick_fence_stays(self):
-        """Review round 2: a fenced example is content, verbatim."""
-        landed, raw = self.body_after("```markdown", META_BIND, "```")
-        self.assertEqual(landed, raw)
-
-    def test_a_control_inside_a_tilde_fence_stays(self):
-        landed, raw = self.body_after("~~~", META_BIND, "~~~")
-        self.assertEqual(landed, raw)
-
-    def test_an_unclosed_fence_runs_to_the_end_of_the_body(self):
-        landed, raw = self.body_after("```", META_BIND)
-        self.assertEqual(landed, raw)
-
-    def test_a_shorter_or_other_fence_does_not_close_a_fence(self):
-        landed, raw = self.body_after("````", "```", "~~~~", META_BIND, "````")
-        self.assertEqual(landed, raw)
-
-    def test_a_control_inside_a_comment_or_math_block_stays(self):
-        """Class pass: every block Markdown or Obsidian does not render as a line of its own."""
-        for opening, closing in (("<!--", "-->"), ("%%", "%%"), ("$$", "$$"), ("<pre>", "</pre>")):
-            with self.subTest(opening=opening):
-                self.setUp()
-                landed, raw = self.body_after(opening, META_BIND, closing)
-                self.assertEqual(landed, raw)
-
-    def test_a_block_closed_on_its_own_line_opens_nothing(self):
-        landed, raw = self.body_after("<!-- a note -->", "%% aside %%", "$$x$$", "<pre>a</pre>", META_BIND)
-        self.assertEqual(landed, raw.replace(META_BIND + "\n", ""))
-
-    def test_a_control_just_after_a_fence_closes_is_dropped(self):
-        landed, raw = self.body_after("```", "code", "```", META_BIND)
-        self.assertEqual(landed, raw.replace(META_BIND + "\n", ""))
+        self.assertEqual(json.loads(self.items()[self.IDEA]["body"]), {"markdown": raw})
 
     def test_a_body_with_no_status_control_lands_byte_for_byte(self):
-        """Class pass: the line split guesses nothing, blank runs and trailing spaces included."""
+        """Blank runs, tabs and trailing spaces included."""
         self.edit("System/Databases/Blog Ideas/first idea.md", "# ", "  \n\n\n\t`INPUT[` in prose  \n# ")
         path = self.vault / "System/Databases/Blog Ideas/first idea.md"
         _, body = read_frontmatter(path.read_text(encoding="utf-8"))
         run(self.connection, self.reader())
         self.assertEqual(json.loads(self.items()[self.IDEA]["body"])["markdown"], body)
-
-    def test_the_sitting_reports_the_dropped_meta_bind_lines_per_kind(self):
-        self.add_meta_bind("System/Databases/Blog Ideas/first idea.md", 2)
-        self.add_meta_bind("System/Databases/Blog Ideas/second idea.md")
-        sitting = run(self.connection, self.reader())
-        self.assertIn("vault: 3 blog-idea note(s) under System/Databases/Blog Ideas, "
-                      "3 Meta Bind status line(s) dropped", sitting.notes)
-        self.assertIn("vault: 2 topic note(s) under System/Databases/Topics, "
-                      "0 Meta Bind status line(s) dropped", sitting.notes)
 
     def test_fields_hold_neither_status_nor_mirror_hash(self):
         self.edit("System/Databases/Blog Ideas/first idea.md",
@@ -261,7 +197,7 @@ class TheNormalization(VaultCase):
         self.assertIn("`kind:`", message)
 
     def test_a_row_the_previous_import_left_is_rewritten_normalized(self):
-        """Older state: a row landed with `status` in its fields and its Meta Bind lines."""
+        """Older state: a row landed with `status` in its fields; its body was verbatim then too."""
         self.add_meta_bind("System/Databases/Blog Ideas/first idea.md")
         path = self.vault / "System/Databases/Blog Ideas/first idea.md"
         matter, body = read_frontmatter(path.read_text(encoding="utf-8"))
@@ -274,7 +210,7 @@ class TheNormalization(VaultCase):
         self.assertTrue(sitting.clean, sitting.report())
         self.assertEqual(sitting.counts.updated, 1)
         row = self.items()[self.IDEA]
-        self.assertNotIn("INPUT[", row["body"])
+        self.assertEqual(json.loads(row["body"]), {"markdown": body})
         self.assertNotIn("status", json.loads(row["fields"]))
 
     def test_a_second_run_over_meta_bind_notes_writes_nothing(self):
@@ -325,8 +261,7 @@ class EveryDeclaredKind(VaultCase):
         row = self.items()["market:System/Databases/Market Watch/Example Co.md"]
         self.assertEqual((row["stage"], row["status"]), ("candidate", "planning"))
         self.assertEqual(json.loads(row["fields"])["kind"], "market")
-        self.assertIn("vault: 1 market note(s) under System/Databases/Market Watch, "
-                      "1 Meta Bind status line(s) dropped", sitting.notes)
+        self.assertIn("vault: 1 market note(s) under System/Databases/Market Watch", sitting.notes)
 
 
 class TheDueField(VaultCase):

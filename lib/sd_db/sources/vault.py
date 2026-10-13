@@ -19,12 +19,11 @@ stages in the rows with the set in the frozen source, so a row that stored
 asked. `item.status` beside it is the declared map's answer to the same
 note: the ladder is the plugin's, the six statuses are the system's.
 
-**Freeze and land share one normalization (sd:3972).** A Meta Bind line,
-any line holding `INPUT[`, was the dropdown the operator moved a row with;
-`stage` replaces it, so the body drops it. `fields` drops `status`, which is
-`stage`, and `mirror-hash`, which belongs to the mirror file, and its `kind`
-is the declared one. The verify then compares the stored row with the
-normalized source, so it proves the land wrote the normalized form.
+**The body is stored verbatim (sd:3972).** Nothing strips a body line: a
+Meta Bind status control stays, and the mirror renderer decides how to draw
+it. `fields` drops `status`, which is `stage`, and `mirror-hash`, which
+belongs to the mirror file; a note with its own `kind` refuses, since
+`fields.kind` holds the declared one.
 
 **Every failure refuses the whole sitting and writes nothing.** A word the
 map does not name, a due value that is not a date, two plugins declaring one
@@ -42,7 +41,6 @@ import re
 import sqlite3
 import subprocess
 import sys
-from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -65,12 +63,6 @@ DEFAULT_VAULT = "~/Documents/Obsidian Vault"
 LIST_SECONDS = 120
 
 DUE = re.compile(r"\d{4}-\d{2}-\d{2}")
-
-#: The Meta Bind status control, the whole line and nothing else: the dropdown
-#: the operator moved a row with, which `stage` replaces. A line that only
-#: holds `INPUT[`, or a control bound to another field, is content and stays.
-STATUS_CONTROL = re.compile(
-    r"\*\*Status:\*\* `INPUT\[inlineSelect\(option\([^()`]*\)(?:, option\([^()`]*\))*\):status\]`")
 
 #: Frontmatter keys a row keeps elsewhere: `status` is `stage`, `mirror-hash` is the mirror file's.
 NOT_FIELDS = frozenset({"status", "mirror-hash"})
@@ -198,10 +190,8 @@ class Reader:
                     f"would import as zero notes"
                 )
             found = sorted(directory.rglob("*.md"))
-            dropped = 0
             for path in found:
-                matter, body, removed = normalized(path)
-                dropped += removed
+                matter, body = read_frontmatter(path.read_text(encoding="utf-8"))
                 if "kind" in matter:
                     raise MigrationRefused(
                         f"{path} has a `kind:` in its frontmatter; the row's `fields.kind` "
@@ -231,8 +221,7 @@ class Reader:
                         "body": digest({"markdown": body}),
                     },
                 )
-            notes.append(f"{SOURCE}: {len(found)} {kind} note(s) under {base.relative}, "
-                         f"{dropped} Meta Bind status line(s) dropped")
+            notes.append(f"{SOURCE}: {len(found)} {kind} note(s) under {base.relative}")
         return Frozen(source=self.name, records=records, notes=notes)
 
     # ------------------------------------------------------------ import
@@ -243,7 +232,7 @@ class Reader:
         for identity in sorted(frozen.records):
             payload = frozen.records[identity].payload
             kind, _, relative = identity.partition(":")
-            matter, body, _ = normalized(roots[kind] / relative)
+            matter, body = read_frontmatter((roots[kind] / relative).read_text(encoding="utf-8"))
             _, what = upsert_item(
                 connection,
                 source=SOURCE,
@@ -290,92 +279,19 @@ class Reader:
         return held
 
 
-def normalized(path: Path) -> tuple[dict[str, Any], str, int]:
-    """`(frontmatter, body, dropped)` of one note, as both freeze and land read it.
-
-    The frontmatter keeps `status`, which is the stage; `_fields` drops it.
-    `dropped` counts the status control lines the body lost.
-    """
-    matter, body = read_frontmatter(path.read_text(encoding="utf-8"))
-    return (matter, *_without_controls(body))
-
-
-#: A code fence's opening or closing line: up to three spaces, then three or more
-#: backticks or tildes (CommonMark). A backtick fence's info string holds no backtick.
-FENCE = re.compile(r" {0,3}(`{3,}(?!.*`)|~{3,}).*")
-
-#: A raw HTML block that keeps its lines as they are, by its opening tag (CommonMark type 1).
-RAW_HTML = re.compile(r" {0,3}<(pre|script|style|textarea)\b", re.IGNORECASE)
-RAW_HTML_END = re.compile(r"</(?:pre|script|style|textarea)>", re.IGNORECASE)
-
-
-def _block_end(line: str) -> Callable[[str], bool] | None:
-    """The test for the line that closes the block `line` opens, or None when it opens none.
-
-    The blocks Markdown or Obsidian renders as something other than lines of
-    their own: an HTML comment, a raw HTML block, Obsidian's `%%` comment and
-    its `$$` math. A `%%` or `$$` pair closed on its one line opens nothing.
-    """
-    start = line.rfind("<!--")
-    if start >= 0 and "-->" not in line[start:]:
-        return lambda later: "-->" in later
-    if RAW_HTML.match(line) and not RAW_HTML_END.search(line):
-        return lambda later: bool(RAW_HTML_END.search(later))
-    if line.count("%%") % 2:
-        return lambda later: later.count("%%") % 2 == 1
-    if line.count("$$") % 2:
-        return lambda later: later.count("$$") % 2 == 1
-    return None
-
-
-def _without_controls(body: str) -> tuple[str, int]:
-    """`(body, dropped)`: the body less its `STATUS_CONTROL` lines.
-
-    Only a control Markdown renders as a line of its own goes. Every line in a
-    code fence, a comment, a raw HTML block or a math block stays verbatim, the
-    control among them: there it is an example or commented out, not the
-    dropdown. It splits on line feeds alone, so a body with none comes back
-    byte for byte.
-    """
-    lines = body.split("\n")
-    kept: list[str] = []
-    fence: str | None = None
-    closing: Callable[[str], bool] | None = None
-    for line in lines:
-        if fence is not None:
-            # A fence closes on its own character, at least as long, and nothing after.
-            mark = line.strip()
-            if len(mark) >= len(fence) and set(mark) == {fence[0]} and len(line) - len(line.lstrip(" ")) < 4:
-                fence = None
-        elif closing is not None:
-            if closing(line):
-                closing = None
-        elif opened := FENCE.fullmatch(line):
-            fence = opened.group(1)
-        elif (ends := _block_end(line)) is not None:
-            closing = ends
-        elif STATUS_CONTROL.fullmatch(line):
-            continue
-        kept.append(line)
-    return "\n".join(kept), len(lines) - len(kept)
-
-
 def promoted_view(snapshot: dict[str, Any]) -> dict[str, Any]:
-    """A promoted idea's `promoted_from.row` under the same normalization (sd:1994, sd:3972).
+    """A promoted idea's `promoted_from.row`, its fields read as `_fields` writes them (sd:1994, sd:3972).
 
     A piece promoted from a row an older import wrote keeps `status` in its
-    fields and the status control in its body. Read as it is, it would differ
-    from the normalized note though the note never changed. The view removes
-    those two and nothing else; any other value compares as stored.
+    fields. Read as it is, it would differ from the note though the note never
+    changed. The view removes `NOT_FIELDS` and nothing else; the body and
+    every other value compare as stored.
     """
     view = dict(snapshot)
     fields = json.loads(view["fields"]) if isinstance(view.get("fields"), str) else None
     if isinstance(fields, dict):
         view["fields"] = json.dumps({key: value for key, value in fields.items() if key not in NOT_FIELDS},
                                     sort_keys=True)
-    body = json.loads(view["body"]) if isinstance(view.get("body"), str) else None
-    if isinstance(body, dict) and isinstance(body.get("markdown"), str):
-        view["body"] = json.dumps({**body, "markdown": _without_controls(body["markdown"])[0]}, sort_keys=True)
     return view
 
 
