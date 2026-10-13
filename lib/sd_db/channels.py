@@ -15,6 +15,7 @@ off. NULL is no setting, which is not the same as `{}`: clearing writes NULL.
 from __future__ import annotations
 
 import json
+import re
 import unicodedata
 from typing import Any
 
@@ -25,6 +26,9 @@ CHANNELS = ("obsidian", "notion", "drive")
 
 #: The one key a channel's object may hold.
 FOLDER = "folder"
+
+#: A Notion page id, compact or hyphenated: an id the drain resolves, never a folder name.
+PAGE_ID = re.compile(r"[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
 
 
 class ChannelRefusal(RepoRefusal):
@@ -50,6 +54,9 @@ def _folder(channel: str, folder: Any) -> str:
             raise ChannelRefusal(f"{channel}: folder {folder!r} has an empty or blank segment")
         if segment in (".", ".."):
             raise ChannelRefusal(f"{channel}: folder {folder!r} has a {segment!r} segment")
+        if PAGE_ID.fullmatch(segment):
+            raise ChannelRefusal(f"{channel}: folder {folder!r} holds an id; name the folder, and keep ids "
+                                 f"per machine or per document")
     if channel == "notion" and "/" in folder:
         raise ChannelRefusal(f"notion: folder {folder!r} must be one page name under the scope folder, with no /")
     return folder

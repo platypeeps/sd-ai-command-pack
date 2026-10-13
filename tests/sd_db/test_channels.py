@@ -101,6 +101,16 @@ class TheValidator(unittest.TestCase):
         self.assertIn("notion", str(caught.exception))
         self.assertIn("one page name", str(caught.exception))
 
+    def test_a_notion_page_id_is_refused_as_a_folder_in_either_spelling(self):
+        """Ids stay per machine or per document; a folder is a name (codex review, C1)."""
+        for folder in ("12345678-1234-1234-1234-123456789abc", "12345678123412341234123456789ABC"):
+            for channel in ("notion", "drive", "obsidian"):
+                with self.subTest(channel=channel, folder=folder), self.assertRaises(ChannelRefusal) as caught:
+                    validate({channel: {"folder": folder}})
+                self.assertIn("an id", str(caught.exception))
+        # A name that only holds hex digits among other words stays a name.
+        self.assertEqual(validate({"notion": {"folder": "Q3 deadbeef"}}), {"notion": {"folder": "Q3 deadbeef"}})
+
     def test_the_canonical_text_is_sorted_and_compact(self):
         value = {"obsidian": {"folder": "Briefs/x"}, "drive": {}}
         self.assertEqual(dumps(value), '{"drive":{},"obsidian":{"folder":"Briefs/x"}}')
