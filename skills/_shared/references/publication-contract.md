@@ -296,6 +296,10 @@ local tracking ref without a fetch. That tree is about to be replaced by a pull,
 and a request queued from it is stale text a drain could publish before the
 pull's own render queues the current one.
 
+A render with `SD_MIRROR_DRY_RUN=1` prints each request it would queue, as
+`mirror: would queue ...`, and writes no request and no receipt. The local
+copies are still written.
+
 One queue carries every destination, and `bin/sd-status` reports a pending
 request as `mirror-sync-pending`. A document designated for two places is two
 requests, and either can drain while the other waits.

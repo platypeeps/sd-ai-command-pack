@@ -171,11 +171,16 @@ class RegisterTests(Fixture):
         self.assertIn("left alone", said)
         self.assertEqual(len(self.roots()), 2)
         self.assertIn("~/elsewhere", self.roots()[1])
+        # sd:3515: the refusal names the next step and the file it is in.
+        self.assertIn("rename", said)
+        self.assertIn(str(self.conf), said)
 
     def test_no_dashboard_is_reported_not_raised(self) -> None:
         PUBLISH.DASHBOARD_CONFIG = self.root / "absent"
         said = PUBLISH.register_root(self.repo, "MINE", self.repo / "build")
         self.assertIn("not registered", said)
+        # sd:3515: the refusal names the next step.
+        self.assertIn("SYSTEM_TOOLS_CONFIG", said)
 
 
 class DashboardConfigTests(unittest.TestCase):
@@ -1156,6 +1161,34 @@ class PublishedUrlTests(ReceiptFixture):
         said = PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=3465)])
         self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
         self.assertTrue(any("unchanged" in line for line in said), said)
+
+
+class MirrorDryRunTests(ReceiptFixture):
+    """sd:3515: `SD_MIRROR_DRY_RUN=1` says what a render would queue and
+    writes neither the request nor its receipt."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_MIRROR_DRY_RUN="1")
+
+    def test_a_dry_run_reports_the_request_and_writes_nothing(self) -> None:
+        self.source("first\n")
+        said = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue(any("would queue a" in line for line in said), said)
+        self.assertFalse((PUBLISH.QUEUE / "my-research.a.notion.json").exists())
+        self.assertFalse((PUBLISH.receipts() / "my-research.a.notion.json").exists())
+
+    def test_a_dry_run_leaves_a_pending_request_as_it_was(self) -> None:
+        self.source("first\n")
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_MIRROR_DRY_RUN="")
+        PUBLISH.enqueue(self.repo, self.doc())
+        path = PUBLISH.QUEUE / "my-research.a.notion.json"
+        before = path.read_bytes()
+        self.source("second\n")
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_MIRROR_DRY_RUN="1")
+        said = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue(any("would queue a" in line for line in said), said)
+        self.assertEqual(path.read_bytes(), before)
 
 
 class MirrorHoldTests(ReceiptFixture):

@@ -197,7 +197,7 @@ NOTION_SCOPES = {
                       "your team Notion briefs folder, under %s"),
 }
 
-#: The environment the folder settings, `SD_MIRROR_REQUEUE`,
+#: The environment the folder settings, `SD_MIRROR_REQUEUE`, `SD_MIRROR_DRY_RUN`,
 #: `SD_PUBLISH_FROM_WORKTREE` and `SD_SKIP_MIRROR` are read out of. A module attribute for the same
 #: reason `QUEUE` and `VAULT` are: a test points it at a fixture rather than
 #: at the machine running the test.
@@ -358,6 +358,11 @@ PUBLISH_FROM_WORKTREE = "SD_PUBLISH_FROM_WORKTREE"
 #: (sd:1991). The dashboard still wants the render; the queue does not.
 SKIP_MIRROR = "SD_SKIP_MIRROR"
 
+#: The switch that reports what a render would queue and writes no request
+#: and no receipt (sd:3515). The local copies are still written: they are
+#: what a render is for, and none of them leaves the machine.
+MIRROR_DRY_RUN = "SD_MIRROR_DRY_RUN"
+
 
 def publish_refusal(repo: Path, copy: str) -> str:
     """Why this checkout may not publish `copy`, or `""` when it may.
@@ -480,7 +485,8 @@ def register_root(repo: Path, label: str, directory: Path) -> str:
     """
     conf = documents_conf()
     if not conf.is_file():
-        return "dashboard not registered: no %s" % conf
+        return ("dashboard not registered: no %s; create it, or set SYSTEM_TOOLS_CONFIG "
+                "to the folder that holds project-dashboard/" % conf)
 
     key = repo_key(repo)
     if not KEY.fullmatch(key):
@@ -503,7 +509,9 @@ def register_root(repo: Path, label: str, directory: Path) -> str:
             # A row naming a directory outside this repository belongs to
             # something else, whatever it calls itself.
             if not _own_row(repo, parts[3]):
-                return "dashboard: %s already names %s; left alone" % (key, parts[3])
+                return ("dashboard: %s already names %s; left alone. The key is this "
+                        "checkout's name: rename one checkout, or remove that row from %s"
+                        % (key, parts[3], conf))
         else:
             continue
         if existing.strip() == line:
@@ -1207,6 +1215,8 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     A linked worktree queues nothing unless `SD_PUBLISH_FROM_WORKTREE=1`
     says to; see `publish_refusal`. Nothing is queued, and nothing pending is
     touched, while `SD_SKIP_MIRROR` holds a reason; see `SKIP_MIRROR`.
+    `SD_MIRROR_DRY_RUN=1` reports each request it would write and writes
+    none; see `MIRROR_DRY_RUN`.
     """
     held = str(ENVIRON.get(SKIP_MIRROR, "")).strip()
     if held:
@@ -1225,7 +1235,9 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     if not wanted:
         return reports
 
-    QUEUE.mkdir(parents=True, exist_ok=True)
+    dry = bool(ENVIRON.get(MIRROR_DRY_RUN))
+    if not dry:
+        QUEUE.mkdir(parents=True, exist_ok=True)
     rev = revision(repo)
     key = repo_key(home)
     vault = vault_folder(home)
@@ -1233,29 +1245,7 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     with queue_locked():
         for cfg, target in wanted:
             out = str(cfg.get("out", "")).strip()
-            src = str(cfg.get("src", "")).strip()
-            request = {
-                # The repository, not the checkout: this is what `sd-status`
-                # resolves a row against and what a carried id is compared on.
-                # The three paths below are the checkout's, because that is where
-                # the rendered files are.
-                "repo": str(home),
-                "revision": rev,
-                "document": out,
-                "title": cfg.get("title", out),
-                "source": str(repo / src) if src else "",
-                # The pointer line's link, read from `origin` and never
-                # composed by the drain; None where origin names no GitHub repo.
-                "source_url": source_url(repo, src),
-                "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
-                "markdown": str(vault / (out + ".md")) if vault else "",
-                # What the drain mirrors, read once here. The three paths
-                # above say where it came from and where the copies sit;
-                # none of them is what gets published.
-                "content": source_text(repo / src) if src else "",
-            }
-            request.update(target)
-            request.update(designated_item(cfg)[0])
+            request = mirror_request(repo, home, vault, cfg, target, rev)
             name = "%s.%s.%s.json" % (key, out or "doc", target["destination"])
             path = QUEUE / name
             what = BY_NAME[target["destination"]].what
@@ -1275,6 +1265,10 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
             carried = "" if request[what] else recorded(path, identity, what)
             request[what] = request[what] or carried
             reverted = not force and reverts_to_delivered(path, name, digest)
+            if dry:
+                reports.append(queued_report(out, target["target"], what, carried, reverted,
+                                             "would queue") + " (%s)" % MIRROR_DRY_RUN)
+                continue
             # The generation this request is: what `mirror_delivered()` acknowledges.
             request["fingerprint"] = digest
             path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
@@ -1283,6 +1277,37 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
                 destination=target["destination"]))
             reports.append(queued_report(out, target["target"], what, carried, reverted))
     return reports
+
+
+def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, Any],
+                   target: dict[str, str], rev: str) -> dict[str, Any]:
+    """The request `enqueue` writes for one document and one destination,
+    before its fingerprint and any carried id."""
+    out = str(cfg.get("out", "")).strip()
+    src = str(cfg.get("src", "")).strip()
+    request = {
+        # The repository, not the checkout: this is what `sd-status`
+        # resolves a row against and what a carried id is compared on.
+        # The three paths below are the checkout's, because that is where
+        # the rendered files are.
+        "repo": str(home),
+        "revision": rev,
+        "document": out,
+        "title": cfg.get("title", out),
+        "source": str(repo / src) if src else "",
+        # The pointer line's link, read from `origin` and never
+        # composed by the drain; None where origin names no GitHub repo.
+        "source_url": source_url(repo, src),
+        "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
+        "markdown": str(vault / (out + ".md")) if vault else "",
+        # What the drain mirrors, read once here. The three paths
+        # above say where it came from and where the copies sit;
+        # none of them is what gets published.
+        "content": source_text(repo / src) if src else "",
+    }
+    request.update(target)
+    request.update(designated_item(cfg)[0])
+    return request
 
 
 def designated_item(cfg: dict[str, Any]) -> tuple[dict[str, int], list[str]]:
@@ -1334,15 +1359,16 @@ def record_queued(name: str, fields: dict[str, str]) -> list[str]:
     return []
 
 
-def queued_report(out: str, target: str, what: str, carried: str, reverted: bool) -> str:
-    """The line a render prints for a request it wrote."""
+def queued_report(out: str, target: str, what: str, carried: str, reverted: bool,
+                  verb: str = "queued") -> str:
+    """The line a render prints for a request it wrote, or would write."""
     notes = ""
     if carried:
         notes += ", updating the %s already recorded" % what
     if reverted:
         notes += ("; back to the delivered version, replacing a pending request "
                   "a drain may already hold")
-    return "mirror: queued %s -> %s%s" % (out, target, notes)
+    return "mirror: %s %s -> %s%s" % (verb, out, target, notes)
 
 
 def publish(repo: Path, project: str | None, docs: list[dict[str, Any]]) -> list[str]:

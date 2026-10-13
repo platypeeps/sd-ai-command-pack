@@ -113,6 +113,18 @@ class ArtifactIdentity(ProgressCase):
         with self.assertRaisesRegex(WorkflowError, "already"):
             relink_artifact(self.db, self.item, "other.md", who="operator")
 
+    def test_relink_refusals_name_the_path_and_the_next_step(self):
+        # sd:3515: each refusal needed a second command to learn what to do.
+        with self.assertRaises(WorkflowError) as missing:
+            relink_artifact(self.db, self.item, "docs/work/missing/prd.md", who="operator")
+        self.assertIn("docs/work/missing/prd.md", str(missing.exception))
+        self.assertIn(str(self.repo.resolve()), str(missing.exception))
+        (self.repo / "other.md").write_text("other")
+        other = create_item(self.db, kind="work", title="Other", repo=str(self.repo), path="other.md")
+        with self.assertRaises(WorkflowError) as claimed:
+            relink_artifact(self.db, self.item, "other.md", who="operator")
+        self.assertIn(f"sd work relink {other}", str(claimed.exception))
+
 
 class WorkCompletion(ProgressCase):
     def test_public_transition_cannot_bypass_work_completion(self):
