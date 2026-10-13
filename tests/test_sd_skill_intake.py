@@ -159,6 +159,24 @@ class TheVerdict(IntakeCase):
         self.assertTrue(any("\\u001b[2Jcleared" in line for line in report["diff"]), report["diff"])
         self.assertFalse(any("\x1b" in line for line in report["diff"]))
 
+    def test_a_file_name_cannot_drive_the_terminal(self) -> None:
+        self.write(self.upstream / "skills" / "ledger", GOOD, {"scripts/\x1b[2J.py": "print(1)\n"})
+        self.commit()
+        text = intake.report_text(self.intake(URL.format("ledger")))
+        self.assertNotIn("\x1b", text)
+        self.assertIn("scripts/\\u001b[2J.py", text)
+
+    def test_a_description_the_catalog_cannot_read_is_refused(self) -> None:
+        self.write(self.upstream / "skills" / "ledger",
+                   GOOD.replace("description: Reconcile", "description: |2\n Reconcile", 1))
+        self.commit()
+        self.assertIn("catalog-unreadable", {f["rule"] for f in self.intake(URL.format("ledger"))["risk"]})
+
+    def test_a_skill_the_provenance_pushes_past_the_catalog_limit_is_refused(self) -> None:
+        self.write(self.upstream / "skills" / "ledger", GOOD + "x" * (intake.MAX_FILE - len(GOOD) - 10))
+        self.commit()
+        self.assertIn("oversized-after-provenance", {f["rule"] for f in self.intake(URL.format("ledger"))["risk"]})
+
 
 class TheApproval(IntakeCase):
     """Nothing installs by default; an approval installs exactly the reported revision."""
@@ -218,6 +236,19 @@ class TheApproval(IntakeCase):
         with self.assertRaises(intake.IntakeError):
             self.intake(URL.format("ledger"), approve=report["revision"])
         self.assertNotIn("Provenance", (self.root / "contrib" / "sd-ledger" / "SKILL.md").read_text())
+
+    def test_a_linked_skill_folder_is_never_replaced(self) -> None:
+        # An earlier intake of this URL, kept elsewhere and linked in: no collision, so only the link refuses.
+        commit = self.git("rev-parse", "HEAD")
+        elsewhere = self.home / "agents" / "ledger"
+        self.write(elsewhere, GOOD + "\nA local step.\n\n## Provenance\n\nAdopted by `sd skill intake` on "
+                   f"{TODAY} from `{URL.format('ledger')}` at revision `{commit} (sha256:0)`.\n")
+        (self.home / ".claude" / "skills" / "ledger").symlink_to("../../agents/ledger")
+        report = self.intake(URL.format("ledger"), scope="user")
+        self.assertIn("destination-is-a-link", {f["rule"] for f in report["risk"]})
+        with self.assertRaises(intake.IntakeError):
+            self.intake(URL.format("ledger"), scope="user", approve=report["revision"])
+        self.assertTrue((self.home / ".claude" / "skills" / "ledger").is_symlink())
 
 
 class TheReimport(IntakeCase):
@@ -299,6 +330,14 @@ class TheSteps(IntakeCase):
         self.assertIn("Second version.", self.installed.joinpath("SKILL.md").read_text())
         self.assertEqual(report["mode"], "unchanged")
         self.assertFalse((self.root / intake.STAGING).exists())
+
+    def test_a_stopped_swap_of_a_relative_link_puts_the_link_back(self) -> None:
+        skills = self.home / ".claude" / "skills"
+        stage = intake.staging(skills / "linked")
+        stage.mkdir(parents=True)
+        (stage / "old").symlink_to("../../../agents/linked")
+        self.assertIn("the previous copy is back", intake.recover([skills])[0])
+        self.assertEqual(os.readlink(skills / "linked"), "../../../agents/linked")
 
 
 class TheVerb(IntakeCase):

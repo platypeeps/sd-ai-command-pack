@@ -137,7 +137,9 @@ NETWORK_PATTERNS = (
 # which line feeds which, so the *combination* is what refuses.
 EXFIL_SUBJECT_PATTERNS = (
     (re.compile(r"\b[A-Z][A-Z0-9_]*_(?:TOKEN|KEY|SECRET|PASSWORD)\b"), "credential-env-name"),
-    (re.compile(r"git\s+config\s+(?:--\w+\s+)*user\.email|[\w.+-]+@[\w-]+\.[\w.]+"), "user-identity"),
+    # The lookbehind starts an address only where its run starts; without it a
+    # long run of letters is retried from every position, quadratic (sd:3560).
+    (re.compile(r"git\s+config\s+(?:--\w+\s+)*user\.email|(?<![\w.+-])[\w.+-]+@[\w-]+\.[\w.]+"), "user-identity"),
     (re.compile(r"~/\.claude\.json|~/\.config/|\bos\.environ\b|\$ENV\b"), "machine-state"),
 )
 

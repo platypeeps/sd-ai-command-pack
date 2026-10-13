@@ -273,6 +273,30 @@ def verdict(findings: list[dict[str, Any]], matches: list[dict[str, Any]], worth
     return {"action": "install", "reason": "no refusal, enough instructions, no close match"}
 
 
+def _landing(files: dict[str, bytes], scope: str) -> list[dict[str, Any]]:
+    """Refusals of what would land: the catalog must still read every skill afterwards."""
+
+    if not files:
+        return []
+    found = []
+    if max(map(len, files.values())) > MAX_FILE or sum(map(len, files.values())) > MAX_TOTAL:
+        found.append(_finding(ADOPT.REFUSE, "oversized-after-provenance", SKILL_FILE))
+    if scope == "pack":
+        imported = sd_lib.import_sd_db()
+        if imported.module is None:
+            raise IntakeError(f"cannot check the skill against the catalog: {imported.problem}")
+        # Deferred: only a pack install needs the catalog.
+        from sd_db import skills_catalog  # noqa: PLC0415
+        from sd_db.sources.frontmatter import split  # noqa: PLC0415
+
+        try:
+            # The catalog's own reader: a description it cannot read breaks `sd skill list`.
+            skills_catalog._description(split(files[SKILL_FILE].decode("utf-8"))[0])
+        except (skills_catalog.workflow.WorkflowError, ValueError):
+            found.append(_finding(ADOPT.REFUSE, "catalog-unreadable", SKILL_FILE, 1))
+    return found
+
+
 # --------------------------------------------------------------------------
 # Where it goes, and what is there now
 # --------------------------------------------------------------------------
@@ -385,14 +409,20 @@ def _stage(stage: pathlib.Path, files: dict[str, bytes]) -> None:
     for name, body in files.items():
         path = new / name
         if not path.resolve().is_relative_to(new.resolve()):
-            raise IntakeError(f"{name} resolves outside the skill")
+            raise IntakeError(f"{_printable(name)} resolves outside the skill")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(body)
         path.chmod(0o644)
 
 
+def _present(path: pathlib.Path) -> bool:
+    """There, counting a link whose target no longer resolves from where it sits."""
+
+    return os.path.lexists(path)
+
+
 def _swap_out(destination: pathlib.Path, stage: pathlib.Path) -> None:
-    if destination.exists():
+    if _present(destination):
         os.replace(destination, stage / "old")
 
 
@@ -429,10 +459,10 @@ def recover(roots: list[pathlib.Path]) -> list[str]:
         base = root.parent / STAGING / root.name
         for stage in sorted(base.iterdir()) if base.is_dir() else []:
             destination = root / stage.name
-            if (stage / "old").exists() and not destination.exists():
+            if _present(stage / "old") and not _present(destination):
                 os.replace(stage / "old", destination)
                 done.append(f"undid a stopped install of {destination}: the previous copy is back")
-            elif (stage / "old").exists():
+            elif _present(stage / "old"):
                 done.append(f"finished a stopped install of {destination}: dropped the previous copy")
             elif (stage / "new").exists():
                 done.append(f"dropped an unfinished stage of {destination}")
@@ -459,6 +489,9 @@ def _target(claimed: str, scope: str, url: str, root: pathlib.Path, home: pathli
     found = [_finding(f.severity, f.rule, SKILL_FILE, f.line) for f in collisions]
     if scope == "pack" and not PACK_NAME_RE.fullmatch(name):
         found.append(_finding(ADOPT.REFUSE, "pack-name-shape", SKILL_FILE, 1))
+    if destination.is_symlink():
+        # Something else manages a linked skill folder; an install would cut the link.
+        found.append(_finding(ADOPT.REFUSE, "destination-is-a-link", name))
     return destination, found
 
 
@@ -483,6 +516,7 @@ def evaluate(source: str, scope: str | None, root: pathlib.Path, home: pathlib.P
     previous = source_of(destination)
     # A collision names someone else's skill: a diff against it would read as an update.
     files = {} if collisions else transform(candidate, claimed, destination.name, today)
+    findings += _landing(files, scope)
     lines = installed_diff(destination, files) if files else []
     matches = match(text, installed_skills(root, home), skip={claimed, destination.name})
     worth = value(text, matches)
@@ -540,7 +574,8 @@ def report_text(report: dict[str, Any]) -> str:
         out.append("unchanged: the installed copy matches upstream; nothing to approve")
     elif report["mode"] in ("new", "re-import"):
         out.append(f"approve: sd skill intake {report['url']} --scope {report['scope']} --approve {report['revision']}")
-    return "\n".join(out)
+    # File names come from upstream too, so the whole report is escaped, not only the diff.
+    return _printable("\n".join(out))
 
 
 def run_intake(args: argparse.Namespace, root: pathlib.Path, home: pathlib.Path) -> int:
