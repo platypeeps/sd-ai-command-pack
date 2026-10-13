@@ -1,9 +1,8 @@
 {
   "$comment": [
     "What the installer renders. Requirement 10: a skill installs because a",
-    "path names it, or because a trial row says it is on trial. Usage counts",
-    "cannot decide what stays -- none exist, and three counts over identical",
-    "data gave six, thirteen and eighty-one. Cohesion can.",
+    "path names it, or because a trial row says it is on trial. Cohesion",
+    "decides what a path names; `sd skill list --usage` shows the recorded use.",
     "",
     "Each path is a pipeline that can be named end to end. A skill rides on a",
     "path because the path would be broken without it, never because it is",

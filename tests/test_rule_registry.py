@@ -223,139 +223,15 @@ HEADING = re.compile(r"^#{1,6}\s+(.+?)\s*$")
 # The baselines. Every number below was measured, not chosen.
 # --------------------------------------------------------------------------
 
-#: Rule ids cited in live prose that are defined nowhere at all -- not in the
-#: registry, not in a live document, not even in the archive. Four on
-#: `cddd3b98`, the same four the planning pass found on `e6c2cb20`, and
-#: **empty since sd:431 slice S2**, which widened `DEFINITION` rather than
-#: repointing them: three of the four were defined in the archive in a form
-#: the one-form grammar could not see and are stranded now, and the fourth is
-#: defined by the bold sentence that re-derives it, under the decision
-#: recorded on `DEFINITION`. Nothing was registered and no prose moved.
-#:
-#: Held as a set rather than a count, because the set is the better record: a
-#: new dangling id fails by name on the line that invented it, and no
-#: arithmetic can hide one behind another being fixed.
-#:
-#: Resolving one means either registering it or repointing the prose that cites
-#: it, and then removing it here in the same change.
+#: Rule ids cited in live prose that are defined nowhere at all.
+#: A set, not a count: a new dangling id fails by name on the line that cites it.
+#: Resolve one by registering it or repointing the prose, then remove it here.
 DANGLING_RULE_IDS: frozenset[str] = frozenset()
 
 #: Live prose citations whose only definition sits inside `docs/work/archive`.
-#: 26 of them on `cddd3b98`. More than half the rule ids in live prose point
-#: only into the archive -- into pages this pack's own citation gate treats as
-#: historical records rather than as current statements.
-#:
-#: This is the backfill's meter. Each id moved into a registry row takes one
-#: entry out, and the assertion below proves it went.
-#:
-#: A set, not a count, for the reason `DANGLING_RULE_IDS` already gives: no
-#: arithmetic can hide one behind another being fixed. Held as a count, this
-#: baseline passed unchanged when one stranded id was resolved and a different
-#: one was newly stranded in the same change -- two baselines in one file
-#: keeping two different standards, which review caught.
-#:
-#: **20 before slice D and 19 since, down from the 26 measured on `cddd3b98`.** `R10-D5`,
-#: `R10-D6` and `R10-D4` are rows in `bin/sd_rules.py` now. Three more went the
-#: other way out: sd:719 step 3 deleted the only live files that cited them --
-#: `dashboard/plugins.py`, `dashboard/markup.py` and
-#: `tests/test_dashboard_plugins.py` -- and nothing was registered for them. They
-#: are named in that commit's message and not here, because a live comment
-#: naming them is a live citation, and this set would measure them back in.
-#:
-#: `R10-D6` took two slices to land, and what held it is worth keeping. Its
-#: enforcement was never in doubt --
-#: `tests/test_verb_inventory.py::test_no_command_accepts_a_repository_path`
-#: enumerates `bin/` with `iterdir()`, parses each file, and asserts no command
-#: declares a repo-path option. The obstacle was the registry: `Rule.checker`
-#: held a function object imported by `bin/sd_rules.py`, which cannot import a
-#: test module, so the field could not name a test at all. The first attempt
-#: papered over that with `sd_lib.repo_root`, which is the resolver the rule
-#: CONSTRAINS rather than a guard on it -- it accepts a `start` path, so the row
-#: named the mechanism by which the rule would be broken as its enforcement, and
-#: the meta-check passed it. `checker` is a `path::symbol` location now, so a
-#: test is nameable, and leg d is what makes naming one mean something.
-#:
-#: **Still 20 after sd:431 slice S2, and a different 20.** Widening
-#: `DEFINITION` moved six ids in one change, three in and three out, which a
-#: count would have reported as nothing happening. In: `R5-D1`, `R11-D1` and
-#: `R11-D30`, out of `DANGLING_RULE_IDS`, because the archive defines each of
-#: them in a form the grammar now reads. Out: `R10-D2`, `R11-D4` and
-#: `R11-D20`, because a *live* file defines each of them in the same
-#: closed-bold-then-parenthesis form as the archived `R5-D1` --
-#: `skills/sd-handoff/SKILL.md` for `R10-D2`, `CONTRIBUTING.md` for `R11-D4`,
-#: the module docstring of `dashboard/now.py` for `R11-D20` -- and a grammar
-#: that reads the archive reads the live tree the same way. None of the three
-#: was registered by S2; each became an id with a live definition and no row,
-#: which is not what this set measures. `R10-D2` in particular no longer had
-#: a meter entry for the repeal Dec-4 decided, so when that repeal landed as
-#: the first `REPEALED` row, on 2026-09-16, this set did not move for it.
-#: `R11-D4` and `R11-D20` are still rowless, and `R11-D20` came back in at
-#: sd:719 step 6: `dashboard/now.py`, the one live file that defined it,
-#: retired, so its definition is archive-only again while this file's own
-#: prose still cites it.
-#:
-#: **18 after sd:719 step 6, 2026-09-16.** One in, `R11-D20`, as above. Two
-#: went the way step 3's three did: step 6's module deletions under
-#: `dashboard/` (the package marker stays until step 7) took the only live
-#: files that cited them, and nothing was registered for them. They are named
-#: in that commit's message and not here, for the reason step 3's paragraph
-#: gives.
-#:
-#: **19 after sd:431 slice D, 2026-09-16.** `R10-D1` is a row. What held it
-#: was not its enforcement -- `bin/sd-status::_age_rows` has flagged
-#: `idle-planning` since the check existed -- but that the tool carried the
-#: id in two strings, one of them the `CLASSES` cell the skill's table
-#: mirrors, so registering it would have reddened the second-list check on
-#: the spot. Owner decision Dec-3 rephrased both strings and moved the id
-#: into the comments beside them, the way `R10-D5` cites itself in
-#: `bin/sd_setup_github.py`; the skill's cell changed with the string, and
-#: the id stays in that section's prose for leg a. Held until sd:10 cut the
-#: age sweep (pack #995), because the threshold lived in the sweep module
-#: until then.
-#:
-#: The rest were each looked at and each has a recorded reason it is not a
-#: row yet, in the backfill section of this item's `implement.md`, rather
-#: than left for the next reader to rediscover.
-#: **17 after sd:431 step 8, slice 1, 2026-09-16.** `R10-D3` is a row, in
-#: the narrowed form the audit of that step recorded: the design split
-#: handoff into two lanes, Lane B is the repeal `R10-D2`, and what Lane A
-#: holds as a rule is the restore hook's registration on `startup` and
-#: `clear` and never on `compact`. Its checker is the hook table
-#: `bin/sd_install.py::HOOK_SPECS`, pinned whole by
-#: `tests/test_sd_install.py`, and the section that teaches it is the one
-#: that states the matchers, `The restore side` in
-#: `skills/sd-handoff/SKILL.md`, rather than the Lane B section that cited
-#: the id already and teaches only what is not built.
-#: **16 after sd:431 step 8, slice 2, 2026-09-17.** `R10-D7` is a row: the
-#: local block reaching the prompt, held by `bin/sd-review::local_conventions`
-#: and taught from a section of `skills/sd-review/SKILL.md` written for it,
-#: `Local conventions reach the prompt`. The audit of that step found the id
-#: cited by that function's docstring and by nothing under `skills/`.
-#: **15 after sd:431 step 8, slice 3, 2026-09-17.** `R11-D6` is a row in
-#: the form the audit restated it: the CI job it deleted is history, and the
-#: rule that made the deletion defensible -- no shell outside
-#: `.github/scripts/` -- is held by `tests/test_no_shipped_shell.py`, the
-#: test that stood in for the job. Taught under `Code health` in
-#: `skills/sd-check/SKILL.md` with the `R12` rows, per Dec-2.
-#: **12 after sd:431 step 8, slice 4, 2026-09-17.** `R11-D14`, `R11-D27` and
-#: `R5-D1` are rows, the store and plugin contract: the closed kind
-#: vocabulary held by `bin/sd::validate_kind`, the line edit held by
-#: `bin/sd::edit_field`, and the vault as system-of-record held by
-#: `bin/sd::store_list`. Taught from one section of `skills/sd-help/SKILL.md`,
-#: `The store and plugin contract`, the skill that names `sd plugin`; no
-#: skill taught either verb before it. The twelve left are `R11-D1`,
-#: `R11-D5` and the ten dashboard and history ids, each an owner decision on
-#: a repeal (the audit of that step, slices 7 and 8).
-#: **0 after sd:431 step 4, slice H, 2026-09-17.** The twelve are repealed
-#: rows, under one family decision team-lead took on 2026-09-17 (Dec-9,
-#: recommended on note 2665, reversible by the owner): `R11-D1` and `R11-D5`
-#: in the Dec-4 shape, because the enforcement each claims was never built
-#: or is gone, and the ten dashboard and history ids because sd:719 is done
-#: with `dashboard/` and `bin/sd_ledger.py` deleted (#1013, #1017), so what
-#: each of them ruled on no longer exists to be enforced. The set is empty
-#: and stays a set: a live document newly citing an archived ruling is
-#: reported by name on the day it is written, and the closed baseline is
-#: the same shape `DANGLING_RULE_IDS` has held since slice S2.
+#: Each id moved into a registry row takes one entry out; `git log -L` holds the history.
+#: A set, not a count: a count passes when one id is resolved and another stranded.
+#: Empty: a live document that newly cites an archived ruling fails by name.
 STRANDED_RULE_IDS: frozenset[str] = frozenset()
 
 # --------------------------------------------------------------------------
