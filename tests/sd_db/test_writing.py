@@ -589,6 +589,28 @@ class Promote(WritingCase):
         self.assertEqual((counts.unchanged, counts.promoted_changed, counts.inserted), (1, 0, 0))
         self.assertEqual(verify_source(self.db, reader, reader.freeze()), [])
 
+    def test_a_fenced_control_in_an_old_snapshot_is_content_and_differs(self):
+        """Review round 2: the view keeps a fenced control, so a snapshot that lost one does not match."""
+        vault = self.root / "vault"
+        note = vault / "System/Databases/Blog Ideas/vault-idea.md"
+        note.parent.mkdir(parents=True)
+        (vault / "System/Databases/Topics").mkdir(parents=True)
+        control = "**Status:** `INPUT[inlineSelect(option(inbox), option(drafting)):status]`"
+        note.write_text("---\ntitle: Vault idea\nstatus: inbox\ndateCreated: 2026-01-02\n---\n"
+                        f"```\n{control}\n```\n\nThe angle.\n")
+        reader = vault_reader(vault)
+        reader.land(self.db, reader.freeze())
+        idea = self.db.execute("SELECT id FROM item WHERE title = 'Vault idea'").fetchone()[0]
+        self.assertIn(control, json.loads(self.db.execute(
+            "SELECT body FROM item WHERE id = ?", (idea,)).fetchone()[0])["markdown"])
+        promote(self.db, idea, who="operator")
+        fields = json.loads(self.db.execute("SELECT fields FROM item WHERE id = ?", (idea,)).fetchone()[0])
+        fields["promoted_from"]["row"]["body"] = json.dumps({"markdown": "```\n```\n\nThe angle."}, sort_keys=True)
+        self.db.execute("UPDATE item SET fields = ? WHERE id = ?", (json.dumps(fields), idea))
+        self.db.commit()
+        self.assertEqual(reader.land(self.db, reader.freeze()).promoted_changed, 1)
+        self.assertEqual({d.what for d in verify_source(self.db, reader, reader.freeze())}, {"body"})
+
     def test_an_edit_to_a_promoted_vault_note_is_reported_not_written(self):
         vault = self.root / "vault"
         note = vault / "System/Databases/Blog Ideas/vault-idea.md"

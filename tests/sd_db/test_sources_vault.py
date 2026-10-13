@@ -181,6 +181,48 @@ class TheNormalization(VaultCase):
         self.assertIn("vault: 3 blog-idea note(s) under System/Databases/Blog Ideas, "
                       "1 Meta Bind status line(s) dropped", sitting.notes)
 
+    def body_after(self, *lines):
+        """The landed body of first idea with `lines` before its heading, and the raw body read."""
+        self.edit("System/Databases/Blog Ideas/first idea.md", "# ", "\n".join(lines) + "\n# ")
+        path = self.vault / "System/Databases/Blog Ideas/first idea.md"
+        _, raw = read_frontmatter(path.read_text(encoding="utf-8"))
+        sitting = run(self.connection, self.reader())
+        self.assertTrue(sitting.clean, sitting.report())
+        return json.loads(self.items()[self.IDEA]["body"])["markdown"], raw
+
+    def test_a_control_inside_a_backtick_fence_stays(self):
+        """Review round 2: a fenced example is content, verbatim."""
+        landed, raw = self.body_after("```markdown", META_BIND, "```")
+        self.assertEqual(landed, raw)
+
+    def test_a_control_inside_a_tilde_fence_stays(self):
+        landed, raw = self.body_after("~~~", META_BIND, "~~~")
+        self.assertEqual(landed, raw)
+
+    def test_an_unclosed_fence_runs_to_the_end_of_the_body(self):
+        landed, raw = self.body_after("```", META_BIND)
+        self.assertEqual(landed, raw)
+
+    def test_a_shorter_or_other_fence_does_not_close_a_fence(self):
+        landed, raw = self.body_after("````", "```", "~~~~", META_BIND, "````")
+        self.assertEqual(landed, raw)
+
+    def test_a_control_inside_a_comment_or_math_block_stays(self):
+        """Class pass: every block Markdown or Obsidian does not render as a line of its own."""
+        for opening, closing in (("<!--", "-->"), ("%%", "%%"), ("$$", "$$"), ("<pre>", "</pre>")):
+            with self.subTest(opening=opening):
+                self.setUp()
+                landed, raw = self.body_after(opening, META_BIND, closing)
+                self.assertEqual(landed, raw)
+
+    def test_a_block_closed_on_its_own_line_opens_nothing(self):
+        landed, raw = self.body_after("<!-- a note -->", "%% aside %%", "$$x$$", "<pre>a</pre>", META_BIND)
+        self.assertEqual(landed, raw.replace(META_BIND + "\n", ""))
+
+    def test_a_control_just_after_a_fence_closes_is_dropped(self):
+        landed, raw = self.body_after("```", "code", "```", META_BIND)
+        self.assertEqual(landed, raw.replace(META_BIND + "\n", ""))
+
     def test_a_body_with_no_status_control_lands_byte_for_byte(self):
         """Class pass: the line split guesses nothing, blank runs and trailing spaces included."""
         self.edit("System/Databases/Blog Ideas/first idea.md", "# ", "  \n\n\n\t`INPUT[` in prose  \n# ")

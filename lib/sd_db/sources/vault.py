@@ -42,6 +42,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -299,13 +300,63 @@ def normalized(path: Path) -> tuple[dict[str, Any], str, int]:
     return (matter, *_without_controls(body))
 
 
+#: A code fence's opening or closing line: up to three spaces, then three or more
+#: backticks or tildes (CommonMark). A backtick fence's info string holds no backtick.
+FENCE = re.compile(r" {0,3}(`{3,}(?!.*`)|~{3,}).*")
+
+#: A raw HTML block that keeps its lines as they are, by its opening tag (CommonMark type 1).
+RAW_HTML = re.compile(r" {0,3}<(pre|script|style|textarea)\b", re.IGNORECASE)
+RAW_HTML_END = re.compile(r"</(?:pre|script|style|textarea)>", re.IGNORECASE)
+
+
+def _block_end(line: str) -> Callable[[str], bool] | None:
+    """The test for the line that closes the block `line` opens, or None when it opens none.
+
+    The blocks Markdown or Obsidian renders as something other than lines of
+    their own: an HTML comment, a raw HTML block, Obsidian's `%%` comment and
+    its `$$` math. A `%%` or `$$` pair closed on its one line opens nothing.
+    """
+    start = line.rfind("<!--")
+    if start >= 0 and "-->" not in line[start:]:
+        return lambda later: "-->" in later
+    if RAW_HTML.match(line) and not RAW_HTML_END.search(line):
+        return lambda later: bool(RAW_HTML_END.search(later))
+    if line.count("%%") % 2:
+        return lambda later: later.count("%%") % 2 == 1
+    if line.count("$$") % 2:
+        return lambda later: later.count("$$") % 2 == 1
+    return None
+
+
 def _without_controls(body: str) -> tuple[str, int]:
     """`(body, dropped)`: the body less its `STATUS_CONTROL` lines.
 
-    It splits on line feeds alone, so a body with none comes back byte for byte.
+    Only a control Markdown renders as a line of its own goes. Every line in a
+    code fence, a comment, a raw HTML block or a math block stays verbatim, the
+    control among them: there it is an example or commented out, not the
+    dropdown. It splits on line feeds alone, so a body with none comes back
+    byte for byte.
     """
     lines = body.split("\n")
-    kept = [line for line in lines if not STATUS_CONTROL.fullmatch(line)]
+    kept: list[str] = []
+    fence: str | None = None
+    closing: Callable[[str], bool] | None = None
+    for line in lines:
+        if fence is not None:
+            # A fence closes on its own character, at least as long, and nothing after.
+            mark = line.strip()
+            if len(mark) >= len(fence) and set(mark) == {fence[0]} and len(line) - len(line.lstrip(" ")) < 4:
+                fence = None
+        elif closing is not None:
+            if closing(line):
+                closing = None
+        elif opened := FENCE.fullmatch(line):
+            fence = opened.group(1)
+        elif (ends := _block_end(line)) is not None:
+            closing = ends
+        elif STATUS_CONTROL.fullmatch(line):
+            continue
+        kept.append(line)
     return "\n".join(kept), len(lines) - len(kept)
 
 
