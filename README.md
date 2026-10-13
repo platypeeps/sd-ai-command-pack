@@ -195,6 +195,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.privacy_patterns` names the privacy-pattern file `sd-docs-lint --pr-body` checks a pull request body against, one extended regular expression per line (unset: `privacy-patterns` in `$SYSTEM_TOOLS_CONFIG`, else `~/.config/system`); with no file the check is skipped with a note. It grants nothing.
 `sd-ship lane enqueue|list|retry|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in the hub database, with its logs under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. `sd-ship lane --help` and each verb's `--help` hold the options and refusals; [Parallel work](WORKFLOW.md#parallel-work) holds the rules.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
+`sd gate run --max-wait SECONDS -- <cmd>` gives up after that long in the queue and exits 75, the command not run, naming its place in the queue, the holders and how long it waited; it does not bound the command itself.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
 A waiting gate names who holds each slot and since when.
 `sd.review_slots` is load control too: how many reviews may run their reviewers at once on the machine (unset: 2).

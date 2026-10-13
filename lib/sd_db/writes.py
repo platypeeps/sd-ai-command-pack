@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
+from collections.abc import Callable
 from typing import Any
 
 from . import paths
@@ -223,12 +224,37 @@ def transition(
     later.
     """
     with transaction(connection):
-        row = connection.execute("SELECT kind, status FROM item WHERE id = ?", (item,)).fetchone()
+        row = connection.execute(
+            "SELECT id, kind, status, source, fields FROM item WHERE id = ?", (item,)
+        ).fetchone()
         if row is not None and row["kind"] == "work" and row["status"] != target and target == "done":
             raise TransitionRefused(
                 "work completion requires deliver_work or cancel_work and their verified evidence"
             )
+        if row is not None:
+            refuse_base_status(row)
         return _transition(connection, item, target, who=who, reason=reason)
+
+
+def refuse_base_status(row: Any) -> None:
+    """Refuse a status write on a vault base row, naming the move that applies (sd:3972).
+
+    Its status is its plugin map's answer to its stage, so only a stage move
+    changes it: the import here, through `_transition`. Every status write a
+    person or a job asks for refuses, one of the current status too.
+    """
+    # Read when the rule runs: `sources` imports this module.
+    from .sources.vault import SOURCE
+
+    if row["source"] != SOURCE:
+        return
+    try:
+        kind = json.loads(row["fields"] or "{}").get("kind")
+    except (AttributeError, TypeError, ValueError, RecursionError):
+        kind = None
+    raise TransitionRefused(
+        f"item {row['id']} is a {kind if isinstance(kind, str) and kind else 'base'} row from the vault, "
+        f"and it moves by stage only: its plugin's map sets the status from the stage. Move its stage instead")
 
 
 def _transition(
@@ -367,9 +393,13 @@ def upsert_item(
     status: str,
     who: str,
     created_at: str | None = None,
+    promoted_view: Callable[[dict], dict] | None = None,
     **columns: Any,
 ) -> tuple[int, str]:
     """Land a row a migration read from a source, once. Returns `(id, what)`.
+
+    `promoted_view`, when given, reads a promoted idea's snapshot the way the
+    source now reads its records, before the comparison (sd:3972).
 
     `what` is `inserted`, `updated` or `unchanged`, which is what makes the
     second run of a migration assertable: criterion 5 asks each one to report
@@ -399,6 +429,8 @@ def upsert_item(
         promoted = promoted_rows(connection, source, external_id)
         if promoted:
             snapshot = json.loads(promoted[0]["fields"])["promoted_from"]["row"]
+            if promoted_view is not None:
+                snapshot = promoted_view(snapshot)
             incoming = {"kind": kind, "title": title, "status": status, **columns}
             same = all(snapshot[key] == (_json(value) if key in ("fields", "body") and not isinstance(
                 value, (str, type(None))) else value) for key, value in incoming.items() if key in snapshot)
