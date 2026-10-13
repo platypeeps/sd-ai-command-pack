@@ -13,6 +13,7 @@ Fourteen sections, in output order, under the `pack` banner naming the checkout 
                  flag stale status lines and done rows without closing evidence
   contributions  the shared contribution projection for this repo
   prs            open pull requests through the sd-pr-state code path
+  lane           this repo's merge-lane queue: each item's newest unmerged entry
   setup          mode and detected check entrypoints
   issues         indexed issues for this repository
   jira           the operator's Jira rows from the shared database, every repository
@@ -610,7 +611,8 @@ def _apply_acknowledgements(
 
 
 def _protection_gaps(
-    protection: dict[str, Any], default_branch: str, produced: set[str], notes: list[str]
+    protection: dict[str, Any], default_branch: str, produced: set[str], notes: list[str],
+    local: bool = False,
 ) -> tuple[list[dict[str, str]], dict[str, Any]]:
     gaps: list[dict[str, str]] = []
     checks = protection.get("required_status_checks") or {}
@@ -678,7 +680,8 @@ def _protection_gaps(
                 _gap(
                     "reviews",
                     "a pull request is required but no approving review is: "
-                    "0 approvals, so one with green CI self-merges",
+                    "0 approvals, so one with "
+                    + ("a green gate" if local else "green CI") + " self-merges",
                 )
             )
     detail = {
@@ -754,8 +757,8 @@ def _merge_settings(repo: dict[str, Any]) -> list[dict[str, Any]]:
     """The two r7 merge-settings flags, reported beside the protection gaps.
 
     They are not branch protection -- they are what the merge button does when
-    a human presses it -- but they decide whether `wip:` subjects from a Lane B
-    carrier branch reach main's history, so they are reported here or nowhere.
+    a human presses it -- but they decide whether a builder's `wip:` subjects
+    reach main's history, so they are reported here or nowhere.
     """
     title = str(repo.get("squash_merge_commit_title") or "")
     message = str(repo.get("squash_merge_commit_message") or "")
@@ -765,8 +768,8 @@ def _merge_settings(repo: dict[str, Any]) -> list[dict[str, Any]]:
             "value": f"{title or '?'} / {message or '?'}",
             "flagged": title != "PR_TITLE" or message == "COMMIT_MESSAGES",
             "gap": (
-                f"squash commits are built from {title or '?'} / {message or '?'}, so a "
-                "carrier branch's `wip:` subjects land in main's history when the merge "
+                f"squash commits are built from {title or '?'} / {message or '?'}, so "
+                "a builder's `wip:` subjects land in main's history when the merge "
                 "runs through the web UI; set the title to PR_TITLE and the message to "
                 "PR_BODY or BLANK"
             ),
@@ -984,7 +987,8 @@ def _protection_reading(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any
         ruleset_detail = {"source": sd_protection.RULESET_SOURCE, "rulesets": synthesized["rulesets"],
                           "classic_visibility": result["detail"]["classic_visibility"]}
     result["protected"] = True
-    gaps, detail = _protection_gaps(protection, default_branch, produced, notes)
+    gaps, detail = _protection_gaps(protection, default_branch, produced, notes, sd_lib.ci_mode(root) == "local")
+    gaps = _sole_operator_reviews(root, protection, gaps, detail, result["merge_settings"])
     still_open, accepted = _apply_acknowledgements(
         gaps, _observed_state(protection), acknowledgements
     )
@@ -994,6 +998,33 @@ def _protection_reading(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any
     detail.update(ruleset_detail)
     result["detail"] = detail
     return result
+
+
+def _sole_operator_reviews(root: pathlib.Path, protection: dict[str, Any], gaps: list[dict[str, str]],
+                           detail: dict[str, Any], merge_settings: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """`gaps` less the zero-approvals one when the runner merges (sd:3497).
+
+    One maintainer cannot approve their own pull request, and under
+    `repo.runner_merge = auto` the runner merges: zero approvals is the
+    setting, reported beside the merge flags, not a gap. A missing review
+    requirement stays a gap whatever merges.
+    """
+    if not (isinstance(protection.get("required_pull_request_reviews"), dict)
+            and not detail["required_approving_review_count"] and _runner_merges(root)):
+        return gaps
+    merge_settings.append({"id": "reviews", "flagged": False, "gap": "",
+                           "value": "0 approvals; repo.runner_merge is auto, the runner merges"})
+    return [gap for gap in gaps if gap["id"] != "reviews"]
+
+
+def _runner_merges(root: pathlib.Path) -> bool:
+    """Whether `repo.runner_merge` is `auto` here; a read that cannot tell is no."""
+    import sd_lane  # noqa: PLC0415 - only this and the lane section read the lane
+
+    try:
+        return sd_lane.default_runner_merge(root) == "auto"
+    except sd_lane.LaneError:
+        return False
 
 
 def _classic_unknown(error: str, admin: bool, branch: str, slug: str) -> str:
@@ -1169,7 +1200,7 @@ def _provider_row(provider: Any) -> dict[str, str]:
         # A CLI keeps its own credentials, so a declared variable does not say
         # whether it is signed in. Codex is the one that answers from a local
         # file, which costs nothing to read.
-        if not (pathlib.Path.home() / ".codex" / "auth.json").is_file():
+        if not ((sys.modules.get("sd_review") or _sibling("sd-review", "sd_review")).codex_home() / "auth.json").is_file():
             state = "unauthenticated"
     return {"backend": provider.name, "command": executable, "state": state}
 
@@ -1179,9 +1210,9 @@ def backends_section(root: pathlib.Path) -> list[dict[str, str]]:
 
     The lanes come from the provider registry at runtime, so a reviewer added
     to `providers.yaml` appears here without an edit and one removed stops
-    being claimed. An unreadable or absent registry reports no registry lane
-    rather than failing the section; `sd-review --explain` is where a missing
-    registry is a refusal.
+    being claimed. An unreadable or absent registry reports one `registry`
+    row with its reason rather than failing the section (sd:3494);
+    `sd-review --explain` is where a missing registry is a refusal.
 
     Deliberately shallow: this asks the filesystem and, for `gh`, the one local
     command that answers without a network call. It is not a substitute for the
@@ -1189,8 +1220,10 @@ def backends_section(root: pathlib.Path) -> list[dict[str, str]]:
     backend will actually run -- and which land with `sd-review` at step 3c.
     Authentication is reported as a state, never as a credential.
     """
-    registry, _reason = sd_registry.read_or_report(with_database=True)
+    registry, reason = sd_registry.read_or_report(with_database=True)
     found = [_provider_row(provider) for provider in registry.providers.values()]
+    if reason:
+        found.append({"backend": "registry", "command": "", "state": f"unreadable ({reason})"})
     for name, executable in UNREGISTERED:
         if shutil.which(executable) is None:
             state = "absent"
@@ -1267,6 +1300,82 @@ def residue_section(root: pathlib.Path) -> list[dict[str, Any]]:
     return found
 
 
+#: What a missing database asks of the operator; on a satellite the file lives on the hub (sd:3496).
+NO_DATABASE_REMEDY = "run `sd-db init` on the hub"
+
+
+def _shared_connection(library: str, *modules: str) -> tuple[Any, str]:
+    """A read-only connection to the shared database, or `None` and a reason that names the next step.
+
+    One gate for the three database sections (sd:3496). On a satellite
+    `default_path()` is a `HubPath` whose `exists()` asks the hub and raises
+    `HubUnreachable` when it is down; that is a reported reason here, never
+    a traceback. `modules` are the `sd_db` submodules the caller reads, so a
+    copy that will not import them is named too.
+    """
+    imported = sd_lib.import_sd_db()  # puts the checkout's `lib/` first, before the import (sd:746)
+    try:
+        import sd_db
+        for module in modules:
+            importlib.import_module(f"sd_db.{module}")
+    except ImportError:  # a `lib/` copy that will not import is named, not called absent
+        return None, (imported.problem if imported.provisioned
+                      else f"{library} is not installed; run `make setup` in the pack checkout")
+    try:
+        if not sd_db.default_path().exists():
+            return None, f"no shared sd_db database yet; {NO_DATABASE_REMEDY}"
+        return sd_db.connect(write=False), ""
+    except Exception as error:
+        from sd_db.remote import HubUnreachable
+        if isinstance(error, HubUnreachable):
+            return None, f"{error}; check ~/.config/sd/hub.json and that the hub is up"
+        return None, f"shared database unreadable: {error}"
+
+
+#: A lane entry in one of these states is done with; `sd-ship lane list` keeps it as history.
+LANE_SETTLED = ("merged", "cancelled")
+#: A lane entry in one of these states stopped short of a merge and waits on the operator.
+LANE_FAILED = ("failed", "skipped")
+#: What the section shows of an entry; the body and acceptance texts stay in `sd-ship lane list`.
+LANE_FIELDS = ("item", "branch", "status", "step", "code", "reason", "held", "expected_head")
+
+
+def lane_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
+    """This repository's merge-lane queue: each item's newest entry that has not merged or been cancelled.
+
+    The lane is the one merge path (WORKFLOW.md), and this report knew
+    nothing of it (sd:3495). Read-only, over the connection the database
+    sections share, with the queue's own readers, `sd_lane.stored` and
+    `sd_lane.enqueue_order`; `sd-ship lane list` is the full view. An entry
+    retried later is superseded by the newer one, as `newest_entry` decides.
+    """
+    import sd_lane  # noqa: PLC0415 - only this section reads the lane
+
+    try:
+        repository = sd_lane.queue_for(root, environ).repository
+    except (sd_lane.LaneError, sd_lib.ConfigError) as error:
+        return {"available": False, "reason": str(error), "entries": []}
+    connection, reason = _shared_connection("workflow database library")
+    if connection is None:
+        return {"available": False, "reason": reason, "entries": []}
+    try:
+        try:
+            rows = sd_lane.stored(connection, repository)
+            order = sd_lane.enqueue_order(connection, repository)
+        finally:
+            connection.close()
+    except Exception as error:
+        return {"available": False, "reason": f"lane queue unreadable: {error}", "entries": []}
+    newest: dict[Any, dict[str, Any]] = {}
+    for row in rows:
+        seen = newest.get(row.get("item"))
+        if seen is None or order.get(row["id"], 0) > order.get(seen["id"], 0):
+            newest[row.get("item")] = row
+    entries = [{key: row.get(key) for key in LANE_FIELDS} for row in rows
+               if newest.get(row.get("item")) is row and row.get("status") not in LANE_SETTLED]
+    return {"available": True, "reason": "", "repository": repository, "entries": entries}
+
+
 def _database_issues(slug: str) -> dict[str, Any]:
     """The shared database, and every absence a reported reason in one shape.
 
@@ -1275,16 +1384,11 @@ def _database_issues(slug: str) -> dict[str, Any]:
     reported here the way `jira_section` reports it, naming the library the
     rows live in rather than a verb to run.
     """
-    imported = sd_lib.import_sd_db()  # puts the checkout's `lib/` first, before the import (sd:746)
+    connection, reason = _shared_connection("shared tracker library", "progress")
+    if connection is None:
+        return {"available": False, "reason": reason, "needs_you": [], "other": []}
+    from sd_db.progress import tracker_freshness, tracker_items
     try:
-        import sd_db
-        from sd_db.progress import tracker_freshness, tracker_items
-    except ImportError:  # a `lib/` copy that will not import is named, not called absent
-        return {"available": False, "reason": imported.problem if imported.provisioned else "shared tracker library is not installed", "needs_you": [], "other": []}
-    if not sd_db.default_path().exists():
-        return {"available": False, "reason": "no shared sd_db database yet", "needs_you": [], "other": []}
-    try:
-        connection = sd_db.connect(write=False)
         try:
             rows = tracker_items(connection, tracker="github", repo=slug, state="open")
             freshness = tracker_freshness(connection, "github")
@@ -1319,16 +1423,11 @@ def jira_section() -> dict[str, Any]:
     rule on closed rows is applied here and not in the renderer, so the
     `rows` list `--json` carries is the list the text prints.
     """
-    imported = sd_lib.import_sd_db()  # puts the checkout's `lib/` first, before the import (sd:746)
+    connection, reason = _shared_connection("shared tracker library", "progress")
+    if connection is None:
+        return {"available": False, "reason": reason, "freshness": None, "rows": []}
+    from sd_db.progress import tracker_freshness, tracker_items
     try:
-        import sd_db
-        from sd_db.progress import tracker_freshness, tracker_items
-    except ImportError:  # a `lib/` copy that will not import is named, not called absent
-        return {"available": False, "reason": imported.problem if imported.provisioned else "shared tracker library is not installed", "freshness": None, "rows": []}
-    if not sd_db.default_path().exists():
-        return {"available": False, "reason": "no shared database yet", "freshness": None, "rows": []}
-    try:
-        connection = sd_db.connect(write=False)
         try:
             rows = tracker_items(connection, tracker="jira", state=None)
             freshness = tracker_freshness(connection, "jira")
@@ -1362,20 +1461,15 @@ def _jira_row_is_current(row: dict[str, Any], cutoff: datetime.datetime) -> bool
 
 def contributions_section(root: pathlib.Path) -> dict[str, Any]:
     """Read the shared contribution projection without collecting or opening a writer."""
-    imported = sd_lib.import_sd_db()  # puts the checkout's `lib/` first, before the import (sd:746)
-    try:
-        import sd_db
-        from sd_db import contributions
-    except ImportError:  # a `lib/` copy that will not import is named, not called absent
-        return {"available": False, "reason": imported.problem if imported.provisioned else "shared contribution library is not installed", "rows": []}
-    if not sd_db.default_path().exists():
-        return {"available": False, "reason": "no shared database yet", "rows": []}
+    connection, reason = _shared_connection("shared contribution library", "contributions")
+    if connection is None:
+        return {"available": False, "reason": reason, "rows": []}
+    from sd_db import contributions
     identities = [sd_lib.stored_repo(root)]
     slug = pr_state.remote_slug(root)
     if slug:
         identities.append(slug)
     try:
-        connection = sd_db.connect(write=False)
         try:
             rows = contributions.projection(connection, repo=identities)
         finally:
@@ -1451,6 +1545,8 @@ CLASSES = (
           "an item whose authoritative source will not yield a status"),
     Class("unresolved-concern", "c", True, 20, "## Review ledger",
           "a review concern left open by its own ledger row"),
+    Class("lane-entry-failed", "l", True, 25, "merge lane queue",
+          "an item whose newest lane entry failed or was skipped short of a merge", ("lane",)),
     Class("pr-check-failing", "p", True, 30, "open pull requests",
           "an open pull request with a failing check", ("pull_requests",)),
     Class("pr-check-missing", "p", True, 30, "open PRs + protection",
@@ -1464,8 +1560,6 @@ CLASSES = (
     Class("accepted-gap-standing", "g", False, 45,
           ".github/sd-status.json accepted_gaps[]",
           "a written acceptance whose until condition nothing re-reads"),
-    Class("issue-needs-you", "i", False, 50, "dashboard index",
-          "an indexed issue the index says is waiting on you"),
     Class("pr-needs-action", "p", False, 60, "open pull requests",
           "an open pull request waiting on a review or a merge"),
     Class("mirror-sync-pending", "n", False, 75, "~/.claude/pending-mirror-syncs/",
@@ -1481,8 +1575,6 @@ CLASSES = (
           "an item idle in planning past the 45-day threshold"),
     Class("undated-planning", "w", True, 100, "work item",
           "a planning item with no date to age it by"),
-    Class("issue-open", "i", False, 110, "dashboard index",
-          "an indexed issue open against this repository"),
     Class("source-marker", "t", False, 120, "marker scan over the index",
           "a marker left in tracked source"),
     Class("unreadable-concern-row", "c", True, 20,
@@ -1506,7 +1598,7 @@ EXCLUDED = (
     "closed by where they live; their review ledgers are still read",
     "concerns disposed addressed or rebutted -- two of the four dispositions "
     "are closures",
-    "Jira rows in the dashboard index -- no committed fact ties a Jira project "
+    "Jira rows in the shared database -- no committed fact ties a Jira project "
     "key to a checkout, which is the exclusion `issues_section` already makes",
     "docs/review-learnings.md -- narrative history with no disposition field, "
     "so nothing in it can ever be marked handled",
@@ -1653,10 +1745,11 @@ def actionable_inventory(
     unchecked: dict[str, str] = {}
     rows: list[dict[str, Any]] = []
     rows += _work_rows(root, work, day)
-    rows += _pull_rows(root, pulls, protection)
+    lane = sections.get("lane") or {}
+    rows += _lane_rows(lane)
+    rows += _pull_rows(root, pulls, protection, lane)
     rows += _protection_rows(protection)
-    rows += _issue_rows(sections.get("issues") or {})
-    rows += _branch_rows(root, pulls, protection)
+    rows += _branch_rows(root, pulls, protection, lane)
     rows += _marker_rows(root)
     rows += _tool_rows(root, unchecked)
     rows += _mirror_rows(root, day, env)
@@ -2629,7 +2722,8 @@ def _accepted_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _pull_rows(
-    root: pathlib.Path, pulls: dict[str, Any], protection: dict[str, Any]
+    root: pathlib.Path, pulls: dict[str, Any], protection: dict[str, Any],
+    lane: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """The four pull-request classes, shaped from `sd-pr-state`'s own rows.
 
@@ -2646,6 +2740,11 @@ def _pull_rows(
     some ran and one is absent.
     """
     required = (protection.get("detail") or {}).get("required_contexts") or []
+    # Under the local gate `sd/local-gate` is posted at prepare and the runner
+    # merges, so a queued pull request is waiting on the lane, not on anyone,
+    # and no workflow exists to re-run (sd:3495).
+    local = sd_lib.ci_mode(root) == "local"
+    queued = _lane_branches(lane or {})
     dirty = bool(sd_lib.git_output(
         ["--no-optional-locks", "status", "--porcelain"], root
     ))
@@ -2659,14 +2758,16 @@ def _pull_rows(
             rows.append(_row(
                 "pr-check-failing", key, title,
                 "failing: " + ", ".join(pull["failing"]),
-                f"fix or re-run the failing checks on {pull['url']}",
+                f"fix what the local gate failed on {pull['url']}, then `sd-ship lane retry <item>`"
+                if local else f"fix or re-run the failing checks on {pull['url']}",
             ))
-        if required and not pull["checks_total"]:
+        if required and not pull["checks_total"] and pull["head"] not in queued:
             rows.append(_row(
                 "pr-check-missing", key, title,
                 f"{pull['base']} requires {len(required)} context(s) and this "
                 "pull request reports no check at all",
-                f"check that the workflows triggered on {pull['url']}",
+                f"the gate posts sd/local-gate at prepare; queue {pull['url']} with `sd-ship lane enqueue`"
+                if local else f"check that the workflows triggered on {pull['url']}",
             ))
         if dirty and here and pull["head"] == here:
             rows.append(_row(
@@ -2674,13 +2775,35 @@ def _pull_rows(
                 f"the tree is dirty on {here}, which already has this pull request",
                 "commit or stash the working tree before the pull request moves",
             ))
-        if not pull["draft"]:
+        if not pull["draft"] and pull["head"] not in queued:
             rows.append(_row(
                 "pr-needs-action", key, title,
                 f"{pull['mergeable']}/{pull['merge_state']}, review "
                 f"{pull['review_decision']}",
                 f"review or merge {pull['url']}",
             ))
+    return rows
+
+
+def _lane_branches(lane: dict[str, Any]) -> set[str]:
+    """The branches the lane queue holds: its pull request waits on the runner, not on anyone."""
+    return {str(entry["branch"]) for entry in lane.get("entries") or [] if entry.get("branch")}
+
+
+def _lane_rows(lane: dict[str, Any]) -> list[dict[str, Any]]:
+    """Each item whose newest lane entry stopped short of a merge (sd:3495)."""
+    rows: list[dict[str, Any]] = []
+    for entry in lane.get("entries") or []:
+        if entry.get("status") not in LANE_FAILED:
+            continue
+        item = entry.get("item")
+        why = entry.get("code") or entry.get("step") or ""
+        rows.append(_row(
+            "lane-entry-failed", f"sd:{item}", f"sd:{item} {entry.get('branch') or ''}".rstrip(),
+            str(entry.get("status")) + (f" at {why}" if why else "")
+            + (f": {entry['reason']}" if entry.get("reason") else ""),
+            f"fix it, then `sd-ship lane retry {item}`; `sd-ship lane list` shows the entry",
+        ))
     return rows
 
 
@@ -2702,31 +2825,6 @@ def _protection_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def _issue_rows(issues: dict[str, Any]) -> list[dict[str, Any]]:
-    """Indexed issues for this repository, read from the section that has them.
-
-    Jira rows never arrive here: `issues_section` does not return them, for the
-    reason it states and `EXCLUDED` repeats.
-    """
-    rows: list[dict[str, Any]] = []
-    if issues.get("source") == "database":
-        # A cached open issue is context, not an instruction to close it or a
-        # blocker for local work. Explicit local tasks carry their own status.
-        return rows
-    for check, found in (("issue-needs-you", issues.get("needs_you")),
-                         ("issue-open", issues.get("other"))):
-        for issue in found or []:
-            why = ", ".join(issue.get("why") or [])
-            rows.append(_row(
-                check, f"{issue['repo']}#{issue['number']}",
-                f"#{issue['number']} {issue['title']}",
-                f"{issue['state']} since {issue['updated_at']}"
-                + (f", why: {why}" if why else ""),
-                f"answer or close {issue['url']}",
-            ))
-    return rows
-
-
 def _origin_heads(root: pathlib.Path) -> set[str] | None:
     """Every branch origin publishes right now, or None when it cannot be asked.
 
@@ -2736,6 +2834,8 @@ def _origin_heads(root: pathlib.Path) -> set[str] | None:
     that has outlived its branch, is not a move this tool can make. One call
     per root, never one per item.
     """
+    # Through sd_lib's one git policy (timeout, no shell, failure is None): a dead
+    # network must not hang a read-only report (sd:3495).
     listing = sd_lib.git_output(["ls-remote", "--heads", "origin"], root)
     if listing is None:
         return None
@@ -2758,7 +2858,8 @@ STALE_REFS = "origin could not be asked; read from this checkout's refs"
 
 
 def _branch_rows(
-    root: pathlib.Path, pulls: dict[str, Any], protection: dict[str, Any]
+    root: pathlib.Path, pulls: dict[str, Any], protection: dict[str, Any],
+    lane: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Branches on origin that no open pull request is carrying.
 
@@ -2780,7 +2881,8 @@ def _branch_rows(
     subject. Origin decides which names survive; the refs describe them.
     """
     default = protection.get("default_branch") or "main"
-    carried = {str(pull["head"]) for pull in pulls.get("pull_requests") or []}
+    # `lane enqueue` pushes the branch before prepare opens its pull request.
+    carried = {str(pull["head"]) for pull in pulls.get("pull_requests") or []} | _lane_branches(lane or {})
     published = _origin_heads(root)
     listing = sd_lib.git_output(
         ["for-each-ref",
@@ -3131,6 +3233,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "issues": issues_section(root),
         "jira": jira_section(),
         "contributions": contributions_section(root),
+        "lane": lane_section(root, environ),
     }
     inventory = actionable_inventory(root, result, environ=environ)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
@@ -3383,6 +3486,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
 
     write("\nopen pull requests\n")
     pr_state.render_pulls(result["pull_requests"], stream)
+    _render_lane(result.get("lane"), write)
 
     setup = result["setup"]
     write("\ndetected setup\n")
@@ -3435,6 +3539,21 @@ CONTRIBUTION_ORDER = (
 )
 
 
+def _render_lane(section: dict[str, Any] | None, write: Any) -> None:
+    write("\nmerge lane (this repo, shared database)\n")
+    if not section or not section["available"]:
+        write(f"  ! {section['reason'] if section else 'not collected'}\n")
+        return
+    if not section["entries"]:
+        write("  nothing queued\n")
+    for entry in section["entries"]:
+        why = entry.get("code") or entry.get("step") or ""
+        write(f"  sd:{entry['item']} {entry['status']}" + (f" at {why}" if why else "")
+              + (" (held)" if entry.get("held") else "") + (f"  {entry['branch']}" if entry.get("branch") else "") + "\n")
+        if entry.get("reason") and entry["status"] in LANE_FAILED:
+            write(f"    {entry['reason']}\n")
+
+
 def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
     write("\ncontributions (this repo, shared database order)\n")
     if not section or not section["available"]:
@@ -3457,7 +3576,7 @@ def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
 
 
 def _render_issues(issues: dict[str, Any], write: Any) -> None:
-    write("\nissues (this repo, from the index)\n")
+    write("\nissues (this repo, shared database)\n")
     if not issues["available"]:
         write(f"  ! {issues['reason']}\n")
         return

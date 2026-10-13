@@ -314,7 +314,8 @@ def _git(args: list[str], cwd: pathlib.Path) -> str | None:
             text=True,
             timeout=GIT_TIMEOUT_SECONDS,
             check=False,
-            env=without_fsmonitor(os.environ),
+            # No sd tool can answer a credential prompt: a remote read fails instead (sd:3495).
+            env={**without_fsmonitor(os.environ), "GIT_TERMINAL_PROMPT": "0"},
         )
     except (OSError, subprocess.SubprocessError):
         return None

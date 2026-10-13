@@ -117,7 +117,8 @@ Treat gate results as evidence from the tested machine only.
 - `v0.72.0` is the terminal release; main is the release. Do not add release tags or a changelog.
 - `skills/sd-*/SKILL.md` holds the payload. Edit that source directly.
 - `python3 bin/sd_install.py --user` renders the skills during installation. The repository has no generated platform copies.
-- `python3 bin/sd_install.py --status` reports the serving checkout's commit. Use `--pull` to update that checkout.
+- `python3 bin/sd_install.py --status` reports the serving checkout's commit; in the serving tree it also counts the commits behind `origin/main`.
+  Run `make setup` in your working checkout to move the serving tree; `--pull` refuses a detached tree.
 
 ## Repository Conventions
 

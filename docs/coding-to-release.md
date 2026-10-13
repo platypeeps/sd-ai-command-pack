@@ -18,7 +18,7 @@ An agent runs the commands; the user owns scope, exceptions, and release permiss
 | Merge | `sd-ship merge --item ID --expected-head SHA --manual --watch --json` | User authorizes; pack checks; GitHub merges | Review, ownership, protection, and exact-head checks permit the merge; an unresolved review thread refuses it. |
 | Record delivery | `sd work deliver ID FULL_MERGE_SHA`; `sd-ship reconcile --item ID --json` | Shared database verifies evidence | Delivering merge is confirmed. Slice merges leave the item open. |
 | Close out every merge | Ship skill's [post-merge procedure](../skills/sd-ship/references/post-merge-closeout.md) | Agent inspects; user approves exact deletions | Findings have evidenced dispositions; retained work and cleanup candidates are inventoried. |
-| Activate and verify | Pack: `python3 bin/sd_install.py --pull`; `python3 bin/sd_install.py --verify --json`; system: component installer and check | Operator or authorized agent | Receipt, source, rendered files, PATH resolution, and bounded help checks pass. |
+| Activate and verify | Pack: `make setup` in the working checkout; `python3 bin/sd_install.py --verify --json`; system: component installer and check | Operator or authorized agent | Receipt, source, rendered files, PATH resolution, and bounded help checks pass. |
 
 `sd-plan` is an agent skill, not a shell executable.
 In Codex, invoke skills with `$sd-plan`, `$sd-review`, or `$sd-ship`.

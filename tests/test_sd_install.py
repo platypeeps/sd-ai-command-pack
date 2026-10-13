@@ -396,6 +396,57 @@ class ReconciliationTests(InstallerHarness):
         self.assertTrue(edited.exists(), "an edited file was deleted")
         self.assertIn("modified since it was installed", output)
 
+    def test_a_hand_edited_live_render_refuses_the_install(self):
+        """sd:3492: `make setup` runs unattended, so an edit is refused by name, not overwritten."""
+        checkout = self.make_checkout("sd-kept")
+        self.install(checkout)
+        edited = self.rendered("sd-kept")[0]
+        edited.write_text("someone edited this\n", encoding="utf-8")
+        skill = checkout / "skills" / "sd-kept" / sd_install.SKILL_FILE
+        skill.write_text("---\nname: sd-kept\n---\n\nnew payload\n", encoding="utf-8")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 1)
+        self.assertEqual(edited.read_text(encoding="utf-8"), "someone edited this\n")
+        self.assertIn(f"{edited}: modified since it was installed", out.getvalue())
+        self.assertIn("move it aside", out.getvalue())
+
+    def test_an_unowned_file_at_a_render_path_refuses_the_install(self):
+        """sd:3492: a file no receipt names is somebody's, whatever its kind."""
+        checkout = self.make_checkout("sd-kept")
+        foreign = self.rendered("sd-kept")[0]
+        foreign.parent.mkdir(parents=True)
+        foreign.write_text("not ours\n", encoding="utf-8")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_user(self.context(checkout), out), 1)
+        self.assertEqual(foreign.read_text(encoding="utf-8"), "not ours\n")
+        self.assertIn(f"{foreign}: not installed by this pack", out.getvalue())
+
+    def test_an_unowned_file_that_already_holds_the_render_is_adopted(self):
+        """A lost receipt over an unchanged payload loses nothing, so it installs."""
+        checkout = self.make_checkout("sd-kept")
+        self.install(checkout)
+        receipt = self.context(checkout).receipt
+        receipt.unlink()
+        self.install(checkout)
+        self.assertTrue(receipt.exists())
+
+    def test_a_legacy_render_with_its_recorded_digest_is_overwritten(self):
+        """The old fleet installer's receipt counts as ownership; its edits do not."""
+        checkout = self.make_checkout("sd-kept")
+        ctx = self.context(checkout)
+        target = self.rendered("sd-kept")[0]
+        target.parent.mkdir(parents=True)
+        target.write_text("legacy render\n", encoding="utf-8")
+        with unittest.mock.patch.object(
+            sd_install, "legacy_targets",
+            return_value=[(target, sd_install.digest(b"legacy render\n"))],
+        ):
+            self.install(checkout)
+            self.assertIn("probe surface", target.read_text(encoding="utf-8"))
+            target.write_text("legacy render, edited\n", encoding="utf-8")
+            ctx.receipt.unlink()
+            self.assertEqual(sd_install.cmd_user(ctx, io.StringIO()), 1)
+
     def test_a_retired_render_that_could_not_be_removed_is_tried_again(self):
         """sd:2927: the receipt keeps a row whose removal failed, so the next install retries it."""
         checkout = self.make_checkout("sd-kept", "sd-retired")
@@ -959,6 +1010,15 @@ class ConsentPromptTests(InstallerHarness):
         self.assertEqual(rc, 0)
         self.assertIn("no enabled reviewer entry", output)
         self.assertIsNone(self.consent_line(repo))
+
+    def test_an_unreadable_registry_names_its_reason_not_nobody_enabled(self):
+        """sd:3494: a typo in providers.yaml read as 'nobody is enabled'."""
+        self.seed_registry("providers: [\n")
+        reason = self.registry().read_or_report(self.home / sd_install.REGISTRY_RELATIVE)[1]
+        self.assertTrue(reason)
+        rc, output = self.run_cli("--repo", str(self.make_repo("typo")))
+        self.assertEqual(rc, 0)
+        self.assertIn(f"no enabled reviewer entry to offer ({reason})", output)
 
     # -- asked once, kept ever after -----------------------------------
 
@@ -1725,14 +1785,14 @@ class HookEdgeCaseTests(InstallerHarness):
         path.write_text("[]", encoding="utf-8")
         with self.assertRaises(SystemExit) as caught:
             sd_install.install_hook(path, self.spec())
-        self.assertIn("not a JSON object", str(caught.exception))
+        self.assertIn("not a JSON object; fix or move it, then re-run.", str(caught.exception))
 
     def test_a_non_object_hooks_key_is_refused(self):
         path = self.settings_path()
         path.write_text(json.dumps({"hooks": []}), encoding="utf-8")
         with self.assertRaises(SystemExit) as caught:
             sd_install.install_hook(path, self.spec())
-        self.assertIn("non-object 'hooks'", str(caught.exception))
+        self.assertIn("non-object 'hooks' key; fix or move it, then re-run.", str(caught.exception))
 
     def test_a_non_list_session_start_is_refused(self):
         path = self.settings_path()
@@ -1878,6 +1938,33 @@ class StatusTests(InstallerHarness):
         target.unlink()
         _, output = self.run_cli("--status")
         self.assertIn("1 missing", output)
+
+    def test_status_counts_a_modified_agent(self):
+        """sd:3494: `--user` renders agents too, so `--status` compares them."""
+        self.install()
+        agent = next((self.home / ".claude" / "agents").glob("sd-*.md"))
+        agent.write_text("edited\n", encoding="utf-8")
+        _, output = self.run_cli("--status")
+        self.assertIn("0 missing, 1 modified", output)
+
+    def test_status_names_registry_entries_the_two_files_do_not_share(self):
+        """sd:3494: the registry is seeded once, so a shipped entry stayed unseen until merged by hand."""
+        self.install()
+        shipped = (REPO_ROOT / sd_install.REGISTRY_NAME).read_text(encoding="utf-8")
+        # An entry no role list names, so the renamed copy still parses.
+        providers = sd_install.sibling("sd_registry").parse(shipped).providers
+        name = sorted(key for key, entry in providers.items() if not entry.ranks)[0]
+        target = self.home / sd_install.REGISTRY_RELATIVE
+        head, _, tail = shipped.partition("\nproviders:")
+        target.write_text(head + "\nproviders:" + tail.replace(f"\n  {name}:", f"\n  {name}-local:", 1),
+                          encoding="utf-8")
+        _, output = self.run_cli("--status")
+        self.assertIn(f"registry: shipped, not in {target}: {name}; merge by hand, --user never overwrites it",
+                      output)
+        self.assertIn(f"registry: in {target}, not shipped: {name}-local", output)
+        target.write_text("providers: [\n", encoding="utf-8")
+        _, output = self.run_cli("--status")
+        self.assertIn("registry: not compared (", output)
 
     def test_metadata_refusal_reports_unknown_comparisons_without_cleanup_advice(self):
         checkout = self.committed_checkout()
@@ -2174,7 +2261,8 @@ class PullBehaviourTests(InstallerHarness):
         subprocess.run(["git", "-C", str(repo), "checkout", "-q", "--detach"], check=True, capture_output=True)
         out = io.StringIO()
         self.assertEqual(sd_install.cmd_pull(self.context(repo), out), 1)
-        self.assertIn("error: serving checkout is on HEAD, not main; --pull refuses to move it.", out.getvalue())
+        self.assertIn("error: serving checkout is detached; --pull refuses to move it. "
+                      "Run `make setup` in your working checkout.", out.getvalue())
 
     def test_a_dry_run_pull_does_not_touch_git(self):
         repo = self.make_main_checkout()
@@ -2350,6 +2438,36 @@ class ServeTests(InstallerHarness):
         self.assertEqual(rc, 0, output)
         self.assertEqual(self.git(self.tree, "rev-parse", "HEAD"), self.merged)
         self.assertEqual((self.tree / ".venv" / "built").read_text(encoding="utf-8").strip(), self.merged)
+
+    def test_status_and_verify_in_the_serving_tree_count_commits_behind_origin_main(self):
+        """sd:3493: `--verify` compared the tree with its own receipt, so a pin sat behind unseen."""
+        self.commit_origin("two")
+        self.commit_origin("three")
+        self.assertEqual(self.serve()[0], 0)
+        ctx = self.context(self.tree)
+        out = io.StringIO()
+        sd_install.cmd_status(ctx, out)
+        self.assertIn("serving tree: 2 commit(s) behind origin/main; run `make setup` in your working checkout",
+                      out.getvalue())
+        out = io.StringIO()
+        sd_install.cmd_verify(ctx, out, as_json=True)
+        self.assertEqual(json.loads(out.getvalue())["serving"], {"behind": 2})
+
+    def test_a_failed_fetch_reads_as_unknown_not_zero_behind(self):
+        self.assertEqual(self.serve()[0], 0)
+        self.git(self.tree, "remote", "set-url", "origin", str(self.home / "missing"))
+        out = io.StringIO()
+        sd_install.cmd_verify(self.context(self.tree), out)
+        self.assertIn("serving tree: behind origin/main unknown (fetch failed:", out.getvalue())
+
+    def test_a_failed_count_reads_as_unknown(self):
+        self.assertEqual(self.serve()[0], 0)
+        with unittest.mock.patch.object(sd_install, "_git", return_value=(128, "", "bad revision")):
+            self.assertEqual(sd_install.serving_behind(self.context(self.tree)),
+                             {"behind": None, "error": "count failed: bad revision"})
+
+    def test_a_working_checkout_reports_no_serving_count(self):
+        self.assertIsNone(sd_install.serving_behind(self.context()))
 
     def test_a_commit_origin_lacks_is_fetched_from_the_working_checkout(self):
         self.assertEqual(self.serve()[0], 0)
@@ -2601,6 +2719,7 @@ class ServeTests(InstallerHarness):
         rc, output = self.serve()
         self.assertEqual(rc, 1)
         self.assertIn("has no origin remote", output)
+        self.assertIn("add one with `git remote add origin <url>`", output)
         self.assertFalse(self.tree.exists())
 
     def test_serve_refuses_a_path_that_is_not_a_clone(self):
@@ -4376,11 +4495,11 @@ class CodexMetadataTests(InstallerHarness):
         target.mkdir()
         planned = [(target, b"data", "invocation-policy:codex")]
         with self.assertRaises(sd_install.MetadataRefused):
-            sd_install.policy_collisions(planned, [])
+            sd_install.render_collisions(planned, [], [])
         target.rmdir()
         target.symlink_to(self.home / "missing")
         with self.assertRaises(sd_install.MetadataRefused):
-            sd_install.policy_collisions(planned, [])
+            sd_install.render_collisions(planned, [], [])
         surface.skill.write_bytes(b"---\ndisable-model-invocation: invalid\n---\n")
         self.assertEqual(sd_install.cmd_user(self.context_for(self.home / "checkout"), io.StringIO()), 1)
 
@@ -4563,6 +4682,22 @@ class StrictVerificationTests(InstallerHarness):
         out = io.StringIO()
         self.assertEqual(sd_install.cmd_verify(self.ctx, out), 1)
         self.assertIn("receipt_missing_or_unreadable", out.getvalue())
+
+    def test_text_mode_names_the_detail_and_the_remedy(self):
+        """sd:3494: text mode printed `component: code` alone; JSON held the rest."""
+        data = json.loads(self.ctx.receipt.read_bytes())
+        data["checkout"] = "/foreign"
+        self.ctx.receipt.write_text(json.dumps(data))
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_verify(self.ctx, out), 1)
+        self.assertIn("  receipt: receipt_foreign_checkout (recorded=/foreign)\n    fix: ", out.getvalue())
+        data["checkout"] = str(self.ctx.checkout)
+        self.ctx.receipt.write_text(json.dumps(data))
+        render = self.home / ".claude" / "skills" / "sd-probe" / "SKILL.md"
+        render.write_text("edited\n", encoding="utf-8")
+        out = io.StringIO()
+        self.assertEqual(sd_install.cmd_verify(self.ctx, out), 1)
+        self.assertIn(f"  render: render_modified (path={render})\n    fix: move it aside", out.getvalue())
 
     def test_source_mismatch_dirty_and_unreadable_refuse_smoke(self):
         receipt = self.receipt
