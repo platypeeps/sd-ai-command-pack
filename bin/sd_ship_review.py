@@ -1156,9 +1156,14 @@ class SharedReview:
             else:
                 passes[-1].update(execution_error=diagnostic, exit_code=124)
                 self.save(passes=passes, reviewed_head=None, phase="reviewed")
-            raise Refusal(f"local review {stage} watchdog expired after {error.diagnostic['allowed_seconds']}s; "
-                          + ("no provider pass reserved; " if stage == "planning" else f"reserved pass retained{consumed(passes)}; ")
-                          + "bounded diagnostics remain in the item ship receipt") from None
+            # sd:3478. A planning stage that timed out reserved no pass, so a rerun is retryable.
+            said = (f"local review {stage} watchdog expired after {error.diagnostic['allowed_seconds']}s; "
+                    + ("no provider pass reserved; " if stage == "planning" else f"reserved pass retained{consumed(passes)}; ")
+                    + "bounded diagnostics remain in the item ship receipt")
+            if stage == "planning":
+                raise Refusal(said, code="review_planning_timeout", boundary="runtime", state="retryable_failure",
+                              next_action="Run prepare again when the machine is less loaded.") from None
+            raise Refusal(said) from None
 
     def release_gate_failure(self, report: dict, head: str, passes: list[dict], exit_code: int) -> None:
         """Drop the pass a gate failure reserved, and refuse with the gate's words.

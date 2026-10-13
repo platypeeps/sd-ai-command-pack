@@ -5017,6 +5017,30 @@ roles:
         self.assertEqual(state["review_preflight_error"]["exit_code"], 0)
         self.assertEqual(state["review_preflight_error"]["stdout"]["tail"], "{}")
 
+    def test_a_refused_plan_is_retryable_and_says_prepare_spent_no_pass(self):
+        """sd:3478. Five lane entries failed on this refusal as a policy block; each passed when retried by hand."""
+        with patch.object(ship, "review_process", return_value=subprocess.CompletedProcess([], 0, "{}", "")):
+            with self.assertRaisesRegex(ship.Refusal, "no valid timing plan") as refused:
+                self.prepare()
+        answer = ship.failure("prepare", refused.exception)
+        self.assertEqual((answer["workflow"]["blocker"]["retryable"], answer["passes_spent"]), (True, 0))
+
+    def test_a_planning_watchdog_is_retryable_and_an_execution_watchdog_spent_its_pass(self):
+        """sd:3478. Only the planning stage reserves no pass; the lane retries only a refusal that spent none."""
+        original = ship.review_process
+        for stage in ("planning", "execution"):
+            with self.subTest(stage=stage):
+                def killed(root, argv, stage=stage, **kwargs):
+                    if stage == "execution" and "--explain" in argv:
+                        return original(root, argv, **kwargs)
+                    raise ship.ReviewTimeout({"kind": "watchdog_expired", "allowed_seconds": kwargs["timeout"]})
+                with patch.object(ship, "review_process", side_effect=killed):
+                    with self.assertRaisesRegex(ship.Refusal, f"{stage} watchdog expired") as refused:
+                        self.prepare()
+                answer = ship.failure("prepare", refused.exception)
+                self.assertEqual((answer["workflow"]["blocker"]["retryable"], answer["passes_spent"]),
+                                 (stage == "planning", int(stage == "execution")))
+
     def test_a_refused_plan_keeps_its_argv_and_plan_fields_past_the_tail(self):
         """sd:2646. The tail held 4 KiB of an explained report and cut off the fields the plan was refused on."""
         timing = {"candidates": [], "check_seconds": 3600, "execution_seconds": 21600, "phase_seconds": 1800,

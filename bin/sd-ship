@@ -353,7 +353,10 @@ def timing_plan(result: subprocess.CompletedProcess) -> dict:
     except (ValueError, KeyError, TypeError, AttributeError, RecursionError):
         valid = False
     if not valid:
-        raise Refusal("local review emitted no valid timing plan; no provider pass was reserved")
+        # sd:3478. Retryable: no pass was reserved, and a rerun by hand passed each time the lane met it.
+        raise Refusal("local review emitted no valid timing plan; no provider pass was reserved",
+                      code="timing_plan_invalid", boundary="runtime", state="retryable_failure",
+                      next_action="Run prepare again; the receipt's review_preflight_error keeps the plan if it repeats.")
     return plan
 
 
@@ -1281,6 +1284,19 @@ class Ship(SharedReview):
             self.save(copilot_reviews=updated)
 
     def prepare(self) -> dict:
+        """`prepare_head`; a refusal says how many review passes it spent (sd:3478), as the cap counts them.
+
+        The lane retries a retryable refusal only when that count is 0;
+        another failure says nothing, and the lane does not retry it.
+        """
+        before = self.history.spent(self.state)
+        try:
+            return self.prepare_head()
+        except Refusal as error:
+            error.details["passes_spent"] = self.history.spent(self.state) - before
+            raise
+
+    def prepare_head(self) -> dict:
         if self.state.get("phase") in ("merged", "merge_dispatch"):
             if self.args.deliver and not self.state.get("deliver"):
                 # A merge prepared associate-only carries `Item:` and no
