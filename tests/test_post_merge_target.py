@@ -27,10 +27,9 @@ class ThePostMergeTarget(unittest.TestCase):
         done = dry_run("SYSTEM_REPO=/example/system")
         self.assertEqual(done.returncode, 0, done.stderr)
         lines = [line for line in done.stdout.splitlines() if line.strip()]
-        self.assertEqual(len(lines), 3, done.stdout)
+        self.assertEqual(len(lines), 2, done.stdout)
         self.assertIn(f'/example/system/local-repo-sync/repo-sync.sh" refresh "{REPO_ROOT}"', lines[0])
-        self.assertIn("git symbolic-ref", lines[1])
-        self.assertIn('/example/system/local-project-dashboard/dashboard.sh" health', lines[2])
+        self.assertIn('/example/system/local-project-dashboard/dashboard.sh" health', lines[1])
 
     def test_the_system_checkout_defaults_to_the_home_folder(self) -> None:
         done = dry_run()
@@ -60,14 +59,15 @@ class ThePostMergeTargetRuns(unittest.TestCase):
 
     def post_merge(self) -> list[str]:
         env = {key: value for key, value in clean_environment().items() if key not in ("SD_LOCAL_GATE", "VENV")}
-        done = subprocess.run(["make", "--no-print-directory", "post-merge", f"SYSTEM_REPO={self.tmp / 'system'}",
-                               f"POST_MERGE_SETUP=echo setup >> {self.tmp}/calls"], cwd=self.checkout, env=env,
+        done = subprocess.run(["make", "--no-print-directory", "post-merge", f"SYSTEM_REPO={self.tmp / 'system'}"], cwd=self.checkout, env=env,
                               capture_output=True, text=True, check=False)
         self.assertEqual(done.returncode, 0, done.stderr)
         return (self.tmp / "calls").read_text(encoding="utf-8").splitlines()
 
-    def test_a_branch_checkout_is_installed_here_because_refresh_leaves_it_alone(self) -> None:
-        self.assertEqual(self.post_merge(), [f"repo-sync.sh refresh {self.checkout}", "setup", "dashboard.sh health"])
+    def test_a_branch_checkout_installs_nothing_outside_refresh(self) -> None:
+        # REGRESSION sd:3647 review: setup on a branch checkout ran after refresh released its locks,
+        # with services up and another lane free to start.
+        self.assertEqual(self.post_merge(), [f"repo-sync.sh refresh {self.checkout}", "dashboard.sh health"])
 
     def test_a_pinned_checkout_is_installed_by_refresh_alone(self) -> None:
         self.git("switch", "-q", "--detach")
