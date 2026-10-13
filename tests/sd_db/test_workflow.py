@@ -14,7 +14,7 @@ from sd_db.database import transaction
 from sd_db.migrate import initialise
 from sd_db.reads import item_by_id
 from sd_db.writes import add_note, set_item_fields
-from sd_db.writes import TransitionRefused
+from sd_db.writes import TransitionRefused, transition
 from sd_db.workflow import (
     HAND_KINDS, REPO_LESS_KINDS, TASK_STATUSES, MissingItem, MissingNote, StaleItem, WorkflowError,
     add_item_note, allowed_statuses, capture_task, change_status, edit_item, item_state,
@@ -174,6 +174,36 @@ class StatusGuards(WorkflowCase):
         with self.assertRaises(TransitionRefused):
             change_status(self.db, item, "ready", who="operator")
         self.assertEqual(allowed_statuses(self.db, item), [])
+
+    def vault_row(self):
+        item = create_item(self.db, kind="idea", title="Example idea", source="vault",
+                           external_id="blog-idea:System/Databases/Blog Ideas/Example idea.md",
+                           stage="inbox", fields={"kind": "blog-idea"})
+        self.db.commit()
+        return item
+
+    def test_a_vault_row_moves_by_stage_only(self):
+        """sd:3972: its status follows its stage through the plugin's map, so no status write may move it."""
+        item = self.vault_row()
+        self.assertEqual(allowed_statuses(self.db, item), [])
+        before, counts = item_state(self.db, item), self.counts()
+        for target in ("done", "ready", "planning"):
+            with self.subTest(target=target), \
+                    self.assertRaisesRegex(TransitionRefused, "blog-idea row from the vault.*by stage only"):
+                change_status(self.db, item, target, who="operator")
+        self.assertEqual(item_state(self.db, item), before)
+        self.assertEqual(self.counts(), counts)
+
+    def test_the_public_status_writer_refuses_a_vault_row_too(self):
+        """sd:3972: `sd_db.transition` is the library's public status write; only the import moves a base row."""
+        item = self.vault_row()
+        before, counts = item_state(self.db, item), self.counts()
+        for target in ("done", "planning"):
+            with self.subTest(target=target), \
+                    self.assertRaisesRegex(TransitionRefused, "blog-idea row from the vault.*by stage only"):
+                transition(self.db, item, target, who="operator")
+        self.assertEqual(item_state(self.db, item), before)
+        self.assertEqual(self.counts(), counts)
 
     def test_allowed_statuses_takes_the_state_the_caller_read(self):
         # sd:2380: a caller that read the item's state passes it, and the history is not read again.

@@ -565,6 +565,30 @@ class Promote(WritingCase):
         self.assertEqual(missing, [identity])
         self.assertEqual(reader.land(self.db, reader.freeze()).inserted, 1)
 
+    def test_a_snapshot_the_previous_import_took_still_reads_unchanged(self):
+        """Review round 1: a piece promoted from a row the older importer wrote keeps
+        `status` in its snapshot's fields; the body, control and all, compares as stored (sd:3972)."""
+        vault = self.root / "vault"
+        note = vault / "System/Databases/Blog Ideas/vault-idea.md"
+        note.parent.mkdir(parents=True)
+        (vault / "System/Databases/Topics").mkdir(parents=True)
+        control = "**Status:** `INPUT[inlineSelect(option(inbox), option(drafting)):status]`"
+        note.write_text("---\ntitle: Vault idea\nstatus: inbox\ndateCreated: 2026-01-02\n---\n"
+                        f"{control}\n\nThe angle.\n")
+        reader = vault_reader(vault)
+        reader.land(self.db, reader.freeze())
+        idea = self.db.execute("SELECT id FROM item WHERE title = 'Vault idea'").fetchone()[0]
+        promote(self.db, idea, who="operator")
+        fields = json.loads(self.db.execute("SELECT fields FROM item WHERE id = ?", (idea,)).fetchone()[0])
+        snapshot = fields["promoted_from"]["row"]
+        snapshot["fields"] = json.dumps({**json.loads(snapshot["fields"]), "status": "inbox"}, sort_keys=True)
+        snapshot["body"] = json.dumps({"markdown": f"{control}\n\nThe angle."}, sort_keys=True)
+        self.db.execute("UPDATE item SET fields = ? WHERE id = ?", (json.dumps(fields), idea))
+        self.db.commit()
+        counts = reader.land(self.db, reader.freeze())
+        self.assertEqual((counts.unchanged, counts.promoted_changed, counts.inserted), (1, 0, 0))
+        self.assertEqual(verify_source(self.db, reader, reader.freeze()), [])
+
     def test_an_edit_to_a_promoted_vault_note_is_reported_not_written(self):
         vault = self.root / "vault"
         note = vault / "System/Databases/Blog Ideas/vault-idea.md"

@@ -22,7 +22,7 @@ from .errors import SdDbError
 from .reads import item_by_id, item_notes
 from .recurrence import ANCHORS, RecurrenceError, first_barren_start, next_after, parse as parse_rule
 from .writes import (
-    STATUSES, TransitionRefused, add_note, create_item, resolve_note,
+    STATUSES, TransitionRefused, add_note, create_item, refuse_base_status, resolve_note,
     set_item_fields, transition,
 )
 
@@ -583,7 +583,8 @@ def allowed_statuses(connection: sqlite3.Connection, item: int, *, state: dict |
 
     A `TASK_STATUS_KINDS` item gets `TASK_STATUSES`; work that is not done
     gets every status but `done`; every other kind, and any item with a
-    queued or running assignment, gets none.
+    queued or running assignment, gets none. A vault base row is an `idea`,
+    so it gets none: it moves by stage only (sd:3972).
 
     The dashboard item screen offers exactly these choices, but only on the
     panels it renders: `task` and `TASK_STATUS_KINDS` items always, a `work`
@@ -681,6 +682,9 @@ def change_status(
             else:
                 way_out = "it is running, and no verb cancels a running assignment now that the runner is gone"
             raise TransitionRefused(f"item {item} has queued or running assignment {active['id']}; {way_out}")
+        # Before the same-status no-op too: a base row's status is its plugin
+        # map's answer to its stage, so no status write is its own (sd:3972).
+        refuse_base_status(row)
         if row["status"] == target:
             return state
         if row["kind"] == "work":
