@@ -184,10 +184,15 @@ def item_state(connection: sqlite3.Connection, item: int) -> dict:
         result = {"item": dict(row), "notes": [dict(note) for note in item_notes(connection, item)]}
     finally:
         connection.execute("RELEASE sd_workflow_state")
-    content = json.dumps(result, sort_keys=True, separators=(",", ":"),
-                         default=json_safe).encode("utf-8")
-    result["revision"] = hashlib.sha256(content).hexdigest()
+    result["revision"] = _revision(result)
     return result
+
+
+def _revision(state: dict) -> str:
+    """The hash of an `{"item", "notes"}` readback; `reads.revisions` hashes with it too."""
+    content = json.dumps(state, sort_keys=True, separators=(",", ":"),
+                         default=json_safe).encode("utf-8")
+    return hashlib.sha256(content).hexdigest()
 
 
 def _checked_state(connection: sqlite3.Connection, item: int, expected: str | None) -> dict:
