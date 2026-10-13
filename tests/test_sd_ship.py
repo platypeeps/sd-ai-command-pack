@@ -2690,9 +2690,8 @@ roles:
         with (self.root / ".git/info/exclude").open("a") as stream:
             stream.write("target/\n")
         clean = self.merged_worktree("clean")
-        with contextlib.chdir(clean):  # as `sd-ship -C <worktree> merge` runs: inside the tree it removes
-            self.assertEqual(ship.clean_up_merged(clean, "clean", head),
-                             {"removed": [str(clean), "clean", "origin/clean"], "kept": {}})
+        self.assertEqual(ship.clean_up_merged(self.root, "clean", head),
+                         {"removed": [str(clean), "clean", "origin/clean"], "kept": {}})
         self.assertFalse(clean.exists())
         dirty = self.merged_worktree("dirty")
         (dirty / "notes.txt").write_text("unsaved")
@@ -2710,6 +2709,21 @@ roles:
                 self.assertEqual(cleanup["kept"], {str(tree): why, name: "a kept worktree has it checked out"})
                 self.assertEqual(cleanup["removed"], [f"origin/{name}"])
                 self.assertTrue(tree.exists())
+
+    def test_a_merge_cleanup_keeps_the_worktree_it_runs_in(self):
+        """sd:3477. The lane merges in the builder's own worktree (`-C <entry worktree>`), and a
+        harness that resets its cwd between calls left no process inside: an idle builder lost its
+        directory mid-task. The entry's `remove` command takes it once the builder stops."""
+        head = _git(self.root, "rev-parse", "HEAD")
+        with (self.root / ".git/info/exclude").open("a") as stream:
+            stream.write("target/\n")
+        tree = self.merged_worktree("builder")
+        with contextlib.chdir(self.root):  # no process inside the tree, as between a builder's tool calls
+            cleanup = ship.clean_up_merged(tree, "builder", head)
+        self.assertTrue(tree.exists(), cleanup)
+        self.assertEqual(cleanup["removed"], ["origin/builder"])
+        self.assertEqual(cleanup["kept"], {str(tree): ship.MERGE_CHECKOUT,
+                                           "builder": "a kept worktree has it checked out"})
 
     def test_a_merge_cleanup_keeps_a_worktree_holding_ignored_data_that_is_not_build_output(self):
         """Review of sd:3013: `git status --porcelain` hides ignored files, and

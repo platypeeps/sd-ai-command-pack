@@ -559,7 +559,8 @@ The rules for them:
   A killed shell alone leaves its children holding a gate slot.
 - **After a lane merge, the runner lands the entry (sd:2568).** It deletes
   the remote branch with `--force-with-lease` while the worktree's tip is
-  the merged head. It never removes the worktree or its local branch: no
+  the merged head. Neither it nor `sd-ship merge`, which keeps the checkout
+  it runs in, removes the worktree or its local branch: no
   lock excludes the builder, and a write through a file handle opened before
   removal reaches an unlinked file and is lost. The cleanup names the host
   that holds the worktree, and the entry's `remove` holds the command to run

@@ -1744,46 +1744,19 @@ class Ship(SharedReview):
         return body
 
     def closing(self, body: str, title: str, deliver: bool) -> tuple[int, ...]:
-        """The items a merge closes beside the claimed one: each `Closes:` item, then each sd:N in the title.
-
-        A batched pull request names its items in its title, and the merge
-        closes each the way it closes a `Closes:` item (sd:3014). An
-        associate-only claim closes nothing: its title names context (sd:3365).
-        """
-        if self.args.no_item or not deliver:
+        """The items a merge closes beside the claimed one (`sd_ship_body.items_closed`); none without an item."""
+        if self.args.no_item:
             return ()
-        named = (*sd_ship_body.closes_named(body, self.args.item), *map(int, re.findall(r"\bsd:([0-9]+)\b", title)))
-        return tuple(dict.fromkeys(number for number in named if number != self.args.item))
+        return sd_ship_body.items_closed(body, title, self.args.item, deliver)
 
     def co_delivered(self) -> tuple[int, ...]:
         """The items the prepared body and title co-deliver (sd:1481, sd:3014)."""
         return self.closing(self.state.get("body") or "", self.state.get("title") or "", bool(self.state.get("deliver")))
 
     def check_closes(self, body: str, title: str, deliver: bool) -> None:
-        """Refuse a co-delivered item the merge could not close, before anything is published.
-
-        One pull request claims one item; `Closes:` and the title name the
-        others it delivers, and the merge closes them (operator ruling
-        2026-10-03, sd:3014). `Refs:` names related items and is not read
-        here: they stay open. An associate-only claim closes nothing, so its
-        `Closes:` line is refused rather than dropped (sd:3365).
-        """
-        if not self.args.no_item and not deliver and sd_ship_body.closes_named(body, self.args.item):
-            raise Refusal(f"an associate-only claim on sd:{self.args.item} closes nothing, and the body has a Closes: line",
-                          code="closes_need_delivery", boundary="input", state="operator_decision",
-                          next_action="Move the Closes: items to Refs:, or name them on the item's --deliver pull request.")
-        for number in self.closing(body, title, deliver):
-            row = self.connection.execute("SELECT repo FROM item WHERE id = ?", (number,)).fetchone()
-            if row is None:
-                raise Refusal(f"Closes: or the title names sd:{number}, which is no item; "
-                              "the merge closes every item they name",
-                              code="closes_item_unknown", boundary="input", state="operator_decision",
-                              next_action="Correct the Closes: line or the title, or move a related item to Refs:.")
-            if row["repo"] != self.item["repo"]:
-                raise Refusal(f"Closes: or the title names sd:{number}, which belongs to another repository; "
-                              "a merge closes only this repository's items",
-                              code="closes_item_foreign", boundary="input", state="operator_decision",
-                              next_action="Close that item from its own repository, or move it to Refs:.")
+        """Refuse a co-delivered item the merge could not close, before anything is published (`sd_ship_body.refuse_unclosable`)."""
+        if not self.args.no_item:
+            sd_ship_body.refuse_unclosable(self.connection, self.args.item, self.item["repo"], body, title, deliver)
 
     def item_status(self, number: int) -> str | None:
         row = self.connection.execute("SELECT status FROM item WHERE id = ?", (number,)).fetchone()
@@ -2251,9 +2224,10 @@ def clean_up_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
     """Remove a merged branch's clean worktrees, then its local and remote branch (sd:3006).
 
     `git worktree remove` takes the tree's ignored build output with it.
-    Whatever stays is named with its reason: the main checkout, uncommitted
-    changes, ignored files outside `BUILD_OUTPUT`, commits past the merged
-    head, or a process working inside.
+    Whatever stays is named with its reason: the main checkout, the checkout
+    this merge runs in (`MERGE_CHECKOUT`), uncommitted changes, ignored files
+    outside `BUILD_OUTPUT`, commits past the merged head, or a process
+    working inside.
     The merge stands whatever happens here, so a failed step is reported in
     the answer, never raised.
     """
@@ -2264,6 +2238,10 @@ def clean_up_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
 
 
 BUILD_OUTPUT = frozenset({"target", "node_modules", ".venv", "__pycache__"})
+#: Why the merge keeps the checkout it runs in (sd:3477). The lane merges in the builder's own worktree,
+#: and a builder whose harness resets its cwd between calls has no process inside to keep it: an idle
+#: builder lost its directory mid-task. The lane entry's `remove` command takes it once the builder stops.
+MERGE_CHECKOUT = "the merge ran in it, and its builder may still work there; remove it once the builder stops"
 # Config can hide untracked and ignored files from status, and `worktree
 # remove` deletes what status did not show, so cleanup pins the shape: every
 # untracked file, every submodule, and no fsmonitor or untracked cache.
@@ -2301,7 +2279,8 @@ def remove_merged(root: pathlib.Path, branch: str, merged: str) -> dict:
               for block in git(root, "worktree", "list", "--porcelain").split("\n\n") if block.strip()]
     main = pathlib.Path(blocks[0]["worktree"])
     for path in (pathlib.Path(block["worktree"]) for block in blocks if block.get("branch") == f"refs/heads/{branch}"):
-        why = "the main checkout" if path == main else kept_because(path, merged)
+        why = "the main checkout" if path == main else MERGE_CHECKOUT if path.resolve() == root.resolve() \
+            else kept_because(path, merged)
         if why:
             kept[str(path)] = why
         else:

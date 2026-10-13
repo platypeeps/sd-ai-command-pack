@@ -58,7 +58,7 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         with self.assertRaisesRegex(ship.Refusal, "no review pass was spent") as caught:
             review.review(HEAD)
         message = str(caught.exception)
-        self.assertIn("test (exit 1): stderr: AssertionError: sd2021 marker", message)
+        self.assertIn("test (exit 1): failing: AssertionError: sd2021 marker\nstderr: AssertionError: sd2021 marker", message)
         self.assertIn("lint (exit 2): stdout: E501 line too long", message)
 
     def test_the_refusal_names_the_failed_shards_and_the_whole_output(self):
@@ -123,6 +123,24 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         self.assertIn(f"so the next prepare reviews again: {summary}\ncheck (exit 2): ", message)
         self.assertLess(message.index("FAIL: test_sd2687_marker"), message.index("waiting for a gate slot"))
         self.assertIn("gate output: waiting for a gate slot", message)
+
+    def test_the_lanes_cut_of_the_refusal_names_the_failing_test_when_a_later_suite_passed(self):
+        """sd:3476. A system `make check` ends with whichever suite finished last, so 8 of 9 lane
+        reasons read `Ran 24 tests in 3.2s OK` and the failing test was only in the log."""
+        failed = "FAIL: test_sd3476_marker (tests.test_obsidian_review.DigestTest)\nTraceback (most recent call last):\n" \
+                 "AssertionError: 1 != 2\n"
+        passing = "." * 3000 + "\nRan 24 tests in 3.2s\n\nOK\n"
+        row = {"name": "check", "status": "fail", "exit_code": 2, "stdout": "o" * 3000, "stderr": failed + passing,
+               "output_path": "/tmp/run-check.log", "failed_shards": [], "failed_steps": ["suite leg-shared"],
+               "failure": failed + "...\n" + passing[-600:]}
+        summary = "sd-check fail (check fail: suite leg-shared; make target check) whole output: /tmp/run-check.log"
+        review, _process = self.context(report_changes={**CLEARED, "check": {"status": "fail", "exit_code": 1,
+                                                                             "summary": summary, "checks": [row]}})
+        with self.assertRaises(ship.Refusal) as caught:
+            review.review(HEAD)
+        kept = str(caught.exception)[:2000]  # sd_lane.REASON_CHARS, the cut a failed entry's reason keeps
+        for line in ("FAIL: test_sd3476_marker (tests.test_obsidian_review.DigestTest)", "AssertionError: 1 != 2"):
+            self.assertIn(f"failing: {line}", kept)
 
     def test_the_refusal_leaves_out_failing_lines_the_tails_already_hold(self):
         """sd:2608. A short run's failure lines are its tails; saying them twice only lengthens the refusal."""
@@ -256,6 +274,48 @@ class AClearedReviewOutlivesItsGate(unittest.TestCase):
         self.assertEqual(process.call_count, 0)
         self.assertEqual([entry["report"]["status"] for entry in review.state["passes"]], ["gate_failed"])
         self.assertIsNone(review.state.get("reviewed_head"))
+
+    def caught_up(self, status: str):
+        """The kept pass met at a clean catch-up merge of its head, as the lane's `--catch-up` prepare makes (sd:3474)."""
+        head = "d" * 40
+        review, process = self.context(state={**self.kept(), "base": "main"}, head=head)
+        carried = {"from": HEAD, "to": head, "patch_id": "e" * 40, "merges": [head]}
+        with self.gate(status) as gate, unittest.mock.patch.object(sd_ship_review, "carry_forward", return_value=carried), \
+                unittest.mock.patch("sd_ship_review.is_ancestor", return_value=True):
+            if status == "pass":
+                review.review(head)
+            else:
+                with self.assertRaisesRegex(ship.Refusal, "failed again at .*; its review pass stays kept"):
+                    review.review(head)
+        self.assertEqual(process.call_count, 0, "a reviewer was asked")
+        self.assertEqual(gate.call_args.args[1], head)
+        return review, head
+
+    def test_a_clean_catch_up_of_that_head_runs_only_the_gate(self):
+        """sd:3474. The lane prepares with --catch-up, so a busy base moved the head
+        before the retry: 26 of 32 kept passes paid a full review there."""
+        review, head = self.caught_up("pass")
+        [entry] = review.state["passes"]
+        self.assertEqual((entry["head"], entry["report"]["status"], entry["report"]["check"]["status"]),
+                         (HEAD, "clean", "pass"))
+        self.assertEqual((review.state["reviewed_head"], review.state["review_carry_forward"]["from"]), (head, HEAD))
+        self.assertIsNone(review.state["review_preflight_error"])
+
+    def test_a_gate_that_fails_at_the_catch_up_keeps_the_pass_and_records_no_carry(self):
+        review, _head = self.caught_up("fail")
+        self.assertEqual([entry["report"]["status"] for entry in review.state["passes"]], ["gate_failed"])
+        self.assertIsNone(review.state.get("reviewed_head"))
+        self.assertNotIn("review_carry_forward", review.state)
+
+    def test_a_catch_up_that_does_not_carry_is_reviewed(self):
+        """A base change beside the branch's files, or a merge with content of its own: `carry_forward` says no."""
+        head = "d" * 40
+        review, process = self.context(state={**self.kept(), "base": "main"}, head=head)
+        with self.gate("pass") as gate, unittest.mock.patch.object(sd_ship_review, "carry_forward", return_value=None), \
+                unittest.mock.patch("sd_ship_review.is_ancestor", return_value=True):
+            review.review(head)
+        self.assertEqual((process.call_count, gate.call_count), (2, 0))
+        self.assertEqual(len(review.state["passes"]), 2)
 
     def test_a_fix_after_it_is_verified_as_a_delta(self):
         fixed = "c" * 40

@@ -40,6 +40,8 @@ def git(root: pathlib.Path, *args: str) -> str:
 class Lane(unittest.TestCase):
     #: `repo.runner_merge` for a suite with no database (sd:3132); None reads the suite's own database.
     runner_merge: str | None = "manual"
+    #: Whether enqueue and retry read the item in the suite's database (sd:3473); most suites queue items it lacks.
+    checks_item = False
 
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
@@ -78,11 +80,26 @@ class Lane(unittest.TestCase):
             patcher = mock.patch.object(sd_lane, "default_runner_merge", lambda root: self.runner_merge)
             patcher.start()
             self.addCleanup(patcher.stop)
+        if not self.checks_item:
+            patcher = mock.patch.object(sd_lane, "check_item", lambda *args: None)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         # And each runs as the hub would, which hosts every lane whose `repo.lane_host` is NULL (sd:3003).
         if importlib.util.find_spec("sd_db") is not None:
             patcher = mock.patch("sd_db.database.served_by", lambda target, home=None: None, create=True)
             patcher.start()
             self.addCleanup(patcher.stop)
+
+    def register_items(self, count: int, remote: str = "https://github.com/example/pack.git") -> list[int]:
+        """This checkout as a repository with `remote`, and `count` items of it, as prepare reads them (sd:3473)."""
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            sd_db.upsert_repo(connection, str(self.repo), remote=remote, managed=1)
+            return [sd_db.create_item(connection, kind="task", title=f"item {number}", status="in_progress",
+                                      repo=str(self.repo)) for number in range(count)]
+        finally:
+            connection.close()
 
     def note(self, item: int, body: str, main: pathlib.Path, kind: str = "comment") -> str:
         self.notes.append((item, body, main))
@@ -112,6 +129,12 @@ class Lane(unittest.TestCase):
 
 
 class QueueOutlivesTheProcess(Lane):
+    checks_item = True  # the verbs run in a child process, which no patch here reaches
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.register_items(7)
+
     def sd_ship(self, cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
         env = {**os.environ, **self.environ}
         return subprocess.run([sys.executable, str(REPO_ROOT / "bin/sd-ship"), "lane", *args], cwd=cwd, env=env,
@@ -499,6 +522,31 @@ class Runner(Lane):
         self.assertEqual([(c[2], c[4], "--retry-review" in c) for c in self.calls],
                          [("prepare", "1", False), ("merge", "1", False), ("prepare", "2", False), ("merge", "2", False)])
         self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "merged"])
+
+    def test_a_failed_entry_keeps_the_failing_test_its_refusal_names(self) -> None:
+        """sd:3476. The reason was cut at 600 characters, before the gate refusal's failing lines."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        error = ("the repository gate failed after the review cleared: sd-check fail (check fail: suite leg-shared)\n"
+                 "check (exit 2): whole output: " + "/tmp/" + "o" * 700 + ".log\nfailing: FAIL: test_sd3476_marker")
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "reviewed", "error": error}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual(entry["status"], "failed")
+        self.assertIn("failing: FAIL: test_sd3476_marker", entry["reason"])
+
+    def test_a_database_older_than_the_library_stops_the_run_and_fails_nothing(self) -> None:
+        """sd:3475. On 2026-10-10 a pack landing built the library for schema 25 over a database at 24,
+        and the runner failed four entries in turn, each in no time, before anyone migrated."""
+        from sd_db.errors import SchemaTooOld
+        sd_lane.enqueue_entry(self.worktree("topic"), 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = sd_lane.sd_ship_workflow.failure("prepare", SchemaTooOld(24, 25))
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([(c[2], c[4]) for c in self.calls], [("prepare", "1")])
+        self.assertIn("sd:1", answer["stopped"])
+        one, two = self.entries()
+        self.assertEqual((one["status"], one["hub_retries"], two["status"]), ("pending", 1, "pending"))
+        self.assertIn("migrate", one["hub_fault"]["reason"])
 
     def test_a_hub_fault_in_the_merge_is_retried_too(self) -> None:
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
@@ -1286,6 +1334,67 @@ class Landing(Lane):
                                                         "elsewhere"), answer["post_merge"])
         self.assertEqual((self.notes[-1][1], self.note_kinds[-1]), (f"Post-merge: {answer['post_merge']}", "followup"))
 
+    def test_a_pinned_detached_checkout_runs_the_post_merge_that_refreshes_it(self) -> None:
+        """sd:3647. The hub's main checkout is pinned (detached): the fast-forward skips it, and `repo-sync.sh
+        refresh`, which the target runs, moves only a pinned checkout. So the target must run for it."""
+        tree, head = self.topic()
+        git(self.repo, "switch", "-q", "--detach")
+        self.post_merge("touch ran")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertEqual(self.entries()[0]["status"], "merged")
+        self.assertEqual(answer.get("post_merge"), f"make post-merge passed in {self.repo}")
+        self.assertTrue((self.repo / "ran").exists())
+
+    def pin_at_a_base_without_the_target(self) -> str:
+        """The real bootstrap: origin/main tracks a Makefile with no `post-merge`; the main checkout is pinned there."""
+        (self.repo / "Makefile").write_text("other:\n\t@echo other\n", encoding="utf-8")
+        git(self.repo, "add", "Makefile")
+        git(self.repo, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "-m", "base")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(self.repo, "switch", "-q", "--detach")
+        return git(self.repo, "rev-parse", "HEAD")
+
+    def land_a_makefile(self, text: str) -> str:
+        upstream = self.tmp / "upstream"
+        subprocess.run(["git", "clone", "-q", str(self.origin), str(upstream)], check=True, env=clean_environment())
+        (upstream / "Makefile").write_text(text, encoding="utf-8")
+        git(upstream, "add", "Makefile")
+        git(upstream, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "-m", "target")
+        git(upstream, "push", "-q", "origin", "main")
+        return git(upstream, "rev-parse", "HEAD")
+
+    def test_a_checkout_pinned_at_a_base_without_the_target_runs_origins_target_and_stays_put(self) -> None:
+        """sd:3647. The first landing cannot rely on the old Makefile. The lane runs origin's, with the pin still
+        checked out: the recipe's `repo-sync.sh refresh` stops the consumers, records the old SHA and moves it."""
+        tree, head = self.topic()
+        base = self.pin_at_a_base_without_the_target()
+        landed = self.land_a_makefile("post-merge:\n\tgit rev-parse HEAD >> head.out\n")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertNotEqual(base, landed)
+        self.assertEqual(git(self.repo, "rev-parse", "HEAD"), base)
+        self.assertEqual((self.repo / "Makefile").read_text(encoding="utf-8"), "other:\n\t@echo other\n")
+        self.assertEqual((self.repo / "head.out").read_text(encoding="utf-8").split(), [base])
+        self.assertEqual(answer.get("post_merge"), f"make post-merge passed in {self.repo}")
+
+    def test_a_pinned_checkout_whose_origin_has_no_target_runs_nothing(self) -> None:
+        tree, head = self.topic()
+        base = self.pin_at_a_base_without_the_target()
+        self.land_a_makefile("other:\n\t@echo other again\n")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertEqual((git(self.repo, "rev-parse", "HEAD"), "post_merge" in answer), (base, False))
+
+    def test_a_pinned_checkout_that_cannot_fetch_origin_says_unknown_not_no_target(self) -> None:
+        tree, head = self.topic()
+        self.pin_at_a_base_without_the_target()
+        self.merge_lands(tree, 1, head)
+        self.origin.rename(self.origin.with_name("origin-moved"))
+        answer = self.drain()
+        self.assertTrue(answer["post_merge"].startswith("make post-merge unknown: git fetch failed"), answer)
+        self.assertEqual(self.note_kinds[-1], "followup")
+
 class Killed(BaseException):
     """A process killed between two steps: nothing after the raise runs, and no `except Exception` catches it."""
 
@@ -1458,6 +1567,80 @@ class Publishing(SharedQueue):
         with self.assertRaisesRegex(sd_lane.LaneError, "already queued"):
             sd_lane.enqueue_entry(self.feature, 1, "t", self.body, self.environ, claim="deliver")
         self.assertEqual(len(self.entries()), 1)
+
+
+class ItemChecks(SharedQueue):
+    """sd:3473. Enqueue refuses what prepare refuses on the item, before it pushes or queues anything.
+
+    Eight system entries waited 3 to 32 minutes at the queue's head, then
+    failed in seconds on an item of another repository, a `Closes:` item of
+    another repository, or an item with no registered repository.
+    """
+
+    checks_item = True
+
+    def setUp(self) -> None:
+        super().setUp()
+        [self.own] = self.register_items(1)
+        import sd_db
+        other = self.tmp / "other"
+        other.mkdir()
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            sd_db.upsert_repo(connection, str(other), remote="https://github.com/example/other.git", managed=1)
+            self.foreign = sd_db.create_item(connection, kind="task", title="theirs", status="in_progress", repo=str(other))
+            self.unregistered = sd_db.create_item(connection, kind="task", title="nowhere", status="in_progress")
+        finally:
+            connection.close()
+        self.tree, _ = self.committed("topic", "work")
+
+    def refused(self, item: int, title: str = "t", body: str = "Words.\n", claim: str = "deliver") -> sd_lane.LaneError:
+        self.body.write_text(body, encoding="utf-8")
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.enqueue_entry(self.tree, item, title, self.body, self.environ, claim=claim)
+        self.assertEqual((self.rows(), "push" in self.git_verbs, self.remote_tip("topic")), ([], False, None))
+        return refused.exception
+
+    def test_an_item_of_another_repository_is_refused_before_any_push(self) -> None:
+        refused = self.refused(self.foreign)
+        self.assertEqual(refused.code, "item_repository_mismatch")
+        self.assertIn(f"item sd:{self.foreign} belongs to example/other, not example/pack", str(refused))
+
+    def test_an_item_with_no_registered_repository_is_refused_before_any_push(self) -> None:
+        self.assertIn("requires an item with a registered repository", str(self.refused(self.unregistered)))
+
+    def test_a_closes_line_or_title_naming_another_repositorys_item_is_refused(self) -> None:
+        for title, body in (("t", f"Closes: sd:{self.foreign}\n"), (f"Two fixes (sd:{self.own}, sd:{self.foreign})", "")):
+            with self.subTest(title=title):
+                refused = self.refused(self.own, title, body)
+                self.assertEqual(refused.code, "closes_item_foreign")
+                self.assertIn(f"names sd:{self.foreign}, which belongs to another repository", str(refused))
+
+    def test_an_associate_only_claim_with_a_closes_line_is_refused(self) -> None:
+        refused = self.refused(self.own, body=f"Closes: sd:{self.own + 99}\n", claim="associate-only")
+        self.assertEqual(refused.code, "closes_need_delivery")
+
+    def test_an_item_of_this_repository_is_queued(self) -> None:
+        self.body.write_text(f"Closes: sd:{self.own}\n", encoding="utf-8")
+        entry = sd_lane.enqueue_entry(self.tree, self.own, f"One fix (sd:{self.own})", self.body, self.environ,
+                                      claim="deliver")
+        self.assertEqual(([row["item"] for row in self.entries()], entry["status"]), ([self.own], "pending"))
+
+    def test_retry_checks_the_item_again(self) -> None:
+        """A retry queues the same item again; one moved to another repository since refuses as enqueue does."""
+        sd_lane.enqueue_entry(self.tree, self.own, "t", self.body, self.environ, claim="deliver")
+        sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed"))
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            connection.execute("UPDATE item SET repo = (SELECT repo FROM item WHERE id = ?) WHERE id = ?",
+                               (self.foreign, self.own))
+        finally:
+            connection.close()
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, self.own, self.environ)
+        self.assertEqual(refused.exception.code, "item_repository_mismatch")
+        self.assertEqual([row["status"] for row in self.entries()], ["failed"])
 
 
 class ClaimAndLease(SharedQueue):
