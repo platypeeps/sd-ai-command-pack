@@ -19,6 +19,13 @@ stages in the rows with the set in the frozen source, so a row that stored
 asked. `item.status` beside it is the declared map's answer to the same
 note: the ladder is the plugin's, the six statuses are the system's.
 
+**Freeze and land share one normalization (sd:3972).** A Meta Bind line,
+any line holding `INPUT[`, was the dropdown the operator moved a row with;
+`stage` replaces it, so the body drops it. `fields` drops `status`, which is
+`stage`, and `mirror-hash`, which belongs to the mirror file, and its `kind`
+is the declared one. The verify then compares the stored row with the
+normalized source, so it proves the land wrote the normalized form.
+
 **Every failure refuses the whole sitting and writes nothing.** A word the
 map does not name, a due value that is not a date, two plugins declaring one
 kind, a plugin the pack could not read: each stops the import and names what
@@ -57,6 +64,12 @@ DEFAULT_VAULT = "~/Documents/Obsidian Vault"
 LIST_SECONDS = 120
 
 DUE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+#: What marks a Meta Bind input line, as `grep -c 'INPUT\['` counts them.
+META_BIND = "INPUT["
+
+#: Frontmatter keys a row keeps elsewhere: `status` is `stage`, `mirror-hash` is the mirror file's.
+NOT_FIELDS = frozenset({"status", "mirror-hash"})
 
 
 def vault_root(environ: dict[str, str] | None = None) -> Path:
@@ -125,6 +138,11 @@ def declared_bases(entries: list[dict[str, Any]],
             notes.append(f"{prefix}: declares no dated kinds; nothing imported")
             continue
         store = entry["store"]
+        if store.get("driver") == "db":
+            # The flip of this one value is the cutover: the rows are the
+            # source from then on, and notes imported over them would be older.
+            raise MigrationRefused(f"plugin {prefix}'s `store.driver` is 'db', so its rows are the "
+                                   f"source and the vault holds only their mirror; nothing imported")
         variable = str(store["root"])[1:]
         if variable == "OBSIDIAN_VAULT":
             root = vault_root(env)
@@ -176,9 +194,10 @@ class Reader:
                     f"would import as zero notes"
                 )
             found = sorted(directory.rglob("*.md"))
-            notes.append(f"{SOURCE}: {len(found)} {kind} note(s) under {base.relative}")
+            dropped = 0
             for path in found:
-                matter, body = read_frontmatter(path.read_text(encoding="utf-8"))
+                matter, body, removed = normalized(path)
+                dropped += removed
                 stage = str(matter.get("status") or "").strip()
                 if not stage:
                     raise MigrationRefused(
@@ -192,7 +211,6 @@ class Reader:
                         f"manifest before the import writes a status it guessed."
                     )
                 identity = f"{kind}:{path.relative_to(base.root).as_posix()}"
-                fields = {"kind": kind, **{str(key): value for key, value in matter.items()}}
                 records[identity] = Record(
                     identity=identity,
                     payload={
@@ -201,10 +219,12 @@ class Reader:
                         "status": base.status[stage],
                         "created": str(matter.get("dateCreated") or "").strip(),
                         "due": _due(path, base, matter),
-                        "fields": digest(fields),
+                        "fields": digest(_fields(kind, matter)),
                         "body": digest({"markdown": body}),
                     },
                 )
+            notes.append(f"{SOURCE}: {len(found)} {kind} note(s) under {base.relative}, "
+                         f"{dropped} Meta Bind line(s) dropped")
         return Frozen(source=self.name, records=records, notes=notes)
 
     # ------------------------------------------------------------ import
@@ -215,9 +235,7 @@ class Reader:
         for identity in sorted(frozen.records):
             payload = frozen.records[identity].payload
             kind, _, relative = identity.partition(":")
-            path = roots[kind] / relative
-            matter, body = read_frontmatter(path.read_text(encoding="utf-8"))
-            fields = {"kind": kind, **{str(key): value for key, value in matter.items()}}
+            matter, body, _ = normalized(roots[kind] / relative)
             _, what = upsert_item(
                 connection,
                 source=SOURCE,
@@ -230,7 +248,7 @@ class Reader:
                 due=payload["due"],
                 path=relative,
                 stage=payload["stage"],
-                fields=fields,
+                fields=_fields(kind, matter),
                 body={"markdown": body},
             )
             counts.record(what)
@@ -261,6 +279,25 @@ class Reader:
                 },
             )
         return held
+
+
+def normalized(path: Path) -> tuple[dict[str, Any], str, int]:
+    """`(frontmatter, body, dropped)` of one note, as both freeze and land read it.
+
+    The frontmatter keeps `status`, which is the stage; `_fields` drops it.
+    `dropped` counts the Meta Bind lines the body lost. It splits on line
+    feeds alone, so a body with none comes back byte for byte.
+    """
+    matter, body = read_frontmatter(path.read_text(encoding="utf-8"))
+    lines = body.split("\n")
+    kept = [line for line in lines if META_BIND not in line]
+    return matter, "\n".join(kept), len(lines) - len(kept)
+
+
+def _fields(kind: str, matter: dict[str, Any]) -> dict[str, Any]:
+    """A row's `fields`: the frontmatter without `NOT_FIELDS`, and the declared kind."""
+    return {**{str(key): value for key, value in matter.items() if str(key) not in NOT_FIELDS},
+            "kind": kind}
 
 
 def _due(path: Path, base: Base, matter: dict[str, Any]) -> str | None:
