@@ -28,13 +28,13 @@ vault and the dashboard's Documents tab by default, and reaches an
 outward destination — Notion, Google Drive — only where the user designated that
 document for it.
 
-## The fourteen sections, in output order
+## The fifteen sections, in output order
 
 Above them all sits the banner — two lines, `sd-status: <repo path>` and the
 `pack:` line naming the checkout these tools came from with its branch and
 head. It is a header rather than a section: it names where the report ran and
 what ran it, and nothing under it is a finding. Count it and the report
-opens with fifteen top-level lines; the fourteen below are the sections.
+opens with sixteen top-level lines; the fifteen below are the sections.
 
 | Section | What it shows |
 |---|---|
@@ -45,8 +45,9 @@ opens with fifteen top-level lines; the fourteen below are the sections.
 | `work items` | derived item status from `docs/work`, counted, archived ones counted and not listed |
 | `contributions (this repo, shared database order)` | upstream activity, local evidence, and dependency readiness from the shared contribution projection |
 | `open pull requests` | open pull requests, via the same code path as `sd-pr-state` |
+| `merge lane (this repo, shared database)` | each item's newest lane entry that has not merged or been cancelled, with its state; `sd-ship lane list` is the full view |
 | `detected setup` | mode, lowering reason, shared-tree paths to move, and detected check entrypoints |
-| `issues (this repo, from the index)` | indexed issues for this repository, split into the ones the index says need you and the rest |
+| `issues (this repo, shared database)` | open GitHub issues for this repository from the shared database, as context; no row in `pending` comes from them |
 | `jira (shared database, all repositories)` | the operator's Jira involvement from the shared database, across every repository: one line per ticket, key and state, open rows first, then rows closed within seven days. Not scoped to the checkout |
 | `protection` | branch-protection **enforcement**, gap by gap, plus the merge-settings and fleet-baseline flags |
 | `resumable handoffs` | the pending local packet for this directory (**read, never consumed**) |
@@ -90,19 +91,18 @@ predict `pending` from this table before running the command.
 | 10 | `status-unreadable` | `w` | yes | `work item` | an item whose prd.md will not yield a status |
 | 20 | `unresolved-concern` | `c` | yes | `## Review ledger` | a review concern left open by its own ledger row |
 | 20 | `unreadable-concern-row` | `c` | yes | `ledger row nothing can classify` | a C- row whose disposition this reader does not recognise |
+| 25 | `lane-entry-failed` | `l` | yes | `merge lane queue` | an item whose newest lane entry failed or was skipped short of a merge |
 | 30 | `pr-check-failing` | `p` | yes | `open pull requests` | an open pull request with a failing check |
 | 30 | `pr-check-missing` | `p` | yes | `open PRs + protection` | an open pull request reporting no check the branch requires |
 | 30 | `dirty-tree-with-open-pr` | `p` | yes | `git + open PRs` | uncommitted work on a branch that already has a pull request |
 | 40 | `protection-gap` | `g` | yes | `protection` | an enforcement leg missing on the default branch |
 | 45 | `accepted-gap-standing` | `g` | no | `.github/sd-status.json accepted_gaps[]` | a written acceptance whose until condition nothing re-reads |
-| 50 | `issue-needs-you` | `i` | no | `dashboard index` | an indexed issue the index says is waiting on you |
 | 60 | `pr-needs-action` | `p` | no | `open pull requests` | an open pull request waiting on a review or a merge |
 | 75 | `mirror-sync-pending` | `n` | no | `~/.claude/pending-mirror-syncs/` | a published document whose designated mirror is not written yet |
 | 80 | `unmerged-branch` | `b` | no | `origin heads` | a branch on origin with no open pull request carrying it |
 | 90 | `parked-concern` | `c` | no | `## Review ledger` | a concern parked behind a trigger nobody is watching |
 | 100 | `idle-planning` | `w` | yes | `item activity + idle threshold` | an item idle in planning past the 45-day threshold |
 | 100 | `undated-planning` | `w` | yes | `work item` | a planning item with no date to age it by |
-| 110 | `issue-open` | `i` | no | `dashboard index` | an indexed issue open against this repository |
 | 120 | `source-marker` | `t` | no | `marker scan over the index` | a marker left in tracked source |
 | 125 | `undisclosed-tool` | `k` | no | `skill claims bin/<tool>` | a skill disclosing a tool that is not built |
 
