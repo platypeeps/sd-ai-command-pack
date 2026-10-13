@@ -508,8 +508,8 @@ class IssueCollection(unittest.TestCase):
         for field, changed in (("updated_at", "2026-09-10T02:00:00Z"), ("state", "closed"), ("state_reason", "completed"),
                                ("labels", [{"name": "bug"}])):
             api = IssueApi()
-            count = []
-            def detail():
+            count: list[bool] = []
+            def detail(api=api, count=count, field=field, changed=changed):
                 count.append(True)
                 return api.issue if len(count) == 1 else {**api.issue, field: changed}
             api.rows[ROOT + "/issues/9"] = detail

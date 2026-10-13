@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import connect, upsert_repo
+from sd_db import connect, upsert_repo, writing
 from sd_db.migrate import initialise
 from sd_db.testing.wire import hub_only
 from sd_db.workflow import StaleItem, WorkflowError
@@ -62,6 +62,17 @@ class WritingCase(unittest.TestCase):
     def cutover(self):
         preview = cutover_preview(self.db, str(self.repo))
         return cutover_pieces(self.db, str(self.repo), expected_fingerprint=preview["fingerprint"], who="operator")
+
+
+class Rewrite(unittest.TestCase):
+    """sd:3485. `_rewrite` puts each field's own value on its line, as written."""
+
+    def test_each_changed_field_keeps_its_own_value_and_backslashes_stay_literal(self):
+        text = "---\ntitle: Old\nstatus: drafting\npublished_urls:\n  gdrive: null\ntip: none\n---\nBody\n"
+        rewritten = writing._rewrite(text, {"title": r"A \1 B", "status": "review", "tip": r"\g<0>",
+                                            "published_urls": {"gdrive": "https://example.test/a"}})
+        self.assertEqual(rewritten, '---\ntitle: "A \\\\1 B"\nstatus: review\n'
+                                    'published_urls:\n  gdrive: "https://example.test/a"\ntip: "\\\\g<0>"\n---\nBody\n')
 
 
 class PieceFiles(WritingCase):
@@ -119,6 +130,15 @@ class SharedTransitions(WritingCase):
         for bad in ("", "   ", None, 7, "two\nlines", "tab\tinside"):
             with self.subTest(title=bad), self.assertRaises(WorkflowError):
                 update_piece_metadata(self.db, self.item, {"title": bad}, who="operator")
+        self.assertEqual(piece_state(self.db, self.item), before)
+        self.assertEqual(self.index.read_bytes(), source)
+
+    def test_an_unknown_url_destination_is_refused_and_writes_nothing(self):
+        """sd:3485: the check inside the write names the allowed destinations."""
+        before, source = piece_state(self.db, self.item), self.index.read_bytes()
+        for key in ("published_urls", "review_urls"):
+            with self.subTest(key=key), self.assertRaisesRegex(WorkflowError, f"unknown {key} destination elsewhere"):
+                update_piece_metadata(self.db, self.item, {key: {"elsewhere": "https://example.test/a"}}, who="operator")
         self.assertEqual(piece_state(self.db, self.item), before)
         self.assertEqual(self.index.read_bytes(), source)
 

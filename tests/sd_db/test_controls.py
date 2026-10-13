@@ -11,7 +11,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import sd_db
 from sd_db import (
     ledger,
     provider_controls,
@@ -687,7 +686,8 @@ class NoVerbNamesItsOperatorForTheCaller(unittest.TestCase):
         arguments = function.args
         positional = arguments.posonlyargs + arguments.args
         defaults = [None] * (len(positional) - len(arguments.defaults)) + list(arguments.defaults)
-        pairs = list(zip(positional, defaults)) + list(zip(arguments.kwonlyargs, arguments.kw_defaults))
+        pairs = (list(zip(positional, defaults, strict=True))
+                 + list(zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True)))
         return [(argument, default) for argument, default in pairs if argument.arg in ("who", "principal")]
 
     def sources(self):

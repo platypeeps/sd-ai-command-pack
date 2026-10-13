@@ -413,7 +413,7 @@ class JiraTests(unittest.TestCase):
         for (code, located), reason in cases.items():
             with self.subTest(code=code, location=located):
                 headers = {"Location": elsewhere.url + "/rest/api/3/myself"} if located else {}
-                jira = Recorder(lambda: (code, headers, b""))
+                jira = Recorder(lambda code=code, headers=headers: (code, headers, b""))
                 self.addCleanup(jira.close)
                 config = {**settings(JIRA_ENV), "base": jira.url}
                 with patch("sd_db.shadow_jira.settings", return_value=config):
