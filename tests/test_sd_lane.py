@@ -523,6 +523,17 @@ class Runner(Lane):
                          [("prepare", "1", False), ("merge", "1", False), ("prepare", "2", False), ("merge", "2", False)])
         self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "merged"])
 
+    def test_a_failed_entry_keeps_the_failing_test_its_refusal_names(self) -> None:
+        """sd:3476. The reason was cut at 600 characters, before the gate refusal's failing lines."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        error = ("the repository gate failed after the review cleared: sd-check fail (check fail: suite leg-shared)\n"
+                 "check (exit 2): whole output: " + "/tmp/" + "o" * 700 + ".log\nfailing: FAIL: test_sd3476_marker")
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "reviewed", "error": error}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual(entry["status"], "failed")
+        self.assertIn("failing: FAIL: test_sd3476_marker", entry["reason"])
+
     def test_a_database_older_than_the_library_stops_the_run_and_fails_nothing(self) -> None:
         """sd:3475. On 2026-10-10 a pack landing built the library for schema 25 over a database at 24,
         and the runner failed four entries in turn, each in no time, before anyone migrated."""

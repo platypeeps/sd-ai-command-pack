@@ -58,7 +58,7 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         with self.assertRaisesRegex(ship.Refusal, "no review pass was spent") as caught:
             review.review(HEAD)
         message = str(caught.exception)
-        self.assertIn("test (exit 1): stderr: AssertionError: sd2021 marker", message)
+        self.assertIn("test (exit 1): failing: AssertionError: sd2021 marker\nstderr: AssertionError: sd2021 marker", message)
         self.assertIn("lint (exit 2): stdout: E501 line too long", message)
 
     def test_the_refusal_names_the_failed_shards_and_the_whole_output(self):
@@ -123,6 +123,24 @@ class GateFailureSpendsNoPass(unittest.TestCase):
         self.assertIn(f"so the next prepare reviews again: {summary}\ncheck (exit 2): ", message)
         self.assertLess(message.index("FAIL: test_sd2687_marker"), message.index("waiting for a gate slot"))
         self.assertIn("gate output: waiting for a gate slot", message)
+
+    def test_the_lanes_cut_of_the_refusal_names_the_failing_test_when_a_later_suite_passed(self):
+        """sd:3476. A system `make check` ends with whichever suite finished last, so 8 of 9 lane
+        reasons read `Ran 24 tests in 3.2s OK` and the failing test was only in the log."""
+        failed = "FAIL: test_sd3476_marker (tests.test_obsidian_review.DigestTest)\nTraceback (most recent call last):\n" \
+                 "AssertionError: 1 != 2\n"
+        passing = "." * 3000 + "\nRan 24 tests in 3.2s\n\nOK\n"
+        row = {"name": "check", "status": "fail", "exit_code": 2, "stdout": "o" * 3000, "stderr": failed + passing,
+               "output_path": "/tmp/run-check.log", "failed_shards": [], "failed_steps": ["suite leg-shared"],
+               "failure": failed + "...\n" + passing[-600:]}
+        summary = "sd-check fail (check fail: suite leg-shared; make target check) whole output: /tmp/run-check.log"
+        review, _process = self.context(report_changes={**CLEARED, "check": {"status": "fail", "exit_code": 1,
+                                                                             "summary": summary, "checks": [row]}})
+        with self.assertRaises(ship.Refusal) as caught:
+            review.review(HEAD)
+        kept = str(caught.exception)[:2000]  # sd_lane.REASON_CHARS, the cut a failed entry's reason keeps
+        for line in ("FAIL: test_sd3476_marker (tests.test_obsidian_review.DigestTest)", "AssertionError: 1 != 2"):
+            self.assertIn(f"failing: {line}", kept)
 
     def test_the_refusal_leaves_out_failing_lines_the_tails_already_hold(self):
         """sd:2608. A short run's failure lines are its tails; saying them twice only lengthens the refusal."""

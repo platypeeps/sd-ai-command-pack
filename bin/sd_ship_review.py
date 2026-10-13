@@ -1426,6 +1426,26 @@ def shard_lines(value: object) -> list:
 FAILING_TAIL_CHARS = 1200
 #: How many failed-shard lines a receipt row and a refusal carry.
 FAILED_SHARDS_NAMED = 20
+#: A line that says which test failed and why: unittest's `FAIL:`/`ERROR:`, a traceback, an exception (sd:3476).
+FAILING_LINE = re.compile(r"^(?:FAIL|ERROR): |^Traceback \(|^\w*(?:Error|Exception)\b")
+#: How many of those lines lead a failing check's entry, and how much of each.
+FAILING_LINES_NAMED, FAILING_LINE_CHARS = 8, 300
+
+
+def leading_lines(row: dict) -> list[str]:
+    """What leads one failing check's entry: its failed shards, the whole output's path, then its failing lines.
+
+    The failing lines are the last `FAILING_LINE`s of `sd-check`'s `failure`
+    excerpt and the streams (sd:3476). A run of many suites ends with
+    whichever finished last, so the tail of a failed `make check` read
+    `Ran 24 tests ... OK`, and the lane's cut of the refusal held nothing
+    else: 8 of 9 system gate failures needed the log opened.
+    """
+    found = [f"failed {line}" for line in shard_lines(row.get("failed_shards"))[:FAILED_SHARDS_NAMED]]
+    found += [f"whole output: {row['output_path']}"] * bool(row.get("output_path"))
+    text = "\n".join(str(row.get(key) or "") for key in ("failure", "stderr", "stdout"))
+    failing = [line.rstrip()[:FAILING_LINE_CHARS] for line in text.splitlines() if FAILING_LINE.search(line)]
+    return found + [f"failing: {line}" for line in list(dict.fromkeys(failing))[-FAILING_LINES_NAMED:]]
 
 
 def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]:
@@ -1438,7 +1458,8 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
 
     The failed shards and the file holding the whole output come first: a
     shard that failed early in a long run is in neither tail, and the tails
-    are what a lane log cuts again (sd:2558). Each other failed step, such as
+    are what a lane log cuts again (sd:2558). The lines that name the failing
+    test follow (`leading_lines`, sd:3476). Each other failed step, such as
     a make target, follows the tails, and then the failing lines the tails
     do not already hold (sd:2608).
     """
@@ -1446,8 +1467,7 @@ def failing_check_tails(rows: Any, limit: int = FAILING_TAIL_CHARS) -> list[str]
     for row in rows if isinstance(rows, list) else []:
         if not isinstance(row, dict) or row.get("status") != "fail":
             continue
-        found = [f"failed {line}" for line in shard_lines(row.get("failed_shards"))[:FAILED_SHARDS_NAMED]]
-        found += [f"whole output: {row['output_path']}"] * bool(row.get("output_path"))
+        found = leading_lines(row)
         streams = [(stream, str(row.get(stream) or "").strip()) for stream in ("stderr", "stdout")]
         said = [f"{stream}: {'...' if len(text) > limit else ''}{text[-limit:]}" for stream, text in streams if text]
         reason = str(row.get("reason") or "").strip()

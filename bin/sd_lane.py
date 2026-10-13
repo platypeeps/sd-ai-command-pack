@@ -224,6 +224,9 @@ Note = Callable[[int, str, pathlib.Path], str]
 #: The codes of an entry that stops `prepared` for want of merge authority (sd:3132).
 RUNNER_MERGE_MANUAL = "runner_merge_manual"
 RUNNER_MERGE_UNKNOWN = "runner_merge_unknown"
+#: How much of `sd-ship`'s refusal a failed entry keeps as its `reason`; a gate failure's leads with the
+#: failing test, which a 600-character cut lost (sd:3476). The step's log keeps the whole output.
+REASON_CHARS = 2000
 #: The runs that put an entry back after a hub fault before the next fault fails it (sd:3239).
 HUB_RETRIES = 2
 #: The ends short of a merge: `retry` queues such an entry again, with its texts (sd:3254), and a cancelled
@@ -1227,7 +1230,7 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
     fields: dict[str, Any] = {"prepare_log": str(prepare_log), "log_host": this_host(), "head": prepared.get("head")}
     if not (prepared.get("ok") and prepared.get("phase") == "ready_to_send"):
         return {**fields, "status": "failed", "step": "prepare", "phase": prepared.get("phase"),
-                "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:600],
+                "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:REASON_CHARS],
                 **({"hub_fault": True} if answered_hub_fault(prepared) else {})}
     refused = merge_refusal(entry)
     if refused is not None:
@@ -1241,7 +1244,7 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
         return {**fields, "moved": str(merged.get("error") or "the lane moved")[:600]}  # a move, not a failure
     if not (merged.get("ok") and merged.get("phase") == "merged"):
         return {**fields, "status": "failed", "step": "merge", "phase": merged.get("phase"),
-                "reason": str(merged.get("error") or merged.get("code") or "merge did not confirm")[:600],
+                "reason": str(merged.get("error") or merged.get("code") or "merge did not confirm")[:REASON_CHARS],
                 **({"hub_fault": True} if answered_hub_fault(merged) else {})}
     return {**fields, "status": "merged", "merge_commit": merged.get("merge_commit")}
 
