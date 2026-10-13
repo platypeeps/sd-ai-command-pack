@@ -47,7 +47,8 @@ other halves are, is in [domain packs](docs/domain-packs.md).
 - `~/.claude/agents/sd-*.md` — and `--user` removes a hand-placed agent that
   one of them replaces, such as `slice-builder.md` for `sd-slice-builder`,
   when its digest is a known copy; an edited copy stays and is reported.
-  `AGENT_PREDECESSORS` in `bin/sd_install.py` is the list.
+  `AGENT_PREDECESSORS` in `bin/sd_install.py` is the list. `sd-slice-builder`'s
+  frontmatter runs the `sd-builder-guard` hook by name, through the link below.
 - `~/.local/bin/sd` and `~/.local/bin/sd-*` — one symlink per executable in
   `bin/`, so the commands resolve from any directory; `--bin-dir DIR` puts them
   elsewhere. The installer never edits `PATH`: `--user` warns when the link
