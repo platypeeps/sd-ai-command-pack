@@ -13,7 +13,7 @@ from sd_db.errors import SdDbError
 from sd_db.migrate import initialise
 from sd_db.schema import migrations
 from sd_db.testing.wire import hub_only
-from sd_db.writes import add_note, set_item_fields, transition, upsert_shadow
+from sd_db.writes import add_note, record_state, resolve_state, set_item_fields, transition, upsert_shadow
 from sd_db.writing import cutover_pieces, cutover_preview, import_piece, list_pieces, park_piece
 
 #: A fixed instant, so the week window does not depend on when the suite runs.
@@ -542,3 +542,43 @@ class TheAssignmentLedger(unittest.TestCase):
         self.assertEqual(reads.ready_to_send(self.connection), [])
         self.connection.execute("UPDATE item SET status = 'ready_to_send' WHERE id = ?", (self.item,))
         self.assertEqual([row["id"] for row in reads.ready_to_send(self.connection)], [self.item])
+
+
+class TheSessionReads(unittest.TestCase):
+    """`lane_entries` and `launch_notes`, behind the system dashboard's Working now (sd:3466)."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        path = Path(self.tmp.name) / "sd.db"
+        initialise(path)
+        self.connection = connect(path)
+        self.addCleanup(self.connection.close)
+
+    def test_lane_entries_are_the_latest_row_of_each_key_in_every_repository_resolved_or_not(self):
+        record_state(self.connection, "checkpoint", key="lane:v1:example/a:e1", body={"status": "pending"})
+        record_state(self.connection, "checkpoint", key="lane:v1:example/a:e1", body={"status": "running"})
+        resolve_state(self.connection, record_state(self.connection, "checkpoint", key="lane:v1:example/b:e2",
+                                                    body={"status": "merged"}))
+        record_state(self.connection, "checkpoint", key="lane:v1:example/b:e3")
+        record_state(self.connection, "checkpoint", key="run-7", body={"at": NOW})
+        record_state(self.connection, "heartbeat", key="lane:v1:example/a:e9", body={})
+        self.connection.commit()
+        rows = reads.lane_entries(self.connection)
+        self.assertEqual([("lane:v1:example/a:e1", '{"status": "running"}'), ("lane:v1:example/b:e2", '{"status": "merged"}'),
+                          ("lane:v1:example/b:e3", None)], sorted((row["key"], row["body"]) for row in rows))
+
+    def test_launch_notes_are_every_matching_comment_on_an_open_item_of_any_kind(self):
+        task = create_item(self.connection, kind="task", title="A task", status="planning")
+        report = create_item(self.connection, kind="report", title="A run report", status="planning")
+        done = create_item(self.connection, kind="task", title="Finished", status="done")
+        first = add_note(self.connection, task, "comment", "Fix: started a builder session in pane w1:p1")
+        add_note(self.connection, task, "followup", "Fix: started a builder session in pane w1:p2")
+        add_note(self.connection, task, "comment", "Unrelated: Fix: started")
+        resolved = add_note(self.connection, report, "comment", "Fix: started a fix session in pane w2:p1")
+        self.connection.execute("UPDATE note SET resolved_at = ? WHERE id = ?", (NOW, resolved))
+        add_note(self.connection, done, "comment", "Fix: started a builder session in pane w3:p1")
+        self.connection.commit()
+        rows = reads.launch_notes(self.connection, "Fix: started a ")
+        self.assertEqual([(first, task), (resolved, report)], [(row["id"], row["item"]) for row in rows])
+        self.assertEqual("Fix: started a builder session in pane w1:p1", rows[0]["body"])
