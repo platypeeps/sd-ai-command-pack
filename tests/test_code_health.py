@@ -55,11 +55,14 @@ import itertools
 import pathlib
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 import tokenize
 import unittest
 from unittest import mock
+
+from tests.clean_env import clean_environment
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -1466,6 +1469,66 @@ class LintPaths(unittest.TestCase):
                     f"{name} names a path with no tracked file under it: "
                     f"{missing}. Ruff and mypy are handed that path by `make "
                     f"check` and by the lint job; drop it from the Makefile.")
+
+
+#: What `make lint` does not run mypy over yet: the `sd_db` library and its
+#: suite, copied from the system checkout (sd:3278) with its type errors.
+MYPY_RATCHET_PATHS = ("lib", "tests/sd_db")
+
+#: mypy's error count over those paths. Downward only (sd:3485).
+MYPY_CEILING = 508  # measured; lower it with the count
+
+MYPY_SUMMARY = re.compile(r"^(?:Found (\d+) errors? in \d+ files? \(checked (\d+) source files?\)"
+                          r"|Success: no issues found in (\d+) source files?)$", re.M)
+
+
+def mypy_error_count(result: subprocess.CompletedProcess, files: int) -> int:
+    """The errors a mypy run over `files` files reports.
+
+    A run that crashed, printed no summary, or checked another number of files
+    than it was given has no count: that raises, rather than reading as zero.
+    """
+
+    summary = MYPY_SUMMARY.search(result.stdout)
+    errors = int(summary[1] or 0) if summary else None
+    if summary is None or result.returncode != (1 if errors else 0):
+        raise AssertionError(f"mypy exited {result.returncode} with no count it can stand behind:\n"
+                             f"{result.stdout[-2000:]}{result.stderr[-2000:]}")
+    checked = int(summary[2] or summary[3])
+    if checked != files:
+        raise AssertionError(f"mypy checked {checked} source files of the {files} it was given")
+    return errors
+
+
+class MypyRatchet(unittest.TestCase):
+    """mypy's errors over `MYPY_RATCHET_PATHS` may only come down (sd:3485)."""
+
+    def test_the_sd_db_mypy_errors_only_come_down(self):
+        files = [str(path) for path in tracked(*MYPY_RATCHET_PATHS) if path.suffix == ".py"]
+        result = subprocess.run([sys.executable, "-m", "mypy", *files], cwd=REPO_ROOT, capture_output=True,
+                                text=True, timeout=300, env=clean_environment())
+        count = mypy_error_count(result, len(files))
+        self.assertLessEqual(count, MYPY_CEILING, (
+            f"mypy finds {count} errors over {' '.join(MYPY_RATCHET_PATHS)}, above the {MYPY_CEILING} "
+            f"recorded. Fix the new ones; `python -m mypy {' '.join(MYPY_RATCHET_PATHS)}` lists them all."))
+        self.assertEqual(count, MYPY_CEILING,
+                         f"mypy finds {count} errors, {MYPY_CEILING} recorded. "
+                         f"Lower MYPY_CEILING to {count} in the same change.")
+
+    def test_a_count_needs_a_clean_summary_over_every_file(self):
+        def run(code, stdout, stderr=""):
+            return subprocess.CompletedProcess(["mypy"], code, stdout, stderr)
+
+        self.assertEqual(mypy_error_count(run(1, "a.py:1: error: x\nFound 1 error in 1 file (checked 3 source files)\n"), 3), 1)
+        self.assertEqual(mypy_error_count(run(1, "Found 508 errors in 91 files (checked 152 source files)\n"), 152), 508)
+        self.assertEqual(mypy_error_count(run(0, "Success: no issues found in 1 source file\n"), 1), 0)
+        for refused, files in ((run(2, "", "mypy: error: unrecognized arguments"), 3),
+                               (run(1, "", "No module named mypy"), 3),
+                               (run(0, "Found 4 errors in 2 files (checked 3 source files)\n"), 3),
+                               (run(1, "Success: no issues found in 3 source files\n"), 3),
+                               (run(1, "Found 4 errors in 2 files (checked 2 source files)\n"), 3)):
+            with self.subTest(stdout=refused.stdout, stderr=refused.stderr), self.assertRaises(AssertionError):
+                mypy_error_count(refused, files)
 
 
 #: `subprocess` entry points that start a child.
