@@ -1337,3 +1337,34 @@ def status_change_notes(connection: sqlite3.Connection, *, since: str, until: st
 
 
 __all__ += ["status_change_notes"]
+
+
+#: The lane's key prefix, `sd_lane.KEY_PREFIX`; `;` is the character after `:`, so the two bound one index range.
+LANE_KEYS = ("lane:v1:", "lane:v1;")
+
+
+def lane_entries(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    """The latest `checkpoint` row of each lane entry key, every repository's, resolved or not, in no set order.
+
+    `sd_lane.stored` reads one repository's entries for the lane; this reads all of them, for the dashboard's Working
+    now (sd:3466). The body is returned as stored, null included: the reader judges its shape. No `ORDER BY`: sorting
+    the bodies took the live read from 1.5 ms to 8 ms, and the caller orders what it needs.
+    """
+    return connection.execute(
+        "SELECT key, timestamp, body FROM state WHERE id IN (SELECT MAX(id) FROM state WHERE kind = 'checkpoint'"
+        " AND key >= ? AND key < ? GROUP BY key)", LANE_KEYS).fetchall()
+
+
+def launch_notes(connection: sqlite3.Connection, prefix: str) -> list[sqlite3.Row]:
+    """Every `comment` note whose body starts with `prefix`, on an item of any kind that is not done, oldest first.
+
+    Resolved notes are kept. Behind the dashboard's Working now (sd:3466), which passes the prefix of the note the
+    dashboard's Fix writes when it launches a session.
+    """
+    return connection.execute(
+        "SELECT note.id, note.item, note.timestamp, note.body FROM note JOIN item ON item.id = note.item"
+        " WHERE note.kind = 'comment' AND substr(note.body, 1, ?) = ? AND item.status != 'done' ORDER BY note.id",
+        (len(prefix), prefix)).fetchall()
+
+
+__all__ += ["lane_entries", "launch_notes"]
