@@ -126,14 +126,14 @@ class Criterion7(unittest.TestCase):
         """The clause's second half: the refusal says what would satisfy it.
 
         A `queued` row has no process, so the way out is the library's own
-        cancel, `sd assignments cancel <id>`. A `running` row has no verb
+        cancel, named as an action (sd:3503). A `running` row has no verb
         since the runner's stop went with the runner (sd:3041), owned run or
         not, and the refusal says so rather than name a verb that is gone.
         """
         queued = runner.enqueue(self.db, [self.item], who="operator")[0]["id"]
         message = self.refusal("ready")
         self.assertRegex(message, rf"assignment {queued}\b")
-        self.assertIn(f"cancel it with `sd assignments cancel {queued}`", message)
+        self.assertIn(f"cancel queued assignment {queued} first", message)
         self.assertNotIn("sd runner", message)
         self.end(queued)
 

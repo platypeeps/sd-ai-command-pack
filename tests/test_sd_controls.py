@@ -397,7 +397,7 @@ class Controls(unittest.TestCase):
         refused = self.cli("reports", "acknowledge", report, "--if-revision", revision, "--json")
         self.assertEqual(refused.returncode, 1)
         self.assertIn(
-            f"resolve the report's followups before acknowledging it: sd note resolve {note}",
+            f"resolve the report's followups before acknowledging it: resolve followup {note}",
             refused.stderr,
         )
         self.assertNotIn("Traceback", refused.stderr)
@@ -427,8 +427,8 @@ class Controls(unittest.TestCase):
         owed = json.loads(noted.stdout)["note"]["id"]
         refused = self.cli("reports", "acknowledge", report, "--resolve-ingest-followups", "--json")
         self.assertEqual(refused.returncode, 1)
-        self.assertIn(f"sd note resolve {owed}", refused.stderr)
-        self.assertNotIn(f"sd note resolve {cron}", refused.stderr)
+        self.assertIn(f"resolve followup {owed}", refused.stderr)
+        self.assertNotIn(f"resolve followup {cron}", refused.stderr)
         self.assertNotIn("Traceback", refused.stderr)
         status, notes = self.followups(report)
         self.assertEqual(status, "planning")

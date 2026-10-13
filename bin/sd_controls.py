@@ -180,7 +180,7 @@ def register(groups: Any) -> None:
                                      help="also resolve the followup the ingest itself wrote for this report "
                                           "(session cron, the text derived from the report's own fields), in "
                                           "the same transaction; a followup a person wrote still blocks, and "
-                                          "the refusal names `sd note resolve <id>` for each")
+                                          "the refusal names each followup, which `sd note resolve <id>` closes")
             if action == "ingest":
                 command.add_argument("job")
                 for option in ("run-id", "started", "ended", "log"):

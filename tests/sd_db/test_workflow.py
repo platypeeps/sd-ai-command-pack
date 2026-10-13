@@ -58,14 +58,14 @@ class OrdinaryTasks(WorkflowCase):
         self.assertIn("planning -> done by user", history[-1]["body"])
         self.assertTrue(history[-1]["timestamp"])
 
-    def test_an_unknown_status_points_to_the_cancel_verbs(self):
-        # sd:2741: 'dropped' listed the statuses and never named the verb that closes.
+    def test_an_unknown_status_points_to_the_cancel_action(self):
+        # sd:2741: 'dropped' listed the statuses and never named what closes; sd:3503 names the action.
         item = self.capture()["item"]["id"]
         with self.assertRaises(TransitionRefused) as refused:
             change_status(self.db, item, "dropped", who="operator")
         self.assertIn("no status 'dropped'", str(refused.exception))
-        self.assertIn(f"sd task cancel {item} --reason", str(refused.exception))
-        self.assertIn("sd work cancel", str(refused.exception))
+        self.assertIn(f"to close item {item} that nobody will do, cancel it with a reason",
+                      str(refused.exception))
 
     def test_optional_repository_must_already_be_registered(self):
         with self.assertRaisesRegex(WorkflowError, "registered"):
@@ -393,7 +393,7 @@ class Unparking(WorkflowCase):
                 self.assertIsNone(edit_item(self.db, state["item"]["id"], {"parked_at": None},
                                             who="operator")["item"]["parked_at"])
         state = self.parked(kind="idea", piece="drafts/old-idea.md")
-        with self.assertRaisesRegex(WorkflowError, "sd writing park"):
+        with self.assertRaisesRegex(WorkflowError, "revives through its own park control"):
             edit_item(self.db, state["item"]["id"], {"parked_at": None}, who="operator")
         self.assertEqual(item_state(self.db, state["item"]["id"]), state)
 
@@ -816,3 +816,72 @@ class BinaryColumns(WorkflowCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RefusalsNameActionsNotVerbs(unittest.TestCase):
+    """sd:3503. A library refusal is the dashboard's error text too, so it names
+    the action ("resolve followup 12 first"), never a CLI verb ("sd note resolve 12").
+
+    Every `raise` of a `WorkflowError` class or `TransitionRefused` in
+    `lib/sd_db` is read: the strings inside the call, and the strings a name
+    used in the call was assigned in the same function.
+    """
+
+    COMMAND = __import__("re").compile(r"\bsd [a-z]")
+
+    def refusal_classes(self):
+        import importlib
+        import pkgutil
+
+        import sd_db
+        from sd_db.workflow import WorkflowError
+
+        for module in pkgutil.iter_modules(sd_db.__path__):
+            importlib.import_module(f"sd_db.{module.name}")
+        found, todo = {TransitionRefused.__name__}, [WorkflowError]
+        while todo:
+            cls = todo.pop()
+            found.add(cls.__name__)
+            todo.extend(cls.__subclasses__())
+        return found
+
+    def test_no_refusal_names_a_cli_verb(self):
+        import ast
+
+        import sd_db
+
+        names = self.refusal_classes()
+        self.assertIn("MissingNote", names, "the class walk missed a class that exists")
+        root = Path(sd_db.__file__).parent
+        offenders = []
+        for path in sorted(root.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            for function in [tree, *(node for node in ast.walk(tree)
+                                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)))]:
+                assigned: dict[str, list[str]] = {}
+                for node in ast.walk(function):
+                    if isinstance(node, ast.Assign):
+                        for target in node.targets:
+                            if isinstance(target, ast.Name):
+                                assigned.setdefault(target.id, []).extend(self.strings(node.value))
+                for node in ast.walk(function):
+                    if not (isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call)):
+                        continue
+                    func = node.exc.func
+                    name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+                    if name not in names:
+                        continue
+                    texts = self.strings(node.exc)
+                    for used in ast.walk(node.exc):
+                        if isinstance(used, ast.Name):
+                            texts.extend(assigned.get(used.id, []))
+                    if any(self.COMMAND.search(text) for text in texts):
+                        offenders.append(f"{path.relative_to(root)}:{node.lineno}")
+        self.assertEqual(sorted(set(offenders)), [])
+
+    @staticmethod
+    def strings(node):
+        import ast
+
+        return [found.value for found in ast.walk(node)
+                if isinstance(found, ast.Constant) and isinstance(found.value, str)]
