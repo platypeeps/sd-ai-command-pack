@@ -223,12 +223,37 @@ def transition(
     later.
     """
     with transaction(connection):
-        row = connection.execute("SELECT kind, status FROM item WHERE id = ?", (item,)).fetchone()
+        row = connection.execute(
+            "SELECT id, kind, status, source, fields FROM item WHERE id = ?", (item,)
+        ).fetchone()
         if row is not None and row["kind"] == "work" and row["status"] != target and target == "done":
             raise TransitionRefused(
                 "work completion requires deliver_work or cancel_work and their verified evidence"
             )
+        if row is not None:
+            refuse_base_status(row)
         return _transition(connection, item, target, who=who, reason=reason)
+
+
+def refuse_base_status(row: Any) -> None:
+    """Refuse a status write on a vault base row, naming the move that applies (sd:3972).
+
+    Its status is its plugin map's answer to its stage, so only a stage move
+    changes it: the import here, through `_transition`. Every status write a
+    person or a job asks for refuses, one of the current status too.
+    """
+    # Read when the rule runs: `sources` imports this module.
+    from .sources.vault import SOURCE
+
+    if row["source"] != SOURCE:
+        return
+    try:
+        kind = json.loads(row["fields"] or "{}").get("kind")
+    except (AttributeError, TypeError, ValueError, RecursionError):
+        kind = None
+    raise TransitionRefused(
+        f"item {row['id']} is a {kind if isinstance(kind, str) and kind else 'base'} row from the vault, "
+        f"and it moves by stage only: its plugin's map sets the status from the stage. Move its stage instead")
 
 
 def _transition(

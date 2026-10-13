@@ -22,7 +22,7 @@ from .errors import SdDbError
 from .reads import item_by_id, item_notes
 from .recurrence import ANCHORS, RecurrenceError, first_barren_start, next_after, parse as parse_rule
 from .writes import (
-    STATUSES, TransitionRefused, add_note, create_item, resolve_note,
+    STATUSES, TransitionRefused, add_note, create_item, refuse_base_status, resolve_note,
     set_item_fields, transition,
 )
 
@@ -684,10 +684,7 @@ def change_status(
             raise TransitionRefused(f"item {item} has queued or running assignment {active['id']}; {way_out}")
         # Before the same-status no-op too: a base row's status is its plugin
         # map's answer to its stage, so no status write is its own (sd:3972).
-        if row["source"] == _vault_source():
-            raise TransitionRefused(
-                f"item {item} is a {_base_kind(row)} row from the vault, and it moves by stage only: "
-                f"its plugin's map sets the status from the stage. Move its stage instead")
+        refuse_base_status(row)
         if row["status"] == target:
             return state
         if row["kind"] == "work":
@@ -716,22 +713,6 @@ def change_status(
         spawned, ended = _next_occurrence(connection, row, who=who)
         return {**item_state(connection, item), "next_occurrence": spawned,
                 "next_occurrence_reason": ended}
-
-
-def _vault_source() -> str:
-    """`sources.vault.SOURCE`, read when a rule runs: `sources` imports this module."""
-    from .sources.vault import SOURCE
-
-    return SOURCE
-
-
-def _base_kind(row: dict) -> str:
-    """The plugin kind a vault row holds in `fields.kind`, or `base` when it cannot be read."""
-    try:
-        kind = json.loads(row["fields"] or "{}").get("kind")
-    except (AttributeError, TypeError, ValueError, RecursionError):
-        kind = None
-    return kind if isinstance(kind, str) and kind else "base"
 
 
 def _today() -> date:
