@@ -1508,6 +1508,15 @@ def fast_forward(main: pathlib.Path, environ: dict[str, str], own_lock: pathlib.
     default = (lane_git(main, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or "").removeprefix("origin/")
     if not branch or branch != (default or branch) or (not default and branch not in ("main", "master")):
         return f"fast-forward skipped: the main checkout is on {branch or 'a detached HEAD'}, not the default branch"
+    # Its `make post-merge` refuses a branch checkout, so moving the code here would leave it on the
+    # old dependencies (sd:3647); refuse before the move instead.
+    try:
+        deploys = bool(POST_MERGE_RULE.search((main / "Makefile").read_text(encoding="utf-8", errors="replace")))
+    except OSError:
+        deploys = False
+    if deploys:
+        return (f"fast-forward skipped: {main} deploys through make post-merge, which needs a pinned checkout; "
+                f"pin it: git -C {main} switch --detach && make -C {main} post-merge")
     lane_git(main, "fetch", "-q", "origin")
     # Every lane runs the tools from wherever `sd-ship` resolves; moving that
     # checkout under another lane's running prepare changes its code mid-step.
