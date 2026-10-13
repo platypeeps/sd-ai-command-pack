@@ -133,6 +133,15 @@ class SharedTransitions(WritingCase):
         self.assertEqual(piece_state(self.db, self.item), before)
         self.assertEqual(self.index.read_bytes(), source)
 
+    def test_an_unknown_url_destination_is_refused_and_writes_nothing(self):
+        """sd:3485: the check inside the write names the allowed destinations."""
+        before, source = piece_state(self.db, self.item), self.index.read_bytes()
+        for key in ("published_urls", "review_urls"):
+            with self.subTest(key=key), self.assertRaisesRegex(WorkflowError, f"unknown {key} destination elsewhere"):
+                update_piece_metadata(self.db, self.item, {key: {"elsewhere": "https://example.test/a"}}, who="operator")
+        self.assertEqual(piece_state(self.db, self.item), before)
+        self.assertEqual(self.index.read_bytes(), source)
+
     def test_gate_recording_requires_the_actual_reviewed_digest_and_deduplicates(self):
         before = piece_state(self.db, self.item)
         with self.assertRaisesRegex(WorkflowError, "reviewed draft"):
