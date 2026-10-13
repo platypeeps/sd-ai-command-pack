@@ -1253,6 +1253,8 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
     prepared, prepare_log = prepare_step(entry, worktree, logs / f"prepare-{item}-{stamp}", ship, renewed)
     fields: dict[str, Any] = {"prepare_log": str(prepare_log), "log_host": this_host(), "head": prepared.get("head")}
     stopped = prepare_stop(entry, worktree, prepared)
+    if stopped is not None and stopped.get("reconciled"):
+        advance()  # the claim still holds, and the lane is still here, before the landing (sd:3482)
     if stopped is not None:
         return {**fields, **stopped}
     refused = merge_refusal(entry)
@@ -1303,16 +1305,24 @@ def prepare_stop(entry: dict[str, Any], worktree: pathlib.Path, prepared: dict[s
 
     An answer `merged` reconciled a merge that landed before its runner died
     at `step: merge` (sd:3482): the entry is merged at that commit, and no
-    merge runs, when the merged head is the entry's head or its catch-up.
-    Another head's merge is an earlier pull request's, and fails the entry.
+    merge runs, when the merged head is the entry's head or prepare's
+    catch-up of it. Any other head's merge, an earlier head's included, is
+    an earlier pull request's, and fails the entry; so does a read that
+    cannot tell.
     """
     if prepared.get("ok") and prepared.get("phase") == "merged":
-        merged_head = str(prepared.get("head") or "")
-        if merged_head and (merged_head == entry["expected_head"] or at_head(worktree, merged_head)):
+        merged_head, expected = str(prepared.get("head") or ""), str(entry["expected_head"])
+        try:
+            ours = bool(merged_head) and (merged_head == expected or catch_up_of(worktree, merged_head, expected))
+        except LaneError as error:  # unknown is not "ours"
+            return {"status": "failed", "step": "prepare", "phase": "merged",
+                    "reason": f"prepare answered sd-ship's merge of {merged_head}; whether it is of {expected} "
+                              f"is unknown: {error}"[:REASON_CHARS]}
+        if ours:
             return {"status": "merged", "merge_commit": prepared.get("merge_commit"), "reconciled": True}
         return {"status": "failed", "step": "prepare", "phase": "merged",
                 "reason": f"prepare answered sd-ship's merge of {merged_head or 'an unrecorded head'}, not this "
-                          f"entry's head {entry['expected_head']}; read the ship receipt before enqueueing it again"}
+                          f"entry's head {expected} or its catch-up; read the ship receipt before enqueueing it again"}
     if prepared.get("ok") and prepared.get("phase") == "ready_to_send":
         return None
     return {"status": "failed", "step": "prepare", "phase": prepared.get("phase"),

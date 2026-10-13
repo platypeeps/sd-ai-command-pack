@@ -543,6 +543,48 @@ class Runner(Lane):
         self.assertEqual([c[2] for c in self.calls], ["prepare"])  # no second merge
         self.assertIn("Landed: merged at landed-1", self.notes[0][1])
 
+    def caught_up_topic(self) -> tuple[pathlib.Path, str, str]:
+        """A worktree whose branch has a commit, then prepare's catch-up merge of a moved `origin/main` on it."""
+        tree = self.worktree("topic")
+        git(tree, "commit", "-q", "--allow-empty", "-m", "work")
+        work = git(tree, "rev-parse", "HEAD")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
+        return tree, work, git(tree, "rev-parse", "HEAD")
+
+    def test_a_reconciled_merge_of_the_entrys_catch_up_records_it_merged(self) -> None:
+        """sd:3482: the merge that landed was of prepare's catch-up of the queued head."""
+        tree, work, caught = self.caught_up_topic()
+        git(tree, "reset", "-q", "--hard", work)
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+        git(tree, "reset", "-q", "--hard", caught)
+        self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": caught, "merge_commit": "landed-1"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged", self.entries()[0].get("reason"))
+
+    def test_a_reconciled_merge_of_an_earlier_head_is_not_a_catch_up_of_it(self) -> None:
+        """Codex round 1: the queued head is a catch-up of the merged one; that merge is not this entry's."""
+        tree, work, caught = self.caught_up_topic()
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+        self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": work, "merge_commit": "landed-0"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], self.notes), ("failed", []))
+        self.assertIn(f"merge of {work}, not this entry's head {caught}", entry["reason"])
+
+    def test_a_reconciled_merge_whose_claim_was_released_lands_nothing(self) -> None:
+        """Codex round 1: the claim must still hold before the landing deletes the branch and notes the item."""
+        head = sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")["expected_head"]
+
+        def released_meanwhile(argv: list[str], log: pathlib.Path) -> dict:
+            sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(token="released"))
+            self.ship(argv, log)
+            return {"ok": True, "phase": "merged", "head": head, "merge_commit": "landed-1"}
+        answer = sd_lane.run_lane(self.repo, self.environ, released_meanwhile)
+        self.assertEqual((self.notes, self.entries()[0]["status"]), ([], "running"))
+        self.assertIn("reclaimed or released", answer["stopped"])
+
     def test_a_reconciled_merge_of_another_head_is_not_this_entrys(self) -> None:
         """sd:3482, evidence: the receipt's merge must be of the entry's head; an earlier pull request's is not."""
         tree = self.worktree("topic")
@@ -796,6 +838,18 @@ class Runner(Lane):
         for lease in leases:  # the retry's prepare runs under a renewed lease, not the old one
             self.assertGreater(lease, sd_lane.sd_lib.GATE_SLOT_SECONDS)
             self.assertLess(lease, 8 * 3600)
+
+    def test_a_claim_released_before_the_retry_starts_no_second_prepare(self) -> None:
+        """sd:3481, the renew step: a claim lost before the --retry-review prepare stops the run there."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+
+        def released_then_incomplete(argv: list[str], log: pathlib.Path) -> dict:
+            sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(token="released"))
+            self.ship(argv, log)
+            return {"ok": False, "error": "incomplete", "workflow": {"blocker": {"code": "review_incomplete"}}}
+        answer = sd_lane.run_lane(self.repo, self.environ, released_then_incomplete)
+        self.assertEqual([("--retry-review" in call) for call in self.calls], [False])
+        self.assertIn("reclaimed or released", answer["stopped"])
 
     def test_a_loaded_machine_claims_no_entry_until_load5_falls_below_the_gate_limit(self) -> None:
         """sd:3479. Six gates timed out at one hour under load, and a retry ran the same gate under the same load."""
@@ -2486,6 +2540,16 @@ class AnyHost(SharedQueue):
         sd_lane.run_lane(self.repo, self.environ, ship)
         self.assertEqual((heads[:1], self.entries()[0]["status"]), ([head], "merged"))
         self.assertFalse(self.made().exists())
+
+    def test_a_leftover_lane_worktree_at_the_head_is_reused_and_its_branch_kept(self) -> None:
+        """sd:3483: a killed run's lane worktree at the head runs the entry; this run did not make its branch."""
+        [head] = self.enqueued_elsewhere(1, "topic", "work")
+        self.made().parent.mkdir(parents=True, exist_ok=True)
+        git(self.repo, "fetch", "-q", "origin", "topic")
+        git(self.repo, "worktree", "add", "-q", "-b", "topic", str(self.made()), head)
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged")
+        self.assertEqual((self.made().exists(), git(self.repo, "rev-parse", "refs/heads/topic")), (False, head))
 
     def test_a_leftover_lane_worktree_keeps_a_branch_origin_lacks(self) -> None:
         """sd:3483. A killed run's lane worktree went with `git branch -D`, though the lane may not have made the branch."""
