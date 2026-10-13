@@ -37,22 +37,17 @@ import os
 import re
 import subprocess
 import sys
-from typing import Any
+from pathlib import Path
 
 # Imported, not spelled again: the two spellings split once already.
-from sd_research_publish import DASHBOARD_DIR
+from sd_research_publish import DASHBOARD_DIR, execute_conf
 
 
 def load_docs(repo):
-    """The DOCS list out of research.conf.py, same way render.py reads it."""
-    conf = os.path.join(repo, "research.conf.py")
-    if not os.path.exists(conf):
+    """The DOCS list out of research.conf.py, read the way `render` reads it."""
+    ns = execute_conf(Path(repo), "review")
+    if ns is None:
         return None
-    ns: dict[str, Any] = {}
-    # nosec B102 - research.conf.py is a file in the repo being rendered, at the
-    # same trust level as this script, and the format needs execution: at least
-    # one live config builds its DOCS list with a loop.
-    exec(compile(open(conf).read(), conf, "exec"), ns)  # nosec B102
     return ns.get("DOCS") or []
 
 

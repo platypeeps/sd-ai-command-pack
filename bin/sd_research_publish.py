@@ -197,7 +197,7 @@ NOTION_SCOPES = {
                       "your team Notion briefs folder, under %s"),
 }
 
-#: The environment the folder settings, `SD_MIRROR_REQUEUE`,
+#: The environment the folder settings, `SD_MIRROR_REQUEUE`, `SD_MIRROR_DRY_RUN`,
 #: `SD_PUBLISH_FROM_WORKTREE` and `SD_SKIP_MIRROR` are read out of. A module attribute for the same
 #: reason `QUEUE` and `VAULT` are: a test points it at a fixture rather than
 #: at the machine running the test.
@@ -281,6 +281,46 @@ def trust_conf(repo: Path, source: bytes) -> None:
         (Path(repo) / record).write_text(hashlib.sha256(source).hexdigest() + "\n", encoding="utf-8")
 
 
+def execute_conf(repo: Path, verb: str) -> dict[str, Any] | None:
+    """The namespace `repo`'s research.conf.py builds, or None when it has none.
+
+    The one place a verb executes the config: `render`, `publish` and
+    `review` all did, and only `render` checked the record (sd:1376), so a
+    `publish` after a pull ran a config nobody read (sd:3513). A run nobody
+    typed executes only a recorded config, checked on the bytes it executes,
+    and records nothing; a run by hand records what it executed.
+    """
+    conf = Path(repo) / "research.conf.py"
+    if not conf.is_file():
+        return None
+    source = conf.read_bytes()
+    trigger = automatic_render()
+    if trigger and not conf_trusted(repo, source):
+        raise SystemExit(
+            "%s: no command by hand has executed this research.conf.py, and "
+            "`sd-research-kit %s` executes it; read it, then run `sd-research-kit "
+            "render`. docs/dashboard/ is stale until then" % (trigger, verb))
+    ns: dict[str, Any] = {}
+    # nosec B102 - research.conf.py is a file in the repo being rendered, at the
+    # same trust level as this script, and the format needs execution: at least
+    # one live config builds its DOCS list with a loop.
+    exec(compile(source, str(conf), "exec"), ns)  # nosec B102
+    if not trigger:
+        trust_conf(repo, source)
+    return ns
+
+
+def project_label(repo: Path, project: str | None) -> str:
+    """The research badge and dashboard label: `PROJECT`, or one fallback.
+
+    One fallback for every verb: `render` and `publish` each had their own,
+    so alternating them relabelled the dashboard row on every run (sd:3513).
+    The repository's name, not the checkout's: a worktree is called after
+    its branch, and its name is nobody's project.
+    """
+    return project or repo_home(repo).name.split("-")[0].upper()
+
+
 def repo_home(repo: Path) -> Path:
     """The checkout that names this repository: `repo`, unless it is a linked
     worktree, in which case the main checkout it was added from.
@@ -317,6 +357,11 @@ PUBLISH_FROM_WORKTREE = "SD_PUBLISH_FROM_WORKTREE"
 #: stale text a drain may publish before the pull's render replaces it
 #: (sd:1991). The dashboard still wants the render; the queue does not.
 SKIP_MIRROR = "SD_SKIP_MIRROR"
+
+#: The switch that reports what a render would queue and writes no request
+#: and no receipt (sd:3515). The local copies are still written: they are
+#: what a render is for, and none of them leaves the machine.
+MIRROR_DRY_RUN = "SD_MIRROR_DRY_RUN"
 
 
 def publish_refusal(repo: Path, copy: str) -> str:
@@ -440,7 +485,8 @@ def register_root(repo: Path, label: str, directory: Path) -> str:
     """
     conf = documents_conf()
     if not conf.is_file():
-        return "dashboard not registered: no %s" % conf
+        return ("dashboard not registered: no %s; create it, or set SYSTEM_TOOLS_CONFIG "
+                "to the folder that holds project-dashboard/" % conf)
 
     key = repo_key(repo)
     if not KEY.fullmatch(key):
@@ -463,7 +509,9 @@ def register_root(repo: Path, label: str, directory: Path) -> str:
             # A row naming a directory outside this repository belongs to
             # something else, whatever it calls itself.
             if not _own_row(repo, parts[3]):
-                return "dashboard: %s already names %s; left alone" % (key, parts[3])
+                return ("dashboard: %s already names %s; left alone. The key is this "
+                        "checkout's name: rename one checkout, or remove that row from %s"
+                        % (key, parts[3], conf))
         else:
             continue
         if existing.strip() == line:
@@ -658,6 +706,30 @@ def vault_folder(repo: Path) -> Path | None:
     return Path(VAULT).expanduser() / BRIEFS / repo_home(repo).name
 
 
+def vault_owner(target: Path) -> str | None:
+    """The checkout a vault copy's frontmatter names: "" when it names none,
+    None when the copy cannot be read.
+
+    The folder is keyed on the checkout's name, so two checkouts with one name
+    share it (sd:3513). A missing copy, or one an earlier version wrote, names
+    no checkout and is taken over. An unreadable one is unknown, not ours.
+    """
+    try:
+        lines = target.read_text(encoding="utf-8").split("\n")
+    except FileNotFoundError:
+        return ""
+    except (OSError, UnicodeDecodeError):
+        return None
+    if not lines or lines[0] != "---":
+        return ""
+    for line in lines[1:]:
+        if line == "---":
+            break
+        if line.startswith("source_checkout: "):
+            return line[len("source_checkout: "):].strip()
+    return ""
+
+
 def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     """Write every document's Markdown into the vault, under its repo folder.
 
@@ -680,6 +752,7 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
 
     rev = revision(repo)
     home = repo_home(repo)
+    checkout = _shown(home)
     reports: list[str] = []
     written = 0
     for cfg in docs:
@@ -701,15 +774,25 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
         front = "\n".join([
             "---",
             "source_repo: %s" % home.name,
+            "source_checkout: %s" % checkout,
             "source_path: %s" % src,
             "revision: %s" % rev,
             "rendered_by: sd-research-kit",
             "---",
             "",
         ])
+        target = folder / (out + ".md")
+        owner = vault_owner(target)
+        if owner is None:
+            reports.append("obsidian: cannot read %s to see whose copy it is; left alone" % target)
+            continue
+        if owner and owner != checkout:
+            reports.append("obsidian: %s.md in %s belongs to %s; left alone. Rename one "
+                           "checkout, or delete that copy to move it here" % (out, folder, owner))
+            continue
         try:
             folder.mkdir(parents=True, exist_ok=True)
-            (folder / (out + ".md")).write_text(front + body, encoding="utf-8")
+            target.write_text(front + body, encoding="utf-8")
         except OSError as problem:
             reports.append("obsidian: cannot write %s.md (%s)" % (out, problem))
             continue
@@ -1025,7 +1108,7 @@ def already_queued(path: Path, receipt: Path, wanted: str,
     return ""
 
 
-def mirror_delivered(name: str, fingerprint: str) -> str:
+def mirror_delivered(name: str, fingerprint: str, url: str = "") -> str:
     """Record that the drain wrote the generation `fingerprint` of request
     `name`, and remove the request only while it is still that generation.
 
@@ -1045,16 +1128,20 @@ def mirror_delivered(name: str, fingerprint: str) -> str:
     comparison against a record read before the lock, or before the receipt
     write, is the window a render fits in: it wrote B after the read, and
     the unlink took B with A's fingerprint on the receipt.
+
+    `url` is where the drain's mirror landed. It goes on the receipt with the
+    item the request names, so a reader of the receipts can show an item
+    where its document was published (sd:3514).
     """
     try:
         with queue_locked():
-            return acknowledge_request(name, fingerprint)
+            return acknowledge_request(name, fingerprint, url)
     except OSError as problem:
         return "delivered: cannot lock the queue at %s (%s); request left in place" % (
             queue_lock_path(), problem)
 
 
-def acknowledge_request(name: str, fingerprint: str) -> str:
+def acknowledge_request(name: str, fingerprint: str, url: str = "") -> str:
     """The acknowledgement itself, for a caller holding the queue lock.
 
     Read here, under the lock, and compared here: the record this reads is
@@ -1068,6 +1155,10 @@ def acknowledge_request(name: str, fingerprint: str) -> str:
     receipt = receipts() / name
     record = load_record(receipt)
     record.update(delivered=fingerprint)
+    if url:
+        record.update(url=url)
+    if "item" in pending:
+        record.update(item=pending["item"])
     try:
         receipts().mkdir(parents=True, exist_ok=True)
         receipt.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -1086,19 +1177,28 @@ def acknowledge_request(name: str, fingerprint: str) -> str:
 
 
 def delivered_main(argv: list[str]) -> int:
-    """The `delivered` verb: `<request file name> <fingerprint>`.
+    """The `delivered` verb: `<request file name> <fingerprint> [--url <url>]`.
 
     The one verb that takes arguments. R10-D6 forbids a *checkout* argument,
     because a command that can be pointed at a repository can act on one the
     caller is not standing in; this verb acts on the machine's one queue and
     names a request in it, which no working directory could resolve.
     """
+    url = ""
+    if len(argv) == 4 and argv[2] == "--url":
+        url = argv[3]
+        parts = urlsplit(url)
+        if parts.scheme not in ("http", "https") or not parts.netloc:
+            print("delivered: --url must be the http(s) address of the mirror, not %r" % url,
+                  file=sys.stderr)
+            return 2
+        argv = argv[:2]
     if len(argv) != 2 or not argv[0] or not argv[1]:
-        print("usage: sd-research-kit delivered <request file name> <fingerprint>",
+        print("usage: sd-research-kit delivered <request file name> <fingerprint> [--url <url>]",
               file=sys.stderr)
         return 2
     name = Path(argv[0]).name
-    print(mirror_delivered(name, argv[1]))
+    print(mirror_delivered(name, argv[1], url))
     return 0
 
 
@@ -1115,6 +1215,8 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     A linked worktree queues nothing unless `SD_PUBLISH_FROM_WORKTREE=1`
     says to; see `publish_refusal`. Nothing is queued, and nothing pending is
     touched, while `SD_SKIP_MIRROR` holds a reason; see `SKIP_MIRROR`.
+    `SD_MIRROR_DRY_RUN=1` reports each request it would write and writes
+    none; see `MIRROR_DRY_RUN`.
     """
     held = str(ENVIRON.get(SKIP_MIRROR, "")).strip()
     if held:
@@ -1127,12 +1229,15 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     wanted: list[tuple[dict[str, Any], dict[str, str]]] = []
     for cfg in docs:
         targets, problems = mirror_targets(cfg, home)
+        problems += designated_item(cfg)[1]
         reports += ["mirror: %s in %s" % (p, cfg.get("out", "?")) for p in problems]
         wanted += [(cfg, target) for target in targets]
     if not wanted:
         return reports
 
-    QUEUE.mkdir(parents=True, exist_ok=True)
+    dry = bool(ENVIRON.get(MIRROR_DRY_RUN))
+    if not dry:
+        QUEUE.mkdir(parents=True, exist_ok=True)
     rev = revision(repo)
     key = repo_key(home)
     vault = vault_folder(home)
@@ -1140,28 +1245,7 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     with queue_locked():
         for cfg, target in wanted:
             out = str(cfg.get("out", "")).strip()
-            src = str(cfg.get("src", "")).strip()
-            request = {
-                # The repository, not the checkout: this is what `sd-status`
-                # resolves a row against and what a carried id is compared on.
-                # The three paths below are the checkout's, because that is where
-                # the rendered files are.
-                "repo": str(home),
-                "revision": rev,
-                "document": out,
-                "title": cfg.get("title", out),
-                "source": str(repo / src) if src else "",
-                # The pointer line's link, read from `origin` and never
-                # composed by the drain; None where origin names no GitHub repo.
-                "source_url": source_url(repo, src),
-                "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
-                "markdown": str(vault / (out + ".md")) if vault else "",
-                # What the drain mirrors, read once here. The three paths
-                # above say where it came from and where the copies sit;
-                # none of them is what gets published.
-                "content": source_text(repo / src) if src else "",
-            }
-            request.update(target)
+            request = mirror_request(repo, home, vault, cfg, target, rev)
             name = "%s.%s.%s.json" % (key, out or "doc", target["destination"])
             path = QUEUE / name
             what = BY_NAME[target["destination"]].what
@@ -1181,6 +1265,10 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
             carried = "" if request[what] else recorded(path, identity, what)
             request[what] = request[what] or carried
             reverted = not force and reverts_to_delivered(path, name, digest)
+            if dry:
+                reports.append(queued_report(out, target["target"], what, carried, reverted,
+                                             "would queue") + " (%s)" % MIRROR_DRY_RUN)
+                continue
             # The generation this request is: what `mirror_delivered()` acknowledges.
             request["fingerprint"] = digest
             path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
@@ -1189,6 +1277,52 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
                 destination=target["destination"]))
             reports.append(queued_report(out, target["target"], what, carried, reverted))
     return reports
+
+
+def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, Any],
+                   target: dict[str, str], rev: str) -> dict[str, Any]:
+    """The request `enqueue` writes for one document and one destination,
+    before its fingerprint and any carried id."""
+    out = str(cfg.get("out", "")).strip()
+    src = str(cfg.get("src", "")).strip()
+    request = {
+        # The repository, not the checkout: this is what `sd-status`
+        # resolves a row against and what a carried id is compared on.
+        # The three paths below are the checkout's, because that is where
+        # the rendered files are.
+        "repo": str(home),
+        "revision": rev,
+        "document": out,
+        "title": cfg.get("title", out),
+        "source": str(repo / src) if src else "",
+        # The pointer line's link, read from `origin` and never
+        # composed by the drain; None where origin names no GitHub repo.
+        "source_url": source_url(repo, src),
+        "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
+        "markdown": str(vault / (out + ".md")) if vault else "",
+        # What the drain mirrors, read once here. The three paths
+        # above say where it came from and where the copies sit;
+        # none of them is what gets published.
+        "content": source_text(repo / src) if src else "",
+    }
+    request.update(target)
+    request.update(designated_item(cfg)[0])
+    return request
+
+
+def designated_item(cfg: dict[str, Any]) -> tuple[dict[str, int], list[str]]:
+    """`{"item": <n>}` for the sd item a DOCS entry names, and what was wrong.
+
+    Where `delivered --url` lands the URL (sd:3514). Not part of the
+    fingerprint: naming an item changes nothing on the destination, so it
+    queues nothing on its own. A bad value is reported and not carried.
+    """
+    item = cfg.get("item")
+    if item is None:
+        return {}, []
+    if type(item) is not int or item < 1:
+        return {}, ["item= must be an sd item number such as 3465, not %r" % (item,)]
+    return {"item": item}, []
 
 
 def reverts_to_delivered(path: Path, name: str, digest: str) -> bool:
@@ -1225,18 +1359,19 @@ def record_queued(name: str, fields: dict[str, str]) -> list[str]:
     return []
 
 
-def queued_report(out: str, target: str, what: str, carried: str, reverted: bool) -> str:
-    """The line a render prints for a request it wrote."""
+def queued_report(out: str, target: str, what: str, carried: str, reverted: bool,
+                  verb: str = "queued") -> str:
+    """The line a render prints for a request it wrote, or would write."""
     notes = ""
     if carried:
         notes += ", updating the %s already recorded" % what
     if reverted:
         notes += ("; back to the delivered version, replacing a pending request "
                   "a drain may already hold")
-    return "mirror: queued %s -> %s%s" % (out, target, notes)
+    return "mirror: %s %s -> %s%s" % (verb, out, target, notes)
 
 
-def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
+def publish(repo: Path, project: str | None, docs: list[dict[str, Any]]) -> list[str]:
     """Every job, in the order the contract states them.
 
     Local copies first, outward queue last. The order is the contract's: the
@@ -1246,7 +1381,7 @@ def publish(repo: Path, project: str, docs: list[dict[str, Any]]) -> list[str]:
     reports = write_obsidian(repo, docs)
     reports.append(ignore_dashboard(repo))
     reports.append(register_root(
-        repo, project or repo_home(repo).name, repo / DASHBOARD_DIR))
+        repo, project_label(repo, project), repo / DASHBOARD_DIR))
     # Before enqueueing, and here rather than inside `enqueue`: a repo that
     # designates nothing still runs on the machine holding the stranded queue,
     # and `enqueue` returns before touching the directory when it has no
@@ -3078,15 +3213,11 @@ def publish_main() -> int:
     only.
     """
     repo = Path.cwd()
-    conf = repo / "research.conf.py"
-    if not conf.is_file():
+    ns = execute_conf(repo, "publish")
+    if ns is None:
         print("no research.conf.py in %s" % repo, file=sys.stderr)
         return 2
-    ns: dict[str, Any] = {}
-    # nosec B102 - same trust level as the render it mirrors; see sd_research_render.
-    exec(compile(conf.read_text(encoding="utf-8"), str(conf), "exec"), ns)  # nosec B102
-    project = ns.get("PROJECT", repo.name)
-    for line in publish(repo, project, ns.get("DOCS", [])):
+    for line in publish(repo, ns.get("PROJECT"), ns.get("DOCS", [])):
         print(line)
     return 0
 
