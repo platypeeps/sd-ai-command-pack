@@ -1835,9 +1835,10 @@ class Ship(SharedReview):
         A done item is left out: a branch stacked on a squashed one still
         carries that branch's commits, and the item closed with its merge.
         """
-        log = git(self.root, "log", "--no-merges", "--reverse", "--format=%B%x1e", f"refs/remotes/origin/{base}..{head}")
+        values = git(self.root, "log", "--no-merges", "--reverse", "--format=%(trailers:key=Delivers,valueonly)",
+                     f"refs/remotes/origin/{base}..{head}")
         named, warnings = [], []
-        for number in sd_ship_body.delivers_named(log.split("\x1e")):
+        for number in sd_ship_body.delivers_named(values):
             if number != self.args.item and self.item_status(number) == "done":
                 warnings.append(f"a branch commit carries `Delivers: sd:{number}`, which is already done; "
                                 "this merge leaves it")
@@ -1868,9 +1869,11 @@ class Ship(SharedReview):
             raise Refusal(f"the closing set this receipt holds was not read at {head}; prepare again to read it",
                           code="closing_set_stale", boundary="input", state="retryable_failure",
                           next_action="Run sd-ship prepare again at this head, then merge.")
+        deliver = bool(self.state.get("deliver"))
+        # Under the old rule an associate-only title named context only (sd:3365).
         named = (tuple(stored["items"]) if stored is not None
-                 else sd_ship_body.title_ids(self.state.get("title") or ""))
-        self.check_closes(self.state.get("body") or "", named, bool(self.state.get("deliver")))
+                 else sd_ship_body.title_ids(self.state.get("title") or "") if deliver else ())
+        self.check_closes(self.state.get("body") or "", named, deliver)
 
     def item_status(self, number: int) -> str | None:
         row = self.connection.execute("SELECT status FROM item WHERE id = ?", (number,)).fetchone()

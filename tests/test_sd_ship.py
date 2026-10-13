@@ -2904,6 +2904,18 @@ roles:
         self.assertIn(f"Delivers: sd:{other}", str(caught.exception))
         self.assertFalse(self.remote.pull_requests)
 
+    def test_a_delivers_line_git_reads_as_no_trailer_closes_nothing(self):
+        """Codex review of sd:3704: git is the reader of record. A subject alone,
+        or a last paragraph that is mostly prose, holds no trailer, so it closes nothing."""
+        self.task_item("task")
+        first, second = self.closes_items()[:2]
+        _git(self.root, "commit", "--allow-empty", "-m", f"Delivers: sd:{first}")
+        _git(self.root, "commit", "--allow-empty", "-m",
+             f"fix\n\nThis is prose that says\nDelivers: sd:{second}\nand more prose\nthat goes on")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.unanswered("--deliver", "--title", "A change").prepare()
+        self.assertEqual(self.operation().state["closing"], {"head": head, "items": []})
+
     def test_a_branch_commit_delivering_no_item_or_another_repositorys_item_refuses(self):
         self.task_item("task")
         elsewhere = self.directory / "elsewhere"
@@ -2988,6 +3000,22 @@ roles:
             result = self.merge()
         self.assert_closed_by_merge(result)
         self.assertEqual(result.get("closed_items"), [f"sd:{batched[0]}"])
+
+    def test_an_older_associate_only_receipt_at_merge_dispatch_still_closes_nothing(self):
+        """Codex review of sd:3704: under the old rule an associate-only title named
+        context only (sd:3365), so its ids are no delivery claim to refuse."""
+        self.task_item("task")
+        other = self.closes_items()[0]
+        self.unanswered("--associate-only", "--title", f"A slice (sd:{other})").prepare()
+        operation = self.operation()
+        del operation.state["closing"]
+        operation.state["phase"] = "merge_dispatch"
+        operation.save()
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        self.assertFalse(result.get("closed_items"))
+        self.assertEqual(self.status_of(other), "planning")
 
     def test_a_lost_merge_response_still_closes_the_trailer_items(self):
         """Failure table, row 6: the `PUT` lands and its answer is lost; reconcile closes the stored set."""

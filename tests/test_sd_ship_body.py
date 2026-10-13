@@ -141,13 +141,9 @@ class NormalizeTests(unittest.TestCase):
 
 
 class ClosingTests(unittest.TestCase):
-    def test_only_a_whole_delivers_trailer_in_the_last_paragraph_names_an_item(self) -> None:
-        """sd:3704: the branch commits' trailers close items, so a mention in prose or a slug closes none."""
-        messages = ["fix\n\nDelivers: sd:4 says the plan\n\ndelivers: sd:5\nRefs: sd:6",
-                    "more\n\nDelivers: sd:5\nDelivers: sd:7",
-                    "docs\n\nDelivers: docs/work/x\nDelivers: sd:08",
-                    ""]
-        self.assertEqual((5, 7), sd_ship_body.delivers_named(messages))
+    def test_only_a_whole_sd_value_names_an_item(self) -> None:
+        """sd:3704: git parses the trailers; a slug or a malformed id closes nothing."""
+        self.assertEqual((5, 7), sd_ship_body.delivers_named("sd:5\n\nsd:5\nsd:7\ndocs/work/x\nsd:08\nsd:9 and more\n"))
 
     def test_a_title_names_each_whole_token_once(self) -> None:
         self.assertEqual((3, 4), sd_ship_body.title_ids("Fix sd:3 and sd:4 (sd:3, xsd:5, sd:6x)"))

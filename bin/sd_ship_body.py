@@ -205,20 +205,15 @@ def title_ids(title: str) -> tuple[int, ...]:
     return tuple(dict.fromkeys(int(number) for number in _TITLE_ID.findall(title)))
 
 
-def delivers_named(messages) -> tuple[int, ...]:
-    """The items the trailer blocks of `messages` name with `Delivers: sd:<n>`, in order, without repeats (sd:3704).
+def delivers_named(values: str) -> tuple[int, ...]:
+    """The items `Delivers:` trailer values name, one value a line, in order, without repeats (sd:3704).
 
+    `values` is git's own parse (`%(trailers:key=Delivers,valueonly)`), the
+    reader of record: a subject or a mostly-prose paragraph holds no trailer.
     Only a whole `sd:<n>` value counts; a `docs/work` slug names no row here.
     """
-    found: list[int] = []
-    for message in messages:
-        for line in sd_lib.trailer_block(message).splitlines():
-            key, _, value = line.partition(":")
-            if key.strip().lower() == "delivers" and re.fullmatch(r"sd:[1-9][0-9]*", value.strip()):
-                number = int(value.strip()[3:])
-                if number not in found:
-                    found.append(number)
-    return tuple(found)
+    return tuple(dict.fromkeys(int(value.strip()[3:]) for value in values.splitlines()
+                               if re.fullmatch(r"sd:[1-9][0-9]*", value.strip())))
 
 
 def items_closed(body: str, named, item: int, deliver: bool) -> tuple[int, ...]:
