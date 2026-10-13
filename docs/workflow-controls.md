@@ -23,7 +23,7 @@ progress belongs to the database.
 | Change task status | Item screen, or `sd task status ID STATUS` |
 | Close a task or followup nobody will do | `sd task cancel ID --reason TEXT` — `done` with a `cancelled` receipt, as `sd work cancel` writes; a finding carried to the row reopens |
 | Record and resolve a followup | Item notes, or `sd task note ID TEXT --kind followup` / `sd note resolve NOTE_ID` — a note on a done item prints an advisory naming its delivery, and still lands |
-| See the same inventory as the dashboard | `sd today --json`, `sd store items --json` |
+| See the same inventory as the dashboard | `sd today` — reports needing attention, decisions waiting, open followups, then due and active work, soonest due first and marked `overdue`; `sd today --json` and `sd store items --json` give the rows |
 | Register a planning folder as a row (row-status repositories only) | `sd work register docs/work/<item>/prd.md` — the row's branch is the local branch the checkout is on when it is not the default, and otherwise nothing |
 | Relink a moved work artifact | Item screen, or `sd work relink ID PATH` |
 | Cancel repository work | Item screen, or `sd work cancel ID --reason TEXT` |

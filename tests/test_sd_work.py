@@ -1419,3 +1419,49 @@ class FieldEditsFold(unittest.TestCase):
                      {"kind": "decision", "body": "Updated priority by operator"},
                      {"kind": "comment", "body": "Updated priority by operator\nand a second thought"}):
             self.assertFalse(audit(note), note)
+
+
+class TodayIsTheDashboardsToday(unittest.TestCase):
+    """sd:3501. `sd today` printed work rows only: no reports, no followups, no
+    decisions, no overdue mark, and due rows in oldest-in-status order."""
+
+    setUp = TaskCLI.setUp
+    call = TaskCLI.call
+
+    def task(self, title, *flags):
+        return json.loads(self.call("task", "add", title, *flags, "--json").stdout)["item"]["id"]
+
+    def test_today_prints_each_section_and_marks_overdue(self):
+        late = self.task("Late one", "--due", "2020-01-02")
+        later = self.task("Later one", "--due", "2020-01-01")
+        self.call("task", "status", late, "in_progress")
+        open_item = self.task("Has a followup")
+        self.call("task", "note", open_item, "--body", "Chase the vendor", "--kind", "followup")
+        closed = self.task("Done with a followup")
+        self.call("task", "note", closed, "--body", "Owed on a done item", "--kind", "followup")
+        self.call("task", "status", closed, "done", "--reason", "test")
+        self.call("task", "note", open_item, "--kind", "question",
+                  "--body", "Which store?\nOption: Pack store\nOption: Database rows")
+        log = self.home / "run.log"
+        log.write_text("Observed drift.\nSD_REPORT_ATTENTION: two stale rows\n")
+        report = json.loads(self.call(
+            "reports", "ingest", "fixture", "--run-id", "r1", "--started", "2026-09-08T00:00:00Z",
+            "--ended", "2026-09-08T00:01:00Z", "--exit-code", "0", "--log", log, "--json").stdout)["item"]["id"]
+
+        lines = self.call("today").stdout.splitlines()
+        heads = [line for line in lines if not line.startswith(("#", " "))]
+        self.assertEqual(heads, ["Reports needing attention (1)", "Decisions waiting (1)",
+                                 "Open followups (1)", "Work (2)"])
+        text = "\n".join(lines)
+        self.assertIn(f"#{report}  planning  ", text)
+        self.assertIn(f"#{open_item}  Which store?", text)
+        self.assertIn(f"#{open_item}  Chase the vendor", text)
+        self.assertNotIn("Owed on a done item", text)
+        work = lines[lines.index("Work (2)") + 1:]
+        self.assertEqual([line.split()[0] for line in work if line.startswith("#")], [f"#{later}", f"#{late}"])
+        self.assertTrue(all(line.endswith(" · overdue") for line in work if line.startswith("#")), work)
+
+    def test_today_json_stays_the_work_rows(self):
+        self.call("task", "status", self.task("Busy"), "in_progress")
+        rows = json.loads(self.call("today", "--json").stdout)
+        self.assertEqual([row["title"] for row in rows], ["Busy"])

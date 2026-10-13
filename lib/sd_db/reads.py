@@ -199,7 +199,7 @@ SELECT item.*,
     OR (item.due IS NOT NULL AND item.due <= :horizon
         AND item.status NOT IN ('done')))
    AND {{unparked}}
- ORDER BY lane ASC, status_since ASC, item.id ASC
+ ORDER BY lane ASC, item.due IS NULL, item.due ASC, status_since ASC, item.id ASC
 """
 
 
@@ -210,9 +210,10 @@ def today_items(
 
     This is criterion 4's query. The Today screen renders it and `sd today`
     prints it; neither may sort it again. The order is three keys deep so it
-    is total: the `ready_to_send` lane first, oldest in its status first
-    within a lane, and the row id as the tie-break, because two rows that
-    entered a status in the same second must still come out in one order.
+    is total: the `ready_to_send` lane first, then the soonest due date with
+    undated rows last (sd:3501), oldest in its status first after that, and
+    the row id as the tie-break, because two rows that entered a status in
+    the same second must still come out in one order.
     """
     stamp = _now(now)
     horizon = (_parse(stamp) + timedelta(days=horizon_days)).strftime("%Y-%m-%d")
@@ -241,6 +242,27 @@ def open_followups(connection: sqlite3.Connection, *, limit: int = 200) -> list[
              LIMIT ?
             """,
             (limit,),
+        ).fetchall()
+    )
+
+
+def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200) -> list[sqlite3.Row]:
+    """Unresolved `kind` notes on items that are neither done nor parked, oldest first (sd:3501).
+
+    `open_followups` keeps notes on done items too, so its page fills with
+    followups nobody owes any more.
+    """
+    return list(
+        connection.execute(
+            f"""
+            SELECT note.*, item.title AS item_title, item.repo AS item_repo
+              FROM note JOIN item ON item.id = note.item
+             WHERE note.kind = ? AND note.resolved_at IS NULL AND item.status != 'done'
+               AND {_unparked_clause(connection)}
+             ORDER BY note.timestamp ASC, note.id ASC
+             LIMIT ?
+            """,
+            (kind, limit),
         ).fetchall()
     )
 

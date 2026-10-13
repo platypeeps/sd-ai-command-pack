@@ -13,6 +13,7 @@ answered. ``edit --kind`` moves a row between the same five -- see
 from __future__ import annotations
 
 import argparse
+import datetime
 import getpass
 import json
 import os
@@ -510,6 +511,23 @@ def _name_refs(value: Any) -> None:
             row["ref"] = row["external_id"]
 
 
+def _print_rows(rows: list[dict[str, Any]], *, moved: bool = False, today: str | None = None) -> None:
+    """One line per row, and its checkout, reference and rule; `today` marks a past due date `overdue` (sd:3501)."""
+    here = _standing_in(rows)
+    for row in rows:
+        priority = f" · P{row['priority']}" if row.get("priority") else ""
+        due = f" · due {row['due']}" if row.get("due") else ""
+        overdue = " · overdue" if today and row.get("due") and row["due"] < today else ""
+        print(f"#{row['id']}  {row['status']}  {row['title']}{priority}{due}{overdue}")
+        line = _repo_line(row, here=here, moved=moved)
+        if line:
+            print(line)
+        if row.get("ref"):
+            print(f"  ref: {row['ref']}")
+        if row.get("recurrence"):
+            print(f"  recurs {row['recurrence']} ({row.get('recurrence_anchor')})")
+
+
 def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = None,
           audit: bool = False, audited: Any = None) -> None:
     _name_refs(value)
@@ -519,18 +537,7 @@ def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = No
     rows = value if isinstance(value, list) else [value["item"]]
     if not rows:
         print("No items.")
-    here = _standing_in(rows)
-    for row in rows:
-        priority = f" · P{row['priority']}" if row.get("priority") else ""
-        due = f" · due {row['due']}" if row.get("due") else ""
-        print(f"#{row['id']}  {row['status']}  {row['title']}{priority}{due}")
-        line = _repo_line(row, here=here, moved=moved)
-        if line:
-            print(line)
-        if row.get("ref"):
-            print(f"  ref: {row['ref']}")
-        if row.get("recurrence"):
-            print(f"  recurs {row['recurrence']} ({row.get('recurrence_anchor')})")
+    _print_rows(rows, moved=moved)
     if isinstance(value, dict) and "next_occurrence" in value:
         _occurrence_line(value, following)
     if isinstance(value, dict):
@@ -560,6 +567,55 @@ def _print_notes(value: dict[str, Any], audited: Any) -> None:
     if folded:
         print(f"  {len(folded)} field {'edit' if len(folded) == 1 else 'edits'} hidden; "
               f"sd task show {value['item']['id']} --audit shows them")
+
+
+#: A choice line of a decision, as the dashboard's Decisions reads one (sd:3012).
+OPTION_LINE = re.compile(r"^[ \t]*Option:[ \t]*\S", re.MULTILINE)
+
+
+def _first_line(text: Any, width: int = 100) -> str:
+    line = str(text or "").strip().partition("\n")[0]
+    return line if len(line) <= width else line[:width - 1] + "…"
+
+
+def _attention_reports(connection: Any) -> list[dict[str, Any]]:
+    """Open reports whose fields say they need attention; unreadable fields count, as an unknown is no pass."""
+    from sd_db import reporting
+
+    found = []
+    for row in reporting.reports(connection):
+        if row["status"] == "done":
+            continue
+        try:
+            attention = json.loads(row["fields"] or "{}").get("attention")
+        except (ValueError, AttributeError):
+            attention = "fields unreadable"
+        if attention:
+            found.append({**row, "why": attention if isinstance(attention, str) else ""})
+    return found
+
+
+def _print_today(sd_db: Any, connection: Any, work: list[dict[str, Any]]) -> None:
+    """`sd today` as the dashboard's Today reads (sd:3501): the short sections first, so `head -40` shows them."""
+    reports = _attention_reports(connection)
+    decisions = [note for note in sd_db.reads.open_notes(connection, "question")
+                 if len(OPTION_LINE.findall(note["body"])) >= 2]
+    # A report's own followup is the report's line already.
+    listed = {row["id"] for row in reports}
+    followups = [note for note in sd_db.reads.open_notes(connection, "followup") if note["item"] not in listed]
+    for title, rows, line in (
+        ("Reports needing attention", reports,
+         lambda row: f"#{row['id']}  {row['status']}  {row['title']}" + (f" · {row['why']}" if row["why"] else "")),
+        ("Decisions waiting", decisions, lambda note: f"#{note['item']}  {_first_line(note['body'])}"),
+        ("Open followups", followups, lambda note: f"#{note['item']}  {_first_line(note['body'])}"),
+    ):
+        if rows:
+            print(f"{title} ({len(rows)})")
+            for row in rows:
+                print(line(row))
+    print(f"Work ({len(work)})")
+    _name_refs(work)
+    _print_rows(work, today=datetime.date.today().isoformat())
 
 
 def _occurrence_line(value: dict[str, Any], following: Any) -> None:
@@ -1060,9 +1116,26 @@ def _note_text(args: argparse.Namespace) -> str:
     return args.text if args.text is not None else args.body
 
 
+def run_today(args: argparse.Namespace) -> int:
+    """`sd today`: `today_items` as rows for `--json`, and the dashboard's Today sections for a person (sd:3501)."""
+    sd_db, _ = _library()
+    connection = sd_handoff_rows.connect(sd_db, write=False)
+    try:
+        rows = [dict(row) for row in sd_db.reads.today_items(connection)]
+        if args.json:
+            _emit(rows, machine=True)
+        else:
+            _print_today(sd_db, connection, rows)
+        return 0
+    except sd_db.SdDbError as error:
+        raise WorkRefusal(str(error)) from error
+    finally:
+        connection.close()
+
+
 def run(args: argparse.Namespace) -> int:
     sd_db, workflow = _library()
-    write = args.work_action not in {"today", "items", "item"}
+    write = args.work_action not in {"items", "item"}
     connection = sd_handoff_rows.connect(sd_db, write=write)
     try:
         action = args.work_action
@@ -1074,9 +1147,7 @@ def run(args: argparse.Namespace) -> int:
         # `following` is the row a recurring completion created, if any.
         moved, following, dedupe = False, None, None
         result: Any
-        if action == "today":
-            result = [dict(row) for row in sd_db.reads.today_items(connection)]
-        elif action == "items":
+        if action == "items":
             result = _items(sd_db, workflow, args, connection)
         elif action == "item":
             result = workflow.item_state(connection, args.item)
@@ -1386,8 +1457,10 @@ def _register_contributions(verbs: Any) -> None:
 
 def register(groups: Any, store: Any) -> None:
     """Extend the existing parser, preserving the plugin note-store verbs."""
-    today = groups.add_parser("today", help="due and active work, in dashboard order")
+    today = groups.add_parser(
+        "today", help="reports needing attention, decisions, open followups, then due and active work")
     _output(today, "today")
+    today.set_defaults(handler=run_today)
 
     items = store.add_parser("items", help="workspace items from the shared database")
     items.add_argument("--open", action="store_true", help="exclude done items")
