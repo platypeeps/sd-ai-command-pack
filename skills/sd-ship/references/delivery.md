@@ -12,6 +12,7 @@ One PR claims one item.
 A body line `Closes: sd:A, sd:B` names the other items it delivers (operator ruling 2026-10-03, sd:1481).
 A `Delivers: sd:N` trailer on one of the branch's own commits names one too (sd:3704).
 Prepare reads those trailers at the head it publishes and stores the closing set with that head.
+A commit a later branch commit reverts (`This reverts commit <sha>.`) names nothing; prepare prints the closing set and returns it as `closes`.
 The merge adds `Delivers:` for each item in the set and closes it; only a `--deliver` claim closes them.
 A merge whose stored set was read at another head, or a receipt prepared before sd:3704, refuses `closing_set_stale`; prepare again.
 The title closes nothing: its ids are context, and prepare warns about each one a delivering merge leaves open.

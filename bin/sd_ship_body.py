@@ -216,6 +216,27 @@ def delivers_named(values: str) -> tuple[int, ...]:
                                if re.fullmatch(r"sd:[1-9][0-9]*", value.strip())))
 
 
+#: The line `git revert` writes, on the full sha (sd:3704).
+_REVERTS = re.compile(r"^This reverts commit ([0-9a-f]{40})\.", re.MULTILINE)
+
+
+def unreverted(commits) -> list[str]:
+    """The trailer values of each `(sha, message, values)` a later commit in `commits` does not revert (sd:3704).
+
+    `commits` run oldest first. Read newest first, a commit already reverted
+    reverts nothing itself, so a revert of a revert restores the first one.
+    A revert naming a commit outside `commits` cancels nothing here.
+    """
+    reverted: set[str] = set()
+    kept: list[str] = []
+    for sha, message, values in reversed(list(commits)):
+        if sha in reverted:
+            continue
+        reverted.update(_REVERTS.findall(message))
+        kept.append(values)
+    return kept[::-1]
+
+
 def items_closed(body: str, named, item: int, deliver: bool) -> tuple[int, ...]:
     """The items a merge closes beside `item`: each `Closes:` item, then each of `named`.
 

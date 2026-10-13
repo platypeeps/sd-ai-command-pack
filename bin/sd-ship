@@ -1375,6 +1375,10 @@ class Ship(SharedReview):
             items = list(self.closing(body, named, deliver))
             closing = {"head": head, "items": items}
             closing_warnings += self.title_left_open(title, items, deliver)
+            # Shown before anything is published, so an undo git cannot see is caught here (sd:3704).
+            print(f"sd-ship: at {head[:12]} this merge closes "
+                  f"{', '.join(f'sd:{number}' for number in items) or 'no item'} beside sd:{self.args.item}",
+                  file=sys.stderr)
         if not self.state:
             self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
         self.persist_copilot_direction()
@@ -1460,7 +1464,8 @@ class Ship(SharedReview):
         if copilot.get("warning"):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
         return self.result("ready_to_send", copilot_review=copilot, invoker=self.state["invoker"],
-                           body_source=self.body_source, normalized=list(self.body_normalized))
+                           body_source=self.body_source, normalized=list(self.body_normalized),
+                           closes=[f"sd:{number}" for number in (self.state.get("closing") or {}).get("items", [])])
 
     def refuse_design_delivery(self, base: str, head: str) -> None:
         """Refuse `--deliver` on a branch `design_only` names, before anything is saved (sd:3519).
@@ -1834,11 +1839,15 @@ class Ship(SharedReview):
         unknown, not an empty set, and `sd_lib.commit_messages` answers `[]`.
         A done item is left out: a branch stacked on a squashed one still
         carries that branch's commits, and the item closed with its merge.
+        A commit the branch reverts names nothing (`sd_ship_body.unreverted`).
         """
-        values = git(self.root, "log", "--no-merges", "--reverse", "--format=%(trailers:key=Delivers,valueonly)",
-                     f"refs/remotes/origin/{base}..{head}")
+        log = git(self.root, "log", "--no-merges", "--reverse",
+                  "--format=%H%x1f%B%x1f%(trailers:key=Delivers,valueonly)%x1e", f"refs/remotes/origin/{base}..{head}")
+        # `run` strips the output, and Python counts \x1e and \x1f as space: the last
+        # commit's empty trailer field can go with them.
+        commits = [(*entry.strip("\n").split("\x1f", 2), "")[:3] for entry in log.split("\x1e") if entry.strip()]
         named, warnings = [], []
-        for number in sd_ship_body.delivers_named(values):
+        for number in sd_ship_body.delivers_named("\n".join(sd_ship_body.unreverted(commits))):
             if number != self.args.item and self.item_status(number) == "done":
                 warnings.append(f"a branch commit carries `Delivers: sd:{number}`, which is already done; "
                                 "this merge leaves it")

@@ -2916,6 +2916,48 @@ roles:
         self.unanswered("--deliver", "--title", "A change").prepare()
         self.assertEqual(self.operation().state["closing"], {"head": head, "items": []})
 
+    def file_commit(self, number: int) -> str:
+        """A branch commit that adds a file and carries `Delivers: sd:<n>`, so `git revert` has work to undo; its sha."""
+        (self.root / f"sd-{number}.txt").write_text("work\n", encoding="utf-8")
+        _git(self.root, "add", f"sd-{number}.txt")
+        _git(self.root, "commit", "-m", f"fix for sd:{number}\n\nDelivers: sd:{number}")
+        return _git(self.root, "rev-parse", "HEAD")
+
+    def test_a_reverted_delivering_commit_closes_nothing(self):
+        """Lane review of sd:3704: `git revert A` on the branch removes A's work, so
+        A's trailers name nothing the merge delivers. Git writes `This reverts commit <sha>.`"""
+        self.task_item("task")
+        kept, reverted = self.closes_items()[:2]
+        self.file_commit(kept)
+        _git(self.root, "revert", "--no-edit", self.file_commit(reverted))
+        result = self.unanswered("--deliver", "--title", "A change").prepare()
+        self.assertEqual(self.operation().state["closing"]["items"], [kept])
+        self.assertEqual(result["closes"], [f"sd:{kept}"])
+
+    def test_a_revert_of_the_revert_restores_the_trailers(self):
+        """A revert of that revert brings the work and its trailers back."""
+        self.task_item("task")
+        kept, reverted = self.closes_items()[:2]
+        self.file_commit(kept)
+        _git(self.root, "revert", "--no-edit", self.file_commit(reverted))
+        _git(self.root, "revert", "--no-edit", "HEAD")
+        result = self.unanswered("--deliver", "--title", "A change").prepare()
+        self.assertEqual(self.operation().state["closing"]["items"], [kept, reverted])
+        self.assertEqual(result["closes"], [f"sd:{kept}", f"sd:{reverted}"])
+
+    def test_a_revert_of_a_commit_outside_the_branch_leaves_the_branch_trailers(self):
+        """Only a commit in `origin/<base>..<head>` is cancelled; a revert naming one
+        on the base, or a sha the branch never had, leaves every branch trailer."""
+        self.task_item("task")
+        number = self.closes_items()[0]
+        self.file_commit(number)
+        _git(self.root, "commit", "--allow-empty", "-m",
+             f"Revert \"base\"\n\nThis reverts commit {_git(self.root, 'rev-parse', 'origin/main')}.")
+        _git(self.root, "commit", "--allow-empty", "-m", f"Revert \"gone\"\n\nThis reverts commit {'1' * 40}.")
+        result = self.unanswered("--deliver", "--title", "A change").prepare()
+        self.assertEqual(self.operation().state["closing"]["items"], [number])
+        self.assertEqual(result["closes"], [f"sd:{number}"])
+
     def test_a_branch_commit_delivering_no_item_or_another_repositorys_item_refuses(self):
         self.task_item("task")
         elsewhere = self.directory / "elsewhere"
