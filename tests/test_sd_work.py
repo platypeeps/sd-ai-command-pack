@@ -1305,10 +1305,6 @@ class NoSelfInstall(unittest.TestCase):
         self.assertNotIn("sd_db.self_install", sys.modules)
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class OneItemIdSpelling(unittest.TestCase):
     """sd:3500. Every positional named `item` reads 234, sd:234 and item:234.
 
@@ -1465,3 +1461,7 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
         self.call("task", "status", self.task("Busy"), "in_progress")
         rows = json.loads(self.call("today", "--json").stdout)
         self.assertEqual([row["title"] for row in rows], ["Busy"])
+
+
+if __name__ == "__main__":
+    unittest.main()
