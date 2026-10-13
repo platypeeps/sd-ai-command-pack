@@ -13,7 +13,6 @@ readers is `local-sd-runner/tests/test_removal_journal.py`.
 import hashlib
 import json
 import os
-import shlex
 import shutil
 import sqlite3
 import tempfile
@@ -767,7 +766,7 @@ class RepoRefusals(Store):
         self.assertEqual([r["key"] for r in self.refused(self.plan_repo(self.source), "P6")], [run])
 
     def test_a1_over_the_merged_plan(self):
-        for number in range(2):
+        for _ in range(2):
             self.assignment(self.item(repo=self.source))
         plan = self.plan_repo(self.source)
         self.assertEqual(len(self.refused(plan, "A1")), 1)
@@ -945,7 +944,7 @@ class TheProbe(Store):
         self.assertEqual(sorted({r["code"] for r in plan["refusals"]}), ["A1", "I6", "P4"])
         p4 = self.refused(plan, "P4")
         self.assertEqual(len(p4), 2)
-        for refusal, work in zip(p4, self.works):
+        for refusal, work in zip(p4, self.works, strict=True):
             clone = str(self.retained / str(work) / "1" / "clone")
             self.assertIn(clone, refusal["message"])
             self.assertEqual(refusal["commands"], [])
@@ -1245,7 +1244,7 @@ class TheRecord(Store):
         _, chunks, refusals = removal._record(plan, who="alex", reason="r", backup="b", note_limit=limit)
         self.assertEqual(refusals, [])
         self.assertEqual(len(chunks), 2)
-        for number, (chunk, expected) in enumerate(zip(chunks, (lines[:3], lines[3:])), 1):
+        for number, (chunk, expected) in enumerate(zip(chunks, (lines[:3], lines[3:]), strict=True), 1):
             with self.subTest(chunk=number):
                 head, rows = self.parse(chunk)
                 self.assertEqual(rows, expected)
@@ -1615,7 +1614,7 @@ class TheApply(Store):
         if memory is None:
             memory = sqlite3.connect(":memory:"); memory.row_factory = sqlite3.Row
             sd_db.paths.install(memory)
-            for number, path in sd_db.schema.migrations():
+            for _, path in sd_db.schema.migrations():
                 memory.executescript(path.read_text(encoding="utf-8"))
         self.addCleanup(memory.close)
         with mock.patch.object(removal.operations, "control_gate", wraps=removal.operations.control_gate) as gate, \

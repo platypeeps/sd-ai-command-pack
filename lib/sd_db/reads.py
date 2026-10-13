@@ -940,7 +940,7 @@ def age_histogram(
     for row in rows:
         tally[index_of[age_bucket(row, now=stamp)]][age_series(row)] += 1
     buckets: list[AgeBucket] = []
-    for (lower, upper), counts in zip(bounds, tally):
+    for (lower, upper), counts in zip(bounds, tally, strict=True):
         label = f"{lower}-{upper - 1}d" if upper is not None else f"{lower}d+"
         buckets.append(AgeBucket(label=label, lower=lower, upper=upper, counts=counts))
     return buckets

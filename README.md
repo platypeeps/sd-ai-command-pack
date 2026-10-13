@@ -464,7 +464,7 @@ There are twelve named surfaces: eleven commands plus `sd-help`.
 The taxonomy makes `sd-help` a skill because a catalog authorizes nothing.
 All platforms preserve Markdown bodies.
 Codex invocation metadata uses the [adapter](#codex-invocation-metadata).
-Each surface has one `skills/sd-*/SKILL.md` file.
+Each surface has one `SKILL.md` file under `skills/` or `contrib/`.
 That file is both the installed artifact and its documentation.
 
 `skills/` and `contrib/` also hold the skills these commands draw on —
@@ -473,9 +473,9 @@ relevant rather than invoked. They are not listed here: `sd-help` reads the
 installed tree at runtime, and `sd skill list` reads both roots, which are the
 only two inventories that cannot go stale.
 
-`sd-skill-adopt` is the only named surface in `contrib/`.
-It installs with `sd skill try` instead of the default installer.
-It remains a command because it authorizes side effects.
+`sd-skill-adopt`, `sd-tips`, `sd-draft-review` and `sd-publish-drive` are the named surfaces in `contrib/`.
+They install with `sd skill try` instead of the default installer.
+They remain commands because they authorize side effects.
 Each of the eleven commands sets `disable-model-invocation`.
 Every other surface, including `sd-help`, omits that marker.
 

@@ -17,8 +17,6 @@
       "summary": "sources to brief to handoff",
       "skills": [
         "sd-brief",
-        "sd-capture",
-        "sd-continuity-packet",
         "sd-digest",
         "sd-fact-check",
         "sd-handoff",
@@ -30,7 +28,6 @@
       "summary": "plan to build to ship",
       "skills": [
         "sd-check",
-        "sd-debug",
         "sd-help",
         "sd-plan",
         "sd-receive-review",
@@ -46,18 +43,13 @@
         "sd-author",
         "sd-decide",
         "sd-diagram",
-        "sd-draft",
-        "sd-draft-review",
         "sd-explain",
         "sd-humanizer",
         "sd-presentation",
         "sd-proposal",
         "sd-prose-lint",
         "sd-publish",
-        "sd-publish-drive",
-        "sd-technical-editor",
-        "sd-tips",
-        "sd-topic-radar"
+        "sd-technical-editor"
       ]
     }
   }

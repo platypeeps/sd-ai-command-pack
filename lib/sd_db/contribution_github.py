@@ -285,7 +285,7 @@ def _ci(client, prefix, head):
                     row.get("workflow_id"), event, row.get("head_branch"), pulls)
     suites = [(run.get("check_suite") or {}).get("id") for run in runs]
     skipped = {}
-    for run, suite in zip(runs, suites):
+    for run, suite in zip(runs, suites, strict=True):
         done = run.get("status") == "completed" and run.get("conclusion") == "skipped"
         skipped[suite] = skipped.get(suite, True) and done
     latest = {}
@@ -294,7 +294,7 @@ def _ci(client, prefix, head):
         if flow is not None and (flow not in latest
                                  or (not skipped[suite], suite) > (not skipped[latest[flow]], latest[flow])):
             latest[flow] = suite
-    newest = {run["id"]: run for run, suite in zip(runs, suites)
+    newest = {run["id"]: run for run, suite in zip(runs, suites, strict=True)
               if workflow.get(suite) is None or latest[workflow[suite]] == suite}
     for run in newest.values():
         status, conclusion = run.get("status"), run.get("conclusion")

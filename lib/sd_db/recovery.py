@@ -10,7 +10,6 @@ import hashlib
 import json
 import re
 import sqlite3
-from pathlib import Path
 
 from . import paths as sdpaths
 from .database import transaction

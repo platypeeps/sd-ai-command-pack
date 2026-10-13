@@ -718,7 +718,7 @@ class Session(socketserver.BaseRequestHandler):
                         return
                     else:
                         raise remote.RemoteError(f"unknown operation {op!r}")
-                except Exception as error:  # every failure goes back as a frame
+                except Exception as error:  # every failure goes back as a frame  # noqa: F841 (ruff misreads the rebinding)
                     if self.denied is not None:
                         # SQLite says only "not authorized"; `_authorize` said why.
                         error = remote.StatementRefused(self.denied)

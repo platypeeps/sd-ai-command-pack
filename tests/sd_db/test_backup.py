@@ -25,7 +25,7 @@ from importlib import import_module
 from pathlib import Path
 
 from sd_db import add_note, connect, create_assignment, create_item, upsert_repo
-from sd_db.backup import (BACKUP_MANIFEST, KEEP, Snapshot, _dated_directory, backup_root,
+from sd_db.backup import (BACKUP_MANIFEST, KEEP, _dated_directory, backup_root,
                           check_restorable, passed, prune, prune_older, restore, run, verify)
 from sd_db.errors import BackupError, SdDbError
 from sd_db.jobs import backup as job_backup

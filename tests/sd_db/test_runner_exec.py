@@ -732,7 +732,7 @@ class TheStandingRefusal(PaletteFixture):
                 for name in ("_standing", "standing_refusal")}
         for words in self.NAMED:
             self.assertIn(words, docs["_standing"], "the docstring stopped naming a refusal it makes")
-        for name, doc in docs.items():
+        for doc in docs.values():
             self.assertNotIn("without reading the item", doc,
                              "the criterion is what the set reads alike for every row, not the item row (sd:820)")
 
