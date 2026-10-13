@@ -1382,3 +1382,40 @@ class OneItemIdSpelling(unittest.TestCase):
 
         for spelling in ("1429", "sd:1429", "item:1429"):
             self.assertEqual(contributions._key(spelling), "item:1429")
+
+
+class FieldEditsFold(unittest.TestCase):
+    """sd:3511. 'Updated X by Y' notes were 29 percent of the notes on open items.
+
+    `sd task show` folds them into one count line unless `--audit`; the store
+    and `--json` keep every note.
+    """
+
+    setUp = TaskCLI.setUp
+    call = TaskCLI.call
+
+    def test_show_folds_field_edits_unless_audit(self):
+        item = json.loads(self.call("task", "add", "Fold me", "--json").stdout)["item"]["id"]
+        self.call("task", "edit", item, "--priority", 2)
+        self.call("task", "edit", item, "--due", "2026-12-01")
+        self.call("task", "note", item, "--body", "Updated priority by hand, a person wrote this")
+        plain = self.call("task", "show", item).stdout
+        self.assertNotIn("Updated priority by", plain.replace("Updated priority by hand", ""))
+        self.assertNotIn("Updated due by", plain)
+        self.assertIn(f"2 field edits hidden; sd task show {item} --audit shows them", plain)
+        self.assertIn("Updated priority by hand, a person wrote this", plain)
+        audit = self.call("task", "show", item, "--audit").stdout
+        self.assertIn("Updated due by", audit)
+        self.assertNotIn("field edits hidden", audit)
+        bodies = [note["body"] for note in json.loads(self.call("task", "show", item, "--json").stdout)["notes"]]
+        self.assertEqual(sum(body.startswith("Updated ") and " by " in body for body in bodies), 3)
+
+    def test_the_predicate_reads_what_edit_item_writes(self):
+        audit = workflow.is_audit_note
+        for body in ("Updated priority by operator", "Updated due, title by dashboard",
+                     "Changed kind task -> followup by operator\nUpdated repo by operator", "Unparked by operator"):
+            self.assertTrue(audit({"kind": "comment", "body": body}), body)
+        for note in ({"kind": "comment", "body": "Updated priority by hand, a person wrote this"},
+                     {"kind": "decision", "body": "Updated priority by operator"},
+                     {"kind": "comment", "body": "Updated priority by operator\nand a second thought"}):
+            self.assertFalse(audit(note), note)

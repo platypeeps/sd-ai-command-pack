@@ -551,6 +551,17 @@ def edit_item(
         return item_state(connection, item)
 
 
+#: One line of the audit comment `edit_item` writes. The name is one token: a
+#: person's comment that starts "Updated priority by hand, ..." is not one.
+AUDIT_LINE = re.compile(r"(?:Updated [a-z_]+(?:, [a-z_]+)*|Changed kind \S+ -> \S+|Unparked) by \S+")
+
+
+def is_audit_note(note: Any) -> bool:
+    """Whether `note` is a field-edit comment `edit_item` wrote, which readers fold (sd:3511)."""
+    lines = str(note["body"] or "").splitlines()
+    return note["kind"] == "comment" and bool(lines) and all(AUDIT_LINE.fullmatch(line) for line in lines)
+
+
 def allowed_statuses(connection: sqlite3.Connection, item: int, *, state: dict | None = None) -> list[str]:
     """The status choices a write through `change_status` accepts.
 

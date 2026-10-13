@@ -510,7 +510,8 @@ def _name_refs(value: Any) -> None:
             row["ref"] = row["external_id"]
 
 
-def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = None) -> None:
+def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = None,
+          audit: bool = False, audited: Any = None) -> None:
     _name_refs(value)
     if machine:
         print(json.dumps(value, ensure_ascii=False))
@@ -540,10 +541,25 @@ def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = No
         if value.get("created") is False:
             print("already filed under this ref; updated, status kept" if value["item"].get("ref")
                   else "already registered; nothing changed")
-        for note in value.get("notes", []):
-            resolved = " · resolved" if note.get("resolved_at") else ""
-            print(f"  note #{note['id']} · {note['kind']}{resolved}: {note['body']}")
+        _print_notes(value, None if audit else audited)
         print(f"revision: {value['revision']}")
+
+
+def _print_notes(value: dict[str, Any], audited: Any) -> None:
+    """The item's notes, with the field-edit comments `audited` names folded into one count (sd:3511).
+
+    `audited` is None when the caller asked for every note; `--json` always keeps them all.
+    """
+    notes = value.get("notes", [])
+    folded = [] if audited is None else [note for note in notes if audited(note)]
+    for note in notes:
+        if note in folded:
+            continue
+        resolved = " · resolved" if note.get("resolved_at") else ""
+        print(f"  note #{note['id']} · {note['kind']}{resolved}: {note['body']}")
+    if folded:
+        print(f"  {len(folded)} field {'edit' if len(folded) == 1 else 'edits'} hidden; "
+              f"sd task show {value['item']['id']} --audit shows them")
 
 
 def _occurrence_line(value: dict[str, Any], following: Any) -> None:
@@ -1097,7 +1113,8 @@ def run(args: argparse.Namespace) -> int:
                 result = _deliver(progress, workflow, connection, args, who)
         else:
             raise WorkRefusal(f"unknown workflow operation: {action}")
-        _emit(result, machine=args.json, moved=moved, following=following)
+        _emit(result, machine=args.json, moved=moved, following=following,
+              audit=getattr(args, "audit", False), audited=workflow.is_audit_note)
         _dedupe(dedupe)
         return 0
     except sd_db.SdDbError as error:
@@ -1186,6 +1203,11 @@ def _recurrence_flags(parser: argparse.ArgumentParser, *, clear: bool = False) -
     parser.add_argument("--recur-anchor", metavar="ANCHOR",
                         help="schedule (default: the next due date follows the last one) or "
                              "completion (it follows the day the task was done)")
+
+
+def _audit(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--audit", action="store_true",
+                        help="print the field-edit notes ('Updated priority by ...') a plain read folds into a count")
 
 
 def _output(parser: argparse.ArgumentParser, action: str, *, revision: bool = False) -> None:
@@ -1376,6 +1398,7 @@ def register(groups: Any, store: Any) -> None:
     _output(items, "items")
     item = store.add_parser("item", help="one workspace item, notes, and revision")
     item.add_argument("item", type=item_id, help=ITEM_HELP)
+    _audit(item)
     _output(item, "item")
 
     task = groups.add_parser("task", help="capture and manage work without files or GitHub")
@@ -1479,6 +1502,7 @@ def register(groups: Any, store: Any) -> None:
     # stays the canonical read for every kind, so both print the same thing.
     show = verbs.add_parser("show", help="one item, notes, and revision (as `sd store item`)")
     show.add_argument("item", type=item_id, help=ITEM_HELP)
+    _audit(show)
     _output(show, "item")
 
     work = groups.add_parser("work", help="maintain artifact links and verified completion")
