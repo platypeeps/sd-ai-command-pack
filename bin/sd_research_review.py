@@ -39,6 +39,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from sd_lib import git_output
+
 # Imported, not spelled again: the two spellings split once already.
 from sd_research_publish import DASHBOARD_DIR, execute_conf
 
@@ -127,12 +129,8 @@ def work_items(repo):
     worktree. Outside git the folder on disk answers, and the lint says why.
     """
     work = os.path.join(repo, "docs", "work")
-    try:
-        tracked = subprocess.run(["git", "ls-files", "--deduplicate", "-z", "--", "docs/work"],
-                                 cwd=repo, capture_output=True, text=True)
-    except OSError:
-        tracked = None
-    if not (tracked.stdout if tracked is not None and tracked.returncode == 0 else os.path.isdir(work)):
+    tracked = git_output(["ls-files", "--deduplicate", "-z", "--", "docs/work"], Path(repo))
+    if not (tracked if tracked is not None else os.path.isdir(work)):
         return 0
     lint = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sd-docs-lint")
     if not os.path.exists(lint):

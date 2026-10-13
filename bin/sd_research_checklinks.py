@@ -14,8 +14,10 @@ folder's notes never fail it (sd:3705).
 """
 import os
 import re
-import subprocess
 import sys
+from pathlib import Path
+
+from sd_lib import git_output
 
 SKIP = ("build/", "vendor/", ".git/", "node_modules/", "__pycache__/")
 LINK = re.compile(r"\[[^\]]*\]\(([^)#\s]+)")
@@ -24,12 +26,9 @@ PATH = re.compile(r"`([0-9]{2}-[a-z]+/[A-Za-z0-9._-]+\.md)`")
 
 def markdown(repo):
     """The Markdown files to read: git's tracked ones, or every one on disk outside git."""
-    try:
-        listed = subprocess.run(["git", "ls-files", "--deduplicate", "-z", "--", "*.md"], cwd=repo, capture_output=True, text=True)
-    except OSError:
-        listed = None
-    if listed is not None and listed.returncode == 0:
-        return [os.path.join(repo, name) for name in listed.stdout.split("\0") if name]
+    listed = git_output(["ls-files", "--deduplicate", "-z", "--", "*.md"], Path(repo))
+    if listed is not None:
+        return [os.path.join(repo, name) for name in listed.split("\0") if name]
     found: list[str] = []
     for root, dirs, files in os.walk(repo):
         dirs[:] = [d for d in dirs if not any((d + "/").startswith(s) for s in SKIP)]
