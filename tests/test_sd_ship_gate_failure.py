@@ -257,6 +257,48 @@ class AClearedReviewOutlivesItsGate(unittest.TestCase):
         self.assertEqual([entry["report"]["status"] for entry in review.state["passes"]], ["gate_failed"])
         self.assertIsNone(review.state.get("reviewed_head"))
 
+    def caught_up(self, status: str):
+        """The kept pass met at a clean catch-up merge of its head, as the lane's `--catch-up` prepare makes (sd:3474)."""
+        head = "d" * 40
+        review, process = self.context(state={**self.kept(), "base": "main"}, head=head)
+        carried = {"from": HEAD, "to": head, "patch_id": "e" * 40, "merges": [head]}
+        with self.gate(status) as gate, unittest.mock.patch.object(sd_ship_review, "carry_forward", return_value=carried), \
+                unittest.mock.patch("sd_ship_review.is_ancestor", return_value=True):
+            if status == "pass":
+                review.review(head)
+            else:
+                with self.assertRaisesRegex(ship.Refusal, "failed again at .*; its review pass stays kept"):
+                    review.review(head)
+        self.assertEqual(process.call_count, 0, "a reviewer was asked")
+        self.assertEqual(gate.call_args.args[1], head)
+        return review, head
+
+    def test_a_clean_catch_up_of_that_head_runs_only_the_gate(self):
+        """sd:3474. The lane prepares with --catch-up, so a busy base moved the head
+        before the retry: 26 of 32 kept passes paid a full review there."""
+        review, head = self.caught_up("pass")
+        [entry] = review.state["passes"]
+        self.assertEqual((entry["head"], entry["report"]["status"], entry["report"]["check"]["status"]),
+                         (HEAD, "clean", "pass"))
+        self.assertEqual((review.state["reviewed_head"], review.state["review_carry_forward"]["from"]), (head, HEAD))
+        self.assertIsNone(review.state["review_preflight_error"])
+
+    def test_a_gate_that_fails_at_the_catch_up_keeps_the_pass_and_records_no_carry(self):
+        review, _head = self.caught_up("fail")
+        self.assertEqual([entry["report"]["status"] for entry in review.state["passes"]], ["gate_failed"])
+        self.assertIsNone(review.state.get("reviewed_head"))
+        self.assertNotIn("review_carry_forward", review.state)
+
+    def test_a_catch_up_that_does_not_carry_is_reviewed(self):
+        """A base change beside the branch's files, or a merge with content of its own: `carry_forward` says no."""
+        head = "d" * 40
+        review, process = self.context(state={**self.kept(), "base": "main"}, head=head)
+        with self.gate("pass") as gate, unittest.mock.patch.object(sd_ship_review, "carry_forward", return_value=None), \
+                unittest.mock.patch("sd_ship_review.is_ancestor", return_value=True):
+            review.review(head)
+        self.assertEqual((process.call_count, gate.call_count), (2, 0))
+        self.assertEqual(len(review.state["passes"]), 2)
+
     def test_a_fix_after_it_is_verified_as_a_delta(self):
         fixed = "c" * 40
         review, process = self.context(state=self.kept(), head=fixed)

@@ -474,12 +474,20 @@ class SharedReview:
         Only a clean or advisory receipt: a blocking one is cleared by
         dispositions bound to its own head. `carry_forward` decides; the
         receipt records what it found, and the output names it.
+
+        A review that cleared before its gate failed (`kept_gate_failure`)
+        carries too, and the gate runs alone at the new head (`rerun_gate`,
+        sd:3474). The lane prepares with `--catch-up`, so a busy base moved
+        the head before the retry, and 26 of 32 kept passes paid a full
+        review all the same. Such a pass names no reviewed head.
         """
         passes, base = self.history.native(self.state), self.state.get("base")
-        if not passes or not base or not self.state.get("reviewed_head"):
+        report = (passes[-1].get("report") or {}) if passes else {}
+        kept = kept_gate_failure(report)
+        if not passes or not base or not (self.state.get("reviewed_head") or kept):
             return False
-        report = passes[-1].get("report") or {}
-        if report.get("status") not in ("clean", "advisory") or not completed_depth(report) or self.binding_moved():
+        if (report.get("status") not in ("clean", "advisory") and not kept) or not completed_depth(report) \
+                or self.binding_moved():
             return False
         # A named reviewer is a selection a receipt from another cannot replace.
         requested = getattr(self.args, "provider", None)
@@ -488,11 +496,15 @@ class SharedReview:
         carried = carry_forward(self.root, passes[-1]["head"], head, f"refs/remotes/origin/{base}")
         if carried is None:
             return False
-        self.save(reviewed_head=head, review_carry_forward={**carried, "recorded_at": self.runtime.clock()})
-        self.check_review(head)
+        carried = {**carried, "recorded_at": self.runtime.clock()}
         print(f"sd-ship: {head[:12]} adds only clean merges of origin/{base} to reviewed {carried['from'][:12]}, "
-              "and the branch's own patch-id is unchanged; its review carries forward, no provider called",
-              file=sys.stderr)
+              "and the branch's own patch-id is unchanged; its review carries forward, no provider called"
+              + ("; the gate that failed after it runs again here" if kept else ""), file=sys.stderr)
+        if kept:
+            self.rerun_gate(head, carried)
+            return True
+        self.save(reviewed_head=head, review_carry_forward=carried)
+        self.check_review(head)
         return True
 
     def check_review(self, head: str, *, refresh_adjudication: bool = False, run_gate: bool = False) -> dict | None:
@@ -536,7 +548,7 @@ class SharedReview:
                           code="gate_failed", boundary="runtime", state="retryable_failure",
                           next_action="Fix the gate and prepare again; the fix is reviewed as a fix verification.")
 
-    def rerun_gate(self, head: str) -> None:
+    def rerun_gate(self, head: str, carried: dict | None = None) -> None:
         """sd:2721. The gate alone, at the head whose review cleared before its gate failed.
 
         `release_gate_failure` kept that pass, so a gate that fails under load
@@ -544,6 +556,10 @@ class SharedReview:
         review cleared with and this gate's check, keeping the failed one as
         `failed_check`; the report then reads as any cleared review does. A
         failure keeps the pass as it was.
+
+        `carried` is the `carry_forward` record when `head` is a clean
+        catch-up of the pass's head (sd:3474); it is saved with the pass in
+        one write, so a gate that fails or a killed run leaves no carry.
         """
         base = self.gate_check_base()
         check = adjudicated_check(self.root, head, base, self.database if base else None,
@@ -560,7 +576,8 @@ class SharedReview:
         report = passes[-1]["report"]
         passes[-1].update(exit_code=0, report={**report, "status": report["cleared_status"], "check": check,
                                                "failed_check": report["check"]})
-        self.save(passes=passes, reviewed_head=head, review_preflight_error=None)
+        self.save(passes=passes, reviewed_head=head, review_preflight_error=None,
+                  **({"review_carry_forward": carried} if carried else {}))
         self.check_review(head)
 
     def adjudicate(self) -> dict:
@@ -1189,15 +1206,16 @@ class SharedReview:
         evidence = "\n".join(failed + [f"gate output: {said}" if failed else said] * bool(said))
         # sd:2605. A pass that asked reviewers but kept no cleared status is
         # released too, and the next prepare reviews the fixed branch again.
-        when = ("after the review cleared; the review pass is kept, so the next prepare at this head runs only "
-                "the gate" if kept else
+        when = ("after the review cleared; the review pass is kept, so the next prepare at this head, or at a "
+                "clean catch-up merge of the base, runs only the gate" if kept else
                 "after the review cleared; the review pass was released, so the next prepare reviews again"
                 if report.get("outcomes") else "before any reviewer was asked; no review pass was spent")
         raise Refusal(f"the repository gate failed {when}: "
                       f"{evidence or 'no check output; sd-ship observe prints the ship receipt'}",
                       code="gate_failed", boundary="runtime", state="retryable_failure",
                       next_action=("Rerun prepare when the machine is less loaded: it runs only the gate at this head "
-                                   "(--review-timeout raises the limit). Or fix the gate and prepare again: the fix "
+                                   "or a clean catch-up of it (--review-timeout raises the limit). Or fix the gate "
+                                   "and prepare again: the fix "
                                    "is reviewed as a fix verification." if kept else
                                    "Fix the gate, or rerun prepare when the machine is less loaded "
                                    "(--review-timeout raises the limit); the next prepare reviews normally."))
