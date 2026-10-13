@@ -7,6 +7,7 @@ so nothing reaches GitHub or a review.
 
 from __future__ import annotations
 
+import calendar
 import contextlib
 import fcntl
 import importlib.util
@@ -35,6 +36,23 @@ from tests.clean_env import clean_environment  # noqa: E402
 
 def git(root: pathlib.Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
+
+
+#: An `sd-ship` that prints `sd_ship_workflow.failure` of prepare's incomplete-review `Refusal`, as `main` does,
+#: and passes `--retry-review` (sd:3482).
+FAKE_PREPARE = """import json, sys
+sys.path.insert(0, {bin!r})
+from sd_ship_remote import Refusal
+from sd_ship_workflow import failure
+if "--retry-review" in sys.argv:
+    print(json.dumps({{"ok": True, "phase": "ready_to_send", "head": "head-1"}}))
+    raise SystemExit(0)
+refused = Refusal("the preceding review did not complete its requested depth; use --retry-review for a "
+                  "full-branch retry", code="review_incomplete", boundary="review", state="operator_decision",
+                  next_action="Prepare again with --retry-review; it spends one automatic pass.")
+print(json.dumps(failure("prepare", refused), indent=2, sort_keys=True))
+raise SystemExit(3)
+"""
 
 
 class Lane(unittest.TestCase):
@@ -381,6 +399,12 @@ class Runner(Lane):
         _, new = self.moved_above(3)
         self.assertEqual(sd_lane.retry(self.repo, 3, self.environ)["expected_head"], new)
 
+    def test_a_cancel_records_who_cancelled_it(self) -> None:
+        """sd:3483. Thirteen cancelled entries carried an empty reason, while a release says who released it."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(self.entries()[0]["reason"], f"cancelled by the operator on {sd_lane.this_host()}")
+
     def test_lane_list_gives_each_entry_its_enqueue_order(self) -> None:
         """sd:3419. A reader of `lane list` takes an item's newest entry by `enqueue_seq`, not by its place after a move."""
         import argparse  # noqa: PLC0415
@@ -395,6 +419,9 @@ class Runner(Lane):
         listed = json.loads(said.getvalue())["entries"]
         self.assertTrue(all(type(row.get("enqueue_seq")) is int for row in listed), listed)
         self.assertEqual([row["item"] for row in sorted(listed, key=lambda row: row["enqueue_seq"])], [1, 2, 2])
+        # sd:3483: each entry's round among its item's entries, so three blocking rounds need no counting by hand.
+        self.assertEqual([(row["item"], row.get("round")) for row in sorted(listed, key=lambda row: row["enqueue_seq"])],
+                         [(1, 1), (2, 1), (2, 2)])
         newest = max((row for row in listed if row["item"] == 2), key=lambda row: row["enqueue_seq"])
         self.assertEqual(newest["expected_head"], new)
         self.assertNotEqual([row for row in listed if row["item"] == 2][-1]["expected_head"], new)
@@ -486,6 +513,89 @@ class Runner(Lane):
         self.assertEqual([(c[2], "--retry-review" in c) for c in self.calls],
                          [("prepare", False), ("prepare", True), ("merge", False)])
         self.assertEqual(self.entries()[0]["status"], "merged")
+
+    def test_sd_ships_own_review_incomplete_refusal_reaches_the_retry(self) -> None:
+        """sd:3482. Two entries kept this refusal with no -retry.log; sd-ship's real refusal, printed, still retries.
+
+        The fake `sd-ship` prints what `sd_ship_workflow.failure` makes of the
+        `Refusal` prepare raises, exits 3 as `sd-ship` does, and runs under
+        the runner's own `default_ship`.
+        """
+        fake = self.tmp / "fake-bin"
+        fake.mkdir()
+        (fake / "sd-ship").write_text(FAKE_PREPARE.format(bin=str(REPO_ROOT / "bin")), encoding="utf-8")
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        with mock.patch.object(sd_lane, "BIN", fake), mock.patch.dict(os.environ, self.environ):
+            sd_lane.run_lane(self.repo, self.environ)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry["head"]), ("prepared", "head-1"), entry.get("reason"))
+        self.assertTrue(entry["prepare_log"].endswith("-retry.log"), entry["prepare_log"])
+        self.assertIn("--retry-review", pathlib.Path(entry["prepare_log"]).read_text(encoding="utf-8"))
+
+    def test_a_prepare_that_reconciles_a_landed_merge_records_it_merged(self) -> None:
+        """sd:3482. A retry after a death at merge: prepare answered `merged`, and the entry failed 'not ready'."""
+        head = sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")["expected_head"]
+        self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": head, "merge_commit": "landed-1"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry.get("merge_commit"), entry.get("reconciled")),
+                         ("merged", "landed-1", True), entry.get("reason"))
+        self.assertEqual([c[2] for c in self.calls], ["prepare"])  # no second merge
+        self.assertIn("Landed: merged at landed-1", self.notes[0][1])
+
+    def caught_up_topic(self) -> tuple[pathlib.Path, str, str]:
+        """A worktree whose branch has a commit, then prepare's catch-up merge of a moved `origin/main` on it."""
+        tree = self.worktree("topic")
+        git(tree, "commit", "-q", "--allow-empty", "-m", "work")
+        work = git(tree, "rev-parse", "HEAD")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
+        return tree, work, git(tree, "rev-parse", "HEAD")
+
+    def test_a_reconciled_merge_of_the_entrys_catch_up_records_it_merged(self) -> None:
+        """sd:3482: the merge that landed was of prepare's catch-up of the queued head."""
+        tree, work, caught = self.caught_up_topic()
+        git(tree, "reset", "-q", "--hard", work)
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+        git(tree, "reset", "-q", "--hard", caught)
+        self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": caught, "merge_commit": "landed-1"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged", self.entries()[0].get("reason"))
+
+    def test_a_reconciled_merge_of_an_earlier_head_is_not_a_catch_up_of_it(self) -> None:
+        """Codex round 1: the queued head is a catch-up of the merged one; that merge is not this entry's."""
+        tree, work, caught = self.caught_up_topic()
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+        self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": work, "merge_commit": "landed-0"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], self.notes), ("failed", []))
+        self.assertIn(f"merge of {work}, not this entry's head {caught}", entry["reason"])
+
+    def test_a_reconciled_merge_whose_claim_was_released_lands_nothing(self) -> None:
+        """Codex round 1: the claim must still hold before the landing deletes the branch and notes the item."""
+        head = sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")["expected_head"]
+
+        def released_meanwhile(argv: list[str], log: pathlib.Path) -> dict:
+            sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(token="released"))
+            self.ship(argv, log)
+            return {"ok": True, "phase": "merged", "head": head, "merge_commit": "landed-1"}
+        answer = sd_lane.run_lane(self.repo, self.environ, released_meanwhile)
+        self.assertEqual((self.notes, self.entries()[0]["status"]), ([], "running"))
+        self.assertIn("reclaimed or released", answer["stopped"])
+
+    def test_a_reconciled_merge_of_another_head_is_not_this_entrys(self) -> None:
+        """sd:3482, evidence: the receipt's merge must be of the entry's head; an earlier pull request's is not."""
+        tree = self.worktree("topic")
+        git(tree, "commit", "-q", "--allow-empty", "-m", "follow-up")
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+        earlier = git(self.repo, "rev-parse", "main")
+        self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": earlier, "merge_commit": "landed-0"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry.get("merge_commit"), self.notes), ("failed", None, []))
+        self.assertIn(f"merge of {earlier}, not this entry's head", entry["reason"])
 
     def test_the_lane_retries_an_incomplete_review_only_once(self) -> None:
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
@@ -697,7 +807,7 @@ class Runner(Lane):
         now = [0.0]
 
         def slow(argv: list[str], log: pathlib.Path) -> dict:
-            now[0] += 40 * 60  # one entry on a busy lane
+            now[0] += 30 * 60  # one entry on a busy lane
             return self.ship(argv, log)
 
         with mock.patch.object(sd_lane, "clock", lambda: now[0]):
@@ -709,6 +819,59 @@ class Runner(Lane):
         self.assertEqual((spent["ran"], len(self.calls)), ([], 2), "a hosted run's later lane started an entry")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([row["status"] for row in self.entries()], ["prepared"] * 3)
+
+    def test_a_claim_leases_one_prepare_and_renews_it_before_the_retry(self) -> None:
+        """sd:3481. A claim leased two prepares, 14 hours, so a dead satellite runner held its lane most of a day."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        leases: list[float] = []
+
+        def incomplete_once(argv: list[str], log: pathlib.Path) -> dict:
+            [row] = self.entries()
+            leases.append(calendar.timegm(time.strptime(row["lease_until"], "%Y-%m-%dT%H:%M:%SZ")) - time.time())
+            sd_lane.update(self.store(), lambda rows: rows[0].update(lease_until="2020-01-01T00:00:00Z"))
+            self.ship(argv, log)
+            if "--retry-review" in argv:
+                return {"ok": True, "phase": "ready_to_send", "head": "head-1"}
+            return {"ok": False, "error": "incomplete", "workflow": {"blocker": {"code": "review_incomplete"}}}
+        sd_lane.run_lane(self.repo, self.environ, incomplete_once)
+        self.assertEqual(len(leases), 2)
+        for lease in leases:  # the retry's prepare runs under a renewed lease, not the old one
+            self.assertGreater(lease, sd_lane.sd_lib.GATE_SLOT_SECONDS)
+            self.assertLess(lease, 8 * 3600)
+
+    def test_a_claim_released_before_the_retry_starts_no_second_prepare(self) -> None:
+        """sd:3481, the renew step: a claim lost before the --retry-review prepare stops the run there."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+
+        def released_then_incomplete(argv: list[str], log: pathlib.Path) -> dict:
+            sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(token="released"))
+            self.ship(argv, log)
+            return {"ok": False, "error": "incomplete", "workflow": {"blocker": {"code": "review_incomplete"}}}
+        answer = sd_lane.run_lane(self.repo, self.environ, released_then_incomplete)
+        self.assertEqual([("--retry-review" in call) for call in self.calls], [False])
+        self.assertIn("reclaimed or released", answer["stopped"])
+
+    def test_a_loaded_machine_claims_no_entry_until_load5_falls_below_the_gate_limit(self) -> None:
+        """sd:3479. Six gates timed out at one hour under load, and a retry ran the same gate under the same load."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        environ = {**self.environ, "SD_GATE_LOAD_MAX": "8"}
+        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (2.0, 9.5, 9.0)):
+            answer = sd_lane.run_lane(self.repo, environ, self.ship)
+        self.assertEqual((self.calls, [row["status"] for row in self.entries()]), ([], ["pending"]))
+        self.assertIn("load5 9.5 is at or above 8", answer["stopped"])
+        with mock.patch.object(sd_lane.os, "getloadavg", side_effect=OSError("no load")):
+            answer = sd_lane.run_lane(self.repo, environ, self.ship)
+        self.assertEqual((self.calls, answer["stopped"]), ([], "cannot read the load average (no load); "
+                                                                 "the next run takes the pending entries"))
+        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (9.0, 7.9, 9.0)):
+            sd_lane.run_lane(self.repo, environ, self.ship)
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
+
+    def test_no_gate_load_limit_claims_whatever_the_load(self) -> None:
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        with mock.patch.object(sd_lane.os, "getloadavg", lambda: (99.0, 99.0, 99.0)):
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
 
     def left_running(self, pid: int | None, step: str = "prepare") -> None:
         """Item 1 claimed by the runner `pid` and never finished, as a killed runner leaves it (sd:2821)."""
@@ -2378,6 +2541,29 @@ class AnyHost(SharedQueue):
         self.assertEqual((heads[:1], self.entries()[0]["status"]), ([head], "merged"))
         self.assertFalse(self.made().exists())
 
+    def test_a_leftover_lane_worktree_at_the_head_is_reused_and_its_branch_kept(self) -> None:
+        """sd:3483: a killed run's lane worktree at the head runs the entry; this run did not make its branch."""
+        [head] = self.enqueued_elsewhere(1, "topic", "work")
+        self.made().parent.mkdir(parents=True, exist_ok=True)
+        git(self.repo, "fetch", "-q", "origin", "topic")
+        git(self.repo, "worktree", "add", "-q", "-b", "topic", str(self.made()), head)
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged")
+        self.assertEqual((self.made().exists(), git(self.repo, "rev-parse", "refs/heads/topic")), (False, head))
+
+    def test_a_leftover_lane_worktree_keeps_a_branch_origin_lacks(self) -> None:
+        """sd:3483. A killed run's lane worktree went with `git branch -D`, though the lane may not have made the branch."""
+        self.enqueued_elsewhere(1, "topic", "work")
+        self.made().parent.mkdir(parents=True, exist_ok=True)
+        git(self.repo, "worktree", "add", "-q", "-b", "topic", str(self.made()), "main")
+        git(self.made(), "commit", "-q", "--allow-empty", "-m", "on no remote")
+        unpushed = git(self.made(), "rev-parse", "HEAD")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry.get("code"), self.calls), ("skipped", sd_lane.BRANCH_BUSY, []))
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/topic"), unpushed)
+        self.assertFalse(self.made().exists())
+
     def test_a_pending_entry_with_no_branch_fails_and_does_not_loop(self) -> None:
         """Failure table, worktree: an entry another host left with no branch has nothing to fetch; it fails once."""
         self.enqueued_elsewhere(1, "topic", "work")
@@ -2980,6 +3166,35 @@ class ShipProcess(Lane):
         self.assertEqual((answer["ok"], answer["entries"]), (True, []))
         self.assertTrue(log.read_text(encoding="utf-8").startswith(f"$ sd-ship -C {self.repo} lane list\n{{"))
 
+    def test_the_timeout_ends_what_sd_ship_started(self) -> None:
+        """sd:3480. The timeout killed `sd-ship` alone; its gate's children ran on and held the gate slot."""
+        fake, child = self.tmp / "bin", self.tmp / "child.pid"
+        fake.mkdir()
+        (fake / "sd-ship").write_text(
+            "import pathlib, subprocess, sys, time\n"
+            "spawned = subprocess.Popen(['sleep', '60'])\n"
+            f"pathlib.Path({str(child)!r}).write_text(str(spawned.pid))\n"
+            "print('started', flush=True)\n"
+            "time.sleep(60)\n", encoding="utf-8")
+        log = self.tmp / "logs/step.log"
+        with mock.patch.object(sd_lane, "BIN", fake):
+            answer = sd_lane.ship_process(["prepare", "--json"], log, 2)
+        pid = int(child.read_text(encoding="utf-8"))
+        alive = True
+        for _ in range(50):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                alive = False
+                break
+            time.sleep(0.1)
+        if alive:
+            os.kill(pid, signal.SIGKILL)
+        self.assertFalse(alive, "sd-ship's child outlived the step's timeout")
+        self.assertEqual(answer["ok"], False)
+        self.assertIn("timed out after 2", log.read_text(encoding="utf-8"))
+        self.assertIn("started", log.read_text(encoding="utf-8"))
+
 
 class Resolution(unittest.TestCase):
     def test_a_git_that_gave_no_answer_is_reported_as_itself(self) -> None:
@@ -3067,7 +3282,39 @@ class Watch(Lane):
         self.assertEqual(lines, ["hub unavailable: down; reading again", "sd:1 merged at merged-1"])
 
 
+class HostedOrder(Lane):
+    def test_the_lane_that_waited_longest_runs_first(self) -> None:
+        """sd:3481. Lanes ran in path order; one that kept refilling held a later lane's entries for 90 minutes."""
+        later = self.tmp / "zeta"
+        later.mkdir()
+        git(later, "init", "-q", "-b", "main")
+        git(later, "remote", "add", "origin", "https://github.com/example/zeta.git")
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            for path, remote in ((self.repo, "pack"), (later, "zeta")):
+                sd_db.upsert_repo(connection, str(path), remote=f"https://github.com/example/{remote}.git", managed=1)
+        finally:
+            connection.close()
+        for checkout, item, stamp in ((self.repo, 1, "2026-10-12T21:00:00Z"), (later, 2, "2026-10-12T20:35:00Z")):
+            sd_lane.add_entry(sd_lane.queue_for(checkout, self.environ),
+                              {"id": f"e{item}", "item": item, "status": "pending", "enqueued_at": stamp})
+        order: list[pathlib.Path] = []
+
+        def recorded(checkout: pathlib.Path, *args: Any) -> dict:
+            order.append(checkout)
+            return {"ran": []}
+        with mock.patch.object(sd_lane, "run_lane", recorded):
+            sd_lane.run_hosted(self.environ, self.ship)
+        self.assertEqual(order, [later, self.repo])
+
+
 class Bounds(unittest.TestCase):
+    def test_an_entry_started_inside_the_budget_ends_before_the_job_limit(self) -> None:
+        """sd:3481. The longest entry seen took 64.3 minutes; the lane-run job TERMs its runner at 120."""
+        longest_seen, job_limit = 64.3 * 60, 120 * 60
+        self.assertLess(sd_lane.RUN_BUDGET_SECONDS + longest_seen + sd_lane.POST_MERGE_SECONDS, job_limit)
+
     def test_prepare_and_merge_bounds_cover_a_gates_slot_wait(self) -> None:
         """sd:2611: the gate under them queues for up to `GATE_SLOT_SECONDS` before its check starts."""
         for bound in (sd_lane.PREPARE_SECONDS, sd_lane.MERGE_SECONDS):
