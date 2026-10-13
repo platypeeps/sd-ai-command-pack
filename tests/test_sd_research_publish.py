@@ -1105,6 +1105,59 @@ class ReceiptTests(ReceiptFixture):
         self.assertTrue(any("queued a" in line for line in said), said)
 
 
+class PublishedUrlTests(ReceiptFixture):
+    """sd:3514: where a mirror landed reaches the receipt, with its item.
+
+    A request carried page and file ids and never an item, and `delivered`
+    took no URL, so nothing said where an item's brief was published.
+    """
+
+    NAME = "my-research.a.notion.json"
+    URL = "https://www.notion.so/example-3c9f52b1578281a7a466fb0e2df4d928"
+
+    def fingerprint(self) -> str:
+        return json.loads((PUBLISH.QUEUE / self.NAME).read_text())["fingerprint"]
+
+    def receipt(self) -> dict:
+        return json.loads((PUBLISH.receipts() / self.NAME).read_text())
+
+    def test_the_request_carries_the_item_the_designation_names(self) -> None:
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=3465)])
+        self.assertEqual(json.loads((PUBLISH.QUEUE / self.NAME).read_text())["item"], 3465)
+
+    def test_delivered_records_the_url_and_the_item(self) -> None:
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=3465)])
+        status = PUBLISH.delivered_main([self.NAME, self.fingerprint(), "--url", self.URL])
+        self.assertEqual(status, 0)
+        self.assertEqual(self.receipt()["url"], self.URL)
+        self.assertEqual(self.receipt()["item"], 3465)
+
+    def test_a_url_that_is_not_a_web_address_is_refused(self) -> None:
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        status = PUBLISH.delivered_main([self.NAME, self.fingerprint(), "--url", "file:///tmp/a"])
+        self.assertEqual(status, 2)
+        self.assertNotIn("delivered", self.receipt())
+        self.assertTrue((PUBLISH.QUEUE / self.NAME).is_file())
+
+    def test_an_item_that_is_not_a_number_is_reported_and_not_carried(self) -> None:
+        self.source("first\n")
+        said = PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item="sd:3465")])
+        self.assertTrue(any("item=" in line for line in said), said)
+        self.assertNotIn("item", json.loads((PUBLISH.QUEUE / self.NAME).read_text()))
+
+    def test_naming_an_item_does_not_queue_a_delivered_document_again(self) -> None:
+        """The item is where the URL goes, not part of the mirror."""
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain()
+        said = PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=3465)])
+        self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
+        self.assertTrue(any("unchanged" in line for line in said), said)
+
+
 class MirrorHoldTests(ReceiptFixture):
     """A render told to hold its mirrors queues nothing, and says why.
 

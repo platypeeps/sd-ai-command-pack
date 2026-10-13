@@ -62,11 +62,12 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                 so a pull and a branch switch render too; upgrades an earlier
                 install of its own. The hook renders only a research.conf.py
                 that a render by hand has executed here
-  delivered <request file name> <fingerprint>
+  delivered <request file name> <fingerprint> [--url <url>]
                 the drain's last step: record that generation of the request
                 as delivered and remove the request only while it is still
-                that generation. The one verb with arguments: it acts on the
-                machine's queue, not on a checkout
+                that generation. --url records where the mirror landed, with
+                the item= the document names. The one verb with arguments:
+                it acts on the machine's queue, not on a checkout
   checklinks    verify every relative markdown link and backticked in-repo path
                 resolves; exit 1 if anything is broken
   review        the mechanical half of the pre-publication adversarial review:

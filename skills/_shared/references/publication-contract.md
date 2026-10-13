@@ -172,6 +172,11 @@ in `research.conf.py`:
 Both keys on one entry are two mirrors, not a choice. Until one of these keys
 exists, the document publishes locally and nowhere else.
 
+`item=<number>` on the entry names the sd item the document belongs to. Each
+request carries it, and step 6 records it on the receipt with the mirror's
+URL, so the item can show where its document was published. It is not part
+of the mirror: adding it queues nothing.
+
 ### A Notion mirror is private unless it asks for the team
 
 `notion=dict()` mirrors to the folder `$SD_NOTION_PRIVATE_FOLDER` names.
@@ -314,7 +319,8 @@ Draining is six steps per request, and the order matters:
    `source_url`, the GitHub URL of the source read from the repository's
    `origin` or `null` where origin names no GitHub repository, its
    container, the page or file to update, the revision the render was made
-   from and its `fingerprint`, which step 6 hands back. A Notion request
+   from, the `item` its entry names if any, and its `fingerprint`, which
+   step 6 hands back. A Notion request
    also names its `scope`,
    `private` or `team`, how its container was resolved — `resolve: "id"` with
    the folder's page id in `space_id`, or `resolve: "name"` with the folder's
@@ -420,9 +426,11 @@ Draining is six steps per request, and the order matters:
    report it and stop, leaving the request in place with its id. The queue then
    still says work is owed, and the next drain updates the page it names rather
    than creating one.
-6. Run `sd-research-kit delivered <request file name> <fingerprint>`, with the
-   fingerprint read in step 1, once steps 4 and 5 have both succeeded. It
-   records that fingerprint as delivered beside the queue and removes the
+6. Run `sd-research-kit delivered <request file name> <fingerprint>` with
+   `--url <url>`, giving the fingerprint read in step 1 and the URL of the
+   page or file step 3 wrote, once steps 4 and 5 have both succeeded. It
+   records that fingerprint and URL, and the request's `item`, beside the
+   queue and removes the
    request only while the file is still that generation. A render that queued
    newer content while steps 2 to 5 ran leaves its request in place, and the
    next drain writes it. Do not delete the file by hand: that acknowledged

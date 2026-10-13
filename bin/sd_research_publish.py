@@ -1100,7 +1100,7 @@ def already_queued(path: Path, receipt: Path, wanted: str,
     return ""
 
 
-def mirror_delivered(name: str, fingerprint: str) -> str:
+def mirror_delivered(name: str, fingerprint: str, url: str = "") -> str:
     """Record that the drain wrote the generation `fingerprint` of request
     `name`, and remove the request only while it is still that generation.
 
@@ -1120,16 +1120,20 @@ def mirror_delivered(name: str, fingerprint: str) -> str:
     comparison against a record read before the lock, or before the receipt
     write, is the window a render fits in: it wrote B after the read, and
     the unlink took B with A's fingerprint on the receipt.
+
+    `url` is where the drain's mirror landed. It goes on the receipt with the
+    item the request names, so a reader of the receipts can show an item
+    where its document was published (sd:3514).
     """
     try:
         with queue_locked():
-            return acknowledge_request(name, fingerprint)
+            return acknowledge_request(name, fingerprint, url)
     except OSError as problem:
         return "delivered: cannot lock the queue at %s (%s); request left in place" % (
             queue_lock_path(), problem)
 
 
-def acknowledge_request(name: str, fingerprint: str) -> str:
+def acknowledge_request(name: str, fingerprint: str, url: str = "") -> str:
     """The acknowledgement itself, for a caller holding the queue lock.
 
     Read here, under the lock, and compared here: the record this reads is
@@ -1143,6 +1147,10 @@ def acknowledge_request(name: str, fingerprint: str) -> str:
     receipt = receipts() / name
     record = load_record(receipt)
     record.update(delivered=fingerprint)
+    if url:
+        record.update(url=url)
+    if "item" in pending:
+        record.update(item=pending["item"])
     try:
         receipts().mkdir(parents=True, exist_ok=True)
         receipt.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
@@ -1161,19 +1169,28 @@ def acknowledge_request(name: str, fingerprint: str) -> str:
 
 
 def delivered_main(argv: list[str]) -> int:
-    """The `delivered` verb: `<request file name> <fingerprint>`.
+    """The `delivered` verb: `<request file name> <fingerprint> [--url <url>]`.
 
     The one verb that takes arguments. R10-D6 forbids a *checkout* argument,
     because a command that can be pointed at a repository can act on one the
     caller is not standing in; this verb acts on the machine's one queue and
     names a request in it, which no working directory could resolve.
     """
+    url = ""
+    if len(argv) == 4 and argv[2] == "--url":
+        url = argv[3]
+        parts = urlsplit(url)
+        if parts.scheme not in ("http", "https") or not parts.netloc:
+            print("delivered: --url must be the http(s) address of the mirror, not %r" % url,
+                  file=sys.stderr)
+            return 2
+        argv = argv[:2]
     if len(argv) != 2 or not argv[0] or not argv[1]:
-        print("usage: sd-research-kit delivered <request file name> <fingerprint>",
+        print("usage: sd-research-kit delivered <request file name> <fingerprint> [--url <url>]",
               file=sys.stderr)
         return 2
     name = Path(argv[0]).name
-    print(mirror_delivered(name, argv[1]))
+    print(mirror_delivered(name, argv[1], url))
     return 0
 
 
@@ -1202,6 +1219,7 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     wanted: list[tuple[dict[str, Any], dict[str, str]]] = []
     for cfg in docs:
         targets, problems = mirror_targets(cfg, home)
+        problems += designated_item(cfg)[1]
         reports += ["mirror: %s in %s" % (p, cfg.get("out", "?")) for p in problems]
         wanted += [(cfg, target) for target in targets]
     if not wanted:
@@ -1237,6 +1255,7 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
                 "content": source_text(repo / src) if src else "",
             }
             request.update(target)
+            request.update(designated_item(cfg)[0])
             name = "%s.%s.%s.json" % (key, out or "doc", target["destination"])
             path = QUEUE / name
             what = BY_NAME[target["destination"]].what
@@ -1264,6 +1283,21 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
                 destination=target["destination"]))
             reports.append(queued_report(out, target["target"], what, carried, reverted))
     return reports
+
+
+def designated_item(cfg: dict[str, Any]) -> tuple[dict[str, int], list[str]]:
+    """`{"item": <n>}` for the sd item a DOCS entry names, and what was wrong.
+
+    Where `delivered --url` lands the URL (sd:3514). Not part of the
+    fingerprint: naming an item changes nothing on the destination, so it
+    queues nothing on its own. A bad value is reported and not carried.
+    """
+    item = cfg.get("item")
+    if item is None:
+        return {}, []
+    if type(item) is not int or item < 1:
+        return {}, ["item= must be an sd item number such as 3465, not %r" % (item,)]
+    return {"item": item}, []
 
 
 def reverts_to_delivered(path: Path, name: str, digest: str) -> bool:
