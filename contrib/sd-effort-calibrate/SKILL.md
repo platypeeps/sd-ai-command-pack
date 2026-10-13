@@ -107,7 +107,7 @@ date, model, prompt id, levels, median cost, median time, scores, choice, settin
 
 Store it locally, never in this pack:
 
-- a note on the work row: `sd task note <item> --kind decision --body "<line>"`, or
+- a note on the work row: `sd task note <item> "<line>" --kind decision`, or
 - a line in a log under the repository's `docs/dashboard/` folder.
 
 Re-run the eval after each model change.

@@ -1,5 +1,6 @@
 """The real CLI operates on a scratch database, without repository ceremony."""
 
+import argparse
 import getpass
 import importlib
 import importlib.machinery
@@ -61,11 +62,12 @@ class TaskCLI(unittest.TestCase):
         self.assertIn("changed", refused.stderr)
         readback = json.loads(self.call("store", "item", item, "--json").stdout)
         self.assertEqual(readback, edited)
-        noted = json.loads(self.call("task", "note", item, "--body", "Verify on iPad",
+        noted = json.loads(self.call("task", "note", item, "Verify on iPad",
                                      "--json").stdout)
-        resolved = json.loads(self.call("task", "resolve", noted["note"]["id"],
-                                        "--json").stdout)
-        self.assertTrue(resolved["note"]["resolved_at"])
+        self.call("note", "resolve", noted["note"]["id"])
+        resolved = json.loads(self.call("task", "show", item, "--json").stdout)
+        self.assertTrue(next(note for note in resolved["notes"]
+                             if note["id"] == noted["note"]["id"])["resolved_at"])
         completed = json.loads(self.call("task", "status", item, "done", "--json").stdout)
         self.assertEqual(completed["item"]["status"], "done")
         self.assertEqual(json.loads(self.call("store", "items", "--open", "--json").stdout), [])
@@ -1301,6 +1303,164 @@ class NoSelfInstall(unittest.TestCase):
             self.assertEqual(load_cli().main(["task", "show", "5"]), 0)
         run.assert_called_once()
         self.assertNotIn("sd_db.self_install", sys.modules)
+
+
+class OneItemIdSpelling(unittest.TestCase):
+    """sd:3500. Every positional named `item` reads 234, sd:234 and item:234.
+
+    `sd task show sd:3432` was an invalid int while `sd note list sd:3432`
+    worked, and `sd task contribution show 1429` refused a bare id.
+    """
+
+    #: Groups whose parsers this test does not yet hold, each with its reason.
+    #: `lane`: bin/sd_lane.py is in the merge lane; its four `item` positionals
+    #: move to `item_id` in sd:3715.
+    EXEMPT = {"lane"}
+
+    setUp = TaskCLI.setUp
+    call = TaskCLI.call
+
+    def item_positionals(self):
+        sd = sd_lib.sibling("sd_under_item_ids", "sd")
+        found = []
+
+        def walk(parser, path):
+            for action in parser._actions:
+                if isinstance(action, argparse._SubParsersAction):
+                    for name, child in action.choices.items():
+                        walk(child, (*path, name))
+                elif not action.option_strings and action.dest == "item":
+                    found.append((" ".join(path), action.type))
+
+        walk(sd.build_parser(), ())
+        return found
+
+    def test_every_item_positional_takes_item_id(self):
+        import sd_notes
+
+        found = self.item_positionals()
+        self.assertIn("task show", [path for path, _ in found], "the walk missed a verb that exists")
+        wrong = [path for path, kind in found
+                 if kind is not sd_notes.item_id and path.split()[0] not in self.EXEMPT]
+        self.assertEqual(wrong, [])
+
+    def test_item_id_reads_three_spellings_and_refuses_others(self):
+        import sd_notes
+
+        self.assertEqual({sd_notes.item_id(text) for text in ("234", "sd:234", "item:234")}, {234})
+        for text in ("x234", "sd:", "item:-1", "issue:234"):
+            with self.assertRaises(argparse.ArgumentTypeError, msg=text):
+                sd_notes.item_id(text)
+
+    def test_task_show_takes_sd_and_item_spellings(self):
+        item = json.loads(self.call("task", "add", "Spell me", "--json").stdout)["item"]["id"]
+        for spelling in (f"sd:{item}", f"item:{item}"):
+            shown = json.loads(self.call("task", "show", spelling, "--json").stdout)
+            self.assertEqual(shown["item"]["id"], item)
+
+    def test_note_body_is_positional_and_body_flag_still_works(self):
+        item = json.loads(self.call("task", "add", "Note me", "--json").stdout)["item"]["id"]
+        positional = json.loads(self.call("task", "note", item, "Positional text", "--json").stdout)
+        self.assertEqual(positional["note"]["body"], "Positional text")
+        flagged = json.loads(self.call("task", "note", item, "--body", "Flag text", "--json").stdout)
+        self.assertEqual(flagged["note"]["body"], "Flag text")
+        both = self.call("task", "note", item, "One", "--body", "Two", code=1)
+        self.assertIn("not both", both.stderr)
+        neither = self.call("task", "note", item, code=1)
+        self.assertIn("the note text", neither.stderr)
+
+    def test_task_resolve_is_gone(self):
+        refused = self.call("task", "resolve", "1", code=2)
+        self.assertIn("invalid choice: 'resolve'", refused.stderr)
+
+    def test_contribution_key_takes_a_bare_or_sd_id(self):
+        import sd_db.contributions as contributions
+
+        for spelling in ("1429", "sd:1429", "item:1429"):
+            self.assertEqual(contributions._key(spelling), "item:1429")
+
+
+class FieldEditsFold(unittest.TestCase):
+    """sd:3511. 'Updated X by Y' notes were 29 percent of the notes on open items.
+
+    `sd task show` folds them into one count line unless `--audit`; the store
+    and `--json` keep every note.
+    """
+
+    setUp = TaskCLI.setUp
+    call = TaskCLI.call
+
+    def test_show_folds_field_edits_unless_audit(self):
+        item = json.loads(self.call("task", "add", "Fold me", "--json").stdout)["item"]["id"]
+        self.call("task", "edit", item, "--priority", 2)
+        self.call("task", "edit", item, "--due", "2026-12-01")
+        self.call("task", "note", item, "--body", "Updated priority by hand, a person wrote this")
+        plain = self.call("task", "show", item).stdout
+        self.assertNotIn("Updated priority by", plain.replace("Updated priority by hand", ""))
+        self.assertNotIn("Updated due by", plain)
+        self.assertIn(f"2 field edits hidden; sd task show {item} --audit shows them", plain)
+        self.assertIn("Updated priority by hand, a person wrote this", plain)
+        audit = self.call("task", "show", item, "--audit").stdout
+        self.assertIn("Updated due by", audit)
+        self.assertNotIn("field edits hidden", audit)
+        bodies = [note["body"] for note in json.loads(self.call("task", "show", item, "--json").stdout)["notes"]]
+        self.assertEqual(sum(body.startswith("Updated ") and " by " in body for body in bodies), 3)
+
+    def test_the_predicate_reads_what_edit_item_writes(self):
+        audit = workflow.is_audit_note
+        for body in ("Updated priority by operator", "Updated due, title by dashboard",
+                     "Changed kind task -> followup by operator\nUpdated repo by operator", "Unparked by operator"):
+            self.assertTrue(audit({"kind": "comment", "body": body}), body)
+        for note in ({"kind": "comment", "body": "Updated priority by hand, a person wrote this"},
+                     {"kind": "decision", "body": "Updated priority by operator"},
+                     {"kind": "comment", "body": "Updated priority by operator\nand a second thought"}):
+            self.assertFalse(audit(note), note)
+
+
+class TodayIsTheDashboardsToday(unittest.TestCase):
+    """sd:3501. `sd today` printed work rows only: no reports, no followups, no
+    decisions, no overdue mark, and due rows in oldest-in-status order."""
+
+    setUp = TaskCLI.setUp
+    call = TaskCLI.call
+
+    def task(self, title, *flags):
+        return json.loads(self.call("task", "add", title, *flags, "--json").stdout)["item"]["id"]
+
+    def test_today_prints_each_section_and_marks_overdue(self):
+        late = self.task("Late one", "--due", "2020-01-02")
+        later = self.task("Later one", "--due", "2020-01-01")
+        self.call("task", "status", late, "in_progress")
+        open_item = self.task("Has a followup")
+        self.call("task", "note", open_item, "--body", "Chase the vendor", "--kind", "followup")
+        closed = self.task("Done with a followup")
+        self.call("task", "note", closed, "--body", "Owed on a done item", "--kind", "followup")
+        self.call("task", "status", closed, "done", "--reason", "test")
+        self.call("task", "note", open_item, "--kind", "question",
+                  "--body", "Which store?\nOption: Pack store\nOption: Database rows")
+        log = self.home / "run.log"
+        log.write_text("Observed drift.\nSD_REPORT_ATTENTION: two stale rows\n")
+        report = json.loads(self.call(
+            "reports", "ingest", "fixture", "--run-id", "r1", "--started", "2026-09-08T00:00:00Z",
+            "--ended", "2026-09-08T00:01:00Z", "--exit-code", "0", "--log", log, "--json").stdout)["item"]["id"]
+
+        lines = self.call("today").stdout.splitlines()
+        heads = [line for line in lines if not line.startswith(("#", " "))]
+        self.assertEqual(heads, ["Reports needing attention (1)", "Decisions waiting (1)",
+                                 "Open followups (1)", "Work (2)"])
+        text = "\n".join(lines)
+        self.assertIn(f"#{report}  planning  ", text)
+        self.assertIn(f"#{open_item}  Which store?", text)
+        self.assertIn(f"#{open_item}  Chase the vendor", text)
+        self.assertNotIn("Owed on a done item", text)
+        work = lines[lines.index("Work (2)") + 1:]
+        self.assertEqual([line.split()[0] for line in work if line.startswith("#")], [f"#{later}", f"#{late}"])
+        self.assertTrue(all(line.endswith(" · overdue") for line in work if line.startswith("#")), work)
+
+    def test_today_json_stays_the_work_rows(self):
+        self.call("task", "status", self.task("Busy"), "in_progress")
+        rows = json.loads(self.call("today", "--json").stdout)
+        self.assertEqual([row["title"] for row in rows], ["Busy"])
 
 
 if __name__ == "__main__":

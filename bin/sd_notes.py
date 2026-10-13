@@ -30,15 +30,22 @@ import sd_handoff_rows
 LARGEST_ID = 2**63 - 1
 
 
+#: The spellings of one item id every `item` positional reads (sd:3500).
+ITEM_PREFIXES = ("sd:", "item:")
+
+
 def item_id(text: str) -> int:
-    """An item id as the brief prints it, `sd:234`, or bare, `234`."""
-    digits = text[3:] if text.startswith("sd:") else text
-    if not digits.isdigit():
-        raise argparse.ArgumentTypeError(f"not an item id: {text!r} (expected 234 or sd:234)")
+    """An item id as the brief prints it, `sd:234`, as a contribution key names it, `item:234`, or bare, `234`."""
+    digits = next((text[len(prefix):] for prefix in ITEM_PREFIXES if text.startswith(prefix)), text)
+    if not (digits.isascii() and digits.isdigit()):
+        raise argparse.ArgumentTypeError(f"not an item id: {text!r} (expected 234, sd:234 or item:234)")
     value = int(digits)
     if value > LARGEST_ID:
         raise argparse.ArgumentTypeError(f"not an item id: {text!r} (larger than any row id)")
     return value
+
+
+ITEM_HELP = "the item id, as 234, sd:234 or item:234"
 
 
 def note_id(text: str) -> int:
@@ -68,15 +75,22 @@ def note_lines(note) -> list[str]:
 
 def cmd_resolve(args, out=None, err=None) -> int:
     out = sys.stdout if out is None else out
+    err = sys.stderr if err is None else err
     sd_db = sd_handoff_rows.library()
     connection = sd_handoff_rows.connect(sd_db, write=True)
     try:
-        sd_db.resolve_note(connection, args.note)
+        closed = sd_db.resolve_note(connection, args.note)
     finally:
         connection.close()
-    # `resolve_note` is a no-op on an id that is absent or already closed, and
-    # says which. Reporting "resolved" either way would be a lie only in the
-    # case nobody can act on, so the line names the id and not an outcome.
+    # sd:3502: an id that is absent or already closed resolves nothing, and a
+    # caller retrying after a refusal must not read that as success. A hub
+    # that sends no count (-1) is an unknown, not a success.
+    if closed == 0:
+        print(f"no open note {args.note}", file=err)
+        return 1
+    if closed < 0:
+        print(f"note {args.note}: the store did not say whether it closed", file=err)
+        return 1
     print(f"resolved note {args.note}", file=out)
     return 0
 
@@ -112,7 +126,7 @@ def add_verbs(verbs: Any) -> None:
     close.add_argument("note", type=note_id, help="the id the write printed")
     close.set_defaults(handler=cmd_resolve)
     listing = verbs.add_parser("list", help="print every note on one item, oldest first")
-    listing.add_argument("item", type=item_id, help="the item id, as 234 or sd:234")
+    listing.add_argument("item", type=item_id, help=ITEM_HELP)
     listing.set_defaults(handler=cmd_list)
 
 

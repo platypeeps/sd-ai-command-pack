@@ -906,7 +906,7 @@ def reconcile_companion(connection: sqlite3.Connection, item: int, artifact: str
     text = snapshot["files"][artifact].decode("utf-8")
     if before["state"] != "current" and artifact == "adversarial":
         share, record = _adversarial_rewrite(row, snapshot, text)
-        rerun = f"Run `sd writing adversarial --piece {piece}`; a fresh run is current by construction."
+        rerun = f"Run the adversarial gate on {piece} again; a fresh run is current by construction."
         if share is None:
             raise WorkflowError(f"{piece} adversarial: cannot tell how much of the draft the last run read "
                                 f"({before['detail']}), so a reconcile would stamp prose nobody reviewed. {rerun}")

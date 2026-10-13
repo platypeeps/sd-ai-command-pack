@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import sd_handoff_rows
+from sd_notes import ITEM_HELP, item_id
 from sd_work import WorkRefusal
 
 #: What the bulk apply records as the acting program, beside the login name
@@ -140,6 +141,11 @@ def run(args: argparse.Namespace) -> int:
             if before is not None and not args.apply and not args.json:
                 print(bulk_preview(result))
                 return 0
+        elif args.control_action == "reopen":
+            # The dashboard's Undo (sd:3504): `done` back to the status it was acknowledged from.
+            revision = args.if_revision or workflow.item_state(connection, args.item)["revision"]
+            result = reporting.reopen(connection, args.item, expected_revision=revision, who=getpass.getuser(),
+                                      reason=args.reason)
         else:
             result = reporting.ingest_log(connection, job=args.job, run_id=args.run_id, started=args.started,
                 ended=args.ended, exit_code=args.exit_code, log_path=args.log, offset=args.offset)
@@ -155,14 +161,14 @@ def register(groups: Any) -> None:
     for name in ("providers", "reports"):
         group = groups.add_parser(name, help=f"inspect and control {name} through the workflow database")
         verbs = group.add_subparsers(dest="verb", required=True)
-        for action in (("list", "configure") if name == "providers" else ("list", "ingest", "acknowledge")):
+        for action in (("list", "configure") if name == "providers" else ("list", "ingest", "acknowledge", "reopen")):
             command = verbs.add_parser(action)
             command.set_defaults(handler=run, control_group=name, control_action=action)
             command.add_argument("--json", action="store_true")
             if action == "configure":
                 command.add_argument("--file", required=True, help="JSON containing revision, enabled flags and both role orders")
             if action == "acknowledge":
-                command.add_argument("item", type=int, nargs="?")
+                command.add_argument("item", type=item_id, nargs="?", help=ITEM_HELP)
                 command.add_argument("--if-revision")
                 command.add_argument("--all-clean", action="store_true",
                                      help="every clean planning report filed before --before, as retention "
@@ -179,7 +185,11 @@ def register(groups: Any) -> None:
                                      help="also resolve the followup the ingest itself wrote for this report "
                                           "(session cron, the text derived from the report's own fields), in "
                                           "the same transaction; a followup a person wrote still blocks, and "
-                                          "the refusal names `sd note resolve <id>` for each")
+                                          "the refusal names each followup, which `sd note resolve <id>` closes")
+            if action == "reopen":
+                command.add_argument("item", type=item_id, help=ITEM_HELP)
+                command.add_argument("--if-revision")
+                command.add_argument("--reason", help="recorded on the transition after 'reopened: '")
             if action == "ingest":
                 command.add_argument("job")
                 for option in ("run-id", "started", "ended", "log"):

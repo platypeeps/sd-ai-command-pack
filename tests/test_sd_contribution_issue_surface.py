@@ -209,7 +209,7 @@ class TheKeyHelpNamesEveryFormTheLibraryAccepts(unittest.TestCase):
         cost; leaving `issue:` out of it is a reader being told the form does
         not exist.
         """
-        for form in ("item:ID", "/pull/NUMBER", "issue:", "/issues/NUMBER"):
+        for form in ("234", "sd:234", "item:234", "/pull/NUMBER", "issue:", "/issues/NUMBER"):
             self.assertIn(form, sd_work.CONTRIBUTION_KEY_HELP)
 
     def test_the_parser_hands_the_reader_the_recited_help(self):

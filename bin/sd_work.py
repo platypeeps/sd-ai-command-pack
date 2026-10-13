@@ -13,6 +13,7 @@ answered. ``edit --kind`` moves a row between the same five -- see
 from __future__ import annotations
 
 import argparse
+import datetime
 import getpass
 import json
 import os
@@ -25,6 +26,7 @@ from typing import Any
 import sd_handoff_rows
 import sd_jev_shadow
 import sd_lib
+from sd_notes import ITEM_HELP, item_id
 
 
 class WorkRefusal(Exception):
@@ -509,19 +511,14 @@ def _name_refs(value: Any) -> None:
             row["ref"] = row["external_id"]
 
 
-def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = None) -> None:
-    _name_refs(value)
-    if machine:
-        print(json.dumps(value, ensure_ascii=False))
-        return
-    rows = value if isinstance(value, list) else [value["item"]]
-    if not rows:
-        print("No items.")
+def _print_rows(rows: list[dict[str, Any]], *, moved: bool = False, today: str | None = None) -> None:
+    """One line per row, and its checkout, reference and rule; `today` marks a past due date `overdue` (sd:3501)."""
     here = _standing_in(rows)
     for row in rows:
         priority = f" · P{row['priority']}" if row.get("priority") else ""
         due = f" · due {row['due']}" if row.get("due") else ""
-        print(f"#{row['id']}  {row['status']}  {row['title']}{priority}{due}")
+        overdue = " · overdue" if today and row.get("due") and row["due"] < today else ""
+        print(f"#{row['id']}  {row['status']}  {row['title']}{priority}{due}{overdue}")
         line = _repo_line(row, here=here, moved=moved)
         if line:
             print(line)
@@ -529,6 +526,18 @@ def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = No
             print(f"  ref: {row['ref']}")
         if row.get("recurrence"):
             print(f"  recurs {row['recurrence']} ({row.get('recurrence_anchor')})")
+
+
+def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = None,
+          audit: bool = False, audited: Any = None) -> None:
+    _name_refs(value)
+    if machine:
+        print(json.dumps(value, ensure_ascii=False))
+        return
+    rows = value if isinstance(value, list) else [value["item"]]
+    if not rows:
+        print("No items.")
+    _print_rows(rows, moved=moved)
     if isinstance(value, dict) and "next_occurrence" in value:
         _occurrence_line(value, following)
     if isinstance(value, dict):
@@ -539,10 +548,74 @@ def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = No
         if value.get("created") is False:
             print("already filed under this ref; updated, status kept" if value["item"].get("ref")
                   else "already registered; nothing changed")
-        for note in value.get("notes", []):
-            resolved = " · resolved" if note.get("resolved_at") else ""
-            print(f"  note #{note['id']} · {note['kind']}{resolved}: {note['body']}")
+        _print_notes(value, None if audit else audited)
         print(f"revision: {value['revision']}")
+
+
+def _print_notes(value: dict[str, Any], audited: Any) -> None:
+    """The item's notes, with the field-edit comments `audited` names folded into one count (sd:3511).
+
+    `audited` is None when the caller asked for every note; `--json` always keeps them all.
+    """
+    notes = value.get("notes", [])
+    folded = [] if audited is None else [note for note in notes if audited(note)]
+    for note in notes:
+        if note in folded:
+            continue
+        resolved = " · resolved" if note.get("resolved_at") else ""
+        print(f"  note #{note['id']} · {note['kind']}{resolved}: {note['body']}")
+    if folded:
+        print(f"  {len(folded)} field {'edit' if len(folded) == 1 else 'edits'} hidden; "
+              f"sd task show {value['item']['id']} --audit shows them")
+
+
+#: A choice line of a decision, as the dashboard's Decisions reads one (sd:3012).
+OPTION_LINE = re.compile(r"^[ \t]*Option:[ \t]*\S", re.MULTILINE)
+
+
+def _first_line(text: Any, width: int = 100) -> str:
+    line = str(text or "").strip().partition("\n")[0]
+    return line if len(line) <= width else line[:width - 1] + "…"
+
+
+def _attention_reports(sd_db: Any, connection: Any) -> list[dict[str, Any]]:
+    """Open reports whose fields say they need attention; unreadable fields count, as an unknown is no pass."""
+    from sd_db import reporting
+
+    found = []
+    for row in reporting.reports(connection):
+        if row["status"] == "done":
+            continue
+        try:
+            attention = json.loads(row["fields"] or "{}").get("attention")
+        except (ValueError, AttributeError):
+            attention = "fields unreadable"
+        if attention:
+            found.append({**row, "why": attention if isinstance(attention, str) else ""})
+    return found
+
+
+def _print_today(sd_db: Any, connection: Any, work: list[dict[str, Any]]) -> None:
+    """`sd today` as the dashboard's Today reads (sd:3501): the short sections first, so `head -40` shows them."""
+    reports = _attention_reports(sd_db, connection)
+    decisions = [note for note in sd_db.reads.open_notes(connection, "question")
+                 if len(OPTION_LINE.findall(note["body"])) >= 2]
+    # A report's own followup is the report's line already.
+    listed = {row["id"] for row in reports}
+    followups = [note for note in sd_db.reads.open_notes(connection, "followup") if note["item"] not in listed]
+    for title, rows, line in (
+        ("Reports needing attention", reports,
+         lambda row: f"#{row['id']}  {row['status']}  {row['title']}" + (f" · {row['why']}" if row["why"] else "")),
+        ("Decisions waiting", decisions, lambda note: f"#{note['item']}  {_first_line(note['body'])}"),
+        ("Open followups", followups, lambda note: f"#{note['item']}  {_first_line(note['body'])}"),
+    ):
+        if rows:
+            print(f"{title} ({len(rows)})")
+            for row in rows:
+                print(line(row))
+    print(f"Work ({len(work)})")
+    _name_refs(work)
+    _print_rows(work, today=datetime.date.today().isoformat())
 
 
 def _occurrence_line(value: dict[str, Any], following: Any) -> None:
@@ -1035,9 +1108,34 @@ def _items(sd_db: Any, workflow: Any, args: argparse.Namespace, connection: Any)
             and (not args.status or row["status"] == args.status)]
 
 
+def _note_text(args: argparse.Namespace) -> str:
+    """The note text, given as TEXT or as the older `--body`, and not both (sd:3500)."""
+    if (args.text is None) == (args.body is None):
+        raise WorkRefusal("give the note text as TEXT or --body TEXT, not both" if args.text is not None
+                          else "give the note text: sd task note ITEM TEXT")
+    return args.text if args.text is not None else args.body
+
+
+def run_today(args: argparse.Namespace) -> int:
+    """`sd today`: `today_items` as rows for `--json`, and the dashboard's Today sections for a person (sd:3501)."""
+    sd_db, _ = _library()
+    connection = sd_handoff_rows.connect(sd_db, write=False)
+    try:
+        rows = [dict(row) for row in sd_db.reads.today_items(connection)]
+        if args.json:
+            _emit(rows, machine=True)
+        else:
+            _print_today(sd_db, connection, rows)
+        return 0
+    except sd_db.SdDbError as error:
+        raise WorkRefusal(str(error)) from error
+    finally:
+        connection.close()
+
+
 def run(args: argparse.Namespace) -> int:
     sd_db, workflow = _library()
-    write = args.work_action not in {"today", "items", "item"}
+    write = args.work_action not in {"items", "item"}
     connection = sd_handoff_rows.connect(sd_db, write=write)
     try:
         action = args.work_action
@@ -1049,9 +1147,7 @@ def run(args: argparse.Namespace) -> int:
         # `following` is the row a recurring completion created, if any.
         moved, following, dedupe = False, None, None
         result: Any
-        if action == "today":
-            result = [dict(row) for row in sd_db.reads.today_items(connection)]
-        elif action == "items":
+        if action == "items":
             result = _items(sd_db, workflow, args, connection)
         elif action == "item":
             result = workflow.item_state(connection, args.item)
@@ -1067,13 +1163,11 @@ def run(args: argparse.Namespace) -> int:
         elif action == "status":
             result, following = _change_status(workflow, connection, args, who)
         elif action == "note":
+            body = _note_text(args)
             _done_advisory(workflow, connection, args.item)
             result = workflow.add_item_note(
-                connection, args.item, body=args.body, kind=args.kind, who=who,
+                connection, args.item, body=body, kind=args.kind, who=who,
                 expected_revision=revision)
-        elif action == "resolve":
-            result = workflow.resolve_item_note(
-                connection, args.note, who=who, expected_revision=revision)
         elif action == "register":
             result = _register(sd_db, connection, args, who)
         elif action in {"relink", "cancel", "cancel-task", "deliver"}:
@@ -1090,7 +1184,8 @@ def run(args: argparse.Namespace) -> int:
                 result = _deliver(progress, workflow, connection, args, who)
         else:
             raise WorkRefusal(f"unknown workflow operation: {action}")
-        _emit(result, machine=args.json, moved=moved, following=following)
+        _emit(result, machine=args.json, moved=moved, following=following,
+              audit=getattr(args, "audit", False), audited=workflow.is_audit_note)
         _dedupe(dedupe)
         return 0
     except sd_db.SdDbError as error:
@@ -1179,6 +1274,11 @@ def _recurrence_flags(parser: argparse.ArgumentParser, *, clear: bool = False) -
     parser.add_argument("--recur-anchor", metavar="ANCHOR",
                         help="schedule (default: the next due date follows the last one) or "
                              "completion (it follows the day the task was done)")
+
+
+def _audit(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--audit", action="store_true",
+                        help="print the field-edit notes ('Updated priority by ...') a plain read folds into a count")
 
 
 def _output(parser: argparse.ArgumentParser, action: str, *, revision: bool = False) -> None:
@@ -1328,7 +1428,7 @@ def run_contribution(args: argparse.Namespace) -> int:
 #: derived is a cost, named here rather than hidden: if the library grows a
 #: fourth form, this string is the place that will not know.
 CONTRIBUTION_KEY_HELP = (
-    "item:ID, github:https://github.com/OWNER/REPO/pull/NUMBER, "
+    "an item id (234, sd:234 or item:234), github:https://github.com/OWNER/REPO/pull/NUMBER, "
     "or issue:https://github.com/OWNER/REPO/issues/NUMBER"
 )
 
@@ -1345,7 +1445,7 @@ def _register_contributions(verbs: Any) -> None:
             if action == "add":
                 parser.add_argument("title")
             else:
-                parser.add_argument("item", type=int)
+                parser.add_argument("item", type=item_id, help=ITEM_HELP)
                 parser.add_argument("--if-revision", help="item revision from sd store item")
         if action in {"show", "ack", "dismiss"}:
             parser.add_argument("key", help=CONTRIBUTION_KEY_HELP)
@@ -1357,8 +1457,10 @@ def _register_contributions(verbs: Any) -> None:
 
 def register(groups: Any, store: Any) -> None:
     """Extend the existing parser, preserving the plugin note-store verbs."""
-    today = groups.add_parser("today", help="due and active work, in dashboard order")
+    today = groups.add_parser(
+        "today", help="reports needing attention, decisions, open followups, then due and active work")
     _output(today, "today")
+    today.set_defaults(handler=run_today)
 
     items = store.add_parser("items", help="workspace items from the shared database")
     items.add_argument("--open", action="store_true", help="exclude done items")
@@ -1368,7 +1470,8 @@ def register(groups: Any, store: Any) -> None:
     items.add_argument("--status", help="filter by workflow status")
     _output(items, "items")
     item = store.add_parser("item", help="one workspace item, notes, and revision")
-    item.add_argument("item", type=int)
+    item.add_argument("item", type=item_id, help=ITEM_HELP)
+    _audit(item)
     _output(item, "item")
 
     task = groups.add_parser("task", help="capture and manage work without files or GitHub")
@@ -1402,7 +1505,7 @@ def register(groups: Any, store: Any) -> None:
     _output(add, "add")
 
     edit = verbs.add_parser("edit", help="change a task's or followup's details, or any hand-filed item's kind")
-    edit.add_argument("item", type=int)
+    edit.add_argument("item", type=item_id, help=ITEM_HELP)
     edit.add_argument("--title")
     edit.add_argument("--body")
     priority = edit.add_mutually_exclusive_group()
@@ -1433,7 +1536,7 @@ def register(groups: Any, store: Any) -> None:
     _output(edit, "edit", revision=True)
 
     status = verbs.add_parser("status", help="change status with an atomic history entry")
-    status.add_argument("item", type=int)
+    status.add_argument("item", type=item_id, help=ITEM_HELP)
     status.add_argument("status")
     reason = status.add_mutually_exclusive_group()
     reason.add_argument("--reason", help="recorded on the transition; on a row worked on "
@@ -1454,34 +1557,35 @@ def register(groups: Any, store: Any) -> None:
 
     cancel = verbs.add_parser(
         "cancel", help="close a task or followup nobody will do: done, with a cancelled receipt")
-    cancel.add_argument("item", type=int)
+    cancel.add_argument("item", type=item_id, help=ITEM_HELP)
     cancel.add_argument("--reason", required=True)
     _output(cancel, "cancel-task", revision=True)
 
     note = verbs.add_parser("note", help="add an item note or follow-up")
-    note.add_argument("item", type=int)
-    note.add_argument("--body", required=True)
+    note.add_argument("item", type=item_id, help=ITEM_HELP)
+    # sd:3500: positional id, then positional value. `--body` is the old
+    # spelling, kept for one release; `_note_text` takes exactly one of the two.
+    note.add_argument("text", nargs="?", help="the note text")
+    note.add_argument("--body", help="the note text, the old spelling of TEXT")
     note.add_argument("--kind", default="comment",
                       choices=("comment", "followup", "question", "decision", "proposal"),
                       help="note kind (default: comment)")
     _output(note, "note", revision=True)
-    resolve = verbs.add_parser("resolve", help="resolve an item note")
-    resolve.add_argument("note", type=int)
-    _output(resolve, "resolve", revision=True)
     # A read alias (sd:1112): the same operation as `sd store item`, which
     # stays the canonical read for every kind, so both print the same thing.
     show = verbs.add_parser("show", help="one item, notes, and revision (as `sd store item`)")
-    show.add_argument("item", type=int)
+    show.add_argument("item", type=item_id, help=ITEM_HELP)
+    _audit(show)
     _output(show, "item")
 
     work = groups.add_parser("work", help="maintain artifact links and verified completion")
     working = work.add_subparsers(dest="verb", required=True)
     relink = working.add_parser("relink", help="link a moved artifact without changing item identity")
-    relink.add_argument("item", type=int)
+    relink.add_argument("item", type=item_id, help=ITEM_HELP)
     relink.add_argument("path", help="existing artifact path relative to the item's repository")
     _output(relink, "relink", revision=True)
     cancel = working.add_parser("cancel", help="record a deliberate cancellation, with a reason")
-    cancel.add_argument("item", type=int)
+    cancel.add_argument("item", type=item_id, help=ITEM_HELP)
     cancel.add_argument("--reason", required=True)
     _output(cancel, "cancel", revision=True)
     register_verb = working.add_parser(
@@ -1492,7 +1596,7 @@ def register(groups: Any, store: Any) -> None:
     _output(register_verb, "register")
 
     deliver = working.add_parser("deliver", help="verify a delivery commit and complete its item")
-    deliver.add_argument("item", type=int)
+    deliver.add_argument("item", type=item_id, help=ITEM_HELP)
     deliver.add_argument("commit", help="full commit SHA carrying the item's Delivers trailer")
     deliver.add_argument("--associated", action="store_true",
                          help="accept a merge whose trailer block carries `Item:` for the item "

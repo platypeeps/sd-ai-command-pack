@@ -488,7 +488,7 @@ def acknowledge(connection, item, *, expected_revision, who, resolve_ingest_foll
     this refuses.
 
     An unresolved followup refuses the move, and the refusal names each note
-    and `sd note resolve <id>`, the verb that closes one. `ingest` opens such
+    as `resolve followup <id>`, the action that closes one (sd:3503). `ingest` opens such
     a followup on every report for a run that needs attention, under
     `INGEST_SESSION`, so every failure report is born refusing this verb
     (sd:921: 51 watchdog reports on the live store, none acknowledgeable).
@@ -526,7 +526,7 @@ def acknowledge(connection, item, *, expected_revision, who, resolve_ingest_foll
         blocking = [note["id"] for note in open_followups if note["id"] not in resolving]
         if blocking:
             raise workflow.WorkflowError("resolve the report's followups before acknowledging it: "
-                                         + "; ".join(f"sd note resolve {note}" for note in blocking))
+                                         + "; ".join(f"resolve followup {note}" for note in blocking))
         for note in resolving:
             resolve_note(connection, note)
         reason = ("resolved the ingest's followup" + ("s " if len(resolving) > 1 else " ")

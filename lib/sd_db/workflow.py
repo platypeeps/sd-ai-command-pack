@@ -225,7 +225,7 @@ def _fields(connection: sqlite3.Connection, changes: dict) -> dict:
         raise WorkflowError(f"fields cannot be edited here: {', '.join(sorted(unknown))}")
     result = dict(changes)
     if result.get("branch") is not None:
-        raise WorkflowError("branch can only be cleared here; `sd work register` sets one")
+        raise WorkflowError("branch can only be cleared here; registering the work folder sets one")
     if result.get("parked_at") is not None:
         raise WorkflowError("parked_at can only be cleared here; the nightly prune parks")
     if "title" in result:
@@ -526,7 +526,7 @@ def edit_item(
             raise WorkflowError(f"{row['kind']} items use their own editing workflow")
         values = _fields(connection, changes)
         if "parked_at" in values and row["piece"]:
-            raise WorkflowError("a writing piece revives with `sd writing park --revive`, which moves its file")
+            raise WorkflowError("a writing piece revives through its own park control, which moves its file")
         if "body" in values and row["kind"] not in ("task", "followup"):
             raise WorkflowError("body text can only be edited here for task and followup items")
         if "repo" in values and row["kind"] == "work" and values["repo"] != row["repo"]:
@@ -556,6 +556,17 @@ def edit_item(
                 lines.append(f"Updated {', '.join(fields)} by {who}")
             add_note(connection, item, "comment", "\n".join(lines), session=who)
         return item_state(connection, item)
+
+
+#: One line of the audit comment `edit_item` writes. The name is one token: a
+#: person's comment that starts "Updated priority by hand, ..." is not one.
+AUDIT_LINE = re.compile(r"(?:Updated [a-z_]+(?:, [a-z_]+)*|Changed kind \S+ -> \S+|Unparked) by \S+")
+
+
+def is_audit_note(note: Any) -> bool:
+    """Whether `note` is a field-edit comment `edit_item` wrote, which readers fold (sd:3511)."""
+    lines = str(note["body"] or "").splitlines()
+    return note["kind"] == "comment" and bool(lines) and all(AUDIT_LINE.fullmatch(line) for line in lines)
 
 
 def allowed_statuses(connection: sqlite3.Connection, item: int, *, state: dict | None = None) -> list[str]:
@@ -626,7 +637,7 @@ def _refuse_unlanded_branch(state: dict, item: int) -> None:
     raise TransitionRefused(
         f"item {item} was worked on branch {branch}, and no merge of it is recorded; "
         f"close it with a reason saying why no pull request is needed, or name the merge "
-        f"that landed it with `sd task status {item} done --delivered-by <commit>`")
+        f"commit that landed it as its delivery")
 
 
 def change_status(
@@ -641,8 +652,7 @@ def change_status(
         # sd:2741: 'dropped' or 'cancelled' is a close; name the verbs that record one.
         raise TransitionRefused(
             f"no status {target!r}; the statuses are {', '.join(STATUSES)}; "
-            f"to close an item nobody will do, run `sd task cancel {item} --reason ...` "
-            f"(`sd work cancel` for a docs/work item)")
+            f"to close item {item} that nobody will do, cancel it with a reason")
     with transaction(connection):
         state = _checked_state(connection, item, expected_revision)
         row = state["item"]
@@ -656,12 +666,13 @@ def change_status(
             (item,),
         ).fetchone()
         if active:
-            # The refusal names the row and the way out. A queued row has no
-            # process, so its cancel is the library's own, `sd assignments
-            # cancel`. A running row has no cancel: the runner's stop went with
-            # the runner (sd:3041), and `operations.assignment_state` refuses it.
+            # The refusal names the row and the way out, as an action each
+            # surface renders as its own control (sd:3503). A queued row has no
+            # process, so its cancel is the library's own. A running row has no
+            # cancel: the runner's stop went with the runner (sd:3041), and
+            # `operations.assignment_state` refuses it.
             if active["status"] == "queued":
-                way_out = f"cancel it with `sd assignments cancel {active['id']}`"
+                way_out = f"cancel queued assignment {active['id']} first"
             else:
                 way_out = "it is running, and no verb cancels a running assignment now that the runner is gone"
             raise TransitionRefused(f"item {item} has queued or running assignment {active['id']}; {way_out}")

@@ -122,6 +122,10 @@ Treat gate results as evidence from the tested machine only.
 
 ## Repository Conventions
 
+### Command shape
+
+A verb takes a positional id, then a positional value, and flags for the rest; an `item` positional takes `sd_notes.item_id` (sd:3500).
+
 ### Documentation and decisions
 
 Use Claude's STE-Concise style for new and revised prose:

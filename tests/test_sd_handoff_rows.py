@@ -677,6 +677,18 @@ class TheNoteGroup(RowCase):
         self.assertEqual((code, out, err), (0, f"resolved note {note}\n", ""))
         self.assertEqual(self.read(), [])
 
+    def test_an_unknown_note_refuses_through_sd(self):
+        """sd:3502. A resolve that closed nothing printed success and exited 0."""
+        code, out, err = run_sd(["note", "resolve", "4242"])
+        self.assertEqual((code, out, err), (1, "", "no open note 4242\n"))
+
+    def test_a_second_resolve_refuses(self):
+        item = self.item()
+        note = self.followup(item, "close me")
+        self.assertEqual(run_sd(["note", "resolve", str(note)])[0], 0)
+        code, out, err = run_sd(["note", "resolve", str(note)])
+        self.assertEqual((code, out, err), (1, "", f"no open note {note}\n"))
+
     def test_an_unknown_item_refuses_through_sd(self):
         code, out, err = run_sd(["note", "list", "4242"])
         self.assertEqual((code, out), (1, ""))
