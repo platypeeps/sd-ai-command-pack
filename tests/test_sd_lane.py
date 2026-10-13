@@ -38,6 +38,23 @@ def git(root: pathlib.Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
+#: An `sd-ship` that prints `sd_ship_workflow.failure` of prepare's incomplete-review `Refusal`, as `main` does,
+#: and passes `--retry-review` (sd:3482).
+FAKE_PREPARE = """import json, sys
+sys.path.insert(0, {bin!r})
+from sd_ship_remote import Refusal
+from sd_ship_workflow import failure
+if "--retry-review" in sys.argv:
+    print(json.dumps({{"ok": True, "phase": "ready_to_send", "head": "head-1"}}))
+    raise SystemExit(0)
+refused = Refusal("the preceding review did not complete its requested depth; use --retry-review for a "
+                  "full-branch retry", code="review_incomplete", boundary="review", state="operator_decision",
+                  next_action="Prepare again with --retry-review; it spends one automatic pass.")
+print(json.dumps(failure("prepare", refused), indent=2, sort_keys=True))
+raise SystemExit(3)
+"""
+
+
 class Lane(unittest.TestCase):
     #: `repo.runner_merge` for a suite with no database (sd:3132); None reads the suite's own database.
     runner_merge: str | None = "manual"
@@ -487,6 +504,47 @@ class Runner(Lane):
         self.assertEqual([(c[2], "--retry-review" in c) for c in self.calls],
                          [("prepare", False), ("prepare", True), ("merge", False)])
         self.assertEqual(self.entries()[0]["status"], "merged")
+
+    def test_sd_ships_own_review_incomplete_refusal_reaches_the_retry(self) -> None:
+        """sd:3482. Two entries kept this refusal with no -retry.log; sd-ship's real refusal, printed, still retries.
+
+        The fake `sd-ship` prints what `sd_ship_workflow.failure` makes of the
+        `Refusal` prepare raises, exits 3 as `sd-ship` does, and runs under
+        the runner's own `default_ship`.
+        """
+        fake = self.tmp / "fake-bin"
+        fake.mkdir()
+        (fake / "sd-ship").write_text(FAKE_PREPARE.format(bin=str(REPO_ROOT / "bin")), encoding="utf-8")
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        with mock.patch.object(sd_lane, "BIN", fake), mock.patch.dict(os.environ, self.environ):
+            sd_lane.run_lane(self.repo, self.environ)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry["head"]), ("prepared", "head-1"), entry.get("reason"))
+        self.assertTrue(entry["prepare_log"].endswith("-retry.log"), entry["prepare_log"])
+        self.assertIn("--retry-review", pathlib.Path(entry["prepare_log"]).read_text(encoding="utf-8"))
+
+    def test_a_prepare_that_reconciles_a_landed_merge_records_it_merged(self) -> None:
+        """sd:3482. A retry after a death at merge: prepare answered `merged`, and the entry failed 'not ready'."""
+        head = sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")["expected_head"]
+        self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": head, "merge_commit": "landed-1"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry.get("merge_commit"), entry.get("reconciled")),
+                         ("merged", "landed-1", True), entry.get("reason"))
+        self.assertEqual([c[2] for c in self.calls], ["prepare"])  # no second merge
+        self.assertIn("Landed: merged at landed-1", self.notes[0][1])
+
+    def test_a_reconciled_merge_of_another_head_is_not_this_entrys(self) -> None:
+        """sd:3482, evidence: the receipt's merge must be of the entry's head; an earlier pull request's is not."""
+        tree = self.worktree("topic")
+        git(tree, "commit", "-q", "--allow-empty", "-m", "follow-up")
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+        earlier = git(self.repo, "rev-parse", "main")
+        self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": earlier, "merge_commit": "landed-0"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        entry = self.entries()[0]
+        self.assertEqual((entry["status"], entry.get("merge_commit"), self.notes), ("failed", None, []))
+        self.assertIn(f"merge of {earlier}, not this entry's head", entry["reason"])
 
     def test_the_lane_retries_an_incomplete_review_only_once(self) -> None:
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")

@@ -1242,37 +1242,19 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
             renewed: Callable[[], None] = lambda: None) -> dict[str, Any]:
     """One entry, start to end; the fields to record on it.
 
-    The body and acceptance texts go to private temporary files for prepare.
+    `prepare_step` prepares, and `prepare_stop` reads its answer.
     `advance` is the before-merge write (`step: merge`); it raises `Stop`
     when the claim is lost or the hub stays down, and no merge starts.
-    `renewed` renews the claim's lease before a second prepare (`renew`).
     """
     worktree, item, logs = pathlib.Path(entry["worktree"]), entry["item"], queue.lane / "logs"
     if not at_head(worktree, entry["expected_head"]):
         return {"status": "skipped", "code": HEAD_MOVED, "reason": "the worktree's HEAD moved from the queued head"}
     stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
-    prepare_log = logs / f"prepare-{item}-{stamp}.log"
-    with tempfile.TemporaryDirectory(prefix="sd-lane-texts-") as private:  # 0700, removed with the step
-        body = pathlib.Path(private) / "body.md"
-        body.write_text(str(entry.get("body") or ""), encoding="utf-8")
-        claim = [f"--{entry['claim']}"]
-        if isinstance(entry.get("acceptance"), str):
-            (pathlib.Path(private) / "acceptance.md").write_text(entry["acceptance"], encoding="utf-8")
-            claim += ["--acceptance-file", str(pathlib.Path(private) / "acceptance.md")]
-        argv = ["-C", str(worktree), "prepare", "--item", str(item), *claim, "--catch-up",
-                "--title", entry["title"], "--body-file", str(body), "--json"]
-        prepared = ship(argv, prepare_log)
-        # sd:3037. An incomplete review gets the one retry an operator would give it, and no second.
-        if blocker_code(prepared) == "review_incomplete":
-            renewed()
-            prepare_log = logs / f"prepare-{item}-{stamp}-retry.log"
-            prepared = ship([*argv, "--retry-review"], prepare_log)
+    prepared, prepare_log = prepare_step(entry, worktree, logs / f"prepare-{item}-{stamp}", ship, renewed)
     fields: dict[str, Any] = {"prepare_log": str(prepare_log), "log_host": this_host(), "head": prepared.get("head")}
-    if not (prepared.get("ok") and prepared.get("phase") == "ready_to_send"):
-        return {**fields, "status": "failed", "step": "prepare", "phase": prepared.get("phase"),
-                "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:REASON_CHARS],
-                **({"hub_fault": True} if answered_hub_fault(prepared) else
-                   {"retryable": True} if answered_retryable(prepared) else {})}
+    stopped = prepare_stop(entry, worktree, prepared)
+    if stopped is not None:
+        return {**fields, **stopped}
     refused = merge_refusal(entry)
     if refused is not None:
         return {**fields, "status": "prepared", **refused}
@@ -1288,6 +1270,55 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
                 "reason": str(merged.get("error") or merged.get("code") or "merge did not confirm")[:REASON_CHARS],
                 **({"hub_fault": True} if answered_hub_fault(merged) else {})}
     return {**fields, "status": "merged", "merge_commit": merged.get("merge_commit")}
+
+
+def prepare_step(entry: dict[str, Any], worktree: pathlib.Path, log: pathlib.Path, ship: Ship,
+                 renewed: Callable[[], None]) -> tuple[dict[str, Any], pathlib.Path]:
+    """`sd-ship prepare`'s answer and its log; the body and acceptance texts go to private temporary files.
+
+    An incomplete review gets the one `--retry-review` an operator would
+    give it, and no second (sd:3037); `renewed` renews the claim's lease
+    first (`renew`, sd:3481).
+    """
+    prepare_log = log.with_name(f"{log.name}.log")
+    with tempfile.TemporaryDirectory(prefix="sd-lane-texts-") as private:  # 0700, removed with the step
+        body = pathlib.Path(private) / "body.md"
+        body.write_text(str(entry.get("body") or ""), encoding="utf-8")
+        claim = [f"--{entry['claim']}"]
+        if isinstance(entry.get("acceptance"), str):
+            (pathlib.Path(private) / "acceptance.md").write_text(entry["acceptance"], encoding="utf-8")
+            claim += ["--acceptance-file", str(pathlib.Path(private) / "acceptance.md")]
+        argv = ["-C", str(worktree), "prepare", "--item", str(entry["item"]), *claim, "--catch-up",
+                "--title", entry["title"], "--body-file", str(body), "--json"]
+        prepared = ship(argv, prepare_log)
+        if blocker_code(prepared) == "review_incomplete":
+            renewed()
+            prepare_log = log.with_name(f"{log.name}-retry.log")
+            prepared = ship([*argv, "--retry-review"], prepare_log)
+    return prepared, prepare_log
+
+
+def prepare_stop(entry: dict[str, Any], worktree: pathlib.Path, prepared: dict[str, Any]) -> dict[str, Any] | None:
+    """The end prepare's answer gives the entry, or None at `ready_to_send`.
+
+    An answer `merged` reconciled a merge that landed before its runner died
+    at `step: merge` (sd:3482): the entry is merged at that commit, and no
+    merge runs, when the merged head is the entry's head or its catch-up.
+    Another head's merge is an earlier pull request's, and fails the entry.
+    """
+    if prepared.get("ok") and prepared.get("phase") == "merged":
+        merged_head = str(prepared.get("head") or "")
+        if merged_head and (merged_head == entry["expected_head"] or at_head(worktree, merged_head)):
+            return {"status": "merged", "merge_commit": prepared.get("merge_commit"), "reconciled": True}
+        return {"status": "failed", "step": "prepare", "phase": "merged",
+                "reason": f"prepare answered sd-ship's merge of {merged_head or 'an unrecorded head'}, not this "
+                          f"entry's head {entry['expected_head']}; read the ship receipt before enqueueing it again"}
+    if prepared.get("ok") and prepared.get("phase") == "ready_to_send":
+        return None
+    return {"status": "failed", "step": "prepare", "phase": prepared.get("phase"),
+            "reason": str(prepared.get("error") or prepared.get("code") or "prepare did not reach ready_to_send")[:REASON_CHARS],
+            **({"hub_fault": True} if answered_hub_fault(prepared) else
+               {"retryable": True} if answered_retryable(prepared) else {})}
 
 
 class SpeculativeGate(threading.Thread):
