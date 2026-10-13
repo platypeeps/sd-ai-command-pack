@@ -15,7 +15,7 @@ Two rules constrain every write here, and both are load-bearing:
     digest no longer matches is refused unless forced, and a link is removed
     only while it is still a symlink resolving to its recorded target, so a
     file someone edited or a link someone retargeted by hand is never silently
-    deleted.
+    deleted. `--user` refuses to overwrite one for the same reason.
   * **It never edits a tracked repository file.** The single exception outside
     a platform home is the one SessionStart stanza in `~/.claude/settings.json`
     for `sd-handoff-restore`, which is recorded in `owned` like any other write
@@ -757,14 +757,34 @@ def write_render_plan(planned: list, dry_run: bool) -> list[Written]:
     return written
 
 
-def policy_collisions(planned: list, previous: list[dict]) -> None:
-    """New generated companions cannot overwrite an unowned or modified file."""
-    owned = {row["path"]: row.get("sha256") for row in previous if isinstance(row.get("path"), str)}
-    for target, _, kind in planned:
-        if kind != "invocation-policy:codex" or not (target.exists() or target.is_symlink()):
+def render_collisions(planned: list, previous: list[dict], legacy: list[tuple[Path, str]]) -> None:
+    """No render overwrites an unowned or modified file (sd:3492).
+
+    `make setup` runs this unattended, so an overwrite would lose an edit with
+    nobody watching. Owned is a receipt row, or a row of the old fleet
+    installer's receipt, whose digest still matches; a file that already holds
+    the planned bytes loses nothing, so a lost receipt over an unchanged
+    payload still installs.
+    """
+    owned: dict[str, str | None] = {str(path): sha for path, sha in legacy}
+    owned.update(
+        (row["path"], row.get("sha256")) for row in previous if isinstance(row.get("path"), str))
+    refused = []
+    for target, body, _ in planned:
+        if not (target.exists() or target.is_symlink()):
             continue
-        if target.is_symlink() or not target.is_file() or owned.get(str(target)) != digest(target.read_bytes()):
-            raise MetadataRefused(f"{target}: invocation metadata is unowned or modified")
+        if target.is_symlink() or not target.is_file():
+            refused.append(f"{target}: not a regular file")
+            continue
+        actual = digest(target.read_bytes())
+        if actual == digest(body) or owned.get(str(target)) == actual:
+            continue
+        why = "modified since it was installed" if str(target) in owned else "not installed by this pack"
+        refused.append(f"{target}: {why}")
+    if refused:
+        raise MetadataRefused(
+            "refusing to overwrite; move it aside or delete it, then re-run:\n  "
+            + "\n  ".join(refused))
 
 
 def restore_policies(backups: list, out) -> None:
@@ -836,18 +856,18 @@ def install_hook(settings: Path, specs, *, dry_run: bool = False) -> bool:
             "fix or move it, then re-run."
         ) from None
     if not isinstance(data, dict):
-        raise SystemExit(f"error: {settings} is not a JSON object.")
+        raise SystemExit(f"error: {settings} is not a JSON object; fix or move it, then re-run.")
 
     hooks = data.setdefault("hooks", {})
     if not isinstance(hooks, dict):
-        raise SystemExit(f"error: {settings} has a non-object 'hooks' key.")
+        raise SystemExit(f"error: {settings} has a non-object 'hooks' key; fix or move it, then re-run.")
 
     changed = False
     for command, event, matchers in specs:
         groups = hooks.setdefault(event, [])
         if not isinstance(groups, list):
             raise SystemExit(
-                f"error: {settings} has a non-list '{event}' hook list."
+                f"error: {settings} has a non-list '{event}' hook list; fix or move it, then re-run."
             )
         for matcher in matchers:
             group = None
@@ -862,7 +882,7 @@ def install_hook(settings: Path, specs, *, dry_run: bool = False) -> bool:
             entries = group.setdefault("hooks", [])
             if not isinstance(entries, list):
                 raise SystemExit(
-                    f"error: {settings} {event}/{matcher} has a non-list 'hooks'."
+                    f"error: {settings} {event}/{matcher} has a non-list 'hooks'; fix or move it, then re-run."
                 )
             if any(
                 isinstance(entry, dict) and entry.get("command") == command
@@ -1667,11 +1687,15 @@ def standing_consent(repo: Path) -> str | None:
     return None if value == lib.parse_scalars(DEFAULT_BLOCK_BODY, comments=True).get(CONSENT_KEY) else value
 
 
-def consent_offers(ctx: Context) -> list:
-    """Every enabled reviewer entry beside the recipient it reaches today."""
+def consent_offers(ctx: Context) -> tuple[list, str]:
+    """Every enabled reviewer entry beside the recipient it reaches today, and why there are none.
+
+    The reason is the registry's refusal, empty when it read: a typo in
+    `providers.yaml` otherwise reads as nobody enabled (sd:3494).
+    """
     sd_registry = sibling("sd_registry")
-    found, _ = sd_registry.read_or_report(sd_registry.registry_path(ctx.home))
-    return [sd_registry.recipient(entry) for entry in found.order("reviewer")]
+    found, reason = sd_registry.read_or_report(sd_registry.registry_path(ctx.home))
+    return [sd_registry.recipient(entry) for entry in found.order("reviewer")], reason
 
 
 def reads_back(line: str, chosen: list) -> bool:
@@ -1748,9 +1772,10 @@ def repo_consent(ctx: Context, repo: Path, answer: str | None, out) -> str | Non
     if answer is None and sibling("sd_lib").core_setting("external_reviews", env) is not None:
         print("repository inherits the operator's external review policy", file=out)
         return None
-    offers = consent_offers(ctx)
+    offers, reason = consent_offers(ctx)
     if not offers:
-        print(f"no enabled reviewer entry to offer; no {CONSENT_KEY} line", file=out)
+        print(f"no enabled reviewer entry to offer{f' ({reason})' if reason else ''}; no {CONSENT_KEY} line",
+              file=out)
         if answer is not None:
             raise sibling("sd_lib").ConfigError("no offered reviewer matches; local block left unchanged")
         return None
@@ -1803,6 +1828,28 @@ def seed_registry(ctx: Context) -> tuple[bool, str]:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
     return True, f"provider registry seeded at {target}"
+
+
+def registry_drift(ctx: Context) -> list[str]:
+    """`--status` lines naming the entries the home registry and the shipped one do not share.
+
+    `seed_registry` copies the file once and never again, so a reviewer the
+    pack ships later stays unseen until merged by hand (sd:3494).
+    """
+    sd_registry = sibling("sd_registry")
+    target = ctx.home / REGISTRY_RELATIVE
+    try:
+        shipped = set(sd_registry.read_file(sd_registry.shipped_path(ctx.checkout)).providers)
+        here = set(sd_registry.read_file(target).providers)
+    except sd_registry.RegistryError as error:
+        return [f"registry: not compared ({error})"]
+    lines = []
+    if shipped - here:
+        lines.append(f"registry: shipped, not in {target}: {', '.join(sorted(shipped - here))}; "
+                     "merge by hand, --user never overwrites it")
+    if here - shipped:
+        lines.append(f"registry: in {target}, not shipped: {', '.join(sorted(here - shipped))}")
+    return lines
 
 
 def open_library(ctx: Context):
@@ -2017,7 +2064,7 @@ def cmd_user(ctx: Context, out) -> int:
     try:
         render_files = render_plan(surfaces, ctx.homes, "skill")
         render_files += render_plan(agents, ctx.agents, "agent")
-        policy_collisions(render_files, owned_entries(recorded))
+        render_collisions(render_files, owned_entries(recorded), legacy_targets(ctx.home, ctx.environ))
     except (MetadataRefused, OSError) as problem:
         print(f"error: {problem}", file=out)
         return 1
@@ -2235,6 +2282,14 @@ VERIFY_HELP_COMMANDS = frozenset({"sd", "sd-review", "sd-ship"})
 VERIFY_TIMEOUT = 5
 
 
+#: The next step for the failures an operator meets most; text mode prints it under the code (sd:3494).
+VERIFY_REMEDIES = {
+    "receipt_foreign_checkout": "the last install ran from the recorded checkout; verify there, or run --user here",
+    "source_commit_changed": "the checkout moved since the last install; run `make setup` to render it",
+    "render_modified": "move it aside, then run `make setup` to render it again",
+}
+
+
 def verify_result(component: str, code: str = "ok", **details) -> dict:
     return {"component": component, "status": "passed" if code == "ok" else "failed",
             "code": code, **details}
@@ -2270,7 +2325,7 @@ def verify_receipt(ctx: Context, receipt: dict) -> dict:
     if type(receipt.get("schema")) is not int or receipt.get("schema") != RECEIPT_SCHEMA:
         return verify_result("receipt", "receipt_schema_unsupported")
     if receipt.get("checkout") != str(ctx.checkout):
-        return verify_result("receipt", "receipt_foreign_checkout")
+        return verify_result("receipt", "receipt_foreign_checkout", recorded=receipt.get("checkout"))
     entries = receipt.get("owned")
     if not isinstance(entries, list) or not entries:
         return verify_result("receipt", "receipt_malformed")
@@ -2428,14 +2483,51 @@ def cmd_verify(ctx: Context, out, *, as_json: bool = False) -> int:
     result = {"schema_version": 1, "status": "verified" if passed else "failed", "checks": checks,
               "smoke": {"status": "complete" if ready else "not_run",
                         "unsmoked": sorted(set(bin_commands(ctx.checkout)) - VERIFY_HELP_COMMANDS)}}
+    # Reported, never failed: the tree serves the working checkout's HEAD, so a
+    # pin sits behind origin on purpose (sd:3111); the count says how far (sd:3493).
+    behind = serving_behind(ctx)
+    if behind is not None:
+        result["serving"] = behind
     if as_json:
         print(json.dumps(result, sort_keys=True), file=out)
     else:
         print(f"installation: {result['status']}", file=out)
+        if behind is not None:
+            print(f"  {serving_line(behind)}", file=out)
         for check in checks:
             if check["status"] == "failed":
-                print(f"  {check['component']}: {check['code']}", file=out)
+                extra = ", ".join(f"{key}={value}" for key, value in check.items()
+                                  if key not in ("component", "status", "code"))
+                print(f"  {check['component']}: {check['code']}" + (f" ({extra})" if extra else ""), file=out)
+                if check["code"] in VERIFY_REMEDIES:
+                    print(f"    fix: {VERIFY_REMEDIES[check['code']]}", file=out)
     return 0 if passed else 1
+
+
+def serving_behind(ctx: Context) -> dict | None:
+    """How far the serving tree sits behind `origin/main`, after a bounded fetch; None elsewhere.
+
+    `--verify` compares the receipt with the checkout it runs from, so a tree
+    many commits behind passed every check (sd:3493). A fetch or count that
+    fails is unknown, with its reason, never zero.
+    """
+    if ctx.checkout.resolve() != serving_tree(ctx.home, ctx.environ).resolve():
+        return None
+    quiet = {**os.environ, **ctx.environ, "GIT_TERMINAL_PROMPT": "0"}
+    code, _, err = _git_in(ctx.checkout, ["fetch", "--quiet", "origin", "main"], GIT_TIMEOUT, quiet)
+    if code:
+        return {"behind": None, "error": f"fetch failed: {err or 'no reason given'}"}
+    code, count, err = _git(ctx, ["rev-list", "--count", "HEAD..origin/main"])
+    if code or not count.isdigit():
+        return {"behind": None, "error": f"count failed: {err or count or 'no output'}"}
+    return {"behind": int(count)}
+
+
+def serving_line(behind: dict) -> str:
+    if behind["behind"] is None:
+        return f"serving tree: behind origin/main unknown ({behind['error']})"
+    return (f"serving tree: {behind['behind']} commit(s) behind origin/main; "
+            "run `make setup` in your working checkout to move it")
 
 
 def cmd_status(ctx: Context, out) -> int:
@@ -2454,13 +2546,20 @@ def cmd_status(ctx: Context, out) -> int:
         )
         if live["dirty"]:
             print("checkout is dirty", file=out)
+    behind = serving_behind(ctx)
+    if behind is not None:
+        print(serving_line(behind), file=out)
 
     surfaces = discover_surfaces(ctx.checkout)
     try:
-        expected = {
-            str(item.path): item.sha256
-            for item in render(surfaces, ctx.homes, dry_run=True)
-        }
+        # What `--user` renders: agents too, and installed trials once the
+        # receipt is this checkout's (sd:3494).
+        if verify_receipt(ctx, receipt)["status"] == "passed":
+            planned = verification_payload(ctx, receipt)
+        else:
+            planned = (render_plan(surfaces, ctx.homes, "skill")
+                       + render_plan(discover_agents(ctx.checkout), ctx.agents, "agent"))
+        expected = {str(path): digest(data) for path, data, _ in planned}
     except MetadataRefused as error:
         print(f"surfaces: metadata cannot render ({error})", file=out)
         print(f"surfaces: {len(surfaces)} in checkout; rendered comparison unavailable", file=out)
@@ -2481,6 +2580,8 @@ def cmd_status(ctx: Context, out) -> int:
         file=out,
     )
     print(command_report(ctx.checkout, ctx.environ), file=out)
+    for line in registry_drift(ctx):
+        print(line, file=out)
 
     # A dry run of the retirement `--user` performs, so the two cannot disagree
     # about which copies count as unmodified.
@@ -2510,7 +2611,8 @@ def _git(ctx: Context, args: list[str], timeout: float = GIT_TIMEOUT) -> tuple[i
     return _git_in(ctx.checkout, args, timeout)
 
 
-def _git_in(directory: Path, args: list[str], timeout: float = GIT_TIMEOUT) -> tuple[int, str, str]:
+def _git_in(directory: Path, args: list[str], timeout: float = GIT_TIMEOUT,
+            environ: dict[str, str] | None = None) -> tuple[int, str, str]:
     """`_git` for a directory other than the checkout."""
     try:
         done = subprocess.run(  # nosec B603 - fixed argv, no shell
@@ -2519,6 +2621,7 @@ def _git_in(directory: Path, args: list[str], timeout: float = GIT_TIMEOUT) -> t
             text=True,
             timeout=timeout,
             check=False,
+            env=environ,
         )
     except (OSError, subprocess.SubprocessError) as error:
         return 1, "", f"could not finish: {error}"
@@ -2535,9 +2638,18 @@ def cmd_pull(ctx: Context, out) -> int:
     moves with `git checkout` and `make setup` instead (`cmd_serve`).
     """
     live = git_context(ctx.checkout)
+    if live["branch"] == "HEAD":
+        # `--serve` detaches the serving tree on purpose (sd:3111), and
+        # `rev-parse --abbrev-ref` names a detached HEAD `HEAD` (sd:3493).
+        print(
+            "error: serving checkout is detached; --pull refuses to move it. "
+            "Run `make setup` in your working checkout.",
+            file=out,
+        )
+        return 1
     if live["branch"] != "main":
         print(
-            f"error: serving checkout is on {live['branch'] or '(detached)'}, not main; "
+            f"error: serving checkout is on {live['branch'] or '(unknown)'}, not main; "
             "--pull refuses to move it.",
             file=out,
         )
@@ -2593,8 +2705,8 @@ def _clone_serving_tree(ctx: Context, tree: Path, out) -> bool:
     """
     code, url, err = _git(ctx, ["remote", "get-url", "origin"])
     if code or not url:
-        print(f"error: {ctx.checkout} has no origin remote to clone the serving checkout from{': ' + err if err else ''}",
-              file=out)
+        print(f"error: {ctx.checkout} has no origin remote to clone the serving checkout from{': ' + err if err else ''}; "
+              "add one with `git remote add origin <url>`, then re-run.", file=out)
         return False
     # A relative local path, such as `../pack.git`, names a place from the
     # checkout, and the clone runs elsewhere (sd:2913). A `scheme://` URL and
