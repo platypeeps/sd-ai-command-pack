@@ -583,7 +583,8 @@ def allowed_statuses(connection: sqlite3.Connection, item: int, *, state: dict |
 
     A `TASK_STATUS_KINDS` item gets `TASK_STATUSES`; work that is not done
     gets every status but `done`; every other kind, and any item with a
-    queued or running assignment, gets none.
+    queued or running assignment, gets none. A vault base row is an `idea`,
+    so it gets none: it moves by stage only (sd:3972).
 
     The dashboard item screen offers exactly these choices, but only on the
     panels it renders: `task` and `TASK_STATUS_KINDS` items always, a `work`
@@ -681,6 +682,12 @@ def change_status(
             else:
                 way_out = "it is running, and no verb cancels a running assignment now that the runner is gone"
             raise TransitionRefused(f"item {item} has queued or running assignment {active['id']}; {way_out}")
+        # Before the same-status no-op too: a base row's status is its plugin
+        # map's answer to its stage, so no status write is its own (sd:3972).
+        if row["source"] == _vault_source():
+            raise TransitionRefused(
+                f"item {item} is a {_base_kind(row)} row from the vault, and it moves by stage only: "
+                f"its plugin's map sets the status from the stage. Move its stage instead")
         if row["status"] == target:
             return state
         if row["kind"] == "work":
@@ -709,6 +716,22 @@ def change_status(
         spawned, ended = _next_occurrence(connection, row, who=who)
         return {**item_state(connection, item), "next_occurrence": spawned,
                 "next_occurrence_reason": ended}
+
+
+def _vault_source() -> str:
+    """`sources.vault.SOURCE`, read when a rule runs: `sources` imports this module."""
+    from .sources.vault import SOURCE
+
+    return SOURCE
+
+
+def _base_kind(row: dict) -> str:
+    """The plugin kind a vault row holds in `fields.kind`, or `base` when it cannot be read."""
+    try:
+        kind = json.loads(row["fields"] or "{}").get("kind")
+    except (AttributeError, TypeError, ValueError, RecursionError):
+        kind = None
+    return kind if isinstance(kind, str) and kind else "base"
 
 
 def _today() -> date:

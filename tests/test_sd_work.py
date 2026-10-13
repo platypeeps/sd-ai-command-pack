@@ -74,6 +74,18 @@ class TaskCLI(unittest.TestCase):
         self.assertFalse((self.home / "docs").exists())
         self.assertFalse((self.home / ".git").exists())
 
+    def test_task_status_refuses_a_vault_row_and_names_the_stage_move(self):
+        """sd:3972: a base row moves by stage only; the refusal says so and writes nothing."""
+        with sd_db.connect(home=self.home) as connection:
+            item = sd_db.create_item(connection, kind="idea", title="Example idea", source="vault",
+                                     external_id="topic:System/Databases/Topics/Example idea.md",
+                                     stage="active", fields={"kind": "topic"})
+        before = json.loads(self.call("task", "show", item, "--json").stdout)
+        refused = self.call("task", "status", item, "done", code=1)
+        self.assertIn("topic row from the vault", refused.stderr)
+        self.assertIn("by stage only", refused.stderr)
+        self.assertEqual(json.loads(self.call("task", "show", item, "--json").stdout), before)
+
     def test_task_show_reads_what_store_item_reads(self):
         """sd:1112. `sd task show` is a read alias; `sd store item` stays canonical.
 

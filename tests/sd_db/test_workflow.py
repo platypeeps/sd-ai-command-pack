@@ -175,6 +175,25 @@ class StatusGuards(WorkflowCase):
             change_status(self.db, item, "ready", who="operator")
         self.assertEqual(allowed_statuses(self.db, item), [])
 
+    def vault_row(self):
+        item = create_item(self.db, kind="idea", title="Example idea", source="vault",
+                           external_id="blog-idea:System/Databases/Blog Ideas/Example idea.md",
+                           stage="inbox", fields={"kind": "blog-idea"})
+        self.db.commit()
+        return item
+
+    def test_a_vault_row_moves_by_stage_only(self):
+        """sd:3972: its status follows its stage through the plugin's map, so no status write may move it."""
+        item = self.vault_row()
+        self.assertEqual(allowed_statuses(self.db, item), [])
+        before, counts = item_state(self.db, item), self.counts()
+        for target in ("done", "ready", "planning"):
+            with self.subTest(target=target), \
+                    self.assertRaisesRegex(TransitionRefused, "blog-idea row from the vault.*by stage only"):
+                change_status(self.db, item, target, who="operator")
+        self.assertEqual(item_state(self.db, item), before)
+        self.assertEqual(self.counts(), counts)
+
     def test_allowed_statuses_takes_the_state_the_caller_read(self):
         # sd:2380: a caller that read the item's state passes it, and the history is not read again.
         item = create_item(self.db, kind="task", title="Listed")
