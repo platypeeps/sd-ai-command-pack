@@ -523,6 +523,20 @@ class Runner(Lane):
                          [("prepare", "1", False), ("merge", "1", False), ("prepare", "2", False), ("merge", "2", False)])
         self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "merged"])
 
+    def test_a_database_older_than_the_library_stops_the_run_and_fails_nothing(self) -> None:
+        """sd:3475. On 2026-10-10 a pack landing built the library for schema 25 over a database at 24,
+        and the runner failed four entries in turn, each in no time, before anyone migrated."""
+        from sd_db.errors import SchemaTooOld
+        sd_lane.enqueue_entry(self.worktree("topic"), 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = sd_lane.sd_ship_workflow.failure("prepare", SchemaTooOld(24, 25))
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([(c[2], c[4]) for c in self.calls], [("prepare", "1")])
+        self.assertIn("sd:1", answer["stopped"])
+        one, two = self.entries()
+        self.assertEqual((one["status"], one["hub_retries"], two["status"]), ("pending", 1, "pending"))
+        self.assertIn("migrate", one["hub_fault"]["reason"])
+
     def test_a_hub_fault_in_the_merge_is_retried_too(self) -> None:
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "merge")] = {**self.HUB_FAULT, "phase": "merge"}

@@ -63,7 +63,8 @@ class WorkflowState(unittest.TestCase):
             base = type("SdDbError", (Exception,), {"__module__": "sd_db.errors"})
             return type(name, (base,), {"__module__": module})("[Errno 32] Broken pipe")
         for error in (sd_db_error("HubUnreachable"), sd_db_error("TransactionLost"), sd_db_error("BuildMismatch"),
-                      sd_db_error("HubRestartNeeded"), sd_db_error("SchemaTooNew", "sd_db.errors")):
+                      sd_db_error("HubRestartNeeded"), sd_db_error("SchemaTooNew", "sd_db.errors"),
+                      sd_db_error("SchemaTooOld", "sd_db.errors")):
             with self.subTest(error=type(error).__name__):
                 result = failure("prepare", error)["workflow"]
                 self.assertEqual((result["state"], result["blocker"]["code"], result["blocker"]["retryable"]),
