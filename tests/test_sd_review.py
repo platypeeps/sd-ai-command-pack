@@ -139,11 +139,13 @@ def codex_sessions(runner: Any) -> list[dict[str, Any]]:
     `codex debug prompt-input` (sd:1248) runs the same program under the same
     name, so a test that filtered on `argv[0] == "codex"` saw one call before
     it existed and sees two after. Filtering here rather than in each test
-    keeps one definition of what a review session is.
+    keeps one definition of what a review session is. Its `--version` read
+    (sd:3499) is not a session either.
     """
 
     return [call for call in runner.calls
-            if call["argv"][0] == "codex" and call["argv"][1:3] != SKILL_PROBE_WORDS]
+            if call["argv"][0] == "codex" and call["argv"][1:3] != SKILL_PROBE_WORDS
+            and call["argv"][1:] != ["--version"]]
 
 
 def chat_answer(content: str, **extra: Any) -> tuple[int, str, str, bool]:
@@ -248,12 +250,13 @@ class ReviewFixture(unittest.TestCase):
 
         `--explain` starts one local process on a ready `codex-json` lane:
         `debug prompt-input`, which renders a prompt offline and bills nothing
-        (sd:1248). Named here rather than relaxed to "some calls", so a second
-        process arriving under `--explain` still fails every caller.
+        (sd:1248), and its `--version` read (sd:3499). Named here rather than
+        relaxed to "some calls", so another process arriving under `--explain`
+        still fails every caller.
         """
 
         started = [call["argv"][1:3] for call in runner.calls]
-        self.assertIn(started, ([], [SKILL_PROBE_WORDS]), started)
+        self.assertIn(started, ([], [SKILL_PROBE_WORDS, ["--version"]]), started)
 
     def environment(self, **extra: str) -> dict[str, str]:
         """An environment whose HOME is the fixture's, so the run reads the
@@ -1126,7 +1129,7 @@ class PipelineTests(ReviewFixture):
         result = self.run_review(root, runner, explain=True)
         self.assertEqual(result["status"], "explained")
         self.assert_no_session_started(runner)
-        self.assertEqual([call["argv"][1:3] for call in runner.calls], [SKILL_PROBE_WORDS])
+        self.assertEqual([call["argv"][1:3] for call in runner.calls], [SKILL_PROBE_WORDS, ["--version"]])
         self.assertTrue(result["route"]["reason"])
 
     def test_explain_digests_what_the_reviewers_would_be_asked(self) -> None:

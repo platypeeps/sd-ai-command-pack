@@ -574,6 +574,17 @@ class JobDirectories(unittest.TestCase):
             self.assertEqual(job_dirs(env), [Path("/x"), conf / "jobs/mini", conf / "jobs"])
             self.assertEqual(job_dirs({**env, "CRON_JOBS_HOST": "studio"})[1], conf / "jobs/studio")
 
+    def test_an_exported_empty_value_beats_the_file(self):
+        """sd:3970. `st_source_env` keeps an exported empty value; the file's
+        host and extra dirs must not come back through `or`."""
+        from sd_db.operations import job_dirs
+        with tempfile.TemporaryDirectory() as directory:
+            conf = Path(directory) / "cron-jobs"; conf.mkdir()
+            (conf / ".env").write_text('CRON_JOBS_HOST="mini"\nCRON_JOBS_EXTRA_DIRS=/x\n')
+            env = {"SYSTEM_TOOLS_CONFIG": directory, "CRON_JOBS_HOST": "", "CRON_JOBS_EXTRA_DIRS": ""}
+            with patch("socket.gethostname", return_value="Studio.local"):
+                self.assertEqual(job_dirs(env), [conf / "jobs/studio", conf / "jobs"])
+
     def test_backend_reads_a_host_job_before_the_shared_one(self):
         from sd_db.operations import job_dirs
         with tempfile.TemporaryDirectory() as directory:
