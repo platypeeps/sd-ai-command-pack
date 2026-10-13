@@ -30,7 +30,7 @@ def markdown(repo):
         listed = None
     if listed is not None and listed.returncode == 0:
         return [os.path.join(repo, name) for name in listed.stdout.split("\0") if name]
-    found = []
+    found: list[str] = []
     for root, dirs, files in os.walk(repo):
         dirs[:] = [d for d in dirs if not any((d + "/").startswith(s) for s in SKIP)]
         found.extend(os.path.join(root, fn) for fn in files if fn.endswith(".md"))
