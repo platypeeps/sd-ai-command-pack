@@ -6,7 +6,7 @@ item: sd:4188
 
 # Design — satellite-lane
 
-Status: draft for operator review; build starts after sd:4046 and sd:4184 land and a day shows which stalls remain (operator, 2026-10-14).
+Status: agreed 2026-10-14 (three open questions answered); build starts after sd:4046 and sd:4184 land and a day shows which stalls remain (operator, 2026-10-14).
 Builds on sd:3003 (`repo.lane_host`), sd:3282 (the queue in the hub database), sd:3340 (held review on disk), sd:4044 (fence) and sd:4012 (promote).
 
 ## Problem
@@ -90,9 +90,9 @@ A dead owner: the hub moves the lane only after `lease_until + MERGE_DEADLINE` f
 
 ## Risks
 
-- Open, for the operator: may the owner merge an item whose seed it cannot refresh, and up to what age (proposed 24 h; past it prepare runs, nothing merges)?
-- Open: `OFFLINE_MAX`, which bounds both offline merging and a dead-owner move without the flag (proposed 12 h).
-- Open: dashboard edits while the owner is unreachable: pending requests (proposed) or refused.
+- Decided (operator, 2026-10-14): the owner may merge an item whose seed is up to 24 h old; past that it prepares and reviews but merges nothing.
+- Decided: `OFFLINE_MAX` is 12 h, plus `MERGE_DEADLINE` of 10 minutes for a dead-owner move without a confirmed stop.
+- Decided: dashboard edits while the owner is unreachable are stored as pending requests, shown "pending at owner", and applied or refused at reconnect.
 - Accepted: the hub's view of an owned lane lags by the outbox depth; it is shown, not enforced.
 - Accepted: a merge the hub would have refused (cancelled during a mismatch) stands; GitHub is the fact, the alert asks the operator.
 - Gate pass receipts stay bound to the owner's machine and head; they never replay.
