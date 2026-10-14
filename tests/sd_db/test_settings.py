@@ -243,6 +243,25 @@ class TheFleetVerbs(FleetCase):
         path.chmod(0o644)
         self.assertEqual(sd_lib.fleet_setting("copilot_review", self.env), ("deep", "database"))
 
+    def test_the_hub_name_is_one_row_the_fence_reads(self):
+        """sd:4044: `sd config set sd.hub_name` writes the row `sd_db.hub.role` reads; a bad name is refused."""
+        path = self.database()
+        done = self.run_sd("config", "set", "sd.hub_name", "hub.example.test")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        connection = connect(path)
+        self.addCleanup(connection.close)
+        self.assertEqual(read_settings(connection, ["sd.hub_name"]), {"sd.hub_name": "hub.example.test"})
+        bad = self.run_sd("config", "set", "sd.hub_name", "hub example")
+        self.assertNotEqual(bad.returncode, 0)
+        self.assertEqual(read_settings(connection, ["sd.hub_name"]), {"sd.hub_name": "hub.example.test"})
+
+    def test_the_hub_name_is_refused_on_a_machine_with_no_database(self):
+        """Codex pass: a file value showed in `get` and fenced nothing once a database came."""
+        done = self.run_sd("config", "set", "sd.hub_name", "hub.example.test")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("sd.hub_name lives in the workflow database", done.stderr)
+        self.assertFalse(self.config_path.exists() and "hub_name" in self.file_keys())
+
     def test_list_names_every_moved_key_with_its_source(self):
         self.write_file(fleet_owners="example", external_reviews="deny")
         connection = connect(self.database())
@@ -252,7 +271,8 @@ class TheFleetVerbs(FleetCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         listed = json.loads(done.stdout)
         self.assertEqual({key: (listed[key]["value"], listed[key]["source"]) for key in sd_lib.FLEET_KEYS},
-                         {"copilot_review": ("never", "database"), "fleet_owners": ("example", "file")})
+                         {"copilot_review": ("never", "database"), "fleet_owners": ("example", "file"),
+                          "hub_name": (None, "default")})
         self.assertEqual((listed["external_reviews"]["value"], listed["external_reviews"]["source"]), ("deny", "file"))
         self.assertEqual((listed["gate_slots"]["value"], listed["gate_slots"]["source"]), (None, "default"))
         text = self.run_sd("config", "list", "sd")

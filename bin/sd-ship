@@ -2051,6 +2051,19 @@ class Ship(SharedReview):
         if self.args.abandon_copilot_review is not None and not self.args.manual:
             raise Refusal("--abandon-copilot-review requires explicit manual merge authority")
 
+    def still_hosted(self) -> None:
+        """The lane host and the fence again, after the last network read before the `PUT`.
+
+        The local gate and those reads can stall for minutes under the lock, and
+        a hub demoted meanwhile merges nothing (sd:4044). `still_gated` asks at its
+        end, and `merge` again after the dispatch receipt, whose write can wait on
+        the database lock.
+        """
+        elsewhere = lane_host_refusal(self.root, self.connection, self.database)
+        if elsewhere:
+            raise Refusal(elsewhere, code="lane_elsewhere", boundary="runtime", state="operator_decision",
+                          next_action="Run it on the lane host, or move the lane: dashboard, Management, Move lane.")
+
     def still_gated(self, base: str, head: str, protection: dict) -> None:
         """The last read before the `PUT`: ownership and the gate as first observed.
 
@@ -2084,6 +2097,7 @@ class Ship(SharedReview):
                           state="retryable_failure",
                           next_action=f"Run sd-ship prepare --catch-up, or git merge origin/{base} on the branch "
                                       "and then prepare again.")
+        self.still_hosted()
 
     def settled_ready(self, number: int, head: str, base: str, protection: dict) -> dict:
         """The pull request once `ready` accepts it, read again while GitHub settles (sd:2050).
@@ -2213,6 +2227,9 @@ class Ship(SharedReview):
         # that never happened (sd:1347).
         self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority, **closes,
                   warnings=self.dispatch_warnings(), merge_invoker=self.invoker())
+        # Again after the receipt, whose write can wait on the database lock; a
+        # refusal here leaves `merge_dispatch` as a refused merge call does.
+        self.still_hosted()
         try:
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
                          body={"sha": head, "merge_method": "squash", "commit_title": f"{title} (#{observed['number']})",

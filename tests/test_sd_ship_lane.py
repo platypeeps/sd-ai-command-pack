@@ -557,6 +557,36 @@ class LaneHost(LaneCase):
             self.dispatch("merge", "--manual", "--expected-head", self.head())
         self.assertEqual(self.puts(), [])
 
+    def test_a_demotion_during_the_merge_refuses_before_the_merge_call(self):
+        """sd:4044 review: the gate can run for minutes under the lock; a hub renamed meanwhile merges nothing.
+
+        Each step names one stall: the readiness wait, (codex pass) the last
+        protection read, and (second review) the dispatch receipt's write, which
+        can wait on the database lock; after it only the merge call remains.
+        """
+        self.assertEqual(self.dispatch("prepare")["phase"], "ready_to_send")
+        for step in ("settled_ready", "still_gated", "save"):
+            original = getattr(ship.Ship, step)
+
+            def demoted_after(delivery, *args, _original=original, _step=step, **kwargs):
+                from sd_db import writes
+                answer = _original(delivery, *args, **kwargs)
+                if _step != "save" or kwargs.get("phase") == "merge_dispatch":
+                    writes.set_setting(self.connection, "sd.hub_name", "hub.example.test")
+                    self.connection.commit()
+                return answer
+            with self.subTest(step=step):
+                with patch("sd_db.tailnet.this_name", lambda: "old-hub.example.test"), \
+                        patch.object(ship.Ship, step, demoted_after), \
+                        self.assertRaises(ship.Refusal) as refused:
+                    self.dispatch("merge", "--manual", "--expected-head", self.head())
+                self.assertEqual(refused.exception.workflow["blocker"]["code"], "lane_elsewhere")
+                self.assertIn("runs on the hub, hub.example.test, not on this machine", str(refused.exception))
+                self.assertEqual(self.puts(), [])
+            from sd_db import writes
+            writes.set_setting(self.connection, "sd.hub_name", None)
+            self.connection.commit()
+
     def test_an_sd_db_without_hosts_lane_hosts_every_lane_on_the_hub_only(self):
         for served, hosted in ((None, True), (self.HUB, False)):
             with self.subTest(served=served), patch.dict(receipts.__dict__), \

@@ -1383,6 +1383,10 @@ def config_set(args: argparse.Namespace) -> int:
         if written:
             print(f"{args.key}: {replaced or '(unset)'} -> {value} (workflow database)")
             return 0
+        if key == "hub_name":
+            # The fence reads the row alone (sd:4044): a file value would show here and fence nothing.
+            raise Refusal(f"{args.key} lives in the workflow database, and this machine has none; "
+                          "set it on the hub or on a satellite")
     config_path = sd_lib.machine_config_path()
     config = sd_lib.machine_config(config_path)
     stored = config.get(SETTINGS_KEY)
