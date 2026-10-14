@@ -1,5 +1,5 @@
 ---
-title: The lane closes items on evidence tied to the reviewed head, records a waived criterion, and closes an umbrella on a trailer that names it
+title: The lane closes the items the enqueue names on the final head, records a waived criterion, and closes an umbrella on a trailer that names it
 created: 2026-10-13
 item: sd:3704
 ---
@@ -15,8 +15,9 @@ The sd:3519 branch (`ship-fixes-3519`) adds `refuse_design_delivery` to prepare;
 
 Agreed 2026-10-13. The operator took the recommended option on each question:
 
-- Part 1: `Closes:` plus `Delivers:` trailers on the branch's own commits, stored at prepare with the head; the title
-  closes nothing, and prepare warns per title id (sd:3704 note #17806).
+- Part 1: a `--deliver` merge closes exactly the items named with `--item` on the enqueue; prepare prints that list
+  and stores it with the head; titles and commit `Delivers:` lines close nothing (note #18007, which replaced the
+  commit-trailer ruling #17806 after two review rounds found undone history still closing items).
 - Part 2: `passed: false` plus `waived {reason, decision}`, the note on this item, listed in the delivery note
   (note #17816). Lane review then made the link exact: the note holds a `Waive:` line equal to the criterion.
 - Part 3: no new close path; `delivery.md` documents the trailer paths (note #17816).
@@ -44,51 +45,37 @@ The lane closes or refuses items on the wrong evidence, in three ways.
 
 ## Approach
 
-### 1. The closing set comes from the claim, `Closes:` and branch-commit trailers; never the title
+### 1. The closing set is the enqueue's `--item` list on the final head; never the title or commit lines
 
 Evidence the lane trusts, and why:
 
-- **The claim** (`--deliver`), as today.
-- **`Closes:` lines in the prepared body**, as today (sd:1481). Merge reads the body stored at prepare, not the
-  live one.
-- **`Delivers: sd:N` trailers on the branch's own commits**, read at prepare from
-  `git log --no-merges refs/remotes/origin/<base>..<head>` through `sd_ship_remote.git`, which raises on a failed
-  call. A commit SHA cannot change, so this evidence is tied to the reviewed head. It is also where a builder writes
-  "this commit delivers that item" (one commit per item). `sd_lib.commit_messages` is not used: it returns `[]`
-  when git fails (`source:bin/sd_lib.py::commit_messages`), and a failed read is not an empty set.
-- **Not the title.** A title is prose for a reader. It names context (#353), anyone can edit it on GitHub after
-  review, and merge reads it live.
+- **The `--item` list on the enqueue**, claimed item first. Each later `--item` names one more item the merge
+  closes. The lead names it against the final head, so no history is trusted: a commit line can be undone by a
+  later commit, with or without git's revert line, and two review rounds found both (note #18007).
+- **Not body `Closes:` lines** (sd:1481). The ruling says "exactly" the `--item` list, so a second source goes:
+  prepare and enqueue refuse the line and name `--item`. Every body that carried one had merged.
+- **Not the title**, which is prose a reader sees (#353), editable on GitHub after review, and read live at merge.
+- **Not commit `Delivers:` lines.** Builders write none; sd-ship writes one per closed item into the squash, so
+  `sd task status --delivered-by` keeps reading the landed commit.
 
 Shape:
 
-- Prepare computes the closing set once: `Closes:` items, then branch-trailer items, minus the claimed item.
-  Only `sd:<n>` trailer values count. It stores `closing = {"head": <head>, "items": [...]}` in the receipt.
-  `sd_ship_body.items_closed` loses its title argument and takes the trailer list. It returns `()` without
-  `deliver`, as today.
-- An associate-only claim whose commits carry `Delivers:` for any item refuses with `closes_need_delivery`. A
-  `Closes:` line gets the same refusal today (operator ruling 2026-10-11, sd:3365).
-- `refuse_unclosable` checks the trailer items the same way it checks `Closes:` items: each must be an item in
-  this repository.
-- Each title `sd:N` outside the closing set gets a prepare warning: "the title names sd:N, which this merge
-  leaves open; add `Closes: sd:N`, a `Delivers:` commit trailer, or `Refs:`". The squash subject still uses the live
-  title (`squash_title`); only the closing role goes. Merge stops re-reading the title for closes
-  (`source:bin/sd-ship::merge`).
+- `sd-ship lane enqueue --item A --item B --item C` stores `closes: [B, C]` on the entry; the runner calls
+  `sd-ship prepare --item A --item B --item C`. Prepare's first `--item` is the claim; the rest are its closing set.
+- Prepare checks each item (`source:bin/sd_ship_body.py::refuse_unclosable`): an item of this repository, and only
+  with `--deliver`. Enqueue makes the same check (`source:bin/sd_lane.py::check_item`).
+- Prepare stores `closing = {"head": <head>, "items": [...]}`, prints "this merge closes sd:A, sd:B, sd:C" and
+  returns the list as `closes`. A delivering title that names other ids gets one warning line.
 - **Every reader takes the stored set**: `squash_body`, `hold_at_merge`, `deliver_closes`, `close_items` and
-  `reconcile`, through `co_delivered` (`source:bin/sd-ship::co_delivered`). The set is fixed at prepare, so a web merge that drops
-  a `Delivers:` line still reports that item in `closes_failed`, as today.
+  `reconcile`, through `co_delivered` (`source:bin/sd-ship::co_delivered`). A web merge that drops a `Delivers:`
+  line still reports that item in `closes_failed`.
 - **Before the merge is sent**, merge refuses `closing_set_stale` when `closing.head` is not the head being merged.
-  The next action is "prepare again".
-- **A receipt is read under the rule that wrote it.** A receipt with no `closing` field was prepared by older code.
-  Before `merge_dispatch`, merge refuses it with `closing_set_stale`, and a new prepare stores the field. At
-  `merge_dispatch` or later (prepare routes those to reconcile, `source:bin/sd-ship::prepare_head`), and for a web merge reconcile
-  observes, `co_delivered` keeps today's reading of the stored body and title. That reading is the one the merge
-  was prepared and sent under.
-- `sd-ship lane enqueue` (`source:bin/sd_lane.py::check_item`) reads the same trailers from its worktree's branch.
-  It refuses there instead of waiting minutes in the queue to refuse at prepare.
+- **A receipt is read under the rule that wrote it.** One with no `closing` field refuses `closing_set_stale` before
+  `merge_dispatch`; at `merge_dispatch` or later it keeps the title reading it was sent under, and an
+  associate-only one closes nothing (sd:3365). Its body `Closes:` items are not read: none was in flight.
 
-Rejected: `Closes:` only, with prepare refusing a commit trailer missing from `Closes:`. That has one source
-fewer, but it makes the lead copy what the commits already say. Commit trailers are the stronger evidence of the
-two, because a body is editable until prepare.
+Rejected: commit trailers (the first ruling, #17806). A trailer is history, and the final head can undo it; the
+revert-line check closed only the case git writes. Rejected: title ids (sd:3014), for the reasons above.
 
 ### 2. A waived row names its reason and the decision note that waived it
 
@@ -124,11 +111,10 @@ cannot tie it. The existing paths already cover each case once part 1 lands:
 
 - **Slices carried `Item: sd:N`.** `sd work deliver N <last slice> --associated --reason TEXT`
   (`source:lib/sd_db/progress.py::deliver_associated_work`), unchanged.
-- **Another item's PR meets the close condition.** That PR names the umbrella in `Closes: sd:N`, or a branch commit
-  carries `Delivers: sd:N` (part 1). The umbrella closes on that merge. sd:997's extra docs commit was needed only
-  because nothing read the commit trailer, or because the condition was noticed after the merge.
-- **Noticed after the merge.** The next `--deliver` PR in the repository names it in `Closes: sd:N`. It closes with
-  that PR's commit: a body line, not a commit of its own.
+- **Another item's PR meets the close condition.** Its enqueue names the umbrella with `--item N` (part 1). The
+  umbrella closes on that merge.
+- **Noticed after the merge.** The next `--deliver` PR in the repository names it with `--item N`. It closes with
+  that PR's commit, not a commit of its own.
 - **Delivered in an unregistered repository** (sd:179, sd:364): ancestry cannot be verified there, so those keep
   `sd work cancel` with a reason (non-goal).
 
@@ -154,14 +140,15 @@ Part 2 writes once, in the delivery's one transaction. Part 3 changes only `deli
 
 | Step | State moved | Failure | Recovery | Test |
 | --- | --- | --- | --- | --- |
-| Prepare reads branch trailers | nothing yet | `git log` fails | Prepare refuses; nothing is stored, so no empty set either. A rerun reads again. | Point the range at a missing base ref so real git fails; prepare refuses and the receipt has no `closing`. |
-| Prepare stores `closing` | receipt gains `{head, items}` | Process stops after the read, before the save | No field stored; the next prepare reads again. | Stop before `save`; the rerun stores the set once. |
-| Branch moves after prepare | none | Merge would close the old head's set | Merge refuses `closing_set_stale`; prepare again. | Prepare at H1, add a commit carrying `Delivers:`, merge refuses. |
-| Older unsent receipt reaches merge | none | No `closing` field; prepared under title closing | Merge refuses `closing_set_stale`; a new prepare stores the set and warns about title ids. | Receipt without the field in phase `ready_to_send`; merge refuses with that code. |
-| Older receipt at `merge_dispatch` or merged | rows move to done | No `closing` field; prepare cannot help, it routes to reconcile | `co_delivered` keeps the old body-and-title reading for that receipt, the rule its message was sent under. | `merge_dispatch` receipt without the field whose message carries a title-derived `Delivers:`; reconcile closes it. |
-| `merge_dispatch` saved, `PUT` lost | receipt holds `merge_message` | Stop between save and `PUT`, or response lost | `reconcile` reads the pull request; if merged, it closes the stored set. | Stop after the save; reconcile closes a trailer-only item. |
-| Web merge or reconcile closes each item | rows move to done | One close fails (row done by hand, `Delivers:` dropped from the landed message) | `delivery_pending` with `closes_failed`, from the stored set; `reconcile` retries. | Extend `test_a_web_merge_without_the_closes_trailers_leaves_those_items_open` with a trailer-only item. |
-| Rollback to the previous commit | receipt keeps `closing` | Old merge ignores it: trailer items stay open, title items close | Accepted. Name the open ones in the next `--deliver` PR's `Closes:`; reopen a wrongly closed one by hand. The new prepare already warned about each title id. | None: old code. |
+| Enqueue stores `closes` | queue entry gains the list | An item is foreign, unknown, or named on an associate-only claim | Enqueue refuses; nothing is queued. | `test_a_second_item_of_another_repository_is_refused` |
+| Enqueue or prepare reads the body | nothing yet | The body carries a `Closes:` line, the old way to name an item; an entry queued before this change could too (none was) | Both refuse `body_trailer_refused`, naming `--item`; nothing is queued or published. Enqueue again with every `--item`. | `test_a_body_closes_line_is_refused_before_any_push`, `test_prepare_refuses_a_body_closes_line` |
+| Runner calls prepare | none | An entry queued before this change has no `closes` | It prepares with the claimed item alone and prints that set; cancel it and enqueue again with every `--item`. | `test_each_item_the_enqueue_names_reaches_prepare` |
+| Prepare stores `closing` | receipt gains `{head, items}` with title and body, in one save | Process stops before the save | No field stored; merge refuses `closing_set_stale` and the next prepare stores it. | `test_an_older_unsent_receipt_without_a_closing_set_refuses_the_merge` |
+| Branch moves after prepare | none | Merge would close the old head's set | Merge refuses `closing_set_stale`; prepare again. | `test_a_closing_set_read_at_another_head_refuses_the_merge` |
+| Older receipt at `merge_dispatch` or merged | rows move to done | No `closing`; prepare routes the phase to reconcile | The title reading it was sent under; associate-only closes nothing; body `Closes:` items are not read, and none was in flight. | `test_an_older_receipt_at_merge_dispatch_closes_what_its_title_named`, `test_an_older_associate_only_receipt_at_merge_dispatch_still_closes_nothing` |
+| `merge_dispatch` saved, `PUT` answer lost | receipt holds `merge_message` | Response lost after GitHub merged | `reconcile` closes the stored set. | `test_a_lost_merge_response_still_closes_the_named_items` |
+| Web merge or reconcile closes each item | rows move to done | The landed message dropped an item's `Delivers:`, or the row was done by hand | `delivery_pending` with `closes_failed`, from the stored set; `reconcile` retries. | `test_a_web_merge_without_the_closes_trailers_leaves_those_items_open` |
+| Rollback to the previous commit | receipt keeps `closing` | Old merge ignores it and closes the title's ids; the later `--item` items stay open | Accepted: name them in the next `--deliver` PR; reopen a wrongly closed one with `sd task`. | None: old code. |
 | Prepare reads the decision note | nothing yet | Database read fails | Prepare refuses; no claim stored. | Closed connection; prepare refuses. |
 | Prepare matches the `Waive:` line | nothing yet | The note mentions the criterion without waiving it, or waives a shorter or longer criterion | Prepare refuses `waiver_not_exact`; no claim stored. The operator or the lead writes a note with the exact line. | Three notes on the item: "Do not waive X", `Waive: X` for a row whose criterion is "X on Y", and `Waive:  X ` for row "X"; the first two refuse, the third passes. |
 | Delivery writes `waived` | completion record and note | Transaction fails | Rolls back whole; `delivery_pending`, reconcile retries with the stored claim. | Fail inside the transaction; the row stays open with no note. |
@@ -174,7 +161,7 @@ which PR A edits anyway.
 1. **PR A, closing set (parts 1 and 3).** `bin/sd_ship_body.py`, `bin/sd-ship`, `bin/sd_lane.py`, `WORKFLOW.md:278`,
    `skills/sd-ship/SKILL.md:113`, `skills/sd-ship/references/delivery.md:12`, tests in
    `tests/test_sd_ship.py` and `tests/test_sd_ship_lane.py`. It leaves every machine closing only on the claim,
-   `Closes:` and commit trailers. Estimate: 4 hours of builder time, then one or two review rounds.
+   the enqueue's `--item` list. Estimate: 4 hours of builder time, then one or two review rounds.
 2. **PR B, waived row (part 2).** `bin/sd-ship` (`acceptance`, `record_delivery`, `close_task`),
    `lib/sd_db/progress.py` (`deliver_work`, `_complete_delivery`), `delivery.md`, tests. It shares `bin/sd-ship`
    with PR A, so it starts from PR A's merge. It leaves the waiver working on every machine. Estimate: 2 hours,
@@ -182,10 +169,10 @@ which PR A edits anyway.
 
 ## Acceptance criteria
 
-- A `--deliver` PR whose title names sd:A, whose body has no `Closes:` and whose commits carry no `Delivers: sd:A`
-  merges with no `Delivers: sd:A` and leaves sd:A open; prepare warned about it.
-- A `--deliver` PR whose branch commit carries `Delivers: sd:B` closes sd:B on merge.
-- An associate-only PR whose branch commit carries `Delivers: sd:B` refuses `closes_need_delivery`.
+- A `--deliver` enqueue naming three items with `--item` closes all three on merge, each with a generated
+  `Delivers:` line in the squash.
+- An item named only in the title or a commit `Delivers:` line stays open; prepare warned about the title's ids.
+- An associate-only enqueue or prepare with a second `--item` refuses `closes_need_delivery`.
 - A receipt whose `closing.head` differs from the merged head, or an unsent one that lacks the field, refuses
   `closing_set_stale`.
 - An acceptance file with one row `passed: false`, a reason and a decision note on the item holding
@@ -198,10 +185,8 @@ which PR A edits anyway.
 ## Risks
 
 - **Builders and the lead must change habits.** A batched PR that relied on title ids now leaves those items
-  open. The prepare warning names each one; the lead's bundle brief names `Closes:` or commit trailers. We accept
-  one cycle of warnings.
-- **A stray `Delivers:` on a branch commit closes an item.** That is the intent, but a copied commit message can
-  carry one. The prepare result lists the closing set, and `refuse_unclosable` keeps it to this repository.
+  open, and so does one a builder named in a commit line. The prepare warning names the title's ids, and the
+  printed closing set shows what closes; the lead's enqueue names every item with `--item`.
 - **A waiver is only as good as the decision note.** Any session can write a `decision` note, so the check ties the
   waiver to a recorded ruling on the item with an exact `Waive:` line, not to the writer's identity; the claim
   keeps the note's `session` so a reader can see who wrote it. We accept that under the single-operator

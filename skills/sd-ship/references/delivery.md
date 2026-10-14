@@ -9,11 +9,16 @@ Every associated merge carries `Item: <item>`, which closes nothing.
 Whole-item delivery also carries `Delivers: <item>`.
 Changes without an item omit both trailers and create no placeholder row.
 One PR claims one item.
-A body line `Closes: sd:A, sd:B` names the other items it delivers (operator ruling 2026-10-03, sd:1481).
-The merge adds `Delivers:` for each `Closes:` item and closes it; only a `--deliver` claim closes them.
-An `--associate-only` claim closes nothing: its title's ids are context, and a `Closes:` line on one stops the prepare (sd:3365).
-Prepare refuses a `Closes:` id that is no item or belongs to another repository, and a `Closes:` line naming the claimed item.
-A `Closes:` item the merge could not close returns `delivery_pending: true` with `closes_failed`; `reconcile` retries it.
+Each later `--item` on `sd-ship lane enqueue` names another item it delivers: `--item A --item B --item C` claims A and closes B and C (operator ruling 2026-10-13, sd:3704).
+The first `--item` is the claim and the lane's key: `lane list`, `retry`, `cancel`, `move` and `watch` name that item.
+A body `Closes:` line is refused at enqueue and prepare: the `--item` list replaced it (sd:1481).
+The lane passes the list to `prepare` the same way; prepare stores the closing set with the head and prints "this merge closes sd:A, sd:B, sd:C".
+The merge adds `Delivers:` for each item in the set and closes it; only a `--deliver` claim closes them.
+A merge whose stored set was read at another head, or a receipt prepared before sd:3704, refuses `closing_set_stale`; prepare again.
+The title and commit `Delivers:` lines close nothing; builders write none, and prepare warns once about a title's ids.
+An `--associate-only` claim closes nothing: a second `--item` on one stops the enqueue and the prepare (sd:3365).
+Prepare and enqueue refuse an `--item` id that is no item or belongs to another repository.
+An item the merge could not close returns `delivery_pending: true` with `closes_failed`; `reconcile` retries it.
 A body line `Refs: sd:A, sd:B` names related or partial items; the merge adds no trailer for them and leaves them open.
 
 The first prepare of an item names its claim, or it refuses.
@@ -33,6 +38,15 @@ Keep trailers contiguous in the merge message's final paragraph.
 Put attribution and session links above them.
 An explicit squash body preserves that ordering.
 A missing delivery trailer leaves delivery unverified; do not invent completion.
+
+## Umbrella items
+
+An umbrella closes on a merge that names it, never on another item's merge alone (sd:3704):
+
+- Slices carried `Item: sd:N`: run `sd work deliver N <last slice SHA> --associated --reason TEXT`.
+- Another item's pull request meets its close condition: its enqueue names it with `--item N`.
+- Noticed after that merge: the next `--deliver` enqueue in the repository names it with `--item N`.
+- Delivered in a repository the workflow database does not register: `sd work cancel N --reason TEXT`, naming where it landed.
 
 ## Verified row completion
 

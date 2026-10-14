@@ -61,6 +61,7 @@ invocation was wrong.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
 import math
@@ -68,12 +69,15 @@ import os
 import pathlib
 import queue
 import re
+import sqlite3
 import stat
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+from collections.abc import Callable, Iterator
+from typing import Any
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -145,10 +149,12 @@ REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 # it lives in the driver's block, the count of eight keys is untouched,
 # and step 11's vault reorganisation rewrites `bases` and nothing else.
 STORE_KEYS = frozenset({"driver", "root", "bases"})
-# One driver, spelled as a closed set rather than an `if`. A manifest that says
-# `"driver": "vualt"` refuses by name instead of falling through to a default
-# that happens to be the only one there is.
-DRIVERS = frozenset({"vault"})
+# A closed set rather than an `if`. A manifest that says `"driver": "vualt"`
+# refuses by name instead of falling through to a default. Under `db` the rows
+# are the source, through `sd_db.records`, and the vault holds a mirror (sd:3975).
+DRIVERS = frozenset({"vault", "db"})
+#: Who a `db` store write names in its notes.
+STORE_WHO = "sd store"
 # The root is an environment variable reference and never a literal path.
 # `pack.py:146` is the incident: a hardcoded absolute string with a username in
 # it, in a file four bindings and forty call sites read, portable to exactly
@@ -797,6 +803,24 @@ def validate_workflow_status(value: object, kind: dict[str, object], what: str) 
     return dict(value)
 
 
+def refuse_db_kinds(kinds: dict[str, object], workflow: object) -> None:
+    """What the `db` store driver needs of each kind: the status is the row's stage.
+
+    So a kind kept in rows needs a `workflow` map, which names the row status
+    of each stage, and `unique-fields` cannot name `status`, which no
+    uniqueness check reads there.
+    """
+
+    for name in sorted(set(kinds) - set(workflow if isinstance(workflow, dict) else {})):
+        raise Refusal(f"kind {name!r} has no `workflow` map, and the `db` store driver keeps "
+                      f"its rows' status by that map")
+    for name, kind in sorted(kinds.items()):
+        assert isinstance(kind, dict)  # validate_kinds builds it
+        if "status" in (kind.get("unique-fields") or []):
+            raise Refusal(f"kind {name!r}: under the `db` store driver the status is the row's "
+                          f"stage, so `unique-fields` cannot name `status`")
+
+
 def validate_workflow(manifest: dict[str, object], kinds: dict[str, object],
                       store: dict[str, object] | None) -> dict[str, dict[str, object]]:
     """`workflow`: the kinds the vault importer turns into rows (sd:1098).
@@ -809,6 +833,8 @@ def validate_workflow(manifest: dict[str, object], kinds: dict[str, object],
     """
 
     workflow = manifest.get("workflow")
+    if store is not None and store["driver"] == "db":
+        refuse_db_kinds(kinds, workflow)
     if workflow is None:
         return {}
     if not isinstance(workflow, dict) or not workflow:
@@ -1041,6 +1067,8 @@ def describe(root: str) -> dict[str, object]:
         return entry
     if kinds:
         entry["kinds"] = sorted(kinds)
+        # Each kind as `validate_kind` checked it: what `sd_db.records.rules_for` reads (sd:3975).
+        entry["rules"] = kinds
     if settings:
         entry["config"] = sorted(settings)
     if issues:
@@ -1948,13 +1976,15 @@ def refuse_below_floor(kind: dict[str, object], field: str, value: str) -> None:
         raise Refusal(f"`floor` puts {field!r} at {floors[field]} or above; {value!r} is under it")
 
 
-def refuse_human_only(kind: dict[str, object], status: str) -> None:
+def refuse_human_only(kind: dict[str, object], status: str,
+                      remedy: str = "edit the note in the vault instead") -> None:
     """A status the manifest reserves for a person.
 
     There is deliberately no flag that lifts this. A `--force` would make the
     key decorative and read in every review as though it protected something;
     the escape hatch is a human editing the note in the vault, which the 8-iii
     freshness test proves is visible to the next query with no sync step.
+    Under the `db` driver the person is the operator on the dashboard.
     """
 
     actions = kind.get("human-only") or {}
@@ -1962,8 +1992,7 @@ def refuse_human_only(kind: dict[str, object], status: str) -> None:
     for action, reserved in actions.items():
         if reserved == status:
             raise Refusal(
-                f"`human-only` reserves {action!r} (status {status!r}) for a person;"
-                " edit the note in the vault instead")
+                f"`human-only` reserves {action!r} (status {status!r}) for a person; {remedy}")
 
 
 def refuse_bad_transition(kind: dict[str, object], current: str, wanted: str) -> None:
@@ -2217,7 +2246,7 @@ def section_lines(body: str, ending: str) -> list[str]:
     return [ending] + [line + ending for line in body.rstrip("\r\n").splitlines()]
 
 
-def edit_section(text: str, name: str, body: str, order: list[str]) -> str:
+def edit_section(text: str, name: str, body: str, order: list[str], *, fenced: bool = True) -> str:
     """One `## ` section's body, replacing those lines and nothing else.
 
     The same discipline `edit_field` follows, for the same reason (R11-D27):
@@ -2225,13 +2254,15 @@ def edit_section(text: str, name: str, body: str, order: list[str]) -> str:
     frontmatter is carried through as raw lines and is not read at all here, so
     a list value, a quoted scalar and a key order that `frontmatter()` cannot
     round-trip all survive a section edit untouched.
+
+    `fenced=False` edits a `db` row's body, which holds no frontmatter block.
     """
 
     lines = text.splitlines(keepends=True)
     # The body only. A column-zero `## ` cannot occur inside a YAML block
     # scalar, whose content is indented, but scanning from the closing fence
     # costs nothing and keeps this from ever depending on that.
-    _, _, close = frontmatter_span(text)
+    close = frontmatter_span(text)[2] if fenced else -1
     headings = note_heading_lines(lines, close + 1)
 
     span = section_span(lines, headings, name)
@@ -2239,7 +2270,7 @@ def edit_section(text: str, name: str, body: str, order: list[str]) -> str:
         # The heading is being created, so it has no line ending of its own to
         # copy; the opening fence is the note's own, the same fallback
         # `edit_field` uses when it inserts a key the note did not carry.
-        ending = line_ending(lines[0])
+        ending = line_ending(lines[0]) if lines else "\n"
         at = insertion_point(lines, headings, name, order)
         filled = section_lines(body, ending)
         block = [f"## {name}{ending}"] + filled
@@ -2556,32 +2587,15 @@ def read_template(root: pathlib.Path, template: str) -> str:
         raise Refusal(f"cannot read the template {path}: {error}") from None
 
 
-def store_add(args: argparse.Namespace) -> int:
-    """A new note, rendered through the kind's `sections.template`.
+def refuse_scalar_lists(kind: dict[str, object], values: dict[str, str | list[str]]) -> None:
+    """Three things read a field's value as a scalar.
 
-    `add` is the safe verb: a note that does not exist yet has nothing to
-    preserve, so this is the one place a block is written whole rather than
-    edited by the line.
+    The floor compares it to a number, `status` walks the transition graph with
+    it, and `unique-fields` compares it across the base. A list in any of those
+    is not a value they can act on, so it is refused by name here rather than
+    reaching them as a `list` where a `str` was expected.
     """
 
-    kind, store, name, root = resolve_kind(args.kind)
-    vault = store_root(store)
-    base = kind_base(store, name, vault)
-    path = note_path(base, args.title)
-    if path.exists():
-        raise Refusal(f"{path} already exists; `sd store set` edits a note that is there")
-    refuse_title_taken(vault, path)
-
-    fields = store_fields(kind)
-    values = parse_assignments(
-        resolve_pair_files(args.field or [], "--field-file", sequences=True), fields)
-    for field in values:
-        refuse_protected(kind, field, "add")
-    # Three things read a field's value as a scalar: the floor compares it to a
-    # number, `status` walks the transition graph with it, and `unique-fields`
-    # compares it across the base. A list in any of those is not a value they
-    # can act on, so it is refused by name here rather than reaching them as a
-    # `list` where a `str` was expected.
     floors = kind.get("floor") or {}
     assert isinstance(floors, dict)
     unique = kind.get("unique-fields") or []
@@ -2592,26 +2606,10 @@ def store_add(args: argparse.Namespace) -> int:
             raise Refusal(
                 f"{field!r} is compared as a single value"
                 " (by `status`, `floor` or `unique-fields`), so `+=` cannot build a list on it")
-    # Every floored field, not only the ones supplied. Iterating the supplied
-    # values let a floor be skipped by omission: the field then defaulted to
-    # `""` at render time and the note was written under its own floor.
-    for field in floors:
-        value = values.get(str(field), "")
-        assert not isinstance(value, list)   # scalar_only refused it above
-        refuse_below_floor(kind, str(field), value)
-    if "status" in fields:
-        initial = str(kind["initial-status"])
-        wanted = values.setdefault("status", initial)
-        assert isinstance(wanted, str)       # scalar_only refused a list above
-        if wanted != initial:
-            refuse_bad_transition(kind, initial, wanted)
-        refuse_human_only(kind, wanted)
-    # The list-valued fields are dropped rather than passed through. Every
-    # `unique-fields` entry is in `scalar_only`, so nothing a uniqueness check
-    # would have read can be a list, and filtering here says that in the type
-    # rather than leaving the checker to take it on trust.
-    refuse_duplicate_unique(
-        kind, base, {f: v for f, v in values.items() if isinstance(v, str)})
+
+
+def rendered_body(kind: dict[str, object], root: pathlib.Path, args: argparse.Namespace) -> str:
+    """A new note's body: the kind's template, its title and the `--section` text."""
 
     sections = kind.get("sections") or {}
     assert isinstance(sections, dict)
@@ -2632,6 +2630,56 @@ def store_add(args: argparse.Namespace) -> int:
         # clean and stayed wrong silently.
         raise Refusal(
             f"`sections.order` declares {order} but the template renders {rendered}")
+    return body
+
+
+def store_add(args: argparse.Namespace) -> int:
+    """A new note, rendered through the kind's `sections.template`.
+
+    `add` is the safe verb: a note that does not exist yet has nothing to
+    preserve, so this is the one place a block is written whole rather than
+    edited by the line.
+    """
+
+    kind, store, name, root = resolve_kind(args.kind)
+    if store["driver"] == "db":
+        return db_add(args, kind, store, name, root)
+    vault = store_root(store)
+    base = kind_base(store, name, vault)
+    path = note_path(base, args.title)
+    if path.exists():
+        raise Refusal(f"{path} already exists; `sd store set` edits a note that is there")
+    refuse_title_taken(vault, path)
+
+    fields = store_fields(kind)
+    values = parse_assignments(
+        resolve_pair_files(args.field or [], "--field-file", sequences=True), fields)
+    for field in values:
+        refuse_protected(kind, field, "add")
+    refuse_scalar_lists(kind, values)
+    floors = kind.get("floor") or {}
+    assert isinstance(floors, dict)
+    # Every floored field, not only the ones supplied. Iterating the supplied
+    # values let a floor be skipped by omission: the field then defaulted to
+    # `""` at render time and the note was written under its own floor.
+    for field in floors:
+        value = values.get(str(field), "")
+        assert not isinstance(value, list)   # scalar_only refused it above
+        refuse_below_floor(kind, str(field), value)
+    if "status" in fields:
+        initial = str(kind["initial-status"])
+        wanted = values.setdefault("status", initial)
+        assert isinstance(wanted, str)       # scalar_only refused a list above
+        if wanted != initial:
+            refuse_bad_transition(kind, initial, wanted)
+        refuse_human_only(kind, wanted)
+    # The list-valued fields are dropped rather than passed through. Every
+    # `unique-fields` entry is in `scalar_only`, so nothing a uniqueness check
+    # would have read can be a list, and filtering here says that in the type
+    # rather than leaving the checker to take it on trust.
+    refuse_duplicate_unique(
+        kind, base, {f: v for f, v in values.items() if isinstance(v, str)})
+    body = rendered_body(kind, root, args)
 
     block = "".join(render_field(field, values.get(field, "")) for field in fields)
     try:
@@ -2641,6 +2689,47 @@ def store_add(args: argparse.Namespace) -> int:
     write_atomically(path, f"---\n{block}---\n{body}")
     print(f"wrote {path}")
     return 0
+
+
+def set_request(args: argparse.Namespace,
+                kind: dict[str, object]) -> tuple[dict[str, str], dict[str, str], list[str]]:
+    """`set`'s fields and sections, each checked against the kind: `(scalars, filled, order)`."""
+
+    declared = store_fields(kind)
+    if args.field is not None:
+        pairs = [f"{args.field}={args.value}"]
+    else:
+        pairs = resolve_pair_files(args.fields or [], "--field-file", sequences=False)
+
+    values = parse_assignments(pairs, declared)
+    scalars: dict[str, str] = {}
+    for field, value in values.items():
+        if isinstance(value, list):
+            # `add` can build a block sequence because it renders the whole
+            # block; `set` edits one line in place and a sequence is several.
+            raise Refusal(
+                f"{field!r} was given with `+=`, which builds a block sequence;"
+                " `set` edits a note by the line and cannot write one")
+        scalars[field] = value
+
+    order = declared_sections(kind)
+    filled = parse_sections(
+        resolve_pair_files(args.section or [], "--section-file", sequences=False))
+    if filled and not order:
+        raise Refusal(f"the kind {args.kind!r} declares no sections to edit")
+    for section in filled:
+        if section not in order:
+            raise Refusal(
+                f"the kind declares no section {section!r}"
+                f" (it declares {', '.join(order)})")
+    if not scalars and not filled:
+        raise UsageError(
+            "give `FIELD VALUE`, or --field NAME=VALUE, or --section NAME=TEXT")
+
+    for field, value in scalars.items():
+        refuse_protected(kind, field, "set")
+        refuse_below_floor(kind, field, value)
+    return scalars, filled, order
 
 
 def store_set(args: argparse.Namespace) -> int:
@@ -2687,45 +2776,13 @@ def store_set(args: argparse.Namespace) -> int:
         raise UsageError("the positional form is `set KIND TITLE FIELD VALUE`")
 
     kind, store, name, _ = resolve_kind(args.kind)
+    if store["driver"] == "db":
+        return db_edit(args, kind, name, *set_request(args, kind))
     base = kind_base(store, name)
     path = note_path(base, args.title)
     if not path.is_file():
         raise Refusal(f"no note titled {args.title!r} in {base}")
-
-    declared = store_fields(kind)
-    if args.field is not None:
-        pairs = [f"{args.field}={args.value}"]
-    else:
-        pairs = resolve_pair_files(args.fields or [], "--field-file", sequences=False)
-
-    values = parse_assignments(pairs, declared)
-    scalars: dict[str, str] = {}
-    for field, value in values.items():
-        if isinstance(value, list):
-            # `add` can build a block sequence because it renders the whole
-            # block; `set` edits one line in place and a sequence is several.
-            raise Refusal(
-                f"{field!r} was given with `+=`, which builds a block sequence;"
-                " `set` edits a note by the line and cannot write one")
-        scalars[field] = value
-
-    order = declared_sections(kind)
-    filled = parse_sections(
-        resolve_pair_files(args.section or [], "--section-file", sequences=False))
-    if filled and not order:
-        raise Refusal(f"the kind {args.kind!r} declares no sections to edit")
-    for section in filled:
-        if section not in order:
-            raise Refusal(
-                f"the kind declares no section {section!r}"
-                f" (it declares {', '.join(order)})")
-    if not scalars and not filled:
-        raise UsageError(
-            "give `FIELD VALUE`, or --field NAME=VALUE, or --section NAME=TEXT")
-
-    for field, value in scalars.items():
-        refuse_protected(kind, field, "set")
-        refuse_below_floor(kind, field, value)
+    scalars, filled, order = set_request(args, kind)
 
     try:
         text = path.read_text(encoding="utf-8")
@@ -2773,6 +2830,25 @@ def store_set(args: argparse.Namespace) -> int:
     return 0
 
 
+def section_request(args: argparse.Namespace,
+                    kind: dict[str, object]) -> tuple[dict[str, str], list[str]]:
+    """`set-section`'s sections, each one the kind declares: `(filled, order)`."""
+
+    order = declared_sections(kind)
+    if not order:
+        raise Refusal(f"the kind {args.kind!r} declares no sections to edit")
+    filled = parse_sections(
+        resolve_pair_files(args.section or [], "--section-file", sequences=False))
+    if not filled:
+        raise UsageError("give at least one --section NAME=TEXT or --section-file NAME=PATH")
+    for section in filled:
+        if section not in order:
+            raise Refusal(
+                f"the kind declares no section {section!r}"
+                f" (it declares {', '.join(order)})")
+    return filled, order
+
+
 def store_set_section(args: argparse.Namespace) -> int:
     """One or more `## ` sections of one note, edited by the line.
 
@@ -2792,23 +2868,13 @@ def store_set_section(args: argparse.Namespace) -> int:
     """
 
     kind, store, name, _ = resolve_kind(args.kind)
+    if store["driver"] == "db":
+        return db_edit(args, kind, name, {}, *section_request(args, kind))
     base = kind_base(store, name)
     path = note_path(base, args.title)
     if not path.is_file():
         raise Refusal(f"no note titled {args.title!r} in {base}")
-
-    order = declared_sections(kind)
-    if not order:
-        raise Refusal(f"the kind {args.kind!r} declares no sections to edit")
-    filled = parse_sections(
-        resolve_pair_files(args.section or [], "--section-file", sequences=False))
-    if not filled:
-        raise UsageError("give at least one --section NAME=TEXT or --section-file NAME=PATH")
-    for section in filled:
-        if section not in order:
-            raise Refusal(
-                f"the kind declares no section {section!r}"
-                f" (it declares {', '.join(order)})")
+    filled, order = section_request(args, kind)
 
     try:
         text = path.read_text(encoding="utf-8")
@@ -2849,6 +2915,8 @@ def store_list(args: argparse.Namespace) -> int:
     """
 
     kind, store, name, _ = resolve_kind(args.kind)
+    if store["driver"] == "db":
+        return db_list(args, kind, name)
     wanted = status_filter(kind, args.status)
     fields = store_fields(kind)
     rows = []
@@ -2883,6 +2951,33 @@ def store_list(args: argparse.Namespace) -> int:
     return 0
 
 
+def section_of(kind: dict[str, object], args: argparse.Namespace, read: Callable[[], str]) -> str:
+    """The text under one declared `## ` section of a note, or "" when the note lacks it.
+
+    `read` gives the whole note, called once the arguments are known good.
+    """
+
+    if args.json:
+        # Refused rather than ignored. `--section` prints the text a caller
+        # feeds straight back to `set-section`, and quietly dropping a
+        # `--json` it asked for would hand back something it did not expect
+        # in a shape it could not tell apart from an empty section.
+        raise UsageError("--section prints one section's text; --json has no form for it")
+    order = declared_sections(kind)
+    if args.section not in order:
+        raise Refusal(
+            f"the kind declares no section {args.section!r}"
+            f" (it declares {', '.join(order) or 'none'})")
+    text = read()
+    lines = text.splitlines(keepends=True)
+    _, _, close = frontmatter_span(text)
+    span = section_span(lines, note_heading_lines(lines, close + 1), args.section)
+    if span is None:
+        return ""
+    start, end = span
+    return "".join(lines[start + 1:end]).strip("\r\n")
+
+
 def store_get(args: argparse.Namespace) -> int:
     """One note: its fields and its whole body.
 
@@ -2894,37 +2989,22 @@ def store_get(args: argparse.Namespace) -> int:
     """
 
     kind, store, name, _ = resolve_kind(args.kind)
+    if store["driver"] == "db":
+        return db_get(args, kind, name)
     base = kind_base(store, name)
     path = note_path(base, args.title)
     if not path.is_file():
         raise Refusal(f"no note titled {args.title!r} in {base}")
 
     if args.section:
-        if args.json:
-            # Refused rather than ignored. `--section` prints the text a caller
-            # feeds straight back to `set-section`, and quietly dropping a
-            # `--json` it asked for would hand back something it did not expect
-            # in a shape it could not tell apart from an empty section.
-            raise UsageError("--section prints one section's text; --json has no form for it")
         # A section the kind declares but the note does not carry reads as
         # empty and exits 0, rather than refusing. That is what makes
         # read-edit-write cover creation: `pack.py topics add-feed` carried a
         # whole second branch to create `## Feeds` on first use, and a caller
         # that appends a line to what it read here and writes it back gets that
         # for free, with no case to get wrong.
-        order = declared_sections(kind)
-        if args.section not in order:
-            raise Refusal(
-                f"the kind declares no section {args.section!r}"
-                f" (it declares {', '.join(order) or 'none'})")
-        text = note_text(path)
-        lines = text.splitlines(keepends=True)
-        _, _, close = frontmatter_span(text)
-        span = section_span(lines, note_heading_lines(lines, close + 1), args.section)
-        if span is not None:
-            start, end = span
-            if section_body := "".join(lines[start + 1:end]).strip("\r\n"):
-                print(section_body)
+        if section_body := section_of(kind, args, lambda: note_text(path)):
+            print(section_body)
         return 0
 
     fields, body = read_note(path)
@@ -2937,6 +3017,171 @@ def store_get(args: argparse.Namespace) -> int:
         return 0
     print(f"=== {args.title} ===")
     sys.stdout.write(note_text(path))
+    return 0
+
+
+# --- the `db` driver (sd:3975) ---------------------------------------------
+#
+# Under `store.driver: db` the rows are the source and the vault holds a
+# mirror, so these verbs read and write rows through `sd_db.records`; only
+# `add` reads the vault, for title collisions. The library checks the stage graph, floors, unique fields
+# and the revision. It leaves `human-only` and `protected-fields` to its
+# callers: the dashboard is the operator and may make those moves, and
+# `sd store` is how an agent writes, so they are checked here.
+
+DB_HUMAN = "the operator makes that move on the dashboard"
+
+
+@contextlib.contextmanager
+def db_store(name: str, *, write: bool = True) -> Iterator[tuple[Any, Any, Any]]:
+    """`(records, rules, connection)` for kind `name`; an sd_db refusal leaves as a `Refusal`.
+
+    The rules come from the plugin list this process reads, the entries
+    `sd plugin list --json` prints. A database that cannot open refuses: an
+    empty listing would read as "no rows", which is not what is known.
+    """
+
+    # Imported here, once `library` has put the checkout's lib/ on the path.
+    sd_db = sd_handoff_rows.library()
+    from sd_db import records  # noqa: PLC0415
+    from sd_db.errors import SdDbError  # noqa: PLC0415
+    from sd_db.workflow import WorkflowError  # noqa: PLC0415
+    try:
+        rules = records.rules_for(name, home=pathlib.Path.home(),
+                                  entries=described(registry(sd_lib.machine_config())))
+    except WorkflowError as error:
+        raise Refusal(str(error)) from None
+    try:
+        connection = sd_db.connect(write=write)
+    except Exception as error:  # noqa: BLE001 - every failure to open is a refusal
+        raise Refusal(f"the `db` store driver cannot open the database: {error}") from None
+    try:
+        yield records, rules, connection
+    except (SdDbError, sqlite3.Error) as error:
+        raise Refusal(f"the `db` store driver: {error}") from None
+    finally:
+        connection.close()
+
+
+def db_fields(kind: dict[str, object], row: dict[str, Any]) -> dict[str, Any]:
+    """A row's fields as its note carries them: `status` is the stage, declared fields first."""
+
+    held = {key: value for key, value in row["fields"].items() if key != "kind"}
+    first = {field: row["stage"] if field == "status" else held.pop(field, None)
+             for field in store_fields(kind)}
+    return {**first, **dict(sorted(held.items()))}
+
+
+def db_text(kind: dict[str, object], row: dict[str, Any]) -> str:
+    """A row as a note: its fields in a frontmatter block, then its body verbatim."""
+
+    block = "".join(
+        render_field(field, value if isinstance(value, list) else "" if value is None else str(value))
+        for field, value in db_fields(kind, row).items())
+    return f"---\n{block}---\n{row['body']}"
+
+
+def db_add(args: argparse.Namespace, kind: dict[str, object], store: dict[str, object],
+           name: str, root: pathlib.Path) -> int:
+    """A new row, its body rendered from the kind's template as a note's is.
+
+    The vault is read for one thing: its other notes share the row's file-name
+    namespace, which the mirror will write into (`refuse_title_taken`).
+    """
+
+    fields = store_fields(kind)
+    values = parse_assignments(
+        resolve_pair_files(args.field or [], "--field-file", sequences=True), fields)
+    for field in values:
+        refuse_protected(kind, field, "add")
+    refuse_scalar_lists(kind, values)
+    stage = values.pop("status", None)
+    assert not isinstance(stage, list)  # refuse_scalar_lists refused it
+    if "status" in fields:
+        refuse_human_only(kind, stage or str(kind["initial-status"]), DB_HUMAN)
+    body = rendered_body(kind, root, args)
+    vault = store_root(store)
+    refuse_title_taken(vault, note_path(kind_base(store, name, vault), args.title))
+    # Every declared field, as `add` writes every key of a note; an empty one is `None`, as `key:` reads.
+    held = {field: values.get(field) for field in fields if field != "status"}
+    with db_store(name) as (records, rules, connection):
+        row = records.add_row(connection, rules, title=args.title, who=STORE_WHO,
+                              fields=held, body=body, stage=stage)
+    print(f"added item {row['id']} at {row['path']}")
+    return 0
+
+
+def db_edit(args: argparse.Namespace, kind: dict[str, object], name: str,
+            scalars: dict[str, str], filled: dict[str, str], order: list[str]) -> int:
+    """One row's stage, fields and sections in one write, at the revision it was read at."""
+
+    stage = scalars.pop("status", None)
+    if stage is not None:
+        refuse_human_only(kind, stage, DB_HUMAN)
+    with db_store(name) as (records, rules, connection):
+        row = records.get_row(connection, kind=name, title=args.title)
+        body = row["body"]
+        for section, text in filled.items():
+            body = edit_section(body, section, text, order, fenced=False)
+        done = records.edit_row(connection, row["id"], rules, revision=row["revision"], who=STORE_WHO,
+                                stage=stage, fields=scalars, body=body if filled else None)
+    if done["revision"] == row["revision"]:
+        print(f"item {row['id']} already holds that")
+    else:
+        print(f"set {', '.join([*(['status'] if stage else []), *scalars, *filled])} in item {row['id']}")
+    return 0
+
+
+def db_list(args: argparse.Namespace, kind: dict[str, object], name: str) -> int:
+    """Every row of one kind, in the shape `store_list` prints notes."""
+
+    wanted = status_filter(kind, args.status)
+    fields = store_fields(kind)
+    with db_store(name, write=False) as (records, _, connection):
+        found = records.list_rows(connection, name, stage=wanted)
+    listed = []
+    for row in found:
+        held = db_fields(kind, row)
+        entry = {"title": pathlib.PurePosixPath(row["path"]).stem,
+                 **{field: "" if held[field] is None else held[field] for field in fields}}
+        if args.full:
+            entry["body"] = row["body"]
+        listed.append(entry)
+    if args.json:
+        json.dump(listed, sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
+    for row, entry in zip(found, listed, strict=True):
+        if args.full:
+            text = db_text(kind, row)
+            print(f"=== {entry['title']} ===")
+            sys.stdout.write(text if text.endswith("\n") else text + "\n")
+            print()
+        else:
+            print("\t".join([*(", ".join(entry[field]) if isinstance(entry[field], list)
+                               else entry[field] or "?" for field in fields), entry["title"]]))
+    print(f"# {len(listed)} row(s)", file=sys.stderr)
+    return 0
+
+
+def db_get(args: argparse.Namespace, kind: dict[str, object], name: str) -> int:
+    """One row, in the shapes `store_get` prints a note."""
+
+    with db_store(name, write=False) as (records, _, connection):
+        row = records.get_row(connection, kind=name, title=args.title)
+    if args.section:
+        if section_body := section_of(kind, args, lambda: db_text(kind, row)):
+            print(section_body)
+        return 0
+    if args.json:
+        json.dump(
+            {"kind": args.kind, "title": args.title, "path": row["path"],
+             "fields": db_fields(kind, row), "body": row["body"]},
+            sys.stdout, indent=2, sort_keys=True)
+        sys.stdout.write("\n")
+        return 0
+    print(f"=== {args.title} ===")
+    sys.stdout.write(db_text(kind, row))
     return 0
 
 
