@@ -544,6 +544,28 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         self.assertEqual((changed["recorded"], changed["item"]["status"]), ("report", "planning"))
         self.assertEqual(self.followups(changed["item"]["id"]), 1)
 
+    def test_a_carried_unseen_finding_does_not_fold_into_an_acknowledged_report(self):
+        """A lost run's finding rides in ahead of an acknowledged one (sd:3537):
+        folding the slice into the done report would close a finding nobody saw."""
+        acked = self.tick("a", 1, exit_code=0, text="SD_REPORT_ATTENTION: disk low [123]\n")["item"]["id"]
+        self.ack(acked)
+        carried = self.tick("b", 16, exit_code=0, text="SD_REPORT_ATTENTION: swap high [7]\nnext run\n"
+                                                        "SD_REPORT_ATTENTION: disk low [123]\n")
+        self.assertEqual((carried["recorded"], carried["item"]["status"]), ("report", "planning"))
+        self.assertEqual(self.followups(carried["item"]["id"]), 1)
+        self.assertIsNone(self.repeats(acked))
+
+    def test_a_late_run_is_counted_but_keeps_the_newer_body(self):
+        """A hand recovery of an older run counts, and the body stays the newest run's."""
+        item = self.tick("a", 1)["item"]["id"]
+        self.tick("c", 31)
+        self.tick("b", 16)
+        body = json.loads(self.db.execute("SELECT body FROM item WHERE id=?", (item,)).fetchone()["body"])
+        self.assertEqual(body, {"text": "boom at 31\n"})
+        repeats = self.repeats(item)
+        self.assertEqual((repeats["count"], repeats["last_run_id"], repeats["last_ended"], repeats["run_ids"]),
+                         (3, "c", "2026-09-08T00:31:00+00:00", ["c", "b"]))
+
     def test_an_open_report_wins_over_an_acknowledged_one_with_the_same_findings(self):
         """A reopened older report and a newer acknowledged one: the open one counts the run."""
         finding = "SD_REPORT_ATTENTION: disk low [123]\n"
