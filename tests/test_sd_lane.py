@@ -1560,6 +1560,19 @@ class Landing(Lane):
                          ("merged", f"make post-merge timed out after 1s in {self.repo}"))
         self.assertEqual(self.note_kinds[-1], "followup")
 
+    def test_a_failed_post_merge_reports_both_tails_when_the_refusal_is_on_stdout(self) -> None:
+        """sd:4047. A `[step]` line always fills stderr, so a refusal printed on stdout was dropped."""
+        tree, head = self.topic()
+        git(self.repo, "switch", "-q", "--detach")  # a deploying checkout is pinned (sd:3647)
+        self.post_merge("@echo '[step] stop consumers' >&2", "@echo 'refused: the database is locked'",
+                        f"@{sys.executable} -c \"print('x' * 900)\" >&2", "@exit 3")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertEqual(self.entries()[0]["status"], "merged")
+        self.assertIn("stdout: refused: the database is locked", answer["post_merge"])
+        self.assertRegex(answer["post_merge"], r": stderr: x{200,}\nmake: [^;]*Error 3; stdout: ")
+        self.assertNotIn("x" * 300, answer["post_merge"])  # each tail stays bounded
+
     def test_a_checkout_that_did_not_fast_forward_skips_the_post_merge_and_says_why(self) -> None:
         tree, head = self.topic()
         git(self.repo, "switch", "-q", "-c", "elsewhere")
