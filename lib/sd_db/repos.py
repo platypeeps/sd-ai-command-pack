@@ -39,7 +39,7 @@ import os
 import re
 import sqlite3
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import config, paths
@@ -276,6 +276,7 @@ class Seeded:
 
     registered: list[str]
     absent: list[str]
+    mismatched: list[str] = field(default_factory=list)
 
     @property
     def counts(self) -> dict[str, int]:
@@ -298,6 +299,7 @@ def seed(
     """
     registered: list[str] = []
     absent: list[str] = []
+    mismatched: list[str] = []
     for checkout in checkouts(path, root=root, environ=environ):
         if not checkout.present:
             absent.append(checkout.slug)
@@ -314,21 +316,35 @@ def seed(
         # The conf value stays as the fallback: it is the only answer for a
         # checkout whose origin has been removed.
         found_remote, _ = detect(checkout.path)
+        # The line names a repository and the path only where it sits: an
+        # origin that names another one is not the line's (sd:4043 review).
+        if found_remote and not same_remote(found_remote, checkout.remote):
+            mismatched.append(_elsewhere(checkout, [("origin", found_remote)]))
+            continue
         registered.append(
             add(connection, checkout.path,
                 remote=found_remote or checkout.remote, home=home)
         )
-    return Seeded(registered=sorted(set(registered)), absent=sorted(set(absent)))
+    return Seeded(registered=sorted(set(registered)), absent=sorted(set(absent)), mismatched=mismatched)
+
+
+def _elsewhere(checkout: Checkout, held: list[tuple[str, str | None]]) -> str:
+    """A line whose path holds another repository, naming both."""
+    found = ", ".join(f"its {what} is {value}" if value else f"it has no {what}" for what, value in held)
+    return (f"{checkout.slug} at {checkout.path}: {found}; nothing was written for this line. Fix the line, "
+            f"or the checkout or row at that path")
 
 
 @dataclass
 class SeededClones:
-    """What `seed_clones` did: rows it made, rows that gained the profile, rows that held it, lines it could not place."""
+    """What `seed_clones` did: rows it made, rows that gained the profile, rows that held it, lines it could not
+    place, and lines whose path holds another repository."""
 
     registered: list[str]
     added: list[str]
     held: list[str]
     unplaced: list[str]
+    mismatched: list[str] = field(default_factory=list)
 
 
 def seed_clones(
@@ -349,6 +365,13 @@ def seed_clones(
     holds, so the machine that holds it runs its own seed. It only adds, and
     each line is its own transaction, so a run stopped at any line is
     finished by running it again (design sd:3983, slice P2).
+
+    A path does not identify a repository: the line's slug does. The
+    checkout's origin, when the checkout is here, and the row's remote, when
+    there is a row, must each name the line's repository, or that line writes
+    nothing and is named in `mismatched`. No origin is an unknown answer, not
+    an agreeing one. Unlike `seed`, the conf's slug is never the fallback:
+    the profile tells other machines what to clone.
     """
     if profile not in CLONE_PROFILES:
         raise RepoRefusal(f"{profile!r} is not a profile; expected one of {', '.join(CLONE_PROFILES)}")
@@ -356,14 +379,20 @@ def seed_clones(
     result = SeededClones([], [], [], [])
     for checkout in checkouts(root=root, environ=env):
         where = checkout.path.resolve()
+        origin = detect(checkout.path)[0] if checkout.present else None
         with transaction(connection):
             row = row_for(connection, where)
+            if row is None and not checkout.present:
+                result.unplaced.append(checkout.slug)
+                continue
+            answers = ([("origin", origin)] if checkout.present else []) + \
+                ([("remote in its row", row["remote"])] if row is not None else [])
+            wrong = [(what, value) for what, value in answers if not same_remote(value, checkout.remote)]
+            if wrong:
+                result.mismatched.append(_elsewhere(checkout, wrong))
+                continue
             if row is None:
-                if not checkout.present:
-                    result.unplaced.append(checkout.slug)
-                    continue
-                found_remote, _ = detect(checkout.path)  # `seed`'s reason: the conf's slug renders https
-                path, held = add(connection, where, remote=found_remote or checkout.remote, home=home), None
+                path, held = add(connection, where, remote=origin, home=home), None
                 result.registered.append(path)
             else:
                 path, held = row["path"], row["clone_profiles"]

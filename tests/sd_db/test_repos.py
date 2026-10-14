@@ -153,6 +153,17 @@ class Seeding(RepoCase):
         )
 
 
+    def test_a_checkout_whose_origin_names_another_repository_is_not_registered(self):
+        """Failure table, row "`repo seed`: the path holds another repository"."""
+        support.git(self.checkouts / "acme" / "anvil", "remote", "add", "origin",
+                    "https://github.com/new-owner/anvil")
+        result = seed(self.connection, self.path, root=self.checkouts, home=self.home)
+        self.assertEqual(result.registered, [])
+        self.assertEqual(len(result.mismatched), 1)
+        self.assertIn("example-org/anvil", result.mismatched[0])
+        self.assertIn("https://github.com/new-owner/anvil", result.mismatched[0])
+        self.assertEqual(registered(self.connection), [])
+
 
 class SeedingTheCommonConf(RepoCase):
     """`repo-sync` reads `repos.common.conf` plus the profile conf on personal.
@@ -936,9 +947,10 @@ class TheCloneSeed(RepoCase):
         self.config = self.root / "cfg"
         (self.config / "repo-sync").mkdir(parents=True)
         self.environ = {"SYSTEM_TOOLS_CONFIG": str(self.config), "REPO_SYNC_PROFILE": "personal"}
-        support.repository(self.checkouts / "platypeeps" / "present")
-        support.repository(self.checkouts / "platypeeps" / "listed")
-        support.repository(self.checkouts / "shared")
+        for folder, origin in (("platypeeps/present", "https://github.com/platypeeps/present"),
+                               ("platypeeps/listed", "git@github.com:platypeeps/listed.git"),
+                               ("shared", "https://github.com/platypeeps/shared")):
+            support.git(support.repository(self.checkouts / folder), "remote", "add", "origin", origin)
         # A row for a checkout this machine does not hold: another machine registered it.
         upsert_repo(self.connection, str((self.checkouts / "platypeeps" / "elsewhere").resolve()),
                     remote="https://github.com/platypeeps/elsewhere")
@@ -984,6 +996,49 @@ class TheCloneSeed(RepoCase):
         """`REPO_SYNC_PROFILE` says personal here; the argument decides."""
         self.seed("terra")
         self.assertEqual(self.state(), [("elsewhere", None), ("listed", "terra"), ("shared", "terra")])
+
+    def origin(self, folder: str, url: str | None) -> None:
+        checkout = self.checkouts / "platypeeps" / folder
+        support.git(checkout, "remote", "remove", "origin")
+        if url is not None:
+            support.git(checkout, "remote", "add", "origin", url)
+
+    def test_a_line_whose_path_holds_another_repository_writes_nothing_and_names_both(self):
+        """Failure table, rows "`seed --clones P`: the path holds another repository".
+
+        The line names a repository; its path only says where `repo-sync` put
+        it. A row's remote and a checkout's origin each name the repository
+        at that path, and each must be the line's, or that line writes nothing.
+        """
+        self.connection.execute("UPDATE repo SET remote = 'https://github.com/new-owner/elsewhere' "
+                                "WHERE path LIKE '%/elsewhere'")
+        self.origin("present", "git@github.com:new-owner/present.git")
+        self.origin("listed", "https://github.com/new-owner/listed")
+        result = self.seed()
+        self.assertEqual(len(result.mismatched), 3, result.mismatched)
+        for slug, held in (("platypeeps/elsewhere", "https://github.com/new-owner/elsewhere"),
+                           ("platypeeps/present", "git@github.com:new-owner/present.git"),
+                           ("platypeeps/listed", "https://github.com/new-owner/listed")):
+            named = next(line for line in result.mismatched if line.startswith(slug))
+            self.assertIn(held, named)
+        # The row the conf names by path keeps what it held; the new checkout gets no row; the line that agrees lands.
+        self.assertEqual(self.state(), [("elsewhere", None), ("listed", "terra"), ("shared", "work")])
+        self.assertEqual(result.unplaced, ["platypeeps/missing"])
+
+    def test_a_checkout_with_no_origin_is_unknown_and_writes_nothing(self):
+        """A probe that finds no origin cannot say which repository the path holds."""
+        self.origin("present", None)
+        result = self.seed()
+        self.assertEqual([line.split(" ", 1)[0] for line in result.mismatched], ["platypeeps/present"])
+        self.assertIn("no origin", result.mismatched[0])
+        self.assertNotIn("present", [name for name, _ in self.state()])
+
+    def test_an_agreeing_row_does_not_vouch_for_a_checkout_that_disagrees(self):
+        """A plain `repo seed` can leave the conf's slug on a row; the checkout still decides."""
+        self.origin("listed", "https://github.com/new-owner/listed")
+        result = self.seed()
+        self.assertEqual([line.split(" ", 1)[0] for line in result.mismatched], ["platypeeps/listed"])
+        self.assertIn(("listed", "terra"), self.state())
 
     def test_a_run_stopped_at_any_line_is_finished_by_a_rerun(self):
         """Failure table, row "`seed --clones P`: stop after line k"."""
@@ -1050,6 +1105,16 @@ class TheCloneVerbs(TheCloneSeed):
                                             "platypeeps platypeeps/present", ". platypeeps/shared"])
         self.lists("repos.work.conf", "platypeeps platypeeps/present\n")
         self.assertEqual(self.run_verb("seed", "--clones", "work")[0], 0)
+
+    def test_both_seeds_exit_1_and_name_a_line_whose_path_holds_another_repository(self):
+        support.git(self.checkouts / "platypeeps" / "listed", "remote", "set-url", "origin",
+                    "https://github.com/new-owner/listed")
+        for argv in (("seed", "--clones", "work"), ("seed",)):
+            with self.subTest(argv=argv):
+                rc, _, err = self.run_verb(*argv)
+                self.assertEqual(rc, 1)
+                self.assertIn("platypeeps/listed", err)
+                self.assertIn("https://github.com/new-owner/listed", err)
 
     def test_a_row_that_is_not_a_line_exits_1_and_prints_nothing(self):
         self.run_verb("seed", "--clones", "work")

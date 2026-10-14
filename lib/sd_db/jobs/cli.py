@@ -549,7 +549,9 @@ def command_repo(argv: list[str]) -> int:
             )
             for slug in result.absent:
                 print(f"sd-db:   not cloned: {slug}")
-            return 0
+            for line in result.mismatched:
+                print(f"sd-db repo seed: {line}", file=sys.stderr)
+            return 1 if result.mismatched else 0
         if verb == "runner-merge":
             if len(rest) != 2:
                 print("sd-db repo runner-merge: needs a path and manual or auto",
@@ -630,7 +632,8 @@ def command_repo(argv: list[str]) -> int:
 
 
 def _seed_clones(connection, rest: list[str]) -> int:
-    """`repo seed --clones PROFILE`: exit 1 after every other line when a line has no checkout and no row."""
+    """`repo seed --clones PROFILE`: exit 1 after every other line when a line has no checkout and no row,
+    or its path holds another repository."""
     if len(rest) != 1:
         print("sd-db repo seed: --clones needs one profile, personal, work or terra, and no conf", file=sys.stderr)
         return 1
@@ -646,7 +649,9 @@ def _seed_clones(connection, rest: list[str]) -> int:
     for slug in result.unplaced:
         print(f"sd-db repo seed: {slug} is not cloned here and has no row; run the seed on the machine that "
               f"holds it, or drop the line", file=sys.stderr)
-    return 1 if result.unplaced else 0
+    for line in result.mismatched:
+        print(f"sd-db repo seed: {line}", file=sys.stderr)
+    return 1 if result.unplaced or result.mismatched else 0
 
 
 def channels_words(words: list[str]) -> dict | None:

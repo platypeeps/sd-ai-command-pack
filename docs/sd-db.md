@@ -213,6 +213,9 @@ The design is slice P2 of the system repository's config-to-DB design (sd:3983).
 The profile is the argument, never `REPO_SYNC_PROFILE`.
 A line with no row is registered as `repo seed` would, when its checkout is here.
 A line with neither a checkout nor a row is named, and the run exits 1 after the other lines.
+A line names a repository; its path only says where it sits.
+The checkout's origin and the row's remote must each name the line's repository, or that line writes nothing, is named with what the path holds, and the run exits 1.
+No origin counts as a mismatch here; plain `repo seed` refuses a differing origin too, and keeps the conf's slug for a checkout with none.
 It only adds, one transaction per line, so a rerun finishes a stopped run.
 `list --clones P` prints one line per row cloned on P, `.` for a checkout straight under `~/repos` (`SD_REPO_ROOT`).
 A row that cannot be such a line exits 1, names every such row, and prints nothing on stdout.
