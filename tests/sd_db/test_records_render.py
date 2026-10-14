@@ -215,6 +215,15 @@ class TheRefusals(MirrorCase):
     def files(self):
         return sorted(str(path.relative_to(self.vault)) for path in self.vault.rglob("*") if path.is_file())
 
+    def test_a_row_path_outside_its_base_is_refused_and_nothing_written_there(self):
+        self.render()
+        row = get_row(self.db, kind="blog-idea", title="first idea")
+        self.db.execute("UPDATE item SET path = ? WHERE id = ?", (f"{IDEAS}/../../escaped.md", row["id"]))
+        self.db.commit()
+        mirror = self.render()
+        self.assertIn("is not a note under", dict(mirror.refused)[f"{IDEAS}/../../escaped.md"])
+        self.assertFalse((self.vault / "escaped.md").exists())
+
     def test_an_open_restore_refuses_before_any_file(self):
         before = self.files()
         record_state(self.db, "restore", key="2026-10-13")
