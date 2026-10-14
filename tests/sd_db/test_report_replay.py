@@ -478,12 +478,16 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         statements: list[str] = []
         self.db.set_trace_callback(statements.append)
         try:
-            reporting._fold_target(self.db, "probe", "disk low", done=True)
+            reporting._fold_target(self.db, "probe", "disk low", host="hosta")
+            # Every tick asks this one, the quiet ones too.
+            reporting._end_chains(self.db, job="probe", host="hosta", ended="2026-09-08T00:01:00+00:00", basis=None)
         finally:
             self.db.set_trace_callback(None)
-        [sql] = [sql for sql in statements if "attention_basis" in sql]
-        plan = [row[3] for row in self.db.execute("EXPLAIN QUERY PLAN " + sql)]
-        self.assertTrue(any("USING INDEX item_by_external" in step for step in plan), plan)
+        reads = [sql for sql in statements if "attention_basis" in sql]
+        self.assertEqual(len(reads), 2)
+        for sql in reads:
+            plan = [row[3] for row in self.db.execute("EXPLAIN QUERY PLAN " + sql)]
+            self.assertTrue(any("USING INDEX item_by_external" in step for step in plan), plan)
 
     def test_a_report_with_unreadable_fields_is_never_a_target(self):
         for index, value in enumerate((None, "", "{not json")):
@@ -594,6 +598,65 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
                         (older,))
         self.db.commit()
         self.assertEqual(self.tick("c", 31, exit_code=0, text=finding)["item"]["id"], older)
+
+    def acked_disk(self):
+        """An acknowledged `disk low` report, the fixture the chain tests start from."""
+        first = self.tick("a", 1, exit_code=0, text=self.DISK)["item"]["id"]
+        self.ack(first)
+        return first
+
+    DISK = "SD_REPORT_ATTENTION: disk low [123]\n"
+
+    def assert_fresh(self, state, acked):
+        self.assertEqual((state["recorded"], state["item"]["status"]), ("report", "planning"), state)
+        self.assertNotEqual(state["item"]["id"], acked)
+        self.assertEqual(self.followups(state["item"]["id"]), 1)
+
+    def test_a_clean_run_ends_the_acknowledged_chain(self):
+        """Lane review of sd:4629: acknowledged findings that recover and return
+        months later are a new incident, not the one the operator closed."""
+        acked = self.acked_disk()
+        self.assertEqual(self.tick("b", 16, exit_code=0, text="ok\n")["recorded"], "heartbeat")
+        self.assert_fresh(self.tick("c", 31, exit_code=0, text=self.DISK), acked)
+
+    def test_other_findings_or_a_failure_end_the_acknowledged_chain(self):
+        for index, (code, text) in enumerate(((0, "SD_REPORT_ATTENTION: swap high [7]\n"), (1, "boom\n"))):
+            with self.subTest(exit_code=code):
+                job = f"probe{index}"
+                acked = self.tick("a", 1, exit_code=0, text=self.DISK, job=job)["item"]["id"]
+                self.ack(acked)
+                self.tick("b", 16, exit_code=code, text=text, job=job)
+                self.assert_fresh(self.tick("c", 31, exit_code=0, text=self.DISK, job=job), acked)
+
+    def test_another_hosts_run_neither_folds_into_nor_ends_the_chain(self):
+        acked = self.acked_disk()
+        with mock.patch("sd_db.ship.this_host", return_value="hostb"):
+            self.tick("b", 16, exit_code=0, text="ok\n")
+            other = self.tick("c", 31, exit_code=0, text=self.DISK)
+        self.assert_fresh(other, acked)
+        fold = json.loads(self.db.execute("SELECT fields FROM item WHERE id=?", (acked,)).fetchone()["fields"])["fold"]
+        self.assertEqual(fold, {"host": "hosta", "current": True})
+
+    def test_a_late_clean_run_does_not_end_the_chain(self):
+        acked = self.acked_disk()
+        self.tick("b", 16, exit_code=0, text=self.DISK)
+        self.tick("late", 10, exit_code=0, text="ok\n")
+        self.assertEqual(self.tick("c", 31, exit_code=0, text=self.DISK)["item"]["id"], acked)
+
+    def test_a_report_filed_before_the_chain_was_kept_is_never_a_done_target(self):
+        """Older state: a row without `fold` cannot say its host or whether a clean run came between."""
+        acked = self.acked_disk()
+        self.db.execute("UPDATE item SET fields=json_remove(fields, '$.fold') WHERE id=?", (acked,))
+        self.db.commit()
+        self.assert_fresh(self.tick("b", 16, exit_code=0, text=self.DISK), acked)
+
+    def test_the_original_run_replays_after_its_chain_ended(self):
+        acked = self.acked_disk()
+        self.tick("b", 16, exit_code=0, text="ok\n")
+        before = tuple(self.db.iterdump())
+        again = self.tick("a", 1, exit_code=0, text=self.DISK)
+        self.assertEqual((again["recorded"], again["item"]["id"]), ("report", acked))
+        self.assertEqual(before, tuple(self.db.iterdump()))
 
     def test_an_acknowledged_failure_does_not_hide_the_next_failure(self):
         """A non-zero exit is not a findings set: `job exited N` says nothing of
