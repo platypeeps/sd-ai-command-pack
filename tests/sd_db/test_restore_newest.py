@@ -36,7 +36,6 @@ backup = import_module("sd_db.backup")
 NOW = datetime(2026, 10, 13, 12, 0, tzinfo=UTC)
 
 
-@hub_only
 class Case(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -80,6 +79,21 @@ class Case(unittest.TestCase):
         return [row["title"] for row in self.open(home).execute("SELECT title FROM item ORDER BY id")]
 
 
+class Refusals(Case):
+    """Refused before any snapshot or hub-only path: these run the same over the wire."""
+
+    def test_a_missing_root_is_a_failure_not_an_empty_prune(self):
+        with self.assertRaisesRegex(BackupError, "existing unlinked directory"):
+            prune_older(self.base / "unmounted", 7, now=NOW, moved=True)
+
+    def test_the_job_refuses_a_prune_without_an_age(self):
+        completed = self.job("--prune-only", "--destination", str(self.nas))
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        self.assertIn("--prune-only needs --destination and --keep-days", completed.stdout + completed.stderr)
+
+
+# Each test takes a snapshot, which `run` refuses off the hub.
+@hub_only
 class MovedCopies(Case):
     def test_a_copy_past_the_window_is_pruned_by_its_hashes_not_its_path(self):
         old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
@@ -115,10 +129,6 @@ class MovedCopies(Case):
 
         self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [old])
 
-    def test_a_missing_root_is_a_failure_not_an_empty_prune(self):
-        with self.assertRaisesRegex(BackupError, "existing unlinked directory"):
-            prune_older(self.base / "unmounted", 7, now=NOW, moved=True)
-
     def test_the_job_prunes_copies_without_taking_a_snapshot(self):
         old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
         taken = sorted(self.local.iterdir())
@@ -128,12 +138,8 @@ class MovedCopies(Case):
         self.assertFalse(old.exists())
         self.assertEqual(sorted(self.local.iterdir()), taken)
 
-    def test_the_job_refuses_a_prune_without_an_age(self):
-        completed = self.job("--prune-only", "--destination", str(self.nas))
-        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
-        self.assertIn("--prune-only needs --destination and --keep-days", completed.stdout + completed.stderr)
 
-
+@hub_only
 class TheNewest(Case):
     def test_the_newest_checkpoint_wins_over_the_newest_name(self):
         self.mirror(self.snapshot(datetime(2026, 10, 12, 9, 0, tzinfo=UTC), title="first"))
