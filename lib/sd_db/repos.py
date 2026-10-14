@@ -942,6 +942,11 @@ def repo_channels(connection: sqlite3.Connection, path: Path | str) -> dict | No
     `channels.validate` refuses raises `ChannelRefusal` naming the
     repository, and a store not yet at 29 raises `SchemaTooOld`. Falling back
     to the defaults would publish into folders the operator moved away from.
+
+    An unresolved restore raises too, so every reader holds: the render, the
+    drain through `repo channels`, and the routine-brief copies. The row may
+    be older than the operator's last edit. `set_channels` still writes,
+    which is the restore's recovery.
     """
     import json
 
@@ -949,7 +954,13 @@ def repo_channels(connection: sqlite3.Connection, path: Path | str) -> dict | No
     from .database import schema_version
     from .errors import SchemaTooOld
     from .schema import SCHEMA_VERSION
+    from .writes import unresolved_state
 
+    if unresolved_state(connection, "restore"):
+        raise channels.ChannelRefusal(
+            "a restore is unresolved, so the repo row may be older than its channels setting; set it "
+            "again with `bin/sd-db repo channels PATH obsidian=... notion=... drive=...`, then resolve "
+            "the restore")
     given = str(Path(path).expanduser().resolve())
     probe = paths.keys(given)
     try:

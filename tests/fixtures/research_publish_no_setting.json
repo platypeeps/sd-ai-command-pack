@@ -1,0 +1,174 @@
+{
+  "fingerprints": {
+    "my-research.a.notion.json": "94d632de8a58a61532f2dc99e658dfce27117dd6e6984bf2b13c3a3c49813182",
+    "my-research.b.drive.json": "4c5f53e69fa2ac52f509c43bc01e5bc00eccf43bbfaf8a3dee4c5bb253f032a7",
+    "my-research.b.notion.json": "19a00e99d91da480c3814a542cabc8e89d5de4e366f490c4b6e04383d4153203",
+    "my-research.c.drive.json": "3e5946e5f8c7a2057765109d190ba79c8263c59da7e521b71e02ea0fda00655f",
+    "my-research.c.notion.json": "e9204522d65e1db067e18d93b2495546a612a6e0ef6da7d30a069711ba440a29",
+    "my-research.e.notion.json": "4d0f1d9abf4cc7b0178b2bb726353dcbeaf7705da85e2ad81d91dccadcb269f0"
+  },
+  "receipts": {
+    "my-research.a.notion.json": {
+      "destination": "notion",
+      "document": "a",
+      "repo": "{root}/my-research",
+      "revision": "unknown"
+    },
+    "my-research.b.drive.json": {
+      "destination": "drive",
+      "document": "b",
+      "repo": "{root}/my-research",
+      "revision": "unknown"
+    },
+    "my-research.b.notion.json": {
+      "destination": "notion",
+      "document": "b",
+      "repo": "{root}/my-research",
+      "revision": "unknown"
+    },
+    "my-research.c.drive.json": {
+      "destination": "drive",
+      "document": "c",
+      "repo": "{root}/my-research",
+      "revision": "unknown"
+    },
+    "my-research.c.notion.json": {
+      "destination": "notion",
+      "document": "c",
+      "repo": "{root}/my-research",
+      "revision": "unknown"
+    },
+    "my-research.e.notion.json": {
+      "destination": "notion",
+      "document": "e",
+      "repo": "{root}/my-research",
+      "revision": "unknown"
+    }
+  },
+  "requests": {
+    "my-research.a.notion.json": {
+      "content": "# A\n\nbody of a\n",
+      "destination": "notion",
+      "document": "a",
+      "markdown": "{root}/vault/Briefs/my-research/a.md",
+      "page": "",
+      "rendered": "{root}/my-research/docs/dashboard/a.html",
+      "repo": "{root}/my-research",
+      "resolve": "id",
+      "revision": "unknown",
+      "scope": "private",
+      "source": "{root}/my-research/10-x/a.md",
+      "source_url": null,
+      "space": "",
+      "space_id": "3c9f52b1-5782-81a7-a466-fb0e2df4d928",
+      "subfolder": "my-research",
+      "target": "your private Notion briefs folder, under my-research",
+      "title": "A"
+    },
+    "my-research.b.drive.json": {
+      "content": "# B\n\nbody of b\n",
+      "destination": "drive",
+      "document": "b",
+      "file": "",
+      "folder": "Briefs/my-research",
+      "markdown": "{root}/vault/Briefs/my-research/b.md",
+      "rendered": "{root}/my-research/docs/dashboard/b.html",
+      "repo": "{root}/my-research",
+      "revision": "unknown",
+      "source": "{root}/my-research/10-x/b.md",
+      "source_url": null,
+      "target": "the Briefs/my-research Drive folder",
+      "title": "B"
+    },
+    "my-research.b.notion.json": {
+      "content": "# B\n\nbody of b\n",
+      "destination": "notion",
+      "document": "b",
+      "markdown": "{root}/vault/Briefs/my-research/b.md",
+      "page": "",
+      "rendered": "{root}/my-research/docs/dashboard/b.html",
+      "repo": "{root}/my-research",
+      "resolve": "id",
+      "revision": "unknown",
+      "scope": "team",
+      "source": "{root}/my-research/10-x/b.md",
+      "source_url": null,
+      "space": "",
+      "space_id": "3cff52b1-5782-806a-acb0-ca0c8f41524b",
+      "subfolder": "my-research",
+      "target": "your team Notion briefs folder, under my-research",
+      "title": "B"
+    },
+    "my-research.c.drive.json": {
+      "content": "# C\n\nbody of c\n",
+      "destination": "drive",
+      "document": "c",
+      "file": "1AbCdEf",
+      "folder": "Deliverables",
+      "markdown": "{root}/vault/Briefs/my-research/c.md",
+      "rendered": "{root}/my-research/docs/dashboard/c.html",
+      "repo": "{root}/my-research",
+      "revision": "unknown",
+      "source": "{root}/my-research/10-x/c.md",
+      "source_url": null,
+      "target": "the Deliverables Drive folder",
+      "title": "C"
+    },
+    "my-research.c.notion.json": {
+      "content": "# C\n\nbody of c\n",
+      "destination": "notion",
+      "document": "c",
+      "markdown": "{root}/vault/Briefs/my-research/c.md",
+      "page": "",
+      "rendered": "{root}/my-research/docs/dashboard/c.html",
+      "repo": "{root}/my-research",
+      "resolve": "name",
+      "revision": "unknown",
+      "scope": "private",
+      "source": "{root}/my-research/10-x/c.md",
+      "source_url": null,
+      "space": "Research",
+      "space_id": "",
+      "subfolder": "",
+      "target": "the Research folder in your private space",
+      "title": "C"
+    },
+    "my-research.e.notion.json": {
+      "content": "# E\n\nbody of e\n",
+      "destination": "notion",
+      "document": "e",
+      "markdown": "{root}/vault/Briefs/my-research/e.md",
+      "page": "https://notion.so/e",
+      "rendered": "{root}/my-research/docs/dashboard/e.html",
+      "repo": "{root}/my-research",
+      "resolve": "id",
+      "revision": "unknown",
+      "scope": "private",
+      "source": "{root}/my-research/10-x/e.md",
+      "source_url": null,
+      "space": "",
+      "space_id": "3c9f52b1-5782-81a7-a466-fb0e2df4d928",
+      "subfolder": "my-research",
+      "target": "your private Notion briefs folder, under my-research",
+      "title": "E"
+    }
+  },
+  "said": [
+    "obsidian: wrote 5 document(s) to {root}/vault/Briefs/my-research",
+    "gitignore: added docs/dashboard/",
+    "dashboard: registered my-research -> MINE",
+    "mirror: queued a -> your private Notion briefs folder, under my-research",
+    "mirror: queued b -> your team Notion briefs folder, under my-research",
+    "mirror: queued b -> the Briefs/my-research Drive folder",
+    "mirror: queued c -> the Research folder in your private space",
+    "mirror: queued c -> the Deliverables Drive folder",
+    "mirror: queued e -> your private Notion briefs folder, under my-research"
+  ],
+  "vault": {
+    "Briefs/my-research/a.md": "---\nsource_repo: my-research\nsource_checkout: {root}/my-research\nsource_path: 10-x/a.md\nrevision: unknown\nrendered_by: sd-research-kit\n---\n# A\n\nbody of a\n",
+    "Briefs/my-research/b.md": "---\nsource_repo: my-research\nsource_checkout: {root}/my-research\nsource_path: 10-x/b.md\nrevision: unknown\nrendered_by: sd-research-kit\n---\n# B\n\nbody of b\n",
+    "Briefs/my-research/c.md": "---\nsource_repo: my-research\nsource_checkout: {root}/my-research\nsource_path: 10-x/c.md\nrevision: unknown\nrendered_by: sd-research-kit\n---\n# C\n\nbody of c\n",
+    "Briefs/my-research/d.md": "---\nsource_repo: my-research\nsource_checkout: {root}/my-research\nsource_path: 10-x/d.md\nrevision: unknown\nrendered_by: sd-research-kit\n---\n# D\n\nbody of d\n",
+    "Briefs/my-research/e.md": "---\nsource_repo: my-research\nsource_checkout: {root}/my-research\nsource_path: 10-x/e.md\nrevision: unknown\nrendered_by: sd-research-kit\n---\n# E\n\nbody of e\n"
+  }
+}

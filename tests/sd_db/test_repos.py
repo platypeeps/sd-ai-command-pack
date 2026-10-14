@@ -747,6 +747,21 @@ class TheChannelsVerb(RepoCase):
                 self.assertEqual(out, "")
                 self.assertEqual(self._stored(path), '{"drive":{}}')
 
+    def test_a_read_during_an_open_restore_exits_1_and_a_write_still_works(self):
+        """Review of b96428745: a drain reads the setting through this verb, so
+        an open restore, whose row may be older than the operator's last edit,
+        holds the read as it holds the render, and never prints a value.
+        Setting it again is the restore's recovery, so a write still works."""
+        path = self._registered()
+        self._run(path, "drive=")
+        self.connection.execute(
+            "INSERT INTO state (kind, key, timestamp, body) VALUES ('restore', '2026-10-13', 't', '{}')")
+        rc, out, err = self._run(path)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("a restore is unresolved", err)
+        self.assertEqual(self._run(path, "notion=")[0], 0)
+        self.assertEqual(self._stored(path), '{"notion":{}}')
+
     def test_an_unregistered_path_refuses_a_write_and_prints_none_for_a_read(self):
         """No row is no setting, so a read answers `none` and says why on stderr."""
         checkout = support.repository(self.checkouts / "two")
