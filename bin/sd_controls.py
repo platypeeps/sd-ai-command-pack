@@ -175,13 +175,16 @@ def run_brief(args: argparse.Namespace) -> int:
     except OSError as error:
         raise WorkRefusal(f"{args.file}: {error.strerror or error}") from error
     repo = _belongs_to(args.belongs_to) if verb in ("add", "import") else None
-    connection = sd_handoff_rows.connect(sd_db, write=verb in ("add", "import"))
+    connection = sd_handoff_rows.connect(sd_db, write=verb in ("add", "import", "render"))
     try:
         if verb == "add":
             mode = "extend" if args.extend else "replace" if args.replace else None
             stem, text = draft or ("", "")
             answer = routine_briefs.add(connection, stem, text, repo=repo, who=getpass.getuser(), mode=mode)
             print(f"{answer['result']} {answer['stem']}")
+            _copies_after(routine_briefs, connection)
+        elif verb == "render":
+            return _rendered(routine_briefs.render(connection, os.environ.get("OBSIDIAN_VAULT")))
         elif verb == "list":
             _list_briefs(routine_briefs.rows(connection, series=args.series, since=args.since), args.json)
         elif verb == "show":
@@ -197,6 +200,37 @@ def run_brief(args: argparse.Namespace) -> int:
         raise WorkRefusal(str(error)) from error
     finally:
         connection.close()
+
+
+def _copies_after(routine_briefs: Any, connection: Any) -> None:
+    """The render after a hub `add`'s commit. It never fails the add: the row is the deliverable.
+
+    On a satellite it is skipped: the hub's next `add` or `render` writes the copy.
+    """
+    from sd_db.remote import HubOnly
+
+    try:
+        copies = routine_briefs.render(connection, os.environ.get("OBSIDIAN_VAULT"))
+    except HubOnly:
+        return
+    except Exception as error:  # noqa: BLE001 - a failed render never fails the add
+        copies = {"ok": False, "reason": str(error) or type(error).__name__, "refused": []}
+    if not copies["ok"]:
+        why = copies["reason"] or f"{len(copies['refused'])} copy(ies) refused, first {copies['refused'][0][0]}: " \
+                                  f"{copies['refused'][0][1]}"
+        print(f"vault copy not written: {why}", file=sys.stderr)
+
+
+def _rendered(copies: dict[str, Any]) -> int:
+    """Print a render; exit 1 on any refused file or a render that stopped."""
+    for stem, reason in copies["refused"]:
+        print(f"refused {stem}: {reason}")
+    for path in copies["left"]:
+        print(f"left in the previous folder: {path}; delete it once the new folder is in use")
+    if copies["reason"]:
+        print(f"sd: vault copies not written: {copies['reason']}", file=sys.stderr)
+    print(f"{copies['state']}: written {len(copies['written'])}, refused {len(copies['refused'])}")
+    return 0 if copies["ok"] else 1
 
 
 def _list_briefs(listed: list[dict[str, Any]], as_json: bool) -> None:
@@ -253,7 +287,9 @@ def register_briefs(verbs: Any) -> None:
     folder.add_argument("--belongs-to", metavar="PATH", required=True, help="the registered checkout that owns them")
     folder.add_argument("--replace", metavar="STEM", action="append",
                         help="take the note for this stem over its row; repeat per stem")
-    for parser in (add, listing, show, folder):
+    render = briefs.add_parser("render", help="write the vault copies of every brief, on the hub; a hand-edited "
+                                              "copy is kept and refused")
+    for parser in (add, listing, show, folder, render):
         parser.set_defaults(handler=run_brief)
 
 

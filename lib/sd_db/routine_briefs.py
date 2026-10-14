@@ -18,10 +18,13 @@ those back with the rows.
 
 `sd_db.records` holds the mirror rule a vault copy is written and read by:
 `hashed` adds the `mirror-hash` line, and `unhashed` and `hash_holds` read it.
+`render` writes the copies under that rule (sd:4041), into the folder each
+owning repository's `channels` setting names.
 """
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import hashlib
 import json
@@ -30,12 +33,12 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from . import repos
-from .database import transaction
-from .records import _closing, hash_holds, unhashed
+from . import records, repos, runner_journal
+from .database import refuse_hub_only, transaction
+from .records import RecordRefused, _closing, hash_holds, hashed, unhashed
 from .reporting import MAX_REPORT
 from .workflow import MissingItem, WorkflowError, _text, item_state
-from .writes import add_note, create_item, item_by_external, now, set_item_fields
+from .writes import add_note, create_item, item_by_external, now, record_state, set_item_fields, unresolved_state
 
 SOURCE = "brief"
 
@@ -87,8 +90,9 @@ def counts(stem: str, text: str) -> dict[str, Any]:
         day = datetime.date.fromisoformat(found[1]).isoformat() if found else None
     except ValueError:
         day = None
-    if found is None or day is None:
-        raise BriefUnusable(f"{stem}: the file name must be `<YYYY-MM-DD> - <Series>.md`, with a day that exists")
+    if found is None or day is None or "/" in stem or "\\" in stem:
+        raise BriefUnusable(f"{stem}: the file name must be `<YYYY-MM-DD> - <Series>.md`, with a day that exists "
+                            f"and no / or \\ in the series")
     if not isinstance(text, str) or len(text.encode("utf-8")) > MAX_REPORT:
         raise BriefUnusable(f"{stem}: the text must be at most {MAX_REPORT} bytes")
     lines = text.split("\n")
@@ -239,3 +243,180 @@ def import_folder(connection: sqlite3.Connection, folder: Path, *, repo: str, wh
     if not result["conflicts"] and matched == len(taken):
         result["verified"] = matched
     return result
+
+
+# ---------------------------------------------------------------- vault copies
+
+#: The `heartbeat` state row each render records:
+#: `{at, ok, state, folder, previous_folder, written, refused, reason}`.
+COPIES_KEY = "brief-copies"
+
+#: The lock file beside the database that serializes renders.
+LOCK_NAME = "brief-copies.lock"
+
+#: Seconds a render waits for another to finish before it fails.
+LOCK_WAIT = 60.0
+
+#: The most refused stems a heartbeat lists.
+REFUSED_SHOWN = 50
+
+#: The obsidian channel's default folder under the vault, then the repository's name: as for a research document.
+DEFAULT_FOLDER = "Briefs"
+
+
+def render(connection: sqlite3.Connection, vault: Path | str | None) -> dict[str, Any]:
+    """Write each brief row's vault copy, `<vault>/<folder>/<stem>.md`, and record a `brief-copies` heartbeat.
+
+    The copy is `body.text` with `records.hashed`'s `mirror-hash` line. A file
+    is written only when its bytes differ, by temporary file and rename, and
+    overwritten only when its own `mirror-hash` holds, or it has none and
+    equals the row's text: else it is a hand edit, kept and refused. A
+    stem-shaped `.md` no row holds is refused and kept too. `folder` maps
+    each owning repository to the folder its `channels` setting names, None
+    when its obsidian channel is off. A folder that moved is kept as
+    `previous_folder` while copies of rows are left there; none is deleted.
+
+    Refuses with `HubOnly` off the hub, before it reads or records anything.
+    Every other failure ends in the returned body and its heartbeat. Rows are
+    read only once the lock beside the database is held, so a render that
+    read older rows never writes after one that read newer rows.
+    """
+    refuse_hub_only(connection, "brief render")
+    copies: dict[str, Any] = {"state": "failed", "folder": {}, "previous_folder": {}, "written": [],
+                              "refused": [], "left": [], "reason": None}
+    try:
+        with runner_journal.lock(_lock_path(connection), blocking=False, wait=LOCK_WAIT, error=BriefRefused,
+                                 noun="brief render", held="another brief render held the lock for "
+                                                           f"{LOCK_WAIT:.0f} seconds"):
+            try:
+                _copy(connection, vault, copies)
+            except Exception as error:  # the heartbeat names it; an unknown is not a pass
+                copies["reason"] = str(error) or type(error).__name__
+            return _beat(connection, copies)
+    except BriefRefused as error:
+        copies["reason"] = str(error)
+    return _beat(connection, copies)
+
+
+def copies_state(connection: sqlite3.Connection) -> tuple[str, dict[str, Any]] | None:
+    """The last render's heartbeat as `(timestamp, body)`, or None when none ran."""
+    row = connection.execute("SELECT timestamp, body FROM state WHERE kind = 'heartbeat' AND key = ? "
+                             "ORDER BY id DESC LIMIT 1", (COPIES_KEY,)).fetchone()
+    return None if row is None else (row["timestamp"], json.loads(row["body"] or "{}"))
+
+
+def _lock_path(connection: sqlite3.Connection) -> Path:
+    found = connection.execute("PRAGMA database_list").fetchone()
+    if found is None or not found[2]:
+        raise BriefRefused("the database has no file, so there is no place for the render's lock")
+    return Path(found[2]).parent / LOCK_NAME
+
+
+def _beat(connection: sqlite3.Connection, copies: dict[str, Any]) -> dict[str, Any]:
+    if copies["reason"] is None and not copies["refused"]:
+        copies["state"] = "ok" if any(copies["folder"].values()) or not copies["folder"] else "off"
+    else:
+        copies["state"] = "failed"
+    copies["ok"] = copies["state"] != "failed"
+    record_state(connection, "heartbeat", key=COPIES_KEY, body={
+        "at": now(), "ok": copies["ok"], "state": copies["state"], "folder": copies["folder"],
+        "previous_folder": copies["previous_folder"], "written": len(copies["written"]),
+        "refused": [stem for stem, _ in copies["refused"]][:REFUSED_SHOWN], "reason": copies["reason"]})
+    return copies
+
+
+def _copy(connection: sqlite3.Connection, vault: Path | str | None, copies: dict[str, Any]) -> None:
+    """Every refusal of the whole render first: a restore, no vault, a setting it cannot read. Then each file."""
+    if unresolved_state(connection, "restore"):
+        raise BriefRefused("a restore is unresolved, so the rows may be older than the copies; "
+                           "import the folder, then resume the restore")
+    briefs = [dict(row) for row in connection.execute(
+        "SELECT repo, title, body FROM item WHERE source = ? AND kind = 'report' ORDER BY id", (SOURCE,))]
+    if not briefs:
+        return
+    if not vault:
+        raise BriefRefused("OBSIDIAN_VAULT is not set, so there is no vault to write copies into")
+    root = Path(vault).expanduser()
+    if not root.is_dir():
+        raise BriefRefused(f"{root} is not a directory; the render creates no vault")
+    last = copies_state(connection)
+    before = last[1] if last is not None else {}
+    folders = {repo: _folder(connection, repo) for repo in sorted({row["repo"] for row in briefs})}
+    copies["folder"] = folders
+    for row in briefs:
+        folder = folders[row["repo"]]
+        if folder is not None:
+            _write(root / folder, row, copies)
+    for repo, folder in folders.items():
+        if folder is not None:
+            stems = {row["title"] for row in briefs if row["repo"] == repo}
+            _strays(root / folder, stems, copies)
+            _moved(root, repo, folder, stems, before, copies)
+
+
+def _folder(connection: sqlite3.Connection, repo: str) -> str | None:
+    """The folder under the vault the repository's obsidian channel names, None when that channel is off.
+
+    A setting it cannot read raises with the cause: unknown is not "no setting".
+    """
+    setting = repos.repo_channels(connection, repo)
+    if setting is None:
+        return f"{DEFAULT_FOLDER}/{Path(repo).name}"
+    if "obsidian" not in setting:
+        return None
+    return setting["obsidian"].get("folder") or f"{DEFAULT_FOLDER}/{Path(repo).name}"
+
+
+def _write(folder: Path, row: dict[str, Any], copies: dict[str, Any]) -> None:
+    """Write one copy, unless the file there is a hand edit."""
+    stem = row["title"]
+    try:
+        text = json.loads(row["body"] or "{}").get("text")
+        counts(stem, text)
+        target = folder / f"{stem}.md"
+        held: bytes | None = None
+        with contextlib.suppress(FileNotFoundError):
+            held = target.read_bytes()
+        if held is not None:
+            _refuse_hand_edit(held, text)
+        if records._replace(target, hashed(text).encode("utf-8"), held=held):
+            copies["written"].append(stem)
+    except (BriefRefused, RecordRefused) as refusal:
+        copies["refused"].append((stem, str(refusal)))
+
+
+def _refuse_hand_edit(held: bytes, text: str) -> None:
+    try:
+        found = held.decode("utf-8")
+    except UnicodeDecodeError:
+        raise BriefRefused("it is not UTF-8: a hand edit, kept") from None
+    holds = hash_holds(found)
+    if holds is False:
+        raise BriefRefused("it differs from its mirror-hash: a hand edit, kept")
+    if holds is None and found != text:
+        raise BriefRefused("it has no mirror-hash and differs from its row: a hand edit or a note changed "
+                           "since the import, kept; `sd reports brief import` lists it")
+
+
+def _strays(folder: Path, stems: set[str], copies: dict[str, Any]) -> None:
+    """Report every brief-shaped note in the folder no row holds. Other notes there are not briefs: left alone."""
+    if not folder.is_dir():
+        return
+    for path in sorted(folder.glob("*.md")):
+        if path.stem not in stems and STEM.fullmatch(path.stem):
+            copies["refused"].append((path.stem, "no row holds this file; kept: file it with "
+                                                 "`sd reports brief add` or delete it"))
+
+
+def _moved(root: Path, repo: str, folder: str, stems: set[str], before: dict[str, Any],
+           copies: dict[str, Any]) -> None:
+    """Name the copies left in the folder the last render wrote, when the folder moved; delete none."""
+    last = (before.get("folder") or {}).get(repo) if isinstance(before.get("folder"), dict) else None
+    previous = last if last and last != folder else \
+        ((before.get("previous_folder") or {}) if isinstance(before.get("previous_folder"), dict) else {}).get(repo)
+    if not previous or previous == folder:
+        return
+    left = sorted(stem for stem in stems if (root / previous / f"{stem}.md").is_file())
+    if left:
+        copies["previous_folder"][repo] = previous
+        copies["left"].extend(f"{previous}/{stem}.md" for stem in left)

@@ -101,6 +101,12 @@ class TheDraft(Briefs):
             self.add(stem="not a stem")
         self.assertEqual(self.count(), 0)
 
+    def test_a_stem_whose_series_holds_a_slash_is_refused_since_its_copy_would_leave_the_folder(self):
+        for stem in ("2026-10-13 - a/../../outside", "2026-10-13 - a\\b"):
+            with self.subTest(stem=stem), self.assertRaisesRegex(BriefUnusable, "no / or"):
+                self.add(stem=stem)
+        self.assertEqual(self.count(), 0)
+
     def test_an_unregistered_checkout_is_refused_by_name(self):
         with self.assertRaisesRegex(routine_briefs.BriefRefused, "not a registered repository"):
             add(self.db, DAILY, TEXT, repo=str(self.root / "elsewhere"), who="operator")
