@@ -817,6 +817,10 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]],
     rev = revision(repo)
     home = repo_home(repo)
     checkout = _shown(home)
+    # Only the default folder is this tool's own. A folder the setting names
+    # is the operator's, so a note there that names no checkout is theirs,
+    # never an earlier version's copy to take over.
+    takeover = folder == Path(VAULT).expanduser() / BRIEFS / home.name
     reports: list[str] = []
     written = 0
     for cfg in docs:
@@ -853,6 +857,10 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]],
         if owner and owner != checkout:
             reports.append("obsidian: %s.md in %s belongs to %s; left alone. Rename one "
                            "checkout, or delete that copy to move it here" % (out, folder, owner))
+            continue
+        if not owner and not takeover and (target.exists() or target.is_symlink()):
+            reports.append("obsidian: %s names no checkout, so this tool did not write it; left "
+                           "alone. Move that note, or rename the document" % target)
             continue
         try:
             folder.mkdir(parents=True, exist_ok=True)

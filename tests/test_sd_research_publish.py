@@ -2384,6 +2384,25 @@ class ChannelsTests(Fixture):
         self.assertFalse((self.briefs() / "a.md").exists())
         self.assertEqual(self.queued()["my-research.a.notion.json"]["markdown"], str(moved))
 
+    def test_a_setting_folder_never_overwrites_a_note_this_tool_did_not_write(self) -> None:
+        """Review of b96428745: a folder the setting names is the operator's,
+        not ours, so a note there that names no checkout is theirs. It is
+        left alone and named; once it is gone the copy is written, and the
+        next render replaces its own copy."""
+        self.row({"obsidian": {"folder": "Notes"}})
+        hand = self.vault / "Notes" / "d.md"
+        hand.parent.mkdir(parents=True)
+        hand.write_text("# My own note\n", encoding="utf-8")
+        said = self.publish([self.SCENARIO[3]])
+        self.assertEqual(hand.read_text(encoding="utf-8"), "# My own note\n")
+        self.assertTrue(any(str(hand) in line and "left alone" in line for line in said), said)
+        hand.unlink()
+        self.publish([self.SCENARIO[3]])
+        self.assertIn("source_checkout: ", hand.read_text(encoding="utf-8"))
+        (self.repo / "10-x" / "d.md").write_text("# D\n\nedited\n", encoding="utf-8")
+        self.publish([self.SCENARIO[3]])
+        self.assertIn("edited", hand.read_text(encoding="utf-8"))
+
     def test_a_document_key_wins_over_the_setting(self) -> None:
         self.row({"notion": {"folder": "Example"}, "drive": {"folder": "Research/Example"}})
         self.publish([self.SCENARIO[2]])
