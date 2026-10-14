@@ -352,6 +352,11 @@ The key is CSV; its first column names the subject.
 `apply` acts only on questions that offer `Approve` and `Reject`; each approval files one task under `review-approved:<note>`.
 It resolves a batch's open questions as `Expired, not ruled` after 7 days.
 
+## The state kinds
+
+`state.kind` has no CHECK since migration 031 (sd:3506): `writes.STATE_KINDS` is its one list, and `writes.record_state` refuses a kind outside it.
+A list the library validates gets no CHECK: SQLite cannot alter one, so each new kind used to rebuild the whole table.
+
 ## The item kinds, and the two words called `followup`
 
 `item.kind` is a closed list, guarded by a CHECK. Eleven values:

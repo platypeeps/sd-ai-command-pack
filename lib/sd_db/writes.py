@@ -33,8 +33,10 @@ from .errors import SdDbError
 STATUSES = ("planning", "ready", "in_progress", "ready_to_send", "blocked", "done")
 STATUS_CHANGE = "status_change"
 
-#: The `state` kinds. The `CHECK` in the schema is the enforcement; this is
-#: the list callers name, so a typo is an error here and not a silent row.
+#: The `state` kinds, and the one list: the schema has no CHECK on
+#: `state.kind` since migration 031 (sd:3506), so a new kind is added here,
+#: with no table rebuild. `record_state` refuses a kind outside it, and
+#: `TheStateKindList` holds every raw insert in the pack to it.
 STATE_KINDS = ("checkpoint", "verified", "restore", "watermark", "heartbeat", "check", "snooze", "view", "setting")
 #: The kinds whose NULL `resolved_at` is open work; the rest are logs and
 #: cursors read latest-per-key, where NULL means nothing (sd:2849).
@@ -537,7 +539,7 @@ def record_state(
     if kind not in STATE_KINDS:
         raise SdDbError(
             f"no state kind {kind!r}; the kinds are {', '.join(STATE_KINDS)}. "
-            f"A new kind is added to the schema and the document first."
+            f"A new kind is added to this list and the document first."
         )
     with transaction(connection):
         cursor = connection.execute(
