@@ -22,7 +22,7 @@ import sys
 from pathlib import Path
 
 from .. import channels, credentials, judgment, records, removal, review, usage
-from ..backup import migration_backup
+from ..backup import migration_backup, unchanged_since
 from ..backup import restore as restore_snapshot
 from ..database import connect, default_path, schema_version, tables
 from ..errors import SdDbError
@@ -62,7 +62,8 @@ def command_migrate(_argv: list[str]) -> int:
     backup = migration_backup(home)
     if backup is not None:
         print(f"sd-db: backup {backup} holds this store; migrating")
-    result = migrate(home=home)
+    # Again under the first migration's write lock: a write since the check above is caught.
+    result = migrate(home=home, check=None if backup is None else (lambda: unchanged_since(home, backup)))
     if not result.applied:
         print(f"sd-db: already at schema version {result.after}; nothing applied")
         return 0

@@ -671,8 +671,37 @@ def _counts(connection: sqlite3.Connection) -> dict[str, int]:
     }
 
 
-def _snapshot(connection: sqlite3.Connection, copy: Path) -> dict[str, int]:
+def _fingerprint(database: Path) -> dict[str, list[int] | None]:
+    """What any commit to `database` changes: the inode, size and modified
+    time of the file and of its write-ahead log (sd:3507).
+
+    An empty or absent log is the same answer: any connection may create an
+    empty one, and the last to close deletes it. The shared-memory file is
+    left out, because readers write it.
+    """
+    found: dict[str, list[int] | None] = {}
+    for key, path in (("database", database), ("wal", database.with_name(database.name + "-wal"))):
+        try:
+            details = path.stat()
+        except FileNotFoundError:
+            if key == "database":
+                raise
+            found[key] = None
+            continue
+        found[key] = [details.st_ino, details.st_size, details.st_mtime_ns] if details.st_size or key == "database" \
+            else None
+    return found
+
+
+def _snapshot(connection: sqlite3.Connection, copy: Path, *,
+              source: Path | None = None) -> tuple[dict[str, int], dict[str, list[int] | None] | None]:
     """Count the source and copy it to `copy` inside one read transaction.
+
+    With `source`, also its `_fingerprint`, read after `BEGIN` and before the
+    first read fixes the transaction's view: a commit before it is in the
+    copy, and one after it changes the fingerprint. Only a connection that
+    writes nothing may ask: a checkpoint row, or the log copied back into the
+    file on close, would change the fingerprint after the fact.
 
     The counts `verify` compares and the copy are then one moment of the
     source, whatever other connections commit meanwhile: under WAL a reader
@@ -685,6 +714,7 @@ def _snapshot(connection: sqlite3.Connection, copy: Path) -> dict[str, int]:
     """
     connection.execute("BEGIN")
     try:
+        store = None if source is None else _fingerprint(source)
         expected = _counts(connection)
         try:
             target = sqlite3.connect(copy, isolation_level=None)
@@ -698,7 +728,7 @@ def _snapshot(connection: sqlite3.Connection, copy: Path) -> dict[str, int]:
             raise BackupError(f"the snapshot was not written to {copy}: {error}") from None
     finally:
         connection.execute("ROLLBACK")
-    return expected
+    return expected, store
 
 
 def verify(copy: Path, *, run_id: str, expected: dict[str, int], checkpointed: bool = True) -> dict[str, int]:
@@ -785,13 +815,16 @@ def _retention_inventory(directory: Path, *, moved: bool = False) -> dict[str, s
 
 
 def _record_backup(directory: Path, source: Path, run_id: str, counts: dict[str, int], *,
-                   checkpointed: bool = True) -> None:
+                   checkpointed: bool = True, store: dict[str, list[int] | None] | None = None) -> None:
     # `checkpoint: false` is a note for the reader, not a key `_owned_backup`
     # honours: it re-verifies through the checkpoint row, so a snapshot
     # without one is never owned, never pruned, and never counted for `--keep`.
     value = {"format": "sd-db-backup", "version": 1, "directory": str(directory.resolve()),
              "database": source.name, "run_id": run_id, "counts": counts,
              "checkpoint": checkpointed, "entries": _retention_inventory(directory)}
+    if store is not None:
+        # `migration_backup` compares it with the live store (`_snapshot`).
+        value["store"] = store
     _write_recovery_record(directory / BACKUP_MANIFEST, (json.dumps(value, sort_keys=True) + "\n").encode())
 
 
@@ -896,20 +929,16 @@ def migration_backup(home: Path | str) -> Path | None:
     retention and `restore_newest` make -- every file hashes to its manifest,
     and the copy verifies against its run and counts (`_check_backup`), and
     `restore` would take it (`check_restorable`) -- and be this store as it
-    stands: the same schema version, the same row counts, and no write to
-    the store since. A read-only snapshot has no checkpoint row, so it is
-    checked with `read_only`, and its time is the manifest's, the last file
-    `run` writes; so is a checkpointed one's, because writing its own
-    checkpoint row moves the store after the row's time.
+    stands: the same schema version, the same row counts, and the fingerprint
+    its manifest recorded (`unchanged_since`). Only a read-only snapshot, the
+    one taken of a store waiting for `migrate`, records one; a checkpointed
+    snapshot wrote to the store, so it is refused here.
+    `unchanged_since` runs again under `migrate`'s write lock.
     Raises `BackupError` naming why not and both ways out.
     """
     database = local_path(home)
     if not database.exists():
         return None
-    # Read first: the read below opens `mode=ro` and writes nothing, but the
-    # times are the evidence and nothing may move them before they are read.
-    written = max(path.stat().st_mtime_ns for path in (database, database.with_name(database.name + "-wal"))
-                  if path == database or (path.exists() and path.stat().st_size))
     live = connect(database, write=False)
     try:
         version = schema_version(live)
@@ -919,36 +948,61 @@ def migration_backup(home: Path | str) -> Path | None:
     if version >= SCHEMA_VERSION:
         return None
     root = backup_root(home)
-    remedy = f"run `bin/sd-db backup` first, or set {ROOT_VARIABLE} to the folder that holds the backup"
     try:
         dated = sorted((path for path in root.iterdir() if DATED_NAME.fullmatch(path.name)
                         and path.is_dir() and not path.is_symlink()), key=_directory_order)
     except OSError:
         dated = []
     if not dated:
-        raise BackupError(f"migrate refuses: no backup under {root}; {remedy}")
+        raise BackupError(f"migrate refuses: no backup under {root}; {_MIGRATE_REMEDY}")
     newest = dated[-1]
     try:
         _check_backup(newest, read_only=True)
-        manifest = newest / BACKUP_MANIFEST
-        taken = manifest.stat().st_mtime_ns
-        held = json.loads(manifest.read_bytes())["counts"]
+        held = json.loads((newest / BACKUP_MANIFEST).read_bytes())["counts"]
         check = check_restorable(newest / database.name)
         if not check.accepted:
             raise BackupError(f"restore refuses it: {check.refusal}")
     except (OSError, ValueError, KeyError, BackupError) as error:
-        raise BackupError(f"migrate refuses: the newest backup {newest} does not verify: {error}; {remedy}") from None
+        raise BackupError(f"migrate refuses: the newest backup {newest} does not verify: {error}; "
+                          f"{_MIGRATE_REMEDY}") from None
     if check.version != version:
         raise BackupError(f"migrate refuses: the newest backup {newest} is at schema version {check.version}, "
-                          f"the store at {version}; {remedy}")
+                          f"the store at {version}; {_MIGRATE_REMEDY}")
     if held != counts:
         differ = ", ".join(f"{name}: store {counts.get(name)}, backup {held.get(name)}"
                            for name in sorted(set(counts) | set(held)) if counts.get(name) != held.get(name))
-        raise BackupError(f"migrate refuses: the store changed since the newest backup {newest} ({differ}); {remedy}")
-    if written > taken:
-        raise BackupError(f"migrate refuses: the store was written after the newest backup {newest} finished; "
-                          f"{remedy}")
+        raise BackupError(f"migrate refuses: the store changed since the newest backup {newest} ({differ}); "
+                          f"{_MIGRATE_REMEDY}")
+    unchanged_since(home, newest)
     return newest
+
+
+_MIGRATE_REMEDY = (f"run this pack's `bin/sd-db backup` first, or set {ROOT_VARIABLE} to the folder "
+                   "that holds the backup")
+
+
+def unchanged_since(home: Path | str, directory: Path) -> None:
+    """Raise `BackupError` unless the live store's `_fingerprint` is the one
+    `directory`'s manifest recorded, exactly (sd:3507).
+
+    The fingerprint was read before the snapshot's view was fixed, so any
+    commit the copy lacks changed it since. A manifest without one -- a
+    checkpointed snapshot, or one an older library took -- proves nothing and
+    is refused, as is a fingerprint that cannot be read.
+    """
+    database = local_path(home)
+    try:
+        recorded = json.loads((directory / BACKUP_MANIFEST).read_bytes()).get("store")
+        found = _fingerprint(database)
+    except (OSError, ValueError, AttributeError) as error:
+        raise BackupError(f"migrate refuses: the store's fingerprint could not be read: {error}; "
+                          f"{_MIGRATE_REMEDY}") from None
+    if recorded is None:
+        raise BackupError(f"migrate refuses: the newest backup {directory} records no fingerprint of the store, "
+                          f"so it cannot show it holds every write; {_MIGRATE_REMEDY}")
+    if recorded != found:
+        raise BackupError(f"migrate refuses: the store was written after the newest backup {directory} "
+                          f"began; {_MIGRATE_REMEDY}")
 
 
 def _check_keep(keep: int | None) -> None:
@@ -1211,7 +1265,9 @@ def run(
             raise BackupError(f"the backup directory was not created: {error}") from None
 
         copy = directory / source.name
-        expected = _snapshot(connection, copy)
+        # A read-only run writes nothing to the source, so its fingerprint
+        # still describes the source when the run ends.
+        expected, store = _snapshot(connection, copy, source=None if checkpointed else source)
     finally:
         connection.close()
 
@@ -1288,7 +1344,7 @@ def run(
         checked.close()
 
     try:
-        _record_backup(directory, source, run_id, counts, checkpointed=checkpointed)
+        _record_backup(directory, source, run_id, counts, checkpointed=checkpointed, store=store)
     except OSError as error:
         raise BackupError(f"backup ownership was not recorded: {error}") from None
     try:
