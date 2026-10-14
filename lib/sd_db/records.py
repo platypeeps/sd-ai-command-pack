@@ -504,10 +504,16 @@ def _mirror_after(connection: sqlite3.Connection, rules: Rules, caught_up: bool)
         print(f"mirror not updated: {mirror.why()}", file=sys.stderr)
 
 
+def mirror_state(connection: sqlite3.Connection) -> tuple[str, dict[str, Any]] | None:
+    """The last render's heartbeat as `(timestamp, body)`, or None when none ran: what the dashboard's Health shows."""
+    row = connection.execute("SELECT timestamp, body FROM state WHERE kind = 'heartbeat' AND key = ? "
+                             "ORDER BY id DESC LIMIT 1", (MIRROR_KEY,)).fetchone()
+    return None if row is None else (row["timestamp"], json.loads(row["body"] or "{}"))
+
+
 def _last_beat_ok(connection: sqlite3.Connection) -> bool:
-    row = connection.execute("SELECT body FROM state WHERE kind = 'heartbeat' AND key = ? ORDER BY id DESC LIMIT 1",
-                             (MIRROR_KEY,)).fetchone()
-    return row is not None and json.loads(row["body"] or "{}").get("ok") is True
+    found = mirror_state(connection)
+    return found is not None and found[1].get("ok") is True
 
 
 def _mirrored(connection: sqlite3.Connection, rules: list[Rules]) -> Mirror:
