@@ -739,6 +739,99 @@ class TheTrackerDispatch(SyncCase):
         self.assertEqual(self.connection.total_changes, before)
 
 
+class BucketGh(Gh):
+    """A `gh` that answers each bucket's qualifier with its own nodes, or fails it."""
+
+    def __init__(self, buckets, *, failing=()):
+        super().__init__()
+        self.buckets = buckets
+        self.failing = set(failing)
+
+    def __call__(self, argv):
+        if argv[:2] == ["gh", "auth"]:
+            return super().__call__(argv)
+        self.calls.append(argv)
+        query = self.queries[-1]
+        qualifier = query.split(" ", 1)[0]
+        if qualifier in self.failing:
+            return 1, "", "the API said no"
+        nodes = self.buckets.get(qualifier, [])
+        payload = {"data": {"search": {"issueCount": len(nodes),
+                                       "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                       "nodes": nodes}}}
+        return 0, json.dumps(payload), ""
+
+
+class TheReason(SyncCase):
+    """sd:4636: each synced row stores why it is the operator's, so Today and
+    Tasks can show the assigned and filed ones and hide the watched ones."""
+
+    def reasons(self):
+        return {row["url"].rsplit("/", 1)[1]: row["reason"] for row in self.shadow().values()}
+
+    def environment(self):
+        values = {**os.environ, **JIRA_ENV}
+        values.pop("JIRA_JQL", None)
+        return patch.dict(os.environ, values, clear=True)
+
+    def test_github_rows_store_the_strongest_bucket(self):
+        runner = BucketGh({"assignee:@me": [node(1), node(4)], "author:@me": [node(2), node(4)],
+                           "mentions:@me": [node(3)], "review-requested:@me": [node(5)]})
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.reasons(), {"1": "assigned", "2": "filed", "3": "watched", "4": "assigned",
+                                          "5": "watched"})
+
+    def test_a_later_collect_moves_the_reason_with_the_row(self):
+        sync(self.connection, now=self.now, runner=BucketGh({"assignee:@me": [node(1)]}))
+        later = self.now + timedelta(hours=1)
+        moved = {**node(1), "updatedAt": iso(later)}
+        result = sync(self.connection, now=later, runner=BucketGh({"mentions:@me": [moved]}))
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.reasons(), {"1": "watched"})
+
+    def test_a_failed_bucket_never_lowers_a_reason(self):
+        """A failed `assignee:` search is unknown, not "not assigned": a row seen
+        only by another bucket keeps what it had, and a new one stores none."""
+        sync(self.connection, now=self.now, runner=BucketGh({"assignee:@me": [node(1)]}))
+        later = self.now + timedelta(hours=1)
+        moved = {**node(1), "updatedAt": iso(later)}
+        fresh = {**node(2), "updatedAt": iso(later)}
+        result = sync(self.connection, now=later,
+                      runner=BucketGh({"mentions:@me": [moved, fresh]}, failing={"assignee:@me"}))
+        self.assertFalse(result.ok)
+        self.assertEqual(self.reasons(), {"1": "assigned", "2": None})
+
+    def test_a_failed_author_bucket_leaves_a_mention_unknown_but_an_assignment_known(self):
+        later = self.now
+        result = sync(self.connection, now=later,
+                      runner=BucketGh({"assignee:@me": [node(1)], "mentions:@me": [node(2)]},
+                                      failing={"author:@me"}))
+        self.assertFalse(result.ok)
+        self.assertEqual(self.reasons(), {"1": "assigned", "2": None})
+
+    def test_jira_rows_store_assigned_filed_or_watched(self):
+        me = "acct-1"
+        mine = jira_issue("ABC-1")
+        filed = jira_issue("ABC-2", assignee=None, reporter={"accountId": me, "displayName": "Alex"})
+        watched = jira_issue("ABC-3", assignee={"accountId": "acct-other"}, watches={"isWatching": True})
+        transport = jira_transport([{"issues": [mine, filed, watched], "isLast": True}], me=me)
+        with self.environment():
+            result = sync(self.connection, tracker="jira", now=self.now, runner=transport)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.reasons(), {"ABC-1": "assigned", "ABC-2": "filed", "ABC-3": "watched"})
+
+    def test_a_writer_that_names_no_reason_keeps_the_stored_one(self):
+        """The importers (`sources.issues`, `sources.index_cache`) call
+        `upsert_shadow` without a reason; a refresh from them is not a
+        collect and must not erase one."""
+        from sd_db.writes import upsert_shadow
+
+        sync(self.connection, now=self.now, runner=BucketGh({"author:@me": [node(1)]}))
+        upsert_shadow(self.connection, tracker=TRACKER, url=node(1)["url"], title="imported")
+        self.assertEqual(self.reasons(), {"1": "filed"})
+
+
 class PaginationIntegrity(unittest.TestCase):
     def pages(self, blocks):
         calls = []

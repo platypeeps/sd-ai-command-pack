@@ -93,6 +93,27 @@ BUCKETS = (
     ("author", "author:@me"),
 )
 
+#: `shadow.reason` (migration 34), strongest first, with the `why` words that
+#: give each: GitHub's buckets and Jira's `normalize`. Any other word is
+#: `watched`: a mention, a review request, a Jira watch, a custom JQL's match.
+REASONS = (("assigned", ("assigned",)), ("filed", ("author", "filed")))
+
+
+def reason_of(why: list[str], unknown=()) -> str | None:
+    """The strongest reason `why` gives a row, or None when it cannot be said.
+
+    `unknown` names the buckets whose search did not complete. A row missing
+    from one of them may still belong to it, so it gets no reason weaker than
+    that bucket's: None, which `upsert_shadow` reads as "keep the stored one".
+    """
+    for value, words in REASONS:
+        if any(word in why for word in words):
+            return value
+        if any(word in unknown for word in words):
+            return None
+    return "watched" if why else None
+
+
 QUERY = """
 query($q: String!, $n: Int!, $after: String) {
   search(query: $q, type: ISSUE, first: $n, after: $after) {
@@ -474,6 +495,7 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
     rows = sorted(merged.values(), key=lambda row: row["updated_at"], reverse=True)
     for row in rows:
         row["why"].sort()
+        row["reason"] = reason_of(row["why"], truncated)
     return Collected(
         ok=not errors and not truncated,
         reason="; ".join(errors),
@@ -489,12 +511,12 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
 def store(connection: sqlite3.Connection, issues: list[dict]) -> int:
     """Write collected issues as `shadow` rows, keyed by `(tracker, url)`.
 
-    `normalize` returns ten keys and this writes eight. The two it does not
-    write -- `why` and `updated_at` -- are not an oversight; the `shadow`
-    table has no column for either, and the comment above that table says
-    why and where `why` goes instead. It goes there *before* this runs:
-    `sync` passes the same `result.issues` to `contribution_sync.refresh`
-    first. Returns the count.
+    `normalize` returns ten keys and this writes eight, plus the `reason`
+    `collect` derives from `why` (migration 34). The two it does not write --
+    `why` and `updated_at` -- are not an oversight; the `shadow` table has no
+    column for either, and the comment above that table says why and where
+    `why` goes instead. It goes there *before* this runs: `sync` passes the
+    same `result.issues` to `contribution_sync.refresh` first. Returns the count.
     """
     for issue in issues:
         upsert_shadow(
@@ -507,6 +529,7 @@ def store(connection: sqlite3.Connection, issues: list[dict]) -> int:
             title=issue.get("title") or None,
             state=issue.get("state") or None,
             author=issue.get("author") or None,
+            reason=issue.get("reason"),
         )
     return len(issues)
 

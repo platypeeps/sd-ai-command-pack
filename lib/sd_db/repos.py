@@ -704,6 +704,36 @@ def issue_sources(connection: sqlite3.Connection, path: Path | str) -> dict[str,
     return sources
 
 
+#: The `shadow.reason` values that make an issue the operator's (sd:4636).
+#: `watched` and NULL (unknown) rows stay synced and stay off Today and Tasks.
+MINE = ("assigned", "filed")
+
+
+def mine_issues(connection: sqlite3.Connection) -> dict[str, list[dict]]:
+    """Each repository's open issues that are the operator's, for Today and Tasks (sd:4636).
+
+    `{path: [row, ...]}` for every registered repository whose issue sources
+    match at least one open issue `assigned` to or `filed` by the operator,
+    newest `last_seen` first. A row's tracker and `shadow.repo` must match one
+    of `issue_sources`; GitHub's `owner/name` matches in any case, as GitHub
+    reads it. Pull requests stay out: they are contributions, not issues.
+    """
+    found: dict[str, list[dict]] = {}
+    for (path,) in connection.execute("SELECT path FROM repo WHERE channels IS NOT NULL ORDER BY path").fetchall():
+        sources = issue_sources(connection, path)
+        if not sources:
+            continue
+        match = " OR ".join("(tracker = ? AND repo = ? COLLATE NOCASE)" for _ in sources)
+        rows = connection.execute(
+            "SELECT tracker, url, number, title, state, reason, last_seen FROM shadow "
+            f"WHERE ({match}) AND kind = 'issue' AND state = 'open' "
+            f"AND reason IN ({', '.join('?' * len(MINE))}) ORDER BY last_seen DESC, id DESC",
+            [value for pair in sources.items() for value in pair] + list(MINE)).fetchall()
+        if rows:
+            found[path] = [dict(row) for row in rows]
+    return found
+
+
 #: The words `repo managed` takes, mapped to what the column holds. Words and
 #: not `1`/`0` so the verb reads like `runner-merge`'s `manual|auto`.
 MANAGED_VALUES = {"yes": 1, "no": 0}
