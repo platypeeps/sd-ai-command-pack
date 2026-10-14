@@ -818,9 +818,10 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]],
     home = repo_home(repo)
     checkout = _shown(home)
     # Only the default folder is this tool's own. A folder the setting names
-    # is the operator's, so a note there that names no checkout is theirs,
-    # never an earlier version's copy to take over.
-    takeover = folder == Path(VAULT).expanduser() / BRIEFS / home.name
+    # is the operator's, even one spelled as the default, so a note there
+    # that names no checkout is theirs, never an earlier version's copy to
+    # take over.
+    takeover = not (channels or {}).get("obsidian", {}).get("folder")
     reports: list[str] = []
     written = 0
     for cfg in docs:

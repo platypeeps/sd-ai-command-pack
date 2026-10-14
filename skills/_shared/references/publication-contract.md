@@ -199,7 +199,8 @@ never whether: an outward mirror still needs its key on the document.
   the default.
 - **A named folder is the operator's.** Nothing there that this tool did not
   write is replaced. The render leaves a vault note that names no checkout and
-  says so; a drain adopts a page or file there only under step 3's pointer rule.
+  says so; a drain adopts a page or file, there or anywhere, only under step 3's
+  pointer rule.
 - **Precedence.** A document's `space=` or `folder=` wins over the setting, and
   the setting wins over the default. A pinned `page=` or `file=` wins over both;
   where the setting names a folder, the render names each pinned document, and
@@ -442,11 +443,11 @@ Draining is six steps per request, and the order matters:
    adopt the match instead of creating a second. A drain that creates
    unconditionally makes a duplicate out of every interrupted earlier drain.
    Two matches is an ambiguity, not a choice: report it and leave the request
-   in place. Where the repo's channels setting (step 2) names a folder for
-   this destination, that folder holds the operator's own pages too: adopt a
-   match there only when its pointer line names this document's `source_url`
-   or `source`. Any other match is not this tool's: report it and leave the
-   request in place.
+   in place. Adopt a match only when its pointer line names this document's
+   `source_url` or `source`. A container can hold the operator's own pages,
+   and whether the channels setting named it can change after the request
+   was queued, so this holds in every container. Any other match is not
+   this tool's: report it and leave the request in place.
 4. Write the id into the request file, the moment the destination returns it.
    The request is the durable record, because it is the one file the drain is
    certain it can write and the one the next drain is certain to read. A

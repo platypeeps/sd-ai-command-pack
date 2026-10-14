@@ -2403,6 +2403,18 @@ class ChannelsTests(Fixture):
         self.publish([self.SCENARIO[3]])
         self.assertIn("edited", hand.read_text(encoding="utf-8"))
 
+    def test_a_setting_naming_the_default_folder_still_never_overwrites_a_hand_note(self) -> None:
+        """Self-review of b91fa6c6f: a folder the setting names is the
+        operator's even when it spells the default, so the takeover of an
+        earlier version's copy is for no setting alone."""
+        self.row({"obsidian": {"folder": "Briefs/my-research"}})
+        hand = self.briefs() / "d.md"
+        hand.parent.mkdir(parents=True, exist_ok=True)
+        hand.write_text("# My own note\n", encoding="utf-8")
+        said = self.publish([self.SCENARIO[3]])
+        self.assertEqual(hand.read_text(encoding="utf-8"), "# My own note\n")
+        self.assertTrue(any(str(hand) in line and "left alone" in line for line in said), said)
+
     def test_a_document_key_wins_over_the_setting(self) -> None:
         self.row({"notion": {"folder": "Example"}, "drive": {"folder": "Research/Example"}})
         self.publish([self.SCENARIO[2]])
