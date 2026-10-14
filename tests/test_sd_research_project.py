@@ -90,6 +90,7 @@ class Projection(base.Fixture):
              **properties: Any) -> dict[str, Any]:
         database = EXPERIMENTS if target == "experiments" else TASKS
         fetched: dict[str, Any] = {"database": database, "schema": schema(target)}
+        properties = {**{name: None for name in self.projection.OWNED[target]}, **properties}
         if row is not None:
             fetched["row"] = {"id": url(row), "parent": database, "properties": properties}
         if candidates is not None:
@@ -500,6 +501,25 @@ class PlanTests(Projection):
         self.project()
         planned = self.planned(self.task, self.live("tasks", row=TASK_ROW, **dict(live, Status="In Progress")))
         self.assertEqual((planned["properties"], planned["yielded"]), ({"Due": "2026-11-02"}, []))
+
+    def test_a_row_read_without_an_owned_property_refuses_and_records_nothing(self) -> None:
+        self.queued()
+        self.planned(self.experiment, self.live())
+        live = self.live(candidates=[ROW], Status="Blocked")
+        del live["candidates"][0]["properties"]["Status"]
+        before = self.held(self.experiment)
+        status, said = self.plan(self.experiment, live)
+        self.assertEqual(status, 1, said)
+        self.assertIn("Status: the live row does not carry it", said)
+        self.assertEqual(self.held(self.experiment), before)
+        self.created(self.task, TASK_ROW)
+        self.status(self.task, "in_progress")
+        self.project()
+        live = self.live(row=TASK_ROW, Status="Blocked")
+        del live["row"]["properties"]["Status"]
+        status, said = self.plan(self.task, live)
+        self.assertEqual(status, 1, said)
+        self.assertIn("Status: the live row does not carry it", said)
 
     def test_a_live_row_lacking_status_names_it(self) -> None:
         self.created()

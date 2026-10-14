@@ -573,6 +573,10 @@ def plan(connection: sqlite3.Connection, request: dict[str, Any], live: dict[str
                       "body": POINTER.format(item=item)}
         else:
             _schema(live, target, OWNED[target])
+            absent = [name for name in OWNED[target] if name not in live_row["properties"]]
+            if absent:  # an unread value is unknown, not empty: the guard cannot clear it
+                raise ProjectionRefusal(f"{absent[0]}: the live row does not carry it; fetch the row again with "
+                                        "every property, an empty one as null")
             unconfirmed = (held.get("writing") or {}).get("values", {})
             written = held.get("written", {})
             writes, yielded = {}, []
