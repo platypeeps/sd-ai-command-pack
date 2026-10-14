@@ -2441,9 +2441,9 @@ roles:
         self.assertEqual((invoker["pid"], invoker["ppid"], invoker["authority"]), (os.getpid(), os.getppid(), "--manual"))
         self.assertEqual(invoker["lock_holder"]["command"], f"sd-ship merge --item {self.item}")
         self.assertEqual(invoker["started_at"], ship.PROCESS_STARTED)
-        [note] = self.connection.execute("SELECT body FROM note WHERE item=? AND body LIKE 'Code delivery %'",
-                                         (self.item,)).fetchall()
-        self.assertEqual(json.loads(note[0].split("\n", 1)[1])["invoker"], invoker)
+        [evidence] = self.connection.execute("SELECT body FROM state WHERE kind='verified' AND key=?",
+                                             (f"code-delivery:{self.item}:{merged['merge_commit']}",)).fetchall()
+        self.assertEqual(json.loads(evidence[0])["invoker"], invoker)  # the note holds only its line (sd:3508)
 
     def test_a_merge_commit_outside_the_default_branch_names_both_commits(self):
         """`--is-ancestor` says "no" by exit status alone; the reconcile check

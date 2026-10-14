@@ -494,6 +494,62 @@ class TheActivityReads(unittest.TestCase):
         self.assertEqual([row["id"] for row in rows], [ids[1]])
         self.assertEqual(rows[0]["title"], "A slice")
 
+    def evidence(self, number, sha):
+        return {"pull_request": {"url": f"https://github.com/o/r/pull/{number}"}, "merge_commit": sha,
+                "review_selection": {"reviewed_by": ["example-reviewer"]}}
+
+    def test_a_delivery_note_is_its_marker_line_and_the_evidence_is_a_resolved_verified_row(self):
+        """sd:3508: the evidence JSON made a quarter of the note bytes; the readers need only the line."""
+        from sd_db.ship import delivery_key, note_merge
+
+        note_merge(self.connection, self.item, self.evidence(1, "a" * 40))
+        [note] = self.connection.execute("SELECT body FROM note WHERE item = ? AND body LIKE 'Code delivery %'",
+                                         (self.item,)).fetchall()
+        self.assertEqual(note["body"], "Code delivery https://github.com/o/r/pull/1 at " + "a" * 40)
+        [row] = self.connection.execute("SELECT key, body, resolved_at FROM state WHERE kind = 'verified'").fetchall()
+        self.assertEqual(row["key"], delivery_key(self.item, "a" * 40))
+        self.assertEqual(json.loads(row["body"]), self.evidence(1, "a" * 40))
+        self.assertIsNotNone(row["resolved_at"])  # a merge is a fact, not open work
+
+    def test_the_read_gives_the_line_and_the_evidence_for_a_new_note_and_an_old_one(self):
+        from sd_db.ship import note_merge
+
+        old = self.evidence(1, "a" * 40)
+        add_note(self.connection, self.item, "comment",
+                 "Code delivery https://github.com/o/r/pull/1 at " + "a" * 40 + "\n" + json.dumps(old, sort_keys=True))
+        note_merge(self.connection, self.item, self.evidence(2, "b" * 40))
+        add_note(self.connection, self.item, "comment", "Code delivery https://github.com/o/r/pull/3 at " + "c" * 40)
+        rows = reads.delivery_notes(self.connection, since="2000-01-01")
+        bodies = [row["body"].split("\n", 1) for row in rows]
+        self.assertEqual([json.loads(rest) for _, rest in bodies[:2]], [old, self.evidence(2, "b" * 40)])
+        self.assertEqual(bodies[2], ["Code delivery https://github.com/o/r/pull/3 at " + "c" * 40])  # no row, no JSON
+
+    def test_a_merge_noted_before_the_split_or_again_writes_nothing(self):
+        from sd_db.ship import note_merge
+
+        evidence = self.evidence(1, "a" * 40)
+        add_note(self.connection, self.item, "comment",
+                 "Code delivery https://github.com/o/r/pull/1 at " + "a" * 40 + "\n" + json.dumps(evidence))
+        note_merge(self.connection, self.item, evidence)
+        note_merge(self.connection, self.item, self.evidence(2, "b" * 40))
+        note_merge(self.connection, self.item, self.evidence(2, "b" * 40))
+        self.assertEqual(self.connection.execute("SELECT count(*) FROM note WHERE body LIKE 'Code delivery %'").fetchone()[0], 2)
+        self.assertEqual(self.connection.execute("SELECT count(*) FROM state WHERE kind = 'verified'").fetchone()[0], 1)
+
+    def test_a_failed_evidence_write_leaves_no_note(self):
+        """The note and its row are one transaction: a rerun finds neither and writes both."""
+        from sd_db.ship import note_merge
+
+        self.connection.execute("CREATE TRIGGER refuse BEFORE INSERT ON state BEGIN SELECT RAISE(ABORT, 'refused'); END")
+        self.connection.commit()
+        with self.assertRaises(sqlite3.IntegrityError):
+            note_merge(self.connection, self.item, self.evidence(1, "a" * 40))
+        self.assertEqual(self.connection.execute("SELECT count(*) FROM note WHERE body LIKE 'Code delivery %'").fetchone()[0], 0)
+        self.connection.execute("DROP TRIGGER refuse")
+        self.connection.commit()
+        note_merge(self.connection, self.item, self.evidence(1, "a" * 40))
+        self.assertEqual(len(reads.delivery_notes(self.connection, since="2000-01-01")), 1)
+
     def test_exec_note_count_counts_every_exec_note_and_nothing_else(self):
         for body in ("{}", "plain text", "{}"):
             add_note(self.connection, self.item, "exec", body)
