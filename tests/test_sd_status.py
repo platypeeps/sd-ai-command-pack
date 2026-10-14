@@ -639,7 +639,9 @@ class GapVocabularyTests(unittest.TestCase):
             default = importlib.reload(system).BASELINE_OWNERS
         importlib.reload(system)
         self.assertEqual(frozenset(sd_fleet.DEFAULT_OWNERS), default)
-        with mock.patch.object(status.sd_lib, "machine_config", lambda path: {}):
+        # The row is in the workflow database under `HOME` (sd:3989): an empty home has none.
+        with (tempfile.TemporaryDirectory() as home, mock.patch.dict(os.environ, {"HOME": home}),
+              mock.patch.object(status.sd_lib, "machine_config", lambda path: {})):
             self.assertEqual(status._baseline_owners(), (sd_fleet.DEFAULT_OWNERS, ""))
 
     def test_the_baseline_flags_are_the_systems_ids_and_sentences(self) -> None:

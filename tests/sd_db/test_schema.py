@@ -1776,6 +1776,12 @@ class TheChannelsColumn(SchemaCase):
     def _rows(self, connection):
         return [tuple(row) for row in connection.execute(f"SELECT {self.COLUMNS} FROM repo ORDER BY path")]
 
+    def _migrate_through_twenty_nine(self):
+        # Through 29 only: 30 rebuilds `state`, which 29's reverse leaves.
+        through = [m for m in schema_module.migrations() if m[0] <= 29]
+        with mock.patch("sd_db.migrate.migrations", return_value=through):
+            return migrate(self.path)
+
     def _reference(self, upto):
         reference = sqlite3.connect(":memory:")
         self.addCleanup(reference.close)
@@ -1788,7 +1794,7 @@ class TheChannelsColumn(SchemaCase):
     def test_every_existing_row_arrives_at_null_and_keeps_its_values_and_a_rerun_applies_nothing(self):
         self._at_version_twenty_eight()
         result = migrate(self.path)
-        self.assertEqual((result.before, result.applied), (28, [29]))
+        self.assertEqual((result.before, result.applied), (28, list(range(29, SCHEMA_VERSION + 1))))
         self.assertEqual(migrate(self.path).applied, [])
         connection = connect(self.path, write=True)
         self.addCleanup(connection.close)
@@ -1817,20 +1823,22 @@ class TheChannelsColumn(SchemaCase):
         raw.commit()
         raw.close()
         with self.assertRaises(sqlite3.OperationalError):
-            migrate(self.path)
+            self._migrate_through_twenty_nine()
         raw = sqlite3.connect(self.path)
         self.assertEqual(schema_version(raw), 28)
         self.assertEqual(self._rows(raw), self.ROWS)
         raw.execute("ALTER TABLE repo DROP COLUMN channels")
         raw.commit()
         raw.close()
-        self.assertEqual(migrate(self.path).applied, [29])
+        self.assertEqual(self._migrate_through_twenty_nine().applied, [29])
 
     def test_the_reverse_returns_the_file_to_twenty_eight(self):
         self._at_version_twenty_eight()
-        migrate(self.path)
-        connection = connect(self.path, write=True)
+        self._migrate_through_twenty_nine()
+        # The library refuses a write below its version; write it raw.
+        connection = sqlite3.connect(self.path)
         connection.execute("UPDATE repo SET channels = ? WHERE path = '/one'", ('{"drive": {}}',))
+        connection.commit()
         connection.close()
         text = dict(schema_module.migrations())[29].read_text(encoding="utf-8")
         raw = sqlite3.connect(self.path, isolation_level=None)
@@ -1841,7 +1849,113 @@ class TheChannelsColumn(SchemaCase):
         # A backup restore compares the table to 28's shape.
         self.assertEqual(raw.execute("PRAGMA table_info(repo)").fetchall(),
                          self._reference(28).execute("PRAGMA table_info(repo)").fetchall())
-        self.assertEqual(migrate(self.path).applied, [29])
+        self.assertEqual(self._migrate_through_twenty_nine().applied, [29])
+
+
+class TheSettingKind(SchemaCase):
+    """Migration 30 (sd:3989, design sd:3983 slice P1). `setting` joins the
+    `state` kinds: a value one row serves every machine. The table is rebuilt
+    as 28 rebuilt it, so every row comes through with its id and all four
+    indexes come back. A failed rebuild leaves the file at 29, and the
+    reverse returns it to 29's shape without the setting rows."""
+
+    ROWS = [(7, "heartbeat", "runner", "t1", "{}", None),
+            (9, "restore", "2026-09-01", "t2", "{}", "t3"),
+            (11, "check", "run-1", "t4", "{}", None),
+            (12, "snooze", "today:job:x:1", "t5", "{}", None),
+            (13, "view", "system/index.html", "t6", "{}", None)]
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(
+            "SELECT id, kind, key, timestamp, body, resolved_at FROM state ORDER BY id")]
+
+    def _shape(self, connection):
+        from sd_db.backup import _schema_objects
+
+        return ([tuple(row) for row in connection.execute("PRAGMA table_info(state)")],
+                _schema_objects(connection, ["state"]))
+
+    def _reference(self, upto):
+        reference = sqlite3.connect(":memory:")
+        self.addCleanup(reference.close)
+        paths.install(reference)
+        for version, path in schema_module.migrations():
+            if version <= upto:
+                reference.executescript(path.read_text(encoding="utf-8"))
+        return reference
+
+    def _at_version_twenty_nine(self):
+        through = [m for m in schema_module.migrations() if m[0] <= 29]
+        with mock.patch("sd_db.migrate.migrations", return_value=through):
+            migrate(self.path)
+        raw = sqlite3.connect(self.path)
+        raw.executemany(
+            "INSERT INTO state (id, kind, key, timestamp, body, resolved_at) VALUES (?, ?, ?, ?, ?, ?)", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def test_rows_survive_the_rebuild_and_a_setting_is_accepted(self):
+        self._at_version_twenty_nine()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied), (29, list(range(30, SCHEMA_VERSION + 1))))
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.ROWS)
+        self.assertEqual(self._shape(connection), self._shape(self._reference(29)))
+        connection.execute(
+            "INSERT INTO state (kind, key, timestamp, body) VALUES ('setting', 'sd.copilot_review', 't7', '{}')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('bored', 'x', 't8', '{}')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('heartbeat', 'runner', 't9', '{}')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('check', 'run-1', 't9', '{}')")
+        self.assertEqual(connection.execute(
+            "SELECT count(*) FROM sqlite_master WHERE name LIKE 'state_before_%'").fetchone()[0], 0)
+
+    def test_a_failed_rebuild_leaves_the_file_at_twenty_nine_with_every_row_and_a_rerun_finishes_it(self):
+        self._at_version_twenty_nine()
+        # A row the new CHECK refuses fails the copy, after the rename and the
+        # new table: the one way the rebuild can stop half done.
+        raw = sqlite3.connect(self.path)
+        raw.execute("PRAGMA ignore_check_constraints = ON")
+        raw.execute("INSERT INTO state (id, kind, key, timestamp) VALUES (20, 'bored', 'x', 't9')")
+        raw.commit()
+        raw.close()
+        with self.assertRaises(sqlite3.IntegrityError):
+            migrate(self.path)
+        raw = sqlite3.connect(self.path)
+        self.assertEqual(schema_version(raw), 29)
+        self.assertEqual(self._rows(raw), self.ROWS + [(20, "bored", "x", "t9", None, None)])
+        self.assertEqual(self._shape(raw), self._shape(self._reference(29)))
+        self.assertEqual(raw.execute(
+            "SELECT count(*) FROM sqlite_master WHERE name LIKE 'state_before_%'").fetchone()[0], 0)
+        raw.execute("DELETE FROM state WHERE id = 20")
+        raw.commit()
+        raw.close()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied), (29, list(range(30, SCHEMA_VERSION + 1))))
+
+    def test_the_reverse_returns_the_file_to_twenty_nine_without_the_settings(self):
+        self._at_version_twenty_nine()
+        migrate(self.path)
+        connection = connect(self.path, write=True)
+        connection.execute(
+            "INSERT INTO state (id, kind, key, timestamp, body) VALUES (30, 'setting', 'sd.copilot_review', 't7', "
+            "'{\"value\": \"never\"}')")
+        connection.close()
+        text = dict(schema_module.migrations())[30].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), 29)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        with self.assertRaises(sqlite3.IntegrityError):
+            raw.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('setting', 'sd.x', 't8', '{}')")
+        # A backup restore compares the table and its indexes to 29's shape.
+        self.assertEqual(self._shape(raw), self._shape(self._reference(29)))
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied), (29, list(range(30, SCHEMA_VERSION + 1))))
 
 
 class TheConnection(SchemaCase):

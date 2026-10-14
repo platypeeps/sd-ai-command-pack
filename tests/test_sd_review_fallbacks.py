@@ -346,6 +346,11 @@ class DatabaseProviderStateTests(ReviewRunFixture):
         self.assertEqual(result["status"], "unavailable")
         self.assertIn("cannot read provider state", result["registry_refusal"])
         self.assertEqual(result["outcomes"], [])
+        # sd:3989: the machine's Copilot word is a row in that database. The
+        # report says it was not read; it does not guess, and it selects nothing.
+        copilot = result["remote_reviews"]["copilot"]
+        self.assertEqual((copilot["policy"], copilot["automatic"]), (None, False))
+        self.assertIn("not read: the workflow database did not open", copilot["source"])
 
 
 class OrderSourceTests(ReviewRunFixture):
