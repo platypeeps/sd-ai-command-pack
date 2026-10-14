@@ -2055,7 +2055,9 @@ class Ship(SharedReview):
         """The lane host and the fence again, after the last network read before the `PUT`.
 
         The local gate and those reads can stall for minutes under the lock, and
-        a hub demoted meanwhile merges nothing (sd:4044).
+        a hub demoted meanwhile merges nothing (sd:4044). `still_gated` asks at its
+        end, and `merge` again after the dispatch receipt, whose write can wait on
+        the database lock.
         """
         elsewhere = lane_host_refusal(self.root, self.connection, self.database)
         if elsewhere:
@@ -2095,6 +2097,7 @@ class Ship(SharedReview):
                           state="retryable_failure",
                           next_action=f"Run sd-ship prepare --catch-up, or git merge origin/{base} on the branch "
                                       "and then prepare again.")
+        self.still_hosted()
 
     def settled_ready(self, number: int, head: str, base: str, protection: dict) -> dict:
         """The pull request once `ready` accepts it, read again while GitHub settles (sd:2050).
@@ -2215,7 +2218,6 @@ class Ship(SharedReview):
             raise Refusal("HEAD moved immediately before merge")
         self.merge_authority()
         self.still_gated(base, head, protection)
-        self.still_hosted()
         # `row_authorized_merge` is written here, with the phase that says a
         # merge is going out, and it is written on every dispatch rather than
         # only when there is something to say: `still_gated` above took the
@@ -2225,6 +2227,9 @@ class Ship(SharedReview):
         # that never happened (sd:1347).
         self.save(phase="merge_dispatch", merge_message=body, row_authorized_merge=self.row_authority, **closes,
                   warnings=self.dispatch_warnings(), merge_invoker=self.invoker())
+        # Again after the receipt, whose write can wait on the database lock; a
+        # refusal here leaves `merge_dispatch` as a refused merge call does.
+        self.still_hosted()
         try:
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
                          body={"sha": head, "merge_method": "squash", "commit_title": f"{title} (#{observed['number']})",
