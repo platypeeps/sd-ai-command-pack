@@ -72,7 +72,7 @@ except ImportError:
 
 from sd_lib import GIT_TIMEOUT_SECONDS
 from sd_research_fonts import FONTS_CSS
-from sd_research_publish import execute_conf, project_label, publish
+from sd_research_publish import execute_conf, exit_status, project_label, publish
 from sd_research_tokens import THEME_JS, TOKENS_CSS
 
 CSS = TOKENS_CSS
@@ -243,7 +243,7 @@ def build_one(repo, cfg, project):
     return page
 
 
-def main():
+def main() -> int:
     # R10-D6: the repository is the one the caller is standing in. The kit took
     # `render [repo_dir]` before it moved here, which is the shape that lets a
     # session act on a checkout nobody pointed it at.
@@ -263,9 +263,11 @@ def main():
     # nobody can find was not delivered. Registration is idempotent and
     # enqueueing skips what is unchanged, so re-rendering costs nothing and
     # leaves no duplicates.
-    for line in publish(Path(repo), project, ns["DOCS"]):
+    reports = publish(Path(repo), project, ns["DOCS"])
+    for line in reports:
         print("  %s" % line)
+    return exit_status(reports)
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
