@@ -412,6 +412,7 @@ Once a plugin's `store.driver` is `db`, its vault base rows live in `item` and `
 
 Each committed `records` write renders its kind, or every kind after a failed render. A write never fails for its render: it prints `mirror not updated: <reason>`.
 Every render records the `heartbeat` state row `records-mirror`, body `{at, ok, kinds, written, refused, reason}`.
+`records.mirror_state(connection)` reads the last one, `(timestamp, body)` or None; the dashboard's Health shows it.
 The verb exits 1 on any refused file or a render that stopped.
 
 ## Renaming a repository
