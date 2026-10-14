@@ -76,7 +76,9 @@ running entry carries a `holder` (host, pid, a token per claim), its `step`
 and `lease_until`. Every runner write checks the token, so a reclaimed or
 released claim writes nothing more; a hub fault is tried again for
 `WRITE_RETRY_SECONDS`, then the run stops, and a hub that refuses this
-build stops it at once (sd:3359). A holder on this machine is dead
+build stops it at once (sd:3359). Such a stop leaves a record beside the
+runner lock, so the next run settles the entry as a hub fault and not as
+a death (`record_hub_stop`, sd:TBD). A holder on this machine is dead
 when the runner lock is free and its pid is gone; one on another machine
 once its lease passed, which the lane host checks at claim. In prepare its
 entry goes back to pending, failing at the `RECLAIMS`th time; in merge it
@@ -165,7 +167,13 @@ blocker `hub_unavailable` (`sd_ship_workflow.HUB_FAULTS`), the runner puts the
 entry back as pending with its `hub_retries` count and stops: the next entry
 would meet the same hub. The next run starts after the satellite's
 self-install, in a new process. A catch-up merge prepare made is accepted
-as the entry's head; any other move still skips the entry.
+as the entry's head; any other move still skips the entry. A hub fault is
+never the entry's, so past `HUB_RETRIES` the entry is held, not failed, and
+`lane release` runs it again (sd:TBD). When the hub refuses the put-back
+too, as it refuses a build it moved past, the runner records the stop in
+its lane folder (`record_hub_stop`) and the next run's reclaim reads it:
+eight prepares spent a reclaim as a dead runner's, and a merge failed,
+in one day of hub upgrades.
 The retry's prepare reuses a review that cleared before the fault, as at any
 head the ship receipt records reviewed; a review whose report the fault kept
 from the receipt is incomplete, and spends the one `--retry-review`.
@@ -297,6 +305,8 @@ WRITE_RETRY_SECONDS = 600
 WRITE_PAUSE = 30
 #: The reclaim of a dead holder in prepare that fails its entry instead of putting it back, so a crash loop stops.
 RECLAIMS = 3
+#: A runner stopped by a hub fault while it held a claim leaves `<lane>/queue/<prefix><token>.json` (sd:TBD).
+HUB_STOP_PREFIX = "hub-stop-"
 #: A merge lease is `MERGE_SECONDS` and this long for the landing.
 LANDING_SECONDS = 1800
 #: The bound on the main checkout's `make post-merge` after a run that merged (sd:3566).
@@ -1185,7 +1195,8 @@ def default_runner_merge(root: pathlib.Path) -> str:
     try:
         connection = connect(default_path(), write=False)
     except Exception as error:  # noqa: BLE001 -- every fault is "cannot tell", which merges nothing
-        raise LaneError(f"the database did not answer: {error}", code=RUNNER_MERGE_UNKNOWN) from None
+        raise LaneError(f"the database did not answer: {error}", code=HUB_UNAVAILABLE if hub_fault_of(error)
+                        else RUNNER_MERGE_UNKNOWN) from None
     try:
         row = sd_lib.repo_row(connection, registered_for(connection, str(root.resolve()), origin))
         value = row["runner_merge"] if row is not None and "runner_merge" in row.keys() else None
@@ -1197,13 +1208,15 @@ def default_runner_merge(root: pathlib.Path) -> str:
         else:
             return str(value)
     except Exception as error:  # noqa: BLE001 -- as above
+        if hub_fault_of(error):
+            raise LaneError(f"{type(error).__name__}: {error}", code=HUB_UNAVAILABLE) from None
         why = f"{type(error).__name__}: {error}"
     finally:
         connection.close()
     raise LaneError(why, code=RUNNER_MERGE_UNKNOWN)
 
 
-def merge_refusal(entry: dict[str, Any]) -> dict[str, str] | None:
+def merge_refusal(entry: dict[str, Any]) -> dict[str, Any] | None:
     """Why the runner may not merge `entry`, as a code and a reason; None when it may (sd:3132).
 
     The one authority check: `--manual` on the entry, or `repo.runner_merge`
@@ -1215,8 +1228,10 @@ def merge_refusal(entry: dict[str, Any]) -> dict[str, str] | None:
     try:
         setting = default_runner_merge(pathlib.Path(entry["worktree"]))
     except Exception as error:  # noqa: BLE001 -- an unread setting authorises nothing
+        hub = getattr(error, "code", None) == HUB_UNAVAILABLE  # put back as a hub fault, not stopped `prepared`
         return {"code": RUNNER_MERGE_UNKNOWN,
-                "reason": f"repo.runner_merge cannot be read ({error}), and the entry has no --manual; merge by hand"}
+                "reason": f"repo.runner_merge cannot be read ({error}), and the entry has no --manual; merge by hand",
+                **({"hub_fault": True, "step": "prepare"} if hub else {})}
     if setting == "auto":
         return None
     return {"code": RUNNER_MERGE_MANUAL, "reason": "repo.runner_merge is manual and the entry has no --manual; "
@@ -1468,7 +1483,10 @@ def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = Fals
     a log beside the others.
     """
     host = this_host()
-    following = next((row for row in read_queue(queue) if runnable(row)), None)
+    try:
+        following = next((row for row in read_queue(queue) if runnable(row)), None)
+    except LaneError:  # a hub fault here left the claimed entry running under a runner that raised (sd:TBD)
+        return None
     if following is None or merge_refusal(entry) is not None:
         return None
 
@@ -1822,10 +1840,24 @@ def host_check(queue: Queue) -> Callable[[Any], None]:
         try:
             elsewhere = sd_lib.lane_elsewhere(connection, hub_database(queue.environ), queue.repository)
         except Exception as error:  # noqa: BLE001 -- `LaneUnknown`, or a read fault it did not wrap
+            fault = hub_fault_of(error)
+            if fault is not None:  # a retried claim that landed unseen must stop as a hub fault (sd:TBD)
+                raise fault from None
             raise LaneError(str(error), code=getattr(error, "code", None) or "lane_unknown") from None
         if elsewhere is not None:
             raise LaneError(elsewhere, code=LANE_ELSEWHERE)
     return on_lane_host
+
+
+def hub_fault_of(error: BaseException | None) -> BaseException | None:
+    """`error`, or the hub fault it wraps (`sd_db.ship.LaneUnknown` keeps it as its cause); None for any other."""
+    seen: set[int] = set()
+    while error is not None and id(error) not in seen:
+        if sd_ship_workflow.is_hub_fault(error):  # type: ignore[arg-type]
+            return error
+        seen.add(id(error))
+        error = error.__cause__ or error.__context__
+    return None
 
 
 def runner_alive(pid: Any) -> bool:
@@ -1841,17 +1873,115 @@ def runner_alive(pid: Any) -> bool:
     return True
 
 
-def reclaim_dead(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def reclaim_dead(entries: list[dict[str, Any]], stops: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """Settle each `running` entry whose holder on this machine died (sd:2821, sd:3282), by `reclaim`.
 
     Called with this machine's runner lock held, so no runner here is live;
     the holder's pid must also be gone, which a reused pid only makes wait.
     A pid that cannot be read keeps the entry `running`. A holder on another
-    machine is left to its lease.
+    machine is left to its lease. A holder whose token has a record in
+    `stops` (`hub_stops`) stopped on a hub fault, and `resume_stopped`
+    settles it instead; a record that did not parse is None, and reclaims.
     """
-    host = this_host()
-    return [reclaim(row) for row in entries if row.get("status") == "running"
+    host, stops = this_host(), stops or {}
+
+    def settled(row: dict[str, Any]) -> dict[str, Any]:
+        record = stops.get(str(row["holder"].get("token")))
+        return resume_stopped(row, record) if record is not None else reclaim(row)
+    return [settled(row) for row in entries if row.get("status") == "running"
             and (row.get("holder") or {}).get("host") == host and not runner_alive(row["holder"].get("pid"))]
+
+
+def resume_stopped(row: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
+    """Settle a running entry whose runner stopped on a hub fault, by its `record`; never as a death (sd:TBD).
+
+    A recorded `outcome` is the end the runner reached and could not write,
+    a merge included, and lands as `finish_entry` writes it. Otherwise the
+    entry goes back to pending at its place, as `requeue` puts it back after
+    a hub fault: `hub_retries` plus one, held once they pass `HUB_RETRIES`.
+    """
+    holder, step, outcome = row.get("holder") or {}, row.get("step"), record.get("outcome")
+    if isinstance(outcome, dict) and outcome.get("status") in ("merged", *BLOCKED):
+        row.update(outcome, finished_at=str(record.get("at") or stamp_now()))
+        row.pop("lease_until", None)
+    else:
+        fault = {"step": step, "reason": str(record.get("reason") or "")[:REASON_CHARS], "at": record.get("at")}
+        back_to_pending(row, str(record.get("expected_head") or row["expected_head"]), last_holder=holder,
+                        **hub_fields(int(row.get("hub_retries") or 0), fault))
+    return {"item": row.get("item"), "runner_pid": holder.get("pid"), "step": step, "status": row["status"],
+            "hub_stop": True}
+
+
+def hub_fields(retries: int, fault: dict[str, Any]) -> dict[str, Any]:
+    """The fields of an entry put back after its `retries + 1`th hub fault; held past `HUB_RETRIES` (sd:TBD)."""
+    fields: dict[str, Any] = {"hub_retries": retries + 1, "hub_fault": {**fault, "at": fault.get("at") or stamp_now()}}
+    if retries >= HUB_RETRIES:
+        fields.update(held=True, held_at=stamp_now())
+        fields["hub_fault"]["held"] = (f"held after {retries + 1} hub faults; `sd-ship lane release` runs it again "
+                                       "once the hub accepts this machine's build")
+    return fields
+
+
+def hub_stop_path(queue: Queue, token: str) -> pathlib.Path:
+    return queue.lock_file.with_name(f"{HUB_STOP_PREFIX}{token}.json")
+
+
+def record_hub_stop(queue: Queue, token: str, error: Stop, entry: dict[str, Any] | None = None,
+                    outcome: dict[str, Any] | None = None, tree: pathlib.Path | None = None) -> str:
+    """Record a stop on a hub fault while `token` may hold a claim; the stop's text for `stopped` (sd:TBD).
+
+    The hub refused the write that would settle the entry, most often a
+    build it moved past, so the entry stays `running` under a runner that is
+    gone. Without this record the next run reclaimed it as a death. `outcome`
+    is the end the runner could not write; without one the entry goes back
+    to pending at `expected_head`, moved to a catch-up prepare pushed. Only a
+    `hub_unavailable` stop is recorded: a lost claim writes nothing more. A
+    record that cannot be written leaves the reclaim as it was, and says so.
+    """
+    if error.code != HUB_UNAVAILABLE:
+        return str(error)
+    record: dict[str, Any] = {"token": token, "reason": str(error)[:REASON_CHARS], "at": stamp_now()}
+    if entry is not None:
+        record.update(id=entry["id"], item=entry["item"], expected_head=entry["expected_head"])
+    if outcome is not None:
+        record["outcome"] = outcome
+    try:
+        write_hub_stop(queue, token, record)
+        if entry is not None and tree is not None and outcome is None:  # written first: `origin` may take minutes
+            write_hub_stop(queue, token, {**record, "expected_head": pushed_catch_up(
+                tree, str(entry.get("branch") or ""), entry["expected_head"])})
+    except OSError as failed:
+        return f"{error} Its record could not be written ({failed}), so the next run reclaims the entry as dead."
+    return str(error)
+
+
+def write_hub_stop(queue: Queue, token: str, record: dict[str, Any]) -> None:
+    """Write `record` whole or not at all, by a rename over the old one."""
+    path = hub_stop_path(queue, token)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    scratch = path.with_suffix(".tmp")
+    scratch.write_text(json.dumps(record, sort_keys=True, default=str), encoding="utf-8")
+    os.replace(scratch, path)
+
+
+def hub_stops(queue: Queue) -> dict[str, Any]:
+    """Each hub-stop record in the lane folder by its token; one that cannot be read or parsed is None."""
+    found: dict[str, Any] = {}
+    for path in queue.lock_file.parent.glob(f"{HUB_STOP_PREFIX}*.json"):
+        try:
+            record = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            record = None
+        found[path.name.removeprefix(HUB_STOP_PREFIX).removesuffix(".json")] = (
+            record if isinstance(record, dict) else None)
+    return found
+
+
+def drop_hub_stops(queue: Queue, tokens: set[str]) -> None:
+    """Remove the records of `tokens`, once the write that settled their claims landed."""
+    for token in tokens:
+        with contextlib.suppress(FileNotFoundError):
+            hub_stop_path(queue, token).unlink()
 
 
 def held(entries: list[dict[str, Any]], entry: dict[str, Any], token: str) -> dict[str, Any]:
@@ -1933,6 +2063,9 @@ def advance(queue: Queue, entry: dict[str, Any], token: str) -> None:
         try:
             found = sd_lib.lane_elsewhere(connection, hub_database(queue.environ), queue.repository)
         except Exception as error:  # noqa: BLE001 -- `LaneUnknown`, or a read fault it did not wrap
+            fault = hub_fault_of(error)
+            if fault is not None:  # `on_hub` names it `hub_unavailable`, which the stop's record keeps (sd:TBD)
+                raise fault from None
             raise Stop(f"Cannot read the lane host before the merge: {error}. No merge started; the next run "
                        "settles the entry.", code="lane_unknown") from None
         elsewhere[:] = [found] if found else []
@@ -2177,32 +2310,49 @@ def lane_tree(main: pathlib.Path, lane: pathlib.Path, branch: str, expected: str
 
 
 def requeue(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, Any]) -> str | None:
-    """Put a running entry back as pending; what it met, or None once its retries are spent.
+    """Put a running entry back as pending; what it met and what follows, or None once its retries are spent.
 
-    A hub fault puts it back `HUB_RETRIES` times (sd:3239), and a retryable
-    prepare refusal that spent no review pass `RETRYABLE_RETRIES` times
-    (sd:3478), each with its own count. It keeps its place, and `hub_fault`
-    or `retryable_fault` says what failed where; a later outcome writes its
-    own fields beside it. Its `expected_head` moves only to a catch-up merge
-    prepare pushed (`pushed_catch_up`, sd:3283).
+    A hub fault puts it back `HUB_RETRIES` times (sd:3239), then held, never
+    failed (`hub_fields`, sd:TBD); a retryable prepare refusal that spent no
+    review pass `RETRYABLE_RETRIES` times (sd:3478). Each has its own count.
+    It keeps its place, and `hub_fault` or `retryable_fault` says what failed
+    where; a later outcome writes its own fields beside it. Its
+    `expected_head` moves only to a catch-up merge prepare pushed
+    (`pushed_catch_up`, sd:3283).
     """
     hub, retryable = outcome.pop("hub_fault", False), outcome.pop("retryable", False)
-    count, limit, record, met = (("hub_retries", HUB_RETRIES, "hub_fault", "a hub fault") if hub else
-                                 ("retryable_retries", RETRYABLE_RETRIES, "retryable_fault", "a retryable refusal"))
-    retries = int(entry.get(count) or 0)
-    if not (hub or retryable) or retries >= limit:
+    retries = int(entry.get("hub_retries" if hub else "retryable_retries") or 0)
+    if not (hub or retryable) or (not hub and retries >= RETRYABLE_RETRIES):
         return None
     expected = pushed_catch_up(pathlib.Path(entry["worktree"]), str(entry.get("branch") or ""), entry["expected_head"])
     fault: dict[str, Any] = {key: outcome[key] for key in ("step", "reason", "prepare_log", "merge_log", "log_host")
                              if key in outcome}
-    put_back(queue, entry, token, expected, **{count: retries + 1, record: {**fault, "at": stamp_now()}})
-    return met
+    fields = (hub_fields(retries, fault) if hub else
+              {"retryable_retries": retries + 1, "retryable_fault": {**fault, "at": stamp_now()}})
+    put_back(queue, entry, token, expected, **fields)
+    if fields.get("held"):
+        return (f"a hub fault after {retries} retries; it is held at its place, and "
+                f"`sd-ship lane release {entry['item']}` runs it again")
+    return f"{'a hub fault' if hub else 'a retryable refusal'}; it is pending again, and the next run retries it"
 
 
 def settle_checkout(root: pathlib.Path, queue: Queue) -> dict[str, Any]:
-    """Under the runner lock already held: import the file queue, then reclaim dead holders; what happened."""
+    """Under the runner lock already held: import the file queue, then reclaim dead holders; what happened.
+
+    A hub-stop record goes once the reclaim's write landed and no running
+    entry holds its token: settled now, or by a run that died before its
+    removal, or a claim the hub never took (sd:TBD).
+    """
     imported = import_file_queue(root, queue, runner_locked=True)
-    reclaimed = runner_write(queue, reclaim_dead)
+    stops, running = hub_stops(queue), set[str]()
+
+    def reclaim_stopped(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        settled = reclaim_dead(entries, stops)
+        running.clear()
+        running.update(str((row.get("holder") or {}).get("token")) for row in entries if row.get("status") == "running")
+        return settled
+    reclaimed = runner_write(queue, reclaim_stopped)
+    drop_hub_stops(queue, set(stops) - running)
     return {**({"import": imported} if imported else {}), **({"reclaimed": reclaimed} if reclaimed else {})}
 
 
@@ -2282,7 +2432,9 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
             token, reclaimed = secrets.token_hex(16), list[dict[str, Any]]()
             try:
                 entry = claim_entry(queue, token, reclaimed)
-            except LaneError as error:  # moved, unknown, busy, or a hub that stayed down
+            except Stop as error:  # the claim may have landed unseen
+                answer["stopped"], entry = record_hub_stop(queue, token, error), None
+            except LaneError as error:  # moved, unknown or busy
                 answer["stopped"], entry = str(error), None
             if reclaimed:
                 answer["reclaimed"] = [*answer.get("reclaimed", []), *reclaimed]
@@ -2346,7 +2498,7 @@ def unknown_checkout(queue: Queue, entry: dict[str, Any], token: str,
         put_back(queue, entry, token, entry["expected_head"], checkout_fault={"reason": str(error)[:600],
                                                                               "at": stamp_now()})
     except Stop as stop:
-        return None, str(stop)
+        return None, record_hub_stop(queue, token, stop, entry)
     return {"item": entry["item"], "status": "pending"}, f"sd:{entry['item']}: {error} It is pending again."
 
 
@@ -2371,11 +2523,10 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
             met = requeue(queue, local, token, outcome)
             if met is not None:
                 return ({"item": entry["item"], **outcome, "status": "pending"},
-                        f"sd:{entry['item']} met {met} in {outcome.get('step')}; "
-                        "it is pending again, and the next run retries it")
+                        f"sd:{entry['item']} met {met} in {outcome.get('step')}")
             outcome.update(settle(local, outcome, environ, note, queue.lock_file, root))
     except Stop as error:
-        return None, str(error)
+        return None, record_hub_stop(queue, token, error, entry, tree=tree)
     except LaneError as error:
         if error.code == PUBLISH_UNKNOWN:  # the head check had no answer; prepare has not started
             return unknown_checkout(queue, entry, token, error)
@@ -2385,7 +2536,8 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
     try:
         finish_entry(queue, entry, token, outcome)
     except Stop as error:
-        return {"item": entry["item"], **outcome, "recorded": False}, str(error)
+        return {"item": entry["item"], **outcome, "recorded": False}, record_hub_stop(queue, token, error, entry,
+                                                                                    outcome=outcome)
     return {"item": entry["item"], **outcome}, None
 
 
