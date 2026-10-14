@@ -215,6 +215,21 @@ class TheNewest(Case):
             backup.restore_newest([self.nas], home=home)
         self.assertFalse((home / ".local/share/sd/sd.db").exists())
 
+    def test_a_damaged_header_claiming_a_newer_schema_is_skipped(self):
+        # Only a copy whose bytes match its manifest can stop the run for its schema.
+        self.mirror(self.snapshot(datetime(2026, 10, 12, 9, 0, tzinfo=UTC), title="first"))
+        damaged = self.mirror(self.snapshot(NOW, title="second"))
+        data = bytearray((damaged / "sd.db").read_bytes())
+        data[60:64] = (SCHEMA_VERSION + 1).to_bytes(4, "big")  # SQLite's user_version field
+        (damaged / "sd.db").write_bytes(bytes(data))
+        home = self.fresh_home()
+
+        result = backup.restore_newest([self.nas], home=home)
+
+        self.assertEqual([path for path, _ in result.refused], [damaged])
+        self.assertIn("differ from its manifest", result.refused[0][1])
+        self.assertEqual(self.items(home), ["first"])
+
     def test_open_leases_from_the_old_hub_are_released_and_noted(self):
         from sd_db import runner_journal as journal
         connection = self.open()

@@ -1633,11 +1633,15 @@ def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None
             local = Path(stage) / path.name
             try:
                 shutil.copytree(path, local, symlinks=True)
-            except OSError as error:
-                refuse(path, f"it could not be copied: {error}")
+                # The hashes first: every later decision, the schema stop included, reads these bytes.
+                if json.loads((local / BACKUP_MANIFEST).read_bytes()).get("entries") != _retention_inventory(
+                        local, moved=True):
+                    raise BackupError("its files differ from its manifest")
+            except (BackupError, OSError, ValueError, AttributeError) as error:
+                refuse(path, str(error))
                 continue
             check = check_restorable(local / "sd.db")
-            # Before the manifest check: this library cannot count a newer schema's tables.
+            # Before the full manifest check: this library cannot count a newer schema's tables.
             if check.version is not None and check.version > SCHEMA_VERSION:
                 raise BackupError(f"{path} is schema {check.version}, newer than this library ({SCHEMA_VERSION}); "
                                   "update the pack and retry")
