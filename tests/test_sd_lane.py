@@ -471,6 +471,13 @@ class Runner(Lane):
         sd_lane.run_lane(self.repo, self.environ, ship)
         self.assertEqual((read, "--deliver" in self.calls[0]), (["{}"], True))
 
+    def test_each_item_the_enqueue_names_reaches_prepare(self) -> None:
+        """sd:3704: the enqueue's --item list is the closing set; prepare gets every one, the claimed item first."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver", closes=(2, 3, 1, 2))
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        items = [self.calls[0][index + 1] for index, part in enumerate(self.calls[0]) if part == "--item"]
+        self.assertEqual(items, ["1", "2", "3"])
+
     def test_prepare_catches_up_with_the_base_inside_the_runner(self) -> None:
         """The catch-up merge runs under the lane lock, never before it."""
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
@@ -1806,7 +1813,8 @@ class ItemChecks(SharedQueue):
 
     Eight system entries waited 3 to 32 minutes at the queue's head, then
     failed in seconds on an item of another repository, a `Closes:` item of
-    another repository, or an item with no registered repository.
+    another repository, or an item with no registered repository. A body
+    `Closes:` line is refused now, and a later `--item` is checked instead (sd:3704).
     """
 
     checks_item = True
@@ -1826,10 +1834,11 @@ class ItemChecks(SharedQueue):
             connection.close()
         self.tree, _ = self.committed("topic", "work")
 
-    def refused(self, item: int, title: str = "t", body: str = "Words.\n", claim: str = "deliver") -> sd_lane.LaneError:
+    def refused(self, item: int, title: str = "t", body: str = "Words.\n", claim: str = "deliver",
+                closes: tuple[int, ...] = ()) -> sd_lane.LaneError:
         self.body.write_text(body, encoding="utf-8")
         with self.assertRaises(sd_lane.LaneError) as refused:
-            sd_lane.enqueue_entry(self.tree, item, title, self.body, self.environ, claim=claim)
+            sd_lane.enqueue_entry(self.tree, item, title, self.body, self.environ, claim=claim, closes=closes)
         self.assertEqual((self.rows(), "push" in self.git_verbs, self.remote_tip("topic")), ([], False, None))
         return refused.exception
 
@@ -1841,19 +1850,31 @@ class ItemChecks(SharedQueue):
     def test_an_item_with_no_registered_repository_is_refused_before_any_push(self) -> None:
         self.assertIn("requires an item with a registered repository", str(self.refused(self.unregistered)))
 
-    def test_a_closes_line_or_title_naming_another_repositorys_item_is_refused(self) -> None:
-        for title, body in (("t", f"Closes: sd:{self.foreign}\n"), (f"Two fixes (sd:{self.own}, sd:{self.foreign})", "")):
-            with self.subTest(title=title):
-                refused = self.refused(self.own, title, body)
-                self.assertEqual(refused.code, "closes_item_foreign")
-                self.assertIn(f"names sd:{self.foreign}, which belongs to another repository", str(refused))
+    def test_a_body_closes_line_is_refused_before_any_push(self) -> None:
+        """sd:3704: the --item list is the one closing set, so a body `Closes:` line waits for no prepare to refuse it."""
+        refused = self.refused(self.own, "t", f"Closes: sd:{self.own + 99}\n")
+        self.assertEqual(refused.code, "body_trailer_refused")
+        self.assertIn("a body `Closes:` line closes nothing; name each item the merge closes with --item", str(refused))
 
-    def test_an_associate_only_claim_with_a_closes_line_is_refused(self) -> None:
-        refused = self.refused(self.own, body=f"Closes: sd:{self.own + 99}\n", claim="associate-only")
+    def test_a_second_item_of_another_repository_is_refused(self) -> None:
+        """sd:3704: each later --item must be an item of this repository."""
+        refused = self.refused(self.own, closes=(self.foreign,))
+        self.assertEqual(refused.code, "closes_item_foreign")
+        self.assertIn(f"names sd:{self.foreign}, which belongs to another repository", str(refused))
+
+    def test_a_title_naming_another_repositorys_item_is_queued(self) -> None:
+        """sd:3704: a title closes nothing, so the item it names is context, not a refusal."""
+        self.body.write_text("Words.\n", encoding="utf-8")
+        entry = sd_lane.enqueue_entry(self.tree, self.own, f"Two fixes (sd:{self.own}, sd:{self.foreign})", self.body,
+                                      self.environ, claim="deliver")
+        self.assertEqual(entry["status"], "pending")
+
+    def test_an_associate_only_claim_with_a_second_item_is_refused(self) -> None:
+        refused = self.refused(self.own, claim="associate-only", closes=(self.own + 99,))
         self.assertEqual(refused.code, "closes_need_delivery")
 
     def test_an_item_of_this_repository_is_queued(self) -> None:
-        self.body.write_text(f"Closes: sd:{self.own}\n", encoding="utf-8")
+        self.body.write_text("Words.\n", encoding="utf-8")
         entry = sd_lane.enqueue_entry(self.tree, self.own, f"One fix (sd:{self.own})", self.body, self.environ,
                                       claim="deliver")
         self.assertEqual(([row["item"] for row in self.entries()], entry["status"]), ([self.own], "pending"))

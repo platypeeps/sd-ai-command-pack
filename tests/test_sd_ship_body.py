@@ -51,22 +51,15 @@ class NormalizeTests(unittest.TestCase):
         self.assertEqual(("Summary.", ("Item: sd:9", "Work: sd:70", "Delivers: sd:7", "Delivers: sd:8")),
                          normalize(body))
 
-    def test_a_closes_line_naming_the_claimed_item_is_refused(self) -> None:
-        with self.assertRaisesRegex(ship.Refusal, r"line 1: `Closes: sd:7`; expected `Closes: sd:<n>\[, sd:<m>\]` naming co-delivered items other than sd:7"):
-            normalize("Closes: sd:7\n")
-        for value in ("sd:8, sd:7", "#12", "sd:08", ""):
-            with self.subTest(value=value), self.assertRaisesRegex(ship.Refusal, r"line 1: `Closes:"):
-                normalize(f"Closes: {value}\n")
-
-    def test_a_closes_line_naming_other_items_stays_in_the_body(self) -> None:
-        """sd:1481: the merge reads `Closes:` from the body, so normalize keeps it."""
-        body = "Summary.\n\nCloses: sd:8, sd:9\nCloses: sd:9,sd:10\n    Closes: sd:11\nRefs: sd:12\n"
-        kept, stripped = normalize(body)
-        self.assertEqual(body.rstrip(), kept)
-        self.assertEqual((), stripped)
-        self.assertEqual((8, 9, 10), sd_ship_body.closes_named(kept, 7))
-        self.assertEqual((), sd_ship_body.closes_named(kept, None))
-        self.assertEqual("Summary.\n\n    Closes: sd:11\nRefs: sd:12", sd_ship_body.strip_closes(kept))
+    def test_a_closes_line_is_refused_and_names_the_enqueue_item_list(self) -> None:
+        """sd:3704, operator ruling 2026-10-13: the enqueue's --item list is the one closing set."""
+        for value in ("sd:8", "sd:8, sd:9", "sd:7", "#12", ""):
+            with self.subTest(value=value), self.assertRaisesRegex(
+                    ship.Refusal, r"line 3: `Closes:[^`]*`; a body `Closes:` line closes nothing; name each item "
+                                  r"the merge closes with --item on `sd-ship lane enqueue`"):
+                normalize(f"Summary.\n\nCloses: {value}\n")
+        body = "Summary.\n\n    Closes: sd:11\nRefs: sd:12\n"
+        self.assertEqual((body.rstrip(), ()), normalize(body))
 
     def test_a_closes_line_in_a_fence_or_a_comment_is_an_example_and_never_closes(self) -> None:
         """A quoted `Closes:` closed sd:8 on merge, even with --associate-only (late-reviews review)."""
@@ -79,21 +72,18 @@ class NormalizeTests(unittest.TestCase):
         }
         for name, body in bodies.items():
             with self.subTest(name):
-                self.assertEqual((), sd_ship_body.closes_named(body, 7))
-                self.assertEqual(body, sd_ship_body.strip_closes(body))
                 with self.assertRaisesRegex(ship.Refusal, r"`Closes: sd:8[^`]*`; a code block or comment holds it"):
                     normalize(body)
                 indented = body.replace("\nCloses: sd:8", "\n    Closes: sd:8")
                 self.assertEqual((indented.rstrip(), ()), normalize(indented))
 
-    def test_a_column_zero_closes_line_outside_fences_and_comments_still_counts(self) -> None:
+    def test_a_column_zero_closes_line_outside_fences_and_comments_is_still_read(self) -> None:
         body = ("Summary.\n```sh\necho done\n```\n<!-- a note -->\n<!--\nRefs: sd:3\n-->\n"
                 "Closes: sd:8\n~~~\n    Closes: sd:9\n~~~\n")
-        kept, stripped = normalize(body)
-        self.assertEqual((body.rstrip(), ()), (kept, stripped))
-        self.assertEqual((8,), sd_ship_body.closes_named(kept, 7))
-        self.assertNotIn("\nCloses: sd:8\n", sd_ship_body.strip_closes(kept))
-        self.assertIn("    Closes: sd:9", sd_ship_body.strip_closes(kept))
+        with self.assertRaises(ship.Refusal) as caught:
+            normalize(body)
+        self.assertIn("line 9: `Closes: sd:8`", str(caught.exception))
+        self.assertNotIn("sd:9", str(caught.exception))
 
     def test_quoted_lines_follow_commonmark_fences(self) -> None:
         body = "a\n````md\n```\nb\n```\n````\nc\n```x`y\nd\n"
@@ -126,7 +116,7 @@ class NormalizeTests(unittest.TestCase):
     def test_normalize_is_a_fixpoint_and_the_published_body_round_trips(self) -> None:
         bodies = ("Summary.", "Summary.\n", "Summary.\n\nWork: sd:7\n", "A\n\nItem: sd:7\n\nB\n\n\n",
                   "Summary.\r\n\r\nWork: sd:7\r\n", "Work: sd:7", "", "Refs: sd:8\nItem: sd:7",
-                  "Summary.\n\nCloses: sd:8\nItem: sd:7\n")
+                  "Summary.\n\nRefs: sd:8\nItem: sd:7\n")
         for body in bodies:
             with self.subTest(body=body):
                 once, _ = normalize(body)
@@ -138,6 +128,11 @@ class NormalizeTests(unittest.TestCase):
     def test_the_parser_reads_the_one_constant(self) -> None:
         body = "".join(f"{key} sd:7\n" for key in sd_lib.OWNED_TRAILERS)
         self.assertEqual(list(sd_lib.OWNED_TRAILERS), [line.key for line in sd_ship_body.owned_lines(body)])
+
+
+class ClosingTests(unittest.TestCase):
+    def test_a_title_names_each_whole_token_once(self) -> None:
+        self.assertEqual((3, 4), sd_ship_body.title_ids("Fix sd:3 and sd:4 (sd:3, xsd:5, sd:6x)"))
 
 
 class TemplateTests(unittest.TestCase):
@@ -248,7 +243,7 @@ class BodyVerbTests(unittest.TestCase):
     def test_the_verb_exits_nonzero_on_a_refusal(self) -> None:
         code, result = self.body("A slice.\n\nCloses: sd:7\n")
         self.assertEqual(3, code)
-        self.assertIn("line 3: `Closes: sd:7`; expected", result["error"])
+        self.assertIn("line 3: `Closes: sd:7`; a body `Closes:` line closes nothing", result["error"])
 
     def test_a_ci_diff_with_no_scope_line_passes_the_verb(self) -> None:
         self.policy()

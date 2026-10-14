@@ -633,12 +633,13 @@ def add_entry(queue: Queue, entry: dict[str, Any],
 
 def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: pathlib.Path, environ: dict[str, str], *,
                   expected_head: str | None = None, manual: bool = False, claim: str | None = None,
-                  acceptance_file: pathlib.Path | None = None) -> dict[str, Any]:
+                  acceptance_file: pathlib.Path | None = None, closes: tuple[int, ...] = ()) -> dict[str, Any]:
     """Add one entry; the head defaults to the worktree's, and must name a commit there.
 
     `claim` is prepare's delivery choice, `deliver` or `associate-only`, and
     is refused when absent as prepare refuses it; it reaches prepare
-    unchanged. The entry holds the body and acceptance texts, not their
+    unchanged, as do `closes`, the other items a `--deliver` merge closes
+    (sd:3704). The entry holds the body and acceptance texts, not their
     paths. The item is checked as prepare checks it (`check_item`), then the
     head is published (`publish_head`); any answer but published refuses,
     and nothing is queued.
@@ -663,9 +664,10 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in read_queue(queue)):
         raise LaneError(f"sd:{item} is already queued in this lane")
     body = body_file.read_text(encoding="utf-8")
-    on_hub(queue, lambda connection: check_item(connection, worktree, item, title, body, claim))
+    closes = tuple(dict.fromkeys(number for number in closes if number != item))
+    on_hub(queue, lambda connection: check_item(connection, worktree, item, body, claim, closes))
     entry = {"id": entry_id(), "repository": queue.repository, "item": item, "branch": branch, "expected_head": head,
-             "title": title, "body": body,
+             "title": title, "body": body, "closes": list(closes),
              "acceptance": acceptance_file.read_text(encoding="utf-8") if acceptance_file else None,
              "authority": "manual" if manual else None, "claim": claim, "enqueued_on": this_host(),
              "worktree": str(worktree), "status": "pending", "enqueued_at": stamp_now()}
@@ -673,14 +675,16 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     return add_entry(queue, entry)
 
 
-def check_item(connection: Any, worktree: pathlib.Path, item: int, title: str, body: str, claim: str | None) -> None:
+def check_item(connection: Any, worktree: pathlib.Path, item: int, body: str, claim: str | None,
+               closes: tuple[int, ...] = ()) -> None:
     """Refuse what prepare refuses on the item before it reviews, so the entry never waits for it (sd:3473).
 
     Each refused in seconds once the entry reached the head of the queue,
     3 to 32 minutes after enqueue: an item with no registered repository
     (`sd_db.ship.identity`), an item of another repository than `worktree`'s
-    origin (`foreign_item`), and a `Closes:` line or a title naming an item
-    the merge could not close (`sd_ship_body.refuse_unclosable`). These are
+    origin (`foreign_item`), a body line sd-ship owns, such as `Closes:`
+    (`sd_ship_body.normalize`), and a later `--item` naming an item the merge
+    could not close (`sd_ship_body.refuse_unclosable`). These are
     prepare's own reads, and prepare makes them again; a hub fault still
     refuses `HUB_UNAVAILABLE` through `on_hub`.
     """
@@ -705,7 +709,9 @@ def check_item(connection: Any, worktree: pathlib.Path, item: int, title: str, b
     try:
         if registered is None or registered != own:
             raise foreign_item(item, registered or info["repo"]["path"], str(own), "prepare")
-        sd_ship_body.refuse_unclosable(connection, item, info["item"]["repo"], body, title, claim == "deliver")
+        sd_ship_body.normalize(body, item)  # a body `Closes:` line, among others (sd:3704)
+        # A title closes nothing; the items named with --item do (sd:3704).
+        sd_ship_body.refuse_unclosable(connection, item, info["item"]["repo"], closes, claim == "deliver")
     except Refusal as error:
         raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
 
@@ -955,15 +961,15 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     if cancelled:
         branch_unmoved(root, last)
         check_unmerged(root, queue, last)
-    on_hub(queue, lambda connection: check_item(connection, root, item, str(last.get("title") or ""), last["body"],
-                                                last.get("claim")))
+    on_hub(queue, lambda connection: check_item(connection, root, item, last["body"],
+                                                last.get("claim"), tuple(last.get("closes") or ())))
     worktree, head = pathlib.Path(str(last.get("worktree"))), last["expected_head"]
     if last.get("enqueued_on") == this_host() and worktree.is_dir():
         head = caught_up(worktree, head)
     require_published(root, last["branch"], head,
               f"sd:{item}'s head {head} is not on `origin` or in this checkout; run the retry on "
               f"{last.get('enqueued_on')}, or enqueue again from a worktree that has it")
-    keep = ("repository", "item", "branch", "title", "body", "acceptance", "claim", "enqueued_on", "worktree")
+    keep = ("repository", "item", "branch", "title", "body", "acceptance", "claim", "closes", "enqueued_on", "worktree")
     entry = {**{key: last.get(key) for key in keep}, "id": entry_id(), "expected_head": head,
              "authority": "manual" if manual or last.get("authority") == "manual" else None,
              "status": "pending", "enqueued_at": stamp_now()}
@@ -1290,7 +1296,8 @@ def prepare_step(entry: dict[str, Any], worktree: pathlib.Path, log: pathlib.Pat
         if isinstance(entry.get("acceptance"), str):
             (pathlib.Path(private) / "acceptance.md").write_text(entry["acceptance"], encoding="utf-8")
             claim += ["--acceptance-file", str(pathlib.Path(private) / "acceptance.md")]
-        argv = ["-C", str(worktree), "prepare", "--item", str(entry["item"]), *claim, "--catch-up",
+        closes = [part for number in entry.get("closes") or () for part in ("--item", str(number))]
+        argv = ["-C", str(worktree), "prepare", "--item", str(entry["item"]), *closes, *claim, "--catch-up",
                 "--title", entry["title"], "--body-file", str(body), "--json"]
         prepared = ship(argv, prepare_log)
         if blocker_code(prepared) == "review_incomplete":
@@ -2537,7 +2544,8 @@ def add_lane_verbs(commands: Any) -> None:
     lane = commands.add_parser("lane", help="a serial ship queue per repository, run under one lock (sd:2524)")
     verbs = lane.add_subparsers(dest="lane_command", required=True)
     adder = verbs.add_parser("enqueue", help="queue this worktree's item for prepare and merge")
-    adder.add_argument("--item", type=int, required=True)
+    adder.add_argument("--item", type=int, action="append", dest="items", required=True,
+                       help="the claimed item; repeat it to name each other item a --deliver merge closes (sd:3704)")
     adder.add_argument("--title", required=True)
     adder.add_argument("--body-file", type=pathlib.Path, required=True)
     adder.add_argument("--expected-head", help="the head the worktree must still be at (default: HEAD now)")
@@ -2602,9 +2610,9 @@ def lane_main(args: Any) -> int:
             return watch_items(queue_for(root, environ), args.items)
         imported = {} if args.lane_command == "run" else import_file_queue(root, queue_for(root, environ))
         if args.lane_command == "enqueue":
-            result: Any = enqueue_entry(root, args.item, args.title, args.body_file, environ,
+            result: Any = enqueue_entry(root, args.items[0], args.title, args.body_file, environ,
                                         expected_head=args.expected_head, manual=args.manual, claim=args.claim,
-                                        acceptance_file=args.acceptance_file)
+                                        acceptance_file=args.acceptance_file, closes=tuple(args.items[1:]))
         elif args.lane_command == "list":  # `enqueue_seq` orders an item's entries, as `newest_entry` does (sd:3419)
             queue = queue_for(root, environ)
             entries, order = on_hub(queue, lambda connection: (stored(connection, queue.repository),
