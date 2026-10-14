@@ -59,7 +59,7 @@ COLUMNS = {
     "publication_claim": {"history": "payload",
                           "none": "id item active_item state created_at updated_at"},
     "repo": {"key": "path", "none": "remote mode runner_merge managed ci lane_host pieces_source created_at updated_at "
-                      "channels"},
+                      "channels clone_profiles dependabot"},
     "repo_protection": {"key": "repo", "history": "body reason",
                         "none": "observed_at status default_branch"},
     "request_outcome": {"none": "id committed_at"},
@@ -488,7 +488,8 @@ class TwoHomes(HomeCase):
 EQUALITY_LOOKUPS = {
     "progress.py": (5, "stored row values; `item.path` is repo-relative; `shadow.repo` is a slug"),
     "recovery.py": (1, "`_pieces` takes the row path `reimport` found with `row_for`"),
-    "repos.py": (1, "`set_channels` writes the row path it read through `paths.keys` in the same transaction"),
+    "repos.py": (4, "`set_channels`, `set_clones` and `set_dependabot` write the row path they read through "
+                 "`paths.keys` in the same transaction; `seed_clones` the path `row_for` or `add` gave"),
     "removal.py": (7, "`_plan_repo` rebinds `path` to the row `row_for` found; `_detach` reads it off the plan"),
     "runner.py": (6, "every argument is an item or run row's `repo`"),
     "runner_exec.py": (1, "the item row's `repo`"),

@@ -193,6 +193,31 @@ The verb refuses an unregistered path when it sets, and prints `none` with a not
 A stored value the validator refuses, or a database not yet migrated, exits 1 and prints no value.
 A change takes effect at the next `sd-research-kit render` in the checkout, or the next commit.
 
+## Clone profiles and Dependabot
+
+`repo.clone_profiles` names the machine kinds `repo-sync` clones a repository on: `personal`, `work` and `terra` (sd:4043).
+NULL, shown as `none`, means none, and every row starts there.
+A set has one spelling, its words in that order, so the column's CHECK is a closed list.
+`repo.dependabot` is 1 for a repository outside the owner rule whose Dependabot pull requests the daily sweep may take.
+The design is the system repository's `docs/work/2026-10-13-config-to-db/design.md`, slice P2.
+
+    bin/sd-db repo clones PATH personal,work    # set; prints before -> after
+    bin/sd-db repo clones PATH +terra           # add one profile; -terra takes one away; none clears
+    bin/sd-db repo dependabot PATH yes          # or no; prints before -> after
+    bin/sd-db repo seed --clones personal       # add personal to each row repo-sync's lists give it
+    bin/sd-db repo list --clones personal       # `<subdir> <owner/repo>`, the lines repo-sync reads
+
+`repo clones` reads and writes in one transaction, so a `+P` beside a `-Q` on the same row loses neither.
+`seed --clones P` reads `repos.common.conf` and `repos.P.conf` in the `repo-sync` config folder; terra reads its own list alone.
+The profile is the argument, never `REPO_SYNC_PROFILE`.
+A line with no row is registered as `repo seed` would, when its checkout is here.
+A line with neither a checkout nor a row is named, and the run exits 1 after the other lines.
+It only adds, one transaction per line, so a rerun finishes a stopped run.
+`list --clones P` prints one line per row cloned on P, `.` for a checkout straight under `~/repos` (`SD_REPO_ROOT`).
+A row that cannot be such a line exits 1, names every such row, and prints nothing on stdout.
+Such a line needs a row one or two folders deep, a GitHub remote, and a folder named as the repository.
+A database not yet migrated exits 1 too; neither case answers an empty list.
+
 ## `judgments`: what the judgment models cost, by stage
 
 `bin/sd-db judgments` compares the stages that route a decision through a judgment model.

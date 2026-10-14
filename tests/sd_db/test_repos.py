@@ -11,6 +11,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -27,20 +28,25 @@ from sd_db.repos import (
     RepoRefusal,
     add,
     checkouts,
+    clone_lines,
     conf_paths,
     read_conf,
     registered,
     repo_channels,
     repo_ci,
     seed,
+    seed_clones,
     set_channels,
+    set_clones,
     set_ci,
+    set_dependabot,
     set_lane_host,
     set_managed,
     set_runner_merge,
     worktrees_root,
 )
 from sd_db.schema import migrations
+from sd_db.writes import upsert_repo
 
 from . import support
 
@@ -81,6 +87,11 @@ class ReadingTheConf(RepoCase):
         self.assertEqual(
             read_conf(path), [("acme", "example-org/anvil"), ("ha", "a/b")]
         )
+
+    def test_a_comment_after_a_line_is_dropped_as_repo_sync_drops_it(self):
+        """`repo-sync`'s conf reader cuts `#...` off every line (`sed -e 's/#.*//'`)."""
+        path = self.conf("acme example-org/anvil  # daily\n  # indented\nha a/b#x\n")
+        self.assertEqual(read_conf(path), [("acme", "example-org/anvil"), ("ha", "a/b")])
 
     def test_a_line_it_cannot_parse_is_a_refusal_and_not_a_skip(self):
         """A line nobody parses is a repository nobody syncs."""
@@ -760,3 +771,308 @@ class TheChannelsVerb(RepoCase):
         self.assertEqual((rc, out), (1, ""))
         self.assertIn("schema version 28", err)
         self.assertNotIn("none", out)
+
+
+class TheClonesWriter(RepoCase):
+    """sd:4043. `repo.clone_profiles`: the machine kinds `repo-sync` clones a
+    repository on, one spelling per set (design sd:3983)."""
+
+    def _registered(self) -> str:
+        checkout = support.repository(self.checkouts / "one")
+        return add(self.connection, checkout, home=self.home)
+
+    def _value(self, path: str):
+        return self.connection.execute("SELECT clone_profiles FROM repo WHERE path = ?", (path,)).fetchone()[0]
+
+    def test_a_set_none_plus_and_minus_each_write_the_one_spelling(self):
+        path = self._registered()
+        for words, before, after in (("work,personal", "none", "personal,work"), ("+terra", "personal,work",
+                                     "personal,work,terra"), ("-work", "personal,work,terra", "personal,terra"),
+                                     ("+terra", "personal,terra", "personal,terra"), ("none", "personal,terra",
+                                     "none"), ("-work", "none", "none"), ("work", "none", "work")):
+            with self.subTest(words=words):
+                self.assertEqual(set_clones(self.connection, path, words), (path, before, after))
+        self.assertEqual(self._value(path), "work")
+
+    def test_a_word_outside_the_profiles_is_refused_in_a_sentence_and_writes_nothing(self):
+        path = self._registered()
+        set_clones(self.connection, path, "personal")
+        for words in ("laptop", "personal,personal", "", "+laptop", "+", "personal,", "none,work"):
+            with self.subTest(words=words), self.assertRaises(RepoRefusal) as caught:
+                set_clones(self.connection, path, words)
+            self.assertIn("personal, work, terra", str(caught.exception))
+        self.assertEqual(self._value(path), "personal")
+
+    def test_it_changes_no_other_field_and_refuses_an_unregistered_path(self):
+        path = self._registered()
+        before = dict(self.connection.execute("SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
+        set_clones(self.connection, path, "+work")
+        after = dict(self.connection.execute("SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
+        self.assertEqual({key for key in before if before[key] != after[key]} - {"updated_at"}, {"clone_profiles"})
+        checkout = support.repository(self.checkouts / "two")
+        with self.assertRaises(RepoRefusal) as caught:
+            set_clones(self.connection, checkout, "work")
+        self.assertIn("not a registered repository", str(caught.exception))
+        self.assertEqual(len(registered(self.connection)), 1)
+
+    def test_two_writers_on_one_row_both_land(self):
+        """Failure table, row "`repo clones PATH -P` beside a dashboard write".
+
+        Each writer reads, waits, then writes. Without one transaction around
+        the read and the write, the second write is computed from the first
+        read and drops the first writer's profile.
+        """
+        import threading
+
+        from sd_db import repos
+
+        path = self._registered()
+        set_clones(self.connection, path, "personal")
+        real = repos.clone_profiles
+
+        def slow(words, held):
+            value = real(words, held)
+            time.sleep(0.3)
+            return value
+
+        errors = []
+
+        def write(words):
+            connection = connect(self.root / "sd.db")
+            try:
+                set_clones(connection, path, words)
+            except Exception as error:  # noqa: BLE001 - reported below
+                errors.append(error)
+            finally:
+                connection.close()
+
+        with mock.patch("sd_db.repos.clone_profiles", slow):
+            threads = [threading.Thread(target=write, args=(words,)) for words in ("+work", "+terra")]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join(30)
+        self.assertEqual(errors, [])
+        self.assertEqual(self._value(path), "personal,work,terra")
+
+
+class TheDependabotWriter(RepoCase):
+    """sd:4043. `repo.dependabot`: the sweep's list outside its owner rule (design sd:3984)."""
+
+    def test_it_sets_the_flag_names_what_it_replaced_and_refuses_in_a_sentence(self):
+        checkout = support.repository(self.checkouts / "one")
+        path = add(self.connection, checkout, home=self.home)
+        self.assertEqual(set_dependabot(self.connection, path, "yes"), (path, "no"))
+        self.assertEqual(set_dependabot(self.connection, path, "yes"), (path, "yes"))
+        for value in ("true", "1", ""):
+            with self.subTest(value=value), self.assertRaises(RepoRefusal) as caught:
+                set_dependabot(self.connection, path, value)
+            self.assertIn("yes or no", str(caught.exception))
+        self.assertEqual(self.connection.execute("SELECT dependabot FROM repo").fetchone()[0], 1)
+        self.assertEqual(set_dependabot(self.connection, path, "no"), (path, "yes"))
+        with self.assertRaises(RepoRefusal):
+            set_dependabot(self.connection, support.repository(self.checkouts / "two"), "yes")
+
+
+class TheCloneLines(RepoCase):
+    """sd:4043. `list --clones P` gives back `repo-sync`'s conf lines, whole or not at all."""
+
+    def row(self, relative: str, remote: str | None, profiles: str | None) -> str:
+        path = str(self.checkouts / relative)
+        upsert_repo(self.connection, path, remote=remote)
+        self.connection.execute("UPDATE repo SET clone_profiles = ? WHERE path = ?", (profiles, path))
+        return path
+
+    def test_each_row_on_the_profile_is_one_line_in_path_order(self):
+        self.row("system", "git@github.com:platypeeps/system.git", "personal,work")
+        self.row("ai/llama.cpp", "https://github.com/example-org/llama.cpp", "personal")
+        self.row("platypeeps/pack", "ssh://git@github.com/platypeeps/pack", "work")
+        self.row("other", "https://github.com/platypeeps/other", None)
+        self.assertEqual(clone_lines(self.connection, "personal", root=self.checkouts),
+                         ["ai example-org/llama.cpp", ". platypeeps/system"])
+        self.assertEqual(clone_lines(self.connection, "work", root=self.checkouts),
+                         ["platypeeps platypeeps/pack", ". platypeeps/system"])
+        self.assertEqual(clone_lines(self.connection, "terra", root=self.checkouts), [])
+
+    def test_a_row_that_is_not_a_conf_line_refuses_the_whole_list_naming_every_one(self):
+        """Failure table, row "`list --clones P`: a row that is not a conf line"."""
+        self.row("system", "git@github.com:platypeeps/system.git", "personal")
+        bad = [self.row("a/b/deep", "https://github.com/platypeeps/deep", "personal"),
+               self.row("local", "/srv/git/local.git", "personal"),
+               self.row("none", None, "personal"),
+               self.row("tools/renamed", "https://github.com/platypeeps/original", "personal")]
+        outside = str(self.root / "elsewhere" / "x")
+        upsert_repo(self.connection, outside, remote="https://github.com/platypeeps/x")
+        self.connection.execute("UPDATE repo SET clone_profiles = 'personal' WHERE path = ?", (outside,))
+        with self.assertRaises(RepoRefusal) as caught:
+            clone_lines(self.connection, "personal", root=self.checkouts)
+        for path in [*bad, outside]:
+            self.assertIn(path, str(caught.exception))
+        self.assertIn("5 row(s)", str(caught.exception))
+        self.assertNotIn("/system ", str(caught.exception))
+
+    def test_an_unknown_profile_is_refused(self):
+        with self.assertRaises(RepoRefusal):
+            clone_lines(self.connection, "laptop", root=self.checkouts)
+
+    def test_a_database_before_the_columns_raises_and_never_answers_empty(self):
+        old = self.root / "old.db"
+        through = [m for m in migrations() if m[0] <= 30]
+        with mock.patch("sd_db.migrate.migrations", return_value=through):
+            migrate(old)
+        raw = sqlite3.connect(old)
+        self.addCleanup(raw.close)
+        raw.row_factory = sqlite3.Row
+        with self.assertRaises(SdDbError) as caught:
+            clone_lines(raw, "personal", root=self.checkouts)
+        self.assertIn("schema version 30", str(caught.exception))
+
+
+class TheCloneSeed(RepoCase):
+    """sd:4043. `seed --clones P` reads repo-sync's lists for P and only adds P to rows."""
+
+    def setUp(self):
+        super().setUp()
+        self.config = self.root / "cfg"
+        (self.config / "repo-sync").mkdir(parents=True)
+        self.environ = {"SYSTEM_TOOLS_CONFIG": str(self.config), "REPO_SYNC_PROFILE": "personal"}
+        support.repository(self.checkouts / "platypeeps" / "present")
+        support.repository(self.checkouts / "platypeeps" / "listed")
+        support.repository(self.checkouts / "shared")
+        # A row for a checkout this machine does not hold: another machine registered it.
+        upsert_repo(self.connection, str((self.checkouts / "platypeeps" / "elsewhere").resolve()),
+                    remote="https://github.com/platypeeps/elsewhere")
+        self.listed = add(self.connection, self.checkouts / "platypeeps" / "listed",
+                          remote="git@github.com:platypeeps/listed.git", home=self.home)
+        self.connection.execute("UPDATE repo SET clone_profiles = 'terra' WHERE path = ?", (self.listed,))
+        self.lists("repos.common.conf", ". platypeeps/shared\n")
+        self.lists("repos.work.conf", "# work\nplatypeeps platypeeps/present\nplatypeeps platypeeps/listed\n"
+                   "platypeeps platypeeps/elsewhere\nplatypeeps platypeeps/missing\n")
+        self.lists("repos.personal.conf", "platypeeps platypeeps/listed\n")
+        self.lists("repos.terra.conf", ". platypeeps/shared\n")
+
+    def lists(self, name: str, text: str) -> None:
+        (self.config / "repo-sync" / name).write_text(text, encoding="utf-8")
+
+    def seed(self, profile: str = "work", connection=None):
+        return seed_clones(connection or self.connection, profile, root=self.checkouts, environ=self.environ,
+                           home=self.home)
+
+    def state(self, connection=None):
+        return sorted((Path(row["path"]).name, row["clone_profiles"]) for row in registered(connection or
+                                                                                            self.connection))
+
+    def test_it_registers_present_lines_adds_the_profile_and_names_the_line_it_cannot_place(self):
+        result = self.seed()
+        self.assertEqual(sorted(Path(path).name for path in result.registered), ["present", "shared"])
+        self.assertEqual(sorted(Path(path).name for path in result.added), ["elsewhere", "listed", "present",
+                                                                            "shared"])
+        self.assertEqual(result.unplaced, ["platypeeps/missing"])
+        # It only adds: the terra a row held stays beside work.
+        self.assertEqual(self.state(), [("elsewhere", "work"), ("listed", "work,terra"), ("present", "work"),
+                                        ("shared", "work")])
+
+    def test_a_second_run_changes_nothing(self):
+        self.seed()
+        before = self.state()
+        result = self.seed()
+        self.assertEqual((result.registered, result.added, result.unplaced), ([], [], ["platypeeps/missing"]))
+        self.assertEqual(len(result.held), 4)
+        self.assertEqual(self.state(), before)
+
+    def test_the_profile_is_the_argument_and_terra_reads_its_own_list_alone(self):
+        """`REPO_SYNC_PROFILE` says personal here; the argument decides."""
+        self.seed("terra")
+        self.assertEqual(self.state(), [("elsewhere", None), ("listed", "terra"), ("shared", "terra")])
+
+    def test_a_run_stopped_at_any_line_is_finished_by_a_rerun(self):
+        """Failure table, row "`seed --clones P`: stop after line k"."""
+        from sd_db import repos
+
+        def fresh(name):
+            source, target = sqlite3.connect(self.root / "sd.db"), sqlite3.connect(self.root / name)
+            source.backup(target)
+            source.close()
+            target.close()
+            connection = connect(self.root / name)
+            self.addCleanup(connection.close)
+            return connection
+
+        reference = fresh("clean.db")
+        self.seed(connection=reference)
+        real = repos.clone_profiles
+        for stop in range(1, 5):
+            with self.subTest(stop=stop):
+                stopped = fresh(f"stopped-{stop}.db")
+                calls: list[str] = []
+
+                def failing(words, held, calls=calls, stop=stop):
+                    calls.append(words)
+                    if len(calls) == stop:
+                        raise OSError("stopped")
+                    return real(words, held)
+
+                with mock.patch("sd_db.repos.clone_profiles", failing), self.assertRaises(OSError):
+                    self.seed(connection=stopped)
+                # Lines before `stop` stay committed; line `stop` left nothing, its new row included.
+                # The placed lines in order: shared and present (no row yet), listed and elsewhere.
+                held = [name for name, profiles in self.state(stopped) if profiles and "work" in profiles]
+                self.assertEqual(len(held), stop - 1)
+                self.assertEqual(len(self.state(stopped)), 2 + min(stop - 1, 2))
+                self.seed(connection=stopped)
+                self.assertEqual(self.state(stopped), self.state(reference))
+
+
+class TheCloneVerbs(TheCloneSeed):
+    """`sd-db repo clones`, `dependabot`, `list --clones` and `seed --clones`, as the operator types them."""
+
+    def run_verb(self, *argv: str) -> tuple[int, str, str]:
+        import contextlib
+        import io
+
+        from sd_db.jobs import cli
+        out, err = io.StringIO(), io.StringIO()
+        environ = {**self.environ, "SD_REPO_ROOT": str(self.checkouts)}
+        with mock.patch.object(cli, "_open_for_write", lambda: connect(self.root / "sd.db")), \
+                mock.patch.object(cli, "_home", lambda: self.home), mock.patch.dict(os.environ, environ), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli.main(["repo", *argv])
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_seed_then_list_gives_the_lines_back_and_names_the_line_it_could_not_place(self):
+        rc, out, err = self.run_verb("seed", "--clones", "work")
+        self.assertEqual(rc, 1)
+        self.assertIn("sd-db: work: registered 2, added to 4, already held by 0", out)
+        self.assertIn("platypeeps/missing is not cloned here and has no row", err)
+        rc, out, err = self.run_verb("list", "--clones", "work")
+        self.assertEqual((rc, err), (0, ""))
+        self.assertEqual(out.splitlines(), ["platypeeps platypeeps/elsewhere", "platypeeps platypeeps/listed",
+                                            "platypeeps platypeeps/present", ". platypeeps/shared"])
+        self.lists("repos.work.conf", "platypeeps platypeeps/present\n")
+        self.assertEqual(self.run_verb("seed", "--clones", "work")[0], 0)
+
+    def test_a_row_that_is_not_a_line_exits_1_and_prints_nothing(self):
+        self.run_verb("seed", "--clones", "work")
+        self.connection.execute("UPDATE repo SET remote = '/srv/git/x.git' WHERE path = ?", (self.listed,))
+        rc, out, err = self.run_verb("list", "--clones", "work")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn(self.listed, err)
+
+    def test_clones_and_dependabot_print_before_and_after(self):
+        rc, out, _ = self.run_verb("clones", self.listed, "+personal")
+        self.assertEqual((rc, out), (0, f"sd-db: {self.listed} clone_profiles terra -> personal,terra\n"))
+        rc, out, _ = self.run_verb("dependabot", self.listed, "yes")
+        self.assertEqual((rc, out), (0, f"sd-db: {self.listed} dependabot no -> yes\n"))
+        for argv in (("clones", self.listed), ("clones", self.listed, "laptop"), ("dependabot", self.listed),
+                     ("dependabot", self.listed, "maybe"), ("list", "--clones"), ("list", "--clones", "laptop"),
+                     ("seed", "--clones"), ("seed", "--clones", "work", "extra.conf")):
+            with self.subTest(argv=argv):
+                rc, out, err = self.run_verb(*argv)
+                self.assertEqual((rc, out), (1, ""), err)
+                self.assertTrue(err)
+
+    def test_list_keeps_runner_merge_as_the_last_field(self):
+        rc, out, _ = self.run_verb("list")
+        self.assertEqual(rc, 0)
+        for line in out.splitlines():
+            self.assertTrue(line.endswith("  manual"), line)

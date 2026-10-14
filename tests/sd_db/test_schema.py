@@ -1936,13 +1936,21 @@ class TheSettingKind(SchemaCase):
         result = migrate(self.path)
         self.assertEqual((result.before, result.applied), (29, list(range(30, SCHEMA_VERSION + 1))))
 
+    def _migrate_through_thirty(self):
+        # Through 30 only: a later migration's reverse comes first, in its own test.
+        through = [m for m in schema_module.migrations() if m[0] <= 30]
+        with mock.patch("sd_db.migrate.migrations", return_value=through):
+            return migrate(self.path)
+
     def test_the_reverse_returns_the_file_to_twenty_nine_without_the_settings(self):
         self._at_version_twenty_nine()
-        migrate(self.path)
-        connection = connect(self.path, write=True)
+        self._migrate_through_thirty()
+        # The library refuses a write below its version; write it raw.
+        connection = sqlite3.connect(self.path)
         connection.execute(
             "INSERT INTO state (id, kind, key, timestamp, body) VALUES (30, 'setting', 'sd.copilot_review', 't7', "
             "'{\"value\": \"never\"}')")
+        connection.commit()
         connection.close()
         text = dict(schema_module.migrations())[30].read_text(encoding="utf-8")
         raw = sqlite3.connect(self.path, isolation_level=None)
@@ -1954,8 +1962,8 @@ class TheSettingKind(SchemaCase):
             raw.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('setting', 'sd.x', 't8', '{}')")
         # A backup restore compares the table and its indexes to 29's shape.
         self.assertEqual(self._shape(raw), self._shape(self._reference(29)))
-        result = migrate(self.path)
-        self.assertEqual((result.before, result.applied), (29, list(range(30, SCHEMA_VERSION + 1))))
+        result = self._migrate_through_thirty()
+        self.assertEqual((result.before, result.applied), (29, [30]))
 
 
 class TheConnection(SchemaCase):
@@ -1970,6 +1978,119 @@ class TheConnection(SchemaCase):
         with self.assertRaises(FileNotFoundError) as raised:
             connect(self.home / ".local/share/sd/absent.db")
         self.assertIn("`bin/sd-db init` from the command pack", str(raised.exception))
+
+
+
+class TheClonesAndDependabotColumns(SchemaCase):
+    """Migration 31 (sd:4043, design sd:3983 slice P2). `repo.clone_profiles`,
+    the machine kinds `repo-sync` clones a repository on, and `repo.dependabot`,
+    the sweep's allowed list outside the owner rule.
+
+    Added, not rebuilt, as 29 was: every existing row reads NULL and 0 and
+    keeps its other values, each CHECK holds a closed list, a failure in the
+    second statement leaves the file at 30 without the first column, and the
+    reverse returns it to 30's shape.
+    """
+
+    VERSION = 31
+    COLUMNS = ("path, remote, mode, runner_merge, pieces_source, created_at, updated_at, managed, ci, lane_host, "
+               "channels")
+    ROWS = [("/one", "git@github.com:platypeeps/one.git", "full", "auto", "file", "t1", "t2", 1, "local", "build-2",
+             '{"drive": {}}'),
+            ("/two", None, None, "manual", "row", "t3", "t4", 0, "github", None, None)]
+
+    def _before(self):
+        through = [m for m in schema_module.migrations() if m[0] < self.VERSION]
+        with mock.patch("sd_db.migrate.migrations", return_value=through):
+            migrate(self.path)
+        raw = sqlite3.connect(self.path)
+        raw.executemany(f"INSERT INTO repo ({self.COLUMNS}) VALUES ({', '.join('?' * 11)})", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(f"SELECT {self.COLUMNS} FROM repo ORDER BY path")]
+
+    def _added(self, connection):
+        return [tuple(row) for row in connection.execute("SELECT clone_profiles, dependabot FROM repo ORDER BY path")]
+
+    def _migrate_through(self):
+        through = [m for m in schema_module.migrations() if m[0] <= self.VERSION]
+        with mock.patch("sd_db.migrate.migrations", return_value=through):
+            return migrate(self.path)
+
+    def _reference(self, upto):
+        reference = sqlite3.connect(":memory:")
+        self.addCleanup(reference.close)
+        paths.install(reference)
+        for version, path in schema_module.migrations():
+            if version <= upto:
+                reference.executescript(path.read_text(encoding="utf-8"))
+        return reference
+
+    def test_every_existing_row_arrives_at_none_and_no_and_keeps_its_values(self):
+        self._before()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied),
+                         (self.VERSION - 1, list(range(self.VERSION, SCHEMA_VERSION + 1))))
+        self.assertEqual(migrate(self.path).applied, [])
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.ROWS)
+        self.assertEqual(self._added(connection), [(None, 0), (None, 0)])
+
+    def test_each_check_holds_a_closed_list(self):
+        self._before()
+        migrate(self.path)
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        for value in ("personal", "work", "terra", "personal,work", "personal,terra", "work,terra",
+                      "personal,work,terra", None):
+            connection.execute("UPDATE repo SET clone_profiles = ? WHERE path = '/one'", (value,))
+        for value in ("work,personal", "laptop", "", "personal,personal", "personal, work"):
+            with self.subTest(value=value), self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE repo SET clone_profiles = ? WHERE path = '/one'", (value,))
+        connection.execute("UPDATE repo SET dependabot = 1 WHERE path = '/two'")
+        for flag in (2, -1, None):
+            with self.subTest(flag=flag), self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE repo SET dependabot = ? WHERE path = '/two'", (flag,))
+        self.assertEqual(self._added(connection), [(None, 0), (None, 1)])
+
+    def test_a_failed_second_add_leaves_the_file_at_thirty_without_either_and_a_rerun_finishes_it(self):
+        """Failure table, row "migration: stop mid-file"."""
+        self._before()
+        # A column of that name added by hand fails the second statement, after the first has run.
+        raw = sqlite3.connect(self.path)
+        raw.execute("ALTER TABLE repo ADD COLUMN dependabot INTEGER")
+        raw.commit()
+        raw.close()
+        with self.assertRaises(sqlite3.OperationalError):
+            self._migrate_through()
+        raw = sqlite3.connect(self.path)
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        self.assertNotIn("clone_profiles", [row[1] for row in raw.execute("PRAGMA table_info(repo)")])
+        raw.execute("ALTER TABLE repo DROP COLUMN dependabot")
+        raw.commit()
+        raw.close()
+        self.assertEqual(self._migrate_through().applied, [self.VERSION])
+
+    def test_the_reverse_returns_the_file_to_thirty(self):
+        self._before()
+        self._migrate_through()
+        raw = sqlite3.connect(self.path)
+        raw.execute("UPDATE repo SET clone_profiles = 'personal,work', dependabot = 1 WHERE path = '/one'")
+        raw.commit()
+        raw.close()
+        text = dict(schema_module.migrations())[self.VERSION].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        self.assertEqual(raw.execute("PRAGMA table_info(repo)").fetchall(),
+                         self._reference(self.VERSION - 1).execute("PRAGMA table_info(repo)").fetchall())
+        self.assertEqual(self._migrate_through().applied, [self.VERSION])
 
 
 if __name__ == "__main__":

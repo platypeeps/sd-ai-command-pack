@@ -631,7 +631,8 @@ class TheRemoveVerbs(RemoveCase):
 
     def test_repo_and_item_with_no_verb_name_their_verbs(self):
         completed = self.sd_db("repo", expect=1)
-        for verb in ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "remove"):
+        for verb in ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "clones",
+                     "dependabot", "remove"):
             self.assertIn(verb, completed.stderr)
         self.assertNotIn("satellite-gate", completed.stderr)
         completed = self.sd_db("item", expect=1)

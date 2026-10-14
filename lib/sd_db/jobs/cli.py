@@ -32,6 +32,7 @@ from ..repos import add as add_repo
 from ..repos import registered
 from ..repos import registered_for, row_for
 from ..repos import ConfMissing, seed as seed_repos
+from ..repos import clone_lines, seed_clones, set_clones, set_dependabot
 from ..repos import LANE_HUB, repo_channels, set_channels, set_ci, set_lane_host, set_managed, set_runner_merge
 from ..schema import SCHEMA_VERSION
 from ..sources import docs_work, index_cache, issues, register
@@ -483,10 +484,12 @@ def _open_for_read() -> sqlite3.Connection:
 
 
 def command_repo(argv: list[str]) -> int:
-    """`repo add <path>`, `repo seed [conf]`, `repo list [--managed]`,
+    """`repo add <path>`, `repo seed [conf | --clones PROFILE]`,
+    `repo list [--managed | --clones PROFILE]`,
     `repo runner-merge <path> <manual|auto>`, `repo managed <path> <yes|no>`,
     `repo ci <path> <github|local>`, `repo lane-host <path> <host|hub>`,
     `repo channels <path> [obsidian=.. notion=.. drive=.. | none]`,
+    `repo clones <path> <P,Q | none | +P | -P>`, `repo dependabot <path> <yes|no>`,
     `repo remove <path> ...`.
 
     The `repo` table is what criterion 6 enumerates from, so an empty one
@@ -503,13 +506,19 @@ def command_repo(argv: list[str]) -> int:
     `repo.lane_host` (sd:3075), the machine that runs the repository's lane;
     `hub` writes NULL, and it prints the value before and after.
     `channels` prints or sets `repo.channels` (sd:3462), the repository's
-    publish channels; `channels_words` reads its words.
+    publish channels; `channels_words` reads its words. `clones` and
+    `dependabot` set `repo.clone_profiles` and `repo.dependabot` (sd:4043):
+    the machine kinds `repo-sync` clones the repository on, and the Dependabot
+    sweep's list outside its owner rule. `seed --clones PROFILE` adds PROFILE
+    to the row of each line repo-sync's lists give it, and `list --clones
+    PROFILE` prints those lines back, `<subdir> <owner/repo>`, for repo-sync.
 
     `list` prints `managed`, `ci`, `lane_host`, then `runner_merge`, so
     the merge setting stays the last field of each row, where the operator's
     instructions read it.
     """
-    verbs = ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "remove")
+    verbs = ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "clones",
+             "dependabot", "remove")
     if not argv or argv[0] not in verbs:
         print(f"sd-db repo: expected {', '.join(verbs[:-1])} or {verbs[-1]}",
               file=sys.stderr)
@@ -526,6 +535,8 @@ def command_repo(argv: list[str]) -> int:
             path = add_repo(connection, rest[0], home=_home())
             print(f"sd-db: registered {path}")
             return 0
+        if verb == "seed" and rest[:1] == ["--clones"]:
+            return _seed_clones(connection, rest[1:])
         if verb == "seed":
             try:
                 result = seed_repos(connection, rest[0] if rest else None, home=_home())
@@ -573,9 +584,29 @@ def command_repo(argv: list[str]) -> int:
             return 0
         if verb == "channels":
             return _repo_channels(connection, rest)
+        if verb == "clones":
+            if len(rest) != 2:
+                print("sd-db repo clones: needs a path and P,Q, none, +P or -P (P is personal, work or terra)",
+                      file=sys.stderr)
+                return 1
+            path, before, after = set_clones(connection, rest[0], rest[1])
+            print(f"sd-db: {path} clone_profiles {before} -> {after}")
+            return 0
+        if verb == "dependabot":
+            if len(rest) != 2:
+                print("sd-db repo dependabot: needs a path and yes or no", file=sys.stderr)
+                return 1
+            path, before = set_dependabot(connection, rest[0], rest[1])
+            print(f"sd-db: {path} dependabot {before} -> {rest[1]}")
+            return 0
+        if rest[:1] == ["--clones"] and len(rest) == 2:
+            # The conf grammar, bare: `repo-sync` reads these lines as its list.
+            for line in clone_lines(connection, rest[1]):
+                print(line)
+            return 0
         if rest not in ([], ["--managed"]):
             print(f"sd-db repo list: unknown argument {' '.join(rest)}; "
-                  f"expected nothing or --managed", file=sys.stderr)
+                  f"expected nothing, --managed or --clones PROFILE", file=sys.stderr)
             return 1
         rows = registered(connection)
         if not rows:
@@ -596,6 +627,26 @@ def command_repo(argv: list[str]) -> int:
         return 0
     finally:
         connection.close()
+
+
+def _seed_clones(connection, rest: list[str]) -> int:
+    """`repo seed --clones PROFILE`: exit 1 after every other line when a line has no checkout and no row."""
+    if len(rest) != 1:
+        print("sd-db repo seed: --clones needs one profile, personal, work or terra, and no conf", file=sys.stderr)
+        return 1
+    try:
+        result = seed_clones(connection, rest[0], home=_home())
+    except ConfMissing as error:
+        print(f"sd-db repo seed: {error}", file=sys.stderr)
+        return 1
+    print(f"sd-db: {rest[0]}: registered {len(result.registered)}, added to {len(result.added)}, "
+          f"already held by {len(result.held)}")
+    for path in result.registered:
+        print(f"sd-db:   registered: {path}")
+    for slug in result.unplaced:
+        print(f"sd-db repo seed: {slug} is not cloned here and has no row; run the seed on the machine that "
+              f"holds it, or drop the line", file=sys.stderr)
+    return 1 if result.unplaced else 0
 
 
 def channels_words(words: list[str]) -> dict | None:
