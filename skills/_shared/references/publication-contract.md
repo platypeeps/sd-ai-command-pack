@@ -205,8 +205,10 @@ never whether: an outward mirror still needs its key on the document.
   the setting wins over the default. A pinned `page=` or `file=` wins over both;
   where the setting names a folder, the render names each pinned document, and
   deleting the pin creates the page under the new folder.
-- **A channel left out is off.** A document designated for it is refused for
-  that channel by name, and its other channels still publish. Without
+- **A channel left out is off.** Only `obsidian`, `notion` and `drive` are
+  channels. The inbound `feed` key (sd:3980) is not one: a setting naming only
+  a feed is no setting here. A document designated for a channel left out is
+  refused for that channel by name, and its other channels still publish. Without
   `obsidian` the render writes no vault copy and says so. The dashboard copy is
   not a channel and always publishes.
 - **A pending request for a channel left out stays.** The render names it with
@@ -384,7 +386,9 @@ Draining is six steps per request, and the order matters:
    externally is not mirrored to a shared destination, and designating it did
    not lift that. Report it and leave the request in place. Then read the
    channels setting of the `repo` the request names, with
-   `bin/sd-db repo channels <repo>`. A setting that leaves out the request's
+   `bin/sd-db repo channels <repo>`. Read only its `obsidian`, `notion` and
+   `drive` keys; a setting naming none of them, such as one holding only a
+   `feed`, is no setting. A setting that leaves out the request's
    destination refuses it: report it and leave it in place. A read that exits
    non-zero, an unresolved restore among the causes, leaves every request of
    that repo unwritten, with or without `item`: unknown is not "no

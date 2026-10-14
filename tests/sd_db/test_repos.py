@@ -724,6 +724,20 @@ class TheChannelsVerb(RepoCase):
         self.assertIn('channels {"drive":{},"obsidian":{}} -> none', out)
         self.assertIsNone(self._stored(path))
 
+    def test_a_feed_word_sets_the_repos_subscription(self):
+        """sd:3980: `feed=URL` is the inbound subscription; a URL keeps its
+        own `=` signs, and `feed=` with no URL refuses."""
+        path = self._registered()
+        rc, out, err = self._run(path, "feed=https://example.test/feed?a=b", "obsidian=")
+        self.assertEqual(rc, 0, err)
+        text = '{"feed":{"url":"https://example.test/feed?a=b"},"obsidian":{}}'
+        self.assertEqual(self._stored(path), text)
+        self.assertEqual(self._run(path), (0, f"{text}\n", ""))
+        rc, out, err = self._run(path, "feed=")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("feed", err)
+        self.assertEqual(self._stored(path), text)
+
     def test_a_change_names_the_render_that_publishes_it(self):
         """Failure table, row "set: the change takes effect"."""
         path = self._registered()

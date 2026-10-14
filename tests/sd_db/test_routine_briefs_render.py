@@ -221,7 +221,8 @@ class TheRefusals(Copies):
 class TheSetting(Copies):
     def test_no_setting_or_an_empty_obsidian_is_the_default_folder(self):
         self.add()
-        values: tuple[dict | None, ...] = (None, {"obsidian": {}})
+        # sd:3980: a feed alone is no outbound setting, so it keeps the default.
+        values: tuple[dict | None, ...] = (None, {"obsidian": {}}, {"feed": {"url": "https://example.test/f"}})
         for value in values:
             with self.subTest(value=value):
                 self.channels(value)

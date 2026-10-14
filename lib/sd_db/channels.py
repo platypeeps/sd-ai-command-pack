@@ -11,6 +11,11 @@ and never read as a setting.
 A channel named with `{}` writes to its default folder; a channel left out is
 off. NULL is no setting, which is not the same as `{}`: clearing writes NULL.
 
+`feed` is inbound (sd:3980): the repo's one RSS/Atom subscription,
+`{"feed": {"url": "https://example.test/feed.xml"}}`, which `sd-watchlist`
+reads. It is not a publish channel: `outbound` drops it before a publisher
+reads the setting, so a feed alone leaves publishing as no setting does.
+
 `record_url` puts where a document was published on the item that owns it
 (sd:3979): the item row holds the URL, and the dashboard reads the row.
 """
@@ -30,8 +35,14 @@ from .repos import RepoRefusal
 #: The channels a repository may name, in the order a refusal lists them.
 CHANNELS = ("obsidian", "notion", "drive")
 
+#: The inbound sources a repository may name beside its channels (sd:3980).
+INBOUND = ("feed",)
+
 #: The one key a channel's object may hold.
 FOLDER = "folder"
+
+#: The one key the feed's object holds.
+URL = "url"
 
 #: A Notion page id, compact or hyphenated: an id the drain resolves, never a folder name.
 PAGE_ID = re.compile(r"[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
@@ -68,6 +79,35 @@ def _folder(channel: str, folder: Any) -> str:
     return folder
 
 
+def _feed(entry: dict) -> dict[str, str]:
+    """The feed's object: one http or https URL with a host, no credentials and no space."""
+    from urllib.parse import urlsplit
+
+    extra = sorted(set(entry) - {URL})
+    url = entry.get(URL)
+    if extra or not isinstance(url, str) or not url:
+        raise ChannelRefusal("feed: expected {\"url\": URL} and nothing else; `feed=URL` sets it")
+    if any(character.isspace() or unicodedata.category(character).startswith("C") for character in url):
+        raise ChannelRefusal(f"feed: url {url!r} holds a space, a control or a format character")
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ChannelRefusal(f"feed: url {url!r} must be an http or https URL with a host")
+    if parts.username is not None or parts.password is not None:
+        raise ChannelRefusal(f"feed: url {url!r} holds credentials; the setting holds none")
+    return {URL: url}
+
+
+def outbound(setting: dict[str, dict[str, str]] | None) -> dict[str, dict[str, str]] | None:
+    """The publish channels of a setting, or None when it names none (sd:3980).
+
+    A setting naming only inbound sources says nothing about publishing, so
+    it publishes as no setting does; beside an outbound channel, a channel
+    left out is still off.
+    """
+    channels = {name: entry for name, entry in (setting or {}).items() if name in CHANNELS}
+    return channels or None
+
+
 def validate(value: Any) -> dict[str, dict[str, str]]:
     """`value` as a setting, or `ChannelRefusal` naming what is wrong.
 
@@ -80,10 +120,14 @@ def validate(value: Any) -> dict[str, dict[str, str]]:
         raise ChannelRefusal("channels {} names no channel; clear the setting with `none` instead")
     out: dict[str, dict[str, str]] = {}
     for channel, entry in value.items():
-        if channel not in CHANNELS:
-            raise ChannelRefusal(f"{channel!r} is not a channel; expected {', '.join(CHANNELS[:-1])} or {CHANNELS[-1]}")
+        if channel not in CHANNELS + INBOUND:
+            raise ChannelRefusal(f"{channel!r} is not a channel; expected {', '.join(CHANNELS[:-1])} or {CHANNELS[-1]}, "
+                                 f"or the inbound {' or '.join(INBOUND)}")
         if not isinstance(entry, dict):
             raise ChannelRefusal(f"{channel}: expected an object holding folder or nothing, not {entry!r}")
+        if channel == "feed":
+            out[channel] = _feed(entry)
+            continue
         extra = sorted(set(entry) - {FOLDER})
         if extra:
             raise ChannelRefusal(f"{channel}: {extra[0]!r} is not a channel key; a channel holds folder or nothing")

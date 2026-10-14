@@ -187,6 +187,9 @@ The design is `docs/work/2026-10-13-channels/design.md`.
     bin/sd-db repo channels PATH none                                    # clear
 
 The keys are `obsidian`, `notion` and `drive`; `drive=` names the default folder, and a channel left out is off.
+`feed=URL` adds the repo's one RSS/Atom subscription (sd:3980), an http or https URL with no credentials; `sd-watchlist` reads it.
+The feed is inbound, not a channel: a setting naming only a feed publishes as no setting, and `channels.outbound` drops it for every publisher.
+The words are the whole setting, so a set that leaves out `feed=` drops the feed; the verb prints `before -> after`.
 A folder is a name, never an id or a URL: no leading `/`, no `.` or `..` segment, no control character.
 A Notion folder is one page name, with no `/`.
 `sd_db.channels.validate` checks every write; `repos.set_channels` is the one writer, `repos.repo_channels` the reader.
