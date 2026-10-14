@@ -5,13 +5,13 @@ The publication contract is
 `skills/_shared/references/publication-contract.md`; this is the half of it a
 script can carry out. Two jobs, both run at the end of `render`:
 
-1. **Register.** Append this repo's `label|key|label` line to the dashboard's
-   `documents.conf`, once. The file is in the machine's config directory, not
-   the dashboard checkout; `dashboard_config` says where. The dashboard finds
-   `docs/dashboard/` on disk, so the line says what to call it and carries no
-   path; `root|` stays for a directory the dashboard cannot find. The
-   dashboard reads that file and never writes it, so nothing here touches the
-   dashboard's own source.
+1. **Register.** Write a `root|key|label|directory` line to the dashboard's
+   `documents.conf` for a directory the dashboard cannot find on disk. The
+   file is in the machine's config directory, not the dashboard checkout;
+   `dashboard_config` says where. The dashboard finds `docs/dashboard/` by
+   itself and takes its name from the workflow database, so that default
+   location gets no line. The dashboard reads that file and never writes it,
+   so nothing here touches the dashboard's own source.
 
 2. **Enqueue.** For each document designated for a destination in
    `DESTINATIONS`, write a sync request naming the document, its container, the
@@ -478,67 +478,71 @@ def _own_row(repo: Path, path: str) -> bool:
 def register_root(repo: Path, label: str, directory: Path) -> str:
     """Register this repo with the dashboard, once.
 
-    The dashboard finds `docs/dashboard/` by itself, so registering the default
-    location means saying what to call it and nothing more:
+    The dashboard finds `docs/dashboard/` by itself, so the default location
+    needs no row at all: its name is the workflow database's `view` row, set
+    on the Documents page, and a `label|` line is no longer read (sd:3986,
+    sd:4631). Writing one on every render only filled the file with lines
+    the page then lists as stale. `root|<key>|<label>|<directory>` stays for
+    a directory the dashboard cannot find -- somewhere outside
+    `docs/dashboard/` -- which is the only thing a row can say that the disk
+    does not.
 
-        label|<key>|<label>
-
-    A path here would be the default location written down a second time, and
-    it goes stale the moment the repository moves while still looking
-    authoritative. `root|<key>|<label>|<directory>` stays for a directory the
-    dashboard cannot find -- somewhere outside `docs/dashboard/` -- which is
-    the only thing a row can say that the disk does not.
+    A `root|` row this repository wrote for a directory it has since left
+    (`build/`, or the default written down as a path) is retired, because it
+    outranks the directory the dashboard would find. A `label|` row is left
+    where it is: the page names it, and Rename replaces it.
 
     Returns a one-line report. Never raises on a missing dashboard: a machine
     without the dashboard checked out still renders its documents, and failing
     the render would make the reading form hostage to the listing.
     """
     conf = documents_conf()
+    found = directory == repo / DASHBOARD_DIR
+    key = repo_key(repo)
     if not conf.is_file():
+        if found:
+            return "dashboard: finds %s by itself; no row to write" % key
         return ("dashboard not registered: no %s; create it, or set SYSTEM_TOOLS_CONFIG "
                 "to the folder that holds project-dashboard/" % conf)
 
-    key = repo_key(repo)
     if not KEY.fullmatch(key):
         return "dashboard not registered: %r is not a usable key" % key
 
-    found = directory == repo / DASHBOARD_DIR
     shown = _shown(directory)
-    line = ("label|%s|%s" % (key, label) if found
-            else "root|%s|%s|%s" % (key, label, shown))
-    named = label if found else shown
+    line = None if found else "root|%s|%s|%s" % (key, label, shown)
 
     text = conf.read_text(encoding="utf-8")
     lines = text.splitlines(keepends=True)
     for index, existing in enumerate(lines):
         parts = [p.strip() for p in existing.strip().split("|")]
-        form = parts[0] if parts else ""
-        if form == "label" and len(parts) == 3 and parts[1] == key:
-            pass
-        elif form == "root" and len(parts) == 4 and parts[1] == key:
-            # A row naming a directory outside this repository belongs to
-            # something else, whatever it calls itself.
-            if not _own_row(repo, parts[3]):
-                return ("dashboard: %s already names %s; left alone. The key is this "
-                        "checkout's name: rename one checkout, or remove that row from %s"
-                        % (key, parts[3], conf))
-        else:
+        if not (parts[0] == "root" and len(parts) == 4 and parts[1] == key):
             continue
+        # A row naming a directory outside this repository belongs to
+        # something else, whatever it calls itself.
+        if not _own_row(repo, parts[3]):
+            return ("dashboard: %s already names %s; left alone. The key is this "
+                    "checkout's name: rename one checkout, or remove that row from %s"
+                    % (key, parts[3], conf))
         if existing.strip() == line:
             return "dashboard: already registered as %s" % key
-        # Ours, and saying the wrong thing. Rewritten in place rather than
-        # appended, because two rows for one key is the drift twice over.
+        # Ours, and saying the wrong thing: rewritten in place, or retired
+        # when the dashboard finds the directory itself, because two rows
+        # for one key is the drift twice over.
+        if line is None:
+            del lines[index]
+            conf.write_text("".join(lines), encoding="utf-8")
+            return "dashboard: retired the row for %s; it finds docs/dashboard by itself" % key
         lines[index] = line + "\n"
         conf.write_text("".join(lines), encoding="utf-8")
-        if form == "label":
-            return "dashboard: relabelled %s -> %s" % (key, named)
-        return "dashboard: moved %s off %s -> %s" % (key, parts[3], named)
+        return "dashboard: moved %s off %s -> %s" % (key, parts[3], shown)
 
+    if line is None:
+        return "dashboard: finds %s by itself; no row to write" % key
     with conf.open("a", encoding="utf-8") as handle:
         if not text.endswith("\n"):
             handle.write("\n")
         handle.write(line + "\n")
-    return "dashboard: registered %s -> %s" % (key, named)
+    return "dashboard: registered %s -> %s" % (key, shown)
 
 
 def revision(repo: Path) -> str:
