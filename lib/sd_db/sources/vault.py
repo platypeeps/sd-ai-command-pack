@@ -103,6 +103,17 @@ def plugin_entries(*, home: Path | str, environ: dict[str, str] | None = None) -
     return entries
 
 
+def store_root(store: dict[str, Any], prefix: str, environ: dict[str, str] | None = None) -> Path:
+    """The folder a plugin's `store.root` names: `$OBSIDIAN_VAULT` through `vault_root`, else its variable."""
+    variable = str(store["root"])[1:]
+    if variable == "OBSIDIAN_VAULT":
+        return vault_root(environ)
+    env = os.environ if environ is None else environ
+    if env.get(variable):
+        return Path(os.path.expanduser(env[variable]))
+    raise MigrationRefused(f"plugin {prefix} keeps its notes under ${variable}, which is not set")
+
+
 @dataclass(frozen=True)
 class Base:
     """One declared kind: where its notes are and how its words map."""
@@ -118,7 +129,6 @@ class Base:
 def declared_bases(entries: list[dict[str, Any]],
                    environ: dict[str, str] | None = None) -> tuple[tuple[Base, ...], list[str]]:
     """`(bases, notes)` from the `plugin list` entries, or a refusal naming what is wrong."""
-    env = os.environ if environ is None else environ
     bases: dict[str, Base] = {}
     notes: list[str] = []
     for entry in entries:
@@ -139,13 +149,7 @@ def declared_bases(entries: list[dict[str, Any]],
             # source from then on, and notes imported over them would be older.
             raise MigrationRefused(f"plugin {prefix}'s `store.driver` is 'db', so its rows are the "
                                    f"source and the vault holds only their mirror; nothing imported")
-        variable = str(store["root"])[1:]
-        if variable == "OBSIDIAN_VAULT":
-            root = vault_root(env)
-        elif env.get(variable):
-            root = Path(os.path.expanduser(env[variable]))
-        else:
-            raise MigrationRefused(f"plugin {prefix} keeps its notes under ${variable}, which is not set")
+        root = store_root(store, prefix, environ)
         for kind, declared in sorted(workflow.items()):
             if kind in bases:
                 raise MigrationRefused(f"plugins {bases[kind].prefix} and {prefix} both declare kind "
