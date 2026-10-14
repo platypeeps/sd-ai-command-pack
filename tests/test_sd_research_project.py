@@ -381,6 +381,15 @@ class PlanTests(Projection):
                          "Status on the experiments row is not sd's (Blocked; sd last wrote Todo; set it to Todo "
                          "to hand it back)")
 
+    def test_a_select_name_is_compared_exactly(self) -> None:
+        self.created()
+        self.status(self.experiment, "in_progress")
+        self.project()
+        live = self.live(row=ROW, Status=" Todo ")
+        live["schema"]["Status"]["options"].append(" Todo ")
+        planned = self.planned(self.experiment, live)
+        self.assertEqual((planned["properties"], planned["yielded"]), ({}, ["Status"]))
+
     def test_a_value_equal_to_the_wanted_one_is_not_claimed(self) -> None:
         self.created()
         self.status(self.experiment, "in_progress")

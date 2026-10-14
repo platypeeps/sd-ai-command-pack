@@ -356,12 +356,15 @@ POINTER = "Projected from sd:{item}. sd keeps Status current; edit anything else
 
 
 def _empty(value: Any) -> Any:
-    """One spelling for a live or wanted value: None for empty, a sorted id list for a relation."""
+    """One spelling for a live or wanted value: None for empty, a sorted id list for a relation.
+
+    Nothing else is changed: a value trimmed or cut here could pass a person's value as sd's.
+    """
     if value is None or value == "" or value == []:
         return None
     if isinstance(value, list):
         return sorted(row_id(entry) or str(entry) for entry in value)
-    return value.strip() if isinstance(value, str) else value
+    return value
 
 
 def _live(target: str, name: str, value: Any) -> Any:
