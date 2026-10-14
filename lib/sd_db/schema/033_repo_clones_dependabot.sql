@@ -20,7 +20,7 @@
 --   BEGIN;
 --   ALTER TABLE repo DROP COLUMN dependabot;
 --   ALTER TABLE repo DROP COLUMN clone_profiles;
---   PRAGMA user_version = 30;
+--   PRAGMA user_version = 32;
 --   COMMIT;
 
 ALTER TABLE repo ADD COLUMN clone_profiles TEXT

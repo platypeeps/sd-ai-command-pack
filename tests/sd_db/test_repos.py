@@ -917,7 +917,7 @@ class TheCloneLines(RepoCase):
 
     def test_a_database_before_the_columns_raises_and_never_answers_empty(self):
         old = self.root / "old.db"
-        through = [m for m in migrations() if m[0] <= 30]
+        through = [m for m in migrations() if m[0] <= 32]
         with mock.patch("sd_db.migrate.migrations", return_value=through):
             migrate(old)
         raw = sqlite3.connect(old)
@@ -925,7 +925,7 @@ class TheCloneLines(RepoCase):
         raw.row_factory = sqlite3.Row
         with self.assertRaises(SdDbError) as caught:
             clone_lines(raw, "personal", root=self.checkouts)
-        self.assertIn("schema version 30", str(caught.exception))
+        self.assertIn("schema version 32", str(caught.exception))
 
 
 class TheCloneSeed(RepoCase):

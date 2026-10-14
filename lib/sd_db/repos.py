@@ -687,7 +687,7 @@ def set_managed(
 
 #: The machine kinds `repo-sync` clones for, in the order `repo.clone_profiles`
 #: spells a set: one spelling per set keeps the column's CHECK a closed list
-#: (migration 031, design sd:3983).
+#: (migration 033, design sd:3983).
 CLONE_PROFILES = ("personal", "work", "terra")
 
 
@@ -749,7 +749,7 @@ def clone_lines(
     a checkout straight under `root`. Every row must give back its own path:
     under `root` at depth 1 or 2, a GitHub remote, and a folder named as the
     repository. One that does not refuses the whole list, naming every such
-    row, because a partial list would read as complete. A store not yet at 31
+    row, because a partial list would read as complete. A store not yet at 33
     raises `SchemaTooOld`, never an empty list.
     """
     from .database import schema_version

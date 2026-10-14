@@ -1300,9 +1300,16 @@ def delivery_notes(connection: sqlite3.Connection, *, since: str) -> list[sqlite
 
     The day is a coarse bound, since note stamps carry either `Z` or `+00:00`;
     the caller compares each stamp exactly. Behind the dashboard's Activity (sd:2111).
+    `body` is the marker line, then the evidence JSON: a note from before
+    sd:3508 carries it, and a later note's comes from its `ship.delivery_key` row.
     """
     return connection.execute(
-        "SELECT note.id, note.item, note.timestamp, note.body, item.title FROM note LEFT JOIN item ON item.id = note.item "
+        "SELECT note.id, note.item, note.timestamp, "
+        "CASE WHEN instr(note.body, char(10)) THEN note.body ELSE note.body || coalesce(char(10) || ("
+        "  SELECT state.body FROM state WHERE state.kind = 'verified' AND state.key = "
+        "  'code-delivery:' || note.item || ':' || substr(note.body, instr(note.body, ' at ') + 4) "
+        "  ORDER BY state.id DESC LIMIT 1), '') END AS body, "
+        "item.title FROM note LEFT JOIN item ON item.id = note.item "
         "WHERE note.kind = 'comment' AND note.body LIKE 'Code delivery %' AND substr(note.timestamp, 1, 10) >= ? "
         "ORDER BY note.id", (since[:10],)).fetchall()
 
