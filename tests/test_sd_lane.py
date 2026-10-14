@@ -1560,6 +1560,22 @@ class Landing(Lane):
                          ("merged", f"make post-merge timed out after 1s in {self.repo}"))
         self.assertEqual(self.note_kinds[-1], "followup")
 
+    def test_a_failed_post_merge_reports_both_tails_when_the_refusal_is_on_stdout(self) -> None:
+        """sd:4047. A `[step]` line always fills stderr, so a refusal printed on stdout was dropped."""
+        tree, head = self.topic()
+        git(self.repo, "switch", "-q", "--detach")  # a deploying checkout is pinned (sd:3647)
+        self.post_merge("@echo '[step] stop consumers' >&2", "@echo 'refused: the database is locked'",
+                        f"@{sys.executable} -c \"print('x' * 900)\" >&2", "@exit 3")
+        self.merge_lands(tree, 1, head)
+        answer = self.drain()
+        self.assertEqual(self.entries()[0]["status"], "merged")
+        # make's own error line and exit code differ between make versions, so neither is asserted.
+        head, _, stdout = answer["post_merge"].rpartition("; stdout: ")
+        _, _, stderr = head.partition(": stderr: ")
+        self.assertIn("refused: the database is locked", stdout)
+        self.assertIn("x" * 100, stderr)
+        self.assertLessEqual(len(stderr), 300)  # each tail stays bounded
+
     def test_a_checkout_that_did_not_fast_forward_skips_the_post_merge_and_says_why(self) -> None:
         tree, head = self.topic()
         git(self.repo, "switch", "-q", "-c", "elsewhere")
