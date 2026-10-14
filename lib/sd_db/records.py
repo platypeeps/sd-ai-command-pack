@@ -118,12 +118,7 @@ def rules_for(kind: str, *, home: Path | str, environ: dict[str, str] | None = N
         except MigrationRefused as error:
             raise RecordRefused(str(error)) from None
     found = [entry for entry in entries if kind in (entry.get("workflow") or {})]
-    for entry in entries:
-        problem = entry.get("manifestError") or entry.get("dashboardError") or (
-            None if entry.get("readable") else entry.get("why") or "unreadable")
-        if problem:
-            raise RecordRefused(f"the plugin at {entry.get('root')} cannot be read, so the rules of "
-                                f"kind {kind!r} cannot be known: {problem}")
+    _refuse_unreadable(entries, f"the rules of kind {kind!r}")
     if len(found) != 1:
         raise RecordRefused(f"{len(found)} registered plugins declare a `workflow` for kind {kind!r}; "
                             f"a base row needs exactly one")
@@ -145,6 +140,16 @@ def rules_for(kind: str, *, home: Path | str, environ: dict[str, str] | None = N
         )
     except (KeyError, TypeError, ValueError) as error:
         raise RecordRefused(f"the pack's rules for kind {kind!r} are missing {error}") from None
+
+
+def _refuse_unreadable(entries: list[dict[str, Any]], what: str) -> None:
+    """Any plugin the pack could not read may declare a kind, so `what` is unknown."""
+    for entry in entries:
+        problem = entry.get("manifestError") or entry.get("dashboardError") or (
+            None if entry.get("readable") else entry.get("why") or "unreadable")
+        if problem:
+            raise RecordRefused(f"the plugin at {entry.get('root')} cannot be read, so {what} "
+                                f"cannot be known: {problem}")
 
 
 # ---------------------------------------------------------------- reads
@@ -206,6 +211,9 @@ def add_row(connection: sqlite3.Connection, rules: Rules, *, title: str, who: st
     who = _text(who, "who")
     _refuse_before_flip(rules)
     values = _checked_fields(rules, fields or {})
+    if "dateCreated" in rules.fields and not values.get("dateCreated"):
+        # Every vault note carries it; without it the mirror note would import with no date.
+        values["dateCreated"] = datetime.date.today().isoformat()
     for name in rules.floor:
         _refuse_below_floor(rules, name, values.get(name))
     stage = rules.initial if stage is None else stage
@@ -224,7 +232,8 @@ def add_row(connection: sqlite3.Connection, rules: Rules, *, title: str, who: st
                            fields={**values, "kind": rules.kind}, body={"markdown": body}, session=who,
                            due=dates.get("due"), created_at=dates.get("created_at"))
         row = get_row(connection, item)
-    _mirror_after(connection, rules)
+        caught_up = _pending(connection, rules)
+    _mirror_after(connection, rules, caught_up)
     return row
 
 
@@ -273,7 +282,8 @@ def edit_row(connection: sqlite3.Connection, item: int, rules: Rules, *, revisio
         if target != current and rules.stages[target] != row["status"]:
             _transition(connection, item, rules.stages[target], who=who, reason=f"stage {current} -> {target}")
         edited = get_row(connection, item)
-    _mirror_after(connection, rules)
+        caught_up = _pending(connection, rules)
+    _mirror_after(connection, rules, caught_up)
     return edited
 
 
@@ -439,6 +449,7 @@ def render(connection: sqlite3.Connection, *, home: Path | str, environ: dict[st
         if entries is None:
             entries = plugin_entries(home=home, environ=env)
         if kinds is None:
+            _refuse_unreadable(entries, "the kinds on the `db` driver")
             kinds = sorted(kind for entry in entries if (entry.get("store") or {}).get("driver") == "db"
                            for kind in entry.get("workflow") or {})
         rules = [rules_for(kind, home=home, environ=env, entries=entries) for kind in kinds]
@@ -447,17 +458,28 @@ def render(connection: sqlite3.Connection, *, home: Path | str, environ: dict[st
     return _mirrored(connection, rules, env)
 
 
-def _mirror_after(connection: sqlite3.Connection, rules: Rules) -> None:
+def _pending(connection: sqlite3.Connection, rules: Rules) -> bool:
+    """In the write's transaction: whether the mirror was caught up, then a heartbeat saying it is not.
+
+    A process stopped between the commit and the render leaves that failed
+    heartbeat, so the next write renders every kind and Health shows the gap.
+    """
+    caught_up = _last_beat_ok(connection)
+    _beat(connection, Mirror(kinds=[rules.kind], reason=f"a {rules.kind} write is committed and not yet rendered"))
+    return caught_up
+
+
+def _mirror_after(connection: sqlite3.Connection, rules: Rules, caught_up: bool) -> None:
     """The render after a committed write. It prints and records a failure and never raises.
 
-    After a failed render it renders every kind, so the next write catches up
-    whichever kind the failure left behind.
+    When the mirror was not caught up before the write, it renders every kind,
+    so the next write catches up whichever kind a failure left behind.
     """
     try:
         if connection.in_transaction:
             raise RecordRefused("the write is inside the caller's open transaction, so it is not committed yet")
         refuse_hub_only(connection, "the records mirror")
-        if _last_beat_ok(connection):
+        if caught_up:
             mirror = _mirrored(connection, [rules], dict(os.environ))
         else:
             mirror = render(connection, home=Path(os.environ.get("HOME", "~")).expanduser())
@@ -541,15 +563,15 @@ def _mirror_note(root: Path, rules: Rules, row: dict[str, Any], mirror: Mirror) 
         problem = _hand_edit(row, held)
         if problem:
             raise RecordRefused(problem)
-    if _replace(target, _note(row).encode("utf-8")):
+    if _replace(target, _note(rules, row).encode("utf-8"), held=held):
         mirror.written.append(relative)
 
 
-def _note(row: dict[str, Any]) -> str:
+def _note(rules: Rules, row: dict[str, Any]) -> str:
     """The row as a note: its fields and `status` as frontmatter, the body verbatim, the hash last.
 
-    The note must read back as the row, or the next import would land
-    another row from it: anything else refuses.
+    The note must read back as the row, as the import reads it, or a
+    rollback's import would land another row from it: anything else refuses.
     """
     fields = {name: value for name, value in row["fields"].items() if name != "kind"}
     matter = "\n".join(_frontmatter_line(name, value) for name, value in {**fields, "status": row["stage"]}.items())
@@ -561,6 +583,13 @@ def _note(row: dict[str, Any]) -> str:
     if found != {**fields, "status": row["stage"]} or body != row["body"]:
         raise RecordRefused(f"item {row['id']} would not read back from its note, since the frontmatter "
                             f"reader has no form for one of its values; kept as it is")
+    # The import's payload beyond the fields: title, created and due (`sources.vault.Reader.freeze`).
+    due = str(fields.get(rules.due) or "").strip() or None if rules.due else None
+    payload = (str(fields.get("title") or PurePosixPath(row["path"] or "").stem).strip(),
+               str(fields.get("dateCreated") or "").strip(), due)
+    if payload != (row["title"], row["created_at"], row["due"]):
+        raise RecordRefused(f"item {row['id']} would not read back from its note: its title, created date "
+                            f"or due date is not the one its fields give; kept as it is")
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
     return f"---\n{matter}\nmirror-hash: {digest}\n---\n{row['body']}\n"
 
@@ -613,11 +642,24 @@ def _strays(root: Path, rules: Rules, rows: list[dict[str, Any]], mirror: Mirror
             mirror.refused.append((relative, "no row holds this file; kept: add it as a row or delete it"))
 
 
-def _replace(target: Path, data: bytes) -> bool:
-    """Write `data` to `target` by temporary file and rename, only when the bytes differ."""
+#: `_replace` without a check of what the file held: the HTML pages, which nobody edits.
+UNCHECKED = object()
+
+
+def _replace(target: Path, data: bytes, *, held: object = UNCHECKED) -> bool:
+    """Write `data` to `target` by temporary file and rename, only when the bytes differ.
+
+    `held` is what the caller checked the file held (`None`: no file). The
+    file is read again just before the rename, and a change since refuses:
+    an Obsidian Sync edit that lands while the render runs stays. A file
+    has no compare-and-swap, so an edit inside the last read and the rename
+    is the one window left.
+    """
+    current: bytes | None = None
     with contextlib.suppress(FileNotFoundError):
-        if target.read_bytes() == data:
-            return False
+        current = target.read_bytes()
+    if current == data:
+        return False
     target.parent.mkdir(parents=True, exist_ok=True)
     try:
         mode = target.stat().st_mode & 0o777
@@ -628,6 +670,12 @@ def _replace(target: Path, data: bytes) -> bool:
         with os.fdopen(handle, "wb") as stream:
             stream.write(data)
         os.chmod(temporary, mode)
+        if held is not UNCHECKED:
+            with contextlib.suppress(FileNotFoundError):
+                current = None
+                current = target.read_bytes()
+            if current != held:
+                raise RecordRefused("it changed while the render ran: a hand edit, kept")
         os.replace(temporary, target)
     except BaseException:
         with contextlib.suppress(FileNotFoundError):

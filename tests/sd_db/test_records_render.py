@@ -17,7 +17,7 @@ from unittest.mock import patch
 from sd_db import connect, record_state
 from sd_db.jobs import cli
 from sd_db.migrate import initialise
-from sd_db.records import MIRROR_KEY, edit_row, get_row, render, rules_for
+from sd_db.records import MIRROR_KEY, add_row, edit_row, get_row, render, rules_for
 from sd_db.remote import HubOnly
 from sd_db.sources import run, verify
 from sd_db.sources.vault import Reader
@@ -126,6 +126,25 @@ class TheMarkdownMirror(MirrorCase):
         reader = Reader.from_plugins([support.plugin_entry()], environ=self.env)
         self.assertEqual(verify(self.db, reader, reader.freeze()), [])
 
+    def test_an_added_row_carries_its_date_so_its_note_reads_back(self):
+        self.render()
+        rules = rules_for("blog-idea", home=self.home, entries=[flipped()])
+        with patch.dict(os.environ, self.env):
+            add_row(self.db, rules, title="added idea", who="operator", fields={"score": "7"}, body="# added\n")
+        self.assertTrue(self.beat()["ok"], self.beat())
+        reader = Reader.from_plugins([support.plugin_entry()], environ=self.env)
+        self.assertEqual(verify(self.db, reader, reader.freeze()), [])
+
+    def test_a_row_whose_created_date_its_fields_do_not_give_is_refused(self):
+        self.render()
+        before = self.note("first idea")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.move("first idea", None, fields={"dateCreated": None})
+        mirror = self.render()
+        self.assertEqual([path for path, _ in mirror.refused], [f"{IDEAS}/first idea.md"])
+        self.assertIn("title, created date or due date", mirror.refused[0][1])
+        self.assertEqual(self.note("first idea"), before)
+
     def test_a_row_that_would_not_read_back_is_refused_and_its_file_kept(self):
         self.render()
         before = self.note("first idea")
@@ -161,6 +180,26 @@ class TheOverwriteRule(MirrorCase):
         self.assertEqual([path for path, _ in mirror.refused], [f"{IDEAS}/first idea.md"])
         self.assertIn("differs from its mirror-hash", mirror.refused[0][1])
         self.assertEqual(self.note("first idea"), edited)
+
+    def test_an_edit_that_lands_while_the_render_runs_is_kept(self):
+        self.render()
+        path = self.vault / IDEAS / "first idea.md"
+        real = os.chmod
+
+        def phone_edit(target, mode):
+            real(target, mode)
+            if Path(target).name.startswith(".first idea.md."):
+                path.write_text("a phone edit\n", encoding="utf-8")
+
+        # A row change the next render writes out, with no render of its own.
+        row = get_row(self.db, kind="blog-idea", title="first idea")
+        self.db.execute("UPDATE item SET stage = 'declined' WHERE id = ?", (row["id"],))
+        with patch("sd_db.records.os.chmod", side_effect=phone_edit):
+            mirror = self.render()
+        self.assertEqual(mirror.refused, [(f"{IDEAS}/first idea.md",
+                                           "it changed while the render ran: a hand edit, kept")])
+        self.assertEqual(path.read_text(encoding="utf-8"), "a phone edit\n")
+        self.assertEqual([found.name for found in self.vault.rglob(".*.tmp")], [])
 
     def test_a_file_with_no_row_is_reported_and_kept(self):
         stray = self.vault / IDEAS / "nested" / "Stray.md"
@@ -200,6 +239,13 @@ class TheRefusals(MirrorCase):
         self.assertIn("is not a directory", said.getvalue())
         self.assertFalse(Path(os.environ["OBSIDIAN_VAULT"]).exists())
         self.assertIn("\nstatus: inbox\n", self.note("first idea"))
+
+    def test_an_unreadable_plugin_is_an_unknown_not_an_empty_render(self):
+        broken = {"root": "/plugins/other", "readable": False, "why": "no manifest"}
+        # Only the unreadable plugin could hold a `db` kind, so no kind's rules are ever asked for.
+        mirror = render(self.db, home=self.home, environ=self.env, entries=[support.plugin_entry(), broken])
+        self.assertIn("cannot be read", str(mirror.reason))
+        self.assertEqual((mirror.ok, self.beat()["ok"]), (False, False))
 
     def test_a_kind_whose_plugin_is_still_on_the_vault_driver_refuses(self):
         entry = flipped()
@@ -257,6 +303,16 @@ class TheRenderAfterAWrite(MirrorCase):
         self.move("a topic", "parked", kind="topic")
         self.assertIn("\nstatus: accepted\n", self.note("first idea"))
         self.assertEqual((self.beat()["ok"], sorted(self.beat()["kinds"])), (True, ["blog-idea", "topic"]))
+
+    def test_a_process_stopped_after_the_commit_leaves_a_failed_heartbeat_the_next_write_catches_up(self):
+        self.render()
+        with patch("sd_db.records._mirror_after"):
+            self.move("first idea", "accepted")
+        self.assertEqual((self.beat()["ok"], self.beat()["reason"]),
+                         (False, "a blog-idea write is committed and not yet rendered"))
+        self.move("a topic", "parked", kind="topic")
+        self.assertIn("\nstatus: accepted\n", self.note("first idea"))
+        self.assertTrue(self.beat()["ok"])
 
     def test_a_write_from_a_satellite_commits_and_leaves_the_render_to_the_hub(self):
         self.render()

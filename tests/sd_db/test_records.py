@@ -6,6 +6,7 @@ carries the `rules` block the pack reports, with the driver flipped to `db`.
 """
 
 import dataclasses
+import datetime
 import json
 import tempfile
 import unittest
@@ -242,7 +243,10 @@ class TheAdd(RecordsCase):
                          ("idea", "vault", "blog-idea:System/Databases/Blog Ideas/third idea.md",
                           "System/Databases/Blog Ideas/third idea.md"))
         self.assertEqual((added["stage"], added["status"], added["body"]), ("inbox", "planning", "# third idea\n"))
-        self.assertEqual(added["fields"], {"score": "8", "tags": ["blog-idea"], "kind": "blog-idea"})
+        today = datetime.date.today().isoformat()
+        self.assertEqual(added["fields"], {"score": "8", "tags": ["blog-idea"], "kind": "blog-idea",
+                                           "dateCreated": today})
+        self.assertEqual(added["created_at"], today)
         self.assertEqual(self.notes(added["id"]), [("status_change", "opened as planning")])
         self.assertEqual(self.row("third idea")["id"], added["id"])
 
