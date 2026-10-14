@@ -5,9 +5,10 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
-from ..backup import run
+from ..backup import prune_older, require_mount, run
 from ..database import connect
 from ..errors import BackupError, SdDbError
 from ..retention import prune
@@ -65,8 +66,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-row-prune", action="store_true",
                         help="skip the nightly row prune and its report item; for a "
                              "backup taken more often than nightly")
+    parser.add_argument("--prune-only", action="store_true",
+                        help="take no snapshot; delete copies under --destination, such as a mirror "
+                             "on a share, whose checkpoint is more than --keep-days days old")
     arguments = parser.parse_args(argv)
     home = Path(os.environ.get("HOME", "~")).expanduser()
+    if arguments.prune_only:
+        # The hourly job's NAS prune (sd:4011). The copies were written in
+        # another directory, so their manifests name it; `moved` verifies
+        # them by their hashes and checkpoint instead.
+        if arguments.destination is None or arguments.keep_days is None:
+            print("sd-db backup: --prune-only needs --destination and --keep-days", file=sys.stderr)
+            return 1
+        try:
+            if arguments.require_mount is not None:
+                require_mount(arguments.require_mount, arguments.destination)
+            removed = prune_older(arguments.destination, arguments.keep_days, now=datetime.now(UTC), moved=True)
+        except (BackupError, OSError) as failure:
+            print(f"sd-db backup: {failure}", file=sys.stderr)
+            return 1
+        print(f"sd-db backup: {len(removed)} {'copy' if len(removed) == 1 else 'copies'} older than "
+              f"{arguments.keep_days} days removed under {arguments.destination}")
+        return 0
     try:
         snapshot = run(home=home, destination=arguments.destination, keep=arguments.keep,
                        keep_days=arguments.keep_days, mount=arguments.require_mount)
