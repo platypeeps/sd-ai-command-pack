@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 #: The verbs `sd_db.jobs.cli` answers; `sd-db` hands each one straight to it.
-CLI_VERBS = ("init", "migrate", "status", "restore", "repo", "item", "work",
+CLI_VERBS = ("init", "migrate", "status", "fence", "restore", "repo", "item", "work",
              "import", "verify", "usage", "judgments", "review", "credentials",
              "records")
 
@@ -32,9 +32,10 @@ sd-db: the workflow database's verbs, run from this checkout's lib/.
 
 Usage: sd-db <verb> [arguments]
 
-  init, migrate, status, restore, repo, item, work, import, verify,
-  usage, judgments, review, credentials, records
+  init, migrate, status, fence, restore, repo, item, work, import,
+  verify, usage, judgments, review, credentials, records
               sd_db.jobs.cli answers these, with the arguments given.
+              fence exits 1 on a machine whose tailnet name is not sd.hub_name.
               -h or --help anywhere prints this text and acts on nothing.
   backup [ARGS]
               Snapshot the database and prove the copy (sd_db.jobs.backup).

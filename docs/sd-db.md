@@ -35,6 +35,25 @@ It sends every open of the default database to the hub, one TCP session per conn
 
 Loopback is not a user boundary: every local account reaches `127.0.0.1`, so the token checks the account.
 
+### The fence: a returning old hub
+
+After a failover the old hub comes back with its own database and no `hub.json`, so it would act as the hub at once.
+The fence stops it (sd:4044): a machine with its own database holds the hub role only while its tailnet name matches `sd.hub_name`.
+
+    sd config set sd.hub_name hub.example.test   # the hub's MagicDNS name, or its bare machine name
+    bin/sd-db fence                             # sd-db: fence: holder: this node is hub.example.test, ...
+
+| Answer | When | `serve` on the tailnet, a lane on this machine's database | `bin/sd-db fence` |
+| --- | --- | --- | --- |
+| `holder` | this node's MagicDNS name matches | go on | exit 0 |
+| `off` | `sd.hub_name` is unset | go on, as before the fence | exit 0 |
+| `elsewhere` | another name, or a satellite | refuse, naming the holder | exit 1 |
+| `unknown` | the setting does not read, or Tailscale does not name this node | refuse | exit 1 |
+
+The setting is read first, so `off` asks Tailscale nothing. One answer from Tailscale stands for 30 seconds in a process.
+`serve --loopback` is not fenced: it leaves the machine for nobody.
+Writes that stay on the machine stay allowed; scripts that write off the machine (the NAS copy, the `hub-pin` push) run `bin/sd-db fence` first.
+
 ### Peer identity on the tailnet
 
 The listener takes the peer from the TCP socket, never from a frame.
@@ -169,6 +188,7 @@ On any other machine it raises `LaneElsewhere` (`lane_elsewhere`) and locks noth
 A read fault, a database that cannot be opened, or clones that disagree raise `LaneUnknown` (`lane_unknown`).
 Uncertain ownership never grants the hub.
 A missing row reads as the hub.
+A lane this machine would run on its own database passes the fence too: `elsewhere` raises `LaneElsewhere` naming the holder, `unknown` raises `LaneUnknown`.
 The hub's lock file sits beside the database; a satellite host's sits under `$XDG_STATE_HOME/sd/ship-locks/`.
 
 The machine that hosts a repository gates and merges it, and no request crosses a machine.

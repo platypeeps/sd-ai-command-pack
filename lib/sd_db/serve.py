@@ -117,7 +117,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import database, remote, tailnet
+from . import database, hub, remote, tailnet
 from .runner import RunnerRefused
 from .runner_journal import lock
 from .writes import now
@@ -869,6 +869,11 @@ def serve(port: int, database_path: Path, stream=sys.stderr, *, loopback: bool =
             node = tailnet.this_node()
         except tailnet.TailnetError as error:
             log.line(f"cannot serve on the tailnet: {error}")
+            return 1
+        # The fence (hub failover, D5): a returning old hub serves its stale database to nobody.
+        found = hub.role_at(target, name=lambda: node.name or tailnet.this_name())
+        if found.refuses:
+            log.line(f"cannot serve on the tailnet: this machine is not the hub: {found.reason}")
             return 1
     resolved = target.resolve()
     guard = resolved.with_name(resolved.name + LOCK_SUFFIX)

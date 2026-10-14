@@ -132,6 +132,33 @@ class Node:
     addresses: frozenset
     login: str
     address: ipaddress.IPv4Address
+    #: The MagicDNS name, as `name` reads it; `None` when the daemon gives none.
+    name: str | None = None
+
+
+def name(self_record) -> str | None:
+    """A `Self.DNSName` lower-cased with no trailing dot, or `None` when it names nothing."""
+    if not isinstance(self_record, dict) or not isinstance(self_record.get("DNSName"), str):
+        return None
+    return self_record["DNSName"].strip().rstrip(".").lower() or None
+
+
+def this_name(run=run) -> str:
+    """This node's tailnet name: the one the console renames (hub failover D3).
+
+    A stopped or logged-out daemon, or one that names no node, raises
+    `TailnetError`; the fence reads that as unknown, never as a name.
+    """
+    try:
+        state = json.loads(run(["tailscale", "status", "--json"]))
+        backend, found = state.get("BackendState"), name(state.get("Self"))
+    except (TypeError, ValueError, AttributeError) as error:
+        raise TailnetError("cannot read this Tailscale node's name") from error
+    if backend != "Running":
+        raise TailnetError(f"Tailscale is not running ({backend})")
+    if found is None:
+        raise TailnetError("Tailscale names no tailnet name for this node")
+    return found
 
 
 def this_node(run=run) -> Node:
@@ -157,4 +184,4 @@ def this_node(run=run) -> Node:
     ipv4 = sorted(value for value in addresses if value.version == 4 and value in TAILNET)
     if not ipv4:
         raise TailnetError("this node has no Tailscale IPv4 address")
-    return Node(addresses, owner, ipv4[0])
+    return Node(addresses, owner, ipv4[0], name(own))
