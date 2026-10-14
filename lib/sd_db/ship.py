@@ -273,8 +273,14 @@ class LaneElsewhere(WorkflowError):
 
     code = "lane_elsewhere"
 
-    def __init__(self, repository: str, host: str | None, path: str | None) -> None:
+    def __init__(self, repository: str, host: str | None, path: str | None, *, fenced: str | None = None) -> None:
         self.repository, self.host, self.path = repository, host, path
+        if fenced is not None:
+            # The fence: this machine's database is not the hub's, so moving the lane here is no remedy.
+            super().__init__(
+                f"The lane for {repository} runs on the hub, {host}, not on this machine: {fenced}.\n"
+                f"Nothing was locked. Run it there; this machine's database is not the hub's.")
+            return
         name = re.sub(r"^~/(repos/)?", "", path) if path else repository.rpartition("/")[2]
         super().__init__(
             f"The lane for {repository} runs on {host or 'the hub'}, not on this machine.\n"
@@ -303,6 +309,7 @@ def _lane(connection, database, repository: str) -> tuple[bool, str | None, str 
     The rows are the ones whose remote gives `repository` (`protection.github_slug`).
     NULL is the hub; so is no row, and a database without the column, where no
     host can be named. A read fault or clones that disagree raise `LaneUnknown`.
+    A lane hosted on this machine's own database passes the fence (`_fence`) too.
     """
     from .protection import github_slug
 
@@ -325,9 +332,30 @@ def _lane(connection, database, repository: str) -> tuple[bool, str | None, str 
             f"Move the lane once to set every clone: dashboard, Management, Move lane;\n"
             f"or bin/sd-db repo lane-host {path} <host>.")
     host = hosts.pop() if hosts else None
-    if host is None:
-        return served_by(database) is None, None, path
-    return host == this_host(), host, path
+    hub = served_by(database) is None
+    if not (host == this_host() if host is not None else hub):
+        return False, host, path
+    if hub:
+        _fence(connection, repository, path)
+    return True, host, path
+
+
+def _fence(connection, repository: str, path: str | None) -> None:
+    """Refuse a lane on this machine's own database unless it holds the hub role (hub failover, D5).
+
+    A returning old hub still has its database, so every lane it would run
+    from it merges from a stale queue: a NULL host and one that names it alike.
+    """
+    from .hub import role
+
+    found = role(connection)
+    if not found.refuses:
+        return
+    if found.state == "elsewhere":
+        raise LaneElsewhere(repository, found.holder, path, fenced=found.reason)
+    raise LaneUnknown(
+        f"Cannot tell whether this machine is the hub, so the lane for {repository} does not run here: "
+        f"{found.reason}. Nothing was locked.")
 
 
 def hosts_lane(connection, database, repository: str) -> bool:

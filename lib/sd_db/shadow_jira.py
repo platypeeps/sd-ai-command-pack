@@ -116,7 +116,7 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta
 
-from .shadow_sync import Collected, iso, parse_iso
+from .shadow_sync import Collected, iso, parse_iso, reason_of
 
 TRACKER = "jira"
 TIMEOUT_SECONDS = 30
@@ -544,6 +544,8 @@ def normalize(raw: dict, config: dict[str, str], me: str) -> dict | None:
         # reason, and a row with no reason at all reads as a collector bug
         # rather than as "your JQL is wider than the three named cases".
         "why": why or ["matched"],
+        # From this issue's own fields, so no failed search can leave it unknown.
+        "reason": reason_of(why or ["matched"]),
     }
 
 

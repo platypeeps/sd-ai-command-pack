@@ -187,8 +187,10 @@ def main(argv):
         if "--json" in argv:
             own = {
                 "HostName": current.get("hostname", "fixture"),
+                "DNSName": current.get("dnsname", f"{current.get('hostname', 'fixture')}.example.test."),
                 "TailscaleIPs": current.get("ips", ["100.64.0.1"]),
-                "Online": True,
+                # `Self.Online`: connected to the control plane; false while partitioned.
+                "Online": current.get("online", True),
                 "UserID": 1,
             }
             if current.get("tags"):

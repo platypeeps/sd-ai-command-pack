@@ -578,7 +578,7 @@ reviewer chain before vendor, transport, availability and spending gates run.
 
 Core settings use `sd config get|set|unset|list` and the existing atomic machine configuration writer.
 The file is `~/.config/sd-ai-command-pack/config.json`, honoring `XDG_CONFIG_HOME`.
-Two keys serve every machine and live in the workflow database as `setting` rows: `sd.fleet_owners` and `sd.copilot_review` (sd:3989).
+Three keys serve every machine and live in the workflow database as `setting` rows: `sd.fleet_owners`, `sd.copilot_review` (sd:3989) and `sd.hub_name` (sd:4044).
 `sd config set` and `unset` write the row; once a row exists, the file's line for that key is not read, and `get` names it on stderr.
 A machine with no database and no `hub.json` keeps them in the file. A database that cannot be read is an error, never the file's value.
 `sd config list sd --json` gives each key's `source`: `database`, `file` or `default`.
@@ -614,6 +614,9 @@ The reserved `sd` namespace declares these settings:
   Absence reads 45. `SD_GATE_SETTLE_SECONDS` overrides it for one run. It grants nothing.
 - `sd.fleet_owners`: comma-separated GitHub logins whose repositories `sd fleet stamp` treats as the operator's own.
   Absence reads the deprecated `fleet.owners` list in the machine config, then the pack's default, `platypeeps`. It grants nothing.
+- `sd.hub_name`: the hub's tailnet name, its MagicDNS name or bare machine name. A machine with its own database serves it
+  on the tailnet and runs lanes from it only while its tailnet name matches; `bin/sd-db fence` answers.
+  Absence is no fence. It grants nothing; [docs/sd-db.md](docs/sd-db.md) has the answers and callers.
 - `sd.gate_cache_gb`: the most gigabytes the local gate's warm Rust build folders may hold; `0` is no bound.
   Absence reads 40. `SD_GATE_CACHE_GB` overrides it for one run. It grants nothing.
 - `sd.lane_root`: the folder that holds each repository's `sd-ship lane` logs and runner lock, as `<root>/<repository>/lane/`.

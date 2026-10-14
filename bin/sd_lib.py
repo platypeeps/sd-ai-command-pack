@@ -124,6 +124,10 @@ CORE_CONFIG = {
                           "description": "The folder for large uncommitted data -- run outputs, logs, captures, "
                                          "scratch evidence -- as <root>/<repository>/; never build output or "
                                          "permission-dependent data. Unset is no bulk root. It grants nothing."},
+    "hub_name": {"pattern": r"[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*",
+                 "description": "The hub's tailnet name, the MagicDNS name or the bare machine name. A machine "
+                                "with its own database serves it, runs its lanes and pushes hub-pin only while its "
+                                "tailnet name matches (`sd-db fence`). Unset is no fence. It grants nothing."},
     "privacy_patterns": {"pattern": r"[~/][^\x00]*",
                          "description": "The privacy-pattern file a pull request body is checked against, one "
                                         "extended regular expression per line. It grants nothing."},
@@ -624,7 +628,7 @@ def review_slot(result: dict[str, Any], environ: Mapping[str, str], root: pathli
 #: workflow database, not `config.json` (sd:3989). `external_reviews` stays per
 #: machine until each machine's value is known to match: it is the consent to
 #: send private code out, and the work satellite holds the work repositories.
-FLEET_KEYS = ("fleet_owners", "copilot_review")
+FLEET_KEYS = ("fleet_owners", "copilot_review", "hub_name")
 
 
 def fleet_connection(environ: Mapping[str, str] | None = None, *, write: bool = False) -> Any:
@@ -1222,11 +1226,18 @@ def lane_elsewhere(connection: Any, database: Any, repository: str) -> str | Non
     the host, then the dashboard control, then the verb. `hosts_lane` already
     refused clones that disagree, so the first matching row names the host.
     """
-    if hosts_lane(connection, database, repository):
-        return None
-    from sd_db import ship  # noqa: PLC0415 -- `hosts_lane` imported the library
+    import_sd_db()  # the gateway's order: resolve the library before importing from it
+    from sd_db import ship  # noqa: PLC0415
 
     elsewhere = getattr(ship, "LaneElsewhere", None)
+    try:
+        if hosts_lane(connection, database, repository):
+            return None
+    except Exception as error:
+        # The fence's refusal names the hub that holds the role (sd:4044); callers treat it as a move.
+        if elsewhere is not None and isinstance(error, elsewhere):
+            return str(error)
+        raise
     if elsewhere is None:
         return f"The lane for {repository} runs on the hub, not on this machine. Run it there."
     return str(elsewhere(repository, *lane_host(connection, repository)))
