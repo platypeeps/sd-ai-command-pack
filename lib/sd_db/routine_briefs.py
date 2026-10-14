@@ -66,20 +66,28 @@ class BriefConflict(BriefRefused):
     """The stem's row holds other text, and nothing allowed the file to replace it."""
 
 
-def read_draft(path: Path) -> tuple[str, str]:
-    """`(stem, text)` of a draft or note, or `BriefUnusable` naming the rule it breaks."""
+#: Room for the `mirror-hash` line a render adds: a copy of a row at `MAX_REPORT` still imports.
+HASH_ROOM = len(f"{records.HASH_LINE} {'0' * 64}\n")
+
+
+def read_draft(path: Path, *, room: int = 0) -> tuple[str, str]:
+    """`(stem, text)` of a draft or note, or `BriefUnusable` naming the rule it breaks.
+
+    `room` is the bytes allowed over `MAX_REPORT`: an import reads a copy
+    with its hash line, and `counts` holds the text without it to the limit.
+    """
     path = Path(path)
     if path.suffix != ".md":
         raise BriefUnusable(f"{path.name}: the file name must be `<YYYY-MM-DD> - <Series>.md`")
     with path.open("rb") as stream:
-        data = stream.read(MAX_REPORT + 1)
-    if len(data) > MAX_REPORT:
+        data = stream.read(MAX_REPORT + room + 1)
+    if len(data) > MAX_REPORT + room:
         raise BriefUnusable(f"{path.name}: over {MAX_REPORT} bytes")
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError as error:
         raise BriefUnusable(f"{path.name}: not UTF-8 ({error.reason} at byte {error.start})") from None
-    counts(path.stem, text)
+    counts(path.stem, unhashed(text)[0] if room else text)
     return path.stem, text
 
 
@@ -219,9 +227,8 @@ def import_folder(connection: sqlite3.Connection, folder: Path, *, repo: str, wh
     taken: dict[str, str] = {}
     for path in notes:
         try:
-            stem, held = read_draft(path)
+            stem, held = read_draft(path, room=HASH_ROOM)
             text, _ = unhashed(held)
-            counts(stem, text)
         except BriefUnusable as refusal:
             result["refused"].append({"name": path.name, "reason": str(refusal)})
             continue

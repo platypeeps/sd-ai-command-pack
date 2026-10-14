@@ -310,6 +310,15 @@ class TheImport(Briefs):
         self.assertEqual([c["stem"] for c in result["conflicts"]], [DAILY])
         self.assertEqual(self.row()["fields"]["brief"]["sha256"], sha("---\na: b\n---\nreplaced after\n"))
 
+    def test_a_rendered_copy_at_the_size_limit_imports_back_after_its_row_is_gone(self):
+        text = TEXT + "x" * (reporting.MAX_REPORT - len(TEXT.encode()) - 1) + "\n"
+        self.add(text)
+        self.note(records.hashed(text))
+        self.db.execute("DELETE FROM note WHERE item = ?", (self.row()["id"],))
+        self.db.execute("DELETE FROM item WHERE id = ?", (self.row()["id"],))  # the restore took it away
+        result = self.imported()
+        self.assertEqual((result["filed"], result["refused"], result["verified"]), ([DAILY], [], 1))
+
     def test_a_hand_edited_copy_is_named_as_one(self):
         self.add()
         self.note(records.hashed(TEXT).replace("Three", "Four"))
