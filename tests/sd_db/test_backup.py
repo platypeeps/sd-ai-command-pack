@@ -1057,6 +1057,88 @@ class TheDatabaseWaitingForMigrate(BackupCase):
         self.assertIn("2 old snapshot(s) removed; row prune skipped", completed.stdout)
 
 
+class MigrateNeedsABackupOfThisStore(BackupCase):
+    """sd:3507: `sd-db migrate` refuses unless the newest snapshot under the
+    backup root verifies and is this store: its schema version and its row
+    counts. A database waiting for `migrate` refuses every library write, so
+    equal counts mean the snapshot holds every row the migration rewrites."""
+
+    def migrate(self, expect):
+        environment = dict(os.environ, HOME=str(self.home), PYTHON=sys.executable)
+        completed = subprocess.run([sys.executable, str(ENTRYPOINT), "migrate"], capture_output=True, text=True,
+                                   input="", env=environment, check=False)
+        self.assertEqual(completed.returncode, expect, completed.stdout + completed.stderr)
+        return completed
+
+    def version(self):
+        raw = sqlite3.connect(f"file:{self.database}?mode=ro", uri=True)
+        try:
+            return raw.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            raw.close()
+
+    def test_no_backup_is_refused_and_names_both_ways_out(self):
+        one_migration_back(self.database)
+        completed = self.migrate(1)
+        self.assertIn(f"no backup under {backup_root(self.home)}", completed.stderr)
+        self.assertIn("bin/sd-db backup", completed.stderr)
+        self.assertIn("SD_DB_BACKUP_ROOT", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_backup_of_this_store_lets_it_migrate(self):
+        one_migration_back(self.database)
+        snapshot = run(home=self.home)
+        completed = self.migrate(0)
+        self.assertIn(f"backup {snapshot.directory}", completed.stdout)
+        self.assertEqual(self.version(), SCHEMA_VERSION)
+
+    @hub_only
+    def test_a_row_written_after_the_backup_is_refused(self):
+        one_migration_back(self.database)
+        run(home=self.home)
+        raw = sqlite3.connect(self.database, isolation_level=None)
+        raw.execute("INSERT INTO item (kind,title,status,created_at,updated_at) "
+                    "VALUES ('task','After the backup','planning','2026-10-13T00:00:00+00:00','2026-10-13T00:00:00+00:00')")
+        raw.close()
+        completed = self.migrate(1)
+        self.assertIn("item: store 1, backup 0", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_backup_at_another_schema_version_is_refused(self):
+        # The snapshot of the store before it moved back: its rows, another version.
+        run(home=self.home)
+        one_migration_back(self.database)
+        completed = self.migrate(1)
+        self.assertIn(f"is at schema version {SCHEMA_VERSION}, the store at {SCHEMA_VERSION - 1}", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_only_the_newest_backup_counts(self):
+        one_migration_back(self.database)
+        good = run(home=self.home, when=datetime(2026, 10, 1, tzinfo=UTC))
+        newer = run(home=self.home, when=datetime(2026, 10, 2, tzinfo=UTC))
+        (newer.directory / "sd.db").write_bytes(b"not a database")
+        completed = self.migrate(1)
+        self.assertIn(str(newer.directory), completed.stderr)
+        self.assertNotIn(str(good.directory), completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_copy_that_links_to_the_store_is_refused(self):
+        one_migration_back(self.database)
+        snapshot = run(home=self.home)
+        (snapshot.directory / "sd.db").unlink()
+        (snapshot.directory / "sd.db").symlink_to(self.database)
+        completed = self.migrate(1)
+        self.assertIn("is a link", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    def test_a_store_with_nothing_pending_needs_no_backup(self):
+        self.assertIn("nothing applied", self.migrate(0).stdout)
+
+
 class JobRun(BackupCase):
     """Runs `sd-db.sh backup` -- the entrypoint the scheduled job runs -- and
     holds no tests of its own, so the classes below do not re-run each other's

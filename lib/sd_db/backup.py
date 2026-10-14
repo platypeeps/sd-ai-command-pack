@@ -854,6 +854,62 @@ def passed(connection: sqlite3.Connection, snapshot: Snapshot) -> bool:
     return row is not None
 
 
+def migration_backup(home: Path | str) -> Path | None:
+    """The snapshot that lets `sd-db migrate` run, or None when nothing is pending (sd:3507).
+
+    The newest dated directory under `backup_root` must verify -- integrity,
+    and the counts its manifest records -- and be this store: the same
+    schema version and the same row counts. A database waiting for `migrate`
+    refuses every library write, so equal counts mean the snapshot holds
+    every row the migration rewrites. A read-only snapshot has no checkpoint
+    row, which is why `passed`, the prune's check, cannot answer here.
+    Raises `BackupError` naming why not and both ways out.
+    """
+    database = local_path(home)
+    if not database.exists():
+        return None
+    live = connect(database, write=False)
+    try:
+        version = schema_version(live)
+        counts = _counts(live)
+    finally:
+        live.close()
+    if version >= SCHEMA_VERSION:
+        return None
+    root = backup_root(home)
+    remedy = f"run `bin/sd-db backup` first, or set {ROOT_VARIABLE} to the folder that holds the backup"
+    try:
+        dated = sorted((path for path in root.iterdir() if DATED_NAME.fullmatch(path.name)
+                        and path.is_dir() and not path.is_symlink()), key=_directory_order)
+    except OSError:
+        dated = []
+    if not dated:
+        raise BackupError(f"migrate refuses: no backup under {root}; {remedy}")
+    newest = dated[-1]
+    if (newest / database.name).is_symlink() or (newest / BACKUP_MANIFEST).is_symlink():
+        raise BackupError(f"migrate refuses: the newest backup {newest} is a link, not a copy; {remedy}")
+    try:
+        manifest = json.loads((newest / BACKUP_MANIFEST).read_text(encoding="utf-8"))
+        held = manifest["counts"]
+        verify(newest / database.name, run_id=manifest["run_id"], expected=held,
+               checkpointed=manifest["checkpoint"] is not False)
+        copy = sqlite3.connect(f"file:{newest / database.name}?mode=ro", uri=True)
+        try:
+            found = schema_version(copy)
+        finally:
+            copy.close()
+    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error, BackupError) as error:
+        raise BackupError(f"migrate refuses: the newest backup {newest} does not verify: {error}; {remedy}") from None
+    if found != version:
+        raise BackupError(f"migrate refuses: the newest backup {newest} is at schema version {found}, "
+                          f"the store at {version}; {remedy}")
+    if held != counts:
+        differ = ", ".join(f"{name}: store {counts.get(name)}, backup {held.get(name)}"
+                           for name in sorted(set(counts) | set(held)) if counts.get(name) != held.get(name))
+        raise BackupError(f"migrate refuses: the store changed since the newest backup {newest} ({differ}); {remedy}")
+    return newest
+
+
 def _check_keep(keep: int | None) -> None:
     if keep is not None and (type(keep) is not int or keep < 0):
         raise BackupError("backup retention needs a nonnegative count or no deletion")

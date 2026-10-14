@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 from .. import credentials, judgment, removal, review, usage
+from ..backup import migration_backup
 from ..backup import restore as restore_snapshot
 from ..database import connect, default_path, schema_version, tables
 from ..errors import SdDbError
@@ -58,6 +59,9 @@ def command_init(_argv: list[str]) -> int:
 
 def command_migrate(_argv: list[str]) -> int:
     home = _home()
+    backup = migration_backup(home)
+    if backup is not None:
+        print(f"sd-db: backup {backup} holds this store; migrating")
     result = migrate(home=home)
     if not result.applied:
         print(f"sd-db: already at schema version {result.after}; nothing applied")
