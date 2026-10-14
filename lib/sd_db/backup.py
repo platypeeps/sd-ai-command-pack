@@ -1597,10 +1597,12 @@ def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None
 
     Each candidate is copied off its share first and judged on the copied
     bytes: its manifest's hashes and its database's checkpoint
-    (`_check_backup`). A refused candidate is reported and the next is tried.
-    A verified candidate newer than this library stops the run: an older
-    snapshot would lose what the newer one holds. So does any failure of the
-    restore itself, which may already have changed live state.
+    (`_check_backup`), then `restore`'s own validator (`check_restorable`). A
+    refused candidate is reported and the next is tried. A candidate newer
+    than this library stops the run: an older snapshot would lose what the
+    newer one holds. So does any failure of the restore itself, which may
+    already have changed live state, or conflicts with live evidence that an
+    older snapshot would conflict with too.
     """
     home = Path(home)
     refuse_hub_only(local_path(home), "the restore", home)
@@ -1631,20 +1633,28 @@ def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None
             local = Path(stage) / path.name
             try:
                 shutil.copytree(path, local, symlinks=True)
+            except OSError as error:
+                refuse(path, f"it could not be copied: {error}")
+                continue
+            check = check_restorable(local / "sd.db")
+            # Before the manifest check: this library cannot count a newer schema's tables.
+            if check.version is not None and check.version > SCHEMA_VERSION:
+                raise BackupError(f"{path} is schema {check.version}, newer than this library ({SCHEMA_VERSION}); "
+                                  "update the pack and retry")
+            try:
                 _check_backup(local, moved=True)
+                if not check.accepted:
+                    # Such as a forensic snapshot of a source with broken references.
+                    raise BackupError(f"restore refuses it: {check.refusal}")
                 raw = sqlite3.connect(f"file:{local / 'sd.db'}?mode=ro", uri=True)
                 try:
-                    version = raw.execute("PRAGMA user_version").fetchone()[0]
                     released = [row[0] for row in raw.execute(
                         "SELECT run FROM runner_lease WHERE released_at IS NULL ORDER BY run")]
                 finally:
                     raw.close()
-            except (BackupError, OSError, sqlite3.Error) as error:
+            except (BackupError, sqlite3.Error) as error:
                 refuse(path, str(error))
                 continue
-            if version > SCHEMA_VERSION:
-                raise BackupError(f"{path} is schema {version}, newer than this library ({SCHEMA_VERSION}); "
-                                  "update the pack and retry")
             target = restore(local, home=home, origin=path, settle=True)
             return Newest(path, taken_at, target, refused, released)
     raise BackupError(f"no snapshot under {', '.join(map(str, roots))} restored ({len(refused)} refused)")
