@@ -166,7 +166,8 @@ class TheListener(StubCase):
             for frame in (
                 remote.request("open", path=path, write=True, create=False, busy_timeout=5000,
                                token="", **remote.handshake()),
-                remote.request("execute", sql="INSERT INTO probe (name) VALUES ('wire')", params=None),
+                remote.request("execute", sql="INSERT INTO probe (name) VALUES ('wire')", params=None,
+                               rid=remote.new_request_id()),  # as the client sends a lone write
                 remote.request("close"),
             ):
                 try:

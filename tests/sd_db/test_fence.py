@@ -391,26 +391,20 @@ class TheLiveServer(StubCase):
         self.assertEqual(self.rows(), 0, "a demoted hub committed a row")
 
     def test_a_write_outside_a_transaction_asks_afresh_inside_the_window(self):
-        """codex pass: a write with no transaction commits by itself, so it asks as a COMMIT does."""
+        """codex pass: a lone write with an id is its own transaction, whose COMMIT asks afresh."""
         def demote():
             self.rename("old-hub.example.test.")
-        for frame in (remote.request("execute", sql="INSERT INTO probe (name) VALUES ('stale')", params=None),
-                      remote.request("execute", sql="INSERT INTO probe (name) VALUES ('stale')", params=None,
-                                     rid=remote.new_request_id()),
-                      remote.request("executemany", sql="INSERT INTO probe (name) VALUES (?)",
-                                     params=[remote.encode_params(["stale"])]),
-                      remote.request("executescript", sql="INSERT INTO probe (name) VALUES ('stale');")):
-            with self.subTest(op=frame["op"], rid=frame["rid"]):
-                self.rename(HUB_NAME + ".")
-                self.server.fenced = None
-                answers = self.session(frame, remote.request("close"), between=demote)
-                self.assertFalse(answers[1]["ok"], answers)
-                self.assertIn("this machine is not the hub", answers[1]["error"]["text"])
-                self.assertEqual(answers[2:], [None])
-                self.assertEqual(self.rows(), 0, "a demoted hub wrote a row")
+        answers = self.session(remote.request("execute", sql="INSERT INTO probe (name) VALUES ('stale')", params=None,
+                                              rid=remote.new_request_id()),
+                               remote.request("close"), between=demote)
+        self.assertFalse(answers[1]["ok"], answers)
+        self.assertIn("this machine is not the hub", answers[1]["error"]["text"])
+        self.assertEqual(answers[2:], [None])
+        self.assertEqual(self.rows(), 0, "a demoted hub wrote a row")
 
-    def test_a_batch_outside_a_transaction_is_refused_so_one_answer_never_covers_two_commits(self):
-        """Second review: each write of a batch commits by itself, so a demotion mid-batch wrote the rest."""
+    def test_a_write_without_a_request_id_is_refused_so_no_answer_precedes_its_commit(self):
+        """Second review: such a write commits when it ends, and a batch commits each write, all after
+        the one fresh answer; a demotion meanwhile wrote the rest."""
         ask = self.server.fence
 
         def fence(**kwargs):
@@ -421,7 +415,8 @@ class TheLiveServer(StubCase):
 
         self.enterContext(mock.patch.object(self.server, "fence", fence))
         two = [remote.encode_params(["a"]), remote.encode_params(["b"])]
-        for frame in (remote.request("executemany", sql="INSERT INTO probe (name) VALUES (?)", params=two),
+        for frame in (remote.request("execute", sql="INSERT INTO probe (name) VALUES ('a')", params=None),
+                      remote.request("executemany", sql="INSERT INTO probe (name) VALUES (?)", params=two),
                       remote.request("executescript", sql="INSERT INTO probe (name) VALUES ('a');"
                                                           "INSERT INTO probe (name) VALUES ('b');")):
             with self.subTest(op=frame["op"]):
@@ -429,8 +424,10 @@ class TheLiveServer(StubCase):
                 self.server.fenced = None
                 answers = self.session(frame, remote.request("close"))
                 self.assertFalse(answers[1]["ok"], answers)
-                self.assertIn("inside BEGIN IMMEDIATE", answers[1]["error"]["text"])
-                self.assertEqual(self.rows(), 0, "a batch committed on one fence answer")
+                self.assertIn("only with a request id", answers[1]["error"]["text"])
+                self.assertTrue(answers[2]["ok"], "a refused write is not a fence refusal; the session stays")
+                self.assertEqual(self.rows(), 0, "a write committed after its fence answer")
+        self.assertTrue(self.session(remote.request("executescript", sql="SELECT 1;"))[1]["ok"], "a read-only script")
         # The remedy: one write transaction, one COMMIT, one fresh answer.
         self.rename(HUB_NAME + ".")
         self.server.fenced = None
