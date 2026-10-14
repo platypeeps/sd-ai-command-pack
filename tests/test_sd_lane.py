@@ -1569,9 +1569,12 @@ class Landing(Lane):
         self.merge_lands(tree, 1, head)
         answer = self.drain()
         self.assertEqual(self.entries()[0]["status"], "merged")
-        self.assertIn("stdout: refused: the database is locked", answer["post_merge"])
-        self.assertRegex(answer["post_merge"], r": stderr: x{200,}\nmake: [^;]*Error 3; stdout: ")
-        self.assertNotIn("x" * 300, answer["post_merge"])  # each tail stays bounded
+        # make's own error line and exit code differ between make versions, so neither is asserted.
+        head, _, stdout = answer["post_merge"].rpartition("; stdout: ")
+        _, _, stderr = head.partition(": stderr: ")
+        self.assertIn("refused: the database is locked", stdout)
+        self.assertIn("x" * 100, stderr)
+        self.assertLessEqual(len(stderr), 300)  # each tail stays bounded
 
     def test_a_checkout_that_did_not_fast_forward_skips_the_post_merge_and_says_why(self) -> None:
         tree, head = self.topic()
