@@ -40,7 +40,7 @@ class TheValidator(unittest.TestCase):
                 validate(value)
 
     def test_each_key_outside_the_vocabulary_refuses_by_name(self):
-        for key in ("slack", "email", "jira", "github", "Obsidian", ""):
+        for key in ("slack", "email", "reddit", "Jira", "Obsidian", ""):
             with self.subTest(key=key), self.assertRaises(ChannelRefusal) as caught:
                 validate({"obsidian": {}, key: {}})
             self.assertIn(repr(key), str(caught.exception))
@@ -148,6 +148,32 @@ class TheFeed(unittest.TestCase):
         self.assertEqual(outbound({"feed": {"url": self.FEED}, "drive": {}}), {"drive": {}})
         self.assertIsNone(outbound(None))
         self.assertEqual(outbound({"obsidian": {"folder": "Notes"}}), {"obsidian": {"folder": "Notes"}})
+
+
+class TheIssueSources(unittest.TestCase):
+    """sd:3461: a repo's Jira project and GitHub repository, inbound keys.
+
+    Each names the `repo` value its tracker's shadow rows carry: a Jira
+    project key, a GitHub `owner/name`."""
+
+    def test_a_project_and_a_repository_are_a_setting_beside_the_channels(self):
+        value = {"jira": {"project": "EXAMPLE_2"}, "github": {"repo": "example-org/my.project_x"}, "drive": {}}
+        self.assertEqual(validate(value), value)
+        self.assertEqual(outbound(value), {"drive": {}})
+        self.assertIsNone(outbound({"jira": {"project": "EXAMPLE"}}))
+
+    def test_each_needs_its_one_key_in_its_trackers_spelling(self):
+        refused = [("jira", entry) for entry in (
+            {}, {"project": ""}, {"project": 3}, {"project": "example"}, {"project": "2X"}, {"project": "EX AMPLE"},
+            {"project": "EX-1"}, {"project": "EXAMPLE\n"}, {"project": "EXAMPLE", "repo": "a/b"}, {"repo": "a/b"})]
+        refused += [("github", entry) for entry in (
+            {}, {"repo": ""}, {"repo": "example"}, {"repo": "a/b/c"}, {"repo": "/b"}, {"repo": "a/"},
+            {"repo": "a/.."}, {"repo": "a/."}, {"repo": "https://example.test/a/b"}, {"repo": "a b/c"},
+            {"repo": "-a/b"}, {"repo": "a/b\n"}, {"repo": "a/b", "project": "X"}, {"project": "X"})]
+        for name, entry in refused:
+            with self.subTest(name=name, entry=entry), self.assertRaises(ChannelRefusal) as caught:
+                validate({name: entry})
+            self.assertIn(name, str(caught.exception))
 
 
 class TheReader(unittest.TestCase):

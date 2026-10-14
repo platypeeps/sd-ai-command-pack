@@ -6,6 +6,7 @@ an empty table makes that criterion pass over nothing. These are the two ways
 it fills and the one path it refuses.
 """
 
+import json
 import os
 import sqlite3
 import subprocess
@@ -30,6 +31,7 @@ from sd_db.repos import (
     checkouts,
     clone_lines,
     conf_paths,
+    issue_sources,
     read_conf,
     registered,
     repo_channels,
@@ -663,6 +665,63 @@ class TheChannelsWriter(RepoCase):
         set_channels(self.connection, path, None)
         self.assertIsNone(self._stored(path))
 
+    def test_issue_sources_map_each_tracker_to_its_shadow_repo_and_keep_the_other_inbound_keys(self):
+        """sd:3461: `jira` and `github` are inbound like `feed`, so a set of
+        the outbound channels keeps them, and `issue_sources` answers the
+        shadow `repo` value each tracker's rows carry."""
+        path = self._registered()
+        self.assertEqual(issue_sources(self.connection, path), {})
+        set_channels(self.connection, path, {"jira": {"project": "EXAMPLE"}, "github": {"repo": "example/project"},
+                                             "feed": {"url": "https://example.test/feed.xml"}})
+        set_channels(self.connection, path, {"drive": {}})
+        self.assertEqual(issue_sources(self.connection, path), {"jira": "EXAMPLE", "github": "example/project"})
+        self.assertEqual(self._stored(path), '{"drive":{},"feed":{"url":"https://example.test/feed.xml"},'
+                                             '"github":{"repo":"example/project"},"jira":{"project":"EXAMPLE"}}')
+
+    INBOUND = {"feed": {"url": "https://example.test/feed.xml"}, "jira": {"project": "EXAMPLE"},
+               "github": {"repo": "example/project"}}
+    CHANGED = {"feed": {"url": "https://example.test/other.xml"}, "jira": {"project": "OTHER"},
+               "github": {"repo": "example/other"}}
+
+    def test_a_set_of_one_inbound_key_keeps_the_other_inbound_keys_and_the_channels(self):
+        """sd:3461 lane review: each inbound source is set on its own, so
+        `feed=URL` never deletes Jira or GitHub, and `jira=KEY` never deletes
+        the feed or GitHub. Each omitted inbound key keeps its stored value."""
+        path = self._registered()
+        for key in self.INBOUND:
+            with self.subTest(key=key):
+                set_channels(self.connection, path, {**self.INBOUND, "obsidian": {}})
+                set_channels(self.connection, path, {key: self.CHANGED[key]})
+                self.assertEqual(json.loads(self._stored(path)),
+                                 {**self.INBOUND, key: self.CHANGED[key], "obsidian": {}})
+                set_channels(self.connection, path, None)
+                self.assertIsNone(self._stored(path))
+
+    def test_a_set_of_the_channels_still_replaces_the_channels_and_keeps_every_inbound_key(self):
+        """Outbound keys stay one replacement: a channel left out is off."""
+        path = self._registered()
+        set_channels(self.connection, path, {**self.INBOUND, "obsidian": {}, "drive": {}})
+        set_channels(self.connection, path, {"notion": {"folder": "Example"}})
+        self.assertEqual(json.loads(self._stored(path)), {**self.INBOUND, "notion": {"folder": "Example"}})
+
+    def test_a_managed_repo_takes_no_github_source_and_reads_none_after_a_later_flip(self):
+        """Managed repositories use no GitHub issues (sd:3461). A set naming
+        `github` on one refuses and writes nothing; a source set before
+        `repo managed PATH yes` reads as none, and still rides along when the
+        dashboard sets the outbound channels, so that form keeps working."""
+        path = self._registered()
+        set_managed(self.connection, path, "yes")
+        with self.assertRaises(RepoRefusal) as caught:
+            set_channels(self.connection, path, {"github": {"repo": "example/project"}, "drive": {}})
+        self.assertIn("managed", str(caught.exception))
+        self.assertIsNone(self._stored(path))
+        set_managed(self.connection, path, "no")
+        set_channels(self.connection, path, {"github": {"repo": "example/project"}, "jira": {"project": "EXAMPLE"}})
+        set_managed(self.connection, path, "yes")
+        self.assertEqual(issue_sources(self.connection, path), {"jira": "EXAMPLE"})
+        set_channels(self.connection, path, {"drive": {}})
+        self.assertIn('"github":{"repo":"example/project"}', self._stored(path))
+
     def test_a_stale_before_refuses_and_writes_nothing_null_included(self):
         """Two forms both opened on a NULL row cannot both write."""
         path = self._registered()
@@ -759,6 +818,41 @@ class TheChannelsVerb(RepoCase):
         self.assertEqual((rc, out), (1, ""))
         self.assertIn("feed", err)
         self.assertEqual(self._stored(path), text)
+
+    def test_jira_and_github_words_set_the_issue_sources(self):
+        """sd:3461: `jira=KEY github=owner/name`; an empty one refuses."""
+        path = self._registered()
+        rc, out, err = self._run(path, "jira=EXAMPLE", "github=example/project")
+        self.assertEqual(rc, 0, err)
+        text = '{"github":{"repo":"example/project"},"jira":{"project":"EXAMPLE"}}'
+        self.assertIn(f"channels none -> {text}", out)
+        for word in ("jira=", "github="):
+            rc, out, err = self._run(path, word)
+            self.assertEqual((rc, out), (1, ""))
+            self.assertIn(word[:-1], err)
+        self.assertEqual(self._stored(path), text)
+
+    def test_one_inbound_word_keeps_the_other_sources_and_prints_what_is_stored(self):
+        """sd:3461 lane review: `feed=URL`, `jira=KEY` and `github=owner/name`
+        each change one source; the others and the channels stay, and the
+        verb prints them in `after`. `none` still clears all of it."""
+        path = self._registered()
+        rc, out, err = self._run(path, "feed=https://example.test/feed.xml", "jira=EXAMPLE",
+                                 "github=example/project", "obsidian=")
+        self.assertEqual(rc, 0, err)
+        for word, key, value in (("feed=https://example.test/other.xml", "feed", {"url": "https://example.test/other.xml"}),
+                                 ("jira=OTHER", "jira", {"project": "OTHER"}),
+                                 ("github=example/other", "github", {"repo": "example/other"})):
+            with self.subTest(word=word):
+                before = json.loads(self._stored(path))
+                rc, out, err = self._run(path, word)
+                self.assertEqual(rc, 0, err)
+                after = {**before, key: value}
+                self.assertEqual(json.loads(self._stored(path)), after)
+                self.assertIn(" -> " + json.dumps(after, sort_keys=True, separators=(",", ":")), out)
+        rc, out, _ = self._run(path, "none")
+        self.assertEqual(rc, 0)
+        self.assertIsNone(self._stored(path))
 
     def test_a_change_names_the_render_that_publishes_it(self):
         """Failure table, row "set: the change takes effect"."""
