@@ -574,7 +574,7 @@ def read_local_block(path: pathlib.Path) -> dict[str, str]:
     return parse_local_block(text, str(path))
 
 
-def machine_config_path(environ: dict[str, str] | None = None) -> pathlib.Path:
+def machine_config_path(environ: Mapping[str, str] | None = None) -> pathlib.Path:
     """Read the supplied operator's XDG/HOME, or the current environment."""
     env = os.environ if environ is None else environ
     home = pathlib.Path(env.get("XDG_CONFIG_HOME") or pathlib.Path(env.get("HOME") or pathlib.Path.home()) / ".config")
@@ -600,8 +600,101 @@ def review_slot(result: dict[str, Any], environ: Mapping[str, str], root: pathli
     return sd_review_slots.hold_review_slot(result, environ, root, bound_seconds)
 
 
-def core_setting(key: str, environ: dict[str, str] | None = None) -> str | None:
-    """Validated standing user policy; absence grants no new permission."""
+#: The `sd.*` keys whose one value serves every machine: `setting` rows in the
+#: workflow database, not `config.json` (sd:3989). `external_reviews` stays per
+#: machine until each machine's value is known to match: it is the consent to
+#: send private code out, and the work satellite holds the work repositories.
+FLEET_KEYS = ("fleet_owners", "copilot_review")
+
+
+def fleet_connection(environ: Mapping[str, str] | None = None, *, write: bool = False) -> Any:
+    """An open workflow database for a fleet key, or `None` on a machine that has none.
+
+    "None" is a machine with no `hub.json` and no local database: the
+    database-free install, whose keys stay in `config.json`. Every other
+    failure -- no library, no hub, a refused or too-new schema -- is a
+    `ConfigError` naming it, never "no row": a failed read is unknown.
+    """
+    env = os.environ if environ is None else environ
+    imported = import_sd_db()
+    if imported.module is None:
+        raise ConfigError(f"the workflow database cannot be read: {imported.problem}")
+    # The checkout's lib, imported above.
+    from sd_db import database as sd_database  # noqa: PLC0415
+    from sd_db import hub as sd_hub  # noqa: PLC0415
+    home = env.get("HOME") or None
+    if not sd_hub.configured(home) and not sd_database.local_path(home).exists():
+        return None
+    try:
+        return imported.module.connect(write=write, home=home)
+    except Exception as error:  # noqa: BLE001 - any open failure is an unknown answer, named
+        raise ConfigError(f"the workflow database did not open: {type(error).__name__}: {error}") from None
+
+
+def fleet_setting(key: str, environ: Mapping[str, str] | None = None) -> tuple[str | None, str]:
+    """A fleet key's value and where it came from: `database`, `file` or `default`.
+
+    Row wins: once the database holds a row for the key, `config.json` is not
+    read for it, and a cleared row reads unset. The file answers only for a
+    key the database never held, so the key moves with no flag day.
+    """
+    connection = fleet_connection(environ)
+    if connection is not None:
+        from sd_db import writes as sd_writes  # noqa: PLC0415
+        try:
+            held = sd_writes.read_settings(connection, [f"sd.{key}"])
+        except Exception as error:  # noqa: BLE001 - a failed read is unknown, named
+            raise ConfigError(f"sd.{key} was not read from the workflow database: "
+                              f"{type(error).__name__}: {error}") from None
+        finally:
+            connection.close()
+        if f"sd.{key}" in held:
+            value = held[f"sd.{key}"]
+            if value is not None and not re.fullmatch(CORE_CONFIG[key]["pattern"], value):
+                raise ConfigError(f"invalid sd.{key} policy in the workflow database")
+            return value, "database"
+    value = file_setting(key, environ)
+    return value, "file" if value is not None else "default"
+
+
+def set_fleet_setting(key: str, value: str | None,
+                      environ: Mapping[str, str] | None = None) -> tuple[bool, str | None]:
+    """Write the fleet key's row (`None` unsets): whether a row was written, and the value it replaced.
+
+    No row is written on a machine with no database (`fleet_connection`);
+    its caller writes `config.json` as before.
+
+    The replaced value is the one `fleet_setting` answered: the row, else the
+    file. The file is never written here; a file value the row now hides
+    stays until the lead deletes it.
+    """
+    was, _source = fleet_setting(key, environ)
+    connection = fleet_connection(environ, write=True)
+    if connection is None:
+        return False, was
+    from sd_db import writes as sd_writes  # noqa: PLC0415
+    try:
+        sd_writes.set_setting(connection, f"sd.{key}", value)
+    except Exception as error:  # noqa: BLE001 - a failed write is named; nothing was written
+        raise ConfigError(f"sd.{key} was not written to the workflow database: "
+                          f"{type(error).__name__}: {error}") from None
+    finally:
+        connection.close()
+    return True, was
+
+
+def core_setting(key: str, environ: Mapping[str, str] | None = None) -> str | None:
+    """Validated standing user policy; absence grants no new permission.
+
+    A key in `FLEET_KEYS` reads its database row first (`fleet_setting`).
+    """
+    if key in FLEET_KEYS:
+        return fleet_setting(key, environ)[0]
+    return file_setting(key, environ)
+
+
+def file_setting(key: str, environ: Mapping[str, str] | None = None) -> str | None:
+    """`sd.<key>` as `config.json` holds it, validated; `None` when absent."""
     config = machine_config(machine_config_path(environ)).get("config", {})
     mine = config.get("sd", {}) if isinstance(config, dict) else None
     if not isinstance(mine, dict):
