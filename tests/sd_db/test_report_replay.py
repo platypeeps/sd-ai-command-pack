@@ -611,8 +611,12 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         lost = self.tick("a", 1, exit_code=0, text="SD_REPORT_ATTENTION: disk low [123]\n")["item"]["id"]
         carried = self.tick("b", 16, exit_code=0,
                             text="SD_REPORT_ATTENTION: disk low [123]\nnext run\nSD_REPORT_ATTENTION: disk low [456]\n")
-        self.assertEqual((carried["recorded"], carried["why"]), ("report", "disk low [123]; disk low [456]"))
+        self.assertEqual((carried["recorded"], carried["why"]), ("report", "disk low [123]\ndisk low [456]"))
         self.assertNotEqual(carried["item"]["id"], lost)
+        # One line holding the separator is not the two lines.
+        self.ack(carried["item"]["id"])
+        one = self.tick("f", 55, exit_code=0, text="SD_REPORT_ATTENTION: disk low [123]; disk low [456]\n")
+        self.assertEqual((one["recorded"], one["item"]["status"]), ("report", "planning"))
         # One line twice is one finding, and folds.
         twice = self.tick("c", 31, exit_code=0, text="SD_REPORT_ATTENTION: disk low [123]\nSD_REPORT_ATTENTION: disk low [123]\n")
         self.assertEqual((twice["recorded"], twice["item"]["id"]), ("folded", lost))

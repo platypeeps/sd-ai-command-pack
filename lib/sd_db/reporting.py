@@ -450,8 +450,9 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
     # went unseen. A failure names the host and the lines, as one job name
     # files from every host, and `job exited N` alone folded one host's or
     # one cause's failure into another's report. A basis past `ingest`'s
-    # limit keeps its head and a digest of the whole, so it files.
-    declared = "; ".join(dict.fromkeys(re.findall(r"(?m)^SD_REPORT_ATTENTION: (.+)$", text)))
+    # limit keeps its head and a digest of the whole, so it files. A line
+    # holds no newline, so joining on one keeps two lines apart from one.
+    declared = "\n".join(dict.fromkeys(re.findall(r"(?m)^SD_REPORT_ATTENTION: (.+)$", text)))
     attention = exit_code != 0 or bool(declared)
     basis = (f"job exited {exit_code} on {ship.this_host()}" + (f": {declared}" if declared else "")
              if exit_code else declared or "not supplied by the job")
