@@ -2343,5 +2343,69 @@ class TheClonesAndDependabotColumns(SchemaCase):
         self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
 
 
+
+class TheShadowReasonColumn(SchemaCase):
+    """Migration 34 (sd:4636, decision on sd:4628). `shadow.reason` says why a
+    synced row is the operator's: `assigned`, `filed`, or `watched` for every
+    other match. Added, not rebuilt: every existing row reads NULL, which is
+    unknown and not watched, keeps its other values, the CHECK holds a closed
+    list, and the reverse returns the table to 33's shape."""
+
+    VERSION = 34
+    COLUMNS = "id, tracker, repo, url, number, kind, title, state, author, first_seen, last_seen"
+    ROWS = [(1, "github", "example/project", "https://github.com/example/project/issues/1", 1, "issue", "one",
+             "open", "octocat", "t1", "t2"),
+            (2, "jira", "EXAMPLE", "https://example.test/browse/EXAMPLE-1", None, "issue", "two", "closed",
+             "Someone", "t3", "t4")]
+
+    def _before(self):
+        self.migrate_through(self.VERSION - 1)
+        raw = sqlite3.connect(self.path)
+        raw.executemany(f"INSERT INTO shadow ({self.COLUMNS}) VALUES ({', '.join('?' * 11)})", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(f"SELECT {self.COLUMNS} FROM shadow ORDER BY id")]
+
+    def test_every_existing_row_arrives_unknown_and_keeps_its_values(self):
+        self._before()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied),
+                         (self.VERSION - 1, list(range(self.VERSION, SCHEMA_VERSION + 1))))
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.ROWS)
+        self.assertEqual([row[0] for row in connection.execute("SELECT reason FROM shadow ORDER BY id")],
+                         [None, None])
+
+    def test_the_check_holds_a_closed_list(self):
+        self._before()
+        migrate(self.path)
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        for value in ("assigned", "filed", "watched", None):
+            connection.execute("UPDATE shadow SET reason = ? WHERE id = 1", (value,))
+        for value in ("author", "mentioned", "watching", "", "Assigned"):
+            with self.subTest(value=value), self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE shadow SET reason = ? WHERE id = 1", (value,))
+
+    def test_the_reverse_returns_the_file_to_the_prior_version(self):
+        self._before()
+        self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        raw.execute("UPDATE shadow SET reason = 'assigned' WHERE id = 1")
+        raw.commit()
+        raw.close()
+        text = dict(schema_module.migrations())[self.VERSION].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        self.assertNotIn("reason", [row[1] for row in raw.execute("PRAGMA table_info(shadow)")])
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+
 if __name__ == "__main__":
     unittest.main()

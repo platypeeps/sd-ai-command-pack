@@ -32,6 +32,7 @@ from sd_db.repos import (
     clone_lines,
     conf_paths,
     issue_sources,
+    mine_issues,
     read_conf,
     registered,
     repo_channels,
@@ -677,6 +678,36 @@ class TheChannelsWriter(RepoCase):
         self.assertEqual(issue_sources(self.connection, path), {"jira": "EXAMPLE", "github": "example/project"})
         self.assertEqual(self._stored(path), '{"drive":{},"feed":{"url":"https://example.test/feed.xml"},'
                                              '"github":{"repo":"example/project"},"jira":{"project":"EXAMPLE"}}')
+
+    def test_mine_issues_reads_the_open_assigned_and_filed_issues_of_each_repo_s_sources(self):
+        """sd:4636: Today and Tasks show a repository's issues that are the
+        operator's. A watched row, a row of unknown reason (synced before
+        migration 34), a closed one, a pull request, and a row from another
+        repository or tracker stay out; GitHub's `owner/name` matches in any case."""
+        path = self._registered()
+        self.assertEqual(mine_issues(self.connection), {})
+        set_channels(self.connection, path, {"jira": {"project": "EXAMPLE"}, "github": {"repo": "example/project"}})
+        rows = [("github", "Example/Project", "https://github.com/example/project/issues/1", "issue", "open", "assigned"),
+                ("github", "example/project", "https://github.com/example/project/issues/2", "issue", "open", "filed"),
+                ("github", "example/project", "https://github.com/example/project/issues/3", "issue", "open", "watched"),
+                ("github", "example/project", "https://github.com/example/project/issues/4", "issue", "open", None),
+                ("github", "example/project", "https://github.com/example/project/issues/5", "issue", "closed",
+                 "assigned"),
+                ("github", "example/project", "https://github.com/example/project/pull/6", "pull", "open", "filed"),
+                ("github", "example/other", "https://github.com/example/other/issues/7", "issue", "open", "assigned"),
+                ("jira", "EXAMPLE", "https://example.test/browse/EXAMPLE-8", "issue", "open", "filed"),
+                ("jira", "example/project", "https://example.test/browse/EXAMPLE-9", "issue", "open", "assigned"),
+                ("github", "EXAMPLE", "https://github.com/example/project/issues/10", "issue", "open", "assigned")]
+        for number, (tracker, repo, url, kind, state, reason) in enumerate(rows, start=1):
+            self.connection.execute(
+                "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, reason, first_seen, last_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 't1', ?)",
+                (tracker, repo, url, number, kind, f"issue {number}", state, reason, f"t{number:02d}"))
+        found = mine_issues(self.connection)
+        self.assertEqual(list(found), [path])
+        self.assertEqual([(row["tracker"], row["number"], row["reason"]) for row in found[path]],
+                         [("jira", 8, "filed"), ("github", 2, "filed"), ("github", 1, "assigned")])
+        self.assertEqual(set(found[path][0]), {"tracker", "url", "number", "title", "state", "reason", "last_seen"})
 
     INBOUND = {"feed": {"url": "https://example.test/feed.xml"}, "jira": {"project": "EXAMPLE"},
                "github": {"repo": "example/project"}}

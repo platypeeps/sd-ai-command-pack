@@ -850,8 +850,13 @@ def upsert_shadow(
     title: str | None = None,
     state: str | None = None,
     author: str | None = None,
+    reason: str | None = None,
 ) -> None:
     """A tracker's row, keyed by `(tracker, url)`. Seen once, then kept current.
+
+    `reason` (migration 34) is `assigned`, `filed` or `watched`. None is
+    unknown and keeps the stored value: an importer names none, and a collect
+    whose stronger bucket failed cannot say the row lost it.
 
     The conflict target is both columns, so this updates only the row this
     tracker already owns. Until sd:603 it was `url` alone and the update set
@@ -864,12 +869,13 @@ def upsert_shadow(
     with transaction(connection):
         connection.execute(
             "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, "
-            "author, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "author, reason, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(tracker, url) DO UPDATE SET "
             "repo = excluded.repo, number = excluded.number, kind = excluded.kind, "
             "title = excluded.title, state = excluded.state, "
-            "author = excluded.author, last_seen = excluded.last_seen",
-            (tracker, repo, url, number, kind, title, state, author, stamp, stamp),
+            "author = excluded.author, reason = COALESCE(excluded.reason, shadow.reason), "
+            "last_seen = excluded.last_seen",
+            (tracker, repo, url, number, kind, title, state, author, reason, stamp, stamp),
         )
 
 
