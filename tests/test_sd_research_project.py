@@ -34,6 +34,11 @@ def url(row: str) -> str:
     return "https://example.test/" + row.replace("-", "")
 
 
+def day(start: str, end: str | None = None, time_zone: str | None = None) -> dict[str, Any]:
+    """A date property as the drain hands it: the whole value, never its start alone."""
+    return {"start": start, "end": end, "time_zone": time_zone}
+
+
 def schema(target: str) -> dict[str, Any]:
     """The live schema of a database as the drain hands it over, matching the mapping."""
     status = {"type": "select", "options": ["Todo", "In Progress", "Blocked", "Done"]}
@@ -494,7 +499,7 @@ class PlanTests(Projection):
         self.planned(self.task, self.live("tasks", row=TASK_ROW, **live))
         # Notion took Due, then the drain stopped before `delivered`.
         self.project()
-        planned = self.planned(self.task, self.live("tasks", row=TASK_ROW, Due="2026-11-02", **live))
+        planned = self.planned(self.task, self.live("tasks", row=TASK_ROW, Due=day("2026-11-02"), **live))
         self.assertEqual((planned["properties"], planned["yielded"]), ({"Status": "In Progress"}, ["Due"]))
         self.assertIn("this may be sd's own unconfirmed write", self.comments(self.task)[-1])
         self.deliver(self.task, row=TASK_ROW)
@@ -520,6 +525,29 @@ class PlanTests(Projection):
         status, said = self.plan(self.task, live)
         self.assertEqual(status, 1, said)
         self.assertIn("Status: the live row does not carry it", said)
+
+    def test_a_date_range_or_time_on_the_written_start_is_yielded_and_a_bare_date_refused(self) -> None:
+        self.created()
+        self.connection.execute("UPDATE item SET due = '2026-11-02' WHERE id = ?", (self.task,))
+        self.designate(self.task, "of:%d" % self.experiment)
+        self.project()
+        self.planned(self.task, self.live("tasks"))
+        self.deliver(self.task, row=TASK_ROW)
+        self.connection.execute("UPDATE item SET due = '2026-11-09' WHERE id = ?", (self.task,))
+        self.project()
+        live = dict(Status="Todo", Experiment=[url(ROW)])
+        for held in (day("2026-11-02", "2026-11-05"), day("2026-11-02T09:00:00.000-06:00"),
+                     day("2026-11-02", time_zone="America/New_York")):
+            with self.subTest(held=held):
+                planned = self.planned(self.task, self.live("tasks", row=TASK_ROW, Due=held, **live))
+                self.assertEqual((planned["properties"], planned["yielded"]), ({}, ["Due"]))
+        self.assertIn("Due on the tasks row is not sd's (2026-11-02 to 2026-11-05; sd last wrote 2026-11-02",
+                      self.comments(self.task)[-1])
+        status, said = self.plan(self.task, self.live("tasks", row=TASK_ROW, Due="2026-11-02", **live))
+        self.assertEqual(status, 1, said)
+        self.assertIn("Due: hand the whole date", said)
+        planned = self.planned(self.task, self.live("tasks", row=TASK_ROW, Due=day("2026-11-02"), **live))
+        self.assertEqual(planned["properties"], {"Due": "2026-11-09"})
 
     def test_a_live_row_lacking_status_names_it(self) -> None:
         self.created()
@@ -687,7 +715,8 @@ class ContractTests(unittest.TestCase):
         for phrase in ("`notion-row`", "sd-research-kit project --plan", "--missing",
                        "a failed read is unknown, not missing", "experiments before tasks",
                        "a `notion-row` request reads the channel `notion`",
-                       "fetch and plan again", "Steps 4 and 5 do not apply to a row"):
+                       "fetch and plan again", "Steps 4 and 5 do not apply to a row",
+                       "a date's whole value, never its start alone"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
 

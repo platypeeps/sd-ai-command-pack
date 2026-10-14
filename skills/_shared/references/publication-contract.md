@@ -453,9 +453,9 @@ Draining is six steps per request, and the order matters:
      what you fetched to a file as JSON: `database`, the data source id;
      `schema`, each property's `type` and, for a select, its `options`; and
      `row`, the page's `id`, `parent` (its data source id) and `properties`,
-     each a select's option name, a date's start as `YYYY-MM-DD`, a relation's
-     list of page ids, or null when empty; a property left out is refused,
-     never read as empty. Then run
+     each a select's option name, a date's whole value, never its start
+     alone, as `{"start", "end", "time_zone"}`, a relation's list of page ids,
+     or null when empty; a property left out is refused, never read as empty. Then run
      `sd-research-kit project --plan <request> --live <file>`. A pinned row
      that is not found or is in the trash takes `--missing` instead of
      `--live`; a fetch that fails any other way stops this request and calls

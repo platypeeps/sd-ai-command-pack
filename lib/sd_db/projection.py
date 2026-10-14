@@ -364,6 +364,24 @@ def _empty(value: Any) -> Any:
     return value.strip() if isinstance(value, str) else value
 
 
+def _live(target: str, name: str, value: Any) -> Any:
+    """A live value, `_empty` spelled, kept whole: a date is its start only when that is all it holds.
+
+    A date with an end, a time or a time zone stays an object, which never equals a date sd wrote, so the
+    guard yields it. A bare date string may be a start the drain cut off, so it is refused as unknown.
+    """
+    if PROPERTIES[target][name] != "date" or value is None:
+        return _empty(value)
+    if not isinstance(value, dict) or not isinstance(value.get("start"), str):
+        raise ProjectionRefusal(f"{name}: hand the whole date, an object with start, end and time_zone, "
+                                "or null; a bare value may be a cut-off start")
+    start = value["start"]
+    whole = {"start": start, "end": value.get("end") or None, "time_zone": value.get("time_zone") or None}
+    if whole["end"] is None and whole["time_zone"] is None and re.fullmatch(r"\d{4}-\d{2}-\d{2}", start):
+        return start
+    return whole
+
+
 def wanted(connection: sqlite3.Connection, row: sqlite3.Row, held: dict[str, Any]) -> dict[str, Any]:
     """The sd-owned values item `row` wants on its row, `_empty` spelled."""
     values: dict[str, Any] = {"Status": status_value(row["status"])}
@@ -483,6 +501,9 @@ def _question(item: int, reason: str, options: list[str]) -> ProjectionRefusal:
 def _shown(value: Any) -> str:
     if value is None:
         return "nothing"
+    if isinstance(value, dict):
+        return " to ".join(str(value[key]) for key in ("start", "end") if value.get(key)) + \
+            (f" ({value['time_zone']})" if value.get("time_zone") else "")
     return ", ".join(value) if isinstance(value, list) else str(value)
 
 
@@ -581,7 +602,7 @@ def plan(connection: sqlite3.Connection, request: dict[str, Any], live: dict[str
             written = held.get("written", {})
             writes, yielded = {}, []
             for name in OWNED[target]:
-                now_live, last = _empty(live_row["properties"].get(name)), _empty(written.get(name))
+                now_live, last = _live(target, name, live_row["properties"][name]), _empty(written.get(name))
                 if now_live == last:
                     if now_live != values[name]:
                         writes[name] = values[name]
