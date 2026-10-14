@@ -81,6 +81,11 @@ class Fleet(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = pathlib.Path(tmp.name).resolve()
+        # `sd.fleet_owners` is a workflow database row (sd:3989), found under
+        # `HOME`: an empty home here, or the operator's row decides the owners.
+        patcher = mock.patch.dict(os.environ, {"HOME": str(self.tmp / "home")})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def repo(self, name: str, files: dict[str, str] | None = None, *, owner: str = "platypeeps",
              local: str | None = None) -> tuple[pathlib.Path, str]:
