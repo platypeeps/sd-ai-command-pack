@@ -163,7 +163,7 @@ def run_brief(args: argparse.Namespace) -> int:
     """`sd reports brief add|list|show|import` (sd:3459): a file the rules refuse exits 2, before any write."""
     sd_db = sd_handoff_rows.library()
     try:
-        from sd_db import routine_briefs
+        from sd_db import remote, routine_briefs
     except ImportError:
         raise WorkRefusal("install the current shared library for routine briefs") from None
     verb = args.brief_verb
@@ -182,7 +182,7 @@ def run_brief(args: argparse.Namespace) -> int:
             stem, text = draft or ("", "")
             answer = routine_briefs.add(connection, stem, text, repo=repo, who=getpass.getuser(), mode=mode)
             print(f"{answer['result']} {answer['stem']}")
-            _copies_after(routine_briefs, connection)
+            _copies_after(routine_briefs, remote.HubOnly, connection)
         elif verb == "render":
             return _rendered(routine_briefs.render(connection, os.environ.get("OBSIDIAN_VAULT")))
         elif verb == "list":
@@ -202,16 +202,14 @@ def run_brief(args: argparse.Namespace) -> int:
         connection.close()
 
 
-def _copies_after(routine_briefs: Any, connection: Any) -> None:
+def _copies_after(routine_briefs: Any, hub_only: type[Exception], connection: Any) -> None:
     """The render after a hub `add`'s commit. It never fails the add: the row is the deliverable.
 
     On a satellite it is skipped: the hub's next `add` or `render` writes the copy.
     """
-    from sd_db.remote import HubOnly
-
     try:
         copies = routine_briefs.render(connection, os.environ.get("OBSIDIAN_VAULT"))
-    except HubOnly:
+    except hub_only:
         return
     except Exception as error:  # noqa: BLE001 - a failed render never fails the add
         copies = {"ok": False, "reason": str(error) or type(error).__name__, "refused": []}

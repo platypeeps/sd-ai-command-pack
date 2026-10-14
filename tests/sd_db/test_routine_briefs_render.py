@@ -33,7 +33,6 @@ TEXT = "---\ntags:\n  - brief\n---\n\n# Daily Intel Brief\n\nThree things.\n"
 FOLDER = "System/AI Generated/Briefs"
 
 
-@hub_only
 class Copies(support.TempRootCase):
     def setUp(self):
         super().setUp()
@@ -67,6 +66,7 @@ class Copies(support.TempRootCase):
         return sorted(path.relative_to(self.vault).as_posix() for path in self.vault.rglob("*") if path.is_file())
 
 
+@hub_only  # a render in this process takes the lock beside the database
 class TheCopies(Copies):
     def test_with_no_rows_a_render_writes_nothing(self):
         copies = self.render()
@@ -167,6 +167,7 @@ class TheCopies(Copies):
         self.assertEqual((len(copies["refused"]), len(self.beat()["refused"])), (60, 50))
 
 
+@hub_only  # a render in this process takes the lock beside the database
 class TheRefusals(Copies):
     def test_a_satellite_refuses_by_name_and_writes_nothing(self):
         self.add()
@@ -216,6 +217,7 @@ class TheRefusals(Copies):
         self.assertEqual(self.files(), [])
 
 
+@hub_only  # a render in this process takes the lock beside the database
 class TheSetting(Copies):
     def test_no_setting_or_an_empty_obsidian_is_the_default_folder(self):
         self.add()
@@ -256,6 +258,7 @@ class TheSetting(Copies):
         self.assertEqual((copies["left"], copies["refused"], self.beat()["previous_folder"]), ([], [], {}))
 
 
+@hub_only  # a render in this process takes the lock beside the database
 class TheSteps(Copies):
     def test_a_write_error_after_one_file_leaves_whole_files_and_a_rerun_finishes(self):
         self.add()
@@ -314,7 +317,9 @@ class TheSteps(Copies):
 
 
 class TheVerbs(Copies):
-    """`sd reports brief` through `bin/sd`, with a temp HOME whose default database is the fixture's."""
+    """`sd reports brief` through `bin/sd`, with a temp HOME whose default database is the fixture's.
+
+    Not `hub_only`: the render runs in the child, which opens its database locally."""
 
     def setUp(self):
         super().setUp()

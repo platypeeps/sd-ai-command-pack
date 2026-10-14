@@ -155,11 +155,11 @@ def add(connection: sqlite3.Connection, stem: str, text: str, *, repo: str, who:
             if held == text:
                 result = "unchanged"
             elif mode is None:
-                raise BriefConflict(f"{stem}: the row holds other text; `sd reports brief show {stem}` prints it, "
-                                    f"and only `--replace` takes the file over it")
+                raise BriefConflict(f"{stem}: the row holds other text; show the brief to read it, and only a "
+                                    f"replace takes the file over it")
             elif mode == "extend" and not (isinstance(held, str) and text.startswith(held)):
                 raise BriefConflict(f"{stem}: the draft is not the row's text with more after it, so --extend "
-                                    f"leaves the row; `sd reports brief show {stem}` prints it")
+                                    f"leaves the row; show the brief to read it")
             else:
                 result = "extended" if mode == "extend" else "replaced"
                 fields["brief"] = {**brief, "at": old.get("at") or now()}
@@ -311,7 +311,6 @@ def render(connection: sqlite3.Connection, vault: Path | str | None) -> dict[str
     read only once the lock beside the database is held, so a render that
     read older rows never writes after one that read newer rows.
     """
-    refuse_hub_only(connection, "brief render")
     copies: dict[str, Any] = {"state": "failed", "folder": {}, "previous_folder": {}, "written": [],
                               "refused": [], "left": [], "reason": None}
     try:
@@ -336,6 +335,8 @@ def copies_state(connection: sqlite3.Connection) -> tuple[str, dict[str, Any]] |
 
 
 def _lock_path(connection: sqlite3.Connection) -> Path:
+    """The lock beside the database: a hub-only path, so a satellite meets `HubOnly` here, before any read."""
+    refuse_hub_only(connection, "brief render")
     found = connection.execute("PRAGMA database_list").fetchone()
     if found is None or not found[2]:
         raise BriefRefused("the database has no file, so there is no place for the render's lock")
@@ -445,7 +446,7 @@ def _refuse_hand_edit(held: bytes, text: str) -> None:
         raise BriefRefused("it differs from its mirror-hash: a hand edit, kept")
     if holds is None and found != text:
         raise BriefRefused("it has no mirror-hash and differs from its row: a hand edit or a note changed "
-                           "since the import, kept; `sd reports brief import` lists it")
+                           "since the import, kept; an import of the folder lists it")
 
 
 def _strays(folder: Path, keys: set[str], copies: dict[str, Any]) -> None:

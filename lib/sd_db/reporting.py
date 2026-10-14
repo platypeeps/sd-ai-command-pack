@@ -481,7 +481,7 @@ def reports(connection, *, limit=200):
 def _refuse_brief(row):
     """A routine brief is a `report` row filed `done` for good (sd:3459): no verb moves it."""
     if row["source"] == "brief":
-        raise workflow.WorkflowError("a routine brief stays done; `sd reports brief` files and replaces it")
+        raise workflow.WorkflowError("a routine brief stays done; only filing or replacing the brief changes it")
 
 
 def acknowledge(connection, item, *, expected_revision, who, resolve_ingest_followups=False):
