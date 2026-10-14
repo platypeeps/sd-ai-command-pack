@@ -676,6 +676,86 @@ def repo_ci(connection: sqlite3.Connection, path: Path | str) -> str:
     return CI_MODES[0] if row is None else row["ci"]
 
 
+def set_channels(
+    connection: sqlite3.Connection,
+    path: Path | str,
+    value: dict | None,
+    *,
+    before: str | None = None,
+) -> tuple[str, str]:
+    """Set one registered repository's publish channels. Returns `(path, before)`.
+
+    The one writer of `repo.channels` (sd:3462, design sd:3471): the verb and
+    the dashboard both call it. `value` passes `channels.validate` and is
+    stored as its canonical text; `None` writes NULL, no setting. `before` is
+    the value the caller read, canonical JSON or `none`; given, a row that
+    reads otherwise raises `StaleItem`, compared inside the write transaction
+    so two forms opened on one NULL row cannot both write. The answer is the
+    value replaced, in the same spelling. Same path refusal as
+    `set_runner_merge`. A direct UPDATE, not `upsert_repo`, whose `None`
+    means "leave it" and so cannot write NULL.
+
+    It does not refuse during an unresolved restore: the restore's recovery
+    is to set each repository's channels again before resolving it.
+    """
+    from . import channels
+    from .workflow import StaleItem
+
+    text = None if value is None else channels.dumps(channels.validate(value))
+    given = str(Path(path).expanduser().resolve())
+    probe = paths.keys(given)
+    with transaction(connection):
+        row = connection.execute(
+            f"SELECT path, channels FROM repo WHERE path IN ({paths.placeholders(probe)})",
+            probe).fetchone()
+        if row is None:
+            raise RepoRefusal(
+                f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
+        was = channels.canonical(row["channels"])
+        if before is not None and channels.canonical(before) != was:
+            raise StaleItem(f"channels for {row['path']} is {was} now, not {before}; read the page again")
+        connection.execute("UPDATE repo SET channels = ?, updated_at = ? WHERE path = ?",
+                           (text, now(), row["path"]))
+    return row["path"], was
+
+
+def repo_channels(connection: sqlite3.Connection, path: Path | str) -> dict | None:
+    """One repository's publish channels, validated, or None for no setting.
+
+    None means the row holds NULL or no row holds the path: either way the
+    repository publishes as it did before the setting existed. Anything this
+    cannot read raises, and never reads as None: a stored value
+    `channels.validate` refuses raises `ChannelRefusal` naming the
+    repository, and a store not yet at 29 raises `SchemaTooOld`. Falling back
+    to the defaults would publish into folders the operator moved away from.
+    """
+    import json
+
+    from . import channels
+    from .database import schema_version
+    from .errors import SchemaTooOld
+    from .schema import SCHEMA_VERSION
+
+    given = str(Path(path).expanduser().resolve())
+    probe = paths.keys(given)
+    try:
+        row = connection.execute(
+            f"SELECT path, channels FROM repo WHERE path IN ({paths.placeholders(probe)})",
+            probe).fetchone()
+    except sqlite3.OperationalError as error:
+        if "no such column" in str(error):
+            raise SchemaTooOld(schema_version(connection), SCHEMA_VERSION) from error
+        raise
+    if row is None or row["channels"] is None:
+        return None
+    try:
+        return channels.validate(json.loads(row["channels"]))
+    except (ValueError, channels.ChannelRefusal) as error:
+        raise channels.ChannelRefusal(
+            f"the channels setting of {row['path']} cannot be used ({error}); set it again with "
+            f"`bin/sd-db repo channels {row['path']} obsidian=... notion=... drive=...`") from error
+
+
 #: The word that names the hub for `repo.lane_host`; the column holds NULL for it.
 LANE_HUB = "hub"
 #: A lane host is a `hostname -s`, lower-cased: the `local-cron-jobs` folder rule.

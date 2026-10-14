@@ -1612,8 +1612,11 @@ class TheSnoozeKind(SchemaCase):
 
     def test_the_reverse_returns_the_file_to_twenty_six_without_the_snoozes(self):
         self._at_version_twenty_six()
-        migrate(self.path)
-        connection = connect(self.path, write=True)
+        # Through 27 only: 29 adds a `repo` column 27's reverse leaves, and the rerun below adds it again.
+        with mock.patch("sd_db.migrate.migrations", return_value=[m for m in schema_module.migrations() if m[0] <= 27]):
+            migrate(self.path)
+        # The library refuses a file below its version; write it raw.
+        connection = sqlite3.connect(self.path)
         connection.execute(
             "INSERT INTO state (id, kind, key, timestamp, body) VALUES (30, 'snooze', 'today:job:x:1', 't6', '{}')")
         connection.commit()
@@ -1725,8 +1728,11 @@ class TheViewKind(SchemaCase):
 
     def test_the_reverse_returns_the_file_to_twenty_seven_without_the_views(self):
         self._at_version_twenty_seven()
-        migrate(self.path)
-        connection = connect(self.path, write=True)
+        # Through 28 only: 29 adds a `repo` column 28's reverse leaves, and the rerun below adds it again.
+        with mock.patch("sd_db.migrate.migrations", return_value=[m for m in schema_module.migrations() if m[0] <= 28]):
+            migrate(self.path)
+        # The library refuses a file below its version; write it raw.
+        connection = sqlite3.connect(self.path)
         connection.execute(
             "INSERT INTO state (id, kind, key, timestamp, body) VALUES (30, 'view', 'system/index.html', 't6', '{}')")
         connection.commit()
@@ -1743,6 +1749,99 @@ class TheViewKind(SchemaCase):
         self.assertEqual(self._shape(raw), self._shape(self._reference(27)))
         result = migrate(self.path)
         self.assertEqual((result.before, result.applied), (27, list(range(28, SCHEMA_VERSION + 1))))
+
+
+class TheChannelsColumn(SchemaCase):
+    """Migration 29 (sd:3462, design sd:3471). `repo.channels`, a repository's
+    publish channels as a JSON object; NULL is no setting, today's behaviour.
+
+    Added, not rebuilt, as 24 was: every existing row reads NULL and keeps its
+    other values, the CHECK holds a value to valid JSON, a failure leaves the
+    file at 28, and the reverse returns it to 28's shape.
+    """
+
+    COLUMNS = "path, remote, mode, runner_merge, pieces_source, created_at, updated_at, managed, ci, lane_host"
+    ROWS = [("/one", "git@github.com:platypeeps/one.git", "full", "auto", "file", "t1", "t2", 1, "local", "build-2"),
+            ("/two", None, None, "manual", "row", "t3", "t4", 0, "github", None)]
+
+    def _at_version_twenty_eight(self):
+        through = [m for m in schema_module.migrations() if m[0] <= 28]
+        with mock.patch("sd_db.migrate.migrations", return_value=through):
+            migrate(self.path)
+        raw = sqlite3.connect(self.path)
+        raw.executemany(f"INSERT INTO repo ({self.COLUMNS}) VALUES ({', '.join('?' * 10)})", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(f"SELECT {self.COLUMNS} FROM repo ORDER BY path")]
+
+    def _reference(self, upto):
+        reference = sqlite3.connect(":memory:")
+        self.addCleanup(reference.close)
+        paths.install(reference)
+        for version, path in schema_module.migrations():
+            if version <= upto:
+                reference.executescript(path.read_text(encoding="utf-8"))
+        return reference
+
+    def test_every_existing_row_arrives_at_null_and_keeps_its_values_and_a_rerun_applies_nothing(self):
+        self._at_version_twenty_eight()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied), (28, [29]))
+        self.assertEqual(migrate(self.path).applied, [])
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.ROWS)
+        self.assertEqual([row[0] for row in connection.execute("SELECT channels FROM repo ORDER BY path")],
+                         [None, None])
+
+    def test_the_check_holds_a_value_to_json(self):
+        self._at_version_twenty_eight()
+        migrate(self.path)
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        connection.execute("UPDATE repo SET channels = ? WHERE path = '/one'", ('{"drive": {}}',))
+        for value in ("obsidian", "{", ""):
+            with self.subTest(value=value), self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE repo SET channels = ? WHERE path = '/one'", (value,))
+        connection.execute("UPDATE repo SET channels = NULL WHERE path = '/two'")
+        self.assertEqual([row[0] for row in connection.execute("SELECT channels FROM repo ORDER BY path")],
+                         ['{"drive": {}}', None])
+
+    def test_a_failed_add_leaves_the_file_at_twenty_eight_and_a_rerun_finishes_it(self):
+        self._at_version_twenty_eight()
+        # A column of that name added by hand is the one way the one statement fails.
+        raw = sqlite3.connect(self.path)
+        raw.execute("ALTER TABLE repo ADD COLUMN channels TEXT")
+        raw.commit()
+        raw.close()
+        with self.assertRaises(sqlite3.OperationalError):
+            migrate(self.path)
+        raw = sqlite3.connect(self.path)
+        self.assertEqual(schema_version(raw), 28)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        raw.execute("ALTER TABLE repo DROP COLUMN channels")
+        raw.commit()
+        raw.close()
+        self.assertEqual(migrate(self.path).applied, [29])
+
+    def test_the_reverse_returns_the_file_to_twenty_eight(self):
+        self._at_version_twenty_eight()
+        migrate(self.path)
+        connection = connect(self.path, write=True)
+        connection.execute("UPDATE repo SET channels = ? WHERE path = '/one'", ('{"drive": {}}',))
+        connection.close()
+        text = dict(schema_module.migrations())[29].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), 28)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        # A backup restore compares the table to 28's shape.
+        self.assertEqual(raw.execute("PRAGMA table_info(repo)").fetchall(),
+                         self._reference(28).execute("PRAGMA table_info(repo)").fetchall())
+        self.assertEqual(migrate(self.path).applied, [29])
 
 
 class TheConnection(SchemaCase):

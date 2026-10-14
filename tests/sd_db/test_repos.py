@@ -7,6 +7,7 @@ it fills and the one path it refuses.
 """
 
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -18,7 +19,8 @@ from unittest import mock
 from sd_db import connect, ship
 from sd_db.errors import SdDbError
 from sd_db.workflow import StaleItem
-from sd_db.migrate import initialise
+from sd_db.channels import ChannelRefusal
+from sd_db.migrate import initialise, migrate
 from sd_db.repos import (
     CI_MODES,
     ConfMissing,
@@ -28,14 +30,17 @@ from sd_db.repos import (
     conf_paths,
     read_conf,
     registered,
+    repo_channels,
     repo_ci,
     seed,
+    set_channels,
     set_ci,
     set_lane_host,
     set_managed,
     set_runner_merge,
     worktrees_root,
 )
+from sd_db.schema import migrations
 
 from . import support
 
@@ -563,3 +568,195 @@ class TheLaneHostWriter(RepoCase):
         with self.assertRaises(StaleItem):
             set_lane_host(self.connection, path, "build-2", before="build-3")
         self.assertIsNone(self._stored(path))
+
+
+class TheChannelsWriter(RepoCase):
+    """sd:3462, design sd:3471. `set_channels` is the one writer of
+    `repo.channels`, shaped like `set_runner_merge`: it writes the canonical
+    text, answers what it replaced, refuses a value the validator refuses and
+    a path no row holds, and moves no other field. `None` clears to NULL.
+    `before` is compared inside the write transaction, NULL included.
+    """
+
+    VALUE = {"obsidian": {"folder": "Briefs/x"}, "notion": {"folder": "Example"}, "drive": {}}
+    TEXT = '{"drive":{},"notion":{"folder":"Example"},"obsidian":{"folder":"Briefs/x"}}'
+
+    def _registered(self) -> str:
+        checkout = support.repository(self.checkouts / "one")
+        return add(self.connection, checkout, home=self.home)
+
+    def _stored(self, path: str):
+        return self.connection.execute("SELECT channels FROM repo WHERE path = ?", (path,)).fetchone()[0]
+
+    def test_it_sets_reads_back_and_clears_each_answering_the_value_before(self):
+        path = self._registered()
+        self.assertIsNone(repo_channels(self.connection, path))
+        self.assertEqual(set_channels(self.connection, path, self.VALUE), (path, "none"))
+        self.assertEqual(self._stored(path), self.TEXT)
+        self.assertEqual(repo_channels(self.connection, path), self.VALUE)
+        self.assertEqual(set_channels(self.connection, path, {"drive": {}}), (path, self.TEXT))
+        self.assertEqual(set_channels(self.connection, path, None), (path, '{"drive":{}}'))
+        self.assertIsNone(self._stored(path))
+        self.assertIsNone(repo_channels(self.connection, path))
+
+    def test_it_changes_no_other_field_on_the_row(self):
+        path = self._registered()
+        before = dict(self.connection.execute("SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
+        set_channels(self.connection, path, self.VALUE)
+        after = dict(self.connection.execute("SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
+        self.assertEqual({key for key in before if before[key] != after[key]} - {"updated_at"}, {"channels"})
+
+    def test_each_refusal_leaves_the_row_unchanged(self):
+        path = self._registered()
+        set_channels(self.connection, path, {"drive": {}})
+        for value, named in (({"slack": {}}, "slack"), ({"notion": {"folder": "A/B"}}, "notion"), ({}, "none"),
+                             ({"drive": {"folder": "/abs"}}, "drive")):
+            with self.subTest(value=value), self.assertRaises(ChannelRefusal) as caught:
+                set_channels(self.connection, path, value)
+            self.assertIn(named, str(caught.exception))
+            self.assertEqual(self._stored(path), '{"drive":{}}')
+
+    def test_an_unregistered_path_is_refused_rather_than_registered(self):
+        checkout = support.repository(self.checkouts / "two")
+        with self.assertRaises(RepoRefusal) as caught:
+            set_channels(self.connection, checkout, {"drive": {}})
+        self.assertIn("not a registered repository", str(caught.exception))
+        self.assertEqual(registered(self.connection), [])
+
+    def test_a_stale_before_refuses_and_writes_nothing_null_included(self):
+        """Two forms both opened on a NULL row cannot both write."""
+        path = self._registered()
+        self.assertEqual(set_channels(self.connection, path, {"drive": {}}, before="none"), (path, "none"))
+        with self.assertRaises(StaleItem) as caught:
+            set_channels(self.connection, path, {"notion": {}}, before="none")
+        self.assertIn('{"drive":{}}', str(caught.exception))
+        self.assertEqual(self._stored(path), '{"drive":{}}')
+        set_channels(self.connection, path, None)
+        with self.assertRaises(StaleItem):
+            set_channels(self.connection, path, {"notion": {}}, before='{"drive":{}}')
+        self.assertIsNone(self._stored(path))
+
+    def test_a_before_in_another_spelling_of_the_same_value_matches(self):
+        path = self._registered()
+        set_channels(self.connection, path, self.VALUE)
+        spelled = '{"obsidian": {"folder": "Briefs/x"}, "notion": {"folder": "Example"}, "drive": {}}'
+        self.assertEqual(set_channels(self.connection, path, None, before=spelled), (path, self.TEXT))
+
+    def test_a_stored_value_the_validator_refuses_can_be_replaced(self):
+        path = self._registered()
+        self.connection.execute("UPDATE repo SET channels = '{\"slack\": {}}' WHERE path = ?", (path,))
+        self.assertEqual(set_channels(self.connection, path, {"drive": {}}, before='{"slack":{}}'),
+                         (path, '{"slack":{}}'))
+        self.assertEqual(self._stored(path), '{"drive":{}}')
+
+    def test_it_writes_while_a_restore_is_open(self):
+        """Failure table, row "restore": the operator sets each repository's
+        setting again before resolving the restore, so the writer does not refuse."""
+        path = self._registered()
+        self.connection.execute(
+            "INSERT INTO state (kind, key, timestamp, body) VALUES ('restore', '2026-10-13', 't', '{}')")
+        set_channels(self.connection, path, {"drive": {}})
+        self.assertEqual(self._stored(path), '{"drive":{}}')
+
+
+class TheChannelsVerb(RepoCase):
+    """`sd-db repo channels PATH [obsidian=.. notion=.. drive=.. | none]`.
+
+    No setting word prints the value, `none` clears it, and `channel=folder`
+    words set it, `channel=` meaning the default folder. A read that fails
+    exits 1 with the cause and never prints `none`.
+    """
+
+    def _registered(self) -> str:
+        checkout = support.repository(self.checkouts / "one")
+        return add(self.connection, checkout, home=self.home)
+
+    def _run(self, *argv: str, database: Path | None = None) -> tuple[int, str, str]:
+        import contextlib
+        import io
+
+        from sd_db.jobs import cli
+        out, err = io.StringIO(), io.StringIO()
+        target = database or self.root / "sd.db"
+        with mock.patch.object(cli, "_open_for_write", lambda: connect(target)), \
+                mock.patch.object(cli, "_home", lambda: self.home), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = cli.main(["repo", "channels", *argv])
+        return rc, out.getvalue(), err.getvalue()
+
+    def _stored(self, path: str):
+        return self.connection.execute("SELECT channels FROM repo WHERE path = ?", (path,)).fetchone()[0]
+
+    def test_print_set_print_and_clear(self):
+        path = self._registered()
+        self.assertEqual(self._run(path), (0, "none\n", ""))
+        rc, out, _ = self._run(path, "notion=Example", "drive=Research/Example")
+        self.assertEqual(rc, 0)
+        text = '{"drive":{"folder":"Research/Example"},"notion":{"folder":"Example"}}'
+        self.assertIn(f"{path} channels none -> {text}", out)
+        self.assertEqual(self._run(path), (0, f"{text}\n", ""))
+        rc, out, _ = self._run(path, "obsidian=", "drive=")
+        self.assertIn(f"channels {text} -> " + '{"drive":{},"obsidian":{}}', out)
+        rc, out, _ = self._run(path, "none")
+        self.assertEqual(rc, 0)
+        self.assertIn('channels {"drive":{},"obsidian":{}} -> none', out)
+        self.assertIsNone(self._stored(path))
+
+    def test_a_change_names_the_render_that_publishes_it(self):
+        """Failure table, row "set: the change takes effect"."""
+        path = self._registered()
+        for words in (["drive="], ["none"]):
+            with self.subTest(words=words):
+                rc, out, _ = self._run(path, *words)
+                self.assertEqual(rc, 0)
+                self.assertIn("sd-research-kit render", out)
+                self.assertIn("next commit", out)
+
+    def test_a_refused_value_names_the_channel_and_changes_nothing(self):
+        path = self._registered()
+        self._run(path, "drive=")
+        for words, named in ((["notion=A/B"], "notion"), (["slack=x"], "slack"), (["obsidian=/abs"], "obsidian"),
+                             (["drive"], "drive"), (["drive=", "drive=x"], "drive"), (["none", "drive="], "none"),
+                             (["--force"], "--force")):
+            with self.subTest(words=words):
+                rc, out, err = self._run(path, *words)
+                self.assertEqual(rc, 1, out + err)
+                self.assertIn(named, err)
+                self.assertEqual(out, "")
+                self.assertEqual(self._stored(path), '{"drive":{}}')
+
+    def test_an_unregistered_path_refuses_a_write_and_prints_none_for_a_read(self):
+        """No row is no setting, so a read answers `none` and says why on stderr."""
+        checkout = support.repository(self.checkouts / "two")
+        rc, out, err = self._run(str(checkout), "drive=")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("not a registered repository", err)
+        self.assertEqual(registered(self.connection), [])
+        rc, out, err = self._run(str(checkout))
+        self.assertEqual((rc, out), (0, "none\n"))
+        self.assertIn("not a registered repository", err)
+
+    def test_a_stored_value_the_validator_refuses_exits_1_and_prints_no_none(self):
+        """Failure table, row "drain: read the setting"."""
+        path = self._registered()
+        self.connection.execute("UPDATE repo SET channels = '{\"slack\": {}}' WHERE path = ?", (path,))
+        rc, out, err = self._run(path)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("slack", err)
+        self.assertNotIn("none", out + err)
+
+    def test_a_database_at_twenty_eight_exits_1_and_prints_no_none(self):
+        """Failure table, row "drain: read the setting": the column is missing."""
+        path = self._registered()
+        old = self.root / "old.db"
+        through = [m for m in migrations() if m[0] <= 28]
+        with mock.patch("sd_db.migrate.migrations", return_value=through):
+            migrate(old)
+        raw = sqlite3.connect(old)
+        raw.execute("INSERT INTO repo (path, created_at, updated_at) VALUES (?, 't', 't')", (path,))
+        raw.commit()
+        raw.close()
+        rc, out, err = self._run(path, database=old)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("schema version 28", err)
+        self.assertNotIn("none", out)
