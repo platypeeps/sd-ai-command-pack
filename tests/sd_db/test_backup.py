@@ -888,14 +888,14 @@ def one_migration_back(database):
     """
     raw = sqlite3.connect(database, isolation_level=None)
     try:
-        # The reverse of 032_item_drop_dead_kinds.sql, which its header carries as
-        # `--   ` lines: `item.kind` gets `proposal` and `dep` back and the version goes to 31. The helper is
+        # The reverse of 033_repo_clones_dependabot.sql, which its header carries as
+        # `--   ` lines: `repo` loses `clone_profiles` and `dependabot` and the version goes to 32. The helper is
         # rewritten with every migration: a migration that adds a table or a column would be refused if left in
         # place.
-        text = (SCHEMA_DIR / "032_item_drop_dead_kinds.sql").read_text()
+        text = (SCHEMA_DIR / "033_repo_clones_dependabot.sql").read_text()
         script = "\n".join(line[4:] for line in text.splitlines() if line.startswith("--   "))
-        assert "PRAGMA user_version = 31" in script, \
-            "032's reverse is not where this helper expects it"
+        assert "PRAGMA user_version = 32" in script, \
+            "033's reverse is not where this helper expects it"
         raw.executescript(script)
         assert raw.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION - 1
     finally:

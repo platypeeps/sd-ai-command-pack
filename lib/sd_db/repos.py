@@ -39,7 +39,7 @@ import os
 import re
 import sqlite3
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import config, paths
@@ -159,8 +159,9 @@ def read_conf(path: Path | str) -> list[tuple[str, str]]:
     text = Path(path).read_text(encoding="utf-8")
     entries: list[tuple[str, str]] = []
     for number, line in enumerate(text.splitlines(), start=1):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+        # `repo-sync` cuts `#...` off every line before it reads one; so does this.
+        stripped = line.split("#", 1)[0].strip()
+        if not stripped:
             continue
         match = CONF_LINE.match(stripped)
         if match is None:
@@ -275,6 +276,7 @@ class Seeded:
 
     registered: list[str]
     absent: list[str]
+    mismatched: list[str] = field(default_factory=list)
 
     @property
     def counts(self) -> dict[str, int]:
@@ -297,6 +299,7 @@ def seed(
     """
     registered: list[str] = []
     absent: list[str] = []
+    mismatched: list[str] = []
     for checkout in checkouts(path, root=root, environ=environ):
         if not checkout.present:
             absent.append(checkout.slug)
@@ -313,11 +316,94 @@ def seed(
         # The conf value stays as the fallback: it is the only answer for a
         # checkout whose origin has been removed.
         found_remote, _ = detect(checkout.path)
+        # The line names a repository and the path only where it sits: an
+        # origin that names another one is not the line's (sd:4043 review).
+        if found_remote and not same_remote(found_remote, checkout.remote):
+            mismatched.append(_elsewhere(checkout, [("origin", found_remote)]))
+            continue
         registered.append(
             add(connection, checkout.path,
                 remote=found_remote or checkout.remote, home=home)
         )
-    return Seeded(registered=sorted(set(registered)), absent=sorted(set(absent)))
+    return Seeded(registered=sorted(set(registered)), absent=sorted(set(absent)), mismatched=mismatched)
+
+
+def _elsewhere(checkout: Checkout, held: list[tuple[str, str | None]]) -> str:
+    """A line whose path holds another repository, naming both."""
+    found = ", ".join(f"its {what} is {value}" if value else f"it has no {what}" for what, value in held)
+    return (f"{checkout.slug} at {checkout.path}: {found}; nothing was written for this line. Fix the line, "
+            f"or the checkout or row at that path")
+
+
+@dataclass
+class SeededClones:
+    """What `seed_clones` did: rows it made, rows that gained the profile, rows that held it, lines it could not
+    place, and lines whose path holds another repository."""
+
+    registered: list[str]
+    added: list[str]
+    held: list[str]
+    unplaced: list[str]
+    mismatched: list[str] = field(default_factory=list)
+
+
+def seed_clones(
+    connection: sqlite3.Connection,
+    profile: str,
+    *,
+    root: Path | str | None = None,
+    environ: dict[str, str] | None = None,
+    home: Path | str | None = None,
+) -> SeededClones:
+    """Add `profile` to the row of every line `repo-sync` clones on it here.
+
+    The lines are `repos.common.conf` and `repos.<profile>.conf` in the config
+    folder, or the terra conf alone (`conf_paths`); the profile is an argument,
+    because a satellite need not set `REPO_SYNC_PROFILE`. A line with no row
+    gets one when its checkout is on disk, as `seed` registers it, and is
+    named in `unplaced` when it is not: no row can be keyed to a path nothing
+    holds, so the machine that holds it runs its own seed. It only adds, and
+    each line is its own transaction, so a run stopped at any line is
+    finished by running it again (design sd:3983, slice P2).
+
+    A path does not identify a repository: the line's slug does. The
+    checkout's origin, when the checkout is here, and the row's remote, when
+    there is a row, must each name the line's repository, or that line writes
+    nothing and is named in `mismatched`. No origin is an unknown answer, not
+    an agreeing one. Unlike `seed`, the conf's slug is never the fallback:
+    the profile tells other machines what to clone.
+    """
+    if profile not in CLONE_PROFILES:
+        raise RepoRefusal(f"{profile!r} is not a profile; expected one of {', '.join(CLONE_PROFILES)}")
+    env = {**(os.environ if environ is None else environ), "REPO_SYNC_PROFILE": profile}
+    result = SeededClones([], [], [], [])
+    for checkout in checkouts(root=root, environ=env):
+        where = checkout.path.resolve()
+        origin = detect(checkout.path)[0] if checkout.present else None
+        with transaction(connection):
+            row = row_for(connection, where)
+            if row is None and not checkout.present:
+                result.unplaced.append(checkout.slug)
+                continue
+            answers = ([("origin", origin)] if checkout.present else []) + \
+                ([("remote in its row", row["remote"])] if row is not None else [])
+            wrong = [(what, value) for what, value in answers if not same_remote(value, checkout.remote)]
+            if wrong:
+                result.mismatched.append(_elsewhere(checkout, wrong))
+                continue
+            if row is None:
+                path, held = add(connection, where, remote=origin, home=home), None
+                result.registered.append(path)
+            else:
+                path, held = row["path"], row["clone_profiles"]
+            value = clone_profiles(f"+{profile}", held)
+            if value == held:
+                result.held.append(path)
+                continue
+            connection.execute("UPDATE repo SET clone_profiles = ?, updated_at = ? WHERE path = ?",
+                               (value, now(), path))
+            result.added.append(path)
+    return result
 
 
 #: `scheme://[user[:password]@]host[:port]/path`, the URL form of a remote.
@@ -626,6 +712,134 @@ def set_managed(
     upsert_repo(connection, target, managed=MANAGED_VALUES[value])
     return target, before
 
+
+
+#: The machine kinds `repo-sync` clones for, in the order `repo.clone_profiles`
+#: spells a set: one spelling per set keeps the column's CHECK a closed list
+#: (migration 033, design sd:3983).
+CLONE_PROFILES = ("personal", "work", "terra")
+
+
+def clone_profiles(words: str, held: str | None) -> str | None:
+    """The `clone_profiles` value `words` makes of `held`; None is no profile.
+
+    `words` is a set (`personal,work`), `none`, `+P` to add one or `-P` to
+    take one away. A word outside `CLONE_PROFILES` or a profile named twice
+    refuses in a sentence, not in the CHECK's text.
+    """
+    current = set(held.split(",")) if held else set()
+    if words == "none":
+        chosen: set[str] = set()
+    elif words[:1] in ("+", "-") and words[1:] in CLONE_PROFILES:
+        chosen = current | {words[1:]} if words[0] == "+" else current - {words[1:]}
+    else:
+        named = words.split(",")
+        if not all(name in CLONE_PROFILES for name in named) or len(set(named)) != len(named):
+            raise RepoRefusal(
+                f"{words!r} is not a clone setting; expected none, +P, -P or a comma list of "
+                f"{', '.join(CLONE_PROFILES)}")
+        chosen = set(named)
+    return ",".join(name for name in CLONE_PROFILES if name in chosen) or None
+
+
+def set_clones(connection: sqlite3.Connection, path: Path | str, words: str) -> tuple[str, str, str]:
+    """Set the profiles one registered repository is cloned on. Returns `(path, before, after)`.
+
+    `before` and `after` are the column's spelling, `none` for NULL. The read
+    and the write hold one transaction, so a `+P` and a `-P` on one row land
+    in one order or the other and neither is lost. Same path refusal as
+    `set_runner_merge`.
+    """
+    given = str(Path(path).expanduser().resolve())
+    probe = paths.keys(given)
+    with transaction(connection):
+        row = connection.execute(
+            f"SELECT path, clone_profiles FROM repo WHERE path IN ({paths.placeholders(probe)})",
+            probe).fetchone()
+        if row is None:
+            raise RepoRefusal(
+                f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
+        value = clone_profiles(words, row["clone_profiles"])
+        connection.execute("UPDATE repo SET clone_profiles = ?, updated_at = ? WHERE path = ?",
+                           (value, now(), row["path"]))
+    return row["path"], row["clone_profiles"] or "none", value or "none"
+
+
+def clone_lines(
+    connection: sqlite3.Connection,
+    profile: str,
+    *,
+    root: Path | str | None = None,
+    environ: dict[str, str] | None = None,
+) -> list[str]:
+    """`<subdir> <owner/repo>` for every row cloned on `profile`, in path order.
+
+    The conf grammar `repo-sync` reads (design sd:3983); `.` is the subdir of
+    a checkout straight under `root`. Every row must give back its own path:
+    under `root` at depth 1 or 2, a GitHub remote, and a folder named as the
+    repository. One that does not refuses the whole list, naming every such
+    row, because a partial list would read as complete. A store not yet at 33
+    raises `SchemaTooOld`, never an empty list.
+    """
+    from .database import schema_version
+    from .errors import SchemaTooOld
+    from .schema import SCHEMA_VERSION
+
+    if profile not in CLONE_PROFILES:
+        raise RepoRefusal(f"{profile!r} is not a profile; expected one of {', '.join(CLONE_PROFILES)}")
+    base = Path(root) if root is not None else repo_root(environ)
+    bases = (base, base.resolve())
+    try:
+        rows = connection.execute(
+            "SELECT path, remote, clone_profiles FROM repo WHERE clone_profiles IS NOT NULL ORDER BY path"
+        ).fetchall()
+    except sqlite3.OperationalError as error:
+        if "no such column" in str(error):
+            raise SchemaTooOld(schema_version(connection), SCHEMA_VERSION) from error
+        raise
+    lines, refused = [], []
+    for row in rows:
+        if profile not in row["clone_profiles"].split(","):
+            continue
+        where = paths.expand(row["path"])
+        relative = next((where.relative_to(each) for each in bases if where.is_relative_to(each)), None)
+        found = parse_remote(row["remote"])
+        parts = relative.parts if relative is not None else ()
+        line = f"{'.' if len(parts) == 1 else parts[0]} {found.owner}/{found.name}" if parts else ""
+        if len(parts) not in (1, 2) or found.kind != "github" or parts[-1] != found.name \
+                or CONF_LINE.match(line) is None:
+            refused.append(f"{row['path']} ({row['remote'] or 'no remote'})")
+            continue
+        lines.append(line)
+    if refused:
+        raise RepoRefusal(
+            f"{len(refused)} row(s) cloned on {profile} are not a `<subdir> <owner/repo>` line under {base}: "
+            f"{'; '.join(refused)}. Each must sit one or two folders below it, named as its GitHub "
+            f"repository; fix the row or clear it with `bin/sd-db repo clones PATH -{profile}`")
+    return lines
+
+
+def set_dependabot(connection: sqlite3.Connection, path: Path | str, value: str) -> tuple[str, str]:
+    """Set whether the Dependabot sweep may take one repository's pull requests. Returns `(path, before)`.
+
+    The owner rule in the sweep's routine still decides first; this flag is
+    the list outside it (design sd:3984). Same words and refusals as
+    `set_managed`.
+    """
+    if value not in MANAGED_VALUES:
+        raise RepoRefusal(f"{value!r} is not a dependabot setting; expected yes or no")
+    given = str(Path(path).expanduser().resolve())
+    probe = paths.keys(given)
+    with transaction(connection):
+        row = connection.execute(
+            f"SELECT path, dependabot FROM repo WHERE path IN ({paths.placeholders(probe)})",
+            probe).fetchone()
+        if row is None:
+            raise RepoRefusal(
+                f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
+        connection.execute("UPDATE repo SET dependabot = ?, updated_at = ? WHERE path = ?",
+                           (MANAGED_VALUES[value], now(), row["path"]))
+    return row["path"], "yes" if row["dependabot"] else "no"
 
 
 #: What `repo.ci` accepts, in the order the CHECK constraint lists them:
