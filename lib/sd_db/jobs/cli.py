@@ -117,8 +117,20 @@ def command_status(_argv: list[str]) -> int:
 
 
 def command_restore(argv: list[str]) -> int:
+    """`restore DIR`, or `restore --newest ROOT...`: the newest verified snapshot under the roots (sd:4011)."""
+    if argv[:1] == ["--newest"]:
+        if len(argv) < 2:
+            print("sd-db restore: --newest needs at least one root", file=sys.stderr)
+            return 1
+        from ..backup import restore_newest
+        newest = restore_newest(argv[1:], home=_home(), report=lambda line: print(f"sd-db: {line}"))
+        print(f"sd-db: restored {newest.snapshot} (checkpoint {newest.taken_at.isoformat()}) to {newest.target}")
+        if newest.released:
+            print(f"sd-db: released {len(newest.released)} lease(s) abandoned at promotion: {', '.join(newest.released)}")
+        print("sd-db: the restore is unreconciled; `sd restore resume` clears it")
+        return 0
     if not argv:
-        print("sd-db restore: needs a dated directory", file=sys.stderr)
+        print("sd-db restore: needs a dated directory, or --newest ROOT...", file=sys.stderr)
         return 1
     target = restore_snapshot(argv[0], home=_home())
     print(f"sd-db: restored {argv[0]} to {target}")
