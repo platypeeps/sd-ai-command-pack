@@ -1771,7 +1771,10 @@ def make_post_merge(main: pathlib.Path, environ: dict[str, str], moved: str) -> 
             return f"make post-merge did not start in {main}: {error}"
     if done.returncode == 0:
         return f"make post-merge passed in {main}"
-    return f"make post-merge failed (exit {done.returncode}) in {main}: {(done.stderr or done.stdout).strip()[-300:]}"
+    # Both tails, labelled: a `[step]` line always fills stderr, so a refusal on stdout was dropped (sd:4047).
+    streams = (("stderr", done.stderr or ""), ("stdout", done.stdout or ""))
+    tails = "; ".join(f"{name}: {text.strip()[-300:]}" for name, text in streams if text.strip())
+    return f"make post-merge failed (exit {done.returncode}) in {main}: {tails or 'no output'}"
 
 
 def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str], note: Note,

@@ -270,7 +270,8 @@ Jira and GitHub issues come first: the shadow table already holds both (since sd
 source settings and "mine" rows on Today and Tasks, filtered to issues assigned to or reported by the operator, not
 watched ones. GitHub issues are read only for repos outside the managed list. Feeds follow: one
 general RSS/Atom subscription read by `sd-watchlist` (sd:3980), the one feed reader, which retires the website's
-ExternalChannels sync. Reddit joins both ways after that (sd:3981); X keeps its small posting quota.
+ExternalChannels sync. It is the inbound `feed` key, `{"url": URL}`, set with `feed=URL`; publishers read only the
+outbound keys (`channels.outbound`), so a feed alone publishes as no setting. Reddit joins both ways after that (sd:3981); X keeps its small posting quota.
 `local-project-dashboard/.env`'s dead Jira keys go in the sd:3461 PR.
 
 **Briefs (sd:3459).** The routines' write target moves from vault notes in their vault briefs folder to database
