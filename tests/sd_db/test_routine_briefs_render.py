@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -127,6 +128,36 @@ class TheCopies(Copies):
         self.assertEqual(self.copy("2026-10-01 - Daily Intel Brief"), TEXT)
         self.assertTrue((self.folder / "Index.md").exists())
 
+    def test_rows_whose_stems_name_one_file_on_macos_are_refused_and_none_is_written(self):
+        self.add()
+        self.render()
+        other = self.add("---\na: b\n---\nother text\n", stem="2026-10-12 - Other")["item"]
+        # A pack before the add refusal (sd:4040) could file this second spelling.
+        self.db.execute("UPDATE item SET title = ?, external_id = ? WHERE id = ?", (DAILY.lower(), DAILY.lower(), other))
+        copies = self.render()
+        self.assertEqual(sorted(stem for stem, _ in copies["refused"]), sorted([DAILY, DAILY.lower()]))
+        self.assertIn(f"also the file of {DAILY.lower()}", dict(copies["refused"])[DAILY])
+        self.assertEqual((copies["written"], copies["state"]), ([], "failed"))
+        self.assertEqual(self.copy(), hashed(TEXT))
+
+    def test_a_copy_named_in_another_unicode_form_is_its_rows_copy_not_a_stray(self):
+        cafe = unicodedata.normalize("NFC", "2026-10-13 - Café")
+        self.add(stem=cafe)
+        self.folder.mkdir(parents=True)
+        (self.folder / f"{unicodedata.normalize('NFD', cafe)}.md").write_text(hashed(TEXT), encoding="utf-8")
+        copies = self.render()
+        self.assertEqual((copies["refused"], copies["state"]), ([], "ok"))
+
+    def test_two_repositories_in_one_folder_are_not_each_others_strays(self):
+        other = support.repository(self.root / "other")
+        repos.add(self.db, other, home=self.root / "home")
+        repos.set_channels(self.db, other, {"obsidian": {"folder": FOLDER.lower()}})
+        self.add()
+        add(self.db, "2026-10-12 - Other", TEXT, repo=str(other), who="operator")
+        copies = self.render()
+        self.assertEqual((copies["refused"], copies["state"]), ([], "ok"))
+        self.assertEqual(sorted(copies["written"]), ["2026-10-12 - Other", DAILY])
+
     def test_the_heartbeat_lists_at_most_50_refused_stems(self):
         self.add()
         self.folder.mkdir(parents=True)
@@ -216,6 +247,13 @@ class TheSetting(Copies):
         self.assertEqual(self.render()["left"], [f"{FOLDER}/{DAILY}.md"])  # until the operator deletes it
         (self.folder / f"{DAILY}.md").unlink()
         self.assertEqual((self.render()["left"], self.beat()["previous_folder"]), ([], {}))
+
+    def test_a_folder_renamed_only_in_case_leaves_no_copies_behind(self):
+        self.add()
+        self.render()
+        self.channels({"obsidian": {"folder": FOLDER.lower()}})
+        copies = self.render()
+        self.assertEqual((copies["left"], copies["refused"], self.beat()["previous_folder"]), ([], [], {}))
 
 
 class TheSteps(Copies):

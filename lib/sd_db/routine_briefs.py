@@ -16,6 +16,11 @@ stems, lists every other difference as a conflict, and takes a file only for
 a stem the operator names. No counter or time decides it: a restore rolls
 those back with the rows.
 
+**A stem is a file name.** macOS ignores case and Unicode form in one, so
+stems, folders and `--replace` names are compared by `records._file_key`.
+`add` and `import_folder` refuse a stem another row spells the same way,
+naming both; `render` writes neither of two such rows.
+
 `sd_db.records` holds the mirror rule a vault copy is written and read by:
 `hashed` adds the `mirror-hash` line, and `unhashed` and `hash_holds` read it.
 `render` writes the copies under that rule (sd:4041), into the folder each
@@ -35,7 +40,7 @@ from typing import Any
 
 from . import records, repos, runner_journal
 from .database import refuse_hub_only, transaction
-from .records import RecordRefused, _closing, hash_holds, hashed, unhashed
+from .records import RecordRefused, _closing, _file_key, hash_holds, hashed, unhashed
 from .reporting import MAX_REPORT
 from .workflow import MissingItem, WorkflowError, _text, item_state
 from .writes import add_note, create_item, item_by_external, now, record_state, set_item_fields, unresolved_state
@@ -64,6 +69,10 @@ class BriefUnusable(BriefRefused):
 
 class BriefConflict(BriefRefused):
     """The stem's row holds other text, and nothing allowed the file to replace it."""
+
+
+class BriefCollision(BriefRefused):
+    """Another row's stem names the same file on macOS (`records._file_key`); nothing was written."""
 
 
 #: Room for the `mirror-hash` line a render adds: a copy of a row at `MAX_REPORT` still imports.
@@ -129,6 +138,7 @@ def add(connection: sqlite3.Connection, stem: str, text: str, *, repo: str, who:
     with transaction(connection):
         row = item_by_external(connection, SOURCE, stem)
         if row is None:
+            _refuse_collision(connection, stem)
             owner = repos.row_for(connection, repo)
             if owner is None:
                 raise BriefRefused(f"{repo} is not a registered repository; register it with `sd-db repo add`")
@@ -157,6 +167,15 @@ def add(connection: sqlite3.Connection, stem: str, text: str, *, repo: str, who:
                 add_note(connection, item, "comment",
                          f"Brief replaced by {who}: {old.get('words', '?')} -> {brief['words']} words", session=who)
     return _answer(connection, item, result)
+
+
+def _refuse_collision(connection: sqlite3.Connection, stem: str) -> None:
+    """A stem is one vault file name: macOS ignores case and Unicode form, so a second spelling is refused."""
+    key = _file_key(stem)
+    for row in connection.execute("SELECT id, external_id FROM item WHERE source = ?", (SOURCE,)):
+        if _file_key(row["external_id"] or "") == key:
+            raise BriefCollision(f"{stem}: brief {row['external_id']} (item {row['id']}) has the same file name "
+                                 f"on macOS, which ignores case and Unicode form; file it under that stem")
 
 
 def _answer(connection: sqlite3.Connection, item: int, result: str) -> dict[str, Any]:
@@ -217,8 +236,9 @@ def import_folder(connection: sqlite3.Connection, folder: Path, *, repo: str, wh
     if not folder.is_dir():
         raise BriefUnusable(f"{folder} is not a folder")
     notes = sorted(folder.glob("*.md"))
-    stems = {path.stem for path in notes}
-    unknown = sorted(set(replace) - stems)
+    stems = {_file_key(path.stem) for path in notes}
+    wanted = {_file_key(stem) for stem in replace}
+    unknown = sorted(stem for stem in replace if _file_key(stem) not in stems)
     if unknown:
         raise BriefUnusable(f"--replace names {', '.join(unknown)}, which has no note in {folder}; "
                             f"name each stem as its note is called")
@@ -235,7 +255,10 @@ def import_folder(connection: sqlite3.Connection, folder: Path, *, repo: str, wh
         stamp = datetime.datetime.fromtimestamp(path.stat().st_mtime, datetime.UTC).isoformat(timespec="seconds")
         try:
             done = add(connection, stem, text, repo=repo, who=who, at=stamp,
-                       mode="replace" if stem in replace else None)
+                       mode="replace" if _file_key(stem) in wanted else None)
+        except BriefCollision as refusal:
+            result["refused"].append({"name": path.name, "reason": str(refusal)})
+            continue
         except BriefConflict:
             result["conflicts"].append({"stem": stem, "copy": COPY[hash_holds(held)]})
             continue
@@ -354,15 +377,31 @@ def _copy(connection: sqlite3.Connection, vault: Path | str | None, copies: dict
         if not (root / named).resolve().is_relative_to(root.resolve()):
             raise BriefRefused(f"{root / named} leads outside the vault, through a link; the render writes "
                                f"copies inside {root} only")
-    for row in briefs:
-        folder = folders[row["repo"]]
-        if folder is not None:
+    targets = [(row, folder, f"{_place(root, folder)}/{_file_key(row['title'])}") for row in briefs
+               if (folder := folders[row["repo"]]) is not None]
+    places: dict[str, list[str]] = {}  # one vault file, as macOS names it: the stems that would write it
+    for row, _, key in targets:
+        places.setdefault(key, []).append(row["title"])
+    for row, folder, key in targets:
+        others = [stem for stem in places[key] if stem != row["title"]]
+        if others:
+            copies["refused"].append((row["title"], f"its file is also the file of {', '.join(others)} on macOS, "
+                                                    f"which ignores case and Unicode form; none of them is written"))
+        else:
             _write(root / folder, row, copies)
+    held: dict[str, tuple[Path, set[str]]] = {}  # one folder, as macOS names it: the stems its rows hold
     for repo, folder in folders.items():
         if folder is not None:
             stems = {row["title"] for row in briefs if row["repo"] == repo}
-            _strays(root / folder, stems, copies)
+            held.setdefault(_place(root, folder), (root / folder, set()))[1].update(map(_file_key, stems))
             _moved(root, repo, folder, stems, before, copies)
+    for path, keys in held.values():
+        _strays(path, keys, copies)
+
+
+def _place(root: Path, folder: str) -> str:
+    """A folder under the vault as macOS names it: two spellings of one directory are one place."""
+    return _file_key((root / folder).resolve().as_posix())
 
 
 def _folder(connection: sqlite3.Connection, repo: str) -> str | None:
@@ -409,12 +448,12 @@ def _refuse_hand_edit(held: bytes, text: str) -> None:
                            "since the import, kept; `sd reports brief import` lists it")
 
 
-def _strays(folder: Path, stems: set[str], copies: dict[str, Any]) -> None:
-    """Report every brief-shaped note in the folder no row holds. Other notes there are not briefs: left alone."""
+def _strays(folder: Path, keys: set[str], copies: dict[str, Any]) -> None:
+    """Report every brief-shaped note in the folder no row holds, by `_file_key`. Other notes there are left alone."""
     if not folder.is_dir():
         return
     for path in sorted(folder.glob("*.md")):
-        if path.stem not in stems and STEM.fullmatch(path.stem):
+        if _file_key(path.stem) not in keys and STEM.fullmatch(path.stem):
             copies["refused"].append((path.stem, "no row holds this file; kept: file it with "
                                                  "`sd reports brief add` or delete it"))
 
@@ -423,9 +462,9 @@ def _moved(root: Path, repo: str, folder: str, stems: set[str], before: dict[str
            copies: dict[str, Any]) -> None:
     """Name the copies left in the folder the last render wrote, when the folder moved; delete none."""
     last = (before.get("folder") or {}).get(repo) if isinstance(before.get("folder"), dict) else None
-    previous = last if last and last != folder else \
+    previous = last if isinstance(last, str) and last and _place(root, last) != _place(root, folder) else \
         ((before.get("previous_folder") or {}) if isinstance(before.get("previous_folder"), dict) else {}).get(repo)
-    if not previous or previous == folder:
+    if not isinstance(previous, str) or not previous or _place(root, previous) == _place(root, folder):
         return
     left = sorted(stem for stem in stems if (root / previous / f"{stem}.md").is_file())
     if left:

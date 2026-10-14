@@ -10,9 +10,11 @@ folder is a temp dir; nothing reads the operator's vault or store.
 import hashlib
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
+import unicodedata
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -28,6 +30,7 @@ PACK = Path(__file__).resolve().parents[2]
 DAILY = "2026-10-13 - Daily Intel Brief"
 TEXT = "---\ntags:\n  - brief\nrelated: \"[[Agents]]\"\n---\n\n# Daily Intel Brief\n\nThree   things\nhappened today.\n"
 FINDINGS = "\n## Adversarial findings\n\nNone.\n"
+CAFE = unicodedata.normalize("NFC", "2026-10-13 - Café")
 
 
 def sha(text):
@@ -182,6 +185,18 @@ class TheRow(Briefs):
             self.add(TEXT + FINDINGS, mode="extend")
         self.assertEqual(self.row()["fields"]["brief"]["sha256"], sha("---\na: b\n---\nthe operator's text\n"))
 
+    def test_a_stem_that_names_the_same_file_on_macos_is_refused_naming_both(self):
+        self.add()
+        self.add(stem=CAFE)
+        for other, held in ((DAILY.lower(), DAILY), (DAILY.upper(), DAILY),
+                            (unicodedata.normalize("NFD", CAFE), CAFE)):
+            for mode in (None, "extend", "replace"):
+                with self.subTest(other=other, mode=mode), \
+                        self.assertRaisesRegex(routine_briefs.BriefCollision,
+                                               f"^{re.escape(other)}: brief {re.escape(held)} \\(item"):
+                    self.add(TEXT + FINDINGS, stem=other, mode=mode)
+        self.assertEqual((self.count(), self.row()["fields"]["brief"]["sha256"]), (2, sha(TEXT)))
+
 
 class TheReads(Briefs):
     def test_rows_are_newest_first_without_bodies_and_filter_by_series_and_day(self):
@@ -258,6 +273,24 @@ class TheImport(Briefs):
                          ([DAILY], ["2026-10-12 - Daily Intel Brief"]))
         self.assertEqual(self.row()["fields"]["brief"]["sha256"], sha(TEXT + FINDINGS))
         self.assertEqual(self.row("2026-10-12 - Daily Intel Brief")["fields"]["brief"]["sha256"], sha(TEXT))
+
+    def test_a_note_named_as_a_row_but_for_case_or_form_is_refused_by_name_and_left(self):
+        self.add()
+        path = self.note(TEXT + FINDINGS, stem=DAILY.lower())
+        result = self.imported()
+        self.assertEqual([entry["name"] for entry in result["refused"]], [path.name])
+        self.assertIn(f"brief {DAILY} (item", result["refused"][0]["reason"])
+        self.assertEqual((result["filed"], result["conflicts"], self.count()), ([], [], 1))
+        self.assertEqual(self.row()["fields"]["brief"]["sha256"], sha(TEXT))
+        self.assertTrue(path.exists())
+
+    def test_replace_names_a_note_as_macos_compares_names(self):
+        self.note()
+        self.imported()
+        self.note(TEXT + FINDINGS)
+        taken = self.imported(replace=[DAILY.lower()])
+        self.assertEqual((taken["replaced"], taken["conflicts"]), ([DAILY], []))
+        self.assertEqual(self.row()["fields"]["brief"]["sha256"], sha(TEXT + FINDINGS))
 
     def test_a_replace_naming_no_note_in_the_folder_is_refused_before_any_write(self):
         self.note()
