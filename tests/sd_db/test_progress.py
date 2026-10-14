@@ -159,6 +159,53 @@ class WorkCompletion(ProgressCase):
         with self.assertRaises(WorkflowError):
             cancel_work(self.db, self.item, reason="Cannot rewrite delivery", who="operator")
 
+    def notes(self, kind="status_change"):
+        return [row["body"] for row in self.db.execute(
+            "SELECT body FROM note WHERE item = ? AND kind = ? ORDER BY id", (self.item, kind))]
+
+    def test_a_waived_delivery_records_the_waiver_in_one_transaction(self):
+        """sd:3704: the completion record keeps each waived criterion and its
+        decision note, and the `status_change` reason names them."""
+        self.remote()
+        commit = self.commit(f"Delivers: sd:{self.item}")
+        self.git("push", "origin", "main")
+        waived = [{"criterion": "p95 under 2 s", "decision": 41}, {"criterion": "runs offline", "decision": 41}]
+        result = deliver_work(self.db, self.item, commit, who="operator", waived=waived)
+        self.assertEqual(json.loads(result["item"]["fields"])["completion"]["waived"], waived)
+        self.assertIn(f"delivered at {commit} on ", self.notes()[-1])
+        self.assertTrue(self.notes()[-1].endswith("main; waived: 2 criteria (decision #41)"), self.notes())
+
+    def test_no_waiver_keeps_the_record_and_the_reason_unchanged(self):
+        self.remote()
+        commit = self.commit(f"Delivers: sd:{self.item}")
+        self.git("push", "origin", "main")
+        result = deliver_work(self.db, self.item, commit, who="operator", waived=[])
+        self.assertNotIn("waived", json.loads(result["item"]["fields"])["completion"])
+        self.assertTrue(self.notes()[-1].endswith("/main"), self.notes())
+        self.assertIn(f"delivered at {commit} on ", self.notes()[-1])
+
+    def test_a_malformed_waiver_refuses_before_any_write(self):
+        before = item_state(self.db, self.item)
+        commit = "0" * 40
+        malformed: list = [[{"criterion": "x"}], [{"criterion": "", "decision": 1}],
+                           [{"criterion": "x", "decision": "1"}], {"criterion": "x", "decision": 1}]
+        for waived in malformed:
+            with self.subTest(waived=waived), self.assertRaisesRegex(WorkflowError, "waived"):
+                deliver_work(self.db, self.item, commit, who="operator", waived=waived)
+        self.assertEqual(item_state(self.db, self.item), before)
+
+    def test_a_failure_inside_the_waived_delivery_rolls_back_whole(self):
+        self.remote()
+        commit = self.commit(f"Delivers: sd:{self.item}")
+        self.git("push", "origin", "main")
+        before, notes = item_state(self.db, self.item), self.notes()
+        with patch("sd_db.progress._transition", side_effect=WorkflowError("stopped inside")), \
+                self.assertRaisesRegex(WorkflowError, "stopped inside"):
+            deliver_work(self.db, self.item, commit, who="operator",
+                         waived=[{"criterion": "p95 under 2 s", "decision": 41}])
+        self.assertEqual(item_state(self.db, self.item), before)
+        self.assertEqual(self.notes(), notes)
+
     def test_legacy_delivery_trailer_uses_original_source_slug_after_relink(self):
         artifact = self.repo / "new-name.md"
         artifact.write_text("moved")

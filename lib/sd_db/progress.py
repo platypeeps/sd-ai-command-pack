@@ -322,9 +322,16 @@ def _delivery_evidence(row: dict, commit: str, *, verification_root: Path | None
 def deliver_work(
     connection: sqlite3.Connection, item: int, commit: str, *, who: str,
     expected_revision: str | None = None, verification_root: Path | str | None = None,
+    waived: list[dict] | None = None,
 ) -> dict:
-    """Verify a delivered commit, then atomically record completion evidence."""
+    """Verify a delivered commit, then atomically record completion evidence.
+
+    `waived` names each criterion the delivery's claim waived, with the
+    decision note that waived it (sd:3704): the completion record keeps it,
+    and the `status_change` reason names it, in the one transaction.
+    """
     who = _text(who, "who")
+    waived = _waived(waived)
     if not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit) is None:
         raise WorkflowError("delivery requires a full lowercase commit ID")
     # Network latency does not hold SQLite's writer lock. The revision read
@@ -336,7 +343,27 @@ def deliver_work(
             return initial
         raise WorkflowError("cancelled or previously completed work cannot be reclassified as delivered")
     evidence = _verified(connection, initial["item"], commit, verification_root)
-    return _complete_delivery(connection, item, initial["revision"], evidence, who=who)
+    return _complete_delivery(connection, item, initial["revision"], evidence, who=who, waived=waived)
+
+
+def _waived(waived: list[dict] | None) -> list[dict]:
+    """`waived` checked: a list of `{criterion: text, decision: note id}`."""
+    if waived is None:
+        return []
+    if not isinstance(waived, list) or any(
+            not isinstance(row, dict) or set(row) != {"criterion", "decision"}
+            or not isinstance(row["criterion"], str) or not row["criterion"].strip()
+            or type(row["decision"]) is not int for row in waived):
+        raise WorkflowError("waived must list {criterion, decision} with a decision note id")
+    return [dict(row) for row in waived]
+
+
+def waived_suffix(waived: list[dict]) -> str:
+    """What a delivery's `status_change` reason adds for its waived criteria, or ""."""
+    if not waived:
+        return ""
+    decisions = ", ".join(f"decision #{number}" for number in dict.fromkeys(row["decision"] for row in waived))
+    return f"; waived: {len(waived)} criteria ({decisions})"
 
 
 def _verified(connection: sqlite3.Connection, row: dict, commit: str,
@@ -380,15 +407,18 @@ def deliver_associated_work(
 
 
 def _complete_delivery(connection: sqlite3.Connection, item: int, revision: str,
-                       evidence: dict, *, who: str) -> dict:
+                       evidence: dict, *, who: str, waived: list[dict] | None = None) -> dict:
     """One completion primitive, after live verification or a validated runner proof."""
     with transaction(connection):
         state = _work(connection, item, revision)
         fields = _fields(state["item"]["fields"])
         fields["completion"] = {"outcome": "delivered", "item": item, "repo": state["item"]["repo"],
                                 "at": current_time(), "who": who, **evidence}
+        if waived:
+            fields["completion"]["waived"] = waived
         set_item_fields(connection, item, fields=fields, shipped_at=evidence["shipped_at"])
-        _transition(connection, item, "done", who=who, reason=f"delivered at {evidence['commit']} on {evidence['verified_ref']}")
+        _transition(connection, item, "done", who=who,
+                    reason=f"delivered at {evidence['commit']} on {evidence['verified_ref']}{waived_suffix(waived or [])}")
         return item_state(connection, item)
 
 
