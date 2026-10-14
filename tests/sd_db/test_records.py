@@ -266,6 +266,39 @@ class TheAdd(RecordsCase):
         self.assertEqual(self.counts(), before)
 
 
+class TheImportShape(RecordsCase):
+    """A written row holds what the import would land from the same note."""
+
+    def dated(self):
+        entry = flipped()
+        entry["workflow"]["blog-idea"]["due-field"] = "deadline"
+        entry["rules"]["blog-idea"]["fields"].append("deadline")
+        return self.rules("blog-idea", [entry])
+
+    def test_the_declared_due_field_sets_due_and_must_be_a_date(self):
+        rules = self.dated()
+        added = add_row(self.db, rules, title="third idea", who="operator",
+                        fields={"score": "7", "deadline": "2026-12-01"})
+        self.assertEqual(added["due"], "2026-12-01")
+        moved = edit_row(self.db, added["id"], rules, revision=added["revision"], who="operator",
+                         fields={"deadline": ""})
+        self.assertIsNone(moved["due"])
+        for value in ("next week", "2026-02-30", ["2026-12-01"]):
+            with self.subTest(value=value), self.assertRaisesRegex(RecordRefused, "YYYY-MM-DD"):
+                edit_row(self.db, added["id"], rules, revision=moved["revision"], who="operator",
+                         fields={"deadline": value})
+
+    def test_date_created_sets_created_at_as_the_import_does(self):
+        added = add_row(self.db, self.idea, title="third idea", who="operator",
+                        fields={"score": "7", "dateCreated": "2020-01-01"})
+        self.assertEqual(added["created_at"], "2020-01-01")
+        row = self.row("first idea")
+        self.assertEqual(row["created_at"], "2026-06-15")
+        edited = edit_row(self.db, row["id"], self.idea, revision=row["revision"], who="operator",
+                          fields={"dateCreated": "2021-01-01"})
+        self.assertEqual((edited["created_at"], edited["fields"]["dateCreated"]), ("2021-01-01", "2021-01-01"))
+
+
 class BeforeTheFlip(RecordsCase):
     def test_both_writers_refuse_while_the_vault_is_the_source(self):
         entry = flipped()

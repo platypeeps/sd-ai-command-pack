@@ -32,6 +32,7 @@ both writers refuse until the driver says `db`.
 
 from __future__ import annotations
 
+import datetime
 import json
 import math
 import sqlite3
@@ -41,7 +42,7 @@ from typing import Any
 
 from .database import transaction
 from .sources import MigrationRefused
-from .sources.vault import NOT_FIELDS, SOURCE, plugin_entries
+from .sources.vault import DUE, NOT_FIELDS, SOURCE, plugin_entries
 from .workflow import MissingItem, WorkflowError, _checked_state, _text, item_state
 from .writes import _transition, add_note, create_item, set_item_fields
 
@@ -73,6 +74,8 @@ class Rules:
     protected: tuple[str, ...]
     unique: tuple[str, ...]
     floor: dict[str, float]
+    #: The field the `workflow` block names as the due date, or None.
+    due: str | None = None
 
 
 # ---------------------------------------------------------------- rules
@@ -116,6 +119,7 @@ def rules_for(kind: str, *, home: Path | str, environ: dict[str, str] | None = N
             transitions=declared.get("transitions"), human_only=dict(declared.get("human-only") or {}),
             protected=tuple(declared.get("protected-fields") or ()),
             unique=tuple(declared.get("unique-fields") or ()), floor=dict(declared.get("floor") or {}),
+            due=entry["workflow"][kind].get("due-field"),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise RecordRefused(f"the pack's rules for kind {kind!r} are missing {error}") from None
@@ -186,6 +190,7 @@ def add_row(connection: sqlite3.Connection, rules: Rules, *, title: str, who: st
     if not isinstance(body, str):
         raise RecordRefused("body must be Markdown text")
     title = _file_title(title)
+    dates = _dates(rules, values)
     path = f"{rules.base}/{title}.md"
     identity = f"{rules.kind}:{path}"
     with transaction(connection):
@@ -193,7 +198,8 @@ def add_row(connection: sqlite3.Connection, rules: Rules, *, title: str, who: st
         _refuse_duplicate(connection, rules, values, skip=None)
         item = create_item(connection, kind="idea", title=title, status=rules.stages[stage],
                            source=SOURCE, external_id=identity, path=path, stage=stage,
-                           fields={**values, "kind": rules.kind}, body={"markdown": body}, session=who)
+                           fields={**values, "kind": rules.kind}, body={"markdown": body}, session=who,
+                           due=dates.get("due"), created_at=dates.get("created_at"))
         return get_row(connection, item)
 
 
@@ -228,7 +234,7 @@ def edit_row(connection: sqlite3.Connection, item: int, rules: Rules, *, revisio
         columns: dict[str, Any] = {"stage": target} if target != current else {}
         set_names = sorted(name for name in changes if name not in held or held[name] != changes[name])
         if set_names:
-            columns["fields"] = {**held, **changes}
+            columns.update(fields={**held, **changes}, **_dates(rules, {name: changes[name] for name in set_names}))
         if body is not None and body != json.loads(row["body"] or "{}").get("markdown"):
             columns["body"] = {"markdown": body}
             set_names.append("body")
@@ -265,6 +271,29 @@ def _checked_fields(rules: Rules, fields: dict[str, Any]) -> dict[str, Any]:
             raise RecordRefused(f"field {name!r} holds {value!r}; a field is one line of text, "
                                 f"a list of them, or empty")
     return dict(fields)
+
+
+def _dates(rules: Rules, values: dict[str, Any]) -> dict[str, Any]:
+    """`due` and `created_at` from the fields given, as the import derives them from a note.
+
+    The declared due field is `YYYY-MM-DD` or empty; `dateCreated`, when it
+    holds text, is the row's `created_at` verbatim.
+    """
+    found: dict[str, Any] = {}
+    if rules.due is not None and rules.due in values:
+        value = values[rules.due]
+        due = value.strip() if isinstance(value, str) else value
+        try:
+            if due and not (isinstance(due, str) and DUE.fullmatch(due) and datetime.date.fromisoformat(due)):
+                raise ValueError(due)
+        except ValueError:
+            raise RecordRefused(f"plugin {rules.prefix} declares {rules.due!r} as the due date of "
+                                f"{rules.kind}, and {value!r} is not YYYY-MM-DD") from None
+        found["due"] = due or None
+    created = values.get("dateCreated")
+    if isinstance(created, str) and created.strip():
+        found["created_at"] = created.strip()
+    return found
 
 
 def _line(value: Any) -> bool:
