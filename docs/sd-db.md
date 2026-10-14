@@ -415,6 +415,19 @@ Every render records the `heartbeat` state row `records-mirror`, body `{at, ok, 
 `records.mirror_state(connection)` reads the last one, `(timestamp, body)` or None; the dashboard's Health shows it.
 The verb exits 1 on any refused file or a render that stopped.
 
+## `sd reports brief`: routine briefs
+
+A routine brief is one `item` row of kind `report`, source `brief`, keyed by its stem, `<YYYY-MM-DD> - <Series>` (sd:3459).
+It is filed `done` and stays `done`: `sd reports list` skips it, and `acknowledge` and `reopen` refuse it.
+`sd_db.routine_briefs` holds the rows; `sd_db.brief` is the session brief, a different thing.
+
+- `add <file> --belongs-to <checkout>` files one brief. A file the rules refuse exits 2 before any write.
+- The same stem with the same bytes prints `unchanged`. Other bytes are a conflict, exit 1, unless `--extend` (the row's text is a strict prefix of the file) or `--replace` (the operator's flag) allows the file.
+- `list [--series S] [--since DAY] [--json]` and `show <stem>` read the rows.
+- `import <folder> --belongs-to <checkout> [--replace <stem>]...` adds each missing stem and strips a `mirror-hash` line first. A row that differs is a conflict, never replaced unless its stem is named; the import prints `verified <n>` when every row it took reads back with the note's sha256.
+
+The row is the source of truth: no counter or time decides a difference, because a restore rolls those back with the rows.
+
 ## Renaming a repository
 
 There is no rename verb (sd:3172).

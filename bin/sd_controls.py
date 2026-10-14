@@ -3,16 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import getpass
 import inspect
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
 import sd_handoff_rows
 from sd_notes import ITEM_HELP, item_id
-from sd_work import WorkRefusal
+from sd_work import WorkRefusal, _belongs_to
 
 #: What the bulk apply records as the acting program, beside the login name
 #: `getpass.getuser()` gives as the principal and the name the caller states.
@@ -157,6 +159,104 @@ def run(args: argparse.Namespace) -> int:
         connection.close()
 
 
+def run_brief(args: argparse.Namespace) -> int:
+    """`sd reports brief add|list|show|import` (sd:3459): a file the rules refuse exits 2, before any write."""
+    sd_db = sd_handoff_rows.library()
+    try:
+        from sd_db import routine_briefs
+    except ImportError:
+        raise WorkRefusal("install the current shared library for routine briefs") from None
+    verb = args.brief_verb
+    try:
+        draft = routine_briefs.read_draft(Path(args.file)) if verb == "add" else None
+    except routine_briefs.BriefUnusable as error:
+        print(f"sd: {error}", file=sys.stderr)
+        return 2
+    except OSError as error:
+        raise WorkRefusal(f"{args.file}: {error.strerror or error}") from error
+    repo = _belongs_to(args.belongs_to) if verb in ("add", "import") else None
+    connection = sd_handoff_rows.connect(sd_db, write=verb in ("add", "import"))
+    try:
+        if verb == "add":
+            mode = "extend" if args.extend else "replace" if args.replace else None
+            stem, text = draft or ("", "")
+            answer = routine_briefs.add(connection, stem, text, repo=repo, who=getpass.getuser(), mode=mode)
+            print(f"{answer['result']} {answer['stem']}")
+        elif verb == "list":
+            _list_briefs(routine_briefs.rows(connection, series=args.series, since=args.since), args.json)
+        elif verb == "show":
+            sys.stdout.write(routine_briefs.show(connection, args.stem))
+        else:
+            return _imported(routine_briefs.import_folder(connection, Path(args.folder), repo=repo,
+                                                          who=getpass.getuser(), replace=args.replace or []))
+        return 0
+    except routine_briefs.BriefUnusable as error:
+        print(f"sd: {error}", file=sys.stderr)
+        return 2
+    except (sd_db.SdDbError, ValueError, OSError) as error:
+        raise WorkRefusal(str(error)) from error
+    finally:
+        connection.close()
+
+
+def _list_briefs(listed: list[dict[str, Any]], as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(listed, ensure_ascii=False))
+        return
+    for row in listed:
+        brief = row["brief"]
+        print(f"{brief.get('day')}  {brief.get('series')}  {row['title']}  {brief.get('words')} words")
+
+
+def _imported(result: dict[str, Any]) -> int:
+    """Print an import; exit 1 while any conflict or refused note is left, or nothing verified."""
+    for conflict in result["conflicts"]:
+        print(f"conflict {conflict['stem']}: {conflict['copy']}; the row stays "
+              f"(`--replace {conflict['stem']}` takes the note)")
+    for refused in result["refused"]:
+        print(f"refused {refused['name']}: {refused['reason']}; left")
+    print(f"{len(result['filed'])} filed, {result['unchanged']} unchanged, {len(result['replaced'])} replaced")
+    if result["verified"] is not None:
+        print(f"verified {result['verified']}")
+    return 1 if result["conflicts"] or result["refused"] or result["verified"] is None else 0
+
+
+def _day(value: str) -> str:
+    try:
+        return datetime.date.fromisoformat(value).isoformat()
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"{value!r} is not a day, YYYY-MM-DD") from None
+
+
+def register_briefs(verbs: Any) -> None:
+    """`sd reports brief`: one verb group under `sd reports`, so no new top-level command."""
+    group = verbs.add_parser("brief", help="routine briefs in the workflow database: file, list, show, import")
+    briefs = group.add_subparsers(dest="brief_verb", required=True)
+    add = briefs.add_parser("add", help="file one brief, `<YYYY-MM-DD> - <Series>.md`; a differing row is a "
+                                        "conflict unless a flag allows the file")
+    add.add_argument("file")
+    add.add_argument("--belongs-to", metavar="PATH", required=True, help="the registered checkout that owns it")
+    replacing = add.add_mutually_exclusive_group()
+    replacing.add_argument("--extend", action="store_true",
+                           help="take the file only when the row's text is a strict prefix of it")
+    replacing.add_argument("--replace", action="store_true",
+                           help="the operator's flag: take the file whatever the row holds")
+    listing = briefs.add_parser("list", help="day, series, stem and words, newest first")
+    listing.add_argument("--series")
+    listing.add_argument("--since", metavar="DAY", type=_day)
+    listing.add_argument("--json", action="store_true")
+    show = briefs.add_parser("show", help="print one brief's stored Markdown")
+    show.add_argument("stem")
+    folder = briefs.add_parser("import", help="file each brief note in a folder; a differing row is listed, "
+                                              "never replaced, unless its stem is named")
+    folder.add_argument("folder")
+    folder.add_argument("--belongs-to", metavar="PATH", required=True, help="the registered checkout that owns them")
+    folder.add_argument("--replace", metavar="STEM", action="append",
+                        help="take the note for this stem over its row; repeat per stem")
+    for parser in (add, listing, show, folder):
+        parser.set_defaults(handler=run_brief)
+
+
 def register(groups: Any) -> None:
     for name in ("providers", "reports"):
         group = groups.add_parser(name, help=f"inspect and control {name} through the workflow database")
@@ -196,3 +296,5 @@ def register(groups: Any) -> None:
                     command.add_argument("--" + option, required=True)
                 command.add_argument("--exit-code", type=int, required=True)
                 command.add_argument("--offset", type=int, default=0)
+        if name == "reports":
+            register_briefs(verbs)

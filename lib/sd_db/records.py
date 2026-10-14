@@ -611,8 +611,50 @@ def _note(rules: Rules, row: dict[str, Any]) -> str:
     if payload != (row["title"], row["created_at"], row["due"]):
         raise RecordRefused(f"item {row['id']} would not read back from its note: its title, created date "
                             f"or due date is not the one its fields give; kept as it is")
+    return hashed(content)
+
+
+#: What starts the line the mirror adds as the last frontmatter line.
+HASH_LINE = "mirror-hash:"
+
+
+def hashed(content: str) -> str:
+    """`content` with `mirror-hash: <sha256 of content>` as its last frontmatter line: the mirror's mark.
+
+    The one mirror rule's writer, for base notes and brief copies alike
+    (sd:3976, sd:4041): `unhashed` of the result is `content` again.
+    """
+    lines = content.split("\n")
+    end = _closing(lines)
+    if end is None:
+        raise RecordRefused("it opens no frontmatter, so there is no place for its mirror-hash")
     digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    return f"---\n{matter}\nmirror-hash: {digest}\n---\n{row['body']}\n"
+    return "\n".join([*lines[:end], f"{HASH_LINE} {digest}", *lines[end:]])
+
+
+def unhashed(text: str) -> tuple[str, str | None]:
+    """`text` without its frontmatter's `mirror-hash` line, and that line's value; `(text, None)` with none."""
+    lines = text.split("\n")
+    for index in range(1, _closing(lines) or 1):
+        if lines[index].startswith(HASH_LINE):
+            return "\n".join(lines[:index] + lines[index + 1:]), lines[index][len(HASH_LINE):].strip()
+    return text, None
+
+
+def hash_holds(text: str) -> bool | None:
+    """Whether a file's `mirror-hash` is its own content's: True for a copy the mirror wrote, None with no hash.
+
+    False is a file changed since it was written: a hand edit, which no render overwrites.
+    """
+    rest, value = unhashed(text)
+    return None if value is None else hashlib.sha256(rest.encode("utf-8")).hexdigest() == value
+
+
+def _closing(lines: list[str]) -> int | None:
+    """The index of the line that closes the frontmatter, or None when the text opens none."""
+    if not lines or lines[0] != "---":
+        return None
+    return next((index for index in range(1, len(lines)) if lines[index] == "---"), None)
 
 
 def _frontmatter_line(name: str, value: Any) -> str:
@@ -665,12 +707,9 @@ def _hand_edit(row: dict[str, Any], held: bytes) -> str | None:
         matter, body = read_frontmatter(text)
     except (UnicodeDecodeError, FrontmatterError):
         return "it is not a note the renderer can read: a hand edit, kept"
-    if "mirror-hash" in matter:
-        value = matter["mirror-hash"]
-        rest = text.replace(f"mirror-hash: {value}\n", "", 1) if isinstance(value, str) else text
-        if isinstance(value, str) and hashlib.sha256(rest.encode("utf-8")).hexdigest() == value:
-            return None
-        return "it differs from its mirror-hash: a hand edit, kept"
+    holds = hash_holds(text)
+    if holds is not None:
+        return None if holds else "it differs from its mirror-hash: a hand edit, kept"
     fields = {name: value for name, value in matter.items() if name != "status"}
     if fields == {name: value for name, value in row["fields"].items() if name != "kind"} \
             and str(matter.get("status") or "").strip() == row["stage"] and body == row["body"]:
