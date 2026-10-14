@@ -699,7 +699,9 @@ def _repo_channels(connection, rest: list[str]) -> int:
         return 0
     value = channels_words(words)
     target, before = set_channels(connection, path, value)
-    print(f"sd-db: {target} channels {before} -> {channels.dumps(value)}")
+    # What is stored, not the words: a half the words leave out is kept (sd:3980).
+    after = connection.execute("SELECT channels FROM repo WHERE path = ?", (target,)).fetchone()[0]
+    print(f"sd-db: {target} channels {before} -> {channels.canonical(after)}")
     print(f"sd-db: run `sd-research-kit render` in {target} to publish under it, or wait for the next commit")
     return 0
 

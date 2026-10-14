@@ -911,11 +911,17 @@ def set_channels(
 
     It does not refuse during an unresolved restore: the restore's recovery
     is to set each repository's channels again before resolving it.
+
+    A value has two halves, the outbound channels and the inbound `feed`
+    (sd:3980). A value naming no key of one half keeps that half as stored,
+    so the dashboard form, which shows the outbound channels alone, never
+    deletes a feed, and `feed=URL` never deletes the channels. `None`
+    clears both.
     """
     from . import channels
     from .workflow import StaleItem
 
-    text = None if value is None else channels.dumps(channels.validate(value))
+    value = None if value is None else channels.validate(value)
     given = str(Path(path).expanduser().resolve())
     probe = paths.keys(given)
     with transaction(connection):
@@ -928,6 +934,7 @@ def set_channels(
         was = channels.canonical(row["channels"])
         if before is not None and channels.canonical(before) != was:
             raise StaleItem(f"channels for {row['path']} is {was} now, not {before}; read the page again")
+        text = None if value is None else channels.dumps(channels.kept(value, row["channels"]))
         connection.execute("UPDATE repo SET channels = ?, updated_at = ? WHERE path = ?",
                            (text, now(), row["path"]))
     return row["path"], was
