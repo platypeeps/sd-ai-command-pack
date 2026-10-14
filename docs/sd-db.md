@@ -193,6 +193,8 @@ A Notion folder is one page name, with no `/`.
 The verb refuses an unregistered path when it sets, and prints `none` with a note when it reads one.
 A stored value the validator refuses, or a database not yet migrated, exits 1 and prints no value.
 A change takes effect at the next `sd-research-kit render` in the checkout, or the next commit.
+The render reads the setting once; one it cannot read holds the vault copy and the queue, and a render by hand exits 1.
+What each channel's folder replaces, and drain step 2's refusal: `skills/_shared/references/publication-contract.md`.
 
 ## `judgments`: what the judgment models cost, by stage
 

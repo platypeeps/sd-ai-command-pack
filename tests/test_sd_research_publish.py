@@ -26,6 +26,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import types
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -1364,16 +1365,17 @@ class ObsidianItemTests(Fixture):
         self.assertEqual(len(self.comments(self.item)), 1)
 
     def test_a_refused_record_keeps_the_copy_and_records_on_the_next_render(self) -> None:
-        from sd_db.writes import record_state, resolve_state  # noqa: PLC0415
-        restore = record_state(self.connection, "restore", key="example", body={})
-        said = self.publish()
+        """Refused for an item not yet in the database. An open restore
+        refuses it too, but holds the whole render first (sd:3462)."""
+        from sd_db.writes import create_item  # noqa: PLC0415
+        later = self.item + 1
+        said = self.publish([dict(src="10-x/a.md", out="a", title="A", item=later)])
         self.assertTrue((self.briefs() / "a.md").is_file())
-        self.assertTrue(any("item: obsidian link for sd:%d not recorded (" % self.item in line
+        self.assertTrue(any("item: obsidian link for sd:%d not recorded (" % later in line
                             for line in said), said)
-        self.assertIsNone(self.published(self.item))
-        resolve_state(self.connection, restore)
-        self.publish()
-        self.assertEqual(self.published(self.item)["%s::a" % self.repo]["obsidian"], self.link)
+        self.assertEqual(create_item(self.connection, kind="task", title="Later"), later)
+        self.publish([dict(src="10-x/a.md", out="a", title="A", item=later)])
+        self.assertEqual(self.published(later)["%s::a" % self.repo]["obsidian"], self.link)
 
     def test_no_database_reports_and_the_render_goes_on(self) -> None:
         self.connection.close()
@@ -2233,6 +2235,383 @@ class HookTests(unittest.TestCase):
         self.assertEqual(self.init_hook().returncode, 0)
         self.git("worktree", "add", "-q", str(self.root / "wt-y"), "-b", "y")
         self.assertEqual(self.calls(), [])
+
+
+
+#: The requests, receipts, vault copies and report lines the `origin/main`
+#: publisher wrote for `ChannelsTests.SCENARIO` with no setting, the fixture
+#: root spelled `{root}` (sd:3462). Captured once from `origin/main` at
+#: a3cd16bd8; a repo with no setting must still match it byte for byte.
+NO_SETTING = Path(__file__).resolve().parent / "fixtures" / "research_publish_no_setting.json"
+
+#: The fields `mirror_targets` puts on a request, per destination: the target
+#: a fingerprint is computed over, read back out of a written request.
+TARGET_FIELDS = {
+    "notion": ("destination", "scope", "space_id", "resolve", "space", "subfolder", "page", "target"),
+    "drive": ("destination", "folder", "file", "target"),
+}
+
+
+class ChannelsTests(Fixture):
+    """sd:3462: the render reads the repo's `channels` setting once.
+
+    No setting publishes as before; a setting moves each channel's folder and
+    turns an omitted channel off; a setting that cannot be read holds the
+    vault copy and the queue for that render.
+    """
+
+    #: Every shape of designation, so the no-setting fixture pins each one.
+    SCENARIO = [
+        dict(src="10-x/a.md", out="a", title="A", notion=dict()),
+        dict(src="10-x/b.md", out="b", title="B", notion=dict(team=True), drive=dict()),
+        dict(src="10-x/c.md", out="c", title="C", notion=dict(space="Research"),
+             drive=dict(folder="Deliverables", file="1AbCdEf")),
+        dict(src="10-x/d.md", out="d", title="D"),
+        dict(src="10-x/e.md", out="e", title="E", notion=dict(page="https://notion.so/e")),
+    ]
+
+    def setUp(self) -> None:
+        super().setUp()
+        for doc in self.SCENARIO:
+            path = self.repo / doc["src"]
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("# %s\n\nbody of %s\n" % (doc["title"], doc["out"]), encoding="utf-8")
+
+    def publish(self, docs: list[dict] | None = None) -> list[str]:
+        return PUBLISH.publish(self.repo, "MINE", self.SCENARIO if docs is None else docs)
+
+    def row(self, channels: object = None) -> None:
+        """This repo's row in a fixture database, holding `channels` as JSON."""
+        sd_db = sd_lib.import_sd_db().module
+        from sd_db.writes import upsert_repo  # noqa: PLC0415 - after the path is set
+        if not hasattr(self, "connection"):
+            self.database()
+        key = sd_db.paths.key(str(self.repo.resolve()))
+        upsert_repo(self.connection, key)
+        self.connection.execute("UPDATE repo SET channels = ? WHERE path = ?",
+                                (None if channels is None else json.dumps(channels), key))
+        self.connection.commit()
+
+    def norm(self, text: str) -> str:
+        for root in sorted({str(self.root.resolve()), str(self.root)}, key=len, reverse=True):
+            text = text.replace(root, "{root}")
+        return text
+
+    def queued(self) -> dict[str, dict]:
+        return {path.name: json.loads(path.read_text(encoding="utf-8"))
+                for path in sorted(PUBLISH.QUEUE.glob("*.json"))}
+
+    def queue_bytes(self) -> dict[str, bytes]:
+        return {path.name: path.read_bytes() for path in sorted(PUBLISH.QUEUE.glob("*.json"))}
+
+    @staticmethod
+    def fingerprint(request: dict) -> str:
+        """The fingerprint `enqueue` computes, from a written request alone."""
+        destination = request["destination"]
+        target = {field: request[field] for field in TARGET_FIELDS[destination]}
+        return PUBLISH.mirror_fingerprint(request, target, PUBLISH.BY_NAME[destination].what)
+
+    def snapshot(self, said: list[str]) -> dict:
+        """Everything a render left, the root spelled `{root}`.
+
+        A fingerprint hashes the repo's path, so each is read at `{root}`:
+        recomputed over the normalised request, and checked here to be the
+        one `enqueue` wrote over the real one.
+        """
+        requests, fingerprints = {}, {}
+        for name, request in self.queued().items():
+            written = request.pop("fingerprint")
+            self.assertEqual(written, self.fingerprint(request), name)
+            requests[name] = json.loads(self.norm(json.dumps(request)))
+            fingerprints[name] = self.fingerprint(requests[name])
+        receipts = {}
+        for path in sorted(PUBLISH.receipts().glob("*.json")):
+            receipt = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(receipt.pop("queued"), self.queued()[path.name]["fingerprint"], path.name)
+            receipts[path.name] = json.loads(self.norm(json.dumps(receipt)))
+        vault = {path.relative_to(self.vault).as_posix(): self.norm(path.read_text(encoding="utf-8"))
+                 for path in sorted(self.vault.rglob("*.md"))}
+        return dict(requests=requests, fingerprints=fingerprints, receipts=receipts, vault=vault,
+                    said=[self.norm(line) for line in said])
+
+    def assert_origin_main(self) -> None:
+        self.assertEqual(self.snapshot(self.publish()),
+                         json.loads(NO_SETTING.read_text(encoding="utf-8")))
+
+    # No setting: today's publisher, byte for byte.
+
+    def test_a_machine_with_no_database_matches_the_origin_main_fixture(self) -> None:
+        self.assertFalse(self.home.exists())
+        self.assert_origin_main()
+
+    def test_a_repo_with_no_row_matches_the_origin_main_fixture(self) -> None:
+        self.database()
+        self.assert_origin_main()
+
+    def test_a_null_setting_matches_the_origin_main_fixture(self) -> None:
+        self.row(None)
+        self.assert_origin_main()
+
+    # Folders.
+
+    def test_a_notion_folder_replaces_the_repo_subfolder(self) -> None:
+        self.row({"notion": {"folder": "Example"}})
+        said = self.publish([self.SCENARIO[0]])
+        request = self.queued()["my-research.a.notion.json"]
+        self.assertEqual(request["subfolder"], "Example")
+        self.assertEqual(request["space_id"], PRIVATE_FOLDER)
+        self.assertIn("under Example", request["target"])
+        self.assertTrue(any("queued a" in line for line in said), said)
+
+    def test_a_drive_folder_replaces_briefs(self) -> None:
+        self.row({"drive": {"folder": "Research/Example"}})
+        self.publish([dict(src="10-x/b.md", out="b", title="B", drive=dict())])
+        self.assertEqual(self.queued()["my-research.b.drive.json"]["folder"], "Research/Example")
+
+    def test_an_empty_channel_keeps_the_default_folder(self) -> None:
+        self.row({"obsidian": {}, "notion": {}, "drive": {}})
+        self.publish([self.SCENARIO[1]])
+        queued = self.queued()
+        self.assertEqual(queued["my-research.b.notion.json"]["subfolder"], "my-research")
+        self.assertEqual(queued["my-research.b.drive.json"]["folder"], "Briefs/my-research")
+        self.assertTrue((self.briefs() / "b.md").is_file())
+
+    def test_an_obsidian_folder_moves_the_vault_copy_and_the_request(self) -> None:
+        self.row({"obsidian": {"folder": "Notes/example"}, "notion": {}})
+        said = self.publish([self.SCENARIO[0]])
+        moved = self.vault / "Notes" / "example" / "a.md"
+        self.assertTrue(moved.is_file(), said)
+        self.assertFalse((self.briefs() / "a.md").exists())
+        self.assertEqual(self.queued()["my-research.a.notion.json"]["markdown"], str(moved))
+
+    def test_a_document_key_wins_over_the_setting(self) -> None:
+        self.row({"notion": {"folder": "Example"}, "drive": {"folder": "Research/Example"}})
+        self.publish([self.SCENARIO[2]])
+        queued = self.queued()
+        self.assertEqual(queued["my-research.c.notion.json"]["space"], "Research")
+        self.assertEqual(queued["my-research.c.notion.json"]["subfolder"], "")
+        self.assertEqual(queued["my-research.c.drive.json"]["folder"], "Deliverables")
+
+    def test_a_pin_wins_over_both_and_is_reported(self) -> None:
+        self.row({"notion": {"folder": "Example"}, "drive": {"folder": "Research/Example"}})
+        said = self.publish([self.SCENARIO[4],
+                             dict(src="10-x/b.md", out="b", title="B", drive=dict(file="1AbCdEf"))])
+        queued = self.queued()
+        self.assertEqual(queued["my-research.e.notion.json"]["page"], "https://notion.so/e")
+        self.assertEqual(queued["my-research.b.drive.json"]["file"], "1AbCdEf")
+        for out, key in (("e", "page="), ("b", "file=")):
+            self.assertTrue(any(line.startswith("mirror: ") and key in line and "delete" in line
+                                and line.endswith(" in %s" % out) for line in said), said)
+
+    def test_no_pin_is_reported_without_a_setting_folder(self) -> None:
+        self.row({"notion": {}})
+        said = self.publish([self.SCENARIO[4]])
+        self.assertFalse(any("page=" in line for line in said), said)
+
+    # An omitted channel.
+
+    def test_an_omitted_channel_refuses_and_leaves_its_pending_request(self) -> None:
+        self.publish([self.SCENARIO[1]])
+        drive = PUBLISH.QUEUE / "my-research.b.drive.json"
+        before = drive.read_bytes()
+        (PUBLISH.QUEUE / "my-research.b.notion.json").unlink()
+        self.row({"notion": {}})
+        said = self.publish([self.SCENARIO[1]])
+        self.assertEqual(drive.read_bytes(), before)
+        self.assertTrue(any("drive: not a channel of this repo" in line for line in said), said)
+        self.assertTrue(any(str(drive) in line for line in said), said)
+        self.assertIn("my-research.b.notion.json", self.queued())
+        # Named again on the next render: refused, never deleted.
+        said = self.publish([self.SCENARIO[1]])
+        self.assertTrue(any(str(drive) in line for line in said), said)
+        self.assertEqual(drive.read_bytes(), before)
+
+    def test_an_omitted_obsidian_writes_no_vault_copy_and_says_so(self) -> None:
+        self.row({"notion": {}})
+        said = self.publish([self.SCENARIO[0]])
+        self.assertFalse(self.vault.exists())
+        self.assertTrue(any(line.startswith("obsidian: not a channel of this repo") for line in said), said)
+        self.assertEqual(self.queued()["my-research.a.notion.json"]["markdown"], "")
+        self.assertTrue((self.root / "config").exists())
+
+    def test_requeue_after_re_enabling_a_channel(self) -> None:
+        self.row({"notion": {}})
+        self.publish([self.SCENARIO[1]])
+        self.assertNotIn("my-research.b.drive.json", self.queued())
+        self.row({"notion": {}, "drive": {}})
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_MIRROR_REQUEUE="1")
+        self.publish([self.SCENARIO[1]])
+        self.assertIn("my-research.b.drive.json", self.queued())
+
+    # A folder change.
+
+    def test_a_folder_change_reports_the_old_vault_copies(self) -> None:
+        self.publish([self.SCENARIO[0]])
+        old = self.briefs() / "a.md"
+        kept = old.read_text(encoding="utf-8")
+        (self.briefs() / "z.md").write_text("---\nsource_checkout: ~/elsewhere/my-research\n---\n")
+        self.row({"obsidian": {"folder": "Notes/example"}, "notion": {}})
+        said = self.publish([self.SCENARIO[0]])
+        self.assertEqual(old.read_text(encoding="utf-8"), kept)
+        self.assertTrue(any(str(old) in line for line in said), said)
+        self.assertFalse(any("z.md" in line for line in said), said)
+
+    def test_a_render_after_a_folder_change_queues_the_new_container_once(self) -> None:
+        doc = [self.SCENARIO[0]]
+        self.publish(doc)
+        path = PUBLISH.QUEUE / "my-research.a.notion.json"
+        request = json.loads(path.read_text(encoding="utf-8"))
+        request["page"] = "3e1f52b1-5782-8145-9c00-e9779a77804f"
+        path.write_text(json.dumps(request) + "\n", encoding="utf-8")
+        self.row({"notion": {"folder": "Example"}})
+        said = self.publish(doc)
+        moved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(moved["subfolder"], "Example")
+        self.assertEqual(moved["page"], "", "a page id belongs to the old folder")
+        self.assertTrue(any("queued a" in line for line in said), said)
+        said = self.publish(doc)
+        self.assertTrue(any("already queued" in line for line in said), said)
+
+    def test_a_rollback_fixture_is_rewritten_and_reported(self) -> None:
+        """What the `origin/main` publisher left (the no-setting fixture
+        proves it is the same), rendered again under a setting: a moved
+        folder's request is rewritten under its own name, an omitted
+        channel's request is reported and left, and the old vault copies
+        are named."""
+        self.publish()
+        drive = PUBLISH.QUEUE / "my-research.b.drive.json"
+        before = drive.read_bytes()
+        self.row({"obsidian": {"folder": "Notes/example"}, "notion": {"folder": "Example"}})
+        said = self.publish()
+        queued = self.queued()
+        self.assertEqual(queued["my-research.a.notion.json"]["subfolder"], "Example")
+        self.assertEqual(queued["my-research.b.notion.json"]["subfolder"], "Example")
+        self.assertEqual(drive.read_bytes(), before)
+        for name in ("my-research.b.drive.json", "my-research.c.drive.json"):
+            self.assertTrue(any(str(PUBLISH.QUEUE / name) in line for line in said), said)
+        for out in "abcde":
+            self.assertTrue((self.vault / "Notes" / "example" / (out + ".md")).is_file())
+            self.assertTrue(any(str(self.briefs() / (out + ".md")) in line for line in said), said)
+
+    # Unknown is not "no setting".
+
+    def hold(self, cause: str) -> None:
+        """Make the setting unreadable for `cause`."""
+        sd_db = sd_lib.import_sd_db().module
+        if cause == "restore":
+            from sd_db.writes import record_state  # noqa: PLC0415
+            self.row({"notion": {}})
+            record_state(self.connection, "restore", key="example", body={})
+        elif cause == "refused value":
+            self.row({"notion": {}})
+            self.connection.execute("UPDATE repo SET channels = ?", ('{"bogus": {}}',))
+            self.connection.commit()
+        elif cause == "schema too old":
+            self.row(None)
+            self.connection.executescript(
+                "ALTER TABLE repo DROP COLUMN channels; PRAGMA user_version = 28;")
+        elif cause == "unreadable file":
+            path = sd_db.database.local_path(self.home)
+            path.parent.mkdir(parents=True)
+            path.write_bytes(b"not a database")
+        elif cause == "hub unreachable":
+            path = sd_db.hub.config_path(self.home)
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps({"hub": "127.0.0.1", "port": 1}), encoding="utf-8")
+        else:
+            raise AssertionError(cause)
+
+    def test_each_unknown_cause_holds_the_vault_copy_and_the_queue(self) -> None:
+        for cause in ("restore", "refused value", "schema too old", "unreadable file",
+                      "hub unreachable"):
+            with self.subTest(cause=cause):
+                self.setUp()
+                self.__dict__.pop("connection", None)
+                self.publish([self.SCENARIO[0]])
+                queue = self.queue_bytes()
+                self.assertTrue(queue)
+                (self.briefs() / "a.md").unlink()
+                (self.repo / "10-x" / "a.md").write_text("# A\n\nedited\n", encoding="utf-8")
+                self.hold(cause)
+                said = self.publish([self.SCENARIO[0]])
+                self.assertEqual(self.queue_bytes(), queue)
+                self.assertFalse((self.briefs() / "a.md").exists())
+                self.assertTrue(said[0].startswith(PUBLISH.HELD), said)
+                self.assertTrue(any("registered" in line or "already" in line for line in said), said)
+                self.assertEqual(PUBLISH.exit_status(said), 1)
+
+    def test_a_hold_exits_1_by_hand_and_0_from_the_hook(self) -> None:
+        held = [PUBLISH.HELD + ": example"]
+        clean = {k: v for k, v in os.environ.items() if k not in ("SD_RESEARCH_TRIGGER", "GIT_EXEC_PATH")}
+        with unittest.mock.patch.dict(os.environ, clean, clear=True):
+            self.assertEqual(PUBLISH.exit_status(held), 1)
+            self.assertEqual(PUBLISH.exit_status(["mirror: queued a"]), 0)
+        with unittest.mock.patch.dict(os.environ, dict(clean, SD_RESEARCH_TRIGGER="post-commit"), clear=True):
+            self.assertEqual(PUBLISH.exit_status(held), 0)
+
+    def test_the_publish_verb_exits_1_on_a_hold(self) -> None:
+        repo = research_repo(self.root, "held-research")
+        self.hold("unreadable file")
+        clean = {k: v for k, v in os.environ.items() if k not in ("SD_RESEARCH_TRIGGER", "GIT_EXEC_PATH")}
+        here = os.getcwd()
+        os.chdir(repo)
+        self.addCleanup(os.chdir, here)
+        out = io.StringIO()
+        with unittest.mock.patch.dict(os.environ, clean, clear=True), contextlib.redirect_stdout(out):
+            status = PUBLISH.publish_main()
+        self.assertEqual(status, 1, out.getvalue())
+        self.assertIn(PUBLISH.HELD, out.getvalue())
+        self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_the_render_exits_1_on_a_hold_by_hand(self) -> None:
+        repo = research_repo(self.root, "held-research")
+        (repo / "research.conf.py").write_text("PROJECT = 'MINE'\nDOCS = []\n", encoding="utf-8")
+        self.hold("unreadable file")
+        spec = importlib.util.spec_from_file_location("sd_research_render", BIN / "sd_research_render.py")
+        assert spec and spec.loader
+        render = importlib.util.module_from_spec(spec)
+        # This module's publisher, so the render reads the fixture's home and
+        # never the machine's database; and no python-markdown is needed for
+        # a config that names no document.
+        with unittest.mock.patch.dict(sys.modules, {"sd_research_publish": PUBLISH,
+                                                    "markdown": types.ModuleType("markdown")}):
+            spec.loader.exec_module(render)
+        clean = {k: v for k, v in os.environ.items() if k not in ("SD_RESEARCH_TRIGGER", "GIT_EXEC_PATH")}
+        here = os.getcwd()
+        os.chdir(repo)
+        self.addCleanup(os.chdir, here)
+        for env, status in ((clean, 1), (dict(clean, SD_RESEARCH_TRIGGER="post-commit"), 0)):
+            out = io.StringIO()
+            with unittest.mock.patch.dict(os.environ, env, clear=True), contextlib.redirect_stdout(out):
+                self.assertEqual(render.main(), status, out.getvalue())
+            self.assertIn(PUBLISH.HELD, out.getvalue())
+
+    def test_another_repos_setting_does_not_apply(self) -> None:
+        """The row read is this checkout's: a setting on another path, and a
+        request another checkout of the same name queued, are not this
+        repo's."""
+        sd_db = sd_lib.import_sd_db().module
+        from sd_db.writes import upsert_repo  # noqa: PLC0415
+        self.database()
+        other = self.root / "elsewhere" / "my-research"
+        key = sd_db.paths.key(str(other))
+        upsert_repo(self.connection, key)
+        self.connection.execute("UPDATE repo SET channels = ? WHERE path = ?",
+                                (json.dumps({"notion": {"folder": "Other"}}), key))
+        self.connection.commit()
+        PUBLISH.enqueue(other, [dict(out="z", title="Z", drive=dict())])
+        self.publish([self.SCENARIO[0]])
+        self.assertEqual(self.queued()["my-research.a.notion.json"]["subfolder"], "my-research")
+        self.row({"notion": {}})
+        said = self.publish([self.SCENARIO[0]])
+        self.assertFalse(any("my-research.z.drive.json" in line for line in said), said)
+
+    def test_a_worktree_render_reads_no_setting(self) -> None:
+        """A linked worktree publishes nothing, so nothing is held for it."""
+        with unittest.mock.patch.object(PUBLISH, "publish_refusal", return_value="refused"):
+            self.hold("unreadable file")
+            said = self.publish()
+        self.assertFalse(any(line.startswith(PUBLISH.HELD) for line in said), said)
 
 
 if __name__ == "__main__":
