@@ -31,6 +31,26 @@ Adversarial review: one read-only round on 2026-10-14 found eight blocking findi
 - F7 step 2 compared `notion-row` with channel names: fixed; a `notion-row` request reads the channel `notion`.
 - F8 `sd-status` cannot match a `~/` repo key: fixed; the request carries the key through `paths.expand`.
 
+A second round, after the guard was made a per-field refusal, found four blocking findings, all fixed:
+
+- R2-1 a second fetch did not refresh the plan: the drain plans on a fetch made just before the write, and plans
+  again if anything comes between.
+- R2-2 an unconfirmed `writing` value could claim a person's identical value hours later: only `written` makes a
+  field sd's; `writing` is confirmed by `delivered` for its own generation, and an interrupted write is handed back.
+- R2-3 the receipt stopped a hand-back from being noticed: `project` re-queues every item with a `yielded` field.
+- R2-4 a second refusal pointed at a stale value: each refusal episode adds its own note naming the current
+  `written`.
+
+A third round found three blocking findings, all fixed: the intent now stores the designation it was planned under,
+and `delivered` compares that with the current one (R3-1); `confirmed` makes a re-run of `delivered` after a failed
+receipt answer `unchanged` (R3-2); adopting a row after an interrupted create no longer makes its fields sd's (R3-3).
+
+A fourth round found two, both fixed: `delivered` confirms an outstanding intent before it reads `confirmed`, and
+every new intent clears `confirmed`, so a hand-back written under the same fingerprint is confirmed (R4-1); the
+failure table no longer promises `unchanged` after a refused record (R4-2).
+
+A fifth round found no blocking findings. That spends the design review cap of 5.
+
 ## Terms
 
 - **Experiments database**: the team database in the work Notion space that holds one row per experiment.
@@ -121,25 +141,44 @@ edit anything else.` (Q2). sd writes the body only at create. The pointer is als
 No item body, note or URL leaves sd: a row carries the title, status, due date and priority of a designated item, no
 more.
 
-**The guard.** An sd-owned field is written only while its live value is one sd itself put there. The designation
-records two values per sd-owned field: `written`, the last value sd wrote and saw land, and `writing`, the value a
-plan approved and the drain may have written. At each drain, for each sd-owned field:
+**The guard.** An sd-owned field is written only while its live value is the one sd last wrote and saw confirmed.
+The designation records, per sd-owned field, `written`: that confirmed value. It also records `writing`: the values a
+plan approved, with the plan's generation (the request fingerprint). `delivered` for that generation moves `writing`
+to `written`, whether or not a newer request has since been queued, because the intent names its own generation.
+At each plan, for each sd-owned field:
 
-- live value equals `written` or `writing`: the field is sd's. The live value becomes `written`, and the field is
-  written when it differs from the wanted value.
-- live value differs from both: a person changed it, even where it happens to equal what sd now wants. sd leaves it:
-  the field is not written and is listed in `yielded`, which the plan reports and the item shows.
-- an empty `written` and `writing` (a row being created, or an adopted row): an empty live value is sd's; any other
-  value is the person's.
+- live value equals `written`: the field is sd's, and it is written when it differs from the wanted value.
+- live value differs from `written`: a person edited it since sd's last confirmed write, even where it equals what
+  sd now wants, and even where it equals an unconfirmed `writing` value, which a person may have set by hand as
+  easily as an interrupted drain. The plan **refuses that field**: it is not written, it is listed in `yielded`, and
+  the plan names the live value and `written`. The other fields are written.
+- an empty `written` (a row being created, or an adopted row): an empty live value is sd's; any other value is the
+  person's.
+
+A field that enters `yielded` adds one comment note on the item, naming the live value and the current `written`:
+`Status on the experiments row is not sd's (In Progress; sd last wrote Todo; set it to Todo to hand it back)`.
+Where the live value equals an unconfirmed `writing` value, the note adds `this may be sd's own unconfirmed write`.
+A field already in `yielded` adds no second note. A field that leaves `yielded` (handed back) and is refused again
+later starts a new episode, and its note names the `written` value of that moment.
 
 The wanted value alone never makes a field sd's: a colleague who set `Blocked` while sd also wants `Blocked` keeps
-the field, and sd's later `Done` does not overwrite it. A yielded field becomes sd's again only when a person sets
-it back to `written`, the value sd last wrote: that is the hand-back, and it needs no command.
-Comparing against `writing` as well is what makes an interrupted write safe: a drain stopped after Notion took the
-value but before sd recorded it sees its own value on the next run, not a colleague's.
+the field, and sd's later `Done` does not overwrite it.
+
+**Recovery from a refused field.** The person's value stands. To keep it, do nothing: the item lists the field under
+`yielded`. To give the field back to sd, a person sets it in Notion to the value the latest note names; the next
+drain sees `written`, takes the field and writes the current wanted value. A drain interrupted between its Notion
+write and `delivered` lands here too: the field is refused, the note says it may be sd's own write, and the same
+hand-back recovers it. No command and no override flag exist: sd never decides that its value beats a person's.
+
+**A refused field keeps its request queued.** `project` re-queues every item whose designation lists a `yielded`
+field, whatever the receipt says, so each drain checks for a hand-back without waiting for the item to change.
+`sd-status` lists that request as pending, which is true: sd owes that write until the field is handed back or the
+item is set `off`.
 
 Notion has no conditional write, so a colleague's edit that lands between the drain's fetch and its write is
-overwritten. The drain fetches immediately before it writes, which keeps that window to seconds; Q4 asks the
+overwritten. The drain runs the plan on a fetch made immediately before the write and writes nothing older; a write
+that does not follow its plan at once is fetched and planned again. That keeps the window to one plan and one call;
+Q4 asks the
 operator to accept it or to make `Status` a seed.
 
 ### Row identity: create versus update
@@ -154,7 +193,9 @@ The row id is recorded in the designation, `fields.experiments.row`, the way dra
   designation lives in the database, not in a file).
 - **No row id, `creating` already set**: an earlier create may have landed with its id recorded nowhere. The drain
   searches the target database for the pointer text `sd:<n>`, whatever the row is titled now, and hands the plan
-  every row whose body opens with that pointer. One row is adopted. None or two make the plan refuse, and the drain
+  every row whose body opens with that pointer. One row is adopted: the plan records its id as `row` and drops the
+  old `creating`. Adopting the row does not make its fields sd's: `written` is still empty, so every populated
+  sd-owned field is refused with the may-be-sd note until a person hands it back. None or two make the plan refuse, and the drain
   files one question on the item (Option: no row exists, create it, which is `--experiment new`; Option: this is the
   row, which is `--experiment row:ID`). sd never creates twice on its own, because search can lag a create.
 - **No step 4.** The request file never holds a row id, so no `project` re-run can graft a row onto another
@@ -181,15 +222,27 @@ No parallel path: one queue, one lock, one receipt directory, one `delivered`, o
   `yielded` and, for a create, `creating` on the item in one transaction, and prints the properties to write as
   JSON. A refusal exits non-zero and writes nothing.
 - **Drain**: a new destination block in the contract's step 3, for `notion-row`: fetch the database schema and the
-  row, run the plan, fetch the row again if the plan took more than a moment, write exactly what the plan printed in
-  one Notion call, experiments before tasks. Step 2 changes in one place: a `notion-row` request reads the channel
-  `notion`, since a destination name is not a channel name. Steps 4 and 5 do not apply to rows; steps 1 and 6 apply
+  row, run the plan on that fetch, and write exactly what the plan printed in one Notion call straight after it,
+  experiments before tasks. Anything between plan and write means fetch and plan again. Step 2 changes in one
+  place: a `notion-row` request reads the channel `notion`, since a destination name is not a channel name. Steps 4 and 5 do not apply to rows; steps 1 and 6 apply
   as written.
 - **`delivered`**: unchanged in shape: `delivered <name> <fingerprint> --url <row url>`. For a `notion-row` request
-  it calls `projection.record_row` where it calls `record_url` for a document, for the drained generation only. One
-  transaction that checks the designation still has the request's `as`, `of`, `since` and database, and a `row` that
-  is empty or equal to the URL's id; then writes `row` and `url`, moves `writing` to `written`, clears `creating`, and
-  adds one comment note `Projected to <target>: <url>` when the row is new. The receipt and removal follow as today.
+  it calls `projection.record_row` where it calls `record_url` for a document, in one transaction:
+  - **Intent to confirm**, checked first: `writing` (and `creating`, for a create) is bound to the fingerprint given. The intent
+    holds the designation it was planned under (`as`, `of`, `since`, database, and `row` or none), and `record_row`
+    compares that with the current designation, never with the request file, which a later `project` may have
+    replaced. A match writes `row` and `url`, moves `writing` to `written`, clears `creating`, sets `confirmed`, and
+    adds one comment note `Projected to <target>: <url>` when the row is new.
+  - **Already confirmed**: no intent is outstanding, `confirmed` equals the fingerprint and `row` equals the URL's
+    id. It answers `unchanged` and writes nothing, so a re-run after a failed receipt write or removal finishes.
+    Every plan that records a new intent clears `confirmed`, so a second write under one fingerprint (a hand-back
+    re-queued with no item change) is confirmed by the first branch, never skipped by this one.
+  - **Anything else** refuses, exit 1, request left: no intent for that fingerprint, a designation that moved since
+    the plan, or a `row` that differs from the URL's id. The next plan drops an intent whose designation is no
+    longer current; fields Notion took under it are then unconfirmed and refused like any other.
+
+  These facts describe the row, so they are recorded for the generation the plan bound them to even when a newer
+  request is pending; the receipt and removal follow the existing generation rule.
 - **Status report**: `sd-status` reports any request as `mirror-sync-pending` from its `repo` and `target`, so a
   `notion-row` request shows on its repo's report with no change there.
 
@@ -213,7 +266,7 @@ without them never projects, which is how the build can land before anyone sets 
 
 | Mechanism | Replaces | Smallest form |
 | --- | --- | --- |
-| `fields.experiments` on the item: `as`, `of`, `since`, `row`, `url`, `written`, `writing`, `yielded`, `creating` | nothing; the item analogue of `page=` | a JSON field, no migration |
+| `fields.experiments` on the item: `as`, `of`, `since`, `row`, `url`, `written`, `writing` and `creating` (each with its generation and designation), `confirmed`, `yielded` | nothing; the item analogue of `page=` | a JSON field, no migration |
 | `sd task edit --experiment` | hand-editing the field | one flag on an existing verb |
 | `sd-research-kit project` and its `--plan` form | copying status by hand | one verb on the command that owns the queue |
 | destination `notion-row` and its contract block | nothing | one row in `DESTINATIONS`, one block in step 3 |
@@ -257,24 +310,24 @@ contract text.
 | project: read config | nothing | a variable unset or holding a name | refuses, naming the variable; nothing queued | `test_projection`: unset and name-valued variables refuse, fail-first |
 | project: write requests | one file per item | stopped between two files; a write fails or truncates a file | written one at a time under the lock; a truncated file fails `load_record`, so no drain reads it and the next `project` rewrites it | `test_projection`: a truncated request is rewritten on the next run |
 | project: item un-designated or deleted | request stays | a request is pending for an item no longer designated | `project` names it with its path on every run; `--plan` refuses it as stale; the operator deletes it by hand with no drain running | `test_projection`: a dropped designation's request is reported and left byte for byte, fail-first |
-| project: re-run during a drain | request rewritten | `project` runs between a plan and its `delivered` | the request holds no row id, so nothing is lost or grafted; `creating` and `writing` stay on the item; `delivered` for the old fingerprint records nothing, and the next drain adopts the row by its pointer | `test_projection`: a re-run after a plan leaves `creating` and `writing` on the item, fail-first |
+| project: re-run during a drain | request rewritten | `project` runs between a plan and its `delivered` | the request holds no row id, so nothing is lost or grafted; `creating` and `writing` carry their generation, so `delivered` for the drained fingerprint still records the row and confirms `written` | `test_projection`, `test_delivered`: a re-run after a plan, then `delivered` for the old fingerprint, records the row and `written`, fail-first |
 | plan: stale request | nothing | the item's status, designation, `of` or the config changed after `project` | refuses `stale: run project`; the drain leaves the request; the next `project` rewrites it | `test_projection_plan`: each change refuses, fail-first |
 | plan: hub or restore | nothing | hub unreachable, restore open | refuses; unknown is not a pass | `test_projection_plan`: both refuse, fail-first |
 | plan: channels | nothing | the item's repo setting omits `notion`, or the setting cannot be read | refuses, naming the setting or the cause | `test_projection_plan`: both refuse, fail-first |
 | plan: row deleted by hand | nothing | the pinned row is not found or is in the trash, which Notion also answers for lost access | the drain passes `--missing`; plan refuses and never prints a create; the drain files one question note on the item (Option: stop projecting it, `--experiment off`; Option: create a new row, `--experiment new`) unless one is open | `test_projection_plan`: `--missing` refuses with no create, fail-first; contract text names the note |
 | plan: live read failed | nothing | the Notion fetch errors other than not found | the drain stops that request and does not call plan: a failed read is unknown, not missing | contract text test |
 | plan: schema change | nothing | a mapped property renamed, removed or retyped; a select option removed; the row's parent is another database | refuses the whole request, naming the property; never edits the schema or adds an option; fix Notion or the mapping | `test_projection_plan`: each change refuses with the property's name, fail-first |
-| plan: field edited by hand | `yielded` on the item | a live sd-owned value differs from `written` and `writing`, including one equal to the wanted value | the field is left out of the write and listed in `yielded`; the others are written; it is sd's again once a person sets it back to `written` | `test_projection_plan`: a hand-set `Status` is yielded, a hand-set value equal to the wanted one is not claimed and is not overwritten by a later wanted value, and setting it back to `written` hands it back, fail-first |
+| plan: field edited by hand | `yielded` on the item, one note per episode | a live sd-owned value differs from `written`, including one equal to the wanted value or to an unconfirmed `writing` | the plan refuses that field: not written, listed in `yielded`, one note naming the live value and the current `written`; the others are written; `project` keeps re-queueing the item; recovery: leave it, or a person sets it to the noted value and the next drain takes it | `test_projection_plan`: a hand-set `Status` is refused; a value equal to the wanted one or to `writing` is not claimed; a hand-back with no item change is picked up by the next `project` and plan, and its write under the same fingerprint is confirmed by `delivered`; two episodes give two notes, each naming its own `written`, fail-first |
 | plan: parent has no row | nothing | a task drained before its experiment's row exists | refuses `parent sd:<m> has no row yet`; the contract drains experiments first | `test_projection_plan`: refuses, fail-first |
 | plan: record intent | `written`, `writing`, `yielded`, `creating` | the transaction fails | nothing is printed and nothing written; exit 1 | `test_projection_plan`: a refused write prints no plan |
-| plan: designation changed after plan | nothing more | `sd task edit --experiment` runs while a drain is between plan and `delivered` | `delivered` checks `as`, `of`, `since`, database and `row` in its transaction and refuses a mismatch; the request stays and the next `project` rewrites it | `test_delivered`: each changed key refuses with request and receipt left, fail-first |
-| Notion: fetch to write | a colleague's value overwritten | a person edits an sd-owned field in the seconds between the drain's fetch and its write | none: Notion has no conditional write; the drain fetches again just before writing; accepted under Q4 | none: no Notion code in the pack; the contract text names the second fetch |
-| Notion: create | a row, `creating` on the item | stopped after create, before `delivered` | the next plan sees `creating`; the drain searches by the pointer text, not the title, and the plan adopts exactly one row; none or two refuse and file one question; sd never creates twice on its own | `test_projection_plan`: with `creating` set, no candidate and two candidates refuse with no create, one candidate is adopted with nothing yielded, fail-first |
+| plan: designation changed after plan | nothing more | `sd task edit --experiment` runs while a drain is between plan and `delivered` | `delivered` compares the intent's stored designation with the current one and refuses a mismatch; the next plan drops that intent, and fields Notion took under it are refused as unconfirmed | `test_delivered`: each changed key refuses even when a later `project` rewrote the request to match, fail-first |
+| Notion: fetch to write | a colleague's value overwritten | a person edits an sd-owned field between the fetch the plan read and the write | the drain plans on a fetch made just before the write, and fetches and plans again if anything comes between; the remaining window of one plan and one call is accepted under Q4 | none: no Notion code in the pack; the contract text names the order |
+| Notion: create | a row, `creating` on the item | stopped after create, before `delivered` | the next plan sees `creating`; the drain searches by the pointer text, not the title; the plan adopts exactly one row and records its id; none or two refuse and file one question; sd never creates twice on its own; the adopted row's populated fields are refused until handed back | `test_projection_plan`: with `creating` set, no candidate and two candidates refuse with no create; one candidate is adopted, its id recorded, its populated fields refused with the may-be-sd note, and a hand-back makes them sd's, fail-first |
 | Notion: create, then the config moves | a row in the old database | the operator changes `SD_NOTION_EXPERIMENTS` while `creating` names the old database | the plan refuses, naming both databases; the operator answers with `--experiment new` or `row:ID` | `test_projection_plan`: `creating` for another database refuses, fail-first |
-| Notion: update | the row's properties | stopped or failed after Notion took some values | the next plan sees `writing` on the row and counts it as sd's; nothing is yielded | `test_projection_plan`: a partly written row is completed with nothing yielded, fail-first |
-| delivered: record row | `row`, `url`, `written` on the item, one note | hub down, restore open, item unknown, the item pins another row, the URL's id is not the request's row | request and receipt stay; exit 1; a re-run answers `unchanged` | `test_delivered`: each refusal leaves request and receipt, fail-first |
-| delivered: between record and receipt | row on the item, no receipt | stopped, or the receipt write fails | existing row of the contract table: the request stays and the re-run records `unchanged` | `test_delivered`: stop after `record_row`, the re-run adds no note |
-| delivered: newer generation pending | receipt for the drained fingerprint | `project` queued a newer generation during the drain | no row is recorded; `creating` and `writing` stay, so the next drain adopts the row by its pointer and counts its values as sd's | `test_delivered`: a newer generation records no row, and the next plan adopts and yields nothing, fail-first |
+| Notion: update | the row's properties | stopped or failed after Notion took some values, before `delivered` | the next plan finds those fields differ from `written` and refuses them, with a note saying they may be sd's own write; a person hands them back by setting the noted value | `test_projection_plan`: a partly written row refuses the unconfirmed fields with the may-be-sd note, and a hand-back completes it, fail-first |
+| delivered: record row | `row`, `url`, `written`, `confirmed` on the item, one note | hub down, restore open, item unknown, no intent for the fingerprint, the designation moved since the plan, the URL's id is not the designation's row | refused before any write; request and receipt stay; exit 1; a hub or restore cause clears and the re-run confirms the intent; a moved designation or a row mismatch stays refused, and the next plan drops that intent | `test_delivered`: each refusal leaves request, receipt and item unchanged, fail-first |
+| delivered: between record and receipt | row and `confirmed` on the item, no receipt | stopped, or the receipt write or removal fails | the request stays; the re-run finds `confirmed` equal to the fingerprint and the row equal, answers `unchanged`, and writes the receipt | `test_delivered`: stop after `record_row`, the re-run answers `unchanged`, adds no note and removes the request, fail-first |
+| delivered: newer generation pending | receipt for the drained fingerprint | `project` queued a newer generation during the drain | `record_row` records the row and confirms `written` for the generation the plan bound them to; the newer request stays and the next drain writes it | `test_delivered`: a newer generation still confirms the drained plan, and the next plan refuses nothing, fail-first |
 | two drains at once | two plans for one item | two sessions drain the same queue | out of the pack's threat model (two concurrent runs of one manual command); `delivered` still refuses a designation that moved, and a second create is found by the pointer search and reported as two rows | none |
 | rollback of the build | `notion-row` requests in the queue | an older pack meets them | an older `delivered` calls `record_url`, which refuses the channel `notion-row` and exits 1; older drains do not know the destination and leave it; `sd-status` still lists it; delete them by hand with no drain running | `test_delivered`: the `origin/main` `record_url` refuses `notion-row` |
 
@@ -328,6 +381,8 @@ Each goes to the operator as its own question on the dashboard.
 - [ ] `--plan` with a live row whose `Status` a person changed prints no `Status` and records it in `yielded`, also
       when the person's value equals the wanted one.
 - [ ] `--plan` with `creating` set and no candidate row exits non-zero and prints no create.
+- [ ] After a refused `Status` is set back to `written` in a fixture, with no item change, the next `project` queues
+      the item and its plan writes `Status`.
 - [ ] `--plan` with a live row lacking the `Status` property exits non-zero, naming `Status`.
 - [ ] `--plan --missing` exits non-zero and prints no create.
 - [ ] `delivered <name> <fp> --url https://example.test/<32 hex>` records the row id on the item; a second run adds no
@@ -348,10 +403,13 @@ Each goes to the operator as its own question on the dashboard.
   title, status, due date and priority go across.
 - A person who sets a yielded field back to sd's last value hands it back, even by chance. Accepted: the value is the
   one sd wrote, so sd taking it again overwrites nothing the person chose differently.
+- A drain interrupted between its Notion write and `delivered` leaves fields a person must hand back. Accepted: an
+  unconfirmed value cannot be told from a person's, and asking costs one edit where guessing could overwrite one.
+- An item with a refused field stays queued and is fetched on every drain until it is handed back or set `off`.
 - Notion has no conditional write: an edit landing between the drain's fetch and its write is lost (Q4).
 - A request for an item with no repo appears in no repo's `sd-status`. `project` lists every pending `notion-row`
   request on each run, and it runs at the start of every drain.
 - What ties each pass to its subject: `--plan` passes only for the request's item, its configured database, a live
   row whose parent is that database and whose id is the pinned one, and a fingerprint equal to a fresh recompute.
-  `delivered` records only for the drained fingerprint, on the request's item, with a URL whose id is the request's
-  row.
+  `delivered` records only on the request's item, with a URL whose id is the designation's row or the first one, and
+  only for a fingerprint equal to the generation the plan bound `writing` and `creating` to.
