@@ -51,6 +51,21 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
         return result
 
+    def test_experiment_designates_and_refuses_a_bad_parent(self):
+        """sd:3982: `--experiment` writes the designation; a task of itself or of an undesignated item refuses."""
+        first = json.loads(self.call("task", "add", "An experiment", "--json").stdout)["item"]["id"]
+        second = json.loads(self.call("task", "add", "A task", "--json").stdout)["item"]["id"]
+        self.assertIn("task of itself",
+                      self.call("task", "edit", second, "--experiment", f"of:{second}", code=1).stderr)
+        self.assertIn(f"sd:{first} is not designated experiment",
+                      self.call("task", "edit", second, "--experiment", f"of:{first}", code=1).stderr)
+        self.assertIn("without other changes",
+                      self.call("task", "edit", first, "--experiment", "yes", "--priority", 1, code=1).stderr)
+        self.call("task", "edit", first, "--experiment", "yes")
+        state = json.loads(self.call("task", "edit", second, "--experiment", f"of:{first}", "--json").stdout)
+        designation = json.loads(state["item"]["fields"])["experiments"]
+        self.assertEqual((designation["as"], designation["of"]), ("task", first))
+
     def test_task_lifecycle_outside_checkout_and_stale_edit(self):
         state = json.loads(self.call("task", "add", "Check the workflow", "--json").stdout)
         item = state["item"]["id"]

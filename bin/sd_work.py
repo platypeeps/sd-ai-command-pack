@@ -260,9 +260,24 @@ def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
     # Clear only: the nightly prune parks, and `edit_item` refuses a writing piece (sd:3007).
     if args.unpark:
         changes["parked_at"] = None
-    if not changes:
+    if not changes and not getattr(args, "experiment", None):
         raise WorkRefusal("edit requires a field to change")
     return changes
+
+
+def _designate(sd_db: Any, args: argparse.Namespace, connection: Any, who: str,
+               revision: str | None) -> dict:
+    """`edit --experiment` (sd:3982): the item's experiments designation, alone.
+
+    Alone, because the designation is written by `projection.designate` for
+    any kind, in its own transaction, while the other fields go through
+    `edit_item`; two writes in one command could land one and refuse the other.
+    """
+    if _edit_changes(args):
+        raise WorkRefusal("give --experiment without other changes; edit the rest in a second command")
+    import sd_db.projection as projection
+
+    return projection.designate(connection, args.item, args.experiment, who=who, expected_revision=revision)
 
 
 def _library():
@@ -1136,6 +1151,8 @@ def run(args: argparse.Namespace) -> int:
             result = workflow.item_state(connection, args.item)
         elif action == "add":
             result, dedupe = _add(sd_db, workflow, args, connection, who)
+        elif action == "edit" and getattr(args, "experiment", None):
+            result = _designate(sd_db, args, connection, who, revision)
         elif action == "edit":
             changes = _edit_changes(args)
             if "kind" in changes:
@@ -1515,6 +1532,11 @@ def register(groups: Any, store: Any) -> None:
     edit.add_argument("--unpark", action="store_true",
                       help="bring back an item the nightly prune parked; a writing piece "
                            "revives with `sd writing park --revive`")
+    edit.add_argument("--experiment", action="append", metavar="yes|of:M|row:ID|new|off",
+                      help="project the item into the team experiments databases: yes as an experiment, "
+                           "of:M as a task of experiment M, row:ID to pin an existing row, new to drop "
+                           "the pinned row, off to stop and keep the row; repeat to combine "
+                           "(yes with row:ID); given alone, without other changes")
     _output(edit, "edit", revision=True)
 
     status = verbs.add_parser("status", help="change status with an atomic history entry")
