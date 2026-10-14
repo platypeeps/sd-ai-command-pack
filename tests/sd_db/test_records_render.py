@@ -14,7 +14,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import connect, record_state
+from sd_db import connect, record_state, records
 from sd_db.jobs import cli
 from sd_db.migrate import initialise
 from sd_db.records import MIRROR_KEY, add_row, edit_row, get_row, render, rules_for
@@ -61,11 +61,10 @@ Seen in [[2026-10-07 - Daily Intel Brief]] and [[Agents|the agents note]].
 
 
 @hub_only
-class MirrorCase(unittest.TestCase):
+class MirrorCase(support.TempRootCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        root = Path(self.tmp.name)
+        super().setUp()
+        root = self.root
         initialise(root / "sd.db")
         self.db = connect(root / "sd.db")
         self.addCleanup(self.db.close)
@@ -93,8 +92,8 @@ class MirrorCase(unittest.TestCase):
 
     def move(self, title, stage, kind="blog-idea", **changes):
         row = get_row(self.db, kind=kind, title=title)
-        rules = rules_for(kind, home=self.home, entries=[flipped()])
-        with patch.dict(os.environ, self.env), patch("sd_db.records.plugin_entries", return_value=[flipped()]):
+        rules = rules_for(kind, home=self.home, environ=self.env, entries=[flipped()])
+        with patch("sd_db.records.plugin_entries", return_value=[flipped()]):
             return edit_row(self.db, row["id"], rules, revision=row["revision"], who="operator", stage=stage,
                             **changes)
 
@@ -128,9 +127,8 @@ class TheMarkdownMirror(MirrorCase):
 
     def test_an_added_row_carries_its_date_so_its_note_reads_back(self):
         self.render()
-        rules = rules_for("blog-idea", home=self.home, entries=[flipped()])
-        with patch.dict(os.environ, self.env):
-            add_row(self.db, rules, title="added idea", who="operator", fields={"score": "7"}, body="# added\n")
+        rules = rules_for("blog-idea", home=self.home, environ=self.env, entries=[flipped()])
+        add_row(self.db, rules, title="added idea", who="operator", fields={"score": "7"}, body="# added\n")
         self.assertTrue(self.beat()["ok"], self.beat())
         reader = Reader.from_plugins([support.plugin_entry()], environ=self.env)
         self.assertEqual(verify(self.db, reader, reader.freeze()), [])
@@ -237,8 +235,8 @@ class TheRefusals(MirrorCase):
         self.assertIn("is not a directory", str(mirror.reason))
         self.assertFalse(missing.exists())
 
-    def test_a_write_in_a_suite_that_names_no_vault_renders_nowhere(self):
-        # tests/sd_db/__init__.py points $OBSIDIAN_VAULT at a folder that does not exist.
+    def test_a_write_whose_rules_name_no_vault_renders_nowhere(self):
+        # support.TempRootCase points $OBSIDIAN_VAULT at a folder that does not exist.
         self.render()
         row = get_row(self.db, kind="blog-idea", title="first idea")
         said = io.StringIO()
@@ -323,6 +321,17 @@ class TheRenderAfterAWrite(MirrorCase):
         self.assertIn("\nstatus: accepted\n", self.note("first idea"))
         self.assertTrue(self.beat()["ok"])
 
+    def test_a_write_renders_the_vault_its_rules_name_not_the_one_in_the_environment(self):
+        self.render()
+        elsewhere = support.vault(self.root / "the environment's vault", ideas={"first idea": "inbox"}, topics={})
+        before = {path: path.read_bytes() for path in elsewhere.rglob("*") if path.is_file()}
+        with patch.dict(os.environ, {"OBSIDIAN_VAULT": str(elsewhere)}):
+            self.move("first idea", "accepted")
+            self.move("a topic", "parked", kind="topic")
+        self.assertEqual({path: path.read_bytes() for path in elsewhere.rglob("*") if path.is_file()}, before)
+        self.assertIn("\nstatus: accepted\n", self.note("first idea"))
+        self.assertTrue(self.beat()["ok"], self.beat())
+
     def test_a_write_from_a_satellite_commits_and_leaves_the_render_to_the_hub(self):
         self.render()
         said = io.StringIO()
@@ -404,3 +413,18 @@ class TheVerbsArguments(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TheTempRootGuard(unittest.TestCase):
+    def test_a_mirror_write_outside_the_temp_root_fails_the_test_and_writes_nothing(self):
+        outside = Path(tempfile.gettempdir()) / "sd-db-tests-never-write-here.md"
+
+        class Writes(support.TempRootCase):
+            def test_it(self):
+                with contextlib.suppress(AssertionError):  # as the render swallows it into a heartbeat
+                    records._replace(outside, b"a fixture\n")
+
+        result = unittest.TestResult()
+        Writes("test_it").run(result)
+        self.assertEqual((result.wasSuccessful(), outside.exists()), (False, False))
+        self.assertIn("a mirror write left the test's temp root", "".join(trace for _, trace in result.errors + result.failures))

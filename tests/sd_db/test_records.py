@@ -8,9 +8,7 @@ carries the `rules` block the pack reports, with the driver flipped to `db`.
 import dataclasses
 import datetime
 import json
-import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 from sd_db import connect, create_item
@@ -50,11 +48,10 @@ def flipped(**extra):
     return entry
 
 
-class RecordsCase(unittest.TestCase):
+class RecordsCase(support.TempRootCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        root = Path(self.tmp.name)
+        super().setUp()
+        root = self.root
         initialise(root / "sd.db")
         self.db = connect(root / "sd.db")
         self.addCleanup(self.db.close)
@@ -64,17 +61,18 @@ class RecordsCase(unittest.TestCase):
                                                    environ={"OBSIDIAN_VAULT": str(vault)}))
         self.assertTrue(sitting.clean)
         self.home = root / "home"
-        # Each write renders the mirror (sd:3976): into this vault, with these rules.
-        for patcher in (patch.dict("os.environ", {"OBSIDIAN_VAULT": str(vault)}),
-                        patch("sd_db.records.plugin_entries", return_value=[flipped()])):
-            patcher.start()
-            self.addCleanup(patcher.stop)
-        self.assertTrue(render(self.db, home=self.home, entries=[flipped()]).ok)
+        # Each write renders the mirror (sd:3976): into the vault its rules name, with these rules.
+        self.env = {"OBSIDIAN_VAULT": str(vault)}
+        patcher = patch("sd_db.records.plugin_entries", return_value=[flipped()])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.assertTrue(render(self.db, home=self.home, environ=self.env, entries=[flipped()]).ok)
         self.idea = self.rules("blog-idea")
         self.topic = self.rules("topic")
 
     def rules(self, kind, entries=None):
-        return rules_for(kind, home=self.home, entries=[flipped()] if entries is None else entries)
+        return rules_for(kind, home=self.home, environ=self.env,
+                         entries=[flipped()] if entries is None else entries)
 
     def row(self, title, kind="blog-idea"):
         return get_row(self.db, kind=kind, title=title)

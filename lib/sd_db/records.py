@@ -98,6 +98,9 @@ class Rules:
     floor: dict[str, float]
     #: The field the `workflow` block names as the due date, or None.
     due: str | None = None
+    #: The folder `root` names under the environment the rules were read with,
+    #: or None when it names none. The mirror writes only here.
+    vault: Path | None = None
 
 
 # ---------------------------------------------------------------- rules
@@ -136,10 +139,17 @@ def rules_for(kind: str, *, home: Path | str, environ: dict[str, str] | None = N
             transitions=declared.get("transitions"), human_only=dict(declared.get("human-only") or {}),
             protected=tuple(declared.get("protected-fields") or ()),
             unique=tuple(declared.get("unique-fields") or ()), floor=dict(declared.get("floor") or {}),
-            due=entry["workflow"][kind].get("due-field"),
+            due=entry["workflow"][kind].get("due-field"), vault=_vault(store, str(entry["prefix"]), environ),
         )
     except (KeyError, TypeError, ValueError) as error:
         raise RecordRefused(f"the pack's rules for kind {kind!r} are missing {error}") from None
+
+
+def _vault(store: dict[str, Any], prefix: str, environ: dict[str, str] | None) -> Path | None:
+    try:
+        return store_root(store, prefix, environ)
+    except MigrationRefused:
+        return None
 
 
 def _refuse_unreadable(entries: list[dict[str, Any]], what: str) -> None:
@@ -455,7 +465,7 @@ def render(connection: sqlite3.Connection, *, home: Path | str, environ: dict[st
         rules = [rules_for(kind, home=home, environ=env, entries=entries) for kind in kinds]
     except (MigrationRefused, RecordRefused) as error:
         return _beat(connection, Mirror(kinds=list(kinds or ()), reason=str(error)))
-    return _mirrored(connection, rules, env)
+    return _mirrored(connection, rules)
 
 
 def _pending(connection: sqlite3.Connection, rules: Rules) -> bool:
@@ -480,9 +490,12 @@ def _mirror_after(connection: sqlite3.Connection, rules: Rules, caught_up: bool)
             raise RecordRefused("the write is inside the caller's open transaction, so it is not committed yet")
         refuse_hub_only(connection, "the records mirror")
         if caught_up:
-            mirror = _mirrored(connection, [rules], dict(os.environ))
+            mirror = _mirrored(connection, [rules])
+        elif rules.vault is None:
+            mirror = _mirrored(connection, [rules])  # refuses: the rules name no vault
         else:
-            mirror = render(connection, home=Path(os.environ.get("HOME", "~")).expanduser())
+            # Every kind, each under the vault the written kind's rules resolved.
+            mirror = render(connection, home=Path.home(), environ={**os.environ, rules.root[1:]: str(rules.vault)})
     except Exception as error:  # a write never fails for its render
         mirror = Mirror(kinds=[rules.kind], reason=str(error) or type(error).__name__)
         with contextlib.suppress(Exception):
@@ -497,10 +510,10 @@ def _last_beat_ok(connection: sqlite3.Connection) -> bool:
     return row is not None and json.loads(row["body"] or "{}").get("ok") is True
 
 
-def _mirrored(connection: sqlite3.Connection, rules: list[Rules], environ: dict[str, str]) -> Mirror:
+def _mirrored(connection: sqlite3.Connection, rules: list[Rules]) -> Mirror:
     mirror = Mirror(kinds=[one.kind for one in rules])
     try:
-        _render(connection, rules, environ, mirror)
+        _render(connection, rules, mirror)
     except Exception as error:  # the heartbeat names it; an unknown is not a pass
         mirror.reason = str(error) or type(error).__name__
     return _beat(connection, mirror)
@@ -514,7 +527,7 @@ def _beat(connection: sqlite3.Connection, mirror: Mirror) -> Mirror:
     return mirror
 
 
-def _render(connection: sqlite3.Connection, rules: list[Rules], environ: dict[str, str], mirror: Mirror) -> None:
+def _render(connection: sqlite3.Connection, rules: list[Rules], mirror: Mirror) -> None:
     """Every refusal of the whole render first, then each kind's notes, strays and page.
 
     The base folder must exist: under a missing `$OBSIDIAN_VAULT` the root is
@@ -528,7 +541,9 @@ def _render(connection: sqlite3.Connection, rules: list[Rules], environ: dict[st
         if one.driver != "db":
             raise RecordRefused(f"plugin {one.prefix}'s `store.driver` is {one.driver!r}, so the vault is "
                                 f"still the source of {one.kind} notes and nothing renders over them")
-        root = store_root({"root": one.root}, one.prefix, environ)
+        root = one.vault
+        if root is None:
+            raise RecordRefused(f"plugin {one.prefix} keeps its notes under {one.root}, which is not set")
         if not (root / one.base).is_dir():
             # An unset or wrong root names a folder that is not the vault; creating it hides that.
             raise RecordRefused(f"{root / one.base} is not a directory; the {one.kind} base is where plugin "
