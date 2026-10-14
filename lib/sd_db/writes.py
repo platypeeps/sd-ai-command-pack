@@ -19,6 +19,7 @@ except `transition`.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from collections.abc import Callable
@@ -34,7 +35,7 @@ STATUS_CHANGE = "status_change"
 
 #: The `state` kinds. The `CHECK` in the schema is the enforcement; this is
 #: the list callers name, so a typo is an error here and not a silent row.
-STATE_KINDS = ("checkpoint", "verified", "restore", "watermark", "heartbeat", "check", "snooze", "view")
+STATE_KINDS = ("checkpoint", "verified", "restore", "watermark", "heartbeat", "check", "snooze", "view", "setting")
 #: The kinds whose NULL `resolved_at` is open work; the rest are logs and
 #: cursors read latest-per-key, where NULL means nothing (sd:2849).
 OPEN_STATE_KINDS = ("restore", "verified", "check")
@@ -639,6 +640,8 @@ VIEW_TAG_LENGTH = 64
 VIEW_TAGS = 16
 #: A file with no view row reads as this: shown, unpinned, untagged.
 VIEW_CLEAR: dict[str, Any] = {"pinned": False, "hidden": False, "tags": []}
+#: A root's label is the name the Documents page shows for it (sd:3986).
+VIEW_LABEL_LENGTH = 60
 
 
 def set_view(
@@ -648,8 +651,13 @@ def set_view(
     pinned: bool | None = None,
     hidden: bool | None = None,
     tags: list[str] | None = None,
+    label: str | None = None,
 ) -> dict[str, Any]:
     """Pin, hide or tag the Documents file `key`, or clear any of them (sd:3430).
+
+    A root key (no `/`) also takes `label`, the name the page shows for the
+    root, 1 to `VIEW_LABEL_LENGTH` characters; `""` clears it (sd:3986). A
+    file key refuses one. The state carries `label` only while one is set.
 
     One `view` row per write, through `record_state`: the latest row for a
     key is the answer (`views`). A field left `None` keeps the value the
@@ -660,8 +668,14 @@ def set_view(
     """
     if not isinstance(key, str) or not key.strip() or len(key) > VIEW_KEY_LENGTH:
         raise SdDbError(f"a view needs the file's key, 1 to {VIEW_KEY_LENGTH} characters")
-    if pinned is None and hidden is None and tags is None:
-        raise SdDbError("a view write needs pinned, hidden or tags")
+    if pinned is None and hidden is None and tags is None and label is None:
+        raise SdDbError("a view write needs pinned, hidden, tags or label")
+    if label is not None:
+        if "/" in key:
+            raise SdDbError("a label names a root; a file key takes none")
+        if not isinstance(label, str) or len(label.strip()) > VIEW_LABEL_LENGTH:
+            raise SdDbError(f"a label is 1 to {VIEW_LABEL_LENGTH} characters, or empty to clear it")
+        label = label.strip()
     for name, flag in (("pinned", pinned), ("hidden", hidden)):
         if flag is not None and not isinstance(flag, bool):
             raise SdDbError(f"{name} is true or false")
@@ -674,11 +688,14 @@ def set_view(
             "SELECT body FROM state WHERE kind = 'view' AND key = ? ORDER BY id DESC LIMIT 1", (key,)
         ).fetchone()
         state = (_view(row["body"]) if row else None) or VIEW_CLEAR
+        kept = state.get("label") if label is None else label
         state = {
             "pinned": state["pinned"] if pinned is None else pinned,
             "hidden": state["hidden"] if hidden is None else hidden,
             "tags": list(state["tags"]) if tags is None else tags,
         }
+        if kept:
+            state["label"] = kept
         record_state(connection, "view", key=key, body=state)
     return state
 
@@ -686,8 +703,9 @@ def set_view(
 def views(connection: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     """Every Documents file pinned, hidden or tagged: its `pinned`, `hidden` and `tags`.
 
-    The latest `view` row per key, read through `state_by_kind_key`. A key
-    whose latest row clears all three is not listed, and neither is one
+    A root key carries its `label` too, and a root row with only a label is
+    listed. The latest `view` row per key, read through `state_by_kind_key`.
+    A key whose latest row clears all of them is not listed, and neither is one
     whose body this cannot read: an unreadable view pins, hides and tags
     nothing.
     """
@@ -717,7 +735,11 @@ def _view(body: str | None) -> dict[str, Any] | None:
     tags = _view_tags(state.get("tags"))
     if tags is None:
         return None
-    return {"pinned": state["pinned"], "hidden": state["hidden"], "tags": tags}
+    found = {"pinned": state["pinned"], "hidden": state["hidden"], "tags": tags}
+    label = state.get("label")
+    if isinstance(label, str) and 0 < len(label) <= VIEW_LABEL_LENGTH:
+        found["label"] = label
+    return found
 
 
 def _view_tags(tags: Any) -> list[str] | None:
@@ -728,6 +750,84 @@ def _view_tags(tags: Any) -> list[str] | None:
     if any(not tag or len(tag) > VIEW_TAG_LENGTH for tag in kept) or len(kept) > VIEW_TAGS:
         return None
     return kept
+
+
+# ---------------------------------------------------------------- settings
+
+
+#: A setting key is a dotted lower-case name: `sd.copilot_review`, `dashboard.home_tiles`.
+SETTING_KEY = re.compile(r"[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+")
+SETTING_KEY_LENGTH = 128
+#: The longest value: the Home tile list's text is the largest one written.
+SETTING_VALUE_LENGTH = 16384
+#: `set_setting`'s `before` when the caller asks for no stale check.
+UNCHECKED: Any = object()
+
+
+class SettingStale(SdDbError):
+    """`set_setting` was told what the value was, and the row says otherwise."""
+
+
+def set_setting(
+    connection: sqlite3.Connection,
+    key: str,
+    value: str | None,
+    *,
+    before: Any = UNCHECKED,
+) -> str | None:
+    """Set the fleet-wide setting `key` to `value`, or clear it with `None` (sd:3989).
+
+    One `setting` row per write, through `record_state`: the latest row for a
+    key is the answer (`read_settings`), and a cleared key is a row too, so an old
+    file value cannot come back. `before`, when given, is the value the caller
+    showed (`None` for unset); a row that holds another refuses with
+    `SettingStale`, read in the same transaction. Returns the value the key
+    held before, `None` when unset or never held.
+    """
+    _setting_key(key)
+    if value is not None and (not isinstance(value, str) or not value or len(value) > SETTING_VALUE_LENGTH):
+        raise SdDbError(f"a setting value is text of 1 to {SETTING_VALUE_LENGTH} characters, or none to unset")
+    with transaction(connection):
+        was = _read_settings(connection, [key]).get(key)
+        if before is not UNCHECKED and before != was:
+            raise SettingStale(f"{key} changed since it was read; read it again")
+        record_state(connection, "setting", key=key, body={"value": value})
+    return was
+
+
+def read_settings(connection: sqlite3.Connection, keys: list[str]) -> dict[str, str | None]:
+    """The latest `setting` row for each of `keys` the database has held: its value, `None` when cleared.
+
+    A key with no row is absent from the answer, which is how a caller tells
+    "never held" (read the old file) from "cleared" (read nothing). A body
+    this cannot read raises: a setting nobody can read is unknown, not unset.
+    """
+    for key in keys:
+        _setting_key(key)
+    return _read_settings(connection, keys)
+
+
+def _read_settings(connection: sqlite3.Connection, keys: list[str]) -> dict[str, str | None]:
+    found: dict[str, str | None] = {}
+    for key in keys:
+        row = connection.execute(
+            "SELECT body FROM state WHERE kind = 'setting' AND key = ? ORDER BY id DESC LIMIT 1", (key,)
+        ).fetchone()
+        if row is None:
+            continue
+        try:
+            value = json.loads(row["body"] or "")["value"]
+        except (ValueError, TypeError, KeyError):
+            raise SdDbError(f"the {key} setting row does not read; set it again") from None
+        if value is not None and not isinstance(value, str):
+            raise SdDbError(f"the {key} setting row holds a {type(value).__name__}, not text; set it again")
+        found[key] = value
+    return found
+
+
+def _setting_key(key: Any) -> None:
+    if not isinstance(key, str) or len(key) > SETTING_KEY_LENGTH or not SETTING_KEY.fullmatch(key):
+        raise SdDbError(f"a setting key is a dotted lower-case name of up to {SETTING_KEY_LENGTH} characters")
 
 
 # ---------------------------------------------------------------- shadow

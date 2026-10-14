@@ -18,7 +18,7 @@ from unittest.mock import patch
 from sd_db import connect, record_state, records
 from sd_db.jobs import cli
 from sd_db.migrate import initialise
-from sd_db.records import MIRROR_KEY, add_row, edit_row, get_row, render, rules_for
+from sd_db.records import MIRROR_KEY, add_row, edit_row, get_row, mirror_state, render, rules_for
 from sd_db.remote import HubOnly
 from sd_db.sources import run, verify
 from sd_db.sources.frontmatter import read as read_frontmatter
@@ -305,6 +305,14 @@ class TheRefusals(MirrorCase):
         mirror = render(self.db, home=self.home, environ=self.env, entries=[entry], kinds=["topic"])
         self.assertIn("still the source", str(mirror.reason))
         self.assertEqual(self.files(), before)
+
+    def test_mirror_state_is_the_last_heartbeat_and_none_before_any_render(self):
+        # The dashboard's Health reads it (sd:3977); it issues no SQL of its own.
+        self.assertIsNone(mirror_state(self.db))
+        self.render()
+        stamp, body = mirror_state(self.db) or ("", None)
+        self.assertEqual(body, self.beat())
+        self.assertRegex(stamp, r"^\d{4}-\d{2}-\d{2}T")
 
     def test_a_satellite_refuses_by_name_and_writes_nothing(self):
         before = self.files()

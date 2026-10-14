@@ -578,6 +578,10 @@ reviewer chain before vendor, transport, availability and spending gates run.
 
 Core settings use `sd config get|set|unset|list` and the existing atomic machine configuration writer.
 The file is `~/.config/sd-ai-command-pack/config.json`, honoring `XDG_CONFIG_HOME`.
+Two keys serve every machine and live in the workflow database as `setting` rows: `sd.fleet_owners` and `sd.copilot_review` (sd:3989).
+`sd config set` and `unset` write the row; once a row exists, the file's line for that key is not read, and `get` names it on stderr.
+A machine with no database and no `hub.json` keeps them in the file. A database that cannot be read is an error, never the file's value.
+`sd config list sd --json` gives each key's `source`: `database`, `file` or `default`.
 Merge permission is one setting, `repo.runner_merge`: a column on the repository row in the workflow database, not an `sd` key.
 Set it with `bin/sd-db repo runner-merge <path> auto|manual`; `bin/sd-db repo list` shows it as each row's last field.
 `auto` lets the runner and the assistant merge active, in-scope work without asking, only through `sd-ship prepare` then `sd-ship merge`.

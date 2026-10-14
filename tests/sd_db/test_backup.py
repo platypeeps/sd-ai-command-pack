@@ -888,14 +888,14 @@ def one_migration_back(database):
     """
     raw = sqlite3.connect(database, isolation_level=None)
     try:
-        # The reverse of 029_repo_channels.sql, which its header carries as
-        # `--   ` lines: `repo` loses `channels` and the version goes to 28. The helper is rewritten with every migration: a
-        # migration that adds a table or a column would be refused if left in
+        # The reverse of 030_state_setting.sql, which its header carries as
+        # `--   ` lines: `state` loses the `setting` kind and the version goes to 29. The helper is rewritten with every
+        # migration: a migration that adds a table or a column would be refused if left in
         # place.
-        text = (SCHEMA_DIR / "029_repo_channels.sql").read_text()
+        text = (SCHEMA_DIR / "030_state_setting.sql").read_text()
         script = "\n".join(line[4:] for line in text.splitlines() if line.startswith("--   "))
-        assert "PRAGMA user_version = 28" in script, \
-            "029's reverse is not where this helper expects it"
+        assert "PRAGMA user_version = 29" in script, \
+            "030's reverse is not where this helper expects it"
         raw.executescript(script)
         assert raw.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION - 1
     finally:
@@ -1216,7 +1216,7 @@ class MigrateNeedsABackupOfThisStore(BackupCase):
     def test_a_write_once_the_snapshot_has_read_is_refused(self):
         self.one_back_with_an_item()
         real = backup_module._counts
-        calls = []
+        calls: list[threading.Thread] = []
 
         def counted(connection):
             found = real(connection)
