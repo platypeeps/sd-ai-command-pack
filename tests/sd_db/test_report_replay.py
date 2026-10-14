@@ -478,16 +478,12 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         statements: list[str] = []
         self.db.set_trace_callback(statements.append)
         try:
-            reporting._fold_target(self.db, "probe", "disk low", host="hosta")
-            # Every tick asks this one, the quiet ones too.
-            reporting._end_chains(self.db, job="probe", host="hosta", ended="2026-09-08T00:01:00+00:00", basis=None)
+            reporting._fold_target(self.db, "probe", "disk low", chain=1)
         finally:
             self.db.set_trace_callback(None)
-        reads = [sql for sql in statements if "attention_basis" in sql]
-        self.assertEqual(len(reads), 2)
-        for sql in reads:
-            plan = [row[3] for row in self.db.execute("EXPLAIN QUERY PLAN " + sql)]
-            self.assertTrue(any("USING INDEX item_by_external" in step for step in plan), plan)
+        [sql] = [sql for sql in statements if "attention_basis" in sql]
+        plan = [row[3] for row in self.db.execute("EXPLAIN QUERY PLAN " + sql)]
+        self.assertTrue(any("USING INDEX item_by_external" in step for step in plan), plan)
 
     def test_a_report_with_unreadable_fields_is_never_a_target(self):
         for index, value in enumerate((None, "", "{not json")):
@@ -634,8 +630,36 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
             self.tick("b", 16, exit_code=0, text="ok\n")
             other = self.tick("c", 31, exit_code=0, text=self.DISK)
         self.assert_fresh(other, acked)
-        fold = json.loads(self.db.execute("SELECT fields FROM item WHERE id=?", (acked,)).fetchone()["fields"])["fold"]
-        self.assertEqual(fold, {"host": "hosta", "current": True})
+        self.assertEqual(self.chain("hosta")["item"], acked)
+
+    def chain(self, host, job="probe"):
+        row = self.db.execute("SELECT body FROM state WHERE kind='heartbeat' AND key=? ORDER BY id DESC LIMIT 1",
+                              (f"{reporting.CHAIN_KEY}{job}@{host}",)).fetchone()
+        return json.loads(row["body"]) if row else None
+
+    def test_a_clean_run_in_the_same_second_ends_the_chain(self):
+        """Codex on the chain fix: a strict time comparison skipped a clean run
+        that ended in the second of the last finding; arrival order ranks a tie."""
+        acked = self.acked_disk()
+        self.tick("b", 1, exit_code=0, text="ok\n")
+        self.assert_fresh(self.tick("c", 16, exit_code=0, text=self.DISK), acked)
+
+    def test_another_hosts_fold_does_not_hide_this_hosts_recovery(self):
+        """Host B's repeat folds into host A's open report and moves its last run;
+        host A's own clean run must still end A's chain."""
+        first = self.tick("a", 1, exit_code=0, text=self.DISK)["item"]["id"]
+        with mock.patch("sd_db.ship.this_host", return_value="hostb"):
+            self.tick("b", 31, exit_code=0, text=self.DISK)
+        self.tick("c", 16, exit_code=0, text="ok\n")
+        self.ack(first)
+        self.assert_fresh(self.tick("d", 46, exit_code=0, text=self.DISK), first)
+
+    def test_a_late_report_after_a_clean_run_starts_no_chain(self):
+        """A hand recovery of an older run with findings, filed after a newer clean run."""
+        self.tick("b", 16, exit_code=0, text="ok\n")
+        late = self.tick("a", 1, exit_code=0, text=self.DISK)["item"]["id"]
+        self.ack(late)
+        self.assert_fresh(self.tick("c", 31, exit_code=0, text=self.DISK), late)
 
     def test_a_late_clean_run_does_not_end_the_chain(self):
         acked = self.acked_disk()
@@ -644,9 +668,9 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         self.assertEqual(self.tick("c", 31, exit_code=0, text=self.DISK)["item"]["id"], acked)
 
     def test_a_report_filed_before_the_chain_was_kept_is_never_a_done_target(self):
-        """Older state: a row without `fold` cannot say its host or whether a clean run came between."""
+        """Older state: with no chain row for the host, nothing says no clean run came between."""
         acked = self.acked_disk()
-        self.db.execute("UPDATE item SET fields=json_remove(fields, '$.fold') WHERE id=?", (acked,))
+        self.db.execute("DELETE FROM state WHERE key LIKE ?", (reporting.CHAIN_KEY + "%",))
         self.db.commit()
         self.assert_fresh(self.tick("b", 16, exit_code=0, text=self.DISK), acked)
 

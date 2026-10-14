@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import reads, ship, workflow
 from .database import transaction
-from .writes import STATUSES, add_note, create_item, record_state, resolve_note, set_item_fields, stamp, transition
+from .writes import STATUSES, add_note, create_item, now, record_state, resolve_note, set_item_fields, stamp, transition
 
 MAX_REPORT = 200_000
 
@@ -19,6 +19,15 @@ MAX_REPORT = 200_000
 #: shared with every other heartbeat writer and a bare job name would collide
 #: with whatever else chose the same word.
 HEARTBEAT_KEY = "cron-report:"
+
+#: The `state` key, `heartbeat` kind, that holds the newest run of a job on
+#: one host: `cron-chain:<job>@<host>`, body `{"run_id", "ended", "item"}`,
+#: one row per key, updated in place (`_set_chain`), so a quiet tick adds no
+#: row for `retention` to compact. `item` is the report a clean-exit run with
+#: findings went to, else `None`. It is what lets an acknowledged report take
+#: an unbroken repeat and nothing after a break (sd:4629): the heartbeat
+#: above is one row per job, and every host overwrites it.
+CHAIN_KEY = "cron-chain:"
 
 #: How far past the clock a recorded `ended` may be and still count as the
 #: newest tick. `cron-jobs.sh` stamps `ended` on this machine moments before it
@@ -107,19 +116,17 @@ def _folded_into(connection, job, run_id):
         " ORDER BY id DESC LIMIT 1", (job + ":", job + ";", job, run_id)).fetchone()
 
 
-def _fold_target(connection, job, attention_basis, *, host=None):
+def _fold_target(connection, job, attention_basis, *, chain=None):
     """The attention report a repeat of `job` folds into, or `None`.
 
     The newest `cron-report` row for this job that is not `done`, has
     `fields.attention` exactly true, the same `attention_basis`, and no
-    `record` marker. With `host`, an acknowledged row qualifies too, after
-    every open one, while its chain is current (sd:4629): `fields.fold`
-    names this host and no run of the job on it since was clean or found
-    anything else (`_end_chains`). The operator saw those findings, so
-    their unbroken repeat counts there and opens nothing; a return after a
-    clean run is a new incident. The `external_id` range is
-    `_folded_into`'s, and for the same reason: done rows are never deleted,
-    so the read seeks this job's rows only. Every JSON function sits inside
+    `record` marker. A `done` row qualifies only as `chain`, after every
+    open one (sd:4629): the report the previous run on this host went to,
+    so the operator's acknowledgement holds while the findings repeat
+    without a break and no longer (`ingest_log`). The `external_id` range
+    is `_folded_into`'s: done rows are never deleted, so the read seeks this
+    job's rows only. Every JSON function sits inside
     `CASE WHEN json_valid(fields)`, the way `clean_candidates` and
     `clean_reports` read: a `CASE` evaluates its branch only when the test
     is true, whatever order the query plan picks for `AND` terms, so a row
@@ -131,41 +138,14 @@ def _fold_target(connection, job, attention_basis, *, host=None):
     return connection.execute(
         "SELECT id, fields FROM item WHERE kind='report' AND source='cron-report'"
         " AND external_id > ? AND external_id < ?"
-        " AND (status != 'done' OR CASE WHEN json_valid(fields)"
-        "      THEN json_extract(fields, '$.fold.host') = ? AND json_type(fields, '$.fold.current') = 'true' END)"
+        " AND (status != 'done' OR id IS ?)"
         f" AND NOT ({UNREADABLE_FIELDS})"
         " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.job') END = ?"
         " AND CASE WHEN json_valid(fields) THEN json_type(fields, '$.attention') END = 'true'"
         " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.attention_basis') END = ?"
         " AND CASE WHEN json_valid(fields) THEN json_type(fields, '$.record') END IS NULL"
         " ORDER BY status = 'done', id DESC LIMIT 1",
-        (job + ":", job + ";", host, job, attention_basis)).fetchone()
-
-
-def _end_chains(connection, *, job, host, ended, basis):
-    """End the acknowledgeable chain of every report of `job` on `host` this run breaks.
-
-    A chain is current while each run of the job on that host repeats the
-    report's findings. A run that ended after the report's newest run and
-    was clean, failed, or declared another `basis` breaks it (`basis` is
-    `None` for the first two), so the report is never a `done` fold target
-    again: findings that recover and return are a new incident (the sd:4629
-    lane review). A late run -- a hand recovery -- ended before and breaks
-    nothing. Open reports are written too, so one acknowledged later does
-    not resume a chain a clean run broke while it was open.
-    """
-    rows = connection.execute(
-        "SELECT id, fields FROM item WHERE kind='report' AND source='cron-report'"
-        " AND external_id > ? AND external_id < ?"
-        " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.fold.host') = ?"
-        "      AND json_type(fields, '$.fold.current') = 'true'"
-        "      AND json_extract(fields, '$.report.job') = ?"
-        "      AND COALESCE(json_extract(fields, '$.repeats.last_ended'), json_extract(fields, '$.report.ended')) < ?"
-        "      AND json_extract(fields, '$.report.attention_basis') IS NOT ? END",
-        (job + ":", job + ";", host, job, ended, basis)).fetchall()
-    for row in rows:
-        fields = json.loads(row["fields"])
-        set_item_fields(connection, row["id"], fields={**fields, "fold": {**fields["fold"], "current": False}})
+        (job + ":", job + ";", chain, job, attention_basis)).fetchone()
 
 
 def _check_identity(job, run_id):
@@ -184,13 +164,12 @@ def _check_times(started, ended):
 
 def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_path,
            attention=False, attention_basis="explicit report", truncated=False, removed=None,
-           actor=None, record=None, host=None):
+           actor=None, record=None, chain=None):
     """File one run's report, or answer a replay of it with the report it filed.
 
-    `host` is the machine the run ran on, which `ingest_log` passes. A clean
-    exit that needs attention then records `fields.fold`, `{"host",
-    "current"}`, the chain `_fold_target` and `_end_chains` read. It is
-    state, not evidence: a replay compares the fields without it.
+    `chain` is the one `done` report this run may fold into: the report the
+    previous run of the job on this host went to, which only `ingest_log`
+    knows (`CHAIN_KEY`). Without it no done report is a target.
 
     `actor` and `record` are for a report that records an operator act rather
     than a cron run. `actor` says who and what acted, stored beside `removed`
@@ -222,12 +201,12 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
     Never folded: a clean report (`attention` false), a `record` report, and
     a report whose `fields` are unreadable is never a target
     (`_fold_target`). An acknowledged report stays `done` while the same
-    findings repeat on the same host without a break: a run with a clean
-    exit folds into it when no open report matches and its chain is
-    current (sd:4629); a clean run, a failure or other findings on that
-    host end the chain (`_end_chains`), and so does filing before `fold`
-    existed. A carried lost run's other finding is in the basis
-    (`ingest_log`), so it never closes unseen. A non-zero exit never
+    findings repeat without a break: a run with a clean exit folds into it
+    when it is `chain` and no open report matches (sd:4629). A clean run, a
+    failure or other findings on that host in between is a break, so
+    findings that recover and return open a fresh report. A carried lost
+    run's other finding is in the basis (`ingest_log`), so it never closes
+    unseen. A non-zero exit never
     folds into a `done` report: its basis says how the run ended, not what
     was found, so acknowledging one failure does not hide the next, and the
     run after an acknowledged failure opens a fresh report as before.
@@ -264,8 +243,8 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         raise workflow.WorkflowError("report actor must be at most ten short text, integer or empty values by name")
     if record is not None and (not isinstance(record, str) or not re.fullmatch(JOB_NAME, record)):
         raise workflow.WorkflowError("report record marker must be a job name")
-    if host is not None and (not isinstance(host, str) or not 1 <= len(host) <= 255):
-        raise workflow.WorkflowError("report host must be a short name")
+    if chain is not None and type(chain) is not int:
+        raise workflow.WorkflowError("report chain must be an item id")
     started, ended = _check_times(started, ended)
     external = job + ":" + run_id
     provenance = {"job": job, "run_id": run_id, "started": started, "ended": ended,
@@ -283,11 +262,10 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
     with transaction(connection):
         previous = connection.execute("SELECT id,fields FROM item WHERE source='cron-report' AND external_id=?", (external,)).fetchone()
         if previous:
-            # `repeats` and `fold` are written by later runs, not by this
-            # one, so the report's own run replays against its fields without them.
+            # `repeats` is written by later runs, not by this one, so the
+            # open report's own run replays against its fields without it.
             stored = json.loads(previous["fields"])
             stored.pop("repeats", None)
-            stored.pop("fold", None)
             if stored != fields:
                 raise workflow.WorkflowError("this report identity already has different evidence")
             return workflow.item_state(connection, previous["id"])
@@ -297,10 +275,10 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         folded = _folded_into(connection, job, run_id) if record is None else None
         if folded:
             return workflow.item_state(connection, folded["id"])
-        # A failure never folds into a done report and starts no chain: its
-        # basis says how the run ended, not what it found.
-        chained = host if exit_code == 0 and attention and record is None else None
-        target = _fold_target(connection, job, attention_basis, host=chained) if attention and record is None else None
+        # A failure never folds into a done report: its basis says how the
+        # run ended, not what it found.
+        target = (_fold_target(connection, job, attention_basis, chain=chain if exit_code == 0 else None)
+                  if attention and record is None else None)
         if target:
             stored = json.loads(target["fields"])
             repeats = stored.get("repeats") or {"count": 1, "first_ended": stored["report"]["ended"], "run_ids": []}
@@ -315,11 +293,19 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
             return workflow.item_state(connection, target["id"])
         item = create_item(connection, kind="report", title=f"{job}: {'needs attention' if attention else 'run report'}",
                            status="planning", source="cron-report", external_id=external,
-                           fields={**fields, "fold": {"host": chained, "current": True}} if chained else fields,
-                           body={"text": text}, session=INGEST_SESSION)
+                           fields=fields, body={"text": text}, session=INGEST_SESSION)
         if attention:
             add_note(connection, item, "followup", _ingest_followup(job, ended, attention_basis), session=INGEST_SESSION)
         return workflow.item_state(connection, item)
+
+
+def _set_chain(connection, key, row, body):
+    """Write a host's chain row (`CHAIN_KEY`) in place, or its first one."""
+    if row is None:
+        record_state(connection, "heartbeat", key=key, body=body)
+    else:
+        connection.execute("UPDATE state SET body=?, timestamp=? WHERE id=?",
+                           (json.dumps(body, sort_keys=True), now(), row["id"]))
 
 
 def health(connection, job):
@@ -532,17 +518,28 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
                     "exit_code": exit_code, "ended": ended,
                     "why": "a replay of a run whose heartbeat recorded it clean;"
                            " the run id is the key, so its changed evidence was not written"}
-        if beat != "recorded":
-            # A replay broke whatever it breaks the first time it arrived.
-            _end_chains(connection, job=job, host=host, ended=ended,
-                        basis=basis if attention and not exit_code else None)
+        # The newest run of this job on this host, before this one (sd:4629).
+        # A run that ended no earlier is the newest now, ties in arrival
+        # order as `_beat` ranks them; an older one, a hand recovery, takes
+        # no done target and moves nothing. A replay moved it the first time.
+        chain_key = f"{CHAIN_KEY}{job}@{host}"
+        newest_row = connection.execute(
+            "SELECT id, body FROM state WHERE kind='heartbeat' AND key=? ORDER BY id DESC LIMIT 1", (chain_key,)).fetchone()
+        last = json.loads(newest_row["body"]) if newest_row else {}
+        moves = beat != "recorded" and ended >= (last.get("ended") or "")
         if not (attention or filed):
+            if moves:
+                _set_chain(connection, chain_key, newest_row, {"run_id": run_id, "ended": ended, "item": None})
             return {"recorded": "heartbeat" if wrote else "nothing", "job": job, "run_id": run_id,
                     "healthy": True, "exit_code": exit_code, "ended": ended,
                     "why": "the job recovered" if recovered else _quiet(beat, previous)}
         state = ingest(connection, job=job, run_id=run_id, started=started, ended=ended,
                        exit_code=exit_code, text=text, source_path=str(path.resolve()),
-                       attention=attention, attention_basis=basis, truncated=truncated, host=host)
+                       attention=attention, attention_basis=basis, truncated=truncated,
+                       chain=last.get("item") if moves and type(last.get("item")) is int else None)
+        if moves:
+            _set_chain(connection, chain_key, newest_row, {
+                "run_id": run_id, "ended": ended, "item": state["item"]["id"] if attention and not exit_code else None})
         if state["item"]["external_id"] != job + ":" + run_id:
             # `ingest` answered with another run's report: this run folded
             # into it (sd:920), or is the replay of one that did.
