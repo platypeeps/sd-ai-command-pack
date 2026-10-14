@@ -634,8 +634,6 @@ COMPLEX = frozenset({
     "bin/sd-review::review",  # 97
     "bin/sd-review::run_provider",  # 40
     "bin/sd-ship::Ship.prepare_head",  # 53
-    "bin/sd::store_add",  # 28
-    "bin/sd::store_set",  # 25
     "bin/sd::validate_kind",  # 28
     "bin/sd_install.py::cmd_user",  # 24
     "bin/sd_install.py::main",  # 27
@@ -656,7 +654,6 @@ LONG = frozenset({
     "bin/sd-review::run_provider",  # 69
     "bin/sd-ship::Ship.prepare_head",  # 80
     "bin/sd::build_parser",  # 135
-    "bin/sd::store_set",  # 57
     "bin/sd_install.py::cmd_user",  # 64
     "bin/sd_install.py::main",  # 63
     "bin/sd_work.py::register",  # 58
