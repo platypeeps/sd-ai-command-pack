@@ -8,5 +8,5 @@ Older items keep their `prd.md` and `implement.md`; write no new ones.
 Status is read from the database.
 Do not add `status:` to active PRD frontmatter.
 Keep archived frontmatter as historical evidence.
-Move completed items to `archive/YYYY-MM/` when their archive conditions hold.
+Delete a done item's folder once its sd notes hold what a later reader needs; a note names the commit that keeps it (sd:3569).
 The [archive index](archive/README.md) links the removed historical snapshot.
