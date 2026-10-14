@@ -543,9 +543,14 @@ class PlanTests(Projection):
                 self.assertEqual((planned["properties"], planned["yielded"]), ({}, ["Due"]))
         self.assertIn("Due on the tasks row is not sd's (2026-11-02 to 2026-11-05; sd last wrote 2026-11-02",
                       self.comments(self.task)[-1])
-        status, said = self.plan(self.task, self.live("tasks", row=TASK_ROW, Due="2026-11-02", **live))
-        self.assertEqual(status, 1, said)
-        self.assertIn("Due: hand the whole date", said)
+        before = self.held(self.task)
+        for cut in ("2026-11-02", {"start": "2026-11-02"}, {"start": "2026-11-02", "end": None},
+                    {"start": "2026-11-02", "end": 5, "time_zone": None}):
+            with self.subTest(cut=cut):
+                status, said = self.plan(self.task, self.live("tasks", row=TASK_ROW, Due=cut, **live))
+                self.assertEqual(status, 1, said)
+                self.assertIn("Due: hand the whole date", said)
+                self.assertEqual(self.held(self.task), before)
         planned = self.planned(self.task, self.live("tasks", row=TASK_ROW, Due=day("2026-11-02"), **live))
         self.assertEqual(planned["properties"], {"Due": "2026-11-09"})
 

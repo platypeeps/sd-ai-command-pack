@@ -372,11 +372,13 @@ def _live(target: str, name: str, value: Any) -> Any:
     """
     if PROPERTIES[target][name] != "date" or value is None:
         return _empty(value)
-    if not isinstance(value, dict) or not isinstance(value.get("start"), str):
+    keys = ("start", "end", "time_zone")
+    if not (isinstance(value, dict) and all(key in value for key in keys) and isinstance(value["start"], str)
+            and all(value[key] is None or isinstance(value[key], str) for key in keys[1:])):
         raise ProjectionRefusal(f"{name}: hand the whole date, an object with start, end and time_zone, "
-                                "or null; a bare value may be a cut-off start")
+                                "or null; a bare or partial value may be a cut-off start")
     start = value["start"]
-    whole = {"start": start, "end": value.get("end") or None, "time_zone": value.get("time_zone") or None}
+    whole = {"start": start, "end": value["end"] or None, "time_zone": value["time_zone"] or None}
     if whole["end"] is None and whole["time_zone"] is None and re.fullmatch(r"\d{4}-\d{2}-\d{2}", start):
         return start
     return whole
