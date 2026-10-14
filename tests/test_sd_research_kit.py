@@ -1792,7 +1792,9 @@ class HookTriggerTests(unittest.TestCase):
         run by hand even when this suite itself runs under a git hook.
         Returns `trust_conf` as a spy, the exit raised or None, and the label
         the dashboard was given or None. Every write `publish()` makes is
-        stubbed, so nothing reaches the machine's dashboard, vault or queue.
+        stubbed, so nothing reaches the machine's dashboard, vault or queue,
+        and so is its read of the channels setting, so none reaches its
+        database.
         """
 
         publish = load_publish()
@@ -1816,7 +1818,8 @@ class HookTriggerTests(unittest.TestCase):
                     write_obsidian=unittest.mock.Mock(return_value=[]),
                     ignore_dashboard=unittest.mock.Mock(return_value=""),
                     migrate_legacy_queue=unittest.mock.Mock(return_value=[]),
-                    enqueue=unittest.mock.Mock(return_value=[])), \
+                    enqueue=unittest.mock.Mock(return_value=[]),
+                    read_channels=unittest.mock.Mock(return_value=(None, ""))), \
                 unittest.mock.patch("sys.stdout", io.StringIO()):
             label = None
             try:
