@@ -132,8 +132,6 @@ class Node:
     addresses: frozenset
     login: str
     address: ipaddress.IPv4Address
-    #: The MagicDNS name, as `name` reads it; `None` when the daemon gives none.
-    name: str | None = None
 
 
 def name(self_record) -> str | None:
@@ -146,16 +144,21 @@ def name(self_record) -> str | None:
 def this_name(run=run) -> str:
     """This node's tailnet name: the one the console renames (hub failover D3).
 
-    A stopped or logged-out daemon, or one that names no node, raises
-    `TailnetError`; the fence reads that as unknown, never as a name.
+    A stopped or logged-out daemon, one cut from the control plane, or one
+    that names no node, raises `TailnetError`; the fence reads that as
+    unknown, never as a name. Offline, `DNSName` comes from the cached
+    netmap, so it can be a name the console has since given another node.
     """
     try:
         state = json.loads(run(["tailscale", "status", "--json"]))
         backend, found = state.get("BackendState"), name(state.get("Self"))
-    except (TypeError, ValueError, AttributeError) as error:
+        online = state["Self"].get("Online")
+    except (KeyError, TypeError, ValueError, AttributeError) as error:
         raise TailnetError("cannot read this Tailscale node's name") from error
     if backend != "Running":
         raise TailnetError(f"Tailscale is not running ({backend})")
+    if online is not True:
+        raise TailnetError("this node is not connected to the Tailscale control plane, so its name may be stale")
     if found is None:
         raise TailnetError("Tailscale names no tailnet name for this node")
     return found
@@ -184,4 +187,4 @@ def this_node(run=run) -> Node:
     ipv4 = sorted(value for value in addresses if value.version == 4 and value in TAILNET)
     if not ipv4:
         raise TailnetError("this node has no Tailscale IPv4 address")
-    return Node(addresses, owner, ipv4[0], name(own))
+    return Node(addresses, owner, ipv4[0])

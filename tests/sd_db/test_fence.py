@@ -104,6 +104,14 @@ class TheRole(StubCase):
                 self.assertEqual(found.state, "unknown")
                 self.assertIn("Tailscale does not name this node", found.reason)
 
+    def test_a_node_cut_from_the_control_plane_is_unknown(self):
+        """Third review: `DNSName` comes from the cached netmap, so offline it can be a name the console took away."""
+        self.name_hub(HUB_NAME)
+        self.node(online=False)
+        found = self.role()
+        self.assertEqual(found.state, "unknown", found.reason)
+        self.assertIn("not connected to the Tailscale control plane", found.reason)
+
     def test_an_unreadable_setting_row_is_unknown(self):
         connection = database.connect(self.path)
         connection.execute("INSERT INTO state (kind, key, body, timestamp) VALUES ('setting', ?, 'nope', '2026')",
@@ -181,6 +189,13 @@ class TheLaneHost(StubCase):
         with self.assertRaisesRegex(ship.LaneUnknown, "Tailscale does not name this node"):
             self.hosts()
 
+    def test_a_partitioned_hub_runs_no_lane(self):
+        """The lane host check, `still_hosted` and the ship lock all read the fence here."""
+        self.name_hub(HUB_NAME)
+        self.node(online=False)
+        with self.assertRaisesRegex(ship.LaneUnknown, "not connected to the Tailscale control plane"):
+            self.hosts()
+
     def test_a_lane_elsewhere_never_asks_the_fence(self):
         self.assertFalse(self.hosts("build-3"))
         self.assertEqual(self.asked(), [])
@@ -222,6 +237,14 @@ class TheServer(StubCase):
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("this machine is not the hub: Tailscale does not name this node", done.stderr)
 
+    def test_a_partitioned_hub_does_not_listen(self):
+        """Startup read the name from `this_node`'s status, past the fence's own reader."""
+        self.name_hub(HUB_NAME)
+        self.node(ips=["100.100.100.100"], online=False)
+        done = self.run_serve("--port", "0")
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("not connected to the Tailscale control plane", done.stderr)
+
     def test_no_setting_goes_on_to_bind(self):
         self.node(ips=["100.100.100.100"])
         done = self.run_serve("--port", "0")
@@ -234,7 +257,7 @@ class TheServer(StubCase):
         done = self.run_serve("--port", "0")
         self.assertEqual(done.returncode, 1, done.stderr)
         self.assertIn("cannot listen on 100.100.100.100:0", done.stderr)
-        self.assertEqual(self.asked(), [["status", "--json"]], "one status call names the node and its name")
+        self.assertEqual(self.asked(), [["status", "--json"]] * 2, "one for the node, one for the fence's name")
 
     def test_loopback_is_not_fenced(self):
         self.node("old-hub.example.test.")
@@ -268,14 +291,14 @@ class TheLiveServer(StubCase):
         self.rename(HUB_NAME + ".")
         self.stream = io.StringIO()
         node = tailnet.Node(frozenset({ipaddress.ip_address(self.HUB_IP)}), self.OPERATOR,
-                            ipaddress.IPv4Address("127.0.0.1"), HUB_NAME)
+                            ipaddress.IPv4Address("127.0.0.1"))
         self.server = serve.Server(0, self.path, serve.Log(self.stream), "", self.root / "unused.token", node)
         self.addCleanup(self.server.server_close)
 
-    def rename(self, dnsname: str) -> None:
+    def rename(self, dnsname: str, **state) -> None:
         whois = {self.SATELLITE: {"Node": {"Addresses": [f"{self.SATELLITE}/32"], "Tags": []},
                                   "UserProfile": {"LoginName": self.OPERATOR}}}
-        self.node(dnsname, ips=[self.HUB_IP], login=self.OPERATOR, whois=whois)
+        self.node(dnsname, ips=[self.HUB_IP], login=self.OPERATOR, whois=whois, **state)
 
     def rows(self) -> int:
         watch = database.connect(self.path, write=False)
@@ -324,6 +347,18 @@ class TheLiveServer(StubCase):
         self.assertFalse(answers[0]["ok"], answers)
         self.assertIn(f"this machine is not the hub: sd.hub_name names {HUB_NAME}", answers[0]["error"]["text"])
         self.assertEqual(answers[1:], [None], "a fenced server answered a second frame")
+        self.assertEqual(self.rows(), 0)
+
+    def test_a_partition_after_start_refuses_the_next_frame(self):
+        """Third review: the old hub keeps its cached name while cut from the control plane."""
+        self.enterContext(mock.patch.object(serve, "FENCE_SECONDS", 0.0))
+        self.assertTrue(self.session(remote.request("close"))[0]["ok"])
+        self.rename(HUB_NAME + ".", online=False)
+        answers = self.session(remote.request("execute", sql="INSERT INTO probe (name) VALUES ('stale')", params=None,
+                                              rid=remote.new_request_id()))
+        self.assertFalse(answers[0]["ok"], answers)
+        self.assertIn("not connected to the Tailscale control plane", answers[0]["error"]["text"])
+        self.assertEqual(answers[1:], [None])
         self.assertEqual(self.rows(), 0)
 
     def test_a_rename_mid_session_refuses_the_write_and_rolls_back(self):
@@ -476,6 +511,11 @@ class TheVerb(StubCase):
         done = self.fence()
         self.assertEqual(done.returncode, 1)
         self.assertIn("sd-db: fence: unknown: Tailscale does not name this node", done.stdout)
+        self.node(online=False)
+        done = self.fence()
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("sd-db: fence: unknown:", done.stdout)
+        self.assertIn("not connected to the Tailscale control plane", done.stdout)
 
     def test_a_satellite_is_elsewhere_and_asks_nobody(self):
         config = self.root / "home" / ".config" / "sd" / "hub.json"
@@ -491,7 +531,6 @@ class TheName(StubCase):
     def test_this_name_is_the_magicdns_name_without_its_dot(self):
         self.node("Hub.Example.Test.")
         self.assertEqual(tailnet.this_name(), HUB_NAME)
-        self.assertEqual(tailnet.this_node().name, HUB_NAME)
 
 
 if __name__ == "__main__":

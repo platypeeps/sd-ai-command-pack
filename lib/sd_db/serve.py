@@ -924,7 +924,7 @@ def serve(port: int, database_path: Path, stream=sys.stderr, *, loopback: bool =
             log.line(f"cannot serve on the tailnet: {error}")
             return 1
         # The fence (hub failover, D5): a returning old hub serves its stale database to nobody.
-        found = hub.role_at(target, name=lambda: node.name or tailnet.this_name())
+        found = hub.role_at(target)
         if found.refuses:
             log.line(f"cannot serve on the tailnet: this machine is not the hub: {found.reason}")
             return 1
