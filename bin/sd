@@ -1318,6 +1318,27 @@ def settings(config: dict[str, object], prefix: str) -> dict[str, object]:
     return mine
 
 
+def is_fleet(prefix: str, key: str) -> bool:
+    """Whether `prefix.key` is a fleet key, held as a workflow database row (sd:3989)."""
+    return prefix == "sd" and key in sd_lib.FLEET_KEYS
+
+
+def sourced_value(prefix: str, key: str) -> tuple[object, str]:
+    """`prefix.key`'s value and its source: `database`, `file` or `default`.
+
+    A fleet key reads its row first; one whose row hides a `config.json`
+    value names that file value on stderr, so a stale line is seen, not read.
+    """
+    if not is_fleet(prefix, key):
+        value = settings(sd_lib.machine_config(), prefix).get(key)
+        return value, "default" if value in (None, "") else "file"
+    value, source = sd_lib.fleet_setting(key)
+    if source == "database" and key in settings(sd_lib.machine_config(), prefix):
+        print(f"sd config: sd.{key} in {sd_lib.machine_config_path()} is not read: the workflow database "
+              f"holds it; delete that line", file=sys.stderr)
+    return value, source
+
+
 def config_get(args: argparse.Namespace) -> int:
     prefix, key = split_setting(args.key)
     declared, _ = declared_config(prefix)
@@ -1325,8 +1346,7 @@ def config_get(args: argparse.Namespace) -> int:
         raise Refusal(
             f"{prefix} declares no config key {key!r}"
             f" -- declared: {', '.join(sorted(declared))}")
-    stored = settings(sd_lib.machine_config(), prefix)
-    value = stored.get(key)
+    value = sourced_value(prefix, key)[0]
     if value in (None, ""):
         # The remedy matters more than the diagnosis, and this is inherited
         # rather than invented: the skills calling this are told to stop and
@@ -1357,6 +1377,12 @@ def config_set(args: argparse.Namespace) -> int:
         # the permissive failure nobody notices.
         raise Refusal(f"{value!r} does not match {pattern!r} ({declared[key]['description']})")
 
+    if is_fleet(prefix, key):
+        # The row, never the file; a machine with no database keeps the file (sd:3989).
+        written, replaced = sd_lib.set_fleet_setting(key, value)
+        if written:
+            print(f"{args.key}: {replaced or '(unset)'} -> {value} (workflow database)")
+            return 0
     config_path = sd_lib.machine_config_path()
     config = sd_lib.machine_config(config_path)
     stored = config.get(SETTINGS_KEY)
@@ -1374,6 +1400,14 @@ def config_set(args: argparse.Namespace) -> int:
 def config_unset(args: argparse.Namespace) -> int:
     prefix, key = split_setting(args.key)
     declared_config(prefix)
+    if is_fleet(prefix, key):
+        # A cleared row, so a file value the row hid cannot come back (sd:3989).
+        if sd_lib.fleet_setting(key)[0] is None:
+            raise Refusal(f"{args.key} is not set")
+        written, _was = sd_lib.set_fleet_setting(key, None)
+        if written:
+            print(f"unset {args.key} (workflow database)")
+            return 0
     config_path = sd_lib.machine_config_path()
     config = sd_lib.machine_config(config_path)
     mine = dict(settings(config, prefix))
@@ -1408,15 +1442,18 @@ def config_list(args: argparse.Namespace) -> int:
 
     declared, _ = declared_config(args.prefix)
     stored = settings(sd_lib.machine_config(), args.prefix)
+    # Each key with its source, so a fleet key's row and an ignored file line are told apart (sd:3989).
+    found = {key: sourced_value(args.prefix, key) for key in sorted(declared)}
     if args.json:
         json.dump(
-            {key: {**spec, "value": stored.get(key)} for key, spec in sorted(declared.items())},
+            {key: {**spec, "value": found[key][0], "source": found[key][1]} for key, spec in sorted(declared.items())},
             sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
         return 0
     width = max(len(key) for key in declared)
     for key, spec in sorted(declared.items()):
-        print(f"{key:<{width}}  {stored.get(key) or '(unset)'}")
+        value, source = found[key]
+        print(f"{key:<{width}}  {value or '(unset)'}  [{source}]")
         print(f"{'':<{width}}  {spec['description']}")
     unread = sorted(set(stored) - set(declared))
     if unread:

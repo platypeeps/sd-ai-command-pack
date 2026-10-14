@@ -9,6 +9,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any
 
 from sd_db import connect
 from sd_db.channels import UrlRefusal, record_url
@@ -38,7 +39,7 @@ class RecordUrl(unittest.TestCase):
             "SELECT body FROM note WHERE item = ? AND kind = 'comment' ORDER BY id", (self.item,))]
 
     def record(self, **changes):
-        given = dict(item=self.item, repo=self.repo, document="a", title="A", channel="notion", url=URL,
+        given: dict[str, Any] = dict(item=self.item, repo=self.repo, document="a", title="A", channel="notion", url=URL,
                      who="sd-research-kit")
         given.update(changes)
         return record_url(self.connection, **given)
