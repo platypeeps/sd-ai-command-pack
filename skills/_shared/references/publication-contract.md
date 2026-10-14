@@ -92,9 +92,9 @@ A skill that emits its own HTML meets the same rule by itself.
 The dashboard finds `docs/dashboard/` by itself: every checkout under its
 `REPO_ROOT` holding that directory is a document root, enumerated from disk.
 So a repository publishing to the default location enters the Documents tab
-by having the directory, and the only thing left to say is what to call it:
-
-    label|<key>|<label>
+by having the directory. Its name is the workflow database's `view` row, set
+on the Documents page, and the dashboard reads no `label|` line (sd:3986), so
+the default location needs no row in `documents.conf` at all.
 
 `root|<key>|<label>|<directory>` stays for a directory the dashboard cannot
 find — somewhere outside `docs/dashboard/`, as `hoa` publishes into `reports`.
@@ -104,18 +104,20 @@ location.** It is the default written down a second time, and it goes stale the
 moment the repository moves while still looking authoritative — which is the
 drift the enumeration removed.
 
-Whatever installs the repository's documents writes that line, and writes it
-once. For a research repo that is `sd-research-kit render`, which registers
-`docs/dashboard/` at the end of every run; `sd-research-kit publish` does the
-same without rebuilding. Registration is idempotent, and a key already naming
-another directory is reported rather than overwritten.
+For a research repo, `sd-research-kit render` checks the file at the end of
+every run, and `sd-research-kit publish` does the same without rebuilding. It
+writes no row for `docs/dashboard/`, and a `label|` row an earlier renderer
+wrote stays where it is: the Documents page names it, and Rename replaces it.
+A `root|` row for a directory outside the default is written once and is
+idempotent, and a key already naming another directory is reported rather than
+overwritten.
 
 One exception to "reported rather than overwritten": a row for this
 repository's key naming a directory *inside this repository* is this
 repository's row, and is rewritten in place rather than duplicated. That
 retires a `build/` row — the published directory before `docs/dashboard/` —
 and it retires a `root|` row for the default location that an earlier renderer
-wrote, replacing it with the `label|` row and keeping the label it carried. A
+wrote, because that row outranks the directory the dashboard finds. A
 row naming *another* repository's directory is still a collision, and is still
 only reported.
 
