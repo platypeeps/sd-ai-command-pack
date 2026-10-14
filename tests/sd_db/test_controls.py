@@ -810,22 +810,21 @@ class AQuietTickWritesNoItem(unittest.TestCase):
                          "two stale pins")
         self.assertEqual(len(self.items()), 1)
 
-    def test_the_recovery_files_a_report_and_the_tick_after_it_does_not(self):
-        """The transition a quiet job would otherwise hide.
+    def test_the_recovery_writes_a_heartbeat_and_files_no_item(self):
+        """A clean run files no report, the one after a failure too (sd:3509).
 
-        A failing report stays `planning` and never says it stopped being true,
-        so without a row here the operator reads a failure that was fixed hours
-        ago and has no way to tell.
+        Recovery reports were most of the clean reports: 298 in 14 days, 85
+        from one flapping job. The heartbeat records the recovery, so
+        `health` reads it, and the failure's own report waits for a person.
         """
-        self.tick("bad", exit_code=1, text="broke\n")
+        failed = self.tick("bad", exit_code=1, text="broke\n")
         recovered = self.tick("good")
-        self.assertEqual(recovered["recorded"], "report")
-        self.assertEqual(recovered["why"], "the job recovered")
-        self.assertFalse(json.loads(recovered["item"]["fields"])["attention"])
-        self.assertEqual(len(self.items()), 2)
+        self.assertEqual((recovered["recorded"], recovered["why"]), ("heartbeat", "the job recovered"))
+        self.assertEqual(self.items(), [{"id": failed["item"]["id"], "title": "watchdog: needs attention"}])
+        self.assertIs(reporting.health(self.db, "watchdog"), True)
         # And the job is quiet again from here.
         self.assertEqual(self.tick("also-good")["recorded"], "heartbeat")
-        self.assertEqual(len(self.items()), 2)
+        self.assertEqual(len(self.items()), 1)
 
     def test_a_first_ever_clean_tick_is_a_baseline_and_not_a_recovery(self):
         self.assertIsNone(reporting.health(self.db, "watchdog"))

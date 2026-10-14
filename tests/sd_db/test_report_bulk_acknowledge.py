@@ -471,9 +471,15 @@ class AReplayAfterABulkAcknowledge(Store):
         return tuple(self.db.execute(f"SELECT count(*) FROM {table}").fetchone()[0] for table in ("item", "note"))
 
     def test_replaying_an_acknowledged_recovery_returns_it_done_and_writes_nothing(self):
+        # A recovery report as the version before sd:3509 filed one, beside the heartbeat it wrote.
         failed = self.ingest("a", "2026-09-10T00:00:00+00:00", exit_code=1, text="boom\n")
-        recovered = self.ingest("b", "2026-09-10T00:15:00+00:00", exit_code=0, text="ok\n")
-        self.assertEqual(recovered["why"], "the job recovered")
+        self.assertEqual(self.ingest("b", "2026-09-10T00:15:00+00:00", exit_code=0, text="ok\n")["why"],
+                         "the job recovered")
+        with mock.patch.object(writes, "now", return_value="2026-09-10T00:15:00+00:00"):
+            recovered = reporting.ingest(self.db, job="probe", run_id="b", started="2026-09-10T00:00:00+00:00",
+                                         ended="2026-09-10T00:15:00+00:00", exit_code=0, text="ok\n",
+                                         source_path=str((self.root / "b.log").resolve()),
+                                         attention_basis="not supplied by the job")
         self.assertEqual(recovered["item"]["created_at"], "2026-09-10T00:15:00+00:00")
         followup, = [note["id"] for note in failed["notes"] if note["kind"] == "followup"]
         resolve_note(self.db, followup)
