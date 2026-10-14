@@ -439,6 +439,12 @@ def squash_allowed(base: str, protection: dict) -> None:
 ANCESTOR_CLEARANCE = "an ancestor of the merge head"
 
 
+def acceptance_row_answered(row: object) -> bool:
+    """An acceptance row that names its criterion and evidence and either passed or says it was waived (sd:3704)."""
+    return (isinstance(row, dict) and bool(row.get("criterion")) and bool(row.get("evidence"))
+            and (row.get("passed") is True or (row.get("passed") is False and "waived" in row)))
+
+
 class Ship(SharedReview):
     #: What the last `merge_ownership` read found: the authority record when
     #: the repository row overrode co-ownership, `None` when ownership alone
@@ -572,10 +578,44 @@ class Ship(SharedReview):
         value = json.loads(self.args.acceptance_file.read_text(encoding="utf-8"))
         rows = value.get("criteria") if isinstance(value, dict) else None
         if (not isinstance(value, dict) or value.get("item") != self.args.item or value.get("complete") is not True or not isinstance(rows, list)
-                or not rows or any(not isinstance(row, dict) or not row.get("criterion") or not row.get("evidence")
-                                   or row.get("passed") is not True for row in rows)):
-            raise Refusal("acceptance file must name this item and passing evidence for every criterion")
+                or not rows or not all(map(acceptance_row_answered, rows))):
+            raise Refusal("acceptance file must name this item and, for every criterion, passing evidence "
+                          "or `passed: false` with a waiver")
+        value["criteria"] = [{**row, "waived": self.waiver(row)} if row.get("passed") is False else row for row in rows]
         return {"claim": value, "item_scope": scope}
+
+    def waiver(self, row: dict) -> dict:
+        """A waived row's `waived`, with the decision note that waived it (sd:3704).
+
+        The note must be a `decision` on the claimed item holding a `Waive:`
+        line equal to the row's criterion, after whitespace is collapsed; a
+        mention, or a shorter or longer criterion, waives nothing. The stored
+        claim keeps the note's id, body and session. A failed read refuses.
+        """
+        waived = row["waived"]
+        if (not isinstance(waived, dict) or not isinstance(waived.get("reason"), str) or not waived["reason"].strip()
+                or type(waived.get("decision")) is not int):
+            raise Refusal(f"the waived criterion {row['criterion']!r} needs `waived: {{\"reason\": TEXT, "
+                          f"\"decision\": NOTE_ID}}`", code="waiver_refused")
+        decision = waived["decision"]
+        try:
+            note = self.connection.execute("SELECT id, item, kind, body, session FROM note WHERE id = ?",
+                                           (decision,)).fetchone()
+        except sqlite3.Error as error:
+            raise Refusal(f"decision note #{decision} could not be read ({error}); nothing is waived",
+                          code="waiver_unread", boundary="database", state="retryable_failure") from None
+        if note is None or note["item"] != self.args.item or note["kind"] != "decision":
+            where = "no note" if note is None else f"a {note['kind']} note on sd:{note['item']}"
+            raise Refusal(f"note #{decision} is {where}, not a decision note on sd:{self.args.item}; "
+                          f"nothing is waived", code="waiver_refused")
+        wanted = " ".join(str(row["criterion"]).split())
+        if not any(line.startswith("Waive:") and " ".join(line[len("Waive:"):].split()) == wanted
+                   for line in str(note["body"]).splitlines()):
+            raise Refusal(f"decision note #{decision} has no `Waive: {wanted}` line; write one with "
+                          f"`sd task note {self.args.item} $'<ruling>\\nWaive: {wanted}' --kind decision`",
+                          code="waiver_not_exact")
+        return {"reason": waived["reason"].strip(), "decision": decision,
+                "note": {"id": note["id"], "body": note["body"], "session": note["session"]}}
 
     def require_claim(self) -> None:
         """Refuse a first item prepare that does not say whether it delivers (sd:1928).
@@ -1919,9 +1959,16 @@ class Ship(SharedReview):
         # The tool that verified the merge is the actor, as sd_db's own
         # ship transition names it.
         if self.item["kind"] == "work":
-            deliver_work(self.connection, self.args.item, commit, who="sd-ship", verification_root=self.root)
+            deliver_work(self.connection, self.args.item, commit, who="sd-ship", verification_root=self.root,
+                         waived=self.waived())
         else:
-            self.close_task(commit, ref)
+            self.close_task(commit, ref, waived=self.waived())
+
+    def waived(self) -> list[dict]:
+        """`{criterion, decision}` for each waived row of the stored claim (sd:3704)."""
+        claim = (self.state.get("acceptance") or {}).get("claim") or {}
+        return [{"criterion": row["criterion"], "decision": row["waived"]["decision"]}
+                for row in claim.get("criteria") or [] if row.get("passed") is False and isinstance(row.get("waived"), dict)]
 
     def squash_message(self, reviewed: str) -> tuple[str, dict]:
         """The squash message, with the owed `Closes:` lines inside its one trailer block (sd:1600)."""
@@ -1967,7 +2014,7 @@ class Ship(SharedReview):
         base = self.state["pull_request"]["base"]
         return f"close it with `sd task status {self.args.item} done --reason 'delivered at {commit} on origin/{base}'`"
 
-    def close_task(self, commit: str, ref: str, number: int | None = None) -> None:
+    def close_task(self, commit: str, ref: str, number: int | None = None, waived: list[dict] | None = None) -> None:
         """Move a delivering task or followup (the claimed item by default) to done once.
 
         `reconcile` has already verified `commit` on the fetched tip of `ref`.
@@ -1988,8 +2035,9 @@ class Ship(SharedReview):
         block = sd_lib.trailer_block(git(self.root, "show", "-s", "--format=%B", commit)).splitlines()
         if not any(line.partition(":")[0] == "Delivers" and line.partition(":")[2].strip() == wanted for line in block):
             raise ValueError(f"{commit} carries no `Delivers: {wanted}` trailer")
+        from sd_db.progress import waived_suffix
         change_status(self.connection, number, "done", who="sd-ship",
-                      reason=f"delivered at {commit} on {ref}")
+                      reason=f"delivered at {commit} on {ref}{waived_suffix(waived or [])}")
 
     def require_copilot_abandonment_authority(self) -> None:
         if self.args.abandon_copilot_review is not None and not self.args.manual:
