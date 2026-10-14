@@ -78,7 +78,7 @@ released claim writes nothing more; a hub fault is tried again for
 `WRITE_RETRY_SECONDS`, then the run stops, and a hub that refuses this
 build stops it at once (sd:3359). Such a stop leaves a record beside the
 runner lock, so the next run settles the entry as a hub fault and not as
-a death (`record_hub_stop`, sd:TBD). A holder on this machine is dead
+a death (`record_hub_stop`, sd:4184). A holder on this machine is dead
 when the runner lock is free and its pid is gone; one on another machine
 once its lease passed, which the lane host checks at claim. In prepare its
 entry goes back to pending, failing at the `RECLAIMS`th time; in merge it
@@ -169,7 +169,7 @@ would meet the same hub. The next run starts after the satellite's
 self-install, in a new process. A catch-up merge prepare made is accepted
 as the entry's head; any other move still skips the entry. A hub fault is
 never the entry's, so past `HUB_RETRIES` the entry is held, not failed, and
-`lane release` runs it again (sd:TBD). When the hub refuses the put-back
+`lane release` runs it again (sd:4184). When the hub refuses the put-back
 too, as it refuses a build it moved past, the runner records the stop in
 its lane folder (`record_hub_stop`) and the next run's reclaim reads it:
 eight prepares spent a reclaim as a dead runner's, and a merge failed,
@@ -305,7 +305,7 @@ WRITE_RETRY_SECONDS = 600
 WRITE_PAUSE = 30
 #: The reclaim of a dead holder in prepare that fails its entry instead of putting it back, so a crash loop stops.
 RECLAIMS = 3
-#: A runner stopped by a hub fault while it held a claim leaves `<lane>/queue/<prefix><token>.json` (sd:TBD).
+#: A runner stopped by a hub fault while it held a claim leaves `<lane>/queue/<prefix><token>.json` (sd:4184).
 HUB_STOP_PREFIX = "hub-stop-"
 #: A merge lease is `MERGE_SECONDS` and this long for the landing.
 LANDING_SECONDS = 1800
@@ -1485,7 +1485,7 @@ def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = Fals
     host = this_host()
     try:
         following = next((row for row in read_queue(queue) if runnable(row)), None)
-    except LaneError:  # a hub fault here left the claimed entry running under a runner that raised (sd:TBD)
+    except LaneError:  # a hub fault here left the claimed entry running under a runner that raised (sd:4184)
         return None
     if following is None or merge_refusal(entry) is not None:
         return None
@@ -1841,7 +1841,7 @@ def host_check(queue: Queue) -> Callable[[Any], None]:
             elsewhere = sd_lib.lane_elsewhere(connection, hub_database(queue.environ), queue.repository)
         except Exception as error:  # noqa: BLE001 -- `LaneUnknown`, or a read fault it did not wrap
             fault = hub_fault_of(error)
-            if fault is not None:  # a retried claim that landed unseen must stop as a hub fault (sd:TBD)
+            if fault is not None:  # a retried claim that landed unseen must stop as a hub fault (sd:4184)
                 raise fault from None
             raise LaneError(str(error), code=getattr(error, "code", None) or "lane_unknown") from None
         if elsewhere is not None:
@@ -1893,7 +1893,7 @@ def reclaim_dead(entries: list[dict[str, Any]], stops: dict[str, Any] | None = N
 
 
 def resume_stopped(row: dict[str, Any], record: dict[str, Any]) -> dict[str, Any]:
-    """Settle a running entry whose runner stopped on a hub fault, by its `record`; never as a death (sd:TBD).
+    """Settle a running entry whose runner stopped on a hub fault, by its `record`; never as a death (sd:4184).
 
     A recorded `outcome` is the end the runner reached and could not write,
     a merge included, and lands as `finish_entry` writes it. Otherwise the
@@ -1913,7 +1913,7 @@ def resume_stopped(row: dict[str, Any], record: dict[str, Any]) -> dict[str, Any
 
 
 def hub_fields(retries: int, fault: dict[str, Any]) -> dict[str, Any]:
-    """The fields of an entry put back after its `retries + 1`th hub fault; held past `HUB_RETRIES` (sd:TBD)."""
+    """The fields of an entry put back after its `retries + 1`th hub fault; held past `HUB_RETRIES` (sd:4184)."""
     fields: dict[str, Any] = {"hub_retries": retries + 1, "hub_fault": {**fault, "at": fault.get("at") or stamp_now()}}
     if retries >= HUB_RETRIES:
         fields.update(held=True, held_at=stamp_now())
@@ -1928,7 +1928,7 @@ def hub_stop_path(queue: Queue, token: str) -> pathlib.Path:
 
 def record_hub_stop(queue: Queue, token: str, error: Stop, entry: dict[str, Any] | None = None,
                     outcome: dict[str, Any] | None = None, tree: pathlib.Path | None = None) -> str:
-    """Record a stop on a hub fault while `token` may hold a claim; the stop's text for `stopped` (sd:TBD).
+    """Record a stop on a hub fault while `token` may hold a claim; the stop's text for `stopped` (sd:4184).
 
     The hub refused the write that would settle the entry, most often a
     build it moved past, so the entry stays `running` under a runner that is
@@ -2064,7 +2064,7 @@ def advance(queue: Queue, entry: dict[str, Any], token: str) -> None:
             found = sd_lib.lane_elsewhere(connection, hub_database(queue.environ), queue.repository)
         except Exception as error:  # noqa: BLE001 -- `LaneUnknown`, or a read fault it did not wrap
             fault = hub_fault_of(error)
-            if fault is not None:  # `on_hub` names it `hub_unavailable`, which the stop's record keeps (sd:TBD)
+            if fault is not None:  # `on_hub` names it `hub_unavailable`, which the stop's record keeps (sd:4184)
                 raise fault from None
             raise Stop(f"Cannot read the lane host before the merge: {error}. No merge started; the next run "
                        "settles the entry.", code="lane_unknown") from None
@@ -2313,7 +2313,7 @@ def requeue(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, 
     """Put a running entry back as pending; what it met and what follows, or None once its retries are spent.
 
     A hub fault puts it back `HUB_RETRIES` times (sd:3239), then held, never
-    failed (`hub_fields`, sd:TBD); a retryable prepare refusal that spent no
+    failed (`hub_fields`, sd:4184); a retryable prepare refusal that spent no
     review pass `RETRYABLE_RETRIES` times (sd:3478). Each has its own count.
     It keeps its place, and `hub_fault` or `retryable_fault` says what failed
     where; a later outcome writes its own fields beside it. Its
@@ -2341,7 +2341,7 @@ def settle_checkout(root: pathlib.Path, queue: Queue) -> dict[str, Any]:
 
     A hub-stop record goes once the reclaim's write landed and no running
     entry holds its token: settled now, or by a run that died before its
-    removal, or a claim the hub never took (sd:TBD).
+    removal, or a claim the hub never took (sd:4184).
     """
     imported = import_file_queue(root, queue, runner_locked=True)
     stops, running = hub_stops(queue), set[str]()

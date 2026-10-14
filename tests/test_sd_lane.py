@@ -762,7 +762,7 @@ class Runner(Lane):
                 self.assertEqual(self.entries()[-1]["status"], "skipped" if builder else "merged")
 
     def test_a_hub_that_keeps_failing_holds_the_entry_after_its_retries(self) -> None:
-        """sd:TBD. A hub fault is never the entry's: past its retries it waits, held, instead of failing."""
+        """sd:4184. A hub fault is never the entry's: past its retries it waits, held, instead of failing."""
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "prepare")] = self.HUB_FAULT
         for _ in range(sd_lane.HUB_RETRIES):
@@ -2202,7 +2202,7 @@ class ClaimAndLease(SharedQueue):
 
     def test_a_finish_write_that_fails_after_a_merge_is_merged_by_reclaim(self) -> None:
         """Failure table, finish: the hub fails after a merge; the run stops, and reclaim writes the outcome it
-        kept (sd:TBD). A runner that died without a record still fails it: see the mid-merge test above."""
+        kept (sd:4184). A runner that died without a record still fails it: see the mid-merge test above."""
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
         with self.failing_store(lambda entry: entry.get("status") == "merged"):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -2234,7 +2234,7 @@ class ClaimAndLease(SharedQueue):
 
 
 class HubSkew(SharedQueue):
-    """sd:TBD. The hub's `sd_db` moved past this machine's mid-run five times on 2026-10-14.
+    """sd:4184. The hub's `sd_db` moved past this machine's mid-run five times on 2026-10-14.
 
     `sd-ship` answered `hub_unavailable`, but the runner's own write that settles the entry met the same
     refusal, so the entry stayed `running` under a runner that had stopped. The next run reclaimed it as
