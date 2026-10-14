@@ -2362,6 +2362,11 @@ class ChannelsTests(Fixture):
         self.row({"feed": {"url": "https://example.test/feed.xml"}})
         self.assert_origin_main()
 
+    def test_a_setting_naming_only_issue_sources_matches_the_origin_main_fixture(self) -> None:
+        """sd:3461: the Jira and GitHub issue sources are inbound too."""
+        self.row({"jira": {"project": "EXAMPLE"}, "github": {"repo": "example/project"}})
+        self.assert_origin_main()
+
     # Folders.
 
     def test_a_notion_folder_replaces_the_repo_subfolder(self) -> None:
