@@ -65,9 +65,9 @@ class OversizeTests(ReviewFixture):
         (root / "change.py").write_text("small change")
         runner = FakeRunner()
         result = sd_review.review(root, namespace(), runner, self.environment(), self.chatgpt_home())
-        # The gate, the skill probe, the review. The probe is a codex call and
-        # is counted here so a fourth call cannot arrive unnoticed.
-        self.assertEqual(len(runner.calls), 3, [call["argv"][:3] for call in runner.calls])
+        # The gate, the skill probe, its `--version` read (sd:3499), the review.
+        # The probe is a codex call and is counted here so a fifth call cannot arrive unnoticed.
+        self.assertEqual(len(runner.calls), 4, [call["argv"][:3] for call in runner.calls])
         self.assertEqual(result["status"], "clean")
         self.assertEqual(result["input_manifest"]["status"], "within_limit")
 
@@ -106,8 +106,9 @@ class OversizeTests(ReviewFixture):
                     result = sd_review.review(root, namespace(provider=provider), runner, self.environment(), self.chatgpt_home())
                     calls = codex_sessions(runner)
                     self.assertEqual(len(calls), 1)
-                    # The gate runs only after a review that cleared (sd:2605).
-                    self.assertEqual(len(runner.calls), 2 if failed else 3, "oversized fallback must never dispatch")
+                    # The gate runs only after a review that cleared (sd:2605); the
+                    # skill probe and its `--version` read (sd:3499) run first.
+                    self.assertEqual(len(runner.calls), 3 if failed else 4, "oversized fallback must never dispatch")
                     self.assertEqual(result["readiness"]["status"], "ready")
                     self.assertEqual(result["input_manifest"]["transport_bytes"]["codex"], len(calls[0]["stdin"].encode()))
                     self.assertLess(len(calls[0]["stdin"].encode()), sd_review.MAX_OUTPUT_BYTES)

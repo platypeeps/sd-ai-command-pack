@@ -19,6 +19,12 @@ stages in the rows with the set in the frozen source, so a row that stored
 asked. `item.status` beside it is the declared map's answer to the same
 note: the ladder is the plugin's, the six statuses are the system's.
 
+**The body is stored verbatim (sd:3972).** Nothing strips a body line: a
+Meta Bind status control stays, and the mirror renderer decides how to draw
+it. `fields` drops `status`, which is `stage`, and `mirror-hash`, which
+belongs to the mirror file; a note with its own `kind` refuses, since
+`fields.kind` holds the declared one.
+
 **Every failure refuses the whole sitting and writes nothing.** A word the
 map does not name, a due value that is not a date, two plugins declaring one
 kind, a plugin the pack could not read: each stops the import and names what
@@ -57,6 +63,9 @@ DEFAULT_VAULT = "~/Documents/Obsidian Vault"
 LIST_SECONDS = 120
 
 DUE = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+#: Frontmatter keys a row keeps elsewhere: `status` is `stage`, `mirror-hash` is the mirror file's.
+NOT_FIELDS = frozenset({"status", "mirror-hash"})
 
 
 def vault_root(environ: dict[str, str] | None = None) -> Path:
@@ -125,6 +134,11 @@ def declared_bases(entries: list[dict[str, Any]],
             notes.append(f"{prefix}: declares no dated kinds; nothing imported")
             continue
         store = entry["store"]
+        if store.get("driver") == "db":
+            # The flip of this one value is the cutover: the rows are the
+            # source from then on, and notes imported over them would be older.
+            raise MigrationRefused(f"plugin {prefix}'s `store.driver` is 'db', so its rows are the "
+                                   f"source and the vault holds only their mirror; nothing imported")
         variable = str(store["root"])[1:]
         if variable == "OBSIDIAN_VAULT":
             root = vault_root(env)
@@ -176,9 +190,12 @@ class Reader:
                     f"would import as zero notes"
                 )
             found = sorted(directory.rglob("*.md"))
-            notes.append(f"{SOURCE}: {len(found)} {kind} note(s) under {base.relative}")
             for path in found:
                 matter, body = read_frontmatter(path.read_text(encoding="utf-8"))
+                if "kind" in matter:
+                    raise MigrationRefused(
+                        f"{path} has a `kind:` in its frontmatter; the row's `fields.kind` "
+                        f"holds the declared kind {kind!r}, so rename that key before the import")
                 stage = str(matter.get("status") or "").strip()
                 if not stage:
                     raise MigrationRefused(
@@ -192,7 +209,6 @@ class Reader:
                         f"manifest before the import writes a status it guessed."
                     )
                 identity = f"{kind}:{path.relative_to(base.root).as_posix()}"
-                fields = {"kind": kind, **{str(key): value for key, value in matter.items()}}
                 records[identity] = Record(
                     identity=identity,
                     payload={
@@ -201,10 +217,11 @@ class Reader:
                         "status": base.status[stage],
                         "created": str(matter.get("dateCreated") or "").strip(),
                         "due": _due(path, base, matter),
-                        "fields": digest(fields),
+                        "fields": digest(_fields(kind, matter)),
                         "body": digest({"markdown": body}),
                     },
                 )
+            notes.append(f"{SOURCE}: {len(found)} {kind} note(s) under {base.relative}")
         return Frozen(source=self.name, records=records, notes=notes)
 
     # ------------------------------------------------------------ import
@@ -215,9 +232,7 @@ class Reader:
         for identity in sorted(frozen.records):
             payload = frozen.records[identity].payload
             kind, _, relative = identity.partition(":")
-            path = roots[kind] / relative
-            matter, body = read_frontmatter(path.read_text(encoding="utf-8"))
-            fields = {"kind": kind, **{str(key): value for key, value in matter.items()}}
+            matter, body = read_frontmatter((roots[kind] / relative).read_text(encoding="utf-8"))
             _, what = upsert_item(
                 connection,
                 source=SOURCE,
@@ -230,8 +245,9 @@ class Reader:
                 due=payload["due"],
                 path=relative,
                 stage=payload["stage"],
-                fields=fields,
+                fields=_fields(kind, matter),
                 body={"markdown": body},
+                promoted_view=promoted_view,
             )
             counts.record(what)
         return counts
@@ -246,7 +262,7 @@ class Reader:
         # A promoted idea answers with the row it was promoted from (sd:1994).
         for promoted in promoted_rows(connection, SOURCE):
             origin = json.loads(promoted["fields"])["promoted_from"]
-            found.append({**origin["row"], "external_id": origin["external_id"]})
+            found.append({**promoted_view(origin["row"]), "external_id": origin["external_id"]})
         for row in found:
             held[row["external_id"]] = Record(
                 identity=row["external_id"],
@@ -261,6 +277,28 @@ class Reader:
                 },
             )
         return held
+
+
+def promoted_view(snapshot: dict[str, Any]) -> dict[str, Any]:
+    """A promoted idea's `promoted_from.row`, its fields read as `_fields` writes them (sd:1994, sd:3972).
+
+    A piece promoted from a row an older import wrote keeps `status` in its
+    fields. Read as it is, it would differ from the note though the note never
+    changed. The view removes `NOT_FIELDS` and nothing else; the body and
+    every other value compare as stored.
+    """
+    view = dict(snapshot)
+    fields = json.loads(view["fields"]) if isinstance(view.get("fields"), str) else None
+    if isinstance(fields, dict):
+        view["fields"] = json.dumps({key: value for key, value in fields.items() if key not in NOT_FIELDS},
+                                    sort_keys=True)
+    return view
+
+
+def _fields(kind: str, matter: dict[str, Any]) -> dict[str, Any]:
+    """A row's `fields`: the frontmatter without `NOT_FIELDS`, and the declared kind."""
+    return {**{str(key): value for key, value in matter.items() if str(key) not in NOT_FIELDS},
+            "kind": kind}
 
 
 def _due(path: Path, base: Base, matter: dict[str, Any]) -> str | None:

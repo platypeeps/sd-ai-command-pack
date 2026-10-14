@@ -113,6 +113,18 @@ class TheOpenSet(RegisterCase):
         self.assertIn("O30", str(caught.exception))
 
 
+class ThePath(unittest.TestCase):
+    def test_an_exported_empty_register_beats_the_file(self):
+        """sd:3970, the same class: `st_source_env` keeps an exported empty value."""
+        from sd_db.sources.register import REGISTER_RELATIVE, register_path
+        with tempfile.TemporaryDirectory() as directory:
+            conf = Path(directory) / "sd-db"; conf.mkdir()
+            (conf / ".env").write_text("SD_REGISTER=/elsewhere/register.md\n")
+            env = {"SYSTEM_TOOLS_CONFIG": directory, "SD_REPO_ROOT": "/repos"}
+            self.assertEqual(register_path(env), Path("/elsewhere/register.md"))
+            self.assertEqual(register_path({**env, "SD_REGISTER": ""}), Path("/repos") / REGISTER_RELATIVE)
+
+
 class TheImport(RegisterCase):
     def setUp(self):
         super().setUp()

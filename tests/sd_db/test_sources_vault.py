@@ -15,11 +15,14 @@ import tempfile
 import textwrap
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from sd_db import connect
 from sd_db.migrate import initialise
-from sd_db.sources import MigrationRefused, run
+from sd_db.sources import MigrationRefused, digest, run
+from sd_db.sources.frontmatter import read as read_frontmatter
 from sd_db.sources.vault import SOURCE, Reader, plugin_entries, stages_in
+from sd_db.writes import upsert_item
 
 from . import support
 
@@ -139,6 +142,128 @@ class TheImport(VaultCase):
                          {"topic"})
 
 
+META_BIND = "**Status:** `INPUT[inlineSelect(option(inbox), option(drafting)):status]`"
+
+
+class TheNormalization(VaultCase):
+    """sd:3972: bodies verbatim, `fields` without `status` and `mirror-hash`, the verify exact."""
+
+    IDEA = "blog-idea:System/Databases/Blog Ideas/first idea.md"
+
+    def add_meta_bind(self, relative, count=1):
+        self.edit(relative, "# ", "\n".join([META_BIND] * count) + "\n\n# ")
+
+    def test_a_body_with_status_controls_comes_back_byte_for_byte(self):
+        """Review round 3 ruling: the body is stored verbatim; nothing strips a line (sd:3972)."""
+        self.edit("System/Databases/Blog Ideas/first idea.md", "# ", "\n".join([
+            META_BIND, "", "```markdown", META_BIND, "\t```", META_BIND, "```", "~~~", META_BIND,
+            "<!--", META_BIND, "-->", "**My rating:** `INPUT[inlineSelect(option(1)):my-rating]`", META_BIND,
+        ]) + "\n# ")
+        path = self.vault / "System/Databases/Blog Ideas/first idea.md"
+        _, raw = read_frontmatter(path.read_text(encoding="utf-8"))
+        reader = self.reader()
+        frozen = reader.freeze()
+        self.assertEqual(frozen.records[self.IDEA].payload["body"], digest({"markdown": raw}))
+        sitting = run(self.connection, reader)
+        self.assertTrue(sitting.clean, sitting.report())
+        self.assertEqual(json.loads(self.items()[self.IDEA]["body"]), {"markdown": raw})
+
+    def test_a_body_with_no_status_control_lands_byte_for_byte(self):
+        """Blank runs, tabs and trailing spaces included."""
+        self.edit("System/Databases/Blog Ideas/first idea.md", "# ", "  \n\n\n\t`INPUT[` in prose  \n# ")
+        path = self.vault / "System/Databases/Blog Ideas/first idea.md"
+        _, body = read_frontmatter(path.read_text(encoding="utf-8"))
+        run(self.connection, self.reader())
+        self.assertEqual(json.loads(self.items()[self.IDEA]["body"])["markdown"], body)
+
+    def test_fields_hold_neither_status_nor_mirror_hash(self):
+        self.edit("System/Databases/Blog Ideas/first idea.md",
+                  "status: inbox\n", "status: inbox\nmirror-hash: 0123abcd\n")
+        sitting = run(self.connection, self.reader())
+        self.assertTrue(sitting.clean, sitting.report())
+        row = self.items()[self.IDEA]
+        fields = json.loads(row["fields"])
+        self.assertNotIn("status", fields)
+        self.assertNotIn("mirror-hash", fields)
+        self.assertEqual(fields["content-type"], "blog-idea")
+        self.assertEqual(row["stage"], "inbox")
+
+    def test_a_frontmatter_kind_refuses_rather_than_being_overwritten(self):
+        """Review round 1 class pass: `fields.kind` holds the declared kind, and a note's own `kind` is not dropped."""
+        self.edit("System/Databases/Blog Ideas/first idea.md",
+                  "status: inbox\n", "status: inbox\nkind: essay\n")
+        message = self.refused()
+        self.assertIn("first idea.md", message)
+        self.assertIn("`kind:`", message)
+
+    def test_a_row_the_previous_import_left_is_rewritten_normalized(self):
+        """Older state: a row landed with `status` in its fields; its body was verbatim then too."""
+        self.add_meta_bind("System/Databases/Blog Ideas/first idea.md")
+        path = self.vault / "System/Databases/Blog Ideas/first idea.md"
+        matter, body = read_frontmatter(path.read_text(encoding="utf-8"))
+        upsert_item(self.connection, source=SOURCE, external_id=self.IDEA, kind="idea",
+                    title="first idea", status="planning", who="vault migration",
+                    created_at="2026-06-15", path="System/Databases/Blog Ideas/first idea.md",
+                    stage="inbox", fields={"kind": "blog-idea", **matter}, body={"markdown": body})
+        self.connection.commit()
+        sitting = run(self.connection, self.reader())
+        self.assertTrue(sitting.clean, sitting.report())
+        self.assertEqual(sitting.counts.updated, 1)
+        row = self.items()[self.IDEA]
+        self.assertEqual(json.loads(row["body"]), {"markdown": body})
+        self.assertNotIn("status", json.loads(row["fields"]))
+
+    def test_a_second_run_over_meta_bind_notes_writes_nothing(self):
+        self.add_meta_bind("System/Databases/Blog Ideas/first idea.md")
+        run(self.connection, self.reader())
+        second = run(self.connection, self.reader())
+        self.assertTrue(second.clean, second.report())
+        self.assertEqual((second.counts.inserted, second.counts.updated), (0, 0))
+
+    def test_a_land_stopped_part_way_finishes_on_the_next_run(self):
+        """Failure table, import row 1: the land upserts by identity, so a rerun completes it."""
+        reader = self.reader()
+        calls: list[str] = []
+
+        def stop_after_two(*args, **kwargs):
+            if len(calls) == 2:
+                raise KeyboardInterrupt("stopped during land")
+            calls.append(kwargs["external_id"])
+            return upsert_item(*args, **kwargs)
+
+        with patch("sd_db.sources.vault.upsert_item", side_effect=stop_after_two), \
+                self.assertRaises(KeyboardInterrupt):
+            run(self.connection, reader)
+        self.connection.commit()
+        self.assertEqual(len(self.items()), 2)
+        sitting = run(self.connection, self.reader())
+        self.assertTrue(sitting.clean, sitting.report())
+        self.assertEqual((sitting.counts.inserted, sitting.counts.unchanged), (3, 2))
+
+
+class EveryDeclaredKind(VaultCase):
+    """S1: the five bases come in through their declarations, with no importer table."""
+
+    def test_a_kind_beyond_the_two_writing_kinds_is_imported(self):
+        market = self.vault / "System/Databases/Market Watch"
+        market.mkdir(parents=True)
+        (market / "Example Co.md").write_text(
+            "---\nstatus: candidate\ndateCreated: 2026-06-15\nslug: example-co\n---\n"
+            f"{META_BIND}\n\n# Example Co\n\nThe entity.\n", encoding="utf-8")
+        declared = entry(
+            workflow={"blog-idea": {"status": dict(BLOG_IDEA)}, "topic": {"status": dict(TOPIC)},
+                      "market": {"status": {"candidate": "planning", "active": "ready"}}},
+            store={"driver": "vault", "root": "$OBSIDIAN_VAULT", "bases": {
+                "blog-idea": "System/Databases/Blog Ideas", "topic": "System/Databases/Topics",
+                "market": "System/Databases/Market Watch"}})
+        sitting = run(self.connection, self.reader([declared]))
+        self.assertTrue(sitting.clean, sitting.report())
+        row = self.items()["market:System/Databases/Market Watch/Example Co.md"]
+        self.assertEqual((row["stage"], row["status"]), ("candidate", "planning"))
+        self.assertEqual(json.loads(row["fields"])["kind"], "market")
+        self.assertIn("vault: 1 market note(s) under System/Databases/Market Watch", sitting.notes)
+
+
 class TheDueField(VaultCase):
     def declared(self):
         return entry(workflow={"blog-idea": {"status": dict(BLOG_IDEA), "due-field": "due"},
@@ -214,6 +339,18 @@ class TheRefusals(VaultCase):
         sitting = run(self.connection, self.reader([entry(), entry(prefix="sys", workflow={})]))
         self.assertTrue(sitting.clean)
         self.assertIn("sys: declares no dated kinds; nothing imported", sitting.notes)
+
+    def test_a_db_store_driver_refuses_naming_the_driver_and_the_prefix(self):
+        """Failure table, after flip: the database is the source, so an import of notes would overwrite it."""
+        flipped = entry(store={**entry()["store"], "driver": "db"})
+        message = self.refused([flipped])
+        self.assertIn("`store.driver` is 'db'", message)
+        self.assertIn("sdw", message)
+
+    def test_a_db_driver_on_a_plugin_that_imports_nothing_does_not_refuse(self):
+        other = entry(prefix="sys", workflow={}, store={**entry()["store"], "driver": "db"})
+        sitting = run(self.connection, self.reader([entry(), other]))
+        self.assertTrue(sitting.clean, sitting.report())
 
     def test_no_plugin_declaring_any_kind_refuses(self):
         self.assertIn("no registered plugin declares", self.refused([entry(workflow={})]))

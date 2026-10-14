@@ -15,6 +15,7 @@ that would silently regress is the CSS going missing from the rendered page.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.machinery
 import importlib.util
@@ -28,6 +29,8 @@ import types
 import unittest
 import unittest.mock
 from pathlib import Path
+
+from tests.clean_env import clean_environment
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KIT = REPO_ROOT / "bin" / "sd-research-kit"
@@ -370,6 +373,7 @@ class WorkItemCoverageTests(unittest.TestCase):
             (item / "prd.md").write_text(
                 "---\ntitle: probe\nstatus: draft\ncreated: 2026-01-01\n---\n# Probe\n"
             )
+            subprocess.run(["git", "add", "docs/work"], cwd=tmp, check=True, env=clean_environment())
         return tmp
 
     def test_a_failing_work_item_fails_the_review(self) -> None:
@@ -422,6 +426,52 @@ class WorkItemCoverageTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("Mechanical checks pass", result.stdout)
         self.assertNotIn("docs/work", result.stdout)
+
+
+    def test_an_ignored_work_directory_is_not_linted(self) -> None:
+        """sd:3705. A developer checkout kept local items in an ignored
+        `docs/work/`, and the review failed there and passed in a clean worktree."""
+
+        with tempfile.TemporaryDirectory() as raw:
+            repo = self.make_repo(Path(raw), work=False)
+            (repo / ".gitignore").write_text("docs/work/\n")
+            item = repo / "docs" / "work" / "2026-01-01-probe"
+            item.mkdir(parents=True)
+            (item / "prd.md").write_text("---\ntitle: probe\nstatus: draft\n---\n# Probe\n")
+            result = run("review", cwd=repo)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertNotIn("docs/work", result.stdout)
+
+
+class TrackedLinkTests(unittest.TestCase):
+    """sd:3705. `checklinks` reads the tracked Markdown in a git repository."""
+
+    def check(self, repo: Path) -> int:
+        module = load_kit().load("sd_research_checklinks")
+        with contextlib.redirect_stdout(io.StringIO()):
+            return module.check(str(repo))
+
+    def test_an_ignored_folder_is_not_walked(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            subprocess.run(["git", "init", "-q"], cwd=repo, check=True, env=clean_environment())
+            (repo / ".gitignore").write_text("state/\n")
+            (repo / "README.md").write_text("[ok](README.md)\n")
+            (repo / "state" / "backup").mkdir(parents=True)
+            (repo / "state" / "backup" / "README.md").write_text("[gone](missing.md)\n")
+            subprocess.run(["git", "add", "."], cwd=repo, check=True, env=clean_environment())
+            self.assertEqual(self.check(repo), 0)
+            (repo / "docs").mkdir()
+            (repo / "docs" / "guide.md").write_text("[gone](missing.md)\n")
+            subprocess.run(["git", "add", "docs"], cwd=repo, check=True, env=clean_environment())
+            self.assertEqual(self.check(repo), 1)
+
+    def test_outside_git_every_file_is_walked(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            (repo / "state").mkdir()
+            (repo / "state" / "README.md").write_text("[gone](missing.md)\n")
+            self.assertEqual(self.check(repo), 1)
 
 
 class NotAResearchRepoTests(unittest.TestCase):

@@ -34,6 +34,13 @@ sequence somebody actually runs, and that is what these three say.
 `sd skill list --usage` prints each skill's recorded uses. A skill in
 `contrib/` is one command away, and use is what moves it.
 
+`sd skill intake <GitHub URL>` judges an outside skill against the installed
+set: its risk, its overlap with installed skills and its value, then a verdict
+of install, fold or decline. It installs nothing until `--approve` names the
+revision the report printed; the skill then lands in `contrib/` and records its
+source URL and commit. `sd skill intake <name>` fetches that source again,
+shows the diff and updates only on the same kind of approval.
+
 A repository can extend the framework from the other side. `sd plugin add`
 registers a **domain pack** — its own manifest, its own `<prefix>-*` skills, its
 own rows — and three exist today. What a manifest may declare, and what the
@@ -47,7 +54,8 @@ other halves are, is in [domain packs](docs/domain-packs.md).
 - `~/.claude/agents/sd-*.md` — and `--user` removes a hand-placed agent that
   one of them replaces, such as `slice-builder.md` for `sd-slice-builder`,
   when its digest is a known copy; an edited copy stays and is reported.
-  `AGENT_PREDECESSORS` in `bin/sd_install.py` is the list.
+  `AGENT_PREDECESSORS` in `bin/sd_install.py` is the list. `sd-slice-builder`'s
+  frontmatter runs the `sd-builder-guard` hook by name, through the link below.
 - `~/.local/bin/sd` and `~/.local/bin/sd-*` — one symlink per executable in
   `bin/`, so the commands resolve from any directory; `--bin-dir DIR` puts them
   elsewhere. The installer never edits `PATH`: `--user` warns when the link
@@ -187,6 +195,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.privacy_patterns` names the privacy-pattern file `sd-docs-lint --pr-body` checks a pull request body against, one extended regular expression per line (unset: `privacy-patterns` in `$SYSTEM_TOOLS_CONFIG`, else `~/.config/system`); with no file the check is skipped with a note. It grants nothing.
 `sd-ship lane enqueue|list|retry|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in the hub database, with its logs under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. `sd-ship lane --help` and each verb's `--help` hold the options and refusals; [Parallel work](WORKFLOW.md#parallel-work) holds the rules.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
+`sd gate run --max-wait SECONDS -- <cmd>` gives up after that long in the queue and exits 75, the command not run, naming its place in the queue, the holders and how long it waited; it does not bound the command itself.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
 A waiting gate names who holds each slot and since when.
 `sd.review_slots` is load control too: how many reviews may run their reviewers at once on the machine (unset: 2).
@@ -256,10 +265,10 @@ refusal: the grammar, the anchor, the due date and the kinds that may recur.
 
 A row another source raises carries a reference to the occurrence that raised it:
 `sd task add "repo-sync failed" --kind followup --ref job:repo-sync:42`.
-A second add with the same reference updates that row's title, and any body,
-priority or due date it names, and keeps its status, so a retried delivery
-never reopens work that is done; the next run's failure names a new reference
-and files a new row. `sd task show` prints the reference as `ref:`, and
+A second add with the same reference refuses, names the row and its status,
+and leaves the row as it was, done or open; `sd task edit` changes a row, and
+the next run's failure names a new reference and files a new row (sd:3703).
+`sd task show` prints the reference as `ref:`, and
 `sd today --json` and every `--json` row carry it as `ref`. Only a task or a
 followup takes `--ref`, and not with `--recur`.
 
