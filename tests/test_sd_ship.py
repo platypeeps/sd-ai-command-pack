@@ -1201,6 +1201,20 @@ roles:
         self.machine_copilot("never")
         self.assertFalse(ship.Ship.copilot_selected([pass_at("deep", 1), pass_at("skip", 0)]))
 
+    def test_an_unreadable_database_refuses_the_dispatch_instead_of_guessing(self):
+        """sd:3989: the machine's Copilot word is a database row. A database that
+        does not open is an unknown word, so the paid request refuses; it is not
+        read as unset, which would select by the default."""
+        self.machine_copilot("always")
+        broken = self.directory / "broken-home"
+        (broken / ".local/share/sd").mkdir(parents=True)
+        (broken / ".local/share/sd/sd.db").write_bytes(b"invalid fixture database")
+        deep = [{"report": {"route": {"tier": "deep", "depth": 1},
+                            "remote_reviews": {"copilot": {"tier": "deep", "repository": None}}}}]
+        with patch.dict(os.environ, {"HOME": str(broken)}):
+            with self.assertRaisesRegex(ship.sd_lib.ConfigError, "the workflow database did not open"):
+                ship.Ship.copilot_selected(deep)
+
     def test_a_report_from_before_the_key_keeps_its_recorded_opt_out(self):
         """A report written before `repository` travelled in it cannot say
         whether its `automatic: false` was the repository opting out, so that

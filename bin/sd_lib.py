@@ -60,7 +60,23 @@ def copilot_policy(repository: bool | None, machine: str | None) -> tuple[str, s
     return COPILOT_REVIEW_DEFAULT, "machine default"
 
 
-def copilot_automatic(policy: str, tier: str, depth: int) -> bool:
+def reported_copilot_policy(repository: bool | None,
+                            environ: Mapping[str, str] | None = None) -> tuple[str | None, str]:
+    """`copilot_policy` for `sd-review`'s report, which a database that gives no answer does not stop.
+
+    The machine word is a database row (sd:3989). A review still runs without
+    the database: the word is only reported, and `sd-ship` reads it again at
+    dispatch, where `DatabaseUnreadable` refuses. Here it is `None`, which
+    selects nothing, with the reason as its source. A malformed value still raises.
+    """
+    try:
+        machine = core_setting("copilot_review", environ)
+    except DatabaseUnreadable as error:
+        return None, f"not read: {error}"
+    return copilot_policy(repository, machine)
+
+
+def copilot_automatic(policy: str | None, tier: str, depth: int) -> bool:
     """Whether `policy` selects a Copilot review of a change routed to `tier`.
 
     `depth` is the tier's own reviewer count from the route plan: `always`
@@ -161,6 +177,10 @@ class ConfigError(RuntimeError):
 
 class GitUnavailable(ConfigError):
     """`git` gave no answer: it timed out, could not start or was killed (sd:2986). Not "outside a repository"."""
+
+
+class DatabaseUnreadable(ConfigError):
+    """The workflow database gave no answer for a fleet key: no library, no open, no read (sd:3989). Not "unset"."""
 
 
 def without_fsmonitor(environ: Mapping[str, str]) -> dict[str, str]:
@@ -618,7 +638,7 @@ def fleet_connection(environ: Mapping[str, str] | None = None, *, write: bool = 
     env = os.environ if environ is None else environ
     imported = import_sd_db()
     if imported.module is None:
-        raise ConfigError(f"the workflow database cannot be read: {imported.problem}")
+        raise DatabaseUnreadable(f"the workflow database cannot be read: {imported.problem}")
     # The checkout's lib, imported above.
     from sd_db import database as sd_database  # noqa: PLC0415
     from sd_db import hub as sd_hub  # noqa: PLC0415
@@ -628,7 +648,7 @@ def fleet_connection(environ: Mapping[str, str] | None = None, *, write: bool = 
     try:
         return imported.module.connect(write=write, home=home)
     except Exception as error:  # noqa: BLE001 - any open failure is an unknown answer, named
-        raise ConfigError(f"the workflow database did not open: {type(error).__name__}: {error}") from None
+        raise DatabaseUnreadable(f"the workflow database did not open: {type(error).__name__}: {error}") from None
 
 
 def fleet_setting(key: str, environ: Mapping[str, str] | None = None) -> tuple[str | None, str]:
@@ -644,7 +664,7 @@ def fleet_setting(key: str, environ: Mapping[str, str] | None = None) -> tuple[s
         try:
             held = sd_writes.read_settings(connection, [f"sd.{key}"])
         except Exception as error:  # noqa: BLE001 - a failed read is unknown, named
-            raise ConfigError(f"sd.{key} was not read from the workflow database: "
+            raise DatabaseUnreadable(f"sd.{key} was not read from the workflow database: "
                               f"{type(error).__name__}: {error}") from None
         finally:
             connection.close()

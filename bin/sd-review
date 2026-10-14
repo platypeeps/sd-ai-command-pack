@@ -1901,8 +1901,7 @@ def review(
     # Resolved here for the report, and again by `sd-ship` at dispatch against
     # the machine setting as it stands then: the verdict below is what the
     # policy said at review time, and the report carries the inputs.
-    copilot_word, copilot_source = sd_lib.copilot_policy(
-        policy["copilot_review"]["automatic_deep"], sd_lib.core_setting("copilot_review", dict(env)))
+    copilot_word, copilot_source = sd_lib.reported_copilot_policy(policy["copilot_review"]["automatic_deep"], dict(env))
     try:
         consent, consent_source = sd_registry.resolve_consent(
             registry, sd_lib.local_block(root).get(sd_lib.CONSENT_KEY), authorization)
