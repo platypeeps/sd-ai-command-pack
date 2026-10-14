@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import contextlib
 import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -46,6 +47,7 @@ def load():
 
 
 PUBLISH = load()
+import sd_lib  # noqa: E402 - on the path once `load` ran
 
 #: `mirror_targets` resolves a destination's default container from the
 #: repo name, so every call needs a repo even when the designation names
@@ -98,10 +100,14 @@ class Fixture(Configured):
 
         self.vault = self.root / "vault"
         original = (PUBLISH.DASHBOARD_CONFIG, PUBLISH.QUEUE, PUBLISH.VAULT,
-                    PUBLISH.LEGACY_QUEUE)
+                    PUBLISH.LEGACY_QUEUE, getattr(PUBLISH, "DATABASE_HOME", None))
         PUBLISH.DASHBOARD_CONFIG = self.dashboard
         PUBLISH.QUEUE = self.root / "queue"
         PUBLISH.VAULT = str(self.vault)
+        # A home with no database until a test makes one, so no test records
+        # a URL on the items of the machine running it.
+        self.home = self.root / "home"
+        PUBLISH.DATABASE_HOME = self.home
         # Pointed inside the fixture even when a test does not use it, so no
         # test can read or empty the queue of the machine running it.
         self.legacy = self.root / "legacy-queue"
@@ -109,12 +115,31 @@ class Fixture(Configured):
 
         def restore() -> None:
             (PUBLISH.DASHBOARD_CONFIG, PUBLISH.QUEUE, PUBLISH.VAULT,
-             PUBLISH.LEGACY_QUEUE) = original
+             PUBLISH.LEGACY_QUEUE, PUBLISH.DATABASE_HOME) = original
 
         self.addCleanup(restore)
 
     def briefs(self) -> Path:
         return self.vault / "Briefs" / "my-research"
+
+    def database(self, *titles: str) -> list[int]:
+        """A workflow database under the fixture's home, holding one item per title."""
+        sd_db = sd_lib.import_sd_db().module
+        from sd_db.writes import create_item  # noqa: PLC0415 - after the path is set
+        path = sd_db.database.local_path(self.home)
+        sd_db.initialise(path)
+        connection = sd_db.connect(path)
+        self.addCleanup(connection.close)
+        self.connection = connection
+        return [create_item(connection, kind="task", title=title) for title in titles]
+
+    def published(self, item: int) -> dict | None:
+        row = self.connection.execute("SELECT fields FROM item WHERE id = ?", (item,)).fetchone()
+        return json.loads(row["fields"] or "{}").get("published")
+
+    def comments(self, item: int) -> list[str]:
+        return [row["body"] for row in self.connection.execute(
+            "SELECT body FROM note WHERE item = ? AND kind = 'comment' ORDER BY id", (item,))]
 
     def roots(self) -> list[str]:
         return [
@@ -1026,7 +1051,7 @@ class ReceiptFixture(Fixture):
     def drain(self, name: str = "my-research.a.notion.json") -> str:
         """What a drain does at its end: acknowledge the generation it read."""
         fingerprint = json.loads((PUBLISH.QUEUE / name).read_text())["fingerprint"]
-        return PUBLISH.mirror_delivered(name, fingerprint)
+        return PUBLISH.mirror_delivered(name, fingerprint)[1]
 
 
 class ReceiptTests(ReceiptFixture):
@@ -1132,12 +1157,13 @@ class PublishedUrlTests(ReceiptFixture):
         self.assertEqual(json.loads((PUBLISH.QUEUE / self.NAME).read_text())["item"], 3465)
 
     def test_delivered_records_the_url_and_the_item(self) -> None:
+        self.database("one", "two")
         self.source("first\n")
-        PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=3465)])
+        PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=2)])
         status = PUBLISH.delivered_main([self.NAME, self.fingerprint(), "--url", self.URL])
         self.assertEqual(status, 0)
         self.assertEqual(self.receipt()["url"], self.URL)
-        self.assertEqual(self.receipt()["item"], 3465)
+        self.assertEqual(self.receipt()["item"], 2)
 
     def test_a_url_that_is_not_a_web_address_is_refused(self) -> None:
         self.source("first\n")
@@ -1153,14 +1179,248 @@ class PublishedUrlTests(ReceiptFixture):
         self.assertTrue(any("item=" in line for line in said), said)
         self.assertNotIn("item", json.loads((PUBLISH.QUEUE / self.NAME).read_text()))
 
-    def test_naming_an_item_does_not_queue_a_delivered_document_again(self) -> None:
-        """The item is where the URL goes, not part of the mirror."""
+    def test_naming_an_item_queues_a_delivered_document_once(self) -> None:
+        """sd:3979: the item joins the fingerprint, so the next drain's
+        `delivered` records the URL on it; a request without one hashes as before."""
         self.source("first\n")
         PUBLISH.enqueue(self.repo, self.doc())
         self.drain()
         said = PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=3465)])
-        self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
-        self.assertTrue(any("unchanged" in line for line in said), said)
+        self.assertTrue(any("queued a" in line for line in said), said)
+        self.assertEqual(json.loads((PUBLISH.QUEUE / self.NAME).read_text())["item"], 3465)
+        again = PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=3465)])
+        self.assertTrue(any("already queued" in line for line in again), again)
+
+    def test_changing_the_item_queues_once_more(self) -> None:
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=3465)])
+        first = self.fingerprint()
+        said = PUBLISH.enqueue(self.repo, [dict(self.doc()[0], item=3466)])
+        self.assertTrue(any("queued a" in line for line in said), said)
+        self.assertNotEqual(self.fingerprint(), first)
+
+
+class DeliveredItemTests(ReceiptFixture):
+    """sd:3979: `delivered` records the URL on the item, for the drained generation only.
+
+    Before, the URL and the pending request's `item` went on the receipt
+    whatever generation was pending, and nothing reached the item row. Every
+    step that did not finish printed its reason and exited 0.
+    """
+
+    NAME = "my-research.a.notion.json"
+    URL = "https://example.test/p"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.item, self.other = self.database("Publish A", "Publish B")
+        self.source("first\n")
+        PUBLISH.enqueue(self.repo, self.doc(self.item))
+
+    def doc(self, item: int | None = None, title: str = "A") -> list[dict]:  # type: ignore[override]
+        entry = dict(src="10-x/a.md", out="a", title=title, notion=dict())
+        return [dict(entry, item=item)] if item else [entry]
+
+    def request(self) -> bytes:
+        return (PUBLISH.QUEUE / self.NAME).read_bytes()
+
+    def receipt(self) -> dict:
+        return PUBLISH.load_record(PUBLISH.receipts() / self.NAME)
+
+    def fingerprint(self) -> str:
+        return json.loads(self.request())["fingerprint"]
+
+    def deliver(self, *extra: str) -> tuple[int, str]:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            status = PUBLISH.delivered_main([self.NAME, self.fingerprint(), *extra])
+        return status, out.getvalue()
+
+    def key(self) -> str:
+        return "%s::a" % self.repo
+
+    def test_the_url_reaches_the_item_with_one_note(self) -> None:
+        status, said = self.deliver("--url", self.URL)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(self.published(self.item), {self.key(): {"title": "A", "notion": self.URL}})
+        self.assertEqual(self.comments(self.item), ["Published notion a: %s" % self.URL])
+        self.assertFalse((PUBLISH.QUEUE / self.NAME).exists())
+        self.assertEqual(self.receipt()["item"], self.item)
+
+    def test_an_item_without_a_url_exits_2_and_writes_nothing(self) -> None:
+        before, receipt = self.request(), self.receipt()
+        status, said = self.deliver()
+        self.assertEqual(status, 2, said)
+        self.assertIn("--url", said)
+        self.assertEqual(self.request(), before)
+        self.assertEqual(self.receipt(), receipt)
+        self.assertIsNone(self.published(self.item))
+
+    def test_a_refused_record_leaves_request_and_receipt_unchanged(self) -> None:
+        from sd_db.writes import record_state  # noqa: PLC0415
+        record_state(self.connection, "restore", key="example", body={})
+        before, receipt = self.request(), self.receipt()
+        status, said = self.deliver("--url", self.URL)
+        self.assertEqual(status, 1, said)
+        self.assertIn("restore", said)
+        self.assertEqual(self.request(), before)
+        self.assertEqual(self.receipt(), receipt)
+        self.assertNotIn("delivered", self.receipt())
+
+    def test_no_database_leaves_the_request_and_exits_1(self) -> None:
+        self.connection.close()
+        PUBLISH.DATABASE_HOME = self.root / "no-home"
+        before = self.request()
+        status, said = self.deliver("--url", self.URL)
+        self.assertEqual(status, 1, said)
+        self.assertEqual(self.request(), before)
+
+    def test_a_newer_generation_with_another_item_records_on_neither(self) -> None:
+        drained = self.fingerprint()
+        self.source("second\n")
+        PUBLISH.enqueue(self.repo, self.doc(self.other))
+        newer = self.request()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = PUBLISH.delivered_main([self.NAME, drained, "--url", self.URL])
+        self.assertEqual(status, 0, out.getvalue())
+        self.assertIsNone(self.published(self.item))
+        self.assertIsNone(self.published(self.other))
+        self.assertEqual(self.request(), newer)
+        self.assertEqual(self.receipt()["delivered"], drained)
+        self.assertNotIn("item", self.receipt())
+
+    def test_a_stop_after_the_record_reruns_to_one_note(self) -> None:
+        """The record lands, the receipt write fails: exit 1, the request
+        stays, and the rerun completes with `unchanged` and no second note."""
+        receipt = PUBLISH.receipts() / self.NAME
+        held = receipt.read_text()
+        receipt.unlink()
+        receipt.mkdir()
+        status, said = self.deliver("--url", self.URL)
+        self.assertEqual(status, 1, said)
+        self.assertIn("cannot write receipt", said)
+        self.assertTrue((PUBLISH.QUEUE / self.NAME).exists())
+        self.assertEqual(self.comments(self.item), ["Published notion a: %s" % self.URL])
+        receipt.rmdir()
+        receipt.write_text(held)
+        status, said = self.deliver("--url", self.URL)
+        self.assertEqual(status, 0, said)
+        self.assertFalse((PUBLISH.QUEUE / self.NAME).exists())
+        self.assertEqual(self.comments(self.item), ["Published notion a: %s" % self.URL])
+
+    def test_an_unlink_error_exits_1(self) -> None:
+        with unittest.mock.patch.object(PUBLISH.Path, "unlink", side_effect=OSError("denied")):
+            status, said = self.deliver("--url", self.URL)
+        self.assertEqual(status, 1, said)
+        self.assertIn("cannot remove the request", said)
+        self.assertEqual(self.receipt()["delivered"], self.fingerprint())
+
+    def test_no_readable_request_exits_1(self) -> None:
+        fingerprint = self.fingerprint()
+        (PUBLISH.QUEUE / self.NAME).unlink()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            status = PUBLISH.delivered_main([self.NAME, fingerprint, "--url", self.URL])
+        self.assertEqual(status, 1, out.getvalue())
+
+    def test_a_request_without_an_item_touches_no_database(self) -> None:
+        self.connection.close()
+        PUBLISH.DATABASE_HOME = self.root / "no-home"
+        PUBLISH.enqueue(self.repo, self.doc())
+        status, said = self.deliver("--url", self.URL)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(self.receipt()["url"], self.URL)
+        self.assertNotIn("item", self.receipt())
+
+
+class ObsidianItemTests(Fixture):
+    """sd:3979: the render records the vault copy's link on the item it names.
+
+    Only a copy the render wrote, and only where it would queue a mirror. A
+    refused record never fails the render, and the next render records it.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        (self.repo / "build").rmdir()
+        self.repo.rmdir()
+        self.repo = research_repo(self.root)
+        (self.item,) = self.database("Publish A")
+        self.link = "obsidian://open?vault=vault&file=Briefs%2Fmy-research%2Fa"
+
+    def docs(self, **extra: object) -> list[dict]:
+        return [dict(src="10-x/a.md", out="a", title="A", item=self.item, **extra)]
+
+    def publish(self, docs: list[dict] | None = None) -> list[str]:
+        return PUBLISH.publish(self.repo, "MINE", self.docs() if docs is None else docs)
+
+    def test_a_written_copy_records_its_link(self) -> None:
+        said = self.publish()
+        self.assertEqual(self.published(self.item), {"%s::a" % self.repo: {"title": "A", "obsidian": self.link}})
+        self.assertEqual(self.comments(self.item), ["Published obsidian a: %s" % self.link])
+        self.assertTrue(any("item: obsidian link for sd:%d recorded" % self.item in line for line in said), said)
+        self.publish()
+        self.assertEqual(len(self.comments(self.item)), 1)
+
+    def test_a_refused_record_keeps_the_copy_and_records_on_the_next_render(self) -> None:
+        from sd_db.writes import record_state, resolve_state  # noqa: PLC0415
+        restore = record_state(self.connection, "restore", key="example", body={})
+        said = self.publish()
+        self.assertTrue((self.briefs() / "a.md").is_file())
+        self.assertTrue(any("item: obsidian link for sd:%d not recorded (" % self.item in line
+                            for line in said), said)
+        self.assertIsNone(self.published(self.item))
+        resolve_state(self.connection, restore)
+        self.publish()
+        self.assertEqual(self.published(self.item)["%s::a" % self.repo]["obsidian"], self.link)
+
+    def test_no_database_reports_and_the_render_goes_on(self) -> None:
+        self.connection.close()
+        PUBLISH.DATABASE_HOME = self.root / "no-home"
+        said = self.publish()
+        self.assertTrue((self.briefs() / "a.md").is_file())
+        self.assertTrue(any("not recorded (" in line for line in said), said)
+        self.assertTrue(any("registered" in line for line in said), said)
+
+    def test_a_document_without_an_item_records_nothing(self) -> None:
+        said = self.publish([dict(src="10-x/a.md", out="a", title="A")])
+        self.assertFalse(any(line.startswith("item:") for line in said), said)
+
+    def assert_nothing_recorded(self, said: list[str]) -> None:
+        self.assertIsNone(self.published(self.item))
+        self.assertEqual(self.comments(self.item), [])
+        self.assertFalse(any("recorded" in line and "not recorded" not in line for line in said), said)
+
+    def test_no_vault_records_nothing(self) -> None:
+        PUBLISH.VAULT = ""
+        self.assert_nothing_recorded(self.publish())
+
+    def test_an_unreadable_source_records_nothing(self) -> None:
+        self.assert_nothing_recorded(self.publish([dict(src="10-x/missing.md", out="a", title="A",
+                                                        item=self.item)]))
+
+    def test_another_checkouts_copy_records_nothing(self) -> None:
+        self.briefs().mkdir(parents=True)
+        (self.briefs() / "a.md").write_text("---\nsource_checkout: ~/elsewhere/my-research\n---\n")
+        self.assert_nothing_recorded(self.publish())
+
+    def test_a_write_error_records_nothing(self) -> None:
+        self.briefs().parent.mkdir(parents=True)
+        self.briefs().write_text("a file where the folder goes")
+        self.assert_nothing_recorded(self.publish())
+
+    def test_a_held_mirror_records_nothing(self) -> None:
+        PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_SKIP_MIRROR="testing")
+        said = self.publish()
+        self.assertTrue((self.briefs() / "a.md").is_file())
+        self.assert_nothing_recorded(said)
+
+    def test_a_branch_off_the_default_records_nothing(self) -> None:
+        git(self.repo, "checkout", "-q", "-b", "topic")
+        said = self.publish()
+        self.assertTrue((self.briefs() / "a.md").is_file())
+        self.assert_nothing_recorded(said)
 
 
 class MirrorDryRunTests(ReceiptFixture):
@@ -1242,7 +1502,7 @@ class DrainRaceTests(ReceiptFixture):
         read = json.loads((PUBLISH.QUEUE / self.NAME).read_text())  # drain step 1
         self.source("B\n")
         PUBLISH.enqueue(self.repo, self.doc())  # a render during the drain
-        said = PUBLISH.mirror_delivered(self.NAME, read["fingerprint"])  # drain step 6
+        said = PUBLISH.mirror_delivered(self.NAME, read["fingerprint"])[1]  # drain step 6
         self.assertIn("newer request is pending and stays", said)
         self.assertTrue((PUBLISH.QUEUE / self.NAME).is_file(), "B's request was deleted")
         pending = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
@@ -1361,7 +1621,7 @@ class AcknowledgementRaceTests(ReceiptFixture):
         PUBLISH.load_record = hooked
         self.addCleanup(setattr, PUBLISH, "load_record", real_load)
 
-        said = PUBLISH.mirror_delivered(self.NAME, read["fingerprint"])  # drain step 6
+        said = PUBLISH.mirror_delivered(self.NAME, read["fingerprint"])[1]  # drain step 6
         thread.join()
         if failures:
             raise failures[0]
@@ -1465,7 +1725,7 @@ class RevertTests(ReceiptFixture):
         read = json.loads((PUBLISH.QUEUE / self.NAME).read_text())  # drain step 1
         self.source("current\n")
         PUBLISH.enqueue(self.repo, self.doc())  # the pull, while the drain writes
-        said = PUBLISH.mirror_delivered(self.NAME, read["fingerprint"])  # drain step 6
+        said = PUBLISH.mirror_delivered(self.NAME, read["fingerprint"])[1]  # drain step 6
         self.assertIn("newer request is pending and stays", said)
         pending = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
         self.assertEqual(pending["content"], "current\n", "STALE: remote=stale, queue empty")
@@ -1500,7 +1760,7 @@ class MutableSourceTests(ReceiptFixture):
         request = json.loads((PUBLISH.QUEUE / self.NAME).read_text())  # drain step 1
         self.source("B\n")  # edited under the queued request, with no render
         remote = self.published(request).strip()  # drain step 3
-        PUBLISH.mirror_delivered(self.NAME, request["fingerprint"])  # drain step 6
+        PUBLISH.mirror_delivered(self.NAME, request["fingerprint"])[1]  # drain step 6
         self.source("A\n")  # the edit reverted
         PUBLISH.enqueue(self.repo, self.doc())
         queued = (PUBLISH.QUEUE / self.NAME).is_file()
@@ -1596,7 +1856,7 @@ class SourceUrlTests(Fixture):
         self.origin("git@github.com:old-owner/research-repo.git")
         PUBLISH.enqueue(self.repo, self.DOC)
         fingerprint = json.loads((PUBLISH.QUEUE / self.NAME).read_text())["fingerprint"]
-        self.assertIn("request removed", PUBLISH.mirror_delivered(self.NAME, fingerprint))
+        self.assertIn("request removed", PUBLISH.mirror_delivered(self.NAME, fingerprint)[1])
         self.origin("git@github.com:example-org/research-repo.git")
         said = PUBLISH.enqueue(self.repo, self.DOC)
         self.assertTrue(any("queued a" in line for line in said), said)

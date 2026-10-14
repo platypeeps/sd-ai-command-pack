@@ -173,9 +173,14 @@ Both keys on one entry are two mirrors, not a choice. Until one of these keys
 exists, the document publishes locally and nowhere else.
 
 `item=<number>` on the entry names the sd item the document belongs to. Each
-request carries it, and step 6 records it on the receipt with the mirror's
-URL, so the item can show where its document was published. It is not part
-of the mirror: adding it queues nothing.
+request carries it, and step 6 records the mirror's URL on that item, under
+`fields.published` with one `Published <channel> <document>: <url>` note, so
+the item shows where its document was published. The render records the vault
+copy's `obsidian://` link the same way, for a copy it wrote from the main
+checkout's default branch; a link that does not land is reported, never fails
+the render, and the next render records it. The item is part of the
+fingerprint: adding or changing it queues the document once, so the next
+drain records the URL on the new item.
 
 ### A Notion mirror is private unless it asks for the team
 
@@ -432,10 +437,16 @@ Draining is six steps per request, and the order matters:
    than creating one.
 6. Run `sd-research-kit delivered <request file name> <fingerprint>` with
    `--url <url>`, giving the fingerprint read in step 1 and the URL of the
-   page or file step 3 wrote, once steps 4 and 5 have both succeeded. It
-   records that fingerprint and URL, and the request's `item`, beside the
-   queue and removes the
-   request only while the file is still that generation. A render that queued
+   page or file step 3 wrote, once steps 4 and 5 have both succeeded. A
+   request that names an `item` needs `--url`; without it the command writes
+   nothing and exits 2. For the generation it was given, it records the URL
+   on the item first, then that fingerprint and URL beside the queue, and
+   removes the request only while the file is still that generation. A newer
+   generation's item gets nothing: the next drain records with it. Any step
+   that does not finish -- the item record refused (a restore open, an
+   unknown item, no database reachable), the receipt write, the removal --
+   leaves the request, prints the reason and exits 1; run step 6 again once
+   the cause is fixed, and an equal URL adds no second note. A render that queued
    newer content while steps 2 to 5 ran leaves its request in place, and the
    next drain writes it. Do not delete the file by hand: that acknowledged
    whatever the file held at that moment, which after such a render was
@@ -452,6 +463,7 @@ procedure whose failure mode is the bug it prevents is not a fix.
 | step 3, before step 4 | a created page, its id recorded nowhere | adopts it by title under step 3 and carries on |
 | step 4, before step 5 | id in the request, not in the designation | updates that page, retries step 5 |
 | step 5, before step 6 | id recorded in both | updates that page, runs step 6 |
+| step 6's item record, before its receipt | URL on the item, request in place | updates that page, runs step 6; the record answers `unchanged` |
 | a render during steps 2–5 | a newer request under the same name | step 6 leaves it; the next drain writes it |
 
 Every row survives a render in between, because a render carries a recorded id
