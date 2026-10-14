@@ -131,20 +131,22 @@ def outbound(setting: dict[str, dict[str, str]] | None) -> dict[str, dict[str, s
 
 
 def kept(value: dict[str, dict[str, str]], stored: str | None) -> dict[str, dict[str, str]]:
-    """`value` with the half it names no key of taken from `stored` (sd:3980).
+    """`value` with what it leaves out taken from `stored` (sd:3980, sd:3461).
 
-    The halves are the outbound channels and the inbound sources. A stored
-    value that is NULL or that the validator refuses keeps nothing: a set
-    replaces it whole.
+    The outbound channels are one replacement: a value naming none keeps the
+    stored ones, and a value naming any replaces them all. Each inbound source
+    is its own: a value that leaves one out keeps it, so `feed=URL` never
+    deletes the Jira or GitHub source. A stored value that is NULL or that the
+    validator refuses keeps nothing: a set replaces it whole.
     """
     try:
         old = validate(json.loads(stored)) if stored else {}
     except (ValueError, ChannelRefusal):
         old = {}
     out = dict(value)
-    for half in (CHANNELS, INBOUND):
-        if not any(key in value for key in half):
-            out.update({key: old[key] for key in half if key in old})
+    if not any(key in value for key in CHANNELS):
+        out.update({key: old[key] for key in CHANNELS if key in old})
+    out.update({key: old[key] for key in INBOUND if key in old and key not in value})
     return out
 
 

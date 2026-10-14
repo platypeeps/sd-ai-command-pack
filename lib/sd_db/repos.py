@@ -933,13 +933,14 @@ def set_channels(
     It does not refuse during an unresolved restore: the restore's recovery
     is to set each repository's channels again before resolving it.
 
-    A value has two halves, the outbound channels and the inbound `feed`
-    (sd:3980). A value naming no key of one half keeps that half as stored,
-    so the dashboard form, which shows the outbound channels alone, never
-    deletes a feed, and `feed=URL` never deletes the channels. `None`
-    clears both. The inbound half holds the issue sources too (sd:3461), and
-    a value naming `github` refuses on a managed repository, which uses no
-    GitHub issues; one kept from before `repo managed PATH yes` rides along.
+    The outbound channels are one replacement, and each inbound key (`feed`,
+    `jira`, `github`) is its own (sd:3980, sd:3461; `channels.kept`). A value
+    naming no channel keeps the stored channels, so the dashboard form never
+    deletes a source, and a value leaving an inbound key out keeps it, so
+    `feed=URL` never deletes the channels or the issue sources. `None` clears
+    all of it. A value naming `github` refuses on a managed repository, which
+    uses no GitHub issues; one kept from before `repo managed PATH yes` rides
+    along.
     """
     from . import channels
     from .workflow import StaleItem

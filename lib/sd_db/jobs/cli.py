@@ -701,7 +701,7 @@ def _repo_channels(connection, rest: list[str]) -> int:
         return 0
     value = channels_words(words)
     target, before = set_channels(connection, path, value)
-    # What is stored, not the words: a half the words leave out is kept (sd:3980).
+    # What is stored, not the words: what the words leave out is kept (sd:3980, sd:3461).
     after = "none" if value is None else channels.dumps(
         channels.kept(channels.validate(value), None if before == "none" else before))
     print(f"sd-db: {target} channels {before} -> {after}")
