@@ -761,17 +761,24 @@ class Runner(Lane):
                 sd_lane.run_lane(self.repo, self.environ, self.ship)
                 self.assertEqual(self.entries()[-1]["status"], "skipped" if builder else "merged")
 
-    def test_a_hub_that_keeps_failing_fails_the_entry_after_its_retries(self) -> None:
+    def test_a_hub_that_keeps_failing_holds_the_entry_after_its_retries(self) -> None:
+        """sd:4184. A hub fault is never the entry's: past its retries it waits, held, instead of failing."""
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "prepare")] = self.HUB_FAULT
         for _ in range(sd_lane.HUB_RETRIES):
             sd_lane.run_lane(self.repo, self.environ, self.ship)
-            self.assertEqual(self.entries()[0]["status"], "pending")
+            self.assertEqual((self.entries()[0]["status"], self.entries()[0].get("held")), ("pending", None))
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertIn("held", answer["stopped"])
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         entry = self.entries()[0]
-        self.assertEqual((entry["status"], entry["hub_retries"], len(self.calls)),
-                         ("failed", sd_lane.HUB_RETRIES, sd_lane.HUB_RETRIES + 1))
-        self.assertIn("Broken pipe", entry["reason"])
+        self.assertEqual((entry["status"], entry["held"], entry["hub_retries"], len(self.calls)),
+                         ("pending", True, sd_lane.HUB_RETRIES + 1, sd_lane.HUB_RETRIES + 1))
+        self.assertIn("Broken pipe", entry["hub_fault"]["reason"])
+        del self.answers[(1, "prepare")]
+        sd_lane.set_hold(self.repo, 1, self.environ, held=False)
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged")
 
     def test_the_whole_prepare_output_is_kept(self) -> None:
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
@@ -2209,8 +2216,9 @@ class ClaimAndLease(SharedQueue):
         self.assertEqual((answer["reclaimed"][0]["status"], self.entries()[0]["status"]), ("pending", "merged"))
         self.assertEqual([c[2] for c in self.calls], ["prepare", "merge"])
 
-    def test_a_finish_write_that_fails_after_a_merge_is_failed_by_reclaim(self) -> None:
-        """Failure table, finish: the hub fails after a merge; the run stops, and reclaim fails the entry."""
+    def test_a_finish_write_that_fails_after_a_merge_is_merged_by_reclaim(self) -> None:
+        """Failure table, finish: the hub fails after a merge; the run stops, and reclaim writes the outcome it
+        kept (sd:4184). A runner that died without a record still fails it: see the mid-merge test above."""
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
         with self.failing_store(lambda entry: entry.get("status") == "merged"):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -2218,8 +2226,7 @@ class ClaimAndLease(SharedQueue):
         self.make_dead()
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         [entry] = self.entries()
-        self.assertEqual(entry["status"], "failed")
-        self.assertIn("a merge may have landed", entry["reason"])
+        self.assertEqual((entry["status"], entry["merge_commit"], len(self.calls)), ("merged", "merged-1", 2))
 
     def test_a_late_finish_after_a_reclaim_writes_nothing(self) -> None:
         """Failure table, finish: the token was reclaimed while the holder slept; it reports claim_lost."""
@@ -2240,6 +2247,303 @@ class ClaimAndLease(SharedQueue):
             sd_lane.finish_entry(self.store(), entry, "mine", {"status": "merged", "merge_commit": "c0ffee"})
         merged = [body for _, body in self.rows() if body["status"] == "merged"]
         self.assertEqual(len(merged), 1)
+
+
+class HubSkew(SharedQueue):
+    """sd:4184. The hub's `sd_db` moved past this machine's mid-run five times on 2026-10-14.
+
+    `sd-ship` answered `hub_unavailable`, but the runner's own write that settles the entry met the same
+    refusal, so the entry stayed `running` under a runner that had stopped. The next run reclaimed it as
+    dead: eight prepares spent a reclaim, and a merge failed. One test per failure-table row.
+    """
+
+    def setUp(self) -> None:
+        self.authority = sd_lane.default_runner_merge  # the real reader, before the suite replaces it
+        super().setUp()
+        import sd_db.database
+        from sd_db import remote
+        self.refusing: list[bool] = []
+        connect = sd_db.database.connect
+
+        def hub(*args: Any, **kwargs: Any) -> Any:
+            if self.refusing:
+                raise remote.BuildMismatch("schema", 32, 33)
+            return connect(*args, **kwargs)
+        patcher = mock.patch("sd_db.database.connect", hub)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+
+    def refused(self, step: str) -> dict:
+        """`sd-ship`'s answer when the hub refused its build in `step`, as its `main` prints it."""
+        from sd_db import remote
+        return sd_lane.sd_ship_workflow.failure(step, remote.BuildMismatch("schema", 32, 33))
+
+    def upgrade_after(self, verb: str, answer: dict | None = None) -> Any:
+        """An `sd-ship` whose `verb` answers `answer`, else the recorder's; the hub refuses this build from then."""
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            answered = self.ship(argv, log)
+            if argv[2] != verb:
+                return answered
+            self.refusing.append(True)
+            return answer if answer is not None else answered
+        return ship
+
+    def follow(self) -> None:
+        """`repo-sync.sh follow`: this machine loads the hub's build, and the runner that stopped is gone."""
+        self.refusing.clear()
+        self.make_dead()
+
+    def records(self) -> list[pathlib.Path]:
+        return sorted((self.store().lane / "queue").glob("hub-stop-*.json"))
+
+    def test_a_prepare_that_meets_the_upgrade_goes_back_to_pending_with_a_hub_retry(self) -> None:
+        """Failure table, put-back after prepare: sd:3695 and seven more spent a reclaim as a dead runner's."""
+        answer = sd_lane.run_lane(self.repo, self.environ, self.upgrade_after("prepare", self.refused("prepare")))
+        self.assertIn("BuildMismatch", answer["stopped"])
+        self.follow()
+        self.calls.clear()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(answer["reclaimed"], [{"item": 1, "runner_pid": mock.ANY, "step": "prepare",
+                                                "status": "pending", "hub_stop": True}])
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], entry["hub_retries"], entry["hub_fault"]["step"], entry.get("reclaims")),
+                         ("merged", 1, "prepare", None))
+        self.assertIn("build mismatch", entry["hub_fault"]["reason"])
+        self.assertEqual(([c[2] for c in self.calls], self.records()), (["prepare", "merge"], []))
+
+    def test_a_merge_that_meets_the_upgrade_goes_back_to_pending_and_is_not_failed(self) -> None:
+        """Failure table, put-back after merge: sd:4019 met schema 32 against 33 at 08:10 MDT; reclaim failed it."""
+        sd_lane.run_lane(self.repo, self.environ, self.upgrade_after("merge", self.refused("merge")))
+        self.follow()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([(row["step"], row["status"]) for row in answer["reclaimed"]], [("merge", "pending")])
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], entry["hub_retries"], entry["hub_fault"]["step"]), ("merged", 1, "merge"))
+        self.assertEqual([c[2] for c in self.calls], ["prepare", "merge", "prepare", "merge"])
+
+    def test_a_merge_whose_outcome_the_hub_refused_is_merged_by_the_next_run(self) -> None:
+        """Failure table, finish: the merge landed, then the outcome write was refused; reclaim failed it."""
+        answer = sd_lane.run_lane(self.repo, self.environ, self.upgrade_after("merge"))
+        self.assertEqual(answer["ran"][0]["recorded"], False)
+        self.follow()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([row["status"] for row in answer["reclaimed"]], ["merged"])
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], entry["merge_commit"], len(self.calls), entry.get("reclaims")),
+                         ("merged", "merged-1", 2, None))
+
+    def test_a_before_merge_write_the_hub_refused_puts_the_entry_back_with_a_hub_retry(self) -> None:
+        """Failure table, before merge: prepare reached ready_to_send, and `step: merge` was refused."""
+        sd_lane.run_lane(self.repo, self.environ, self.upgrade_after("prepare"))
+        self.follow()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], entry["hub_retries"], entry.get("reclaims")), ("merged", 1, None))
+        self.assertEqual([c[2] for c in self.calls], ["prepare", "prepare", "merge"])
+
+    def test_a_renew_the_hub_refused_puts_the_entry_back_with_a_hub_retry(self) -> None:
+        """Failure table, renew: the review was incomplete, and the lease before its retry was refused."""
+        incomplete = {"ok": False, "error": "incomplete", "workflow": {"blocker": {"code": "review_incomplete"}}}
+        sd_lane.run_lane(self.repo, self.environ, self.upgrade_after("prepare", incomplete))
+        self.follow()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], entry["hub_retries"], entry.get("reclaims")), ("merged", 1, None))
+
+    def test_an_upgrade_right_after_the_claim_raises_nothing_and_loses_nothing(self) -> None:
+        """Failure table, claim to prepare: the speculation's queue read met the refusal, and the run raised."""
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        claim = sd_lane.claim_entry
+
+        def then_upgraded(*args: Any, **kwargs: Any) -> Any:
+            claimed = claim(*args, **kwargs)
+            self.refusing.append(True)
+            return claimed
+        self.answers[(1, "prepare")] = self.refused("prepare")
+        with mock.patch.object(sd_lane, "claim_entry", then_upgraded):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertIn("BuildMismatch", answer["stopped"])
+        del self.answers[(1, "prepare")]
+        self.follow()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([(row["item"], row["status"], row.get("hub_retries")) for row in self.entries()],
+                         [(1, "merged", 1), (2, "merged", None)])
+
+    def dropped(self, connection: Any) -> Any:
+        """`connection` whose next read meets a dropped session, as `sd_db.ship`'s host read sees it."""
+        from sd_db import remote
+
+        class Dropped:
+            def execute(self, *args: Any) -> Any:
+                raise remote.TransactionLost("r-1")
+
+            def __getattr__(self, name: str) -> Any:
+                return getattr(connection, name)
+        return Dropped()
+
+    def test_a_session_drop_in_the_before_merge_host_read_is_a_hub_fault(self) -> None:
+        """Failure table, before merge: a dropped session read as `lane_unknown`, and reclaim counted a death.
+
+        The drop goes through `sd_db.ship`'s own host read, which wraps it in `LaneUnknown`.
+        """
+        dropping: list[bool] = []
+        real = sd_lane.sd_lib.lane_elsewhere
+
+        def lane_elsewhere(connection: Any, *args: Any) -> Any:
+            return real(self.dropped(connection) if dropping else connection, *args)
+
+        def prepared_then_dropped(argv: list[str], log: pathlib.Path) -> dict:
+            dropping.append(True)
+            return self.ship(argv, log)
+        with mock.patch.object(sd_lane.sd_lib, "lane_elsewhere", lane_elsewhere):
+            answer = sd_lane.run_lane(self.repo, self.environ, prepared_then_dropped)
+        self.assertIn("did not commit", answer["stopped"])
+        self.make_dead()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual((answer["reclaimed"][0]["status"], entry["status"], entry.get("hub_retries"),
+                          entry.get("reclaims")), ("pending", "merged", 1, None))
+
+    def test_a_claim_that_landed_unseen_then_met_a_drop_in_its_host_read_is_retried(self) -> None:
+        """Failure table, claim: the retry's host read met a dropped session; `lane_unknown` left it running."""
+        real_hub, real_read = sd_lane.on_hub, sd_lane.sd_lib.lane_elsewhere
+        lost, drops = [True], [True]
+
+        def claim_lands_answer_lost(queue: sd_lane.Queue, work: Any) -> Any:
+            answer = real_hub(queue, work)
+            if lost and any(body["status"] == "running" for _, body in self.rows()):
+                lost.clear()
+                raise sd_lane.LaneError("the session dropped", code=sd_lane.HUB_UNAVAILABLE)
+            return answer
+
+        def lane_elsewhere(connection: Any, *args: Any) -> Any:
+            if not lost and drops:
+                drops.clear()
+                return real_read(self.dropped(connection), *args)
+            return real_read(connection, *args)
+        with mock.patch.object(sd_lane, "on_hub", claim_lands_answer_lost), \
+                mock.patch.object(sd_lane.sd_lib, "lane_elsewhere", lane_elsewhere), \
+                mock.patch.object(sd_lane, "WRITE_RETRY_SECONDS", 600):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual((answer.get("stopped"), drops, entry["status"], entry.get("reclaims")),
+                         (None, [], "merged", None))
+
+    def test_a_merge_authority_read_the_hub_refused_puts_the_entry_back(self) -> None:
+        """Failure table, authority: `repo.runner_merge` met the refusal, and the entry stopped `prepared`."""
+        sd_lane.update(self.store(), lambda rows: rows[0].pop("authority", None))
+        with mock.patch.object(sd_lane, "default_runner_merge", self.authority), \
+                mock.patch.dict(os.environ, {"HOME": str(self.tmp)}):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.upgrade_after("prepare"))
+        self.assertIn("BuildMismatch", answer["stopped"])
+        self.follow()
+        with mock.patch.object(sd_lane, "default_runner_merge", lambda root: "auto"):
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], entry["hub_retries"], entry["hub_fault"]["step"], entry.get("reclaims")),
+                         ("merged", 1, "prepare", None))
+
+    def test_a_kill_during_the_catch_up_read_after_a_hub_stop_keeps_the_record(self) -> None:
+        """Failure table, record: the head lookup asks `origin`, which can take minutes; the record comes first."""
+        real = sd_lane.pushed_catch_up
+
+        def killed_once_recorded(*args: Any) -> Any:
+            if self.records():
+                raise Killed
+            return real(*args)
+        with mock.patch.object(sd_lane, "pushed_catch_up", killed_once_recorded), self.assertRaises(Killed):
+            sd_lane.run_lane(self.repo, self.environ, self.upgrade_after("prepare", self.refused("prepare")))
+        self.follow()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual((answer["reclaimed"][0].get("hub_stop"), entry["status"], entry["hub_retries"],
+                          entry.get("reclaims")), (True, "merged", 1, None))
+
+    def test_a_hub_stop_past_the_retries_holds_the_entry_and_release_runs_it(self) -> None:
+        """Bound: the entry is never failed for a hub fault; past `HUB_RETRIES` it waits, held, for the operator."""
+        sd_lane.update(self.store(), lambda rows: rows[0].update(hub_retries=sd_lane.HUB_RETRIES))
+        sd_lane.run_lane(self.repo, self.environ, self.upgrade_after("merge", self.refused("merge")))
+        self.follow()
+        self.calls.clear()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual((answer["reclaimed"][0]["status"], entry["status"], entry.get("held"), entry["hub_retries"],
+                          self.calls), ("pending", "pending", True, sd_lane.HUB_RETRIES + 1, []))
+        sd_lane.set_hold(self.repo, 1, self.environ, held=False)
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[0]["status"], "merged")
+
+    def test_a_run_before_the_follow_keeps_the_record_for_the_run_after(self) -> None:
+        """Failure table, reclaim: the next run starts before `follow`, and the hub refuses its reclaim too."""
+        sd_lane.run_lane(self.repo, self.environ, self.upgrade_after("prepare", self.refused("prepare")))
+        self.follow()
+        self.refusing.append(True)  # the runner died; this machine has not followed yet
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((refused.exception.code, len(self.records())), (sd_lane.HUB_UNAVAILABLE, 1))
+        self.refusing.clear()
+        host = sd_lane.refuse_elsewhere
+
+        def then_upgraded(*args: Any) -> Any:
+            host(*args)
+            self.refusing.append(True)  # the hub moves between the host read and the reclaim
+        with mock.patch.object(sd_lane, "refuse_elsewhere", then_upgraded), self.assertRaises(sd_lane.Stop) as stopped:
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((stopped.exception.code, len(self.records())), (sd_lane.HUB_UNAVAILABLE, 1))
+        self.follow()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], entry["hub_retries"], entry.get("reclaims"), self.records()),
+                         ("merged", 1, None, []))
+
+    def test_a_kill_after_the_reclaim_write_leaves_a_record_the_next_run_drops(self) -> None:
+        """Failure table, record removal: the reclaim landed and the run died before the record went."""
+        sd_lane.run_lane(self.repo, self.environ, self.upgrade_after("prepare", self.refused("prepare")))
+        self.follow()
+        [record] = self.records()
+        with mock.patch.object(sd_lane, "drop_hub_stops", side_effect=Killed), self.assertRaises(Killed):
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.entries()[0]["status"], self.entries()[0]["hub_retries"], record.exists()),
+                         ("pending", 1, True))
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], entry["hub_retries"], record.exists()), ("merged", 1, False))
+
+    def test_a_record_of_a_claim_that_holds_nothing_changes_nothing_and_goes(self) -> None:
+        """Failure table, record removal: a record whose claim no running entry holds is old state."""
+        path = self.store().lane / "queue" / "hub-stop-gone.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"token": "gone", "outcome": {"status": "merged"}}), encoding="utf-8")
+        before = self.rows()
+        self.assertEqual(sd_lane.settle_checkout(self.repo, self.store()), {})
+        self.assertEqual((self.rows(), path.exists()), (before, False))
+
+    def test_a_record_that_cannot_be_written_leaves_the_reclaim_of_a_dead_runner(self) -> None:
+        """Failure table, record: the lane folder refused the file; the next run reclaims as before, and says why."""
+        queue_dir = self.store().lane / "queue"
+
+        def read_only_after_prepare(argv: list[str], log: pathlib.Path) -> dict:
+            queue_dir.chmod(0o555)
+            return self.upgrade_after("prepare", self.refused("prepare"))(argv, log)
+        try:
+            answer = sd_lane.run_lane(self.repo, self.environ, read_only_after_prepare)
+        finally:
+            queue_dir.chmod(0o755)
+        self.assertIn("could not be written", answer["stopped"])
+        self.follow()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((answer["reclaimed"][0].get("hub_stop"), self.entries()[0]["reclaims"]), (None, 1))
+
+    def test_an_unreadable_record_leaves_the_reclaim_of_a_dead_runner_and_goes(self) -> None:
+        """Failure table, record: a record that does not parse is unknown, so the entry is reclaimed as before."""
+        sd_lane.run_lane(self.repo, self.environ, self.upgrade_after("prepare", self.refused("prepare")))
+        self.follow()
+        [record] = self.records()
+        record.write_text("{", encoding="utf-8")
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((answer["reclaimed"][0].get("hub_stop"), self.entries()[0].get("reclaims"), record.exists()),
+                         (None, 1, False))
 
 
 class AnyHost(SharedQueue):
