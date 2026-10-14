@@ -1,4 +1,4 @@
-"""Fleet-wide settings as `setting` rows (sd:3989, sd:3987).
+"""Fleet-wide settings as `setting` rows, and a Documents root's label (sd:3989, sd:3987, sd:3986).
 
 The design is the system repository's `docs/work/2026-10-13-config-to-db/design.md`, slice P1.
 Row wins: once the database holds a row for a key, `config.json` is not read for it, and a
@@ -13,10 +13,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from unittest import mock
 
-from sd_db import connect
+from sd_db import connect, set_view, views
 from sd_db.errors import SdDbError
 from sd_db import schema as schema_module
 from sd_db.migrate import initialise, migrate
@@ -82,6 +82,35 @@ class TheSettingRow(SettingCase):
                     (body,))
                 with self.assertRaises(SdDbError):
                     read_settings(self.connection, ["sd.copilot_review"])
+
+
+class TheRootLabel(SettingCase):
+    """A Documents root key (no `/`) takes a label beside hidden (sd:3986)."""
+
+    def test_a_label_only_root_row_is_listed_and_a_cleared_label_drops_it(self):
+        self.assertEqual(set_view(self.connection, "system", label=" System tools "),
+                         {"pinned": False, "hidden": False, "tags": [], "label": "System tools"})
+        self.assertEqual(views(self.connection), {"system": {"pinned": False, "hidden": False, "tags": [],
+                                                             "label": "System tools"}})
+        self.assertEqual(set_view(self.connection, "system", label=""), {"pinned": False, "hidden": False, "tags": []})
+        self.assertEqual(views(self.connection), {})
+
+    def test_hide_before_rename_keeps_both_and_hide_alone_keeps_the_label(self):
+        set_view(self.connection, "pack", hidden=True)
+        self.assertEqual(set_view(self.connection, "pack", label="Pack"),
+                         {"pinned": False, "hidden": True, "tags": [], "label": "Pack"})
+        self.assertEqual(set_view(self.connection, "pack", hidden=False),
+                         {"pinned": False, "hidden": False, "tags": [], "label": "Pack"})
+        self.assertEqual(views(self.connection)["pack"]["label"], "Pack")
+
+    def test_a_file_key_or_a_long_label_is_refused_and_writes_nothing(self):
+        with self.assertRaises(SdDbError):
+            set_view(self.connection, "system/index.html", label="Index")
+        with self.assertRaises(SdDbError):
+            set_view(self.connection, "system", label="x" * 61)
+        with self.assertRaises(SdDbError):
+            set_view(self.connection, "system", label=cast(Any, 7))
+        self.assertEqual(self.connection.execute("SELECT count(*) FROM state").fetchone()[0], 0)
 
 
 class FleetCase(unittest.TestCase):

@@ -640,6 +640,8 @@ VIEW_TAG_LENGTH = 64
 VIEW_TAGS = 16
 #: A file with no view row reads as this: shown, unpinned, untagged.
 VIEW_CLEAR: dict[str, Any] = {"pinned": False, "hidden": False, "tags": []}
+#: A root's label is the name the Documents page shows for it (sd:3986).
+VIEW_LABEL_LENGTH = 60
 
 
 def set_view(
@@ -649,8 +651,13 @@ def set_view(
     pinned: bool | None = None,
     hidden: bool | None = None,
     tags: list[str] | None = None,
+    label: str | None = None,
 ) -> dict[str, Any]:
     """Pin, hide or tag the Documents file `key`, or clear any of them (sd:3430).
+
+    A root key (no `/`) also takes `label`, the name the page shows for the
+    root, 1 to `VIEW_LABEL_LENGTH` characters; `""` clears it (sd:3986). A
+    file key refuses one. The state carries `label` only while one is set.
 
     One `view` row per write, through `record_state`: the latest row for a
     key is the answer (`views`). A field left `None` keeps the value the
@@ -661,8 +668,14 @@ def set_view(
     """
     if not isinstance(key, str) or not key.strip() or len(key) > VIEW_KEY_LENGTH:
         raise SdDbError(f"a view needs the file's key, 1 to {VIEW_KEY_LENGTH} characters")
-    if pinned is None and hidden is None and tags is None:
-        raise SdDbError("a view write needs pinned, hidden or tags")
+    if pinned is None and hidden is None and tags is None and label is None:
+        raise SdDbError("a view write needs pinned, hidden, tags or label")
+    if label is not None:
+        if "/" in key:
+            raise SdDbError("a label names a root; a file key takes none")
+        if not isinstance(label, str) or len(label.strip()) > VIEW_LABEL_LENGTH:
+            raise SdDbError(f"a label is 1 to {VIEW_LABEL_LENGTH} characters, or empty to clear it")
+        label = label.strip()
     for name, flag in (("pinned", pinned), ("hidden", hidden)):
         if flag is not None and not isinstance(flag, bool):
             raise SdDbError(f"{name} is true or false")
@@ -675,11 +688,14 @@ def set_view(
             "SELECT body FROM state WHERE kind = 'view' AND key = ? ORDER BY id DESC LIMIT 1", (key,)
         ).fetchone()
         state = (_view(row["body"]) if row else None) or VIEW_CLEAR
+        kept = state.get("label") if label is None else label
         state = {
             "pinned": state["pinned"] if pinned is None else pinned,
             "hidden": state["hidden"] if hidden is None else hidden,
             "tags": list(state["tags"]) if tags is None else tags,
         }
+        if kept:
+            state["label"] = kept
         record_state(connection, "view", key=key, body=state)
     return state
 
@@ -687,8 +703,9 @@ def set_view(
 def views(connection: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     """Every Documents file pinned, hidden or tagged: its `pinned`, `hidden` and `tags`.
 
-    The latest `view` row per key, read through `state_by_kind_key`. A key
-    whose latest row clears all three is not listed, and neither is one
+    A root key carries its `label` too, and a root row with only a label is
+    listed. The latest `view` row per key, read through `state_by_kind_key`.
+    A key whose latest row clears all of them is not listed, and neither is one
     whose body this cannot read: an unreadable view pins, hides and tags
     nothing.
     """
@@ -718,7 +735,11 @@ def _view(body: str | None) -> dict[str, Any] | None:
     tags = _view_tags(state.get("tags"))
     if tags is None:
         return None
-    return {"pinned": state["pinned"], "hidden": state["hidden"], "tags": tags}
+    found = {"pinned": state["pinned"], "hidden": state["hidden"], "tags": tags}
+    label = state.get("label")
+    if isinstance(label, str) and 0 < len(label) <= VIEW_LABEL_LENGTH:
+        found["label"] = label
+    return found
 
 
 def _view_tags(tags: Any) -> list[str] | None:
