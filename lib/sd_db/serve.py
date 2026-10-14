@@ -136,6 +136,10 @@ class PeerRefused(remote.RemoteError):
     """The session's TCP peer is not one this listener admits. Nothing opened."""
 
 
+class Fenced(remote.RemoteError):
+    """This machine no longer holds the hub role (hub failover, D5); the session closes and rolls back."""
+
+
 #: The PRAGMAs a session may run, from a grep for `PRAGMA` across
 #: `local-sd-db/sd_db`, `local-sd-runner` and `local-project-dashboard`
 #: (2026-10-04, step 7's review); the command pack's `bin/` names none.
@@ -163,6 +167,13 @@ PRAGMAS_WITH_ARGUMENT = frozenset({
 #: (5 s): a hub writer that starts waiting when a satellite goes silent gets
 #: the lock before its own wait ends (gap (g) of the design).
 IDLE_TIMEOUT = 4.0
+#: Seconds the tailnet listener trusts its last fence answer (sd:4044). An
+#: old hub that slept or lost its network keeps its process while the console
+#: renames it, so the check at start is not enough: every frame asks again
+#: past this, or past a wall clock that moved `CLOCK_SLACK` more than the
+#: monotonic one, which does not count a sleep.
+FENCE_SECONDS = 5.0
+CLOCK_SLACK = 1.0
 #: What `Session._authorize` counts as a read, with `load_extension` left
 #: out of `SQLITE_FUNCTION` and a `PRAGMA` read only with no argument.
 #: SAVEPOINT, RELEASE and ROLLBACK TO move no data: the library's nested
@@ -609,6 +620,11 @@ class Session(socketserver.BaseRequestHandler):
                             f"protocol version {frame.get('v')!r} refused; this hub speaks "
                             f"{remote.PROTOCOL_VERSION}"
                         )
+                    if server.node is not None:
+                        # Every frame, open or not: a demoted hub writes nothing and serves no stale read.
+                        fenced = server.fence()
+                        if fenced is not None:
+                            raise Fenced(f"refused: this machine is not the hub: {fenced}")
                     if connection is None:
                         if op != "open":
                             raise remote.RemoteError(f"the first frame must be open, not {op!r}")
@@ -730,6 +746,10 @@ class Session(socketserver.BaseRequestHandler):
                         server.log.line(f"session {self.number} refused before open: {error}")
                         hang_up = isinstance(error, PeerRefused)
                         restart = isinstance(error, remote.HubRestartNeeded)
+                    if isinstance(error, Fenced):
+                        # Closing the connection rolls back what the session held.
+                        server.log.line(f"session {self.number} closed: this machine is no longer the hub: {error}")
+                        hang_up = True
                 if connection is not None:
                     # A ROLLBACK, or a transaction SQLite ended on an error.
                     self._settle(connection)
@@ -795,7 +815,24 @@ class Server(socketserver.ThreadingTCPServer):
         self.node = node
         self.idle_timeout = idle_timeout
         self.owners = Owners()
+        #: `(monotonic, wall, refusal)` of the last fence answer; see `fence`.
+        self.fenced: tuple[float, float, str | None] | None = None
+        self.fence_guard = threading.Lock()
         super().__init__((LOOPBACK if node is None else str(node.address), port), Session)
+
+    def fence(self) -> str | None:
+        """Why this machine no longer holds the hub role, or `None`: asked again past
+        `FENCE_SECONDS`, or once the wall clock jumped (a sleep). Unknown refuses."""
+        with self.fence_guard:
+            ticks, wall = time.monotonic(), time.time()
+            if self.fenced is not None:
+                since, at, refusal = self.fenced
+                if ticks - since < FENCE_SECONDS and abs((wall - at) - (ticks - since)) <= CLOCK_SLACK:
+                    return refusal
+            found = hub.role_at(self.database)
+            refusal = found.reason if found.refuses else None
+            self.fenced = (ticks, wall, refusal)
+            return refusal
 
     def admit(self, peer, frame: dict, session: int = 0) -> None:
         """Refuse a session before anything opens, and before any SQL runs."""

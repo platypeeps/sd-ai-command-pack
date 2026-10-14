@@ -12,14 +12,18 @@ never named its hub) go on; `elsewhere` (another node holds the name) and
 
 from __future__ import annotations
 
+import ipaddress
+import io
 import os
+import socket
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import database, hub, initialise, serve, ship, tailnet, upsert_repo, writes
+from sd_db import database, hub, initialise, remote, serve, ship, tailnet, upsert_repo, writes
 from sd_db.testing import Stubs
 
 from . import support
@@ -240,6 +244,141 @@ class TheServer(StubCase):
         self.assertEqual(code, 1)
         self.assertIn("cannot listen on 127.0.0.1:0", "".join(refused))
         self.assertEqual(self.asked(), [])
+
+
+class TheLiveServer(StubCase):
+    """A server that started as the hub and is demoted while it runs (the 2026-10-14 review of sd:4044).
+
+    An old hub that slept, or lost its network, keeps its process; the
+    console renames it meanwhile. The check at start does not see that, so
+    every session frame asks the fence again, within `serve.FENCE_SECONDS`
+    and never across a wall-clock jump (a sleep).
+    """
+
+    OPERATOR = "operator@example.test"
+    HUB_IP = "100.64.0.10"
+    SATELLITE = "100.64.0.20"
+
+    def setUp(self):
+        super().setUp()
+        local = database.connect(self.path)
+        local.execute("CREATE TABLE probe (id INTEGER PRIMARY KEY, name TEXT NOT NULL)")
+        local.close()
+        self.name_hub(HUB_NAME)
+        self.rename(HUB_NAME + ".")
+        self.stream = io.StringIO()
+        node = tailnet.Node(frozenset({ipaddress.ip_address(self.HUB_IP)}), self.OPERATOR,
+                            ipaddress.IPv4Address("127.0.0.1"), HUB_NAME)
+        self.server = serve.Server(0, self.path, serve.Log(self.stream), "", self.root / "unused.token", node)
+        self.addCleanup(self.server.server_close)
+
+    def rename(self, dnsname: str) -> None:
+        whois = {self.SATELLITE: {"Node": {"Addresses": [f"{self.SATELLITE}/32"], "Tags": []},
+                                  "UserProfile": {"LoginName": self.OPERATOR}}}
+        self.node(dnsname, ips=[self.HUB_IP], login=self.OPERATOR, whois=whois)
+
+    def rows(self) -> int:
+        watch = database.connect(self.path, write=False)
+        try:
+            return watch.execute("SELECT count(*) FROM probe").fetchone()[0]
+        finally:
+            watch.close()
+
+    def session(self, *frames, between=None, after: int = 0) -> list:
+        """Open, then each frame; `between` runs after answer `after` (0 is the open's). `None` once the hub hangs up."""
+        ours, theirs = socket.socketpair()
+        ours.settimeout(30)
+
+        def handle():
+            try:
+                serve.Session(theirs, (self.SATELLITE, 45678), self.server)
+            finally:
+                theirs.close()
+
+        handler = threading.Thread(target=handle, daemon=True)
+        handler.start()
+        answers: list = []
+        opening = remote.request("open", path=None, write=True, create=False, busy_timeout=5000,
+                                 token="", **remote.handshake())
+        try:
+            for index, frame in enumerate((opening, *frames)):
+                try:
+                    remote.send_frame(ours, frame)
+                    answers.append(remote.read_frame(ours))
+                except (EOFError, OSError):
+                    answers.append(None)
+                    break
+                if index == after and between is not None:
+                    between()
+        finally:
+            ours.close()
+            handler.join(30)
+        self.assertFalse(handler.is_alive(), "the session handler did not end")
+        return answers
+
+    def test_a_rename_after_start_refuses_the_next_open(self):
+        self.enterContext(mock.patch.object(serve, "FENCE_SECONDS", 0.0))
+        self.assertTrue(self.session(remote.request("close"))[0]["ok"])
+        self.rename("old-hub.example.test.")
+        answers = self.session(remote.request("execute", sql="INSERT INTO probe (name) VALUES ('stale')", params=None))
+        self.assertFalse(answers[0]["ok"], answers)
+        self.assertIn(f"this machine is not the hub: sd.hub_name names {HUB_NAME}", answers[0]["error"]["text"])
+        self.assertEqual(answers[1:], [None], "a fenced server answered a second frame")
+        self.assertEqual(self.rows(), 0)
+
+    def test_a_rename_mid_session_refuses_the_write_and_rolls_back(self):
+        self.enterContext(mock.patch.object(serve, "FENCE_SECONDS", 0.0))
+        rid = remote.new_request_id()
+        answers = self.session(
+            remote.request("execute", sql="BEGIN IMMEDIATE", params=None, rid=rid),
+            remote.request("execute", sql="INSERT INTO probe (name) VALUES ('before')", params=None),
+            remote.request("execute", sql="INSERT INTO probe (name) VALUES ('after')", params=None),
+            remote.request("execute", sql="COMMIT", params=None, rid=rid),
+            between=None)
+        self.assertTrue(all(a and a["ok"] for a in answers), answers)
+        self.assertEqual(self.rows(), 2)
+
+        def demote():
+            self.rename("old-hub.example.test.")
+        second = remote.new_request_id()
+        answers = self.session(
+            remote.request("execute", sql="BEGIN IMMEDIATE", params=None, rid=second),
+            remote.request("execute", sql="INSERT INTO probe (name) VALUES ('stale')", params=None),
+            remote.request("execute", sql="COMMIT", params=None, rid=second),
+            remote.request("close"),
+            between=demote, after=2)
+        self.assertTrue(all(a["ok"] for a in answers[:3]), answers)
+        self.assertFalse(answers[3]["ok"], answers)
+        self.assertIn("this machine is not the hub", answers[3]["error"]["text"])
+        self.assertEqual(answers[4:], [None], "a fenced server answered a second frame")
+        self.assertEqual(self.rows(), 2, "a demoted hub wrote a row")
+        self.assertIn("no longer the hub", self.stream.getvalue())
+
+    def test_the_answer_stands_a_few_seconds_but_never_across_a_sleep(self):
+        clock = {"monotonic": 1000.0, "time": 2_000_000_000.0}
+        self.enterContext(mock.patch.object(serve.time, "monotonic", lambda: clock["monotonic"]))
+        self.enterContext(mock.patch.object(serve.time, "time", lambda: clock["time"]))
+        self.assertIsNone(self.server.fence())
+        self.rename("old-hub.example.test.")
+        clock["monotonic"] += 1
+        clock["time"] += 1
+        self.assertIsNone(self.server.fence(), "asked again inside the window")
+        self.assertEqual(self.asked().count(["status", "--json"]), 1)
+        # A sleep: the wall clock moves an hour, the monotonic clock does not.
+        clock["time"] += 3600
+        self.assertIn(f"sd.hub_name names {HUB_NAME}", self.server.fence() or "")
+        clock["monotonic"] += serve.FENCE_SECONDS + 1
+        clock["time"] += serve.FENCE_SECONDS + 1
+        self.rename(HUB_NAME + ".")
+        self.assertIsNone(self.server.fence(), "a refusal outlived its window")
+
+    def test_no_setting_serves_as_before_and_asks_tailscale_nothing(self):
+        self.name_hub(None)
+        self.enterContext(mock.patch.object(serve, "FENCE_SECONDS", 0.0))
+        answers = self.session(remote.request("execute", sql="INSERT INTO probe (name) VALUES ('x')", params=None,
+                                              rid=remote.new_request_id()))
+        self.assertTrue(all(a and a["ok"] for a in answers), answers)
+        self.assertEqual(self.asked().count(["status", "--json"]), 0)
 
 
 class TheVerb(StubCase):

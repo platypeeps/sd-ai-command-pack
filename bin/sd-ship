@@ -2001,6 +2001,12 @@ class Ship(SharedReview):
         A protection object appearing under a declaration, or the declaration's
         object going missing, is a change of gate, not a fresh answer to use.
         """
+        # The lane host and the fence again: the local gate can run for minutes under
+        # the lock, and a hub demoted meanwhile must merge nothing (sd:4044).
+        elsewhere = lane_host_refusal(self.root, self.connection, self.database)
+        if elsewhere:
+            raise Refusal(elsewhere, code="lane_elsewhere", boundary="runtime", state="operator_decision",
+                          next_action="Run it on the lane host, or move the lane: dashboard, Management, Move lane.")
         try:
             again = self.api.gate(base, head)
         except Refusal as error:

@@ -557,6 +557,24 @@ class LaneHost(LaneCase):
             self.dispatch("merge", "--manual", "--expected-head", self.head())
         self.assertEqual(self.puts(), [])
 
+    def test_a_demotion_during_the_merge_refuses_before_the_merge_call(self):
+        """sd:4044 review: the gate can run for minutes under the lock; a hub renamed meanwhile merges nothing."""
+        self.assertEqual(self.dispatch("prepare")["phase"], "ready_to_send")
+        original = ship.Ship.settled_ready
+
+        def demoted_meanwhile(delivery, *args, **kwargs):
+            from sd_db import writes
+            writes.set_setting(self.connection, "sd.hub_name", "hub.example.test")
+            self.connection.commit()
+            return original(delivery, *args, **kwargs)
+        with patch("sd_db.tailnet.this_name", lambda: "old-hub.example.test"), \
+                patch.object(ship.Ship, "settled_ready", demoted_meanwhile), \
+                self.assertRaises(ship.Refusal) as refused:
+            self.dispatch("merge", "--manual", "--expected-head", self.head())
+        self.assertEqual(refused.exception.workflow["blocker"]["code"], "lane_elsewhere")
+        self.assertIn("runs on the hub, hub.example.test, not on this machine", str(refused.exception))
+        self.assertEqual(self.puts(), [])
+
     def test_an_sd_db_without_hosts_lane_hosts_every_lane_on_the_hub_only(self):
         for served, hosted in ((None, True), (self.HUB, False)):
             with self.subTest(served=served), patch.dict(receipts.__dict__), \
