@@ -37,17 +37,14 @@ its snapshot restored and compared, and never before. What the table says:
 
                      Since sd:739 there are far fewer of them to settle: a
                      quiet tick through `reporting.ingest_log` writes a
-                     heartbeat instead of an item, so a clean report from
-                     that path now means a job that recovered, which is a
-                     one-off rather than a thing arriving every fifteen
-                     minutes.  It is `ingest_log` that changed, not
-                     `ingest`: a caller that files a report directly still
-                     files one per run, and `prune` below is such a caller
-                     -- its own successful report is clean and is not a
-                     recovery.  This rule is unchanged and still needed --
-                     recoveries accumulate too, direct callers keep
-                     arriving, and rows predating that change are still
-                     here.
+                     heartbeat instead of an item, and since sd:3509 a
+                     recovery does too, so that path files no clean report.
+                     It is `ingest_log` that changed, not `ingest`: a
+                     caller that files a report directly still files one
+                     per run, and `prune` below is such a caller -- its own
+                     successful report is clean.  This rule is unchanged
+                     and still needed -- direct callers keep arriving, and
+                     rows predating those changes are still here.
     backups          thirty files -- `backup --keep N`, not here. The
                      scheduled job runs `--keep all` by the September 9
                      amendment, and this module does not touch it. The

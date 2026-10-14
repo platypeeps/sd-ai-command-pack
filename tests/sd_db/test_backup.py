@@ -17,6 +17,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -1055,6 +1056,277 @@ class TheDatabaseWaitingForMigrate(BackupCase):
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertEqual([snapshot.directory.exists() for snapshot in older], [False, False, True])
         self.assertIn("2 old snapshot(s) removed; row prune skipped", completed.stdout)
+
+
+class MigrateNeedsABackupOfThisStore(BackupCase):
+    """sd:3507: `sd-db migrate` refuses unless the newest snapshot under the
+    backup root verifies and is this store: its schema version and its row
+    counts. A database waiting for `migrate` refuses every library write, so
+    equal counts mean the snapshot holds every row the migration rewrites."""
+
+    def migrate(self, expect):
+        environment = dict(os.environ, HOME=str(self.home), PYTHON=sys.executable)
+        completed = subprocess.run([sys.executable, str(ENTRYPOINT), "migrate"], capture_output=True, text=True,
+                                   input="", env=environment, check=False)
+        self.assertEqual(completed.returncode, expect, completed.stdout + completed.stderr)
+        return completed
+
+    def version(self):
+        raw = sqlite3.connect(f"file:{self.database}?mode=ro", uri=True)
+        try:
+            return raw.execute("PRAGMA user_version").fetchone()[0]
+        finally:
+            raw.close()
+
+    def test_no_backup_is_refused_and_names_both_ways_out(self):
+        one_migration_back(self.database)
+        completed = self.migrate(1)
+        self.assertIn(f"no backup under {backup_root(self.home)}", completed.stderr)
+        self.assertIn("bin/sd-db backup", completed.stderr)
+        self.assertIn("SD_DB_BACKUP_ROOT", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_backup_of_this_store_lets_it_migrate(self):
+        one_migration_back(self.database)
+        snapshot = run(home=self.home)
+        completed = self.migrate(0)
+        self.assertIn(f"backup {snapshot.directory}", completed.stdout)
+        self.assertEqual(self.version(), SCHEMA_VERSION)
+
+    @hub_only
+    def test_a_row_written_after_the_backup_is_refused(self):
+        one_migration_back(self.database)
+        run(home=self.home)
+        raw = sqlite3.connect(self.database, isolation_level=None)
+        raw.execute("INSERT INTO item (kind,title,status,created_at,updated_at) "
+                    "VALUES ('task','After the backup','planning','2026-10-13T00:00:00+00:00','2026-10-13T00:00:00+00:00')")
+        raw.close()
+        completed = self.migrate(1)
+        self.assertIn("item: store 1, backup 0", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_backup_at_another_schema_version_is_refused(self):
+        # The snapshot of the store before it moved back: its rows, another version.
+        run(home=self.home)
+        one_migration_back(self.database)
+        completed = self.migrate(1)
+        self.assertIn(f"is at schema version {SCHEMA_VERSION}, the store at {SCHEMA_VERSION - 1}", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_only_the_newest_backup_counts(self):
+        one_migration_back(self.database)
+        good = run(home=self.home, when=datetime(2026, 10, 1, tzinfo=UTC))
+        newer = run(home=self.home, when=datetime(2026, 10, 2, tzinfo=UTC))
+        (newer.directory / "sd.db").write_bytes(b"not a database")
+        completed = self.migrate(1)
+        self.assertIn(str(newer.directory), completed.stderr)
+        self.assertNotIn(str(good.directory), completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_copy_that_links_to_the_store_is_refused(self):
+        one_migration_back(self.database)
+        snapshot = run(home=self.home)
+        (snapshot.directory / "sd.db").unlink()
+        (snapshot.directory / "sd.db").symlink_to(self.database)
+        completed = self.migrate(1)
+        self.assertIn("refuses linked or mounted entries", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_an_update_after_the_backup_is_refused(self):
+        # An UPDATE leaves every count as it was; only the store's own file says it moved.
+        connection = self.open()
+        item = create_item(connection, kind="task", title="Before the backup")
+        connection.close()
+        one_migration_back(self.database)
+        run(home=self.home)
+        raw = sqlite3.connect(self.database, isolation_level=None)
+        raw.execute("UPDATE item SET title = 'After the backup' WHERE id = ?", (item,))
+        raw.close()
+        completed = self.migrate(1)
+        self.assertIn("the store was written after the newest backup", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_deleted_or_changed_file_in_the_backup_is_refused(self):
+        self.configuration()
+        one_migration_back(self.database)
+        for change in ("delete", "corrupt"):
+            with self.subTest(change=change):
+                snapshot = run(home=self.home)
+                kept = snapshot.directory / "providers.yaml"
+                if change == "delete":
+                    kept.unlink()
+                else:
+                    kept.write_text("providers: {changed: true}\n", encoding="utf-8")
+                completed = self.migrate(1)
+                self.assertIn("its files differ from its manifest", completed.stderr)
+                self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_checkpointed_backup_is_refused(self):
+        """A checkpointed run writes its row and copies the log back on close,
+        so no fingerprint it could record still describes the store: the
+        previous library's backup does not let the next one migrate."""
+        snapshot = run(home=self.home)
+        self.assertTrue(snapshot.checkpointed)
+        self.assertNotIn("store", json.loads((snapshot.directory / BACKUP_MANIFEST).read_text()))
+        with mock.patch.object(backup_module, "SCHEMA_VERSION", SCHEMA_VERSION + 1):
+            with self.assertRaisesRegex(BackupError, "records no fingerprint of the store"):
+                backup_module.migration_backup(self.home)
+
+    def one_back_with_an_item(self):
+        """The store one migration back, holding one item `raw_write` changes."""
+        connection = self.open()
+        create_item(connection, kind="task", title="Before the backup")
+        connection.close()
+        one_migration_back(self.database)
+
+    def raw_write(self):
+        # An UPDATE: every count stays as it was, so only the fingerprint can tell.
+        raw = sqlite3.connect(self.database, isolation_level=None)
+        try:
+            raw.execute("UPDATE item SET title = 'Written in the gap'")
+        finally:
+            raw.close()
+
+    @hub_only
+    def test_a_write_after_the_snapshot_and_before_the_manifest_is_refused(self):
+        # The gap round 2 found: the copy's read ends, then the run copies the
+        # files beside it, verifies and writes the manifest last.
+        self.one_back_with_an_item()
+        real = backup_module._record_backup
+
+        def late(*args, **kwargs):
+            self.raw_write()
+            return real(*args, **kwargs)
+
+        with mock.patch.object(backup_module, "_record_backup", late):
+            snapshot = run(home=self.home)
+        self.assertFalse(snapshot.checkpointed)
+        completed = self.migrate(1)
+        self.assertIn("the store was written after the newest backup", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_write_once_the_snapshot_has_read_is_refused(self):
+        self.one_back_with_an_item()
+        real = backup_module._counts
+        calls = []
+
+        def counted(connection):
+            found = real(connection)
+            if not calls:
+                # The view is fixed; this write waits for the lock and lands after it.
+                calls.append(threading.Thread(target=self.raw_write))
+                calls[0].start()
+            return found
+
+        with mock.patch.object(backup_module, "_counts", counted):
+            try:
+                run(home=self.home)
+            finally:
+                for thread in calls:
+                    thread.join()
+        completed = self.migrate(1)
+        self.assertIn("the store was written after the newest backup", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_writer_mid_commit_lands_in_the_copy(self):
+        # Round 3: a writer puts its frames in the log before it publishes the
+        # commit. The read-only run takes the write lock around the
+        # fingerprint and the read that fixes its view, so it waits for the
+        # commit and copies it.
+        self.one_back_with_an_item()
+        holding = threading.Event()
+
+        def writer():
+            raw = sqlite3.connect(self.database, isolation_level=None)
+            try:
+                raw.execute("BEGIN IMMEDIATE")
+                raw.execute("UPDATE item SET title = 'Written in the gap'")
+                holding.set()
+                time.sleep(1)
+                raw.execute("COMMIT")
+            finally:
+                raw.close()
+
+        thread = threading.Thread(target=writer)
+        thread.start()
+        self.assertTrue(holding.wait(10))
+        try:
+            snapshot = run(home=self.home)
+        finally:
+            thread.join()
+        copy = sqlite3.connect(f"file:{snapshot.directory / 'sd.db'}?mode=ro", uri=True)
+        try:
+            self.assertEqual([("Written in the gap",)], copy.execute("SELECT title FROM item").fetchall())
+        finally:
+            copy.close()
+        self.migrate(0)
+        self.assertEqual(self.version(), SCHEMA_VERSION)
+
+    @hub_only
+    def test_a_write_between_the_check_and_the_migration_is_refused(self):
+        from sd_db.jobs import cli
+        self.one_back_with_an_item()
+        run(home=self.home)
+        real = cli.migration_backup
+
+        def then_write(home):
+            found = real(home)
+            self.raw_write()
+            return found
+
+        with mock.patch.object(cli, "migration_backup", then_write), \
+                mock.patch.dict(os.environ, {"HOME": str(self.home)}):
+            with self.assertRaisesRegex(BackupError, "the store was written after the newest backup"):
+                cli.command_migrate([])
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_manifest_without_a_fingerprint_is_refused(self):
+        # What a library before this one wrote for a read-only snapshot.
+        one_migration_back(self.database)
+        snapshot = run(home=self.home)
+        manifest = snapshot.directory / BACKUP_MANIFEST
+        value = json.loads(manifest.read_text())
+        del value["store"]
+        os.chmod(manifest, 0o600)
+        manifest.write_text(json.dumps(value, sort_keys=True) + "\n")
+        completed = self.migrate(1)
+        self.assertIn("records no fingerprint of the store", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_fingerprint_that_cannot_be_read_is_refused(self):
+        one_migration_back(self.database)
+        snapshot = run(home=self.home)
+        self.database.rename(self.database.with_name("moved.db"))
+        with self.assertRaisesRegex(BackupError, "fingerprint could not be read"):
+            backup_module.unchanged_since(self.home, snapshot.directory)
+
+    @hub_only
+    def test_a_library_read_after_the_backup_still_migrates(self):
+        # Readers write only the shared-memory file, which the fingerprint leaves out.
+        one_migration_back(self.database)
+        snapshot = run(home=self.home)
+        reader = connect(self.database, write=False)
+        try:
+            reader.execute("SELECT count(*) FROM item").fetchone()
+        finally:
+            reader.close()
+        completed = self.migrate(0)
+        self.assertIn(f"backup {snapshot.directory}", completed.stdout)
+        self.assertEqual(self.version(), SCHEMA_VERSION)
+
+    def test_a_store_with_nothing_pending_needs_no_backup(self):
+        self.assertIn("nothing applied", self.migrate(0).stdout)
 
 
 class JobRun(BackupCase):

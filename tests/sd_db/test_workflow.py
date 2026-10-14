@@ -346,6 +346,61 @@ class BranchItemClose(WorkflowCase):
         self.assertEqual(change_status(self.db, item, "blocked", who="dashboard")["item"]["status"], "blocked")
 
 
+class DoneResolvesOpenNotes(WorkflowCase):
+    """sd:3505: a move to done resolves the item's open followup and question
+    notes, the ones a brief and the review queue read, in the transaction that
+    moves it, and the status note names them."""
+
+    def notes(self, item):
+        rows = self.db.execute("SELECT id, kind, resolved_at FROM note WHERE item = ? AND kind != 'status_change' "
+                               "ORDER BY id", (item,)).fetchall()
+        return {row["id"]: (row["kind"], row["resolved_at"] is None) for row in rows}
+
+    def test_done_resolves_open_followups_and_questions_and_names_them(self):
+        item = self.capture()["item"]["id"]
+        followup = add_note(self.db, item, "followup", "Check the backup")
+        question = add_note(self.db, item, "question", "Keep the old flag?")
+        comment = add_note(self.db, item, "comment", "Context only")
+        settled = add_note(self.db, item, "followup", "Already done")
+        resolve_item_note(self.db, settled, who="operator")
+        finished = change_status(self.db, item, "done", who="operator")
+        self.assertEqual(self.notes(item), {followup: ("followup", False), question: ("question", False),
+                                            comment: ("comment", True), settled: ("followup", False)})
+        self.assertEqual(finished["notes"][-1]["body"],
+                         f"planning -> done by operator: resolved open notes {followup}, {question}")
+
+    def test_a_reason_keeps_its_place_before_the_resolved_notes(self):
+        item = self.capture()["item"]["id"]
+        followup = add_note(self.db, item, "followup", "Check the backup")
+        finished = change_status(self.db, item, "done", who="operator", reason="shipped by hand")
+        self.assertEqual(finished["notes"][-1]["body"],
+                         f"planning -> done by operator: shipped by hand; resolved open note {followup}")
+
+    def test_another_status_resolves_nothing(self):
+        item = self.capture()["item"]["id"]
+        followup = add_note(self.db, item, "followup", "Check the backup")
+        change_status(self.db, item, "blocked", who="operator")
+        self.assertEqual(self.notes(item), {followup: ("followup", True)})
+
+    def test_a_refused_done_leaves_the_notes_open(self):
+        item = self.capture()["item"]["id"]
+        self.db.execute("UPDATE item SET branch = 'fleet/fixture-sd1' WHERE id = ?", (item,))
+        self.db.commit()
+        followup = add_note(self.db, item, "followup", "Check the backup")
+        with self.assertRaises(TransitionRefused):
+            change_status(self.db, item, "done", who="operator")
+        self.assertEqual(self.notes(item), {followup: ("followup", True)})
+
+    def test_a_failed_transition_rolls_the_resolution_back(self):
+        item = self.capture()["item"]["id"]
+        question = add_note(self.db, item, "question", "Keep the old flag?")
+        with patch("sd_db.workflow.transition", side_effect=sqlite3.OperationalError("disk I/O error")):
+            with self.assertRaises(sqlite3.OperationalError):
+                change_status(self.db, item, "done", who="operator")
+        self.assertEqual(self.notes(item), {question: ("question", True)})
+        self.assertEqual(item_state(self.db, item)["item"]["status"], "planning")
+
+
 class BranchClearing(WorkflowCase):
     """sd:2818: `edit_item` clears a stale branch and sets none."""
 

@@ -19,7 +19,7 @@ from typing import Any
 from . import repos
 from .database import transaction
 from .errors import SdDbError
-from .reads import item_by_id, item_notes
+from .reads import BRIEF_KINDS, item_by_id, item_notes
 from .recurrence import ANCHORS, RecurrenceError, first_barren_start, next_after, parse as parse_rule
 from .writes import (
     STATUSES, TransitionRefused, add_note, create_item, refuse_base_status, resolve_note,
@@ -707,6 +707,17 @@ def change_status(
             if isinstance(held, dict) and "completion" in held:
                 del held["completion"]
                 set_item_fields(connection, item, fields=held)
+        if target == "done":
+            # sd:3505: what a done item still owed is no longer owed; the brief
+            # and Today read only open notes, so close them with the move.
+            owed = [note["id"] for note in state["notes"]
+                    if note["kind"] in BRIEF_KINDS and not note["resolved_at"]]
+            for note in owed:
+                resolve_note(connection, note)
+            if owed:
+                closed = (f"resolved open note{'s' if len(owed) > 1 else ''} "
+                          + ", ".join(str(note) for note in owed))
+                reason = f"{reason}; {closed}" if reason else closed
         transition(connection, item, target, who=who, reason=reason)
         if target != "done" or row.get("recurrence") is None:
             return item_state(connection, item)

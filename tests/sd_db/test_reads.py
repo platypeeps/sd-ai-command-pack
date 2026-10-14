@@ -60,6 +60,21 @@ class TheItemShadow(unittest.TestCase):
         self.assertIn("github, jira", str(raised.exception))
 
 
+class OpenFollowups(unittest.TestCase):
+    def test_a_done_items_followups_are_not_owed(self):
+        # sd:3505: Today's list read followups on done items, which nobody owes.
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "sd.db"
+            initialise(path)
+            connection = connect(path)
+            self.addCleanup(connection.close)
+            live = create_item(connection, kind="task", title="Live", status="planning")
+            done = create_item(connection, kind="task", title="Done", status="done")
+            owed = add_note(connection, live, "followup", "Still owed")
+            add_note(connection, done, "followup", "Left behind")
+            self.assertEqual([row["id"] for row in reads.open_followups(connection)], [owed])
+
+
 class ParkedWritingReads(unittest.TestCase):
     def test_due_date_does_not_put_parked_writing_back_in_today(self):
         with tempfile.TemporaryDirectory() as temporary:

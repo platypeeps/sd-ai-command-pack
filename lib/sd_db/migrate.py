@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,7 +42,8 @@ def pending(connection: sqlite3.Connection) -> list[tuple[int, Path]]:
     return [(version, path) for version, path in migrations() if version > found]
 
 
-def migrate(path: Path | str | None = None, *, home: Path | str | None = None) -> Applied:
+def migrate(path: Path | str | None = None, *, home: Path | str | None = None,
+            check: Callable[[], None] | None = None) -> Applied:
     """Apply every migration the database has not seen, in order.
 
     Idempotent: a second run finds nothing pending and reports the same
@@ -49,6 +51,10 @@ def migrate(path: Path | str | None = None, *, home: Path | str | None = None) -
     transaction with the version bump in the same transaction, so a failure
     halfway leaves the database at the last version it fully reached rather
     than at a shape no number describes.
+
+    `check` runs under the write lock the first migration commits in, so no
+    other writer lands between it and that migration; it refuses by raising
+    (`backup.unchanged_since`, sd:3507).
     """
     connection = connect(path, home=home, create=True, write=True)
     try:
@@ -58,7 +64,7 @@ def migrate(path: Path | str | None = None, *, home: Path | str | None = None) -
         paths.install(connection)
         before = schema_version(connection)
         applied: list[int] = []
-        for version, source in pending(connection):
+        for index, (version, source) in enumerate(pending(connection)):
             statements = source.read_text(encoding="utf-8")
             if BEGINS.search(statements):
                 raise ValueError(
@@ -71,8 +77,20 @@ def migrate(path: Path | str | None = None, *, home: Path | str | None = None) -
             # 2026-09-06. The transaction goes inside the script instead, with
             # the version bump in it, so a failure halfway leaves the database
             # at the last version it fully reached.
+            begin = "BEGIN;\n"
+            if index == 0 and check is not None:
+                # No implicit COMMIT before the script, so the lock held for
+                # the check is the one the first migration commits under.
+                connection.autocommit = True
+                connection.execute("BEGIN IMMEDIATE")
+                try:
+                    check()
+                except BaseException:
+                    connection.execute("ROLLBACK")
+                    raise
+                begin = ""
             connection.executescript(
-                f"BEGIN;\n{statements}\n"
+                f"{begin}{statements}\n"
                 f"PRAGMA {VERSION_PRAGMA} = {int(version)};\nCOMMIT;"
             )
             applied.append(version)
