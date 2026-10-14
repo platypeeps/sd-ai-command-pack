@@ -2352,6 +2352,12 @@ class ChannelsTests(Fixture):
         self.row(None)
         self.assert_origin_main()
 
+    def test_a_setting_naming_only_a_feed_matches_the_origin_main_fixture(self) -> None:
+        """sd:3980: the inbound feed is not a publish channel, so it leaves
+        no outbound channel off."""
+        self.row({"feed": {"url": "https://example.test/feed.xml"}})
+        self.assert_origin_main()
+
     # Folders.
 
     def test_a_notion_folder_replaces_the_repo_subfolder(self) -> None:

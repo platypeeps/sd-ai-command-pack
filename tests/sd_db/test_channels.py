@@ -13,7 +13,7 @@ from unittest import mock
 
 from sd_db import connect
 from sd_db import schema as schema_module
-from sd_db.channels import ChannelRefusal, dumps, validate
+from sd_db.channels import ChannelRefusal, dumps, outbound, validate
 from sd_db.errors import SchemaTooOld
 from sd_db.migrate import initialise, migrate
 from sd_db.repos import RepoRefusal, repo_channels
@@ -115,6 +115,39 @@ class TheValidator(unittest.TestCase):
         value = {"obsidian": {"folder": "Briefs/x"}, "drive": {}}
         self.assertEqual(dumps(value), '{"drive":{},"obsidian":{"folder":"Briefs/x"}}')
         self.assertEqual(dumps(None), "none")
+
+
+class TheFeed(unittest.TestCase):
+    """sd:3980: a repo's one RSS/Atom subscription, the inbound `feed` key.
+
+    `sd-watchlist` reads it; it is not an outbound channel, so it neither
+    turns publishing on nor leaves the outbound channels off."""
+
+    FEED = "https://example.test/feed.xml"
+
+    def test_a_feed_url_is_a_setting_beside_the_outbound_channels(self):
+        value = {"feed": {"url": self.FEED}, "notion": {}}
+        self.assertEqual(validate(value), value)
+        self.assertEqual(validate({"feed": {"url": "http://example.test/r/x/.rss?sort=new"}}),
+                         {"feed": {"url": "http://example.test/r/x/.rss?sort=new"}})
+
+    def test_a_feed_needs_one_http_url_and_nothing_else(self):
+        for entry in ({}, {"url": ""}, {"url": 3}, {"url": "example.test/feed"}, {"url": "ftp://example.test/f"},
+                      {"url": "file:///etc/passwd"}, {"url": "https://"}, {"url": "https://user:pw@example.test/f"},
+                      {"url": "https://example.test/f\n"}, {"url": "https://example.test/ f"},
+                      {"url": self.FEED, "folder": "x"}, {"folder": "x"}):
+            with self.subTest(entry=entry), self.assertRaises(ChannelRefusal) as caught:
+                validate({"feed": entry})
+            self.assertIn("feed", str(caught.exception))
+
+    def test_publishing_reads_only_the_outbound_channels(self):
+        """A setting that names only a feed says nothing about publishing:
+        it publishes as no setting. Beside an outbound channel, the feed is
+        dropped and the outbound rule stands: a channel left out is off."""
+        self.assertIsNone(outbound({"feed": {"url": self.FEED}}))
+        self.assertEqual(outbound({"feed": {"url": self.FEED}, "drive": {}}), {"drive": {}})
+        self.assertIsNone(outbound(None))
+        self.assertEqual(outbound({"obsidian": {"folder": "Notes"}}), {"obsidian": {"folder": "Notes"}})
 
 
 class TheReader(unittest.TestCase):

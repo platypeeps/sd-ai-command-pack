@@ -38,7 +38,7 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
-from . import records, repos, runner_journal
+from . import channels, records, repos, runner_journal
 from .database import refuse_hub_only, transaction
 from .records import RecordRefused, _closing, _file_key, hash_holds, hashed, unhashed
 from .reporting import MAX_REPORT
@@ -410,7 +410,7 @@ def _folder(connection: sqlite3.Connection, repo: str) -> str | None:
 
     A setting it cannot read raises with the cause: unknown is not "no setting".
     """
-    setting = repos.repo_channels(connection, repo)
+    setting = channels.outbound(repos.repo_channels(connection, repo))
     if setting is None:
         return f"{DEFAULT_FOLDER}/{Path(repo).name}"
     if "obsidian" not in setting:
