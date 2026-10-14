@@ -1216,7 +1216,7 @@ class MigrateNeedsABackupOfThisStore(BackupCase):
     def test_a_write_once_the_snapshot_has_read_is_refused(self):
         self.one_back_with_an_item()
         real = backup_module._counts
-        calls = []
+        calls: list[threading.Thread] = []
 
         def counted(connection):
             found = real(connection)
