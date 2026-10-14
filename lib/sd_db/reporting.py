@@ -380,14 +380,15 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
 
     So a quiet tick writes a heartbeat and nothing else, which is the shape
     `retention`'s table already prescribes for heartbeats: one row per key, the
-    newest being the only one any reader asks for. An item is created for the
-    three things that are actually events:
+    newest being the only one any reader asks for. An item is created only
+    when the job failed, or declared findings with `SD_REPORT_ATTENTION`.
 
-    * the job failed, or declared findings with `SD_REPORT_ATTENTION`;
-    * the job recovered -- this tick is clean and the last one was not, which
-      is the transition nobody would otherwise see, because the failing report
-      stays `planning` and never says it stopped being true;
-    * nothing else. A first-ever clean tick is a baseline, not an event.
+    A recovery -- this tick is clean and the last one was not -- writes the
+    heartbeat and says so in `why`, and files nothing (sd:3509): recovery
+    reports were most of the 298 clean reports in 14 days, 85 of them from one
+    flapping job. `health` reads the recovery; the failure's own report waits
+    for a person. A replay of a recovery report filed before that still
+    answers with the report.
 
     A failure that repeats an open one -- same job, same basis -- is one
     event still counted, not a new one: it folds into the open report
@@ -456,9 +457,10 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
                     "exit_code": exit_code, "ended": ended,
                     "why": "a replay of a run whose heartbeat recorded it clean;"
                            " the run id is the key, so its changed evidence was not written"}
-        if not (attention or recovered or filed):
+        if not (attention or filed):
             return {"recorded": "heartbeat" if wrote else "nothing", "job": job, "run_id": run_id,
-                    "healthy": True, "exit_code": exit_code, "ended": ended, "why": _quiet(beat, previous)}
+                    "healthy": True, "exit_code": exit_code, "ended": ended,
+                    "why": "the job recovered" if recovered else _quiet(beat, previous)}
         state = ingest(connection, job=job, run_id=run_id, started=started, ended=ended,
                        exit_code=exit_code, text=text, source_path=str(path.resolve()),
                        attention=attention, attention_basis=basis, truncated=truncated)

@@ -51,15 +51,27 @@ class AReplayWritesNothing(unittest.TestCase):
     def dump(self):
         return tuple(self.db.iterdump())
 
-    def test_replaying_a_recovery_returns_the_report_it_filed(self):
+    def test_replaying_a_recovery_writes_nothing(self):
         self.tick("a", 1, exit_code=1, text="boom\n")
         first = self.tick("b", 16)
-        self.assertEqual((first["recorded"], first["why"]), ("report", "the job recovered"))
+        self.assertEqual((first["recorded"], first["why"]), ("heartbeat", "the job recovered"))
         before = self.dump()
         again = self.tick("b", 16)
-        self.assertEqual(again["recorded"], "report")
-        self.assertEqual(again["why"], "the job recovered")
-        self.assertEqual(again["item"]["id"], first["item"]["id"])
+        self.assertEqual(again["recorded"], "nothing")
+        self.assertEqual(before, self.dump())
+
+    def test_replaying_a_recovery_report_an_older_version_filed_returns_it(self):
+        """Before sd:3509 a recovery filed a clean report; its replay still answers with it."""
+        self.tick("a", 1, exit_code=1, text="boom\n")
+        self.tick("b", 16)
+        old = reporting.ingest(self.db, job="probe", run_id="b", started="2026-09-08T00:00:00Z",
+                               ended="2026-09-08T00:16:00Z", exit_code=0, text="ok\n",
+                               source_path=str((self.root / "b.log").resolve()),
+                               attention_basis="not supplied by the job")
+        before = self.dump()
+        again = self.tick("b", 16)
+        self.assertEqual((again["recorded"], again["why"]), ("report", "the job recovered"))
+        self.assertEqual(again["item"]["id"], old["item"]["id"])
         self.assertEqual(before, self.dump())
 
     def test_replaying_an_older_run_leaves_current_health_alone(self):
@@ -97,7 +109,7 @@ class AReplayWritesNothing(unittest.TestCase):
         only the older run's own heartbeat row says it was already recorded.
         """
         failed = self.tick("a", 1, second=5, exit_code=1, text="boom\n")
-        self.assertEqual(self.tick("c", 1, second=5)["recorded"], "report")
+        self.assertEqual(self.tick("c", 1, second=5)["why"], "the job recovered")
         before = self.dump()
         again = self.tick("a", 1, second=5, exit_code=1, text="boom\n")
         self.assertEqual((again["recorded"], again["item"]["id"]), ("report", failed["item"]["id"]))
@@ -177,7 +189,7 @@ class AReplayWritesNothing(unittest.TestCase):
         self.assertEqual(failed["recorded"], "report")
         self.assertIs(reporting.health(self.db, "probe"), False)
         recovered = self.tick("c", 31)
-        self.assertEqual((recovered["recorded"], recovered["why"]), ("report", "the job recovered"))
+        self.assertEqual((recovered["recorded"], recovered["why"]), ("heartbeat", "the job recovered"))
         self.assertIs(reporting.health(self.db, "probe"), True)
         self.assertEqual(self.beats(), ["typo", "b", "c"])
 
@@ -380,18 +392,15 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         self.assertEqual(other["recorded"], "report")
         self.assertNotEqual(other["item"]["id"], first)
 
-    def test_a_clean_report_never_folds_and_is_never_a_target(self):
+    def test_a_recovery_files_nothing_and_the_next_failure_folds(self):
         failed = self.tick("a", 1)["item"]["id"]
         recovered = self.tick("b", 16, exit_code=0, text="ok\n")
-        self.assertEqual((recovered["recorded"], recovered["why"]), ("report", "the job recovered"))
+        self.assertEqual((recovered["recorded"], recovered["why"]), ("heartbeat", "the job recovered"))
         # The failure after a recovery folds into the still-open failure report.
         self.assertEqual(self.tick("c", 31)["item"]["id"], failed)
         again = self.tick("d", 46, exit_code=0, text="ok\n")
-        self.assertEqual((again["recorded"], again["why"]), ("report", "the job recovered"))
-        self.assertNotEqual(again["item"]["id"], recovered["item"]["id"])
-        clean = [row for row in self.rows() if json.loads(row["fields"])["attention"] is False]
-        self.assertEqual(len(clean), 2)
-        self.assertTrue(all("repeats" not in json.loads(row["fields"]) for row in clean))
+        self.assertEqual((again["recorded"], again["why"]), ("heartbeat", "the job recovered"))
+        self.assertEqual([row["id"] for row in self.rows()], [failed])
 
     def test_another_job_with_the_same_basis_is_not_a_target(self):
         first = self.tick("a", 1)["item"]["id"]
