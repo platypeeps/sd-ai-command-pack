@@ -98,7 +98,7 @@ mentions. A ladder therefore needs `status` in `fields` to act on — declaring
           "bases": {"tip": "System/Databases/Tips and Tricks"}}
 ```
 
-All three keys are required together, `vault` is the only driver, and `root` must
+All three keys are required together, the driver is `vault` or `db`, and `root` must
 be an environment-variable reference (`^\$[A-Z][A-Z0-9_]*$`) — never a literal
 path, because a committed absolute path with a username in it is portable to one
 machine. Coverage is checked both ways: a base naming an undeclared kind, or a
@@ -107,6 +107,13 @@ existence — a vault may be unmounted or behind a TCC grant, and refusing
 registration for that would fail a correct manifest.
 
 `store` without `kinds` refuses.
+
+Under `db` the database rows are the source and the vault holds a mirror. Every
+`sd store` verb reads and writes rows through `sd_db.records`, `status` is the
+row's stage, and every kind needs a `workflow` map. `sd store` refuses
+`human-only` moves and `protected-fields` writes, as it does under `vault`; the
+operator makes them on the dashboard. `sd plugin list --json` reports each
+kind's checked rules under `rules`, which is where the library reads them.
 
 ### `config`
 
