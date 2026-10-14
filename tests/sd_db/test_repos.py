@@ -30,6 +30,7 @@ from sd_db.repos import (
     checkouts,
     clone_lines,
     conf_paths,
+    issue_sources,
     read_conf,
     registered,
     repo_channels,
@@ -663,6 +664,37 @@ class TheChannelsWriter(RepoCase):
         set_channels(self.connection, path, None)
         self.assertIsNone(self._stored(path))
 
+    def test_issue_sources_map_each_tracker_to_its_shadow_repo_and_keep_the_other_inbound_keys(self):
+        """sd:3461: `jira` and `github` are inbound like `feed`, so a set of
+        the outbound channels keeps them, and `issue_sources` answers the
+        shadow `repo` value each tracker's rows carry."""
+        path = self._registered()
+        self.assertEqual(issue_sources(self.connection, path), {})
+        set_channels(self.connection, path, {"jira": {"project": "EXAMPLE"}, "github": {"repo": "example/project"},
+                                             "feed": {"url": "https://example.test/feed.xml"}})
+        set_channels(self.connection, path, {"drive": {}})
+        self.assertEqual(issue_sources(self.connection, path), {"jira": "EXAMPLE", "github": "example/project"})
+        self.assertEqual(self._stored(path), '{"drive":{},"feed":{"url":"https://example.test/feed.xml"},'
+                                             '"github":{"repo":"example/project"},"jira":{"project":"EXAMPLE"}}')
+
+    def test_a_managed_repo_takes_no_github_source_and_reads_none_after_a_later_flip(self):
+        """Managed repositories use no GitHub issues (sd:3461). A set naming
+        `github` on one refuses and writes nothing; a source set before
+        `repo managed PATH yes` reads as none, and still rides along when the
+        dashboard sets the outbound channels, so that form keeps working."""
+        path = self._registered()
+        set_managed(self.connection, path, "yes")
+        with self.assertRaises(RepoRefusal) as caught:
+            set_channels(self.connection, path, {"github": {"repo": "example/project"}, "drive": {}})
+        self.assertIn("managed", str(caught.exception))
+        self.assertIsNone(self._stored(path))
+        set_managed(self.connection, path, "no")
+        set_channels(self.connection, path, {"github": {"repo": "example/project"}, "jira": {"project": "EXAMPLE"}})
+        set_managed(self.connection, path, "yes")
+        self.assertEqual(issue_sources(self.connection, path), {"jira": "EXAMPLE"})
+        set_channels(self.connection, path, {"drive": {}})
+        self.assertIn('"github":{"repo":"example/project"}', self._stored(path))
+
     def test_a_stale_before_refuses_and_writes_nothing_null_included(self):
         """Two forms both opened on a NULL row cannot both write."""
         path = self._registered()
@@ -758,6 +790,19 @@ class TheChannelsVerb(RepoCase):
         rc, out, err = self._run(path, "feed=")
         self.assertEqual((rc, out), (1, ""))
         self.assertIn("feed", err)
+        self.assertEqual(self._stored(path), text)
+
+    def test_jira_and_github_words_set_the_issue_sources(self):
+        """sd:3461: `jira=KEY github=owner/name`; an empty one refuses."""
+        path = self._registered()
+        rc, out, err = self._run(path, "jira=EXAMPLE", "github=example/project")
+        self.assertEqual(rc, 0, err)
+        text = '{"github":{"repo":"example/project"},"jira":{"project":"EXAMPLE"}}'
+        self.assertIn(f"channels none -> {text}", out)
+        for word in ("jira=", "github="):
+            rc, out, err = self._run(path, word)
+            self.assertEqual((rc, out), (1, ""))
+            self.assertIn(word[:-1], err)
         self.assertEqual(self._stored(path), text)
 
     def test_a_change_names_the_render_that_publishes_it(self):

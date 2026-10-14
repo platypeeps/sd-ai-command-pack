@@ -16,6 +16,11 @@ off. NULL is no setting, which is not the same as `{}`: clearing writes NULL.
 reads. It is not a publish channel: `outbound` drops it before a publisher
 reads the setting, so a feed alone leaves publishing as no setting does.
 
+`jira` and `github` are inbound too (sd:3461): the repo's issue sources,
+`{"jira": {"project": "EXAMPLE"}, "github": {"repo": "example/project"}}`.
+Each names the `repo` value its tracker's `shadow` rows carry, and
+`repos.issue_sources` reads them for Today and Tasks.
+
 `record_url` puts where a document was published on the item that owns it
 (sd:3979): the item row holds the URL, and the dashboard reads the row.
 """
@@ -36,13 +41,19 @@ from .repos import RepoRefusal
 CHANNELS = ("obsidian", "notion", "drive")
 
 #: The inbound sources a repository may name beside its channels (sd:3980).
-INBOUND = ("feed",)
+INBOUND = ("feed", "jira", "github")
 
 #: The one key a channel's object may hold.
 FOLDER = "folder"
 
 #: The one key the feed's object holds.
 URL = "url"
+
+#: The one key each issue source's object holds, and the spelling of its value:
+#: a Jira project key, a GitHub `owner/name` (sd:3461).
+ISSUE_KEYS = {"jira": "project", "github": "repo"}
+ISSUE_SPELLING = {"jira": re.compile(r"[A-Z][A-Z0-9_]+"),
+                  "github": re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/(?!\.\.?$)[A-Za-z0-9._-]+")}
 
 #: A Notion page id, compact or hyphenated: an id the drain resolves, never a folder name.
 PAGE_ID = re.compile(r"[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
@@ -97,6 +108,17 @@ def _feed(entry: dict) -> dict[str, str]:
     return {URL: url}
 
 
+def _issue_source(source: str, entry: dict) -> dict[str, str]:
+    """An issue source's object: its one key, in its tracker's spelling."""
+    key = ISSUE_KEYS[source]
+    value = entry.get(key)
+    if set(entry) != {key} or not isinstance(value, str) or not ISSUE_SPELLING[source].fullmatch(value):
+        example = "EXAMPLE" if source == "jira" else "owner/name"
+        raise ChannelRefusal(f"{source}: expected {{\"{key}\": \"{example}\"}} and nothing else, not {entry!r}; "
+                             f"`{source}={example}` sets it")
+    return {key: value}
+
+
 def outbound(setting: dict[str, dict[str, str]] | None) -> dict[str, dict[str, str]] | None:
     """The publish channels of a setting, or None when it names none (sd:3980).
 
@@ -140,11 +162,14 @@ def validate(value: Any) -> dict[str, dict[str, str]]:
     for channel, entry in value.items():
         if channel not in CHANNELS + INBOUND:
             raise ChannelRefusal(f"{channel!r} is not a channel; expected {', '.join(CHANNELS[:-1])} or {CHANNELS[-1]}, "
-                                 f"or the inbound {' or '.join(INBOUND)}")
+                                 f"or the inbound {', '.join(INBOUND[:-1])} or {INBOUND[-1]}")
         if not isinstance(entry, dict):
             raise ChannelRefusal(f"{channel}: expected an object holding folder or nothing, not {entry!r}")
         if channel == "feed":
             out[channel] = _feed(entry)
+            continue
+        if channel in ISSUE_KEYS:
+            out[channel] = _issue_source(channel, entry)
             continue
         extra = sorted(set(entry) - {FOLDER})
         if extra:
