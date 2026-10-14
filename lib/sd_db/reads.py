@@ -231,28 +231,12 @@ def days_since_status(row: sqlite3.Row, *, now: str | None = None) -> int | None
 
 
 def open_followups(connection: sqlite3.Connection, *, limit: int = 200) -> list[sqlite3.Row]:
-    """Unresolved followups on unparked items, oldest first."""
-    return list(
-        connection.execute(
-            f"""
-            SELECT note.*, item.title AS item_title, item.repo AS item_repo
-              FROM note JOIN item ON item.id = note.item
-             WHERE note.kind = 'followup' AND note.resolved_at IS NULL
-               AND {_unparked_clause(connection)}
-             ORDER BY note.timestamp ASC, note.id ASC
-             LIMIT ?
-            """,
-            (limit,),
-        ).fetchall()
-    )
+    """Unresolved followups on items that are neither done nor parked, oldest first (sd:3505)."""
+    return open_notes(connection, "followup", limit=limit)
 
 
 def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200) -> list[sqlite3.Row]:
-    """Unresolved `kind` notes on items that are neither done nor parked, oldest first (sd:3501).
-
-    `open_followups` keeps notes on done items too, so its page fills with
-    followups nobody owes any more.
-    """
+    """Unresolved `kind` notes on items that are neither done nor parked, oldest first (sd:3501)."""
     return list(
         connection.execute(
             f"""
