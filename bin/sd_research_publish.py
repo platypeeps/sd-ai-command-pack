@@ -1542,7 +1542,7 @@ def read_channels(repo: Path) -> tuple[dict[str, dict[str, str]] | None, str]:
     if imported.module is None:
         return None, imported.problem
     try:
-        from sd_db import hub, repos, writes  # noqa: PLC0415 - the checkout's `lib/`
+        from sd_db import hub, repos  # noqa: PLC0415 - the checkout's `lib/`
         if not (imported.module.database.local_path(DATABASE_HOME).exists()
                 or hub.configured(DATABASE_HOME)):
             return None, ""
@@ -1551,9 +1551,6 @@ def read_channels(repo: Path) -> tuple[dict[str, dict[str, str]] | None, str]:
     except Exception as problem:  # an unknown is not "no setting": every failure is the cause
         return None, "cannot open the workflow database: %s" % (problem or type(problem).__name__)
     try:
-        if writes.unresolved_state(connection, "restore"):
-            return None, ("a restore is unresolved, so the repo row may be older than its "
-                          "setting; resolve the restore")
         return repos.repo_channels(connection, repo_home(repo)), ""
     except Exception as problem:  # refused or failed: the setting is unknown
         return None, str(problem) or type(problem).__name__

@@ -385,8 +385,9 @@ Draining is six steps per request, and the order matters:
    channels setting of the `repo` the request names, with
    `bin/sd-db repo channels <repo>`. A setting that leaves out the request's
    destination refuses it: report it and leave it in place. A read that exits
-   non-zero leaves every request of that repo unwritten, with or without
-   `item`: unknown is not "no restriction". `none` is no setting, and so is a
+   non-zero, an unresolved restore among the causes, leaves every request of
+   that repo unwritten, with or without `item`: unknown is not "no
+   restriction". `none` is no setting, and so is a
    machine with no workflow database (no `~/.local/share/sd/sd.db` and no
    `~/.config/sd/hub.json`), where the read is skipped.
 3. Mirror the document to the named container, in that destination's **native
