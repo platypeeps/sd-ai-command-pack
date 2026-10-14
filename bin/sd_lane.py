@@ -682,7 +682,8 @@ def check_item(connection: Any, worktree: pathlib.Path, item: int, body: str, cl
     Each refused in seconds once the entry reached the head of the queue,
     3 to 32 minutes after enqueue: an item with no registered repository
     (`sd_db.ship.identity`), an item of another repository than `worktree`'s
-    origin (`foreign_item`), and a `Closes:` line naming an item the merge
+    origin (`foreign_item`), a body line sd-ship owns, such as `Closes:`
+    (`sd_ship_body.normalize`), and a later `--item` naming an item the merge
     could not close (`sd_ship_body.refuse_unclosable`). These are
     prepare's own reads, and prepare makes them again; a hub fault still
     refuses `HUB_UNAVAILABLE` through `on_hub`.
@@ -708,8 +709,9 @@ def check_item(connection: Any, worktree: pathlib.Path, item: int, body: str, cl
     try:
         if registered is None or registered != own:
             raise foreign_item(item, registered or info["repo"]["path"], str(own), "prepare")
+        sd_ship_body.normalize(body, item)  # a body `Closes:` line, among others (sd:3704)
         # A title closes nothing; the items named with --item do (sd:3704).
-        sd_ship_body.refuse_unclosable(connection, item, info["item"]["repo"], body, closes, claim == "deliver")
+        sd_ship_body.refuse_unclosable(connection, item, info["item"]["repo"], closes, claim == "deliver")
     except Refusal as error:
         raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
 

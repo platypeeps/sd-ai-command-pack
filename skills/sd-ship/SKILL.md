@@ -109,10 +109,9 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Missing protection remains a refusal; this workflow adds no exception.
 8. **Record verified delivery.**
    An associated merge carries `Item:`; only whole-item delivery adds `Delivers:`.
-   A body `Closes: sd:N[, sd:M]` line names co-delivered items; each gets `Delivers:` and closes on the merge (sd:1481).
-   Each later `--item` on `sd-ship lane enqueue` co-delivers that item the same way; the title and commit `Delivers:` lines close nothing (sd:3704).
+   Each later `--item` on `sd-ship lane enqueue` names a co-delivered item; each gets `Delivers:` and closes on the merge (sd:3704).
+   A body `Closes:` line is refused, and the title and commit `Delivers:` lines close nothing.
    An `--associate-only` claim closes nothing (sd:3365).
-   Prepare refuses one inside a code fence or HTML comment; indent an example.
    A body `Refs: sd:N` line names a related or partial item; the merge leaves it open.
    Record the row only after the remote confirms the merge.
    Read `skills/sd-ship/references/delivery.md` in the sd-ai-command-pack checkout before delivery, cancellation, or completion reporting.

@@ -15,16 +15,15 @@ rule 5 reads; an indented line is prose about a trailer, and the body keeps
 it. A body with no item owns nothing, so every column-zero owned line is
 stripped there, `Closes:` included.
 
-`Closes: sd:N[, sd:M]` is the one owned line a body keeps: it names the items
-the pull request co-delivers, and the merge closes each with a `Delivers:`
-trailer beside the claimed item's (sd:1481, operator ruling 2026-10-03).
-`Refs:` is not owned: it names related items, which stay open.
+With an item, a body `Closes:` line is refused: the enqueue's `--item` list
+is the one closing set (operator ruling 2026-10-13, sd:3704, replacing the
+sd:1481 body line). `Refs:` is not owned: it names related items, which stay
+open.
 
 A column-zero owned line inside a fenced code block or an HTML comment is
-an example, not a claim, so `closes_named` and `strip_closes` never read one.
-`normalize` refuses it rather than keep it: the squash carries the body as
-written, and `sd_lib.demoted_trailers` would refuse the line there, at merge.
-Indented, it is prose like any other example.
+refused too, rather than kept: the squash carries the body as written, and
+`sd_lib.demoted_trailers` would refuse the line there, at merge. Indented,
+it is prose like any other example.
 """
 
 from __future__ import annotations
@@ -36,9 +35,6 @@ import tempfile
 
 import sd_lib
 from sd_ship_remote import Refusal, completed_process
-
-#: A `Closes:` value: one or more `sd:<n>`, comma-separated.
-_CLOSES_VALUE = re.compile(r"sd:[1-9][0-9]*(?:[ \t]*,[ \t]*sd:[1-9][0-9]*)*")
 
 #: The canonical spelling of each owned key, by its case-folded name.
 _CANONICAL = {key.rstrip(":").lower(): key for key in sd_lib.OWNED_TRAILERS}
@@ -125,11 +121,8 @@ def problem(line: OwnedLine, item: int | None) -> str | None:
                 "or move it out of the block to make it a trailer")
     if line.key in (sd_lib.ITEM_TRAILER, sd_lib.WORK_TRAILER, sd_lib.DELIVERS_TRAILER) or item is None:
         return None  # sd:2999: sd-ship writes the links itself, so a stray one is dropped
-    expected = f"sd:{item}"
-    if _CLOSES_VALUE.fullmatch(line.value) and expected not in _ids(line.value):
-        return None
-    return (f"expected `{line.key} sd:<n>[, sd:<m>]` naming co-delivered items other than {expected}, "
-            "which closes with --deliver")
+    return ("a body `Closes:` line closes nothing; name each item the merge closes with --item "
+            "on `sd-ship lane enqueue` (sd:3704)")
 
 
 def normalize(body: str, item: int | None) -> tuple[str, tuple[str, ...]]:
@@ -150,8 +143,6 @@ def normalize(body: str, item: int | None) -> tuple[str, tuple[str, ...]]:
                       + "; ".join(f"line {line.number}: `{line.text}`; {reason}" for line, reason in problems),
                       code="body_trailer_refused", boundary="input", state="operator_decision",
                       next_action="Remove or correct the named lines; sd-ship writes them itself.")
-    # A `Closes:` line stays: it is the body's own claim, and the merge reads it there.
-    read = [line for line in read if line.key != sd_lib.CLOSES_TRAILER or item is None]
     stripped = {line.number for line in read}
     lines = body.split("\n")
     kept: list[str] = []
@@ -164,38 +155,6 @@ def normalize(body: str, item: int | None) -> tuple[str, tuple[str, ...]]:
     return "\n".join(kept).rstrip(), tuple(line.text for line in read)
 
 
-def _ids(value: str) -> list[str]:
-    return re.findall(r"sd:[0-9]+", value)
-
-
-def closes_named(body: str, item: int | None) -> tuple[int, ...]:
-    """The items the body's column-zero, unquoted `Closes:` lines name, in order, without repeats.
-
-    No item, no closing: a no-item body refuses the line in `normalize`.
-    """
-    if item is None:
-        return ()
-    found: list[int] = []
-    for line in owned_lines(body):
-        if line.key == sd_lib.CLOSES_TRAILER and not line.indented and not line.quoted:
-            for number in (int(name[3:]) for name in _ids(line.value)):
-                if number not in found:
-                    found.append(number)
-    return tuple(found)
-
-
-def strip_closes(body: str) -> str:
-    """`body` without its column-zero `Closes:` lines, for the squash message.
-
-    The squash states each as a `Delivers:` trailer; a `Closes:` line left in
-    the prose is a trailer outside the block git reads, and the merge refuses
-    such a message (`sd_lib.demoted_trailers`).
-    """
-    kept = {line.number for line in owned_lines(body)
-            if line.key == sd_lib.CLOSES_TRAILER and not line.indented and not line.quoted}
-    return "\n".join(text for number, text in enumerate(body.split("\n"), start=1) if number not in kept)
-
-
 #: An `sd:<n>` a title names: context for a reader, never a close (sd:3704).
 _TITLE_ID = re.compile(r"\bsd:([0-9]+)\b")
 
@@ -205,8 +164,8 @@ def title_ids(title: str) -> tuple[int, ...]:
     return tuple(dict.fromkeys(int(number) for number in _TITLE_ID.findall(title)))
 
 
-def items_closed(body: str, named, item: int, deliver: bool) -> tuple[int, ...]:
-    """The items a merge closes beside `item`: each `Closes:` item, then each of `named`.
+def items_closed(named, item: int, deliver: bool) -> tuple[int, ...]:
+    """The items a merge closes beside `item`: each of `named`, in order, without repeats.
 
     `named` is each item prepare's later `--item` names (sd:3704); a receipt
     prepared before that passes its title's ids, the rule it was sent under
@@ -214,40 +173,35 @@ def items_closed(body: str, named, item: int, deliver: bool) -> tuple[int, ...]:
     """
     if not deliver:
         return ()
-    return tuple(dict.fromkeys(number for number in (*closes_named(body, item), *named) if number != item))
+    return tuple(dict.fromkeys(number for number in named if number != item))
 
 
-def refuse_unclosable(connection, item: int, repo: str, body: str, named, deliver: bool) -> None:
+def refuse_unclosable(connection, item: int, repo: str, named, deliver: bool) -> None:
     """Refuse a co-delivered item the merge could not close; `repo` is `item`'s registered path.
 
-    One pull request claims one item; `Closes:` and each later `--item`
-    (`named`) name the others it delivers, and the merge closes them
-    (operator rulings 2026-10-03 and 2026-10-13, sd:3704). `Refs:` names
-    related items and is not read here: they stay open. An associate-only
-    claim closes nothing, so its `Closes:` line or later `--item` is
-    refused rather than dropped (sd:3365). `sd-ship prepare` and `sd-ship lane
+    One pull request claims one item; each later `--item` (`named`) names
+    another it delivers, and the merge closes them (operator ruling
+    2026-10-13, sd:3704). An associate-only claim closes nothing, so a later
+    `--item` on one is refused rather than dropped (sd:3365). `sd-ship prepare` and `sd-ship lane
     enqueue` both read it (sd:3473).
     """
-    if not deliver and (closes_named(body, item) or named):
-        said = ([f"Closes: sd:{number}" for number in closes_named(body, item)]
-                + [f"--item {number}" for number in named])
-        raise Refusal(f"an associate-only claim on sd:{item} closes nothing, and the pull request names "
-                      f"{', '.join(f'`{line}`' for line in said)}",
+    if not deliver and named:
+        raise Refusal(f"an associate-only claim on sd:{item} closes nothing, and it names "
+                      f"{', '.join(f'`--item {number}`' for number in named)}",
                       code="closes_need_delivery", boundary="input", state="operator_decision",
-                      next_action="Move the Closes: items to Refs: and drop the extra --item, "
-                                  "or name them on the item's --deliver pull request.")
-    for number in items_closed(body, named, item, deliver):
+                      next_action="Drop the extra --item, or name it on the item's --deliver pull request.")
+    for number in items_closed(named, item, deliver):
         row = connection.execute("SELECT repo FROM item WHERE id = ?", (number,)).fetchone()
         if row is None:
-            raise Refusal(f"Closes: or --item names sd:{number}, which is no item; "
-                          "the merge closes every item they name",
+            raise Refusal(f"--item names sd:{number}, which is no item; "
+                          "the merge closes every item it names",
                           code="closes_item_unknown", boundary="input", state="operator_decision",
-                          next_action="Correct the Closes: line or the --item, or move a related item to Refs:.")
+                          next_action="Correct the --item, or name a related item in a Refs: line.")
         if row["repo"] != repo:
-            raise Refusal(f"Closes: or --item names sd:{number}, which belongs to another "
+            raise Refusal(f"--item names sd:{number}, which belongs to another "
                           "repository; a merge closes only this repository's items",
                           code="closes_item_foreign", boundary="input", state="operator_decision",
-                          next_action="Close that item from its own repository, or move it to Refs:.")
+                          next_action="Close that item from its own repository, or name it in a Refs: line.")
 
 
 def published(body: str, item: int) -> str:
