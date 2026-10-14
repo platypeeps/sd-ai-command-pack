@@ -156,6 +156,7 @@ The message names the verb and the hub.
 - shadow sync;
 - `repo lane-host`, which holds the hub's ship lock while it moves a lane (sd:3075);
 - `records render`, the vault mirror of base rows (next section).
+- `sd reports brief render`, the vault copies of routine briefs.
 
 `ledger.reserve` raises `LedgerRefused` with scope `hub`: provider calls are charged on the hub.
 `ledger.release_orphans` sweeps nothing off the hub, because it asks the local kernel about owner pids.
@@ -213,6 +214,34 @@ A Notion folder is one page name, with no `/`.
 The verb refuses an unregistered path when it sets, and prints `none` with a note when it reads one.
 A stored value the validator refuses, or a database not yet migrated, exits 1 and prints no value.
 A change takes effect at the next `sd-research-kit render` in the checkout, or the next commit.
+
+## Clone profiles and Dependabot
+
+`repo.clone_profiles` names the machine kinds `repo-sync` clones a repository on: `personal`, `work` and `terra` (sd:4043).
+NULL, shown as `none`, means none, and every row starts there.
+A set has one spelling, its words in that order, so the column's CHECK is a closed list.
+`repo.dependabot` is 1 for a repository outside the owner rule whose Dependabot pull requests the daily sweep may take.
+The design is slice P2 of the system repository's config-to-DB design (sd:3983).
+
+    bin/sd-db repo clones PATH personal,work    # set; prints before -> after
+    bin/sd-db repo clones PATH +terra           # add one profile; -terra takes one away; none clears
+    bin/sd-db repo dependabot PATH yes          # or no; prints before -> after
+    bin/sd-db repo seed --clones personal       # add personal to each row repo-sync's lists give it
+    bin/sd-db repo list --clones personal       # `<subdir> <owner/repo>`, the lines repo-sync reads
+
+`repo clones` reads and writes in one transaction, so a `+P` beside a `-Q` on the same row loses neither.
+`seed --clones P` reads `repos.common.conf` and `repos.P.conf` in the `repo-sync` config folder; terra reads its own list alone.
+The profile is the argument, never `REPO_SYNC_PROFILE`.
+A line with no row is registered as `repo seed` would, when its checkout is here.
+A line with neither a checkout nor a row is named, and the run exits 1 after the other lines.
+A line names a repository; its path only says where it sits.
+The checkout's origin and the row's remote must each name the line's repository, or that line writes nothing, is named with what the path holds, and the run exits 1.
+No origin counts as a mismatch here; plain `repo seed` refuses a differing origin too, and keeps the conf's slug for a checkout with none.
+It only adds, one transaction per line, so a rerun finishes a stopped run.
+`list --clones P` prints one line per row cloned on P, `.` for a checkout straight under `~/repos` (`SD_REPO_ROOT`).
+A row that cannot be such a line exits 1, names every such row, and prints nothing on stdout.
+Such a line needs a row one or two folders deep, a GitHub remote, and a folder named as the repository.
+A database not yet migrated exits 1 too; neither case answers an empty list.
 
 ## `judgments`: what the judgment models cost, by stage
 
@@ -436,6 +465,29 @@ Each committed `records` write renders its kind, or every kind after a failed re
 Every render records the `heartbeat` state row `records-mirror`, body `{at, ok, kinds, written, refused, reason}`.
 `records.mirror_state(connection)` reads the last one, `(timestamp, body)` or None; the dashboard's Health shows it.
 The verb exits 1 on any refused file or a render that stopped.
+
+## `sd reports brief`: routine briefs
+
+A routine brief is one `item` row of kind `report`, source `brief`, keyed by its stem, `<YYYY-MM-DD> - <Series>` (sd:3459).
+It is filed `done` and stays `done`: `sd reports list` skips it, and `acknowledge` and `reopen` refuse it.
+`sd_db.routine_briefs` holds the rows; `sd_db.brief` is the session brief, a different thing.
+
+- `add <file> --belongs-to <checkout>` files one brief. A file the rules refuse exits 2 before any write.
+- The same stem with the same bytes prints `unchanged`. Other bytes are a conflict, exit 1, unless `--extend` (the row's text is a strict prefix of the file) or `--replace` (the operator's flag) allows the file.
+- `list [--series S] [--since DAY] [--json]` and `show <stem>` read the rows.
+- `import <folder> --belongs-to <checkout> [--replace <stem>]...` adds each missing stem and strips a `mirror-hash` line first. A row that differs is a conflict, never replaced unless its stem is named; the import prints `verified <n>` when every row it took reads back with the note's sha256.
+
+The row is the source of truth: no counter or time decides a difference, because a restore rolls those back with the rows.
+
+`render` writes each row's copy, `<vault>/<folder>/<stem>.md`, under the `records render` mirror rule (sd:4041).
+
+- The folder is the owning repository's `channels` obsidian folder; no setting or `obsidian: {}` is `Briefs/<repo>`, and a setting without `obsidian` writes no copy.
+- A setting it cannot read writes no copy and names the cause.
+- A hand-edited copy and a brief-shaped note no row holds are kept and refused; the verb then exits 1.
+- It refuses off the hub and while a `restore` is unresolved. A lock beside the database serializes renders, and each reads the rows only once it holds the lock.
+- When the folder moves, it names the copies left in the previous folder and deletes none.
+- Every render records the `heartbeat` state row `brief-copies`; `routine_briefs.copies_state` reads the last one.
+- A hub `add` renders after its commit. A failed render prints `vault copy not written: <reason>`, and `add` still exits 0.
 
 ## Renaming a repository
 
