@@ -21,7 +21,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from .. import channels, credentials, judgment, removal, review, usage
+from .. import channels, credentials, judgment, records, removal, review, usage
 from ..backup import restore as restore_snapshot
 from ..database import connect, default_path, schema_version, tables
 from ..errors import SdDbError
@@ -183,6 +183,32 @@ def command_credentials(argv: list[str]) -> int:
     for probe in body["probes"]:
         print(credentials.describe(probe))
     return 0
+
+
+def command_records(argv: list[str]) -> int:
+    """`records render [KIND ...]`: write the vault mirror of base rows (sd:3976).
+
+    Every kind a plugin on the `db` driver declares, or the kinds named.
+    Exit 1 on any refused file or a render that stopped; the heartbeat says
+    the same to the dashboard.
+    """
+    if not argv or argv[0] != "render" or any(word.startswith("-") for word in argv[1:]):
+        print("sd-db records: expected render [KIND ...]", file=sys.stderr)
+        return 1
+    connection = _open_for_write()
+    try:
+        mirror = records.render(connection, home=_home(), kinds=argv[1:] or None)
+    finally:
+        connection.close()
+    print(f"sd-db: records render: {', '.join(mirror.kinds) or 'no kind on the db driver'}: "
+          f"wrote {len(mirror.written)} file(s), refused {len(mirror.refused)}")
+    for path in mirror.written:
+        print(f"sd-db:   wrote {path}")
+    for path, reason in mirror.refused:
+        print(f"sd-db:   refused {path}: {reason}", file=sys.stderr)
+    if mirror.reason is not None:
+        print(f"sd-db: records render stopped: {mirror.reason}", file=sys.stderr)
+    return 0 if mirror.ok else 1
 
 
 def command_judgments(argv: list[str]) -> int:
@@ -985,6 +1011,7 @@ COMMANDS = {
     "judgments": command_judgments,
     "review": command_review,
     "credentials": command_credentials,
+    "records": command_records,
 }
 
 

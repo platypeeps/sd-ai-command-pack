@@ -22,7 +22,8 @@ from tests.clean_env import clean_environment
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SD_DB = REPO_ROOT / "bin" / "sd-db"
 CLI_VERBS = ("init", "migrate", "status", "restore", "repo", "item", "work",
-             "import", "verify", "usage", "judgments", "review", "credentials")
+             "import", "verify", "usage", "judgments", "review", "credentials",
+             "records")
 
 FAKE_CLI = """\
 import sys
