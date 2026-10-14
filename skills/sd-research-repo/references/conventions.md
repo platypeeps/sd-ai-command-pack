@@ -394,8 +394,10 @@ default.
 ### Obsidian and the dashboard are the defaults
 
 `sd-research-kit render` ends by writing each document's Markdown into
-`$OBSIDIAN_VAULT/Briefs/<repo>/<name>.md`. That vault copy is where the document
-lives; everything else is a duplicate of it in another format. The note carries
+`$OBSIDIAN_VAULT/Briefs/<repo>/<name>.md`. The repo's channels setting may name
+another vault folder, or turn Obsidian off; see the publication contract's
+"A repo's channels setting". The document is the Markdown in the repo; the vault
+copy and everything else are duplicates of it in another format. The note carries
 frontmatter naming the source repo, path and revision, so a reader knows which
 checkout owns it and that the note is not the place to edit.
 

@@ -9,19 +9,22 @@ judgment.
 
 | Destination | When | Format | Written by |
 | --- | --- | --- | --- |
-| Obsidian | always | Markdown | the render, directly |
+| Obsidian | on unless the repo turns it off | Markdown | the render, directly |
 | Dashboard | always | HTML | the render, directly |
 | Notion | designated | Notion blocks | an agent session, from the queue |
 | Google Drive | designated | native Google Doc | an agent session, from the queue |
 
-A document lives in Obsidian. The other three are duplicates of it, each in the
+A document is the Markdown in its repo. Obsidian is one channel, on by default,
+and a repo may turn it off (see [A repo's channels setting](#a-repos-channels-setting)).
+The others are duplicates of it, each in the
 format its destination reads natively — a Markdown file pasted into Drive, or an
 HTML blob pasted into Obsidian, is a copy nobody can use where it landed.
 
-## Obsidian is where a document lives
+## Obsidian is the default copy
 
 A finished document is written into the vault as Markdown, under
-`Briefs/<repo>/<name>.md`. `$OBSIDIAN_VAULT` names the vault; a machine with
+`Briefs/<repo>/<name>.md`, or under the folder the repo's channels setting
+names. `$OBSIDIAN_VAULT` names the vault; a machine with
 none still publishes everywhere else and reports the missing copy by name.
 
 Markdown, because the vault's whole value is that a note is editable, linkable
@@ -182,6 +185,50 @@ the render, and the next render records it. The item is part of the
 fingerprint: adding or changing it queues the document once, so the next
 drain records the URL on the new item.
 
+### A repo's channels setting
+
+A repo may name the channels it uses, and a folder for each, on its `repo` row
+(`bin/sd-db repo channels`, `docs/sd-db.md` § Channels). The setting says where,
+never whether: an outward mirror still needs its key on the document.
+
+- **No setting, no change.** A NULL value, no row, or a machine with no
+  workflow database publishes as described here, byte for byte.
+- **A folder replaces the default.** Obsidian: the folder under the vault, for
+  `Briefs/<repo>`. Notion: the page under the scope folder, for `<repo>` in
+  `subfolder`. Drive: the path under My Drive, for `Briefs/<repo>`. `{}` keeps
+  the default.
+- **A named folder is the operator's.** Nothing there that this tool did not
+  write is replaced. The render leaves a vault note that names no checkout and
+  says so; a drain adopts a page or file, there or anywhere, only under step 3's
+  pointer rule.
+- **Precedence.** A document's `space=` or `folder=` wins over the setting, and
+  the setting wins over the default. A pinned `page=` or `file=` wins over both;
+  where the setting names a folder, the render names each pinned document, and
+  deleting the pin creates the page under the new folder.
+- **A channel left out is off.** Only `obsidian`, `notion` and `drive` are
+  channels. The inbound `feed` key (sd:3980) is not one: a setting naming only
+  a feed is no setting here. A document designated for a channel left out is
+  refused for that channel by name, and its other channels still publish. Without
+  `obsidian` the render writes no vault copy and says so. The dashboard copy is
+  not a channel and always publishes.
+- **A pending request for a channel left out stays.** The render names it with
+  its path on every run, and drain step 2 refuses it. Delete it by hand, with no
+  drain running. Re-enabling the channel takes one render with
+  `SD_MIRROR_REQUEUE=1`.
+- **A moved folder.** An unpinned document's request names the new container,
+  so a carried page or file id is dropped and the drain creates it there; the
+  old one stays. The render names each vault copy this checkout left in
+  `Briefs/<repo>`, and deletes none.
+- **Unknown is not "no setting".** A setting the render cannot read (the hub
+  does not answer, a build mismatch, a database older than the column, a value
+  the validator refuses, an unresolved restore) holds the vault copy and the
+  queue for that render, names the cause, and leaves earlier requests as they
+  are. The dashboard copy is still written. A render by hand exits 1; the git
+  hook's exits 0.
+
+The render reads the setting once, when it publishes. A change takes effect at
+the next render.
+
 ### A Notion mirror is private unless it asks for the team
 
 `notion=dict()` mirrors to the folder `$SD_NOTION_PRIVATE_FOLDER` names.
@@ -337,7 +384,17 @@ Draining is six steps per request, and the order matters:
    document belongs in.
 2. Check the document's handling restrictions first. One that may not be shared
    externally is not mirrored to a shared destination, and designating it did
-   not lift that. Report it and leave the request in place.
+   not lift that. Report it and leave the request in place. Then read the
+   channels setting of the `repo` the request names, with
+   `bin/sd-db repo channels <repo>`. Read only its `obsidian`, `notion` and
+   `drive` keys; a setting naming none of them, such as one holding only a
+   `feed`, is no setting. A setting that leaves out the request's
+   destination refuses it: report it and leave it in place. A read that exits
+   non-zero, an unresolved restore among the causes, leaves every request of
+   that repo unwritten, with or without `item`: unknown is not "no
+   restriction". `none` is no setting, and so is a
+   machine with no workflow database (no `~/.local/share/sd/sd.db` and no
+   `~/.config/sd/hub.json`), where the read is skipped.
 3. Mirror the document to the named container, in that destination's **native
    format**, updating the page or file the request names rather than creating a
    second one:
@@ -390,7 +447,11 @@ Draining is six steps per request, and the order matters:
    adopt the match instead of creating a second. A drain that creates
    unconditionally makes a duplicate out of every interrupted earlier drain.
    Two matches is an ambiguity, not a choice: report it and leave the request
-   in place.
+   in place. Adopt a match only when its pointer line names this document's
+   `source_url` or `source`. A container can hold the operator's own pages,
+   and whether the channels setting named it can change after the request
+   was queued, so this holds in every container. Any other match is not
+   this tool's: report it and leave the request in place.
 4. Write the id into the request file, the moment the destination returns it.
    The request is the durable record, because it is the one file the drain is
    certain it can write and the one the next drain is certain to read. A

@@ -157,8 +157,7 @@ def reexec_with_markdown(argv: list[str]) -> None:
 def run_render(argv: list[str]) -> int:
     if importlib.util.find_spec("markdown") is None:
         reexec_with_markdown(["render"] + argv)
-    load("sd_research_render").main()
-    return 0
+    return int(load("sd_research_render").main())
 
 
 def main(argv: list[str]) -> int:

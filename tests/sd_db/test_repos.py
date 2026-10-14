@@ -645,6 +645,24 @@ class TheChannelsWriter(RepoCase):
         self.assertIn("not a registered repository", str(caught.exception))
         self.assertEqual(registered(self.connection), [])
 
+    def test_a_set_keeps_the_half_it_does_not_name(self):
+        """sd:3980 self-review: the dashboard form posts the outbound channels
+        alone, and `feed=URL` names the feed alone. Each keeps the stored
+        other half, so neither deletes what it never showed; `None` clears
+        both."""
+        path = self._registered()
+        feed = {"url": "https://example.test/feed.xml"}
+        set_channels(self.connection, path, {"feed": feed, "obsidian": {}})
+        stored = self._stored(path)
+        set_channels(self.connection, path, {"obsidian": {"folder": "Briefs/changed"}}, before=stored)
+        self.assertEqual(self._stored(path), '{"feed":{"url":"https://example.test/feed.xml"},'
+                                             '"obsidian":{"folder":"Briefs/changed"}}')
+        set_channels(self.connection, path, {"feed": {"url": "https://example.test/other.xml"}})
+        self.assertEqual(self._stored(path), '{"feed":{"url":"https://example.test/other.xml"},'
+                                             '"obsidian":{"folder":"Briefs/changed"}}')
+        set_channels(self.connection, path, None)
+        self.assertIsNone(self._stored(path))
+
     def test_a_stale_before_refuses_and_writes_nothing_null_included(self):
         """Two forms both opened on a NULL row cannot both write."""
         path = self._registered()
@@ -724,6 +742,24 @@ class TheChannelsVerb(RepoCase):
         self.assertIn('channels {"drive":{},"obsidian":{}} -> none', out)
         self.assertIsNone(self._stored(path))
 
+    def test_a_feed_word_sets_the_repos_subscription(self):
+        """sd:3980: `feed=URL` is the inbound subscription; a URL keeps its
+        own `=` signs, and `feed=` with no URL refuses."""
+        path = self._registered()
+        rc, out, err = self._run(path, "feed=https://example.test/feed?a=b", "obsidian=")
+        self.assertEqual(rc, 0, err)
+        text = '{"feed":{"url":"https://example.test/feed?a=b"},"obsidian":{}}'
+        self.assertEqual(self._stored(path), text)
+        self.assertEqual(self._run(path), (0, f"{text}\n", ""))
+        rc, out, err = self._run(path, "drive=")
+        kept = '{"drive":{},"feed":{"url":"https://example.test/feed?a=b"}}'
+        self.assertIn(f"channels {text} -> {kept}", out)
+        text = kept
+        rc, out, err = self._run(path, "feed=")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("feed", err)
+        self.assertEqual(self._stored(path), text)
+
     def test_a_change_names_the_render_that_publishes_it(self):
         """Failure table, row "set: the change takes effect"."""
         path = self._registered()
@@ -746,6 +782,21 @@ class TheChannelsVerb(RepoCase):
                 self.assertIn(named, err)
                 self.assertEqual(out, "")
                 self.assertEqual(self._stored(path), '{"drive":{}}')
+
+    def test_a_read_during_an_open_restore_exits_1_and_a_write_still_works(self):
+        """Review of b96428745: a drain reads the setting through this verb, so
+        an open restore, whose row may be older than the operator's last edit,
+        holds the read as it holds the render, and never prints a value.
+        Setting it again is the restore's recovery, so a write still works."""
+        path = self._registered()
+        self._run(path, "drive=")
+        self.connection.execute(
+            "INSERT INTO state (kind, key, timestamp, body) VALUES ('restore', '2026-10-13', 't', '{}')")
+        rc, out, err = self._run(path)
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("a restore is unresolved", err)
+        self.assertEqual(self._run(path, "notion=")[0], 0)
+        self.assertEqual(self._stored(path), '{"notion":{}}')
 
     def test_an_unregistered_path_refuses_a_write_and_prints_none_for_a_read(self):
         """No row is no setting, so a read answers `none` and says why on stderr."""

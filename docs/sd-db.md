@@ -208,12 +208,18 @@ The design is `docs/work/2026-10-13-channels/design.md`.
     bin/sd-db repo channels PATH none                                    # clear
 
 The keys are `obsidian`, `notion` and `drive`; `drive=` names the default folder, and a channel left out is off.
+`feed=URL` adds the repo's one RSS/Atom subscription (sd:3980), an http or https URL with no credentials; `sd-watchlist` reads it.
+The feed is inbound, not a channel: a setting naming only a feed publishes as no setting, and `channels.outbound` drops it for every publisher.
+A set replaces each half it names, the channels or the feed, and keeps the other as stored, so the dashboard form never drops a feed; `none` clears both. The verb prints `before -> after`, as stored.
 A folder is a name, never an id or a URL: no leading `/`, no `.` or `..` segment, no control character.
 A Notion folder is one page name, with no `/`.
 `sd_db.channels.validate` checks every write; `repos.set_channels` is the one writer, `repos.repo_channels` the reader.
 The verb refuses an unregistered path when it sets, and prints `none` with a note when it reads one.
 A stored value the validator refuses, or a database not yet migrated, exits 1 and prints no value.
+So does a read while a `restore` is unresolved, for every reader: the row may be older than the operator's last edit. A set still works; it is the restore's recovery.
 A change takes effect at the next `sd-research-kit render` in the checkout, or the next commit.
+The render reads the setting once; one it cannot read holds the vault copy and the queue, and a render by hand exits 1.
+What each channel's folder replaces, and drain step 2's refusal: `skills/_shared/references/publication-contract.md`.
 
 ## Clone profiles and Dependabot
 

@@ -911,11 +911,17 @@ def set_channels(
 
     It does not refuse during an unresolved restore: the restore's recovery
     is to set each repository's channels again before resolving it.
+
+    A value has two halves, the outbound channels and the inbound `feed`
+    (sd:3980). A value naming no key of one half keeps that half as stored,
+    so the dashboard form, which shows the outbound channels alone, never
+    deletes a feed, and `feed=URL` never deletes the channels. `None`
+    clears both.
     """
     from . import channels
     from .workflow import StaleItem
 
-    text = None if value is None else channels.dumps(channels.validate(value))
+    value = None if value is None else channels.validate(value)
     given = str(Path(path).expanduser().resolve())
     probe = paths.keys(given)
     with transaction(connection):
@@ -928,6 +934,7 @@ def set_channels(
         was = channels.canonical(row["channels"])
         if before is not None and channels.canonical(before) != was:
             raise StaleItem(f"channels for {row['path']} is {was} now, not {before}; read the page again")
+        text = None if value is None else channels.dumps(channels.kept(value, row["channels"]))
         connection.execute("UPDATE repo SET channels = ?, updated_at = ? WHERE path = ?",
                            (text, now(), row["path"]))
     return row["path"], was
@@ -942,6 +949,11 @@ def repo_channels(connection: sqlite3.Connection, path: Path | str) -> dict | No
     `channels.validate` refuses raises `ChannelRefusal` naming the
     repository, and a store not yet at 29 raises `SchemaTooOld`. Falling back
     to the defaults would publish into folders the operator moved away from.
+
+    An unresolved restore raises too, so every reader holds: the render, the
+    drain through `repo channels`, and the routine-brief copies. The row may
+    be older than the operator's last edit. `set_channels` still writes,
+    which is the restore's recovery.
     """
     import json
 
@@ -949,7 +961,13 @@ def repo_channels(connection: sqlite3.Connection, path: Path | str) -> dict | No
     from .database import schema_version
     from .errors import SchemaTooOld
     from .schema import SCHEMA_VERSION
+    from .writes import unresolved_state
 
+    if unresolved_state(connection, "restore"):
+        raise channels.ChannelRefusal(
+            "a restore is unresolved, so the repo row may be older than its channels setting; set it "
+            "again with `bin/sd-db repo channels PATH obsidian=... notion=... drive=...`, then resolve "
+            "the restore")
     given = str(Path(path).expanduser().resolve())
     probe = paths.keys(given)
     try:

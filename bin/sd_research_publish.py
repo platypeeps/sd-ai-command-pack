@@ -580,7 +580,7 @@ def source_url(repo: Path, src: str) -> str | None:
 
 
 def notion_target(
-    raw: dict[str, Any], repo: Path
+    raw: dict[str, Any], repo: Path, folder: str = ""
 ) -> tuple[dict[str, str] | None, str]:
     """One Notion designation resolved to a container, or what was missing.
 
@@ -597,9 +597,11 @@ def notion_target(
     makes an empty lookup a failure to report rather than a folder to create.
 
     A default also carries `subfolder`, the repo's own page under that folder,
-    the way a Drive default carries `Briefs/<repo>`. An explicit `space=` does
-    not: naming a container says where the document goes, and appending to
-    what the user named would put it somewhere they did not ask for.
+    the way a Drive default carries `Briefs/<repo>`. The repo's `channels`
+    setting may name that page instead (`folder`, sd:3462). An explicit
+    `space=` carries none: naming a container says where the document goes,
+    and appending to what the user named would put it somewhere they did not
+    ask for.
 
     A default with nothing configured returns no target and says so, naming
     the variable to set. Falling back would mirror the document into whichever
@@ -634,14 +636,14 @@ def notion_target(
         "space_id": configured,
         "resolve": "id",
         "space": "",
-        "subfolder": repo.name,
+        "subfolder": folder or repo.name,
         "page": str(raw.get("page", "")).strip(),
-        "target": phrase % repo.name,
+        "target": phrase % (folder or repo.name),
     }, ""
 
 
 def mirror_targets(
-    cfg: dict[str, Any], repo: Path
+    cfg: dict[str, Any], repo: Path, channels: dict[str, dict[str, str]] | None = None
 ) -> tuple[list[dict[str, str]], list[str]]:
     """The outward destinations this DOCS entry designates, and what was wrong.
 
@@ -665,6 +667,12 @@ def mirror_targets(
     A malformed designation is the user's to fix, and one bad key must not cost
     the other destination its request: the local copies are written either way,
     so withholding a valid mirror would punish the destination that was fine.
+
+    `channels` is the repo's setting (sd:3462), None for none. A destination
+    it leaves out is refused by name, and the others still publish. A folder
+    it names stands in for the default, and a document's own container wins
+    over it. A pinned page or file wins over both, and is named, so the
+    operator knows that document did not move.
     """
     targets: list[dict[str, str]] = []
     problems: list[str] = []
@@ -682,8 +690,17 @@ def mirror_targets(
                 "%s= must be a dict, not %s" % (dest.name, type(raw).__name__)
             )
             continue
+        if channels is not None and dest.name not in channels:
+            problems.append("%s: not a channel of this repo; not queued" % dest.name)
+            continue
+        folder = (channels or {}).get(dest.name, {}).get("folder", "")
+        pinned = str(raw.get(dest.what, "")).strip()
+        if folder and pinned and not str(raw.get(dest.where, "")).strip():
+            problems.append("%s: %s= pins the %s, which stays where it is and does not move "
+                            "to %s; delete %s= to create it there"
+                            % (dest.name, dest.what, dest.what, folder, dest.what))
         if dest.name == "notion":
-            target, problem = notion_target(raw, repo)
+            target, problem = notion_target(raw, repo, folder)
             if target is None:
                 problems.append(problem)
             else:
@@ -691,7 +708,7 @@ def mirror_targets(
             continue
         # Notion returned above, so this is the destination whose default is
         # a path the drain resolves rather than a container it is handed.
-        where = str(raw.get(dest.where, "")).strip() or dest.default % repo.name
+        where = str(raw.get(dest.where, "")).strip() or folder or dest.default % repo.name
         targets.append({
             "destination": dest.name,
             dest.where: where,
@@ -704,16 +721,42 @@ def mirror_targets(
     return targets, problems
 
 
-def vault_folder(repo: Path) -> Path | None:
+def vault_folder(repo: Path, channels: dict[str, dict[str, str]] | None = None) -> Path | None:
     """`<vault>/Briefs/<repo>`, or None when no vault is configured.
 
     None rather than a raise: a machine with no vault still renders and still
     publishes to the dashboard, the same way one with no dashboard checkout
     does. The copy that is missing is reported by name.
+
+    The repo's `channels` setting may name another folder under the vault,
+    or leave `obsidian` out, which is None too (sd:3462).
+    """
+    if not VAULT or (channels is not None and "obsidian" not in channels):
+        return None
+    folder = (channels or {}).get("obsidian", {}).get("folder")
+    if folder:
+        return Path(VAULT).expanduser() / folder
+    return Path(VAULT).expanduser() / BRIEFS / repo_home(repo).name
+
+
+def left_behind(repo: Path, folder: Path | None) -> list[str]:
+    """Each vault copy this checkout wrote to `Briefs/<repo>` before its
+    `channels` setting moved the folder or left `obsidian` out (sd:3462).
+
+    Named on every render and deleted by nobody but the operator: a copy
+    in the vault may be linked from notes this tool cannot see. A copy
+    another checkout or an earlier version wrote names no checkout of
+    this one, and is not named.
     """
     if not VAULT:
-        return None
-    return Path(VAULT).expanduser() / BRIEFS / repo_home(repo).name
+        return []
+    default = Path(VAULT).expanduser() / BRIEFS / repo_home(repo).name
+    if folder == default:
+        return []
+    checkout = _shown(repo_home(repo))
+    return ["obsidian: %s is from before this repo's channels setting moved its vault "
+            "folder; delete it by hand" % copy
+            for copy in sorted(default.glob("*.md")) if vault_owner(copy) == checkout]
 
 
 def vault_owner(target: Path) -> str | None:
@@ -741,7 +784,8 @@ def vault_owner(target: Path) -> str | None:
 
 
 def write_obsidian(repo: Path, docs: list[dict[str, Any]],
-                   wrote: list[dict[str, Any]] | None = None) -> list[str]:
+                   wrote: list[dict[str, Any]] | None = None,
+                   channels: dict[str, dict[str, str]] | None = None) -> list[str]:
     """Write every document's Markdown into the vault, under its repo folder.
 
     Each entry whose copy was written is appended to `wrote`, when given: the
@@ -757,17 +801,27 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]],
     A local filesystem write, so a render performs it rather than queueing it.
     Nothing here reaches the network and nothing needs a credential, which is
     what lets the primary copy be the one that never waits for a drain.
+
+    The repo's `channels` setting (sd:3462) may move the folder, or leave
+    Obsidian out, which writes no copy and says so.
     """
     refused = publish_refusal(repo, "obsidian")
     if refused:
         return [refused]
-    folder = vault_folder(repo)
+    folder = vault_folder(repo, channels)
+    if channels is not None and "obsidian" not in channels:
+        return ["obsidian: not a channel of this repo; no vault copy written"] + left_behind(repo, folder)
     if folder is None:
         return ["obsidian: OBSIDIAN_VAULT is not set; no vault copy written"]
 
     rev = revision(repo)
     home = repo_home(repo)
     checkout = _shown(home)
+    # Only the default folder is this tool's own. A folder the setting names
+    # is the operator's, even one spelled as the default, so a note there
+    # that names no checkout is theirs, never an earlier version's copy to
+    # take over.
+    takeover = not (channels or {}).get("obsidian", {}).get("folder")
     reports: list[str] = []
     written = 0
     for cfg in docs:
@@ -805,6 +859,10 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]],
             reports.append("obsidian: %s.md in %s belongs to %s; left alone. Rename one "
                            "checkout, or delete that copy to move it here" % (out, folder, owner))
             continue
+        if not owner and not takeover and (target.exists() or target.is_symlink()):
+            reports.append("obsidian: %s names no checkout, so this tool did not write it; left "
+                           "alone. Move that note, or rename the document" % target)
+            continue
         try:
             folder.mkdir(parents=True, exist_ok=True)
             target.write_text(front + body, encoding="utf-8")
@@ -816,7 +874,7 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]],
             wrote.append(cfg)
     if written:
         reports.append("obsidian: wrote %d document(s) to %s" % (written, folder))
-    return reports
+    return reports + left_behind(repo, folder)
 
 
 def ignore_dashboard(repo: Path) -> str:
@@ -1273,7 +1331,8 @@ def delivered_main(argv: list[str]) -> int:
     return status
 
 
-def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
+def enqueue(repo: Path, docs: list[dict[str, Any]],
+            channels: dict[str, dict[str, str]] | None = None) -> list[str]:
     """Write one sync request per document per designated destination, for
     every document whose mirror would differ from the one last queued.
 
@@ -1288,18 +1347,21 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
     touched, while `SD_SKIP_MIRROR` holds a reason; see `SKIP_MIRROR`.
     `SD_MIRROR_DRY_RUN=1` reports each request it would write and writes
     none; see `MIRROR_DRY_RUN`.
+
+    `channels` is the repo's setting (sd:3462): see `mirror_targets` for the
+    folders, and `stale_requests` for a pending request it now refuses.
     """
     held = str(ENVIRON.get(SKIP_MIRROR, "")).strip()
     if held:
         return ["mirror: not queued: %s (%s)" % (held, SKIP_MIRROR)]
-    reports: list[str] = []
     refused = publish_refusal(repo, "mirror")
     if refused:
         return [refused]
     home = repo_home(repo)
+    reports = stale_requests(home, channels)
     wanted: list[tuple[dict[str, Any], dict[str, str]]] = []
     for cfg in docs:
-        targets, problems = mirror_targets(cfg, home)
+        targets, problems = mirror_targets(cfg, home, channels)
         problems += designated_item(cfg)[1]
         reports += ["mirror: %s in %s" % (p, cfg.get("out", "?")) for p in problems]
         wanted += [(cfg, target) for target in targets]
@@ -1311,7 +1373,7 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
         QUEUE.mkdir(parents=True, exist_ok=True)
     rev = revision(repo)
     key = repo_key(home)
-    vault = vault_folder(home)
+    vault = vault_folder(home, channels)
     force = bool(ENVIRON.get("SD_MIRROR_REQUEUE"))
     with queue_locked():
         for cfg, target in wanted:
@@ -1347,6 +1409,27 @@ def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
                 queued=digest, revision=rev, repo=str(home), document=out,
                 destination=target["destination"]))
             reports.append(queued_report(out, target["target"], what, carried, reverted))
+    return reports
+
+
+def stale_requests(home: Path, channels: dict[str, dict[str, str]] | None) -> list[str]:
+    """Each pending request of this repo for a channel its setting leaves out.
+
+    Refused, never deleted (sd:3462): drain step 2 reads the setting and
+    leaves such a request unwritten, and a deletion here could race a drain
+    that passed step 2 before the setting changed. Named on every render,
+    with its path, until the operator deletes it with no drain running.
+    """
+    if channels is None:
+        return []
+    reports = []
+    for path in sorted(QUEUE.glob("%s.*.json" % repo_key(home))):
+        request = load_record(path)
+        channel = request.get("destination")
+        if request.get("repo") == str(home) and channel in BY_NAME and channel not in channels:
+            reports.append("mirror: %s: not a channel of this repo; the pending request %s stays "
+                           "and drain step 2 refuses it. Delete it by hand with no drain running"
+                           % (channel, path))
     return reports
 
 
@@ -1443,15 +1526,79 @@ def queued_report(out: str, target: str, what: str, carried: str, reverted: bool
     return "mirror: %s %s -> %s%s" % (verb, out, target, notes)
 
 
+def read_channels(repo: Path) -> tuple[dict[str, dict[str, str]] | None, str]:
+    """The repo's `channels` setting (sd:3462): `(setting, "")`, `(None, "")`
+    for no setting, or `(None, cause)` when it cannot be read.
+
+    No setting is a NULL value, no row, or a machine with no workflow
+    database (no database file and no `hub.json`): each publishes as it did
+    before the setting existed. Anything else is unknown, and unknown is not
+    "no setting": a hub that does not answer, a build mismatch, a database
+    older than the column, a stored value the validator refuses, and an
+    unresolved restore, whose row may be older than the operator's last
+    edit. Falling back to the defaults would publish into folders the
+    operator moved away from.
+    """
+    imported = import_sd_db()
+    if imported.module is None:
+        return None, imported.problem
+    try:
+        from sd_db import channels, hub, repos  # noqa: PLC0415 - the checkout's `lib/`
+        if not (imported.module.database.local_path(DATABASE_HOME).exists()
+                or hub.configured(DATABASE_HOME)):
+            return None, ""
+        connection = imported.module.connect(home=DATABASE_HOME, write=False,
+                                             busy_timeout=DATABASE_BOUND)
+    except Exception as problem:  # an unknown is not "no setting": every failure is the cause
+        return None, "cannot open the workflow database: %s" % (problem or type(problem).__name__)
+    try:
+        # The inbound feed is not a publish channel (sd:3980).
+        return channels.outbound(repos.repo_channels(connection, repo_home(repo))), ""
+    except Exception as problem:  # refused or failed: the setting is unknown
+        return None, str(problem) or type(problem).__name__
+    finally:
+        connection.close()
+
+
+#: The first words of the line a render prints when it cannot read the
+#: setting. `exit_status` reads them, so a render by hand exits 1.
+HELD = "channels: held"
+
+
+def exit_status(reports: list[str]) -> int:
+    """1 for a held render run by hand, else 0.
+
+    The git hook's render exits 0: the commit is made, and the hook reports
+    a failed render as a stale dashboard, which this is not.
+    """
+    held = any(line.startswith(HELD) for line in reports)
+    return 1 if held and automatic_render() is None else 0
+
+
 def publish(repo: Path, project: str | None, docs: list[dict[str, Any]]) -> list[str]:
     """Every job, in the order the contract states them.
 
     Local copies first, outward queue last. The order is the contract's: the
     copies that cannot leak are written before the ones that can, so a run that
     stops halfway has published locally and disclosed nothing.
+
+    The repo's `channels` setting is read once, here (sd:3462). A linked
+    worktree publishes nothing, so it reads none. A setting that cannot be
+    read holds the vault copy, the queue and the item records for this
+    render: requests queued earlier stay, the legacy queue is not moved
+    (the next render moves it), and the dashboard copy is written.
     """
+    channels, unknown = (None, "") if publish_refusal(repo, "obsidian") else read_channels(repo)
+    if unknown:
+        return [
+            "%s: cannot read this repo's channels setting (%s); no vault copy written and "
+            "nothing queued, and requests queued earlier stay. Fix it, then render again"
+            % (HELD, unknown),
+            ignore_dashboard(repo),
+            register_root(repo, project_label(repo, project), repo / DASHBOARD_DIR),
+        ]
     wrote: list[dict[str, Any]] = []
-    reports = write_obsidian(repo, docs, wrote)
+    reports = write_obsidian(repo, docs, wrote, channels)
     reports.append(ignore_dashboard(repo))
     reports.append(register_root(
         repo, project_label(repo, project), repo / DASHBOARD_DIR))
@@ -1460,12 +1607,13 @@ def publish(repo: Path, project: str | None, docs: list[dict[str, Any]]) -> list
     # and `enqueue` returns before touching the directory when it has no
     # request of its own to write.
     reports += migrate_legacy_queue()
-    reports += enqueue(repo, docs)
-    reports += record_obsidian(repo, wrote)
+    reports += enqueue(repo, docs, channels)
+    reports += record_obsidian(repo, wrote, channels)
     return reports
 
 
-def record_obsidian(repo: Path, wrote: list[dict[str, Any]]) -> list[str]:
+def record_obsidian(repo: Path, wrote: list[dict[str, Any]],
+                    channels: dict[str, dict[str, str]] | None = None) -> list[str]:
     """Record each written vault copy's link on the item its entry names (sd:3979).
 
     Only the copies `write_obsidian` wrote, and only where the render would
@@ -1485,7 +1633,7 @@ def record_obsidian(repo: Path, wrote: list[dict[str, Any]]) -> list[str]:
         return ["item: obsidian link for sd:%d not recorded (%s)" % (item, why) for _, item in named]
     home = repo_home(repo)
     vault = Path(VAULT).expanduser()
-    folder = vault_folder(repo)
+    folder = vault_folder(repo, channels)
     reports = []
     for cfg, item in named:
         out = str(cfg.get("out", "")).strip()
@@ -3326,9 +3474,10 @@ def publish_main() -> int:
     if ns is None:
         print("no research.conf.py in %s" % repo, file=sys.stderr)
         return 2
-    for line in publish(repo, ns.get("PROJECT"), ns.get("DOCS", [])):
+    reports = publish(repo, ns.get("PROJECT"), ns.get("DOCS", []))
+    for line in reports:
         print(line)
-    return 0
+    return exit_status(reports)
 
 
 if __name__ == "__main__":

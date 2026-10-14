@@ -3359,6 +3359,121 @@ roles:
         self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id=?", (self.item,)).fetchone()[0], "done")
         self.assertEqual(len([call for call in self.remote.calls if call.method == "PUT"]), 1)
 
+    def waiver_file(self, *rows: dict) -> pathlib.Path:
+        """An acceptance file for the claimed item: a passing row, then `rows`."""
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [
+            {"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}, *rows]}))
+        return acceptance
+
+    def decision(self, body: str, *, item: int | None = None, kind: str = "decision") -> int:
+        from sd_db.writes import add_note
+        return add_note(self.connection, self.item if item is None else item, kind, body, session="fixture-session")
+
+    @staticmethod
+    def waived_row(criterion: str, decision: object) -> dict:
+        return {"criterion": criterion, "passed": False, "evidence": "not measured on this machine",
+                "waived": {"reason": "the owner waived it", "decision": decision}}
+
+    def delivered_reason(self) -> str:
+        return self.connection.execute("SELECT body FROM note WHERE item = ? AND kind = 'status_change' "
+                                       "ORDER BY id DESC LIMIT 1", (self.item,)).fetchone()[0]
+
+    def test_a_waived_row_with_its_decision_note_delivers_and_names_the_waiver(self):
+        """sd:3704 part 2: `passed: false` with a reason and the decision note
+        that waived it. Whitespace is collapsed on both sides before the
+        exact compare."""
+        note = self.decision("Ruling: no load rig here.\nWaive:  p95   under 2 s ")
+        self.prepare("--deliver", "--acceptance-file", str(self.waiver_file(self.waived_row("p95 under 2 s", note))))
+        stored = self.operation().state["acceptance"]["claim"]["criteria"][1]["waived"]
+        self.assertEqual(stored, {"reason": "the owner waived it", "decision": note, "note": {
+            "id": note, "body": "Ruling: no load rig here.\nWaive:  p95   under 2 s ", "session": "fixture-session"}})
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertFalse(result["delivery_pending"], result)
+        self.assertEqual(self.status_of(self.item), "done")
+        self.assertTrue(self.delivered_reason().endswith(f"; waived: 1 criteria (decision #{note})"),
+                        self.delivered_reason())
+        fields = json.loads(self.connection.execute("SELECT fields FROM item WHERE id = ?", (self.item,)).fetchone()[0])
+        self.assertEqual(fields["completion"]["waived"], [{"criterion": "p95 under 2 s", "decision": note}])
+
+    def test_a_task_closed_with_a_waiver_names_it(self):
+        self.task_item("task")
+        note = self.decision("Waive: runs offline")
+        self.prepare("--deliver", "--acceptance-file", str(self.waiver_file(self.waived_row("runs offline", note))))
+        with patch.object(ship.time, "sleep"):
+            result = self.merge()
+        self.assertFalse(result["delivery_pending"], result)
+        self.assertTrue(self.delivered_reason().endswith(
+            f"on origin/main; waived: 1 criteria (decision #{note})"), self.delivered_reason())
+
+    def test_a_waiver_without_an_exact_decision_note_on_this_item_refuses(self):
+        """A mention is not a waiver, a shorter or longer criterion is not
+        this one, and a note on another item or of another kind waives
+        nothing. Each refuses by name and stores no claim."""
+        other = create_item(self.connection, kind="task", title="another item", repo=str(self.operator))
+        cases = [
+            ("Do not waive X", "X", {}, "waiver_not_exact"),
+            ("Waive: X", "X on Y", {}, "waiver_not_exact"),
+            ("Waive: X on Y", "X", {}, "waiver_not_exact"),
+            ("waive: X", "X", {}, "waiver_not_exact"),
+            ("Waive: X", "X", {"item": other}, "waiver_refused"),
+            ("Waive: X", "X", {"kind": "comment"}, "waiver_refused"),
+        ]
+        for body, criterion, where, code in cases:
+            with self.subTest(body=body, criterion=criterion, where=where):
+                row = self.waived_row(criterion, self.decision(body, **where))
+                with self.assertRaises(ship.Refusal) as caught:
+                    self.unanswered("--deliver", "--acceptance-file", str(self.waiver_file(row))).prepare()
+                self.assertEqual(caught.exception.workflow["blocker"]["code"], code)
+                self.assertNotIn("acceptance", self.operation().state)
+        for waived in ({"reason": "r", "decision": 999999}, {"reason": "", "decision": 1}, {"reason": "r"}, "r"):
+            with self.subTest(waived=waived):
+                row = {"criterion": "X", "passed": False, "evidence": "e", "waived": waived}
+                with self.assertRaises(ship.Refusal) as caught:
+                    self.unanswered("--deliver", "--acceptance-file", str(self.waiver_file(row))).prepare()
+                self.assertEqual(caught.exception.workflow["blocker"]["code"], "waiver_refused")
+        row = {"criterion": "X", "passed": False, "evidence": "e"}
+        with self.assertRaisesRegex(ship.Refusal, "waiver"):
+            self.unanswered("--deliver", "--acceptance-file", str(self.waiver_file(row))).prepare()
+
+    def test_a_row_prepare_cannot_deliver_as_waived_refuses(self):
+        """A passed row that also claims a waiver, and a waived row whose
+        criterion is not text, refuse at prepare: the first would deliver
+        with its waiver unread and unrecorded, the second would merge and
+        then fail every delivery."""
+        rows = [
+            {**self.waived_row("X", 999999), "passed": True},
+            self.waived_row(123, self.decision("Waive: 123")),  # type: ignore[arg-type]
+            self.waived_row("  ", self.decision("Waive: ")),
+        ]
+        for row in rows:
+            with self.subTest(row=row):
+                with self.assertRaisesRegex(ship.Refusal, "waiver"):
+                    self.unanswered("--deliver", "--acceptance-file", str(self.waiver_file(row))).prepare()
+                self.assertNotIn("acceptance", self.operation().state)
+
+    def test_a_failed_read_of_the_decision_note_refuses(self):
+        class Failing:
+            def __init__(self, connection):
+                self.connection = connection
+
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+
+            def execute(self, sql, *args):
+                if sql.startswith("SELECT id, item, kind, body, session FROM note"):
+                    raise sqlite3.OperationalError("database is locked")
+                return self.connection.execute(sql, *args)
+
+        row = self.waived_row("X", self.decision("Waive: X"))
+        operation = self.unanswered("--deliver", "--acceptance-file", str(self.waiver_file(row)))
+        operation.connection = Failing(self.connection)
+        with self.assertRaises(ship.Refusal) as caught:
+            operation.prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "waiver_unread")
+        self.assertNotIn("acceptance", self.operation().state)
+
     def test_dirty_checkout_and_preexisting_index_are_unchanged(self):
         (self.root / "unrelated.txt").write_text("operator work")
         before = _git(self.root, "status", "--porcelain")

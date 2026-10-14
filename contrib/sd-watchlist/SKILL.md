@@ -32,7 +32,12 @@ Arguments arrive as free text. Unknown argument names are an error — stop and
 identify them before reading sources, state, or profile data.
 
 - `sources=` — bounded source definitions or authorized connected-source
-  locators; required unless unambiguous in context;
+  locators; required unless unambiguous in context. `repo:<path>` names a
+  managed repo's one RSS/Atom subscription (sd:3980): read it with the pack's
+  `bin/sd-db repo channels <path>` and use the `feed` `url`. A read that exits
+  non-zero leaves that source unavailable, never empty; `none` or no `feed`
+  means the repo has no subscription, so say so and read nothing for it.
+  The feed is the source; read it as any other feed, with no per-site code;
 - `checkpoint=` — `new`, a dated cutoff, or a supplied `sd-monitor-state/v1`
   block; missing state enters first-baseline mode. `checkpoint=new` explicitly
   starts first-baseline mode. This skill does not accept `baseline=`; that name
