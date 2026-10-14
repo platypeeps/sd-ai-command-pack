@@ -134,7 +134,8 @@ The message names the verb and the hub.
 - the retention and executions prunes;
 - the publication journal and the `sd writing` cutover;
 - shadow sync;
-- `repo lane-host`, which holds the hub's ship lock while it moves a lane (sd:3075).
+- `repo lane-host`, which holds the hub's ship lock while it moves a lane (sd:3075);
+- `records render`, the vault mirror of base rows (next section).
 
 `ledger.reserve` raises `LedgerRefused` with scope `hub`: provider calls are charged on the hub.
 `ledger.release_orphans` sweeps nothing off the hub, because it asks the local kernel about owner pids.
@@ -173,6 +174,24 @@ The hub's lock file sits beside the database; a satellite host's sits under `$XD
 The machine that hosts a repository gates and merges it, and no request crosses a machine.
 Schedule `sd-ship lane run --hosted` on every machine: it runs each lane the machine hosts.
 [WORKFLOW.md § Parallel work](../WORKFLOW.md#parallel-work) covers the lane from the ship side.
+
+## Channels
+
+`repo.channels` names the publish channels a repository uses, and the folder each one writes to (sd:3462).
+It is a JSON object; NULL, shown as `none`, means no setting, and every row starts there.
+The design is `docs/work/2026-10-13-channels/design.md`.
+
+    bin/sd-db repo channels PATH                                         # print: canonical JSON or none
+    bin/sd-db repo channels PATH obsidian=Briefs/x notion=Example drive= # set; prints before -> after
+    bin/sd-db repo channels PATH none                                    # clear
+
+The keys are `obsidian`, `notion` and `drive`; `drive=` names the default folder, and a channel left out is off.
+A folder is a name, never an id or a URL: no leading `/`, no `.` or `..` segment, no control character.
+A Notion folder is one page name, with no `/`.
+`sd_db.channels.validate` checks every write; `repos.set_channels` is the one writer, `repos.repo_channels` the reader.
+The verb refuses an unregistered path when it sets, and prints `none` with a note when it reads one.
+A stored value the validator refuses, or a database not yet migrated, exits 1 and prints no value.
+A change takes effect at the next `sd-research-kit render` in the checkout, or the next commit.
 
 ## `judgments`: what the judgment models cost, by stage
 
@@ -379,6 +398,21 @@ The edit writes a `comment` note, `Changed kind <old> -> <new> by <who>`, in the
 `work-idea`, `personal-idea` and `personal` (`workflow.REPO_LESS_KINDS`) are filed with no repository.
 Read them as a group with `reads.backlog_items(connection, repo=reads.NO_REPO)` or the dashboard's `/tasks?repo=no%20repo`.
 That is filing behaviour, not a constraint: `item.repo` has no per-kind CHECK, and `writes.create_item` takes a `repo` for any kind.
+
+## `records render`: the vault mirror of base rows
+
+Once a plugin's `store.driver` is `db`, its vault base rows live in `item` and `sd_db.records` writes them.
+`records render [KIND ...]` writes them back into the vault as a read-only mirror; with no kind it takes every kind a `db` plugin declares.
+
+- Each row's note sits at its `path`, with `status` from `stage`, the body verbatim and a `mirror-hash` of the rest of the file.
+- One HTML page per base goes to `<vault>/docs/dashboard/base-<kind>.html`, for the dashboard's Documents tab.
+- A file is overwritten only when its `mirror-hash` matches its content, or it has none and reads as its row. Any other file is a hand edit: it stays, and the render reports it.
+- A note in the base folder that no row holds is reported and kept.
+- It refuses off the hub, while a `restore` is unresolved, for a kind still on the `vault` driver, and when a base folder does not exist.
+
+Each committed `records` write renders its kind, or every kind after a failed render. A write never fails for its render: it prints `mirror not updated: <reason>`.
+Every render records the `heartbeat` state row `records-mirror`, body `{at, ok, kinds, written, refused, reason}`.
+The verb exits 1 on any refused file or a render that stopped.
 
 ## Renaming a repository
 

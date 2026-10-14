@@ -1367,12 +1367,21 @@ class Ship(SharedReview):
             if not self.args.no_item and self.state.get("deliver") != deliver:
                 raise Refusal("existing PR delivery claim differs; reconcile the prepared scope first")
         self.assert_scope()
+        closing: dict | None = None
+        closing_warnings: list[str] = []
         if not self.args.no_item:
-            self.check_closes(body, title, deliver)
+            # The items named with --item after the first: the confirmation on this head (sd:3704).
+            named = tuple(dict.fromkeys(self.args.closes))
+            self.check_closes(named, deliver)
+            items = list(self.closing(named, deliver))
+            closing = {"head": head, "items": items}
+            closing_warnings += self.title_left_open(title, items, deliver)
+            print(f"sd-ship: at {head[:12]} this merge closes {', '.join(self.closes_now(closing, deliver)) or 'no item'}",
+                  file=sys.stderr)
         if not self.state:
             self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
         self.persist_copilot_direction()
-        fields = {} if self.args.no_item else {"deliver": deliver, "acceptance": claim}
+        fields = {} if self.args.no_item else {"deliver": deliver, "acceptance": claim, "closing": closing}
         self.save(title=title, body=body, base=base, invoker=self.invoker(), **fields)
         # Rules 5 and 8 read the pull request body, and the body is built by
         # now. Without it the rules report themselves not run and CI is the
@@ -1407,7 +1416,7 @@ class Ship(SharedReview):
         # sd:2998. A docs-only or pin-bump branch gets the gate alone; any other gets the review.
         if not self.gate_only(head):
             self.review(head)
-        self.save(warnings=lint_warnings + claims + self.commit_warnings(head))
+        self.save(warnings=lint_warnings + claims + closing_warnings + self.commit_warnings(head))
         self.assert_scope()
         # Artifact exposure is checked again against the actual push target.
         mode = self.resolve_mode()
@@ -1454,7 +1463,8 @@ class Ship(SharedReview):
         if copilot.get("warning"):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
         return self.result("ready_to_send", copilot_review=copilot, invoker=self.state["invoker"],
-                           body_source=self.body_source, normalized=list(self.body_normalized))
+                           body_source=self.body_source, normalized=list(self.body_normalized),
+                           closes=self.closes_now(self.state.get("closing") or {}, bool(self.state.get("deliver"))))
 
     def refuse_design_delivery(self, base: str, head: str) -> None:
         """Refuse `--deliver` on a branch `design_only` names, before anything is saved (sd:3519).
@@ -1778,13 +1788,12 @@ class Ship(SharedReview):
             self.store.manual_merge_guard(self.connection, self.repo["path"])
 
     def squash_body(self, reviewed_base: str = "") -> str:
-        # `Closes:` lines become the `Delivers:` trailers below (sd:1481).
-        body = sd_ship_body.strip_closes(self.state["body"]).rstrip() + "\n\n"
+        body = self.state["body"].rstrip() + "\n\n"
         if not self.args.no_item:
             body += f"{sd_lib.ITEM_TRAILER} sd:{self.args.item}\n"
             delivered = ([self.args.item] if self.state.get("deliver") else []) + list(self.co_delivered())
-            # Each `Closes:` item is co-delivered, so it gets the `Delivers:` its
-            # close and every git reader require (sd:1481).
+            # Each co-delivered item, from a later `--item`, gets the
+            # `Delivers:` its close and every git reader require (sd:3704).
             for number in delivered:
                 body += f"{sd_lib.DELIVERS_TRAILER} sd:{number}\n"
             # The message is fixed before GitHub picks the squash parent,
@@ -1794,27 +1803,69 @@ class Ship(SharedReview):
                 body += f"{sd_lib.REVIEWED_BASE_TRAILER} {reviewed_base}\n"
         return body
 
-    def closing(self, body: str, title: str, deliver: bool) -> tuple[int, ...]:
+    def closing(self, named: tuple[int, ...], deliver: bool) -> tuple[int, ...]:
         """The items a merge closes beside the claimed one (`sd_ship_body.items_closed`); none without an item."""
         if self.args.no_item:
             return ()
-        return sd_ship_body.items_closed(body, title, self.args.item, deliver)
+        return sd_ship_body.items_closed(named, self.args.item, deliver)
 
     def co_delivered(self) -> tuple[int, ...]:
-        """The items the prepared body and title co-deliver (sd:1481, sd:3014)."""
-        return self.closing(self.state.get("body") or "", self.state.get("title") or "", bool(self.state.get("deliver")))
+        """The closing set prepare stored with its head (sd:3704).
 
-    def check_closes(self, body: str, title: str, deliver: bool) -> None:
+        A receipt prepared before sd:3704 has none and keeps the title's ids,
+        the rule it was sent under (sd:3014); `check_closing` lets it merge only
+        from `merge_dispatch`. Its body `Closes:` items are not read: every such
+        body had merged when the line went (sd:3704).
+        """
+        if self.args.no_item:
+            return ()
+        stored = self.state.get("closing")
+        if stored is not None:
+            return tuple(stored["items"])
+        return self.closing(sd_ship_body.title_ids(self.state.get("title") or ""), bool(self.state.get("deliver")))
+
+    def check_closes(self, named: tuple[int, ...], deliver: bool) -> None:
         """Refuse a co-delivered item the merge could not close, before anything is published (`sd_ship_body.refuse_unclosable`)."""
         if not self.args.no_item:
-            sd_ship_body.refuse_unclosable(self.connection, self.args.item, self.item["repo"], body, title, deliver)
+            sd_ship_body.refuse_unclosable(self.connection, self.args.item, self.item["repo"], named, deliver)
+
+    def title_left_open(self, title: str, closing: list[int], deliver: bool) -> list[str]:
+        """One warning when a delivering title names items this merge leaves open (sd:3704)."""
+        named = [f"sd:{number}" for number in sd_ship_body.title_ids(title)
+                 if number != self.args.item and number not in closing]
+        return [f"the title names {', '.join(named)}; a title closes nothing, so name each with --item"] if deliver and named else []
+
+    def closes_now(self, closing: dict, deliver: bool) -> list[str]:
+        """The items the merge closes, the claimed one first, as prepare prints them (sd:3704)."""
+        return [f"sd:{number}" for number in ([self.args.item] if deliver else []) + list(closing.get("items", []))]
+
+    def check_closing(self, head: str) -> None:
+        """Refuse a merge whose stored closing set was not read at `head` (sd:3704).
+
+        A receipt with no set was prepared before sd:3704; it merges only from
+        `merge_dispatch`, which prepare routes to reconcile and cannot
+        refresh. Either way the items are checked again, as prepare did.
+        """
+        if self.args.no_item:
+            return
+        stored = self.state.get("closing")
+        if (stored is None and self.state.get("phase") != "merge_dispatch") or (
+                stored is not None and stored.get("head") != head):
+            raise Refusal(f"the closing set this receipt holds was not read at {head}; prepare again to read it",
+                          code="closing_set_stale", boundary="input", state="retryable_failure",
+                          next_action="Run sd-ship prepare again at this head, then merge.")
+        deliver = bool(self.state.get("deliver"))
+        # Under the old rule an associate-only title named context only (sd:3365).
+        named = (tuple(stored["items"]) if stored is not None
+                 else sd_ship_body.title_ids(self.state.get("title") or "") if deliver else ())
+        self.check_closes(named, deliver)
 
     def item_status(self, number: int) -> str | None:
         row = self.connection.execute("SELECT status FROM item WHERE id = ?", (number,)).fetchone()
         return None if row is None else row["status"]
 
     def close_items(self, commit: str, ref: str) -> tuple[list[int], dict[str, str]]:
-        """Close each `Closes:` item at the verified merge, verified as the claimed item is.
+        """Close each co-delivered item at the verified merge, verified as the claimed item is.
 
         The landed message is read, never assumed: a pull request merged on
         GitHub carries whatever message the web form held, so an item whose
@@ -2037,6 +2088,7 @@ class Ship(SharedReview):
             raise Refusal("--expected-head must name the current exact reviewed commit")
         self.require_copilot_abandonment_authority()
         self.check_review(head)
+        self.check_closing(head)
         self.merge_authority()
         # The one validated reader of the `mode:` line, as `merge_ownership`
         # and `resolve_mode` read it: a word that is not a mode is named here
@@ -2067,9 +2119,8 @@ class Ship(SharedReview):
         self.require_copilot_clearance(observed["number"], observed, head)
         self.save(phase="ci_passed", protection=protection)
         reviewed = self.reviewed_base(head, base)
-        # The title that lands names the items the merge closes (sd:3014).
+        # The live title is the squash subject; it closes nothing (sd:3704).
         title = squash_title(observed, self.state["title"])
-        self.check_closes(self.state.get("body") or "", title, bool(self.state.get("deliver")))  # a title edited after prepare
         self.state["title"] = title
         body, closes = self.squash_message(reviewed)
         # The squash message is composed here and read by `git
@@ -2224,7 +2275,7 @@ class Ship(SharedReview):
 
         A hand delivery after the combined tree passed is the resolution;
         reissuing the hold over it would never clear (#1179). A hand close of
-        a held `Closes:` item is its resolution in the same way (sd:1481).
+        a held co-delivered item is its resolution in the same way (sd:1481).
         """
         hand = bool(self.state.get("deliver")) and not self.delivered_at(commit)
         held = [number for number in self.co_delivered() if self.item_status(number) != "done"]
@@ -2232,7 +2283,7 @@ class Ship(SharedReview):
             return None
         steps = [self.by_hand(commit)] if hand else []
         if held:
-            steps.append(f"close the Closes: items {', '.join(f'sd:{number}' for number in held)} the same way")
+            steps.append(f"close the co-delivered items {', '.join(f'sd:{number}' for number in held)} the same way")
         pending = blocked("base_advanced_at_merge", "ci",
                           f"Verify the combined tree at {commit} (default-branch CI), then {'; '.join(steps)}.",
                           state="operator_decision")
@@ -2240,7 +2291,7 @@ class Ship(SharedReview):
                 "workflow": {**evidence["workflow"], **pending}}
 
     def deliver_closes(self, commit: str, ref: str, evidence: dict) -> dict:
-        """`evidence` with the `Closes:` items closed, or the pending answer naming those that failed."""
+        """`evidence` with the co-delivered items closed, or the pending answer naming those that failed."""
         if not self.co_delivered():
             return evidence
         closed, failed = self.close_items(commit, ref)
@@ -2248,7 +2299,7 @@ class Ship(SharedReview):
         if not failed:
             return evidence
         pending = blocked("closes_delivery_pending", "database",
-                          "Resolve each Closes: item's error, then run sd-ship reconcile.", state="operator_decision")
+                          "Resolve each co-delivered item's error, then run sd-ship reconcile.", state="operator_decision")
         return {**evidence, "delivery_pending": True, "closes_failed": failed,
                 "workflow": {**evidence["workflow"], **pending}}
 
@@ -2459,9 +2510,24 @@ def squash_title(pull: dict, prepared: str) -> str:
     return title
 
 
-def identity_flags(action) -> None:
+class ItemList(argparse.Action):
+    """`prepare --item`: the first claims the item; each later one is an item the merge closes (sd:3704)."""
+
+    def __call__(self, parser, namespace, value, option_string=None):
+        if namespace.item is None:
+            namespace.item = value
+        else:
+            namespace.closes = [*namespace.closes, value]
+
+
+def identity_flags(action, closes: bool = False) -> None:
     identity = action.add_mutually_exclusive_group(required=True)
-    identity.add_argument("--item", type=int)
+    if closes:
+        identity.add_argument("--item", type=int, action=ItemList,
+                              help="the claimed item; repeat it to name each other item a --deliver merge closes")
+        action.set_defaults(closes=[])
+    else:
+        identity.add_argument("--item", type=int)
     identity.add_argument("--no-item", action="store_true", help="a standalone review record, never a placeholder work item")
     action.add_argument("--review-id", metavar="ID", help="the stable record identity every later no-item command requires; --create-record allocates it and prints it as review_id, it is never chosen")
     action.add_argument("--json", action="store_true")
@@ -2551,7 +2617,7 @@ def parser():
     body.add_argument("--json", action="store_true")
     for name in ("prepare", "merge", "reconcile", "observe"):
         action = commands.add_parser(name)
-        identity_flags(action)
+        identity_flags(action, closes=name == "prepare")
         if name in ("prepare", "merge"):
             lock_wait_flag(action)
         if name == "prepare":
@@ -2597,8 +2663,8 @@ def parser():
 BODY_EPILOG = """\
 body: `sd-ship body --item N [--body-file F] [--pr P]` prints the body prepare
 would publish and runs the body lint (sd-docs-lint --body-only). It strips
-every Item:, Work: and Delivers: line, and refuses a Closes: line naming the
-claimed item or no item, by number. With --pr and no --body-file, that pull
+every Item:, Work: and Delivers: line, and refuses a Closes: line: each later
+--item names an item the merge closes (sd:3704). With --pr and no --body-file, that pull
 request's live body is the one read. It reads no sd state, and calls the
 GitHub API only for --pr.
 Exit 0 when the body would prepare, 3 on a refusal or a lint failure.

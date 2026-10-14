@@ -1217,6 +1217,19 @@ Delete these entries.""")
 # --------------------------------------------------------------------------
 
 
+class TheVerdictReader(unittest.TestCase):
+    """`node_verdicts` reads a node's verdict past what the test wrote to stderr."""
+
+    def test_a_verdict_after_the_tests_own_stderr_still_counts(self):
+        """sd:3704: prepare prints its closing set, and unittest's ` ... ok` then
+        split across lines; the row read `no verdict` for a green test."""
+
+        output = ("test_a (tests.test_x.Case.test_a)\nWhat it checks. ... sd-ship: at 0123 this merge closes no item\n"
+                  "ok\ntest_b (tests.test_x.Case.test_b) ... FAIL\ntest_c (tests.test_x.Case.test_c) ... noise\n")
+        self.assertEqual({"tests.test_x.Case.test_a": "ok", "tests.test_x.Case.test_b": "FAIL",
+                          "tests.test_x.Case.test_c": "no verdict"}, node_verdicts(output))
+
+
 class Mutation(NamedTuple):
     """One violation of one rule, and the test that must notice it.
 
@@ -1295,8 +1308,10 @@ def unittest_counts(output: str) -> dict[str, int] | None:
 #: A node's line in a `-v` run: its name, then its id in parentheses. The
 #: verdict follows on that line, or on the docstring line under it.
 NODE_LINE = re.compile(r"^\w+ \(([\w.]+)\)", re.MULTILINE)
+#: The verdict ends the ` ... ` line, or starts a line of its own when the test
+#: wrote to stderr after unittest printed ` ... ` (sd:3704).
 NODE_VERDICT = re.compile(
-    r" \.\.\. (ok|FAIL|ERROR|skipped.*|expected failure|unexpected success)$",
+    r"(?: \.\.\. |^)(ok|FAIL|ERROR|skipped.*|expected failure|unexpected success)$",
     re.MULTILINE)
 
 

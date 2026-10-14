@@ -54,16 +54,17 @@ import sys
 import tempfile
 import time
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import paths
-from .database import connect, local_path, refuse_hub_only, schema_version, tables
+from .database import connect, local_path, refuse_hub_only, schema_version, tables, transaction
 from .errors import BackupError, SchemaTooOld, SdDbError
 from .migrate import migrate as migrate_database
 from .schema import SCHEMA_VERSION, TABLES, migrations
-from .writes import record_state
+from .writes import add_note, now as stamp_now, record_state
 
 #: Where a run writes when no destination is named: the `Backup` folder on the
 #: USB disk attached to this Mac. Snapshots taken before 2026-09-25 went to
@@ -754,11 +755,18 @@ def verify(copy: Path, *, run_id: str, expected: dict[str, int], checkpointed: b
         connection.close()
 
 
-def _retention_inventory(directory: Path) -> dict[str, str | None]:
+#: What Finder leaves in a folder someone browsed on a share. A moved copy is
+#: judged without them: the writer never records them and restore never reads them.
+FINDER_METADATA = re.compile(r"\.DS_Store|\._.*")
+
+
+def _retention_inventory(directory: Path, *, moved: bool = False) -> dict[str, str | None]:
     """Bind every entry, including empty directories, without following links."""
-    inventory = {}
+    inventory: dict[str, str | None] = {}
     device = directory.stat().st_dev
     for path in sorted(directory.rglob("*")):
+        if moved and FINDER_METADATA.fullmatch(path.name):
+            continue
         details = path.lstat()
         if stat.S_ISLNK(details.st_mode) or details.st_dev != device:
             raise BackupError("backup retention refuses linked or mounted entries")
@@ -787,45 +795,66 @@ def _record_backup(directory: Path, source: Path, run_id: str, counts: dict[str,
     _write_recovery_record(directory / BACKUP_MANIFEST, (json.dumps(value, sort_keys=True) + "\n").encode())
 
 
-def _owned_backup(directory: Path, *, run_id: str | None = None) -> tuple[int, int, str] | None:
-    """Legacy, moved, incomplete, modified, or unrelated directories stay put.
+def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = False) -> tuple[int, int, str]:
+    """The directory's identity when it is a verified backup; else `BackupError` saying why.
 
-    `run_id` asks the stronger question `passed` needs: is this directory the
-    backup *that run* took. Without it the answer is only "some owned backup",
-    which is not the same claim once two runs have left a directory each.
+    `moved` accepts a copy away from where it was written, such as the hourly
+    mirror on a share (sd:4011). Its manifest still names the first directory,
+    so the path proves nothing about it; what proves it is the rest: every
+    file hashes to the manifest, and the database verifies against the
+    manifest's run and counts.
     """
     try:
         if directory.is_symlink() or not directory.is_dir() or directory.parent.is_symlink():
-            return None
+            raise BackupError("it is a link or not a directory")
         if not DATED_NAME.fullmatch(directory.name):
-            return None
+            raise BackupError("its name is not a backup's dated name")
         datetime.strptime(directory.name[:10], "%Y-%m-%d")
         manifest = directory / BACKUP_MANIFEST
         if manifest.is_symlink() or not manifest.is_file() or manifest.stat().st_size > 16 * 1024 * 1024:
-            return None
+            raise BackupError("it holds no backup manifest")
         material = manifest.read_bytes()
         value = json.loads(material)
         database = value.get("database")
         counts = value.get("counts")
         stored = value.get("run_id")
         if run_id is not None and stored != run_id:
-            return None
+            raise BackupError("its manifest names another run")
         run_id = stored
         if (value.get("format") != "sd-db-backup" or type(value.get("version")) is not int
-                or value["version"] != 1 or value.get("directory") != str(directory.resolve())
+                or value["version"] != 1
                 or not isinstance(database, str) or Path(database).name != database or database in ("", ".", "..")
                 or not isinstance(run_id, str) or not re.fullmatch(r"[0-9a-f]{32}", run_id)
                 or not isinstance(counts, dict) or "state" not in counts
                 or any(type(count) is not int or count < 0 for count in counts.values())
                 or not isinstance(value.get("entries"), dict)
-                or value["entries"] != _retention_inventory(directory)
                 or database not in value["entries"] or value["entries"][database] is None):
-            return None
+            raise BackupError("its manifest is not a backup manifest")
+        if not moved and value.get("directory") != str(directory.resolve()):
+            raise BackupError("its manifest records another directory")
+        if value["entries"] != _retention_inventory(directory, moved=moved):
+            raise BackupError("its files differ from its manifest")
         if verify(directory / database, run_id=run_id, expected=counts) != counts:
-            return None
+            raise BackupError("its database holds other counts than its manifest")
         details = directory.stat()
         return details.st_dev, details.st_ino, hashlib.sha256(material).hexdigest()
-    except (OSError, ValueError, TypeError, AttributeError, sqlite3.Error, BackupError):
+    except BackupError:
+        raise
+    except (OSError, ValueError, TypeError, AttributeError, sqlite3.Error) as error:
+        raise BackupError(f"it could not be read: {error}") from None
+
+
+def _owned_backup(directory: Path, *, run_id: str | None = None, moved: bool = False) -> tuple[int, int, str] | None:
+    """Legacy, moved, incomplete, modified, or unrelated directories stay put.
+
+    `run_id` asks the stronger question `passed` needs: is this directory the
+    backup *that run* took. Without it the answer is only "some owned backup",
+    which is not the same claim once two runs have left a directory each.
+    `moved` lets a verified copy away from its first directory count (`_check_backup`).
+    """
+    try:
+        return _check_backup(directory, run_id=run_id, moved=moved)
+    except BackupError:
         return None
 
 
@@ -932,10 +961,10 @@ def _retention_root(root: Path) -> None:
         raise BackupError("backup retention root must be an existing unlinked directory")
 
 
-def _remove_owned(directories: list[tuple[Path, tuple[int, int, str]]]) -> list[Path]:
+def _remove_owned(directories: list[tuple[Path, tuple[int, int, str]]], *, moved: bool = False) -> list[Path]:
     removed = []
     for path, identity in directories:
-        if _owned_backup(path) != identity:
+        if _owned_backup(path, moved=moved) != identity:
             raise BackupError(f"backup changed before retention: {path}; preserved for review")
         shutil.rmtree(path)
         removed.append(path)
@@ -953,7 +982,33 @@ def prune(root: Path, keep: int | None = KEEP) -> list[Path]:
     return _remove_owned(directories[:-keep] if keep else directories)
 
 
-def prune_older(root: Path, days: int, *, now: datetime) -> list[Path]:
+def _taken_at(directory: Path) -> datetime:
+    """When the backup in `directory` was taken: its checkpoint row's time, read from its own database.
+
+    The name is not the time: a copy can be renamed, and a day's names restart
+    on a hub with an empty root. `run` writes the row before the snapshot, so
+    the copy holds it.
+    """
+    try:
+        value = json.loads((directory / BACKUP_MANIFEST).read_bytes())
+        database = value["database"]
+        if not isinstance(database, str) or Path(database).name != database:
+            raise ValueError("the manifest names no database file")
+        connection = sqlite3.connect(f"file:{directory / database}?mode=ro", uri=True)
+        try:
+            row = connection.execute("SELECT body FROM state WHERE kind = 'checkpoint' AND key = ?",
+                                     (value["run_id"],)).fetchone()
+        finally:
+            connection.close()
+        taken = datetime.fromisoformat(json.loads(row[0])["at"])
+    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as error:
+        raise BackupError(f"its checkpoint time could not be read: {error}") from None
+    if taken.tzinfo is None:
+        raise BackupError("its checkpoint time names no zone")
+    return taken
+
+
+def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False) -> list[Path]:
     """Delete owned backups taken more than `days` days before `now`.
 
     Age comes from the directory's day, which `_dated_directory` takes from
@@ -971,6 +1026,11 @@ def prune_older(root: Path, days: int, *, now: datetime) -> list[Path]:
     name test first -- so an hourly run opens the few snapshots it may
     delete, not the whole week. What it deletes is still only an unchanged,
     verified owned backup, exactly as `prune` requires.
+
+    `moved` prunes copies away from where they were written, such as the
+    hourly mirror on a share (sd:4011): each is verified by its manifest's
+    hashes (`_check_backup`), and its checkpoint time must also lie past the
+    window, so a copy named for an older day than its data stays.
     """
     _check_keep_days(days)
     _retention_root(root)
@@ -985,10 +1045,16 @@ def prune_older(root: Path, days: int, *, now: datetime) -> list[Path]:
             continue
         if day >= cutoff:
             continue
-        if (identity := _owned_backup(path)) is not None:
+        if moved:
+            try:
+                if _taken_at(path) >= now - timedelta(days=days):
+                    continue
+            except BackupError:
+                continue
+        if (identity := _owned_backup(path, moved=moved)) is not None:
             directories.append((path, identity))
     directories.sort(key=lambda value: _directory_order(value[0]))
-    return _remove_owned(directories)
+    return _remove_owned(directories, moved=moved)
 
 
 def _mount_point(path: Path) -> Path:
@@ -1425,13 +1491,37 @@ def _install_restore(candidate: Path, target: Path, expected: dict[str, int]) ->
         source.close()
 
 
-def restore(directory: Path | str, *, home: Path | str) -> Path:
+def _release_leases(connection: sqlite3.Connection) -> list[str]:
+    """Release every open runner lease and note each run abandoned at promotion (sd:4011).
+
+    A lease names a supervisor pid on the hub that took the snapshot; a pid
+    check on this machine could match an unrelated process. The run rows stay
+    as they are, so they still agree with the runner journal restored beside them.
+    """
+    with transaction(connection):
+        rows = list(connection.execute(
+            "SELECT lease.run, assignment.item FROM runner_lease lease "
+            "LEFT JOIN runner_run run ON run.id = lease.run LEFT JOIN assignment ON assignment.id = run.assignment "
+            "WHERE lease.released_at IS NULL ORDER BY lease.run"))
+        connection.execute("UPDATE runner_lease SET released_at = ? WHERE released_at IS NULL", (stamp_now(),))
+        for row in rows:
+            if row["item"] is not None:
+                add_note(connection, row["item"], "comment",
+                         f"Runner run {row['run']} abandoned at promotion; its lease is released")
+    return [row["run"] for row in rows]
+
+
+def restore(directory: Path | str, *, home: Path | str, origin: Path | None = None,
+            settle: bool = False) -> Path:
     """Put a dated directory's database and configuration back in place.
 
     A restored database is a record, not a permission: this writes the
     `restore` row and leaves it unresolved. While it is unresolved the runner
     dispatches nothing and the palette runs nothing -- enforced by the
     callers that read it, which is the only place that can enforce it.
+
+    `origin` is the path the row records when `directory` is a local copy of
+    it; `settle` releases the old hub's open leases (`_release_leases`).
     """
     from .operations import control_gate
 
@@ -1465,8 +1555,10 @@ def restore(directory: Path | str, *, home: Path | str) -> Path:
             executions = prepare_executions(directory, state, connection)
             from .recovery import prepare_restore
             prepare_restore(connection)
-            record_state(connection, "restore", key=directory.name,
-                         body={"from": str(directory), "restored_at": datetime.now(UTC).isoformat()})
+            body: dict[str, object] = {"from": str(origin or directory), "restored_at": datetime.now(UTC).isoformat()}
+            if settle:
+                body["released"] = _release_leases(connection)
+            record_state(connection, "restore", key=directory.name, body=body)
             expected = _check_restore(connection)
         finally:
             connection.close()
@@ -1543,3 +1635,86 @@ def restore(directory: Path | str, *, home: Path | str) -> Path:
         if not keep_stage:
             shutil.rmtree(stage)
     return target
+
+
+@dataclass
+class Newest:
+    """What `restore_newest` restored, and what it refused on the way."""
+
+    snapshot: Path
+    taken_at: datetime
+    target: Path
+    refused: list[tuple[Path, str]]
+    released: list[str]
+
+
+def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None) -> Newest:
+    """Restore the newest verified snapshot under `roots`, newest checkpoint first (sd:4011).
+
+    Each candidate is copied off its share first and judged on the copied
+    bytes: its manifest's hashes and its database's checkpoint
+    (`_check_backup`), then `restore`'s own validator (`check_restorable`). A
+    refused candidate is reported and the next is tried. A candidate newer
+    than this library stops the run: an older snapshot would lose what the
+    newer one holds. So does any failure of the restore itself, which may
+    already have changed live state, or conflicts with live evidence that an
+    older snapshot would conflict with too.
+    """
+    home = Path(home)
+    refuse_hub_only(local_path(home), "the restore", home)
+    refused: list[tuple[Path, str]] = []
+
+    def refuse(path: Path, reason: str) -> None:
+        refused.append((path, reason))
+        if report is not None:
+            report(f"refused {path}: {reason}")
+
+    candidates = []
+    for root in map(Path, roots):
+        try:
+            _retention_root(root)
+            entries = sorted(root.iterdir())
+        except (BackupError, OSError) as error:
+            refuse(root, str(error))
+            continue
+        for path in entries:
+            if path.is_symlink() or not DATED_NAME.fullmatch(path.name):
+                continue
+            try:
+                candidates.append((_taken_at(path), _directory_order(path), path))
+            except BackupError as error:
+                refuse(path, str(error))
+    for taken_at, _, path in sorted(candidates, reverse=True):
+        with tempfile.TemporaryDirectory(prefix="sd-newest-") as stage:
+            local = Path(stage) / path.name
+            try:
+                shutil.copytree(path, local, symlinks=True)
+                # The hashes first: every later decision, the schema stop included, reads these bytes.
+                if json.loads((local / BACKUP_MANIFEST).read_bytes()).get("entries") != _retention_inventory(
+                        local, moved=True):
+                    raise BackupError("its files differ from its manifest")
+            except (BackupError, OSError, ValueError, AttributeError) as error:
+                refuse(path, str(error))
+                continue
+            check = check_restorable(local / "sd.db")
+            # Before the full manifest check: this library cannot count a newer schema's tables.
+            if check.version is not None and check.version > SCHEMA_VERSION:
+                raise BackupError(f"{path} is schema {check.version}, newer than this library ({SCHEMA_VERSION}); "
+                                  "update the pack and retry")
+            try:
+                _check_backup(local, moved=True)
+                if not check.accepted:
+                    # Such as a forensic snapshot of a source with broken references.
+                    raise BackupError(f"restore refuses it: {check.refusal}")
+                raw = sqlite3.connect(f"file:{local / 'sd.db'}?mode=ro", uri=True)
+                try:
+                    released = [row[0] for row in raw.execute(
+                        "SELECT run FROM runner_lease WHERE released_at IS NULL ORDER BY run")]
+                finally:
+                    raw.close()
+            except (BackupError, sqlite3.Error) as error:
+                refuse(path, str(error))
+                continue
+            target = restore(local, home=home, origin=path, settle=True)
+            return Newest(path, taken_at, target, refused, released)
+    raise BackupError(f"no snapshot under {', '.join(map(str, roots))} restored ({len(refused)} refused)")

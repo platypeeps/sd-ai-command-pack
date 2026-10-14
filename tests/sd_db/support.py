@@ -9,9 +9,15 @@ nothing outside this suite has a use for them.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
+import tempfile
+import unittest
 from pathlib import Path
+from unittest.mock import patch
+
+from sd_db import records
 
 #: The pack checkout this suite runs from.
 PACK = Path(__file__).resolve().parents[2]
@@ -207,3 +213,35 @@ def vault(root: Path, *, ideas: dict[str, str], topics: dict[str, str]) -> Path:
                 encoding="utf-8",
             )
     return root
+
+
+class TempRootCase(unittest.TestCase):
+    """A temp root per test, `$OBSIDIAN_VAULT` inside it, and a mirror write outside it fails the test.
+
+    `$OBSIDIAN_VAULT` names a folder in the root that does not exist, so
+    rules that name no vault of their own refuse to render.
+
+    Every mirror file goes through `records._replace`. The guard refuses a
+    target outside the root before it is written, and a cleanup fails the
+    test, since the render turns the refusal into a heartbeat (sd:3976).
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        outside: list[str] = []
+        self.addCleanup(lambda: self.assertEqual(outside, [], "a mirror write left the test's temp root"))
+        replace = records._replace
+        inside = self.root.resolve()
+
+        def guarded(target, data, **options):
+            if not Path(target).resolve().is_relative_to(inside):
+                outside.append(str(target))
+                raise AssertionError(f"a mirror write left the test's temp root: {target}")
+            return replace(target, data, **options)
+
+        for patcher in (patch.dict(os.environ, {"OBSIDIAN_VAULT": str(self.root / "no vault named")}),
+                        patch("sd_db.records._replace", guarded)):
+            patcher.start()
+            self.addCleanup(patcher.stop)

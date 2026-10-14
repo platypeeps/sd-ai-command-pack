@@ -393,7 +393,7 @@ class ManifestTests(StoreFixture):
                     self.refused({**STORE, "root": root}))
 
     def test_an_unknown_driver_refuses_by_name(self) -> None:
-        self.assertIn("the driver(s) are vault", self.refused({**STORE, "driver": "vualt"}))
+        self.assertIn("the driver(s) are db, vault", self.refused({**STORE, "driver": "vualt"}))
 
     def test_every_key_of_the_block_is_required(self) -> None:
         for key in sorted(STORE):
