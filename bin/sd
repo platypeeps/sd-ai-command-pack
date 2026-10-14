@@ -69,6 +69,7 @@ import os
 import pathlib
 import queue
 import re
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -802,6 +803,24 @@ def validate_workflow_status(value: object, kind: dict[str, object], what: str) 
     return dict(value)
 
 
+def refuse_db_kinds(kinds: dict[str, object], workflow: object) -> None:
+    """What the `db` store driver needs of each kind: the status is the row's stage.
+
+    So a kind kept in rows needs a `workflow` map, which names the row status
+    of each stage, and `unique-fields` cannot name `status`, which no
+    uniqueness check reads there.
+    """
+
+    for name in sorted(set(kinds) - set(workflow if isinstance(workflow, dict) else {})):
+        raise Refusal(f"kind {name!r} has no `workflow` map, and the `db` store driver keeps "
+                      f"its rows' status by that map")
+    for name, kind in sorted(kinds.items()):
+        assert isinstance(kind, dict)  # validate_kinds builds it
+        if "status" in (kind.get("unique-fields") or []):
+            raise Refusal(f"kind {name!r}: under the `db` store driver the status is the row's "
+                          f"stage, so `unique-fields` cannot name `status`")
+
+
 def validate_workflow(manifest: dict[str, object], kinds: dict[str, object],
                       store: dict[str, object] | None) -> dict[str, dict[str, object]]:
     """`workflow`: the kinds the vault importer turns into rows (sd:1098).
@@ -815,10 +834,7 @@ def validate_workflow(manifest: dict[str, object], kinds: dict[str, object],
 
     workflow = manifest.get("workflow")
     if store is not None and store["driver"] == "db":
-        # A row's status is the map's word for its stage, so a kind kept in rows needs one.
-        for name in sorted(set(kinds) - set(workflow if isinstance(workflow, dict) else {})):
-            raise Refusal(f"kind {name!r} has no `workflow` map, and the `db` store driver keeps "
-                          f"its rows' status by that map")
+        refuse_db_kinds(kinds, workflow)
     if workflow is None:
         return {}
     if not isinstance(workflow, dict) or not workflow:
@@ -2627,7 +2643,7 @@ def store_add(args: argparse.Namespace) -> int:
 
     kind, store, name, root = resolve_kind(args.kind)
     if store["driver"] == "db":
-        return db_add(args, kind, name, root)
+        return db_add(args, kind, store, name, root)
     vault = store_root(store)
     base = kind_base(store, name, vault)
     path = note_path(base, args.title)
@@ -3007,8 +3023,8 @@ def store_get(args: argparse.Namespace) -> int:
 # --- the `db` driver (sd:3975) ---------------------------------------------
 #
 # Under `store.driver: db` the rows are the source and the vault holds a
-# mirror, so these verbs read and write rows through `sd_db.records` and never
-# open the vault. The library checks the stage graph, floors, unique fields
+# mirror, so these verbs read and write rows through `sd_db.records`; only
+# `add` reads the vault, for title collisions. The library checks the stage graph, floors, unique fields
 # and the revision. It leaves `human-only` and `protected-fields` to its
 # callers: the dashboard is the operator and may make those moves, and
 # `sd store` is how an agent writes, so they are checked here.
@@ -3028,6 +3044,7 @@ def db_store(name: str, *, write: bool = True) -> Iterator[tuple[Any, Any, Any]]
     # Imported here, once `library` has put the checkout's lib/ on the path.
     sd_db = sd_handoff_rows.library()
     from sd_db import records  # noqa: PLC0415
+    from sd_db.errors import SdDbError  # noqa: PLC0415
     from sd_db.workflow import WorkflowError  # noqa: PLC0415
     try:
         rules = records.rules_for(name, home=pathlib.Path.home(),
@@ -3040,8 +3057,8 @@ def db_store(name: str, *, write: bool = True) -> Iterator[tuple[Any, Any, Any]]
         raise Refusal(f"the `db` store driver cannot open the database: {error}") from None
     try:
         yield records, rules, connection
-    except WorkflowError as error:
-        raise Refusal(str(error)) from None
+    except (SdDbError, sqlite3.Error) as error:
+        raise Refusal(f"the `db` store driver: {error}") from None
     finally:
         connection.close()
 
@@ -3064,8 +3081,13 @@ def db_text(kind: dict[str, object], row: dict[str, Any]) -> str:
     return f"---\n{block}---\n{row['body']}"
 
 
-def db_add(args: argparse.Namespace, kind: dict[str, object], name: str, root: pathlib.Path) -> int:
-    """A new row, its body rendered from the kind's template as a note's is."""
+def db_add(args: argparse.Namespace, kind: dict[str, object], store: dict[str, object],
+           name: str, root: pathlib.Path) -> int:
+    """A new row, its body rendered from the kind's template as a note's is.
+
+    The vault is read for one thing: its other notes share the row's file-name
+    namespace, which the mirror will write into (`refuse_title_taken`).
+    """
 
     fields = store_fields(kind)
     values = parse_assignments(
@@ -3078,6 +3100,8 @@ def db_add(args: argparse.Namespace, kind: dict[str, object], name: str, root: p
     if "status" in fields:
         refuse_human_only(kind, stage or str(kind["initial-status"]), DB_HUMAN)
     body = rendered_body(kind, root, args)
+    vault = store_root(store)
+    refuse_title_taken(vault, note_path(kind_base(store, name, vault), args.title))
     # Every declared field, as `add` writes every key of a note; an empty one is `None`, as `key:` reads.
     held = {field: values.get(field) for field in fields if field != "status"}
     with db_store(name) as (records, rules, connection):

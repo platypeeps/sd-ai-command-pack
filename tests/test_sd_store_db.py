@@ -12,6 +12,7 @@ import io
 import json
 import os
 import pathlib
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -190,6 +191,13 @@ class TheWrites(DbStoreFixture):
         again = self.ok("store", "set-section", "pp.tip", "First tip", "--section", "Notes=Seen twice.")
         self.assertIn("already holds", again.stdout)
 
+    def test_add_refuses_a_title_another_vault_note_holds(self) -> None:
+        """A wikilink resolves on the file name alone, so the vault's other notes share the namespace."""
+
+        (self.vault / "Learning").mkdir()
+        (self.vault / "Learning" / "Taken.md").write_text("A note.\n", encoding="utf-8")
+        self.refused("store", "add", "pp.tip", "Taken", "--field", "score=7", says="Learning/Taken.md")
+
     def test_a_missing_row_refuses(self) -> None:
         self.refused("store", "set", "pp.tip", "No such tip", "score", "8", says="no tip row has the title")
 
@@ -222,6 +230,19 @@ class TheReads(DbStoreFixture):
         whole = self.ok("store", "get", "pp.tip", "First tip").stdout
         self.assertTrue(whole.startswith("=== First tip ===\n---\nstatus: inbox\nscore: 7\nmy-rating:\n"), whole)
         self.assertTrue(whole.endswith("---\n# First tip\n\n## Tip\n\nUse the flag.\n\n## Notes\n"), whole)
+
+
+class UniqueStatus(DbStoreFixture):
+    def test_a_db_store_refuses_a_unique_status(self) -> None:
+        """Under `db` the status is the stage, which no `unique-fields` check reads."""
+
+        root = self.plugin(register=False)
+        manifest = json.loads((root / "sd-plugin.json").read_text(encoding="utf-8"))
+        manifest["kinds"]["tip"]["unique-fields"] = ["status"]
+        (root / "sd-plugin.json").write_text(json.dumps(manifest), encoding="utf-8")
+        done = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(done.returncode, 1, done.stderr)
+        self.assertIn("`unique-fields` cannot name `status`", done.stderr)
 
 
 class StaleRead(DbStoreFixture):
@@ -261,6 +282,18 @@ class NoDatabase(DbStoreFixture):
         done = self.run_sd("store", "list", "pp.tip", "--json")
         self.assertEqual(done.returncode, 1, done.stdout)
         self.assertIn("the `db` store driver", done.stderr)
+        self.assertNotIn("Traceback", done.stderr)
+
+    def test_a_query_that_fails_after_the_open_refuses_without_a_traceback(self) -> None:
+        self.plugin()
+        broken = sqlite3.connect(local_path(self.home))
+        broken.execute("PRAGMA foreign_keys = OFF")
+        broken.execute("ALTER TABLE item RENAME TO item_gone")
+        broken.commit()
+        broken.close()
+        done = self.run_sd("store", "list", "pp.tip", "--json")
+        self.assertEqual(done.returncode, 1, done.stdout)
+        self.assertIn("no such table: item", done.stderr)
         self.assertNotIn("Traceback", done.stderr)
 
 
