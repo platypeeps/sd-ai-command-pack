@@ -654,6 +654,22 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         self.ack(first)
         self.assert_fresh(self.tick("d", 46, exit_code=0, text=self.DISK), first)
 
+    def test_a_replay_after_compaction_does_not_restore_a_broken_chain(self):
+        """Codex on the chain row: once compaction took a run's heartbeat, its
+        replay tied the chain's end and wrote the done report back into it."""
+        for kind, run in (("original", "a"), ("folded", "a2")):
+            with self.subTest(kind):
+                job = f"probe-{kind}"
+                first = self.tick("a", 1, exit_code=0, text=self.DISK, job=job)["item"]["id"]
+                self.tick("a2", 1, exit_code=0, text=self.DISK, job=job)
+                self.ack(first)
+                self.tick("clean", 1, exit_code=0, text="ok\n", job=job)
+                with mock.patch("sd_db.ship.this_host", return_value="hostb"):
+                    self.tick("b", 16, exit_code=0, text="ok\n", job=job)
+                retention.compact_heartbeats(self.db)
+                self.assertEqual(self.tick(run, 1, exit_code=0, text=self.DISK, job=job)["item"]["id"], first)
+                self.assert_fresh(self.tick("c", 31, exit_code=0, text=self.DISK, job=job), first)
+
     def test_a_late_report_after_a_clean_run_starts_no_chain(self):
         """A hand recovery of an older run with findings, filed after a newer clean run."""
         self.tick("b", 16, exit_code=0, text="ok\n")

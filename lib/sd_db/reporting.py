@@ -521,12 +521,15 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
         # The newest run of this job on this host, before this one (sd:4629).
         # A run that ended no earlier is the newest now, ties in arrival
         # order as `_beat` ranks them; an older one, a hand recovery, takes
-        # no done target and moves nothing. A replay moved it the first time.
+        # no done target and moves nothing. A replay moved it the first time,
+        # and is told by its run id, not by `beat`: once compaction took its
+        # heartbeat, a replay reads as a new run that ties the newest end.
         chain_key = f"{CHAIN_KEY}{job}@{host}"
         newest_row = connection.execute(
             "SELECT id, body FROM state WHERE kind='heartbeat' AND key=? ORDER BY id DESC LIMIT 1", (chain_key,)).fetchone()
         last = json.loads(newest_row["body"]) if newest_row else {}
-        moves = beat != "recorded" and ended >= (last.get("ended") or "")
+        replay = beat == "recorded" or bool(filed) or bool(attention and _folded_into(connection, job, run_id))
+        moves = not replay and ended >= (last.get("ended") or "")
         if not (attention or filed):
             if moves:
                 _set_chain(connection, chain_key, newest_row, {"run_id": run_id, "ended": ended, "item": None})
