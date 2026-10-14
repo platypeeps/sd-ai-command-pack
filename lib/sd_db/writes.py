@@ -460,6 +460,10 @@ def upsert_item(
         ) else value
         if current != wanted:
             changed[key] = value
+    # A source that names a creation time owns it, as on insert; one that names
+    # none keeps the row's, so a note dated after its first import verifies (sd:4624).
+    if created_at is not None and found["created_at"] != created_at:
+        changed["created_at"] = created_at
     if changed:
         set_item_fields(connection, item, **changed)
     moved = found["status"] != status

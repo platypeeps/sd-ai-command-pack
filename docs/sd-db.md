@@ -210,7 +210,9 @@ The design is `docs/work/2026-10-13-channels/design.md`.
 The keys are `obsidian`, `notion` and `drive`; `drive=` names the default folder, and a channel left out is off.
 `feed=URL` adds the repo's one RSS/Atom subscription (sd:3980), an http or https URL with no credentials; `sd-watchlist` reads it.
 The feed is inbound, not a channel: a setting naming only a feed publishes as no setting, and `channels.outbound` drops it for every publisher.
-A set replaces each half it names, the channels or the feed, and keeps the other as stored, so the dashboard form never drops a feed; `none` clears both. The verb prints `before -> after`, as stored.
+`jira=KEY` and `github=OWNER/NAME` name the repo's issue sources (sd:3461), inbound like the feed: the `repo` value that tracker's `shadow` rows carry, a Jira project key or a GitHub `owner/name`.
+`repos.issue_sources` reads them for Today and Tasks; a managed repo refuses `github` and reads one set before as none, since managed repos use no GitHub issues.
+A set naming any channel replaces the channels; one naming none keeps them, so the dashboard form never drops a source. Each inbound key (feed, jira, github) is set on its own: a set that leaves one out keeps it. `none` clears all of it; to drop one source, clear and set the rest again. The verb prints `before -> after`, as stored.
 A folder is a name, never an id or a URL: no leading `/`, no `.` or `..` segment, no control character.
 A Notion folder is one page name, with no `/`.
 `sd_db.channels.validate` checks every write; `repos.set_channels` is the one writer, `repos.repo_channels` the reader.

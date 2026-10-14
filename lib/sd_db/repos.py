@@ -683,6 +683,27 @@ def set_runner_merge(
     return target, before
 
 
+def issue_sources(connection: sqlite3.Connection, path: Path | str) -> dict[str, str]:
+    """One repository's issue sources: tracker to the `shadow.repo` its rows carry (sd:3461).
+
+    `{"jira": "EXAMPLE", "github": "example/project"}`, either left out when
+    unset; `{}` for no setting. It reads through `repo_channels`, so what that
+    cannot read raises here too. A managed repository's `github` reads as
+    none, whenever it was set: managed repositories use no GitHub issues.
+    """
+    from . import channels
+
+    setting = repo_channels(connection, path) or {}
+    sources = {name: setting[name][key] for name, key in channels.ISSUE_KEYS.items() if name in setting}
+    if "github" in sources:
+        probe = paths.keys(str(Path(path).expanduser().resolve()))
+        row = connection.execute(
+            f"SELECT managed FROM repo WHERE path IN ({paths.placeholders(probe)})", probe).fetchone()
+        if row is None or row["managed"]:
+            del sources["github"]
+    return sources
+
+
 #: The words `repo managed` takes, mapped to what the column holds. Words and
 #: not `1`/`0` so the verb reads like `runner-merge`'s `manual|auto`.
 MANAGED_VALUES = {"yes": 1, "no": 0}
@@ -912,11 +933,14 @@ def set_channels(
     It does not refuse during an unresolved restore: the restore's recovery
     is to set each repository's channels again before resolving it.
 
-    A value has two halves, the outbound channels and the inbound `feed`
-    (sd:3980). A value naming no key of one half keeps that half as stored,
-    so the dashboard form, which shows the outbound channels alone, never
-    deletes a feed, and `feed=URL` never deletes the channels. `None`
-    clears both.
+    The outbound channels are one replacement, and each inbound key (`feed`,
+    `jira`, `github`) is its own (sd:3980, sd:3461; `channels.kept`). A value
+    naming no channel keeps the stored channels, so the dashboard form never
+    deletes a source, and a value leaving an inbound key out keeps it, so
+    `feed=URL` never deletes the channels or the issue sources. `None` clears
+    all of it. A value naming `github` refuses on a managed repository, which
+    uses no GitHub issues; one kept from before `repo managed PATH yes` rides
+    along.
     """
     from . import channels
     from .workflow import StaleItem
@@ -926,11 +950,14 @@ def set_channels(
     probe = paths.keys(given)
     with transaction(connection):
         row = connection.execute(
-            f"SELECT path, channels FROM repo WHERE path IN ({paths.placeholders(probe)})",
+            f"SELECT path, channels, managed FROM repo WHERE path IN ({paths.placeholders(probe)})",
             probe).fetchone()
         if row is None:
             raise RepoRefusal(
                 f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
+        if value and "github" in value and row["managed"]:
+            raise RepoRefusal(f"{row['path']} is managed, and managed repositories use no GitHub issues; "
+                              f"name github only on a repository outside the managed list")
         was = channels.canonical(row["channels"])
         if before is not None and channels.canonical(before) != was:
             raise StaleItem(f"channels for {row['path']} is {was} now, not {before}; read the page again")

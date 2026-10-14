@@ -677,9 +677,9 @@ def _frontmatter_value(value: Any) -> str:
     """The text as a YAML scalar that the importer's reader and a YAML reader both read back as it is.
 
     Bare when YAML reads it as the same string, or as the number or date it
-    is. Else in double quotes, or single when it holds `"` or `\\`: the
-    importer's reader strips the quotes and unescapes nothing, so a text
-    that needs both kinds has no form, and the row refuses.
+    is. Else in double quotes, or single when it holds `"` or `\\`. A text
+    that holds both kinds goes in double quotes with `\\` and `"` escaped,
+    which the importer's reader undoes as YAML does (sd:4626).
     """
     text = str(value)
     if any(ord(char) < 32 or char == "\x7f" for char in text):
@@ -692,7 +692,7 @@ def _frontmatter_value(value: Any) -> str:
         return f'"{text}"'
     if "'" not in text:
         return f"'{text}'"
-    raise RecordRefused(f"{text!r} needs quotes and holds both kinds, so it would not read back from a note")
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def _hand_edit(row: dict[str, Any], held: bytes) -> str | None:

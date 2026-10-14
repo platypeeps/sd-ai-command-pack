@@ -156,7 +156,7 @@
   "said": [
     "obsidian: wrote 5 document(s) to {root}/vault/Briefs/my-research",
     "gitignore: added docs/dashboard/",
-    "dashboard: registered my-research -> MINE",
+    "dashboard: finds my-research by itself; no row to write",
     "mirror: queued a -> your private Notion briefs folder, under my-research",
     "mirror: queued b -> your team Notion briefs folder, under my-research",
     "mirror: queued b -> the Briefs/my-research Drive folder",
