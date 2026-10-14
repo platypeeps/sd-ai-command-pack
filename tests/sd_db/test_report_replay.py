@@ -555,6 +555,21 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         self.assertEqual(self.followups(carried["item"]["id"]), 1)
         self.assertIsNone(self.repeats(acked))
 
+    def test_a_carried_unseen_finding_opens_its_own_report_beside_an_open_one(self):
+        """The same slice against an open report: a fold would keep the unseen
+        finding only until the next body replaced it, or drop it as a late run."""
+        disk = "SD_REPORT_ATTENTION: disk low [123]\n"
+        open_ = self.tick("a", 1, exit_code=0, text=disk)["item"]["id"]
+        carried = self.tick("b", 16, exit_code=0, text="SD_REPORT_ATTENTION: swap high [7]\nnext run\n" + disk)
+        self.assertEqual(carried["recorded"], "report")
+        self.assertIn("swap high", json.loads(carried["item"]["body"])["text"])
+        self.assertIsNone(self.repeats(open_))
+        # A job that prints the same two lines every run still folds.
+        again = self.tick("c", 31, exit_code=0, text="SD_REPORT_ATTENTION: swap high [7]\n" + disk)
+        self.assertEqual((again["recorded"], again["item"]["id"]), ("folded", carried["item"]["id"]))
+        # A disk-only run folds into the disk report, never into the carried one.
+        self.assertEqual(self.tick("d", 46, exit_code=0, text=disk)["item"]["id"], open_)
+
     def test_a_late_run_is_counted_but_keeps_the_newer_body(self):
         """A hand recovery of an older run counts, and the body stays the newest run's."""
         item = self.tick("a", 1)["item"]["id"]
@@ -589,14 +604,28 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         self.assertEqual((fresh["recorded"], fresh["item"]["status"]), ("report", "planning"))
         self.assertNotEqual(fresh["item"]["id"], first)
 
-    def test_the_last_declared_line_in_the_slice_is_the_runs_reason(self):
+    def test_a_carried_slice_names_every_declared_line(self):
         """sd:4629 (c): a lost run's slice is carried into the next run's
-        (`.unreported`, sd:3537); the newest run's line is last, and it is the reason."""
+        (`.unreported`, sd:3537); its first line made the basis, so the slice
+        folded into the lost run's report and the new finding went unseen."""
         lost = self.tick("a", 1, exit_code=0, text="SD_REPORT_ATTENTION: disk low [123]\n")["item"]["id"]
         carried = self.tick("b", 16, exit_code=0,
                             text="SD_REPORT_ATTENTION: disk low [123]\nnext run\nSD_REPORT_ATTENTION: disk low [456]\n")
-        self.assertEqual((carried["recorded"], carried["why"]), ("report", "disk low [456]"))
+        self.assertEqual((carried["recorded"], carried["why"]), ("report", "disk low [123]; disk low [456]"))
         self.assertNotEqual(carried["item"]["id"], lost)
+        # One line twice is one finding, and folds.
+        twice = self.tick("c", 31, exit_code=0, text="SD_REPORT_ATTENTION: disk low [123]\nSD_REPORT_ATTENTION: disk low [123]\n")
+        self.assertEqual((twice["recorded"], twice["item"]["id"]), ("folded", lost))
+
+    def test_a_basis_past_the_limit_still_files(self):
+        """A carried slice grows a line per lost night; past `ingest`'s 2000
+        characters the run was refused, and every later run carried it again."""
+        lines = "".join(f"SD_REPORT_ATTENTION: finding {index} {'x' * 80}\n" for index in range(30))
+        first = self.tick("a", 1, exit_code=0, text=lines)
+        self.assertEqual(first["recorded"], "report")
+        self.assertLessEqual(len(first["why"]), 2000)
+        self.assertRegex(first["why"], r"\[sha256 [0-9a-f]{16}\]$")
+        self.assertEqual(self.tick("b", 16, exit_code=0, text=lines)["item"]["id"], first["item"]["id"])
 
     def test_a_failure_names_its_host_and_its_declared_reason(self):
         """sd:4629 (d): `job exited N` folded one host's crash into another's

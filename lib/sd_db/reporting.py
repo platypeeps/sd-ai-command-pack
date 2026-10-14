@@ -69,9 +69,6 @@ MAX_BATCH = 1000
 #: marker that report carries so a later bulk run declines it.
 BULK_JOB = "reports-acknowledge"
 
-#: A line a job prints to declare its findings; `ingest_log` reads the last.
-DECLARED = re.compile(r"(?m)^SD_REPORT_ATTENTION: (.+)$")
-
 #: How many folded run ids an open report remembers under `fields.repeats`,
 #: newest last. Enough to answer the replay of any run the operator could
 #: plausibly recover by hand; bounded, because remembering every one is the
@@ -194,11 +191,11 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
     a report whose `fields` are unreadable is never a target
     (`_fold_target`). An acknowledged report stays `done` while the same
     findings repeat: a run with a clean exit folds into it when no open
-    report matches and its text declares no other finding (sd:4629). A
-    non-zero exit never folds into a `done`
-    report: its basis says how the run ended, not what was found, so
-    acknowledging one failure does not hide the next, and the run after an
-    acknowledged failure opens a fresh report as before.
+    report matches (sd:4629); a carried lost run's other finding is in the
+    basis (`ingest_log`), so it never closes unseen. A non-zero exit never
+    folds into a `done` report: its basis says how the run ended, not what
+    was found, so acknowledging one failure does not hide the next, and the
+    run after an acknowledged failure opens a fresh report as before.
 
     Replay: a `run_id` in `repeats.run_ids` of any of the job's reports, or
     a report's own, is answered with that report's state and counts nothing
@@ -262,11 +259,8 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         folded = _folded_into(connection, job, run_id) if record is None else None
         if folded:
             return workflow.item_state(connection, folded["id"])
-        # A done target only for a text that declares nothing but this
-        # basis: a carried lost run's other finding (sd:3537) was never seen,
-        # so it must not be closed with the acknowledged one.
-        done = exit_code == 0 and all(line == attention_basis for line in DECLARED.findall(text))
-        target = _fold_target(connection, job, attention_basis, done=done) if attention and record is None else None
+        target = (_fold_target(connection, job, attention_basis, done=exit_code == 0)
+                  if attention and record is None else None)
         if target:
             stored = json.loads(target["fields"])
             repeats = stored.get("repeats") or {"count": 1, "first_ended": stored["report"]["ended"], "run_ids": []}
@@ -449,15 +443,20 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
     text = data[:MAX_REPORT].decode("utf-8", errors="replace")
     # A successful exit does not prove there were no findings. Jobs can emit
     # this explicit marker; absent it, a report filed for a clean run (a
-    # recovery) says attention was not supplied. The last line is this run's:
-    # a lost run's slice is carried in ahead of it (sd:3537), and its older
-    # line made the basis (sd:4629). A failure names the host and the line, as
-    # one job name files from every host and `job exited N` alone folded one
-    # host's or one cause's failure into another's report.
-    declared = (DECLARED.findall(text) or [None])[-1]
+    # recovery) says attention was not supplied. Every distinct line is the
+    # basis, in order (sd:4629): a lost run's slice is carried in ahead of
+    # this run's (sd:3537), and its first line alone made the basis, so the
+    # whole slice folded into the lost run's report and this run's finding
+    # went unseen. A failure names the host and the lines, as one job name
+    # files from every host, and `job exited N` alone folded one host's or
+    # one cause's failure into another's report. A basis past `ingest`'s
+    # limit keeps its head and a digest of the whole, so it files.
+    declared = "; ".join(dict.fromkeys(re.findall(r"(?m)^SD_REPORT_ATTENTION: (.+)$", text)))
     attention = exit_code != 0 or bool(declared)
     basis = (f"job exited {exit_code} on {ship.this_host()}" + (f": {declared}" if declared else "")
              if exit_code else declared or "not supplied by the job")
+    if len(basis) > 2000:
+        basis = f"{basis[:1900]} [sha256 {hashlib.sha256(basis.encode()).hexdigest()[:16]}]"
     text = text.encode()[:MAX_REPORT].decode("utf-8", errors="ignore")
     with transaction(connection):
         # A run that already filed a report is answered with that report, the
