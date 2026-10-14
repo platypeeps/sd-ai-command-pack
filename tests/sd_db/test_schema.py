@@ -36,7 +36,7 @@ class TheTables(SchemaCase):
         self.assertEqual(sorted(tables(connection)), sorted(TABLES))
         self.assertEqual(len(TABLES), 17)
 
-    def test_report_and_dep_are_item_kinds_not_tables(self):
+    def test_report_is_an_item_kind_not_a_table_and_dep_is_neither(self):
         initialise(self.path)
         connection = connect(self.path)
         self.addCleanup(connection.close)
@@ -46,10 +46,11 @@ class TheTables(SchemaCase):
             "INSERT INTO item (kind, title, status, created_at, updated_at) "
             "VALUES ('report', 't', 'planning', '', '')"
         )
-        connection.execute(
-            "INSERT INTO item (kind, title, status, created_at, updated_at) "
-            "VALUES ('dep', 't', 'planning', '', '')"
-        )
+        with self.assertRaises(sqlite3.IntegrityError):  # 032 (sd:3510)
+            connection.execute(
+                "INSERT INTO item (kind, title, status, created_at, updated_at) "
+                "VALUES ('dep', 't', 'planning', '', '')"
+            )
 
     def test_the_library_inserts_into_no_table_the_document_does_not_name(self):
         """Criterion 1's grep, run against the library rather than by hand."""
@@ -63,7 +64,9 @@ class TheTables(SchemaCase):
         # rebuilds `repo` through a scratch table (sd:3217).
         source = "\n".join(line for line in source.splitlines() if not line.lstrip().startswith("--"))
         # `main.`: the hub names its outcome table's schema (`sd_db.serve`).
-        written = set(re.findall(r"INSERT (?:OR IGNORE )?INTO (?:main\.)?([a-z_]+)", source))
+        written = set(re.findall(r"INSERT (?:OR IGNORE )?INTO (?:main\.)?([a-z0-9_]+)", source))
+        # A migration's guard refuses through a temporary table it drops (031 on).
+        written = {name for name in written if not re.fullmatch(r"migration_\d+_guard", name)}
         self.assertTrue(written, "the grep found no inserts at all")
         self.assertEqual(written - set(TABLES), set())
 
@@ -269,8 +272,7 @@ class TheStateCheckKind(SchemaCase):
         connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('check', 'run-1', 't4', '{}')")
         with self.assertRaises(sqlite3.IntegrityError):
             connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('check', 'run-1', 't5', '{}')")
-        with self.assertRaises(sqlite3.IntegrityError):
-            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('bored', 'x', 't6', '{}')")
+        # 031 dropped the kind CHECK; `TheStateKindList` holds the refusal (sd:3506).
         # The heartbeat's one-row-per-key index came back with the table.
         with self.assertRaises(sqlite3.IntegrityError):
             connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('heartbeat', 'runner', 't7', '{}')")
@@ -1577,8 +1579,7 @@ class TheSnoozeKind(SchemaCase):
         self.assertEqual(self._shape(connection), self._shape(self._reference(26)))
         connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('snooze', 'today:job:x:1', 't6', '{}')")
         connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('snooze', 'today:job:x:1', 't7', '{}')")
-        with self.assertRaises(sqlite3.IntegrityError):
-            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('bored', 'x', 't8', '{}')")
+        # 031 dropped the kind CHECK; `TheStateKindList` holds the refusal (sd:3506).
         # The heartbeat's and the check's one-row-per-key indexes came back with the table.
         with self.assertRaises(sqlite3.IntegrityError):
             connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('heartbeat', 'runner', 't9', '{}')")
@@ -1693,8 +1694,7 @@ class TheViewKind(SchemaCase):
         self.assertEqual(self._shape(connection), self._shape(self._reference(27)))
         connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('view', 'system/index.html', 't6', '{}')")
         connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('view', 'system/index.html', 't7', '{}')")
-        with self.assertRaises(sqlite3.IntegrityError):
-            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('bored', 'x', 't8', '{}')")
+        # 031 dropped the kind CHECK; `TheStateKindList` holds the refusal (sd:3506).
         # The heartbeat's and the check's one-row-per-key indexes came back with the table.
         with self.assertRaises(sqlite3.IntegrityError):
             connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('heartbeat', 'runner', 't9', '{}')")
@@ -1904,8 +1904,7 @@ class TheSettingKind(SchemaCase):
         self.assertEqual(self._shape(connection), self._shape(self._reference(29)))
         connection.execute(
             "INSERT INTO state (kind, key, timestamp, body) VALUES ('setting', 'sd.copilot_review', 't7', '{}')")
-        with self.assertRaises(sqlite3.IntegrityError):
-            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('bored', 'x', 't8', '{}')")
+        # 031 dropped the kind CHECK; `TheStateKindList` holds the refusal (sd:3506).
         with self.assertRaises(sqlite3.IntegrityError):
             connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('heartbeat', 'runner', 't9', '{}')")
         with self.assertRaises(sqlite3.IntegrityError):
@@ -1956,6 +1955,261 @@ class TheSettingKind(SchemaCase):
         self.assertEqual(self._shape(raw), self._shape(self._reference(29)))
         result = migrate(self.path)
         self.assertEqual((result.before, result.applied), (29, list(range(30, SCHEMA_VERSION + 1))))
+
+
+class TheStateKindList(SchemaCase):
+    """Migration 31 (sd:3506). `state.kind` loses its CHECK, edited in place
+    as 9 edited `item.kind`'s: no row moves and the table keeps its pages.
+    `writes.STATE_KINDS` is the one list, and `record_state` refuses a kind
+    outside it. An unknown shape is refused at 30; a replay is a no-op; the
+    reverse puts 30's CHECK back."""
+
+    ROWS = TheSettingKind.ROWS + [(14, "setting", "sd.copilot_review", "t7", '{"value": "never"}', None)]
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(
+            "SELECT id, kind, key, timestamp, body, resolved_at FROM state ORDER BY id")]
+
+    def _sql(self, connection):
+        return connection.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'state'").fetchone()[0]
+
+    def _reference(self, upto):
+        return TheSettingKind._reference(self, upto)  # type: ignore[arg-type]
+
+    def _at_version_thirty(self):
+        through = [m for m in schema_module.migrations() if m[0] <= 30]
+        with mock.patch("sd_db.migrate.migrations", return_value=through):
+            migrate(self.path)
+        raw = sqlite3.connect(self.path)
+        raw.executemany(
+            "INSERT INTO state (id, kind, key, timestamp, body, resolved_at) VALUES (?, ?, ?, ?, ?, ?)", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def test_the_check_goes_with_no_row_moved_and_the_library_list_refuses(self):
+        from sd_db.errors import SdDbError
+        from sd_db.writes import record_state
+
+        self._at_version_thirty()
+        raw = sqlite3.connect(self.path)
+        page = raw.execute("SELECT rootpage FROM sqlite_master WHERE name = 'state'").fetchone()[0]
+        raw.close()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied), (30, list(range(31, SCHEMA_VERSION + 1))))
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.ROWS)
+        # The same root page: the table was not rebuilt.
+        self.assertEqual(connection.execute("SELECT rootpage FROM sqlite_master WHERE name = 'state'").fetchone()[0], page)
+        self.assertNotIn("CHECK (kind", self._sql(connection))
+        self.assertEqual(self._sql(connection), self._sql(self._reference(SCHEMA_VERSION)))
+        self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        with self.assertRaises(SdDbError):
+            record_state(connection, "bored", key="x")
+        connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('bored', 'x', 't8', '{}')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES (NULL, 'x', 't8', '{}')")
+        with self.assertRaises(sqlite3.IntegrityError):
+            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('heartbeat', 'runner', 't9', '{}')")
+
+    def test_every_raw_insert_names_a_listed_kind(self):
+        """The CHECK guarded the inserts that skip `record_state`; this guards them now."""
+        from sd_db.writes import STATE_KINDS
+
+        sources = [*PACKAGE_ROOT.rglob("*.py"), *(PACKAGE_ROOT.parent / "bin").glob("*.py"),
+                   *(path for path in (PACKAGE_ROOT.parent / "bin").iterdir() if path.suffix == "" and path.is_file())]
+        found = []
+        for path in sources:
+            text = path.read_text(encoding="utf-8", errors="replace")
+            inserts = re.findall(r"INTO state\s*\(", text)
+            kinds = re.findall(r"INTO state\s*\(\s*kind\b[^)]*\)\s*VALUES\s*\(\s*(?:'([a-z]+)'|(\?))", text)
+            self.assertEqual(len(kinds), len(inserts), f"{path}: an insert into state this test cannot read")
+            for literal, placeholder in kinds:
+                if placeholder:
+                    self.assertEqual(path.name, "writes.py", f"{path}: a state kind from a variable skips record_state")
+                else:
+                    self.assertIn(literal, STATE_KINDS, f"{path}: {literal!r} is not in STATE_KINDS")
+                found.append(literal or placeholder)
+        self.assertGreaterEqual(len(found), 6)
+
+    #: 30's kind column, as 030 wrote it.
+    KIND_030 = ("    kind            TEXT NOT NULL\n"
+                "                    CHECK (kind IN ('checkpoint', 'verified', 'restore',\n"
+                "                                    'watermark', 'heartbeat', 'check',\n"
+                "                                    'snooze', 'view', 'setting')),")
+
+    def test_an_unknown_state_shape_is_refused_and_left_at_thirty(self):
+        shapes = {
+            "another order": ("'view', 'setting'", "'setting', 'view'"),
+            # The column's CHECK matches; a second, table-level one would survive the edit.
+            "a second CHECK": ("    resolved_at     TEXT\n)", "    resolved_at     TEXT,\n    CHECK (kind <> 'bored')\n)"),
+            # No CHECK and a nullable kind: the refusal cannot hang on `state`'s constraints.
+            "a nullable kind": (self.KIND_030, "    kind            TEXT,"),
+        }
+        for shape, (old, new) in shapes.items():
+            with self.subTest(shape=shape):
+                self.path.unlink(missing_ok=True)
+                self._at_version_thirty()
+                raw = sqlite3.connect(self.path, isolation_level=None)
+                raw.execute("PRAGMA writable_schema = ON")
+                raw.execute("UPDATE sqlite_master SET sql = replace(sql, ?, ?) WHERE name = 'state'", (old, new))
+                raw.execute("PRAGMA writable_schema = RESET")
+                before = self._sql(raw)
+                self.assertNotEqual(before, self._sql(self._reference(30)))
+                raw.close()
+                with self.assertRaisesRegex(sqlite3.IntegrityError, "migration_031_refuses_an_unknown_state_shape"):
+                    migrate(self.path)
+                raw = sqlite3.connect(self.path)
+                self.assertEqual(schema_version(raw), 30)
+                self.assertEqual(self._sql(raw), before)
+                self.assertEqual(self._rows(raw), self.ROWS)
+                self.assertEqual(raw.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+                raw.close()
+
+    def test_a_replay_on_the_new_shape_changes_nothing(self):
+        """A restore replays migrations onto a snapshot that may carry 31's shape already."""
+        initialise(self.path)
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        before = self._sql(raw)
+        raw.executescript("BEGIN;\n" + dict(schema_module.migrations())[31].read_text(encoding="utf-8") + "\nCOMMIT;")
+        self.assertEqual(self._sql(raw), before)
+
+    def test_the_reverse_puts_thirtys_check_back(self):
+        self._at_version_thirty()
+        migrate(self.path)
+        text = dict(schema_module.migrations())[31].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), 30)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        self.assertEqual(self._sql(raw), self._sql(self._reference(30)))
+        with self.assertRaises(sqlite3.IntegrityError):
+            raw.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('bored', 'x', 't8', '{}')")
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied), (30, list(range(31, SCHEMA_VERSION + 1))))
+
+
+class TheDeadItemKinds(SchemaCase):
+    """Migration 32 (sd:3510). `proposal` and `dep` leave `item.kind`'s CHECK,
+    edited in place as 9 widened it: no producer writes either and the hub
+    holds no row of either. A row of either refuses the migration at 31, as
+    does an unknown shape; a replay is a no-op; the reverse widens it back."""
+
+    KINDS = ("work", "idea", "task", "report", "skill-review", "personal", "followup", "work-idea", "personal-idea")
+
+    def _sql(self, connection):
+        return connection.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'item'").fetchone()[0]
+
+    def _reference(self, upto):
+        return TheSettingKind._reference(self, upto)  # type: ignore[arg-type]
+
+    def _at_version_thirty_one(self, *kinds):
+        through = [m for m in schema_module.migrations() if m[0] <= 31]
+        with mock.patch("sd_db.migrate.migrations", return_value=through):
+            migrate(self.path)
+        raw = sqlite3.connect(self.path)
+        raw.executemany("INSERT INTO item (kind, title, status, created_at, updated_at) VALUES (?, ?, 'planning', 't', 't')",
+                        [(kind, kind) for kind in kinds])
+        raw.commit()
+        raw.close()
+
+    def _kinds(self, connection):
+        from sd_db.workflow import schema_kinds
+
+        connection.row_factory = sqlite3.Row
+        return schema_kinds(connection)
+
+    def test_the_two_kinds_go_and_every_row_stays(self):
+        self._at_version_thirty_one(*self.KINDS)
+        raw = sqlite3.connect(self.path)
+        page = raw.execute("SELECT rootpage FROM sqlite_master WHERE name = 'item'").fetchone()[0]
+        raw.close()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied), (31, list(range(32, SCHEMA_VERSION + 1))))
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._kinds(connection), self.KINDS)
+        self.assertEqual(sorted(row[0] for row in connection.execute("SELECT kind FROM item")), sorted(self.KINDS))
+        self.assertEqual(connection.execute("SELECT rootpage FROM sqlite_master WHERE name = 'item'").fetchone()[0], page)
+        self.assertEqual(self._sql(connection), self._sql(self._reference(SCHEMA_VERSION)))
+        self.assertEqual(connection.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+        for dead in ("proposal", "dep"):
+            with self.subTest(kind=dead), self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("INSERT INTO item (kind, title, status, created_at, updated_at) "
+                                   "VALUES (?, 't', 'planning', 't', 't')", (dead,))
+
+    def test_a_row_of_a_dead_kind_refuses_the_migration_at_thirty_one(self):
+        for dead in ("proposal", "dep"):
+            with self.subTest(kind=dead):
+                self.path.unlink(missing_ok=True)
+                self._at_version_thirty_one("task", dead)
+                raw = sqlite3.connect(self.path)
+                before = self._sql(raw)
+                raw.close()
+                with self.assertRaisesRegex(sqlite3.IntegrityError, "migration_032_refuses_a_dead_kind_row"):
+                    migrate(self.path)
+                raw = sqlite3.connect(self.path)
+                self.assertEqual(schema_version(raw), 31)
+                self.assertEqual(self._sql(raw), before)
+                self.assertEqual(sorted(row[0] for row in raw.execute("SELECT kind FROM item")), sorted(["task", dead]))
+                self.assertEqual(raw.execute("PRAGMA integrity_check").fetchone()[0], "ok")
+                raw.close()
+
+    def test_an_unknown_item_shape_is_refused_and_left_at_thirty_one(self):
+        shapes = {
+            "another order": lambda sql: sql.replace("'proposal', 'skill-review', 'dep'",
+                                                     "'skill-review', 'proposal', 'dep'"),
+            # The expected lines are there; a `dep` after them would survive the edit.
+            "a dep at the end": lambda sql: sql.replace("'personal-idea'))", "'personal-idea', 'dep'))"),
+            # A second CHECK on the kind, spelt another way, would survive the edit.
+            "a second kind CHECK": lambda sql: sql[:-1] + ",\n    check (kind in ('work', 'task')))",
+            # No kind CHECK: the refusal cannot hang on `item`'s constraints.
+            "no kind CHECK": lambda sql: re.sub(r"\n\s*CHECK \(kind IN \([^)]*\)\)", "", sql),
+        }
+        for shape, change in shapes.items():
+            with self.subTest(shape=shape):
+                self.path.unlink(missing_ok=True)
+                self._at_version_thirty_one("task")
+                raw = sqlite3.connect(self.path, isolation_level=None)
+                old = self._sql(raw)
+                raw.execute("PRAGMA writable_schema = ON")
+                raw.execute("UPDATE sqlite_master SET sql = ? WHERE name = 'item'", (change(old),))
+                raw.execute("PRAGMA writable_schema = RESET")
+                before = self._sql(raw)
+                self.assertNotEqual(before, old)
+                raw.close()
+                with self.assertRaisesRegex(sqlite3.IntegrityError, "migration_032_refuses_a_dead_kind_row"):
+                    migrate(self.path)
+                raw = sqlite3.connect(self.path)
+                self.assertEqual(schema_version(raw), 31)
+                self.assertEqual(self._sql(raw), before)
+                self.assertEqual([row[0] for row in raw.execute("SELECT kind FROM item")], ["task"])
+                raw.close()
+
+    def test_a_replay_on_the_new_shape_changes_nothing(self):
+        initialise(self.path)
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        before = self._sql(raw)
+        raw.executescript("BEGIN;\n" + dict(schema_module.migrations())[32].read_text(encoding="utf-8") + "\nCOMMIT;")
+        self.assertEqual(self._sql(raw), before)
+
+    def test_the_reverse_widens_the_list_back(self):
+        self._at_version_thirty_one("task")
+        migrate(self.path)
+        text = dict(schema_module.migrations())[32].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), 31)
+        self.assertEqual(self._sql(raw), self._sql(self._reference(31)))
+        self.assertIn("dep", self._kinds(raw))
+        raw.execute("INSERT INTO item (kind, title, status, created_at, updated_at) VALUES ('dep', 't', 'planning', 't', 't')")
+        raw.execute("DELETE FROM item WHERE kind = 'dep'")
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied), (31, list(range(32, SCHEMA_VERSION + 1))))
 
 
 class TheConnection(SchemaCase):

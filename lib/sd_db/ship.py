@@ -142,13 +142,28 @@ def for_item(connection: sqlite3.Connection, repository: str, item: int, branch:
     return matches[0]
 
 
+def delivery_key(item: int, commit: str) -> str:
+    """The `verified` row that holds a delivery's evidence: the item and the merge commit its note names."""
+    return f"code-delivery:{item}:{commit}"
+
+
 def note_merge(connection: sqlite3.Connection, item: int, evidence: dict) -> None:
-    """A slice records its commit once, without changing item status."""
+    """A slice records its commit once, without changing item status.
+
+    The note is the one marker line its readers match; the evidence goes to a
+    `verified` row under `delivery_key`, resolved as written, since a merge is
+    a fact and not open work (sd:3508). A note from before that carries the
+    evidence under its marker, and counts as the same delivery.
+    """
     marker = f"Code delivery {evidence['pull_request']['url']} at {evidence['merge_commit']}"
     with transaction(connection):
-        if not connection.execute("SELECT 1 FROM note WHERE item = ? AND body LIKE ?",
-                                  (item, marker + "\n%" )).fetchone():
-            add_note(connection, item, "comment", marker + "\n" + json.dumps(evidence, sort_keys=True))
+        if not connection.execute("SELECT 1 FROM note WHERE item = ? AND (body = ? OR substr(body, 1, ?) = ?)",
+                                  (item, marker, len(marker) + 1, marker + "\n")).fetchone():
+            add_note(connection, item, "comment", marker)
+            stamp = now()
+            connection.execute("INSERT INTO state(kind,key,timestamp,body,resolved_at) VALUES ('verified',?,?,?,?)",
+                               (delivery_key(item, evidence["merge_commit"]), stamp,
+                                json.dumps(evidence, sort_keys=True), stamp))
 
 
 def prepare_delivery(connection: sqlite3.Connection, run_id: str, *, verification_root: Path | str) -> dict:

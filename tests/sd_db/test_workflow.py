@@ -563,7 +563,7 @@ class KindEditing(WorkflowCase):
             with self.subTest(target=kind):
                 self.refused(item, {"kind": kind}, "own producer")
         upsert_repo(self.db, "/repos/work")
-        for kind in ("work", "report", "dep", "skill-review", "proposal"):
+        for kind in ("work", "report", "skill-review"):
             source = create_item(self.db, kind=kind, title=kind,
                                  repo="/repos/work" if kind == "work" else None)
             with self.subTest(source=kind):
