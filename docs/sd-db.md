@@ -199,7 +199,7 @@ A change takes effect at the next `sd-research-kit render` in the checkout, or t
 NULL, shown as `none`, means none, and every row starts there.
 A set has one spelling, its words in that order, so the column's CHECK is a closed list.
 `repo.dependabot` is 1 for a repository outside the owner rule whose Dependabot pull requests the daily sweep may take.
-The design is the system repository's `docs/work/2026-10-13-config-to-db/design.md`, slice P2.
+The design is slice P2 of the system repository's config-to-DB design (sd:3983).
 
     bin/sd-db repo clones PATH personal,work    # set; prints before -> after
     bin/sd-db repo clones PATH +terra           # add one profile; -terra takes one away; none clears
