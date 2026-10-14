@@ -409,6 +409,38 @@ class TheLiveServer(StubCase):
                 self.assertEqual(answers[2:], [None])
                 self.assertEqual(self.rows(), 0, "a demoted hub wrote a row")
 
+    def test_a_batch_outside_a_transaction_is_refused_so_one_answer_never_covers_two_commits(self):
+        """Second review: each write of a batch commits by itself, so a demotion mid-batch wrote the rest."""
+        ask = self.server.fence
+
+        def fence(**kwargs):
+            refusal = ask(**kwargs)
+            if kwargs.get("fresh"):
+                self.rename("old-hub.example.test.")  # demoted right after a fresh answer
+            return refusal
+
+        self.enterContext(mock.patch.object(self.server, "fence", fence))
+        two = [remote.encode_params(["a"]), remote.encode_params(["b"])]
+        for frame in (remote.request("executemany", sql="INSERT INTO probe (name) VALUES (?)", params=two),
+                      remote.request("executescript", sql="INSERT INTO probe (name) VALUES ('a');"
+                                                          "INSERT INTO probe (name) VALUES ('b');")):
+            with self.subTest(op=frame["op"]):
+                self.rename(HUB_NAME + ".")
+                self.server.fenced = None
+                answers = self.session(frame, remote.request("close"))
+                self.assertFalse(answers[1]["ok"], answers)
+                self.assertIn("inside BEGIN IMMEDIATE", answers[1]["error"]["text"])
+                self.assertEqual(self.rows(), 0, "a batch committed on one fence answer")
+        # The remedy: one write transaction, one COMMIT, one fresh answer.
+        self.rename(HUB_NAME + ".")
+        self.server.fenced = None
+        rid = remote.new_request_id()
+        answers = self.session(remote.request("execute", sql="BEGIN IMMEDIATE", params=None, rid=rid),
+                               remote.request("executemany", sql="INSERT INTO probe (name) VALUES (?)", params=two),
+                               remote.request("execute", sql="COMMIT", params=None, rid=rid))
+        self.assertTrue(all(a and a["ok"] for a in answers), answers)
+        self.assertEqual(self.rows(), 2)
+
     def test_no_setting_serves_as_before_and_asks_tailscale_nothing(self):
         self.name_hub(None)
         self.enterContext(mock.patch.object(serve, "FENCE_SECONDS", 0.0))

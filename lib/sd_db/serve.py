@@ -318,6 +318,8 @@ class Session(socketserver.BaseRequestHandler):
         self.fenced: str | None = None
         #: `_authorize` asked the fence afresh in this frame already.
         self.asked = False
+        #: The frame is `executemany` or `executescript`, whose writes commit one by one.
+        self.batch = False
 
     def _authorize(self, action: int, arg1, arg2, database_name, trigger) -> int:
         """SQLite's authorizer on the session's connection.
@@ -349,9 +351,10 @@ class Session(socketserver.BaseRequestHandler):
         if action == sqlite3.SQLITE_FUNCTION and (arg2 or "").lower() == "load_extension":
             # Off on the connection already; refused by name all the same.
             return self._deny("load_extension is not served over the wire")
-        if (not self.routing and self.kind != "write" and not self.asked
-                and self.server.node is not None and not (  # type: ignore[attr-defined]
-                    action in READS or action == sqlite3.SQLITE_PRAGMA and arg2 is None)):
+        alone = (not self.routing and self.kind != "write"
+                 and self.server.node is not None and not (  # type: ignore[attr-defined]
+                     action in READS or action == sqlite3.SQLITE_PRAGMA and arg2 is None))
+        if alone and not self.asked:
             # A write outside the hub's write transaction commits by itself, so it
             # asks the fence afresh, as `_commit` does (sd:4044).
             self.asked = True
@@ -360,6 +363,10 @@ class Session(socketserver.BaseRequestHandler):
                 self.fenced = fenced
         if self.fenced is not None:
             return self._deny(f"this machine is not the hub: {self.fenced}")
+        if alone and self.batch:
+            # Each write of a batch commits by itself, all on the one answer above (sd:4044).
+            return self._deny("a batch outside a write transaction commits each write by itself; "
+                              "send it inside BEGIN IMMEDIATE ... COMMIT")
         if not self.routing and action not in ROWS and not (
                 action in READS and (arg2 or "").lower() != "load_extension"
                 or action == sqlite3.SQLITE_PRAGMA and arg2 is None):
@@ -620,6 +627,7 @@ class Session(socketserver.BaseRequestHandler):
                 received = time.monotonic()
                 self.denied = None
                 self.asked = False
+                self.batch = frame.get("op") in ("executemany", "executescript")
                 writing = connection is not None and first_sql != ""
                 if writing:
                     frames += 1
