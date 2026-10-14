@@ -1226,11 +1226,18 @@ def lane_elsewhere(connection: Any, database: Any, repository: str) -> str | Non
     the host, then the dashboard control, then the verb. `hosts_lane` already
     refused clones that disagree, so the first matching row names the host.
     """
-    if hosts_lane(connection, database, repository):
-        return None
-    from sd_db import ship  # noqa: PLC0415 -- `hosts_lane` imported the library
+    import_sd_db()  # the gateway's order: resolve the library before importing from it
+    from sd_db import ship  # noqa: PLC0415
 
     elsewhere = getattr(ship, "LaneElsewhere", None)
+    try:
+        if hosts_lane(connection, database, repository):
+            return None
+    except Exception as error:
+        # The fence's refusal names the hub that holds the role (sd:4044); callers treat it as a move.
+        if elsewhere is not None and isinstance(error, elsewhere):
+            return str(error)
+        raise
     if elsewhere is None:
         return f"The lane for {repository} runs on the hub, not on this machine. Run it there."
     return str(elsewhere(repository, *lane_host(connection, repository)))

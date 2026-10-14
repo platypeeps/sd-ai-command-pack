@@ -50,7 +50,8 @@ The fence stops it (sd:4044): a machine with its own database holds the hub role
 | `elsewhere` | another name, or a satellite | refuse, naming the holder | exit 1 |
 | `unknown` | the setting does not read, or Tailscale does not name this node | refuse | exit 1 |
 
-The setting is read first, so `off` asks Tailscale nothing. One answer from Tailscale stands for 30 seconds in a process.
+The setting is read first, so `off` asks Tailscale nothing. Each check reads the name again; a failed read refuses again for 30 seconds without asking.
+`sd config set sd.hub_name` refuses on a machine with no database: the fence reads the row alone.
 `serve --loopback` is not fenced: it leaves the machine for nobody.
 Writes that stay on the machine stay allowed; scripts that write off the machine (the NAS copy, the `hub-pin` push) run `bin/sd-db fence` first.
 

@@ -204,11 +204,12 @@ class HubPath(type(Path())):
 
 #: The fleet setting that names the hub by its tailnet name (hub failover, D5).
 HUB_NAME = "sd.hub_name"
-#: Seconds one answer from Tailscale stands: `lane run` asks once per
+#: Seconds a failed read of this node's name stands: `lane run` asks once per
 #: repository, and a stalled daemon must not cost each one its timeout.
+#: A name is never held: a rename must refuse the next check (sd:4044).
 NAME_SECONDS = 30.0
 
-_name_read: tuple[float, str | Exception] | None = None
+_name_failed: tuple[float, Exception] | None = None
 
 
 @dataclass(frozen=True)
@@ -228,17 +229,16 @@ class Role:
         return self.state not in ("holder", "off")
 
 
-def _cached_name() -> str:
-    # ponytail: one process-wide answer for NAME_SECONDS; a rename shows within that.
-    global _name_read
-    if _name_read is None or time.monotonic() - _name_read[0] > NAME_SECONDS:
-        try:
-            _name_read = (time.monotonic(), tailnet.this_name())
-        except tailnet.TailnetError as error:
-            _name_read = (time.monotonic(), error)
-    if isinstance(_name_read[1], Exception):
-        raise _name_read[1]
-    return _name_read[1]
+def _this_name() -> str:
+    """`tailnet.this_name`, except that a failure refuses again for `NAME_SECONDS` without asking."""
+    global _name_failed
+    if _name_failed is not None and time.monotonic() - _name_failed[0] <= NAME_SECONDS:
+        raise _name_failed[1]
+    try:
+        return tailnet.this_name()
+    except tailnet.TailnetError as error:
+        _name_failed = (time.monotonic(), error)
+        raise
 
 
 def _matches(mine: str, holder: str) -> bool:
@@ -251,7 +251,7 @@ def role(connection, name=None) -> Role:
     """The fence: a machine holds the hub role only while its tailnet name is `sd.hub_name`.
 
     `connection` is this machine's own database; `name` reads this node's
-    tailnet name (`tailnet.this_name`, held for `NAME_SECONDS`). The setting
+    tailnet name (`tailnet.this_name`; a failure stands for `NAME_SECONDS`). The setting
     is read first, so a machine that never set it asks Tailscale nothing.
 
     Unset is `off`: a fleet that never named its hub runs as before, and
@@ -271,7 +271,7 @@ def role(connection, name=None) -> Role:
         return Role("off", None, f"{HUB_NAME} is unset, so the fence is off; "
                                  f"on the hub run `sd config set {HUB_NAME} <its tailnet name>`")
     try:
-        mine = (name or _cached_name)()
+        mine = (name or _this_name)()
     except tailnet.TailnetError as error:
         return Role("unknown", holder, f"Tailscale does not name this node, so it cannot match {holder}: {error}")
     if _matches(mine, holder):

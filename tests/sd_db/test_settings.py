@@ -255,6 +255,13 @@ class TheFleetVerbs(FleetCase):
         self.assertNotEqual(bad.returncode, 0)
         self.assertEqual(read_settings(connection, ["sd.hub_name"]), {"sd.hub_name": "hub.example.test"})
 
+    def test_the_hub_name_is_refused_on_a_machine_with_no_database(self):
+        """Codex pass: a file value showed in `get` and fenced nothing once a database came."""
+        done = self.run_sd("config", "set", "sd.hub_name", "hub.example.test")
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("sd.hub_name lives in the workflow database", done.stderr)
+        self.assertFalse(self.config_path.exists() and "hub_name" in self.file_keys())
+
     def test_list_names_every_moved_key_with_its_source(self):
         self.write_file(fleet_owners="example", external_reviews="deny")
         connection = connect(self.database())

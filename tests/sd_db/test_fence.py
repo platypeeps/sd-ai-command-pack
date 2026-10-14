@@ -36,7 +36,7 @@ class StubCase(unittest.TestCase):
         self.root = Path(self.tmp.name)
         self.stubs = Stubs(self.root / "stubs", names=("tailscale",))
         self.enterContext(mock.patch.dict(os.environ, self.stubs.environment()))
-        self.enterContext(mock.patch.object(hub, "_name_read", None, create=True))
+        self.enterContext(mock.patch.object(hub, "_name_failed", None, create=True))
         self.path = self.root / "sd.db"
         initialise(self.path)
 
@@ -71,7 +71,6 @@ class TheRole(StubCase):
         self.node()
         self.assertEqual(self.role().state, "holder")
         self.node("hub-2.example.test.")
-        hub._name_read = None
         self.assertEqual(self.role().state, "elsewhere")
 
     def test_another_node_is_elsewhere_and_named(self):
@@ -95,7 +94,7 @@ class TheRole(StubCase):
         self.name_hub(HUB_NAME)
         for state in ({"backend": "Stopped"}, {"backend": "NeedsLogin"}, {"dnsname": ""}):
             with self.subTest(state=state):
-                hub._name_read = None
+                hub._name_failed = None
                 self.node(**state)
                 found = self.role()
                 self.assertEqual(found.state, "unknown")
@@ -114,12 +113,24 @@ class TheRole(StubCase):
     def test_a_database_that_does_not_open_is_unknown(self):
         self.assertEqual(hub.role_at(self.root / "missing.db").state, "unknown")
 
-    def test_one_answer_from_tailscale_serves_a_lane_run(self):
+    def test_a_rename_refuses_the_next_check(self):
+        """Codex pass: a held name admitted a renamed node for 30 s; a name is read at every check."""
         self.name_hub(HUB_NAME)
         self.node()
+        self.assertEqual(self.role().state, "holder")
+        self.node("old-hub.example.test.")
+        self.assertEqual(self.role().state, "elsewhere")
+
+    def test_a_failed_read_refuses_again_without_asking(self):
+        self.name_hub(HUB_NAME)
+        self.node(backend="Stopped")
+        self.assertEqual(self.role().state, "unknown")
+        self.node()
         for _ in range(5):
+            self.assertEqual(self.role().state, "unknown")
+        self.assertEqual(len(self.asked()), 1, "a stalled daemon costs a lane run one timeout")
+        with mock.patch.object(hub.time, "monotonic", return_value=hub.time.monotonic() + hub.NAME_SECONDS + 1):
             self.assertEqual(self.role().state, "holder")
-        self.assertEqual(len(self.asked()), 1)
 
 
 class TheLaneHost(StubCase):
