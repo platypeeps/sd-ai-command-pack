@@ -23,6 +23,7 @@ from sd_db.remote import HubOnly
 from sd_db.sources import run, verify
 from sd_db.sources.frontmatter import read as read_frontmatter
 from sd_db.sources.vault import Reader
+from sd_db.writes import set_item_fields
 from sd_db.testing.wire import hub_only
 
 from . import support
@@ -43,7 +44,8 @@ RATING_CONTROL = "**My rating:** `INPUT[inlineSelect(option(1), option(2), optio
 #: collection, an anchor, a tag, a bool, a null, a number in another form.
 TRICKY = ["#hashtag first", "a: b", "ends:", " padded ", "it's", 'say "hi"', "- dash", "? q", "[x]", "{x}",
           "&anchor", "*alias", "!tag", "|pipe", ">gt", "%pct", "@at", "`tick", ",comma", "yes", "No", "null",
-          "~", "true", "off", "08", "1e3", "0x1F", ".inf", "1:20", "1_000", "+1", "a #b", "2026-06-15 noon"]
+          "~", "true", "off", "08", "1e3", "0x1F", ".inf", "1:20", "1_000", "+1", "a #b", "2026-06-15 noon",
+          '"it\'s" both', '"x" y', "a \\ b: c", '\\"x\\" y']
 
 #: A note body with every shape the HTML mirror redraws, and one code fence it must leave alone.
 RICH = f"""---
@@ -159,13 +161,25 @@ class TheMarkdownMirror(MirrorCase):
             # Numbers and dates stay bare, so Obsidian keeps them number and date properties.
             self.assertEqual((loaded["score"], loaded["dateCreated"]), (8, datetime.date(2026, 6, 15)))
 
+    def test_a_value_with_both_quote_kinds_and_a_backslash_reads_back(self):
+        """sd:4626: double quotes with escapes carry what no single-quoted form can."""
+        self.render()
+        self.move("first idea", None, fields={"description": '"it\'s" a \\ path'})
+        self.assertTrue(self.render().ok)
+        text = self.note("first idea")
+        self.assertIn('\ndescription: "\\"it\'s\\" a \\\\ path"\n', text)
+        self.assertEqual(read_frontmatter(text)[0]["description"], '"it\'s" a \\ path')
+        if yaml is not None:
+            self.assertEqual(yaml.safe_load(text.split("---\n")[1])["description"], '"it\'s" a \\ path')
+
     def test_a_value_no_quoting_can_carry_is_refused_and_its_file_kept(self):
+        """A control character an import unescaped has no one-line form; the note stays as it was."""
         self.render()
         before = self.note("first idea")
-        with contextlib.redirect_stderr(io.StringIO()):
-            self.move("first idea", None, fields={"description": "\"it's\" both"})
+        row = get_row(self.db, kind="blog-idea", title="first idea")
+        set_item_fields(self.db, row["id"], fields={**row["fields"], "description": "a\tb"})
         mirror = self.render()
-        self.assertIn("would not read back", dict(mirror.refused)[f"{IDEAS}/first idea.md"])
+        self.assertIn("control character", dict(mirror.refused)[f"{IDEAS}/first idea.md"])
         self.assertEqual(self.note("first idea"), before)
 
     def test_an_added_row_carries_its_date_so_its_note_reads_back(self):
