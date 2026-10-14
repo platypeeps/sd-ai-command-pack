@@ -2435,13 +2435,33 @@ class ChannelsTests(Fixture):
         self.assertTrue((self.root / "config").exists())
 
     def test_requeue_after_re_enabling_a_channel(self) -> None:
+        """A drain may have written the page before the channel was left
+        out, so its receipt reads delivered: re-enabling takes one render
+        with `SD_MIRROR_REQUEUE=1`."""
+        name = "my-research.b.drive.json"
+        doc = [dict(src="10-x/b.md", out="b", title="B", drive=dict())]
+        self.publish(doc)
+        status, _ = PUBLISH.mirror_delivered(name, self.queued()[name]["fingerprint"])
+        self.assertEqual(status, 0)
         self.row({"notion": {}})
-        self.publish([self.SCENARIO[1]])
-        self.assertNotIn("my-research.b.drive.json", self.queued())
+        self.publish(doc)
         self.row({"notion": {}, "drive": {}})
+        said = self.publish(doc)
+        self.assertNotIn(name, self.queued())
+        self.assertTrue(any("unchanged since it was last mirrored" in line for line in said), said)
         PUBLISH.ENVIRON = dict(PUBLISH.ENVIRON, SD_MIRROR_REQUEUE="1")
-        self.publish([self.SCENARIO[1]])
-        self.assertIn("my-research.b.drive.json", self.queued())
+        self.publish(doc)
+        self.assertIn(name, self.queued())
+
+    def test_a_hold_leaves_the_legacy_queue(self) -> None:
+        """The legacy queue moves into the queue; a hold moves nothing."""
+        self.legacy.mkdir()
+        (self.legacy / "other.a.notion.json").write_text('{"repo": "/elsewhere"}\n', encoding="utf-8")
+        self.hold("unreadable file")
+        said = self.publish([self.SCENARIO[0]])
+        self.assertTrue(said[0].startswith(PUBLISH.HELD), said)
+        self.assertTrue((self.legacy / "other.a.notion.json").is_file())
+        self.assertFalse(PUBLISH.QUEUE.exists())
 
     # A folder change.
 

@@ -1578,7 +1578,8 @@ def publish(repo: Path, project: str | None, docs: list[dict[str, Any]]) -> list
     The repo's `channels` setting is read once, here (sd:3462). A linked
     worktree publishes nothing, so it reads none. A setting that cannot be
     read holds the vault copy, the queue and the item records for this
-    render: requests queued earlier stay, and the dashboard copy is written.
+    render: requests queued earlier stay, the legacy queue is not moved
+    (the next render moves it), and the dashboard copy is written.
     """
     channels, unknown = (None, "") if publish_refusal(repo, "obsidian") else read_channels(repo)
     if unknown:
@@ -1588,7 +1589,7 @@ def publish(repo: Path, project: str | None, docs: list[dict[str, Any]]) -> list
             % (HELD, unknown),
             ignore_dashboard(repo),
             register_root(repo, project_label(repo, project), repo / DASHBOARD_DIR),
-        ] + migrate_legacy_queue()
+        ]
     wrote: list[dict[str, Any]] = []
     reports = write_obsidian(repo, docs, wrote, channels)
     reports.append(ignore_dashboard(repo))
