@@ -8,7 +8,7 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
-from . import reads, workflow
+from . import reads, ship, workflow
 from .database import transaction
 from .writes import STATUSES, add_note, create_item, record_state, resolve_note, set_item_fields, stamp, transition
 
@@ -107,12 +107,17 @@ def _folded_into(connection, job, run_id):
         " ORDER BY id DESC LIMIT 1", (job + ":", job + ";", job, run_id)).fetchone()
 
 
-def _fold_target(connection, job, attention_basis):
-    """The open attention report a repeat of `job` folds into, or `None`.
+def _fold_target(connection, job, attention_basis, *, done=False):
+    """The attention report a repeat of `job` folds into, or `None`.
 
     The newest `cron-report` row for this job that is not `done`, has
     `fields.attention` exactly true, the same `attention_basis`, and no
-    `record` marker. Every JSON function sits inside
+    `record` marker. With `done`, an acknowledged row of a clean exit
+    qualifies too, after every open one (sd:4629): the operator saw those
+    findings, so their repeat counts there and opens nothing. The
+    `external_id` range is `_folded_into`'s, and for the same reason: done
+    rows are never deleted, so the read seeks this job's rows only. Every
+    JSON function sits inside
     `CASE WHEN json_valid(fields)`, the way `clean_candidates` and
     `clean_reports` read: a `CASE` evaluates its branch only when the test
     is true, whatever order the query plan picks for `AND` terms, so a row
@@ -122,13 +127,18 @@ def _fold_target(connection, job, attention_basis):
     and it can neither carry a count nor say what it was.
     """
     return connection.execute(
-        "SELECT id, fields FROM item WHERE kind='report' AND source='cron-report' AND status != 'done'"
+        "SELECT id, fields FROM item WHERE kind='report' AND source='cron-report'"
+        " AND external_id > ? AND external_id < ?"
+        " AND (status != 'done' OR (? AND CASE WHEN json_valid(fields)"
+        "      THEN json_type(fields, '$.report.exit_code') = 'integer'"
+        "       AND json_extract(fields, '$.report.exit_code') = 0 END))"
         f" AND NOT ({UNREADABLE_FIELDS})"
         " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.job') END = ?"
         " AND CASE WHEN json_valid(fields) THEN json_type(fields, '$.attention') END = 'true'"
         " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.attention_basis') END = ?"
         " AND CASE WHEN json_valid(fields) THEN json_type(fields, '$.record') END IS NULL"
-        " ORDER BY id DESC LIMIT 1", (job, attention_basis)).fetchone()
+        " ORDER BY status = 'done', id DESC LIMIT 1",
+        (job + ":", job + ";", done, job, attention_basis)).fetchone()
 
 
 def _check_identity(job, run_id):
@@ -164,22 +174,26 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
     report's `fields.repeats` becomes `{"count", "first_ended",
     "last_run_id", "last_ended", "run_ids"}`: the count starts at 2 on the
     first fold, `first_ended` is the open report's own `ended`, and `run_ids`
-    holds the last `REMEMBERED_RUNS` folded run ids, newest last. Nothing else
-    on the row changes -- not the title, not the body, not the provenance
-    under `fields.report`, and no second followup is written. The folded
-    run's `text` is not stored: the body stays the first run's, because the
-    count and the last run's identity are what the operator needs, and a
-    body per run is the growth this bounds. `text` differing between runs is
-    expected (a timestamp in stderr) and does not block the fold; a different
-    `attention_basis` is a different failure and opens its own report. The
-    returned state is the open report's, so a caller tells a fold from a new
-    row by `external_id`.
+    holds the last `REMEMBERED_RUNS` folded run ids, newest last. The body
+    becomes the folded run's `text`, the run `last_run_id` names (sd:4629: the
+    sd:4042 ruling keeps one report "updated while its findings stay the
+    same", and a drifting measure is in the text, not the basis). It replaces
+    the old body, so the row holds one body however often it folds. Nothing
+    else on the row changes -- not the title, not the provenance under
+    `fields.report`, which stays the first run's, and no second followup is
+    written. `text` differing between runs is expected (a timestamp in
+    stderr) and does not block the fold; a different `attention_basis` is a
+    different failure and opens its own report. The returned state is the
+    target's, so a caller tells a fold from a new row by `external_id`.
 
     Never folded: a clean report (`attention` false), a `record` report, and
     a report whose `fields` are unreadable is never a target
-    (`_fold_target`). An acknowledged report is `done` and never a target
-    either, so the run after an acknowledge opens a fresh report, and the
-    single-failure case -- one bad night, one report -- is exactly as before.
+    (`_fold_target`). An acknowledged report stays `done` while the same
+    findings repeat: a run with a clean exit folds into it when no open
+    report matches (sd:4629). A non-zero exit never folds into a `done`
+    report: its basis says how the run ended, not what was found, so
+    acknowledging one failure does not hide the next, and the run after an
+    acknowledged failure opens a fresh report as before.
 
     Replay: a `run_id` in `repeats.run_ids` of any of the job's reports, or
     a report's own, is answered with that report's state and counts nothing
@@ -243,13 +257,14 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         folded = _folded_into(connection, job, run_id) if record is None else None
         if folded:
             return workflow.item_state(connection, folded["id"])
-        target = _fold_target(connection, job, attention_basis) if attention and record is None else None
+        target = (_fold_target(connection, job, attention_basis, done=exit_code == 0)
+                  if attention and record is None else None)
         if target:
             stored = json.loads(target["fields"])
             repeats = stored.get("repeats") or {"count": 1, "first_ended": stored["report"]["ended"], "run_ids": []}
             repeats.update(count=repeats["count"] + 1, last_run_id=run_id, last_ended=ended,
                            run_ids=(repeats["run_ids"] + [run_id])[-REMEMBERED_RUNS:])
-            set_item_fields(connection, target["id"], fields={**stored, "repeats": repeats})
+            set_item_fields(connection, target["id"], fields={**stored, "repeats": repeats}, body={"text": text})
             return workflow.item_state(connection, target["id"])
         item = create_item(connection, kind="report", title=f"{job}: {'needs attention' if attention else 'run report'}",
                            status="planning", source="cron-report", external_id=external,
@@ -421,10 +436,15 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
     text = data[:MAX_REPORT].decode("utf-8", errors="replace")
     # A successful exit does not prove there were no findings. Jobs can emit
     # this explicit marker; absent it, a report filed for a clean run (a
-    # recovery) says attention was not supplied.
-    declared = re.search(r"(?m)^SD_REPORT_ATTENTION: (.+)$", text)
+    # recovery) says attention was not supplied. The last line is this run's:
+    # a lost run's slice is carried in ahead of it (sd:3537), and its older
+    # line made the basis (sd:4629). A failure names the host and the line, as
+    # one job name files from every host and `job exited N` alone folded one
+    # host's or one cause's failure into another's report.
+    declared = (re.findall(r"(?m)^SD_REPORT_ATTENTION: (.+)$", text) or [None])[-1]
     attention = exit_code != 0 or bool(declared)
-    basis = f"job exited {exit_code}" if exit_code else declared[1] if declared else "not supplied by the job"
+    basis = (f"job exited {exit_code} on {ship.this_host()}" + (f": {declared}" if declared else "")
+             if exit_code else declared or "not supplied by the job")
     text = text.encode()[:MAX_REPORT].decode("utf-8", errors="ignore")
     with transaction(connection):
         # A run that already filed a report is answered with that report, the
