@@ -435,13 +435,13 @@ class CaptureItems(unittest.TestCase):
             fixtures = (
                 ("task", "planning", repositories[0], "2026-09-01", None),
                 ("work", "in_progress", repositories[1], "2026-09-01", None),
-                ("proposal", "ready", None, "2026-09-02", None),
+                ("followup", "ready", None, "2026-09-02", None),
                 ("task", "done", repositories[0], "2026-09-05", None),
                 ("idea", "planning", repositories[1], "2026-09-06", WHEN),
                 ("idea", "done", repositories[0], "2026-09-04", WHEN),
                 ("report", "planning", None, "2026-08-31", None),
                 ("skill-review", "planning", None, "2026-08-31", None),
-                ("dep", "blocked", None, "2026-08-31", None),
+                ("personal", "blocked", None, "2026-08-31", None),
             )
             ids = []
             for kind, status, repo, updated, parked in fixtures:

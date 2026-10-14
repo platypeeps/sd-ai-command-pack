@@ -48,10 +48,9 @@ PARK_FIELDS = frozenset({"parked_at"})
 #: The item kinds a person may set by hand: the five the pack's `sd task add`
 #: files (`ADD_KINDS`, `bin/sd_work.py`), for the reason that list gives. Each
 #: other kind in `item.kind`'s CHECK has a producer -- `work` the work lane,
-#: `report` the job that ran, `dep` the item that waits on it, `skill-review`
-#: the catalogue -- or is reserved (`proposal`), or is `idea`, which
-#: `writing.list_pieces` reads as a draft article only when it carries a
-#: `piece`. A hand edit that made one would be a second way to make that row,
+#: `report` the job that ran, `skill-review` the catalogue -- or is `idea`,
+#: which `writing.list_pieces` reads as a draft article only when it carries
+#: a `piece`. A hand edit that made one would be a second way to make that row,
 #: and a hand edit that unmade one would take a row away from its producer.
 HAND_KINDS = ("task", "personal", "followup", "work-idea", "personal-idea")
 

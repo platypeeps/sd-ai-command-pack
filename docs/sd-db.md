@@ -359,16 +359,14 @@ A list the library validates gets no CHECK: SQLite cannot alter one, so each new
 
 ## The item kinds, and the two words called `followup`
 
-`item.kind` is a closed list, guarded by a CHECK. Eleven values:
+`item.kind` is a closed list, guarded by a CHECK. Nine values:
 
 | Kind | What it is |
 |---|---|
 | `work` | a change to a repository, planned under `docs/work/` |
 | `task` | a scoped piece of work in a repository |
 | `report` | a run report a scheduled job wrote |
-| `dep` | something a `work` item waits on |
 | `skill-review` | a review of a skill, run by the catalogue |
-| `proposal` | reserved; nothing creates one today |
 | `idea` | **a writing piece on the article ladder, and nothing else** |
 | `work-idea` | an idea about a repository or product, not yet planned work |
 | `personal-idea` | an idea about life, which does not enter the writing pipeline |
@@ -380,14 +378,12 @@ A list the library validates gets no CHECK: SQLite cannot alter one, so each new
 So a personal or a work idea has its own kind, not a stage on `idea`.
 
 `note.kind` is its own closed list of seven: `followup`, `decision`, `proposal`, `question`, `comment`, `exec` and `status_change`.
-Only `followup` and `proposal` are in both lists.
+Only `followup` is in both lists. Migration 032 (sd:3510) dropped the `proposal` and `dep` item kinds: neither had a producer or a row.
 
 - A `followup` note hangs off an item and is resolved against it (`sd task note <item> --kind followup`).
   A `followup` item stands on its own (`sd task add --kind followup`).
   If it makes no sense with the parent deleted, it is a note.
-- A `proposal` note is live: `sd task note <item> --kind proposal` records one, and `reads.brief_notes` carries it into a brief.
-  A `proposal` item is reserved: `sd task add --kind` offers only `workflow.HAND_KINDS`, which leaves it out.
-  An unqualified "proposal" is the note.
+- A `proposal` is a note: `sd task note <item> --kind proposal` records one, and `reads.brief_notes` carries it into a brief.
 
 `task`, `personal` and `followup` items (`workflow.TASK_STATUS_KINDS`) share the five `TASK_STATUSES`:
 `planning`, `ready`, `in_progress`, `blocked` and `done`.
@@ -395,7 +391,7 @@ Only `followup` and `proposal` are in both lists.
 
 `workflow.edit_item` is the verb a person uses to change a row's kind.
 The target must be in the store's CHECK (`workflow.schema_kinds`) and in `workflow.HAND_KINDS`, the five `sd task add --kind` files.
-A `work`, `report`, `dep`, `skill-review` or `proposal` row keeps its kind, because its producer owns it.
+A `work`, `report` or `skill-review` row keeps its kind, because its producer owns it.
 So does an `idea` with a `piece`, and a row whose `fields` carry `contribution` or `skill_review` (`workflow.PRODUCED_FIELDS`).
 The edit writes a `comment` note, `Changed kind <old> -> <new> by <who>`, in the same transaction.
 `writes.upsert_item` also writes `kind` on every import, with no note: a vault-imported `idea` moved by hand goes back on the next import.

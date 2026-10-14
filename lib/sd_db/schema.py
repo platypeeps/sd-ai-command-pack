@@ -15,10 +15,10 @@ SCHEMA_DIR = Path(__file__).resolve().parent / "schema"
 
 #: The version this build of the library was written against. Bumped in the
 #: same commit that adds a migration file, and nowhere else.
-SCHEMA_VERSION = 31
+SCHEMA_VERSION = 32
 
-#: The storage tables. `report` and `dep` are `item.kind`
-#: values. The tuple is the document requirement 1 points at: a record kind
+#: The storage tables. `report` is an `item.kind`
+#: value. The tuple is the document requirement 1 points at: a record kind
 #: with no home is added here, in review, before anything writes it.
 TABLES = (
     "repo",

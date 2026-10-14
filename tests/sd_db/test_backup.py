@@ -888,14 +888,14 @@ def one_migration_back(database):
     """
     raw = sqlite3.connect(database, isolation_level=None)
     try:
-        # The reverse of 031_state_kind_no_check.sql, which its header carries as
-        # `--   ` lines: `state.kind` gets 030's CHECK back and the version goes to 30. The helper is rewritten with
-        # every migration: a migration that adds a table or a column would be refused if left in
+        # The reverse of 032_item_drop_dead_kinds.sql, which its header carries as
+        # `--   ` lines: `item.kind` gets `proposal` and `dep` back and the version goes to 31. The helper is
+        # rewritten with every migration: a migration that adds a table or a column would be refused if left in
         # place.
-        text = (SCHEMA_DIR / "031_state_kind_no_check.sql").read_text()
+        text = (SCHEMA_DIR / "032_item_drop_dead_kinds.sql").read_text()
         script = "\n".join(line[4:] for line in text.splitlines() if line.startswith("--   "))
-        assert "PRAGMA user_version = 30" in script, \
-            "031's reverse is not where this helper expects it"
+        assert "PRAGMA user_version = 31" in script, \
+            "032's reverse is not where this helper expects it"
         raw.executescript(script)
         assert raw.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION - 1
     finally:
