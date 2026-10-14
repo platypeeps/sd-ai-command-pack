@@ -34,11 +34,13 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import remote
-from .errors import SchemaTooNew
+from . import remote, tailnet
+from .errors import SchemaTooNew, SdDbError
 
 #: Beside `runner.json` and `dashboard.json`, under the same home as the
 #: database path it replaces.
@@ -196,3 +198,96 @@ class HubPath(type(Path())):
             return True
         connection.close()
         return True
+
+
+# ---------------------------------------------------------------- the fence
+
+#: The fleet setting that names the hub by its tailnet name (hub failover, D5).
+HUB_NAME = "sd.hub_name"
+#: Seconds a failed read of this node's name stands: `lane run` asks once per
+#: repository, and a stalled daemon must not cost each one its timeout.
+#: A name is never held: a rename must refuse the next check (sd:4044).
+NAME_SECONDS = 30.0
+
+_name_failed: tuple[float, Exception] | None = None
+
+
+@dataclass(frozen=True)
+class Role:
+    """Whether this machine holds the hub role: `holder`, `off`, `elsewhere` or `unknown`.
+
+    `holder` is the name `sd.hub_name` holds, `None` when unset; `reason`
+    is one line a refusal can quote. Callers refuse on `elsewhere` and `unknown`.
+    """
+
+    state: str
+    holder: str | None
+    reason: str
+
+    @property
+    def refuses(self) -> bool:
+        return self.state not in ("holder", "off")
+
+
+def _this_name() -> str:
+    """`tailnet.this_name`, except that a failure refuses again for `NAME_SECONDS` without asking."""
+    global _name_failed
+    if _name_failed is not None and time.monotonic() - _name_failed[0] <= NAME_SECONDS:
+        raise _name_failed[1]
+    try:
+        return tailnet.this_name()
+    except tailnet.TailnetError as error:
+        _name_failed = (time.monotonic(), error)
+        raise
+
+
+def _matches(mine: str, holder: str) -> bool:
+    """The full MagicDNS name, or its first label when `sd.hub_name` is a bare machine name."""
+    holder = holder.strip().rstrip(".").lower()
+    return mine == holder if "." in holder else mine.split(".")[0] == holder
+
+
+def role(connection, name=None) -> Role:
+    """The fence: a machine holds the hub role only while its tailnet name is `sd.hub_name`.
+
+    `connection` is this machine's own database; `name` reads this node's
+    tailnet name (`tailnet.this_name`; a failure stands for `NAME_SECONDS`). The setting
+    is read first, so a machine that never set it asks Tailscale nothing.
+
+    Unset is `off`: a fleet that never named its hub runs as before, and
+    `promote` refuses to move the role until the setting exists, so a
+    returning old hub always finds the name in its own database.
+    An unreadable setting, or a Tailscale that does not answer, is `unknown`.
+    """
+    from . import writes
+
+    try:
+        # A database older than the `state` table can hold no setting: never set, not unreadable.
+        held = connection.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'state'").fetchone()
+        holder = writes.read_settings(connection, [HUB_NAME]).get(HUB_NAME) if held else None
+    except (SdDbError, sqlite3.Error, OSError) as error:
+        return Role("unknown", None, f"{HUB_NAME} does not read: {error}")
+    if not holder:
+        return Role("off", None, f"{HUB_NAME} is unset, so the fence is off; "
+                                 f"on the hub run `sd config set {HUB_NAME} <its tailnet name>`")
+    try:
+        mine = (name or _this_name)()
+    except tailnet.TailnetError as error:
+        return Role("unknown", holder, f"Tailscale does not name this node, so it cannot match {holder}: {error}")
+    if _matches(mine, holder):
+        return Role("holder", holder, f"this node is {mine}, the hub {HUB_NAME} names")
+    return Role("elsewhere", holder, f"{HUB_NAME} names {holder}, and this node is {mine}")
+
+
+def role_at(path: Path, name=None) -> Role:
+    """`role` on a fresh read-only connection to `path`; a database that does not open is `unknown`."""
+    from .database import connect
+
+    try:
+        connection = connect(path, write=False)
+    except Exception as error:  # noqa: BLE001 -- no answer is unknown, named
+        return Role("unknown", None, f"the database at {path} did not open: {type(error).__name__}: {error}")
+    try:
+        return role(connection, name)
+    finally:
+        connection.close()

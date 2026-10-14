@@ -190,6 +190,7 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd.gate_slots` is load control, not a grant: how many gates may run at once on the machine, across every repository (unset: a quarter of the cores).
 `sd.gate_load_max` and `sd.gate_settle_seconds` are load control too: the gate queue starts its head 45 s after the last start by default, and only below a load1 limit where one is set (unset: none, since macOS counts disk waits in the load average).
 `sd.fleet_owners` names the GitHub logins whose repositories `sd fleet stamp` treats as the operator's own, comma-separated; it grants nothing.
+`sd.hub_name` names the hub by its tailnet name; a machine with its own database serves it and runs lanes from it only while its tailnet name matches (unset: no fence; `bin/sd-db fence` answers). It grants nothing.
 `sd.gate_cache_gb` bounds the local gate's warm Rust build folders (unset: 40 GB); past it the gate removes the least recently used free folder.
 `sd.bulk_storage_root` names the folder for large uncommitted data, as `<root>/<repository>/` (unset: none); build output stays on the system disk. It grants nothing.
 `sd.privacy_patterns` names the privacy-pattern file `sd-docs-lint --pr-body` checks a pull request body against, one extended regular expression per line (unset: `privacy-patterns` in `$SYSTEM_TOOLS_CONFIG`, else `~/.config/system`); with no file the check is skipped with a note. It grants nothing.

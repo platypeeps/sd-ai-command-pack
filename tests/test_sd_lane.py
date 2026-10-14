@@ -2969,6 +2969,27 @@ class AnyHost(SharedQueue):
         with mock.patch("sd_db.ship.this_host", lambda: "build-2"):
             self.assertEqual((sd_lane.claim_entry(self.store(), "new-host") or {}).get("item"), 1)
 
+    def test_a_demotion_during_prepare_puts_the_entry_back(self) -> None:
+        """sd:4044, codex pass: the fence refuses before the merge; the entry keeps its place, as on a move."""
+        self.repo_row()
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+
+        def prepared_then_demoted(argv: list[str], log: pathlib.Path) -> dict:
+            import sd_db
+            from sd_db import writes
+            connection = sd_db.connect(home=self.tmp)
+            try:
+                writes.set_setting(connection, "sd.hub_name", "hub.example.test")
+            finally:
+                connection.close()
+            return self.ship(argv, log)
+        with mock.patch("sd_db.tailnet.this_name", lambda: "old-hub.example.test"):
+            answer = sd_lane.run_lane(self.repo, self.environ, prepared_then_demoted)
+        self.assertEqual([c[2] for c in self.calls], ["prepare"])
+        self.assertIn("runs on the hub, hub.example.test, not on this machine", answer["stopped"])
+        one = self.entries()[0]
+        self.assertEqual((one["status"], "holder" in one), ("pending", False))
+
     def test_a_lane_host_that_cannot_be_read_before_the_merge_stops_with_no_merge(self) -> None:
         """Failure table, before merge: clones that disagree on the host; no merge starts and the run stops."""
         self.repo_row()
