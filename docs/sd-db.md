@@ -191,6 +191,7 @@ The keys are `obsidian`, `notion` and `drive`; `drive=` names the default folder
 The feed is inbound, not a channel: a setting naming only a feed publishes as no setting, and `channels.outbound` drops it for every publisher.
 `jira=KEY` and `github=OWNER/NAME` name the repo's issue sources (sd:3461), inbound like the feed: the `repo` value that tracker's `shadow` rows carry, a Jira project key or a GitHub `owner/name`.
 `repos.issue_sources` reads them for Today and Tasks; a managed repo refuses `github` and reads one set before as none, since managed repos use no GitHub issues.
+`repos.mine_issues` reads each repo's open issues whose `shadow.reason` is `assigned` or `filed` (sd:4636); both collectors write the reason, `watched` rows stay synced and hidden, and a row synced before migration 34 reads unknown until a collect sees it again.
 A set naming any channel replaces the channels; one naming none keeps them, so the dashboard form never drops a source. Each inbound key (feed, jira, github) is set on its own: a set that leaves one out keeps it. `none` clears all of it; to drop one source, clear and set the rest again. The verb prints `before -> after`, as stored.
 A folder is a name, never an id or a URL: no leading `/`, no `.` or `..` segment, no control character.
 A Notion folder is one page name, with no `/`.
