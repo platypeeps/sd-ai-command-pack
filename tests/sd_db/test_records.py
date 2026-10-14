@@ -266,6 +266,18 @@ class TheAdd(RecordsCase):
         self.assertEqual(self.counts(), before)
 
 
+    def test_a_title_equal_once_unicode_normalized_is_taken(self):
+        # macOS keeps one file for `Café.md` composed (NFC) and decomposed (NFD).
+        composed, decomposed = "Caf\u00e9", "Cafe\u0301"
+        added = add_row(self.db, self.idea, title=composed, who="operator", fields={"score": "7"})
+        before = self.counts()
+        for title in (decomposed, decomposed.upper()):
+            with self.subTest(title=ascii(title)), self.assertRaisesRegex(RecordRefused, "already has the file name"):
+                add_row(self.db, self.topic, title=title, who="operator")
+        self.assertEqual(self.counts(), before)
+        self.assertEqual(self.row(decomposed)["id"], added["id"])
+        self.assertEqual(self.row("FIRST IDEA")["title"], "first idea")
+
 class TheImportShape(RecordsCase):
     """A written row holds what the import would land from the same note."""
 

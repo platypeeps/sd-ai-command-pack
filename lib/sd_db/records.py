@@ -36,6 +36,7 @@ import datetime
 import json
 import math
 import sqlite3
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -146,13 +147,14 @@ def get_row(connection: sqlite3.Connection, item: int | None = None, *, kind: st
     """One base row with its `revision`: by id, or by kind and file title.
 
     The file title is the stem of the row's path, the name a wikilink and the
-    store verbs use; two rows of one kind with that stem refuse as ambiguous.
+    store verbs use, compared as macOS compares file names (`_file_key`); two
+    rows of one kind with that stem refuse as ambiguous.
     """
     if item is None:
         if kind is None or title is None:
             raise RecordRefused("name a base row by its id, or by its kind and title")
         held = [row["id"] for row in list_rows(connection, kind)
-                if PurePosixPath(row["path"] or "").stem == title]
+                if _file_key(PurePosixPath(row["path"] or "").stem) == _file_key(title)]
         if not held:
             raise MissingItem(f"no {kind} row has the title {title!r}")
         if len(held) > 1:
@@ -330,11 +332,19 @@ def _file_title(title: Any) -> str:
     return title
 
 
+def _file_key(name: str) -> str:
+    """A file name as macOS compares it: one Unicode normalization, and case ignored.
+
+    `Café.md` composed and decomposed, or in another case, is one file there.
+    """
+    return unicodedata.normalize("NFC", name).casefold()
+
+
 def _refuse_taken(connection: sqlite3.Connection, path: str) -> None:
-    """A row's file name is one vault-wide wikilink target, and macOS file names ignore case."""
-    name = PurePosixPath(path).name.casefold()
+    """A row's file name is one vault-wide wikilink target, compared by `_file_key`."""
+    name = _file_key(PurePosixPath(path).name)
     for row in connection.execute("SELECT id, path FROM item WHERE source = ?", (SOURCE,)):
-        if PurePosixPath(row["path"] or "").name.casefold() == name:
+        if _file_key(PurePosixPath(row["path"] or "").name) == name:
             raise RecordRefused(f"item {row['id']} already has the file name {PurePosixPath(path).name!r} "
                                 f"at {row['path']}; titles share one namespace across the vault")
 
