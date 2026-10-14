@@ -147,7 +147,8 @@ records the differences that are on purpose. Both are in
    `page=` for Notion and `file=` for Drive. Run `sd-research-kit delivered`
    only after both writes succeed; it removes the request only while the file
    is still that generation, so a render that queued newer content while the
-   drain ran keeps its request. Never delete the request by hand. If the second write fails, report it and leave the request
+   drain ran keeps its request. A request naming `item=` needs `--url`, and a
+   non-zero exit leaves the request: report its reason. Never delete the request by hand. If the second write fails, report it and leave the request
    in place carrying the id; the queue still says work is owed, and the next
    drain updates that page instead of creating one. A `notion=True` designation
    is amended into `notion=dict(page="<id>")`; a `None` or `False` one enqueues
