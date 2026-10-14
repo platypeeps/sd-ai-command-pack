@@ -3437,6 +3437,22 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "waiver"):
             self.unanswered("--deliver", "--acceptance-file", str(self.waiver_file(row))).prepare()
 
+    def test_a_row_prepare_cannot_deliver_as_waived_refuses(self):
+        """A passed row that also claims a waiver, and a waived row whose
+        criterion is not text, refuse at prepare: the first would deliver
+        with its waiver unread and unrecorded, the second would merge and
+        then fail every delivery."""
+        rows = [
+            {**self.waived_row("X", 999999), "passed": True},
+            self.waived_row(123, self.decision("Waive: 123")),  # type: ignore[arg-type]
+            self.waived_row("  ", self.decision("Waive: ")),
+        ]
+        for row in rows:
+            with self.subTest(row=row):
+                with self.assertRaisesRegex(ship.Refusal, "waiver"):
+                    self.unanswered("--deliver", "--acceptance-file", str(self.waiver_file(row))).prepare()
+                self.assertNotIn("acceptance", self.operation().state)
+
     def test_a_failed_read_of_the_decision_note_refuses(self):
         class Failing:
             def __init__(self, connection):

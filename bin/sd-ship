@@ -440,9 +440,17 @@ ANCESTOR_CLEARANCE = "an ancestor of the merge head"
 
 
 def acceptance_row_answered(row: object) -> bool:
-    """An acceptance row that names its criterion and evidence and either passed or says it was waived (sd:3704)."""
-    return (isinstance(row, dict) and bool(row.get("criterion")) and bool(row.get("evidence"))
-            and (row.get("passed") is True or (row.get("passed") is False and "waived" in row)))
+    """An acceptance row that names its criterion and evidence and either passed or says it was waived (sd:3704).
+
+    A passed row may not also claim a waiver, and a waived criterion must be
+    text: delivery records only the waived rows, by their criterion.
+    """
+    if not isinstance(row, dict) or not row.get("criterion") or not row.get("evidence"):
+        return False
+    if row.get("passed") is True:
+        return "waived" not in row
+    criterion = row["criterion"]
+    return row.get("passed") is False and "waived" in row and isinstance(criterion, str) and bool(criterion.strip())
 
 
 class Ship(SharedReview):

@@ -30,7 +30,7 @@ Its verified merge moves it to done with the sentence `sd task status ID done --
 For a work item, use `prepare --deliver --acceptance-file FILE` only when every item acceptance criterion has evidence.
 The JSON requires `item`, `complete: true`, and a nonempty `criteria` array.
 Each criterion contains `criterion`, `passed: true`, and concrete `evidence`.
-A criterion the owner waived takes `passed: false`, its `evidence`, and `waived: {"reason": TEXT, "decision": NOTE_ID}` (sd:3704).
+A criterion the owner waived takes `passed: false`, its `evidence`, and `waived: {"reason": TEXT, "decision": NOTE_ID}` (sd:3704); a passed row carries no `waived`.
 The operator or the lead writes that note first: `sd task note N $'<ruling>\nWaive: <criterion>' --kind decision`, one `Waive:` line per criterion.
 Prepare refuses a note on another item or of another kind (`waiver_refused`), a failed read (`waiver_unread`), and a note with no `Waive:` line equal to the criterion after whitespace is collapsed (`waiver_not_exact`).
 The claim keeps the note's id, body and session; the delivery's completion record lists the waived criteria, and its `status_change` reason ends `; waived: N criteria (decision #ID)`.
