@@ -205,42 +205,10 @@ def title_ids(title: str) -> tuple[int, ...]:
     return tuple(dict.fromkeys(int(number) for number in _TITLE_ID.findall(title)))
 
 
-def delivers_named(values: str) -> tuple[int, ...]:
-    """The items `Delivers:` trailer values name, one value a line, in order, without repeats (sd:3704).
-
-    `values` is git's own parse (`%(trailers:key=Delivers,valueonly)`), the
-    reader of record: a subject or a mostly-prose paragraph holds no trailer.
-    Only a whole `sd:<n>` value counts; a `docs/work` slug names no row here.
-    """
-    return tuple(dict.fromkeys(int(value.strip()[3:]) for value in values.splitlines()
-                               if re.fullmatch(r"sd:[1-9][0-9]*", value.strip())))
-
-
-#: The line `git revert` writes, on the full sha (sd:3704).
-_REVERTS = re.compile(r"^This reverts commit ([0-9a-f]{40})\.", re.MULTILINE)
-
-
-def unreverted(commits) -> list[str]:
-    """The trailer values of each `(sha, message, values)` a later commit in `commits` does not revert (sd:3704).
-
-    `commits` run oldest first. Read newest first, a commit already reverted
-    reverts nothing itself, so a revert of a revert restores the first one.
-    A revert naming a commit outside `commits` cancels nothing here.
-    """
-    reverted: set[str] = set()
-    kept: list[str] = []
-    for sha, message, values in reversed(list(commits)):
-        if sha in reverted:
-            continue
-        reverted.update(_REVERTS.findall(message))
-        kept.append(values)
-    return kept[::-1]
-
-
 def items_closed(body: str, named, item: int, deliver: bool) -> tuple[int, ...]:
     """The items a merge closes beside `item`: each `Closes:` item, then each of `named`.
 
-    `named` is what the branch's own commits deliver (sd:3704); a receipt
+    `named` is each item prepare's later `--item` names (sd:3704); a receipt
     prepared before that passes its title's ids, the rule it was sent under
     (sd:3014). An associate-only claim closes nothing (sd:3365).
     """
@@ -252,31 +220,31 @@ def items_closed(body: str, named, item: int, deliver: bool) -> tuple[int, ...]:
 def refuse_unclosable(connection, item: int, repo: str, body: str, named, deliver: bool) -> None:
     """Refuse a co-delivered item the merge could not close; `repo` is `item`'s registered path.
 
-    One pull request claims one item; `Closes:` and the branch commits'
-    `Delivers:` trailers (`named`) name the others it delivers, and the merge
-    closes them (operator ruling 2026-10-03, sd:3704). `Refs:` names related
-    items and is not read here: they stay open. An associate-only claim
-    closes nothing, so its `Closes:` line or delivering commit is refused
-    rather than dropped (sd:3365). `sd-ship prepare` and `sd-ship lane
+    One pull request claims one item; `Closes:` and each later `--item`
+    (`named`) name the others it delivers, and the merge closes them
+    (operator rulings 2026-10-03 and 2026-10-13, sd:3704). `Refs:` names
+    related items and is not read here: they stay open. An associate-only
+    claim closes nothing, so its `Closes:` line or later `--item` is
+    refused rather than dropped (sd:3365). `sd-ship prepare` and `sd-ship lane
     enqueue` both read it (sd:3473).
     """
     if not deliver and (closes_named(body, item) or named):
         said = ([f"Closes: sd:{number}" for number in closes_named(body, item)]
-                + [f"Delivers: sd:{number}" for number in named])
-        raise Refusal(f"an associate-only claim on sd:{item} closes nothing, and the pull request says "
+                + [f"--item {number}" for number in named])
+        raise Refusal(f"an associate-only claim on sd:{item} closes nothing, and the pull request names "
                       f"{', '.join(f'`{line}`' for line in said)}",
                       code="closes_need_delivery", boundary="input", state="operator_decision",
-                      next_action="Move the Closes: items to Refs: and drop the commits' Delivers: trailers, "
+                      next_action="Move the Closes: items to Refs: and drop the extra --item, "
                                   "or name them on the item's --deliver pull request.")
     for number in items_closed(body, named, item, deliver):
         row = connection.execute("SELECT repo FROM item WHERE id = ?", (number,)).fetchone()
         if row is None:
-            raise Refusal(f"Closes: or a branch commit's Delivers: names sd:{number}, which is no item; "
+            raise Refusal(f"Closes: or --item names sd:{number}, which is no item; "
                           "the merge closes every item they name",
                           code="closes_item_unknown", boundary="input", state="operator_decision",
-                          next_action="Correct the Closes: line or the commit's trailer, or move a related item to Refs:.")
+                          next_action="Correct the Closes: line or the --item, or move a related item to Refs:.")
         if row["repo"] != repo:
-            raise Refusal(f"Closes: or a branch commit's Delivers: names sd:{number}, which belongs to another "
+            raise Refusal(f"Closes: or --item names sd:{number}, which belongs to another "
                           "repository; a merge closes only this repository's items",
                           code="closes_item_foreign", boundary="input", state="operator_decision",
                           next_action="Close that item from its own repository, or move it to Refs:.")

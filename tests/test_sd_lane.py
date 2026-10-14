@@ -471,6 +471,13 @@ class Runner(Lane):
         sd_lane.run_lane(self.repo, self.environ, ship)
         self.assertEqual((read, "--deliver" in self.calls[0]), (["{}"], True))
 
+    def test_each_item_the_enqueue_names_reaches_prepare(self) -> None:
+        """sd:3704: the enqueue's --item list is the closing set; prepare gets every one, the claimed item first."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver", closes=(2, 3, 1, 2))
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        items = [self.calls[0][index + 1] for index, part in enumerate(self.calls[0]) if part == "--item"]
+        self.assertEqual(items, ["1", "2", "3"])
+
     def test_prepare_catches_up_with_the_base_inside_the_runner(self) -> None:
         """The catch-up merge runs under the lane lock, never before it."""
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
@@ -1845,6 +1852,14 @@ class ItemChecks(SharedQueue):
         refused = self.refused(self.own, "t", f"Closes: sd:{self.foreign}\n")
         self.assertEqual(refused.code, "closes_item_foreign")
         self.assertIn(f"names sd:{self.foreign}, which belongs to another repository", str(refused))
+
+    def test_a_second_item_of_another_repository_is_refused(self) -> None:
+        """sd:3704: each later --item is checked as a `Closes:` item is."""
+        self.body.write_text("Words.\n", encoding="utf-8")
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.enqueue_entry(self.tree, self.own, "t", self.body, self.environ, claim="deliver", closes=(self.foreign,))
+        self.assertEqual(refused.exception.code, "closes_item_foreign")
+        self.assertEqual(self.rows(), [])
 
     def test_a_title_naming_another_repositorys_item_is_queued(self) -> None:
         """sd:3704: a title closes nothing, so the item it names is context, not a refusal."""

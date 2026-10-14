@@ -1370,14 +1370,13 @@ class Ship(SharedReview):
         closing: dict | None = None
         closing_warnings: list[str] = []
         if not self.args.no_item:
-            named, closing_warnings = self.branch_delivers(base, head)
+            # The items named with --item after the first: the confirmation on this head (sd:3704).
+            named = tuple(dict.fromkeys(self.args.closes))
             self.check_closes(body, named, deliver)
             items = list(self.closing(body, named, deliver))
             closing = {"head": head, "items": items}
             closing_warnings += self.title_left_open(title, items, deliver)
-            # Shown before anything is published, so an undo git cannot see is caught here (sd:3704).
-            print(f"sd-ship: at {head[:12]} this merge closes "
-                  f"{', '.join(f'sd:{number}' for number in items) or 'no item'} beside sd:{self.args.item}",
+            print(f"sd-ship: at {head[:12]} this merge closes {', '.join(self.closes_now(closing, deliver)) or 'no item'}",
                   file=sys.stderr)
         if not self.state:
             self.save(repository=self.repository, branch=self.branch, item=self.args.item, phase="new")
@@ -1465,7 +1464,7 @@ class Ship(SharedReview):
             self.save(warnings=list(self.state.get("warnings") or []) + [copilot["warning"]])
         return self.result("ready_to_send", copilot_review=copilot, invoker=self.state["invoker"],
                            body_source=self.body_source, normalized=list(self.body_normalized),
-                           closes=[f"sd:{number}" for number in (self.state.get("closing") or {}).get("items", [])])
+                           closes=self.closes_now(self.state.get("closing") or {}, bool(self.state.get("deliver"))))
 
     def refuse_design_delivery(self, base: str, head: str) -> None:
         """Refuse `--deliver` on a branch `design_only` names, before anything is saved (sd:3519).
@@ -1794,9 +1793,8 @@ class Ship(SharedReview):
         if not self.args.no_item:
             body += f"{sd_lib.ITEM_TRAILER} sd:{self.args.item}\n"
             delivered = ([self.args.item] if self.state.get("deliver") else []) + list(self.co_delivered())
-            # Each co-delivered item, from `Closes:` or a branch commit's
-            # `Delivers:`, gets the `Delivers:` its close and every git reader
-            # require (sd:1481, sd:3704).
+            # Each co-delivered item, from `Closes:` or a later `--item`, gets
+            # the `Delivers:` its close and every git reader require (sd:1481, sd:3704).
             for number in delivered:
                 body += f"{sd_lib.DELIVERS_TRAILER} sd:{number}\n"
             # The message is fixed before GitHub picks the squash parent,
@@ -1832,36 +1830,15 @@ class Ship(SharedReview):
         if not self.args.no_item:
             sd_ship_body.refuse_unclosable(self.connection, self.args.item, self.item["repo"], body, named, deliver)
 
-    def branch_delivers(self, base: str, head: str) -> tuple[tuple[int, ...], list[str]]:
-        """The items the branch's own commits deliver at `head`, and a warning per one already done (sd:3704).
-
-        Read through `git`, which raises on a failed call: a failed read is
-        unknown, not an empty set, and `sd_lib.commit_messages` answers `[]`.
-        A done item is left out: a branch stacked on a squashed one still
-        carries that branch's commits, and the item closed with its merge.
-        A commit the branch reverts names nothing (`sd_ship_body.unreverted`).
-        """
-        log = git(self.root, "log", "--no-merges", "--reverse",
-                  "--format=%H%x1f%B%x1f%(trailers:key=Delivers,valueonly)%x1e", f"refs/remotes/origin/{base}..{head}")
-        # `run` strips the output, and Python counts \x1e and \x1f as space: the last
-        # commit's empty trailer field can go with them.
-        commits = [(*entry.strip("\n").split("\x1f", 2), "")[:3] for entry in log.split("\x1e") if entry.strip()]
-        named, warnings = [], []
-        for number in sd_ship_body.delivers_named("\n".join(sd_ship_body.unreverted(commits))):
-            if number != self.args.item and self.item_status(number) == "done":
-                warnings.append(f"a branch commit carries `Delivers: sd:{number}`, which is already done; "
-                                "this merge leaves it")
-            else:
-                named.append(number)
-        return tuple(named), warnings
-
     def title_left_open(self, title: str, closing: list[int], deliver: bool) -> list[str]:
-        """One warning per `sd:<n>` a delivering title names and the merge leaves open (sd:3704)."""
-        if not deliver:
-            return []
-        return [f"the title names sd:{number}, which this merge leaves open; add `Closes: sd:{number}`, "
-                "a `Delivers:` commit trailer, or `Refs:`"
-                for number in sd_ship_body.title_ids(title) if number != self.args.item and number not in closing]
+        """One warning when a delivering title names items this merge leaves open (sd:3704)."""
+        named = [f"sd:{number}" for number in sd_ship_body.title_ids(title)
+                 if number != self.args.item and number not in closing]
+        return [f"the title names {', '.join(named)}; a title closes nothing, so name each with --item"] if deliver and named else []
+
+    def closes_now(self, closing: dict, deliver: bool) -> list[str]:
+        """The items the merge closes, the claimed one first, as prepare prints them (sd:3704)."""
+        return [f"sd:{number}" for number in ([self.args.item] if deliver else []) + list(closing.get("items", []))]
 
     def check_closing(self, head: str) -> None:
         """Refuse a merge whose stored closing set was not read at `head` (sd:3704).
@@ -2534,9 +2511,24 @@ def squash_title(pull: dict, prepared: str) -> str:
     return title
 
 
-def identity_flags(action) -> None:
+class ItemList(argparse.Action):
+    """`prepare --item`: the first claims the item; each later one is an item the merge closes (sd:3704)."""
+
+    def __call__(self, parser, namespace, value, option_string=None):
+        if namespace.item is None:
+            namespace.item = value
+        else:
+            namespace.closes = [*namespace.closes, value]
+
+
+def identity_flags(action, closes: bool = False) -> None:
     identity = action.add_mutually_exclusive_group(required=True)
-    identity.add_argument("--item", type=int)
+    if closes:
+        identity.add_argument("--item", type=int, action=ItemList,
+                              help="the claimed item; repeat it to name each other item a --deliver merge closes")
+        action.set_defaults(closes=[])
+    else:
+        identity.add_argument("--item", type=int)
     identity.add_argument("--no-item", action="store_true", help="a standalone review record, never a placeholder work item")
     action.add_argument("--review-id", metavar="ID", help="the stable record identity every later no-item command requires; --create-record allocates it and prints it as review_id, it is never chosen")
     action.add_argument("--json", action="store_true")
@@ -2626,7 +2618,7 @@ def parser():
     body.add_argument("--json", action="store_true")
     for name in ("prepare", "merge", "reconcile", "observe"):
         action = commands.add_parser(name)
-        identity_flags(action)
+        identity_flags(action, closes=name == "prepare")
         if name in ("prepare", "merge"):
             lock_wait_flag(action)
         if name == "prepare":

@@ -141,10 +141,6 @@ class NormalizeTests(unittest.TestCase):
 
 
 class ClosingTests(unittest.TestCase):
-    def test_only_a_whole_sd_value_names_an_item(self) -> None:
-        """sd:3704: git parses the trailers; a slug or a malformed id closes nothing."""
-        self.assertEqual((5, 7), sd_ship_body.delivers_named("sd:5\n\nsd:5\nsd:7\ndocs/work/x\nsd:08\nsd:9 and more\n"))
-
     def test_a_title_names_each_whole_token_once(self) -> None:
         self.assertEqual((3, 4), sd_ship_body.title_ids("Fix sd:3 and sd:4 (sd:3, xsd:5, sd:6x)"))
 
