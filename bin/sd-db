@@ -24,7 +24,8 @@ from typing import Any
 
 #: The verbs `sd_db.jobs.cli` answers; `sd-db` hands each one straight to it.
 CLI_VERBS = ("init", "migrate", "status", "restore", "repo", "item", "work",
-             "import", "verify", "usage", "judgments", "review", "credentials")
+             "import", "verify", "usage", "judgments", "review", "credentials",
+             "records")
 
 USAGE = """\
 sd-db: the workflow database's verbs, run from this checkout's lib/.
@@ -32,7 +33,7 @@ sd-db: the workflow database's verbs, run from this checkout's lib/.
 Usage: sd-db <verb> [arguments]
 
   init, migrate, status, restore, repo, item, work, import, verify,
-  usage, judgments, review, credentials
+  usage, judgments, review, credentials, records
               sd_db.jobs.cli answers these, with the arguments given.
               -h or --help anywhere prints this text and acts on nothing.
   backup [ARGS]

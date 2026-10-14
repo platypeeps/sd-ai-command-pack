@@ -25,6 +25,13 @@ line: the import stores the note's body as it is, and so does every write here.
 **Each write is one transaction.** The row, its notes and its status change
 commit together or not at all, so a stopped write leaves nothing to finish.
 
+**The vault gets a read-only mirror (sd:3976).** `render` writes each row
+back to its note's path, with `status` from `stage` and a `mirror-hash` of
+the rest of the file, and one HTML page per base under `docs/dashboard/`.
+A file it did not write, or one changed since, is a hand edit: it stays, and
+the render reports it. It runs after each committed write, for that kind,
+and on demand (`sd-db records render`); a write never fails for its render.
+
 **The vault stays the source until the flip.** While the plugin's driver is
 `vault`, the next import would overwrite a row edited here with its note, so
 both writers refuse until the driver says `db`.
@@ -32,20 +39,32 @@ both writers refuse until the driver says `db`.
 
 from __future__ import annotations
 
+import contextlib
 import datetime
+import functools
+import hashlib
+import html
+import importlib.util
 import json
 import math
+import os
+import re
 import sqlite3
+import sys
+import tempfile
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from .database import transaction
+from .database import refuse_hub_only, transaction
+from .publication_render import _fence_closer, md_to_html
 from .sources import MigrationRefused
-from .sources.vault import DUE, NOT_FIELDS, SOURCE, plugin_entries
+from .sources.frontmatter import FrontmatterError, _scalar
+from .sources.frontmatter import read as read_frontmatter
+from .sources.vault import DUE, NOT_FIELDS, SOURCE, plugin_entries, store_root
 from .workflow import MissingItem, WorkflowError, _checked_state, _text, item_state
-from .writes import _transition, add_note, create_item, set_item_fields
+from .writes import _transition, add_note, create_item, now, record_state, set_item_fields, unresolved_state
 
 #: Keys a caller may not set in `fields`: `status` is `stage`, `mirror-hash`
 #: is the mirror file's, `kind` is the declared kind.
@@ -63,6 +82,8 @@ class Rules:
     kind: str
     prefix: str
     driver: str
+    #: The plugin's `store.root`, such as `$OBSIDIAN_VAULT`; `base` is under it.
+    root: str
     #: The kind's folder under the vault root; a new row's path starts with it.
     base: str
     #: The `workflow` map: ladder word -> item status.
@@ -114,7 +135,7 @@ def rules_for(kind: str, *, home: Path | str, environ: dict[str, str] | None = N
     store = entry.get("store") or {}
     try:
         return Rules(
-            kind=kind, prefix=str(entry["prefix"]), driver=str(store["driver"]),
+            kind=kind, prefix=str(entry["prefix"]), driver=str(store["driver"]), root=str(store["root"]),
             base=str(store["bases"][kind]), stages=dict(entry["workflow"][kind]["status"]),
             fields=tuple(declared["fields"]), initial=str(declared["initial-status"]),
             transitions=declared.get("transitions"), human_only=dict(declared.get("human-only") or {}),
@@ -202,7 +223,9 @@ def add_row(connection: sqlite3.Connection, rules: Rules, *, title: str, who: st
                            source=SOURCE, external_id=identity, path=path, stage=stage,
                            fields={**values, "kind": rules.kind}, body={"markdown": body}, session=who,
                            due=dates.get("due"), created_at=dates.get("created_at"))
-        return get_row(connection, item)
+        row = get_row(connection, item)
+    _mirror_after(connection, rules)
+    return row
 
 
 def edit_row(connection: sqlite3.Connection, item: int, rules: Rules, *, revision: str, who: str,
@@ -249,7 +272,9 @@ def edit_row(connection: sqlite3.Connection, item: int, rules: Rules, *, revisio
             add_note(connection, item, "comment", f"Set {', '.join(set_names)} by {who}", session=who)
         if target != current and rules.stages[target] != row["status"]:
             _transition(connection, item, rules.stages[target], who=who, reason=f"stage {current} -> {target}")
-        return get_row(connection, item)
+        edited = get_row(connection, item)
+    _mirror_after(connection, rules)
+    return edited
 
 
 def _refuse_before_flip(rules: Rules) -> None:
@@ -360,3 +385,371 @@ def _refuse_duplicate(connection: sqlite3.Connection, rules: Rules, values: dict
             if row["id"] != skip and row["fields"].get(name) == value:
                 raise RecordRefused(f"`unique-fields` declares {name!r} unique and item {row['id']} "
                                     f"already holds {value!r}")
+
+
+# ---------------------------------------------------------------- mirror
+
+#: The `heartbeat` state row each render records: `{at, ok, kinds, written, refused, reason}`.
+MIRROR_KEY = "records-mirror"
+
+#: Stages whose rows are table lines only on the HTML page (D3).
+TABLE_ONLY = frozenset({"declined", "retired"})
+
+#: A Meta Bind input, `INPUT[<widget>:<field>]`, with the backticks around it.
+CONTROL = re.compile(r"`?INPUT\[[^\]\n]*:([\w-]+)\]`?")
+#: `[[target]]`, `[[target|alias]]` and the `![[embed]]` form.
+WIKILINK = re.compile(r"!?\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]")
+#: An image `md_to_html` would mark missing, since it embeds local files only.
+REMOTE_IMAGE = re.compile(r"!\[([^\]]*)\]\((https?://[^)\s]+)\)")
+
+
+@dataclass
+class Mirror:
+    """What one render did: the kinds, the files written, the files refused, and why it stopped."""
+
+    kinds: list[str]
+    written: list[str] = field(default_factory=list)
+    #: `(path under the root, reason)`: a hand edit, a file with no row, a row that would not read back.
+    refused: list[tuple[str, str]] = field(default_factory=list)
+    #: Why the render stopped or never started; `None` when it ran to the end.
+    reason: str | None = None
+
+    @property
+    def ok(self) -> bool:
+        return self.reason is None and not self.refused
+
+    def why(self) -> str:
+        if self.reason is not None:
+            return self.reason
+        path, reason = self.refused[0]
+        return f"{len(self.refused)} file(s) refused, first {path}: {reason}"
+
+
+def render(connection: sqlite3.Connection, *, home: Path | str, environ: dict[str, str] | None = None,
+           kinds: list[str] | None = None, entries: list[dict[str, Any]] | None = None) -> Mirror:
+    """Write the mirror of `kinds`, by default every kind a plugin on the `db` driver declares.
+
+    Refuses with `HubOnly` off the hub, before it reads or records anything:
+    a satellite's render would write a vault the hub's rows never see. Every
+    other failure ends in the returned `Mirror` and its heartbeat.
+    """
+    refuse_hub_only(connection, "records render")
+    env = dict(os.environ if environ is None else environ)
+    try:
+        if entries is None:
+            entries = plugin_entries(home=home, environ=env)
+        if kinds is None:
+            kinds = sorted(kind for entry in entries if (entry.get("store") or {}).get("driver") == "db"
+                           for kind in entry.get("workflow") or {})
+        rules = [rules_for(kind, home=home, environ=env, entries=entries) for kind in kinds]
+    except (MigrationRefused, RecordRefused) as error:
+        return _beat(connection, Mirror(kinds=list(kinds or ()), reason=str(error)))
+    return _mirrored(connection, rules, env)
+
+
+def _mirror_after(connection: sqlite3.Connection, rules: Rules) -> None:
+    """The render after a committed write. It prints and records a failure and never raises.
+
+    After a failed render it renders every kind, so the next write catches up
+    whichever kind the failure left behind.
+    """
+    try:
+        if connection.in_transaction:
+            raise RecordRefused("the write is inside the caller's open transaction, so it is not committed yet")
+        refuse_hub_only(connection, "the records mirror")
+        if _last_beat_ok(connection):
+            mirror = _mirrored(connection, [rules], dict(os.environ))
+        else:
+            mirror = render(connection, home=Path(os.environ.get("HOME", "~")).expanduser())
+    except Exception as error:  # a write never fails for its render
+        mirror = Mirror(kinds=[rules.kind], reason=str(error) or type(error).__name__)
+        with contextlib.suppress(Exception):
+            _beat(connection, mirror)
+    if not mirror.ok:
+        print(f"mirror not updated: {mirror.why()}", file=sys.stderr)
+
+
+def _last_beat_ok(connection: sqlite3.Connection) -> bool:
+    row = connection.execute("SELECT body FROM state WHERE kind = 'heartbeat' AND key = ? ORDER BY id DESC LIMIT 1",
+                             (MIRROR_KEY,)).fetchone()
+    return row is not None and json.loads(row["body"] or "{}").get("ok") is True
+
+
+def _mirrored(connection: sqlite3.Connection, rules: list[Rules], environ: dict[str, str]) -> Mirror:
+    mirror = Mirror(kinds=[one.kind for one in rules])
+    try:
+        _render(connection, rules, environ, mirror)
+    except Exception as error:  # the heartbeat names it; an unknown is not a pass
+        mirror.reason = str(error) or type(error).__name__
+    return _beat(connection, mirror)
+
+
+def _beat(connection: sqlite3.Connection, mirror: Mirror) -> Mirror:
+    record_state(connection, "heartbeat", key=MIRROR_KEY, body={
+        "at": now(), "ok": mirror.ok, "kinds": mirror.kinds, "written": len(mirror.written),
+        "refused": [{"path": path, "reason": reason} for path, reason in mirror.refused],
+        "reason": mirror.reason})
+    return mirror
+
+
+def _render(connection: sqlite3.Connection, rules: list[Rules], environ: dict[str, str], mirror: Mirror) -> None:
+    """Every refusal of the whole render first, then each kind's notes, strays and page.
+
+    The base folder must exist: under a missing `$OBSIDIAN_VAULT` the root is
+    a default path, and a render there would build a second vault nobody reads.
+    """
+    if unresolved_state(connection, "restore"):
+        raise RecordRefused("a restore is unresolved, so the rows may be older than the mirror; "
+                            "re-apply edits from the mirror, then resume the restore")
+    roots = []
+    for one in rules:
+        if one.driver != "db":
+            raise RecordRefused(f"plugin {one.prefix}'s `store.driver` is {one.driver!r}, so the vault is "
+                                f"still the source of {one.kind} notes and nothing renders over them")
+        root = store_root({"root": one.root}, one.prefix, environ)
+        if not (root / one.base).is_dir():
+            # An unset or wrong root names a folder that is not the vault; creating it hides that.
+            raise RecordRefused(f"{root / one.base} is not a directory; the {one.kind} base is where plugin "
+                                f"{one.prefix}'s `store.bases` says it is, and the mirror creates no vault")
+        roots.append(root)
+    for one, root in zip(rules, roots, strict=True):
+        rows = list_rows(connection, one.kind)
+        for row in rows:
+            try:
+                _mirror_note(root, one, row, mirror)
+            except RecordRefused as refusal:
+                mirror.refused.append((row["path"] or f"item {row['id']}", str(refusal)))
+        _strays(root, one, rows, mirror)
+        page = f"docs/dashboard/base-{one.kind}.html"
+        if _replace(root / page, _page(root, one, rows).encode("utf-8")):
+            mirror.written.append(page)
+
+
+def _mirror_note(root: Path, rules: Rules, row: dict[str, Any], mirror: Mirror) -> None:
+    """Write one row's note, unless the file there is a hand edit."""
+    relative = row["path"] or ""
+    path = PurePosixPath(relative)
+    if path.is_absolute() or ".." in path.parts or path.suffix != ".md" or \
+            path.parts[:len(PurePosixPath(rules.base).parts)] != PurePosixPath(rules.base).parts:
+        raise RecordRefused(f"item {row['id']}'s path {relative!r} is not a note under {rules.base}")
+    target = root / relative
+    try:
+        held: bytes | None = target.read_bytes()
+    except FileNotFoundError:
+        held = None
+    if held is not None:
+        problem = _hand_edit(row, held)
+        if problem:
+            raise RecordRefused(problem)
+    if _replace(target, _note(row).encode("utf-8")):
+        mirror.written.append(relative)
+
+
+def _note(row: dict[str, Any]) -> str:
+    """The row as a note: its fields and `status` as frontmatter, the body verbatim, the hash last.
+
+    The note must read back as the row, or the next import would land
+    another row from it: anything else refuses.
+    """
+    fields = {name: value for name, value in row["fields"].items() if name != "kind"}
+    matter = "\n".join(_frontmatter_line(name, value) for name, value in {**fields, "status": row["stage"]}.items())
+    content = f"---\n{matter}\n---\n{row['body']}\n"
+    try:
+        found, body = read_frontmatter(content)
+    except FrontmatterError as error:
+        found, body = {"unreadable": str(error)}, None
+    if found != {**fields, "status": row["stage"]} or body != row["body"]:
+        raise RecordRefused(f"item {row['id']} would not read back from its note, since the frontmatter "
+                            f"reader has no form for one of its values; kept as it is")
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return f"---\n{matter}\nmirror-hash: {digest}\n---\n{row['body']}\n"
+
+
+def _frontmatter_line(name: str, value: Any) -> str:
+    if value is None:
+        return f"{name}:"
+    if isinstance(value, list):
+        return "\n".join([f"{name}:", *(f"  - {_frontmatter_value(item)}" for item in value)])
+    return f"{name}: {_frontmatter_value(value)}"
+
+
+def _frontmatter_value(value: Any) -> str:
+    """Bare when the reader gives the text back as it is, else in double quotes, which it strips."""
+    text = str(value)
+    return text if text and _scalar(text) == text else f'"{text}"'
+
+
+def _hand_edit(row: dict[str, Any], held: bytes) -> str | None:
+    """Why the file at a row's path may not be overwritten, or None.
+
+    A file with a `mirror-hash` may be when the hash is its own content's. A
+    file without one may be when it reads as the row: the import payload of
+    the note equals the row's, so nothing in it is newer.
+    """
+    try:
+        text = held.decode("utf-8")
+        matter, body = read_frontmatter(text)
+    except (UnicodeDecodeError, FrontmatterError):
+        return "it is not a note the renderer can read: a hand edit, kept"
+    if "mirror-hash" in matter:
+        value = matter["mirror-hash"]
+        rest = text.replace(f"mirror-hash: {value}\n", "", 1) if isinstance(value, str) else text
+        if isinstance(value, str) and hashlib.sha256(rest.encode("utf-8")).hexdigest() == value:
+            return None
+        return "it differs from its mirror-hash: a hand edit, kept"
+    fields = {name: value for name, value in matter.items() if name != "status"}
+    if fields == {name: value for name, value in row["fields"].items() if name != "kind"} \
+            and str(matter.get("status") or "").strip() == row["stage"] and body == row["body"]:
+        return None
+    return "it has no mirror-hash and differs from its row: a hand edit or a note changed since the import, kept"
+
+
+def _strays(root: Path, rules: Rules, rows: list[dict[str, Any]], mirror: Mirror) -> None:
+    """Report every note in the base folder no row holds, compared as macOS compares names."""
+    held = {_file_key(row["path"] or "") for row in rows}
+    for path in sorted((root / rules.base).rglob("*.md")):
+        relative = path.relative_to(root).as_posix()
+        if _file_key(relative) not in held:
+            mirror.refused.append((relative, "no row holds this file; kept: add it as a row or delete it"))
+
+
+def _replace(target: Path, data: bytes) -> bool:
+    """Write `data` to `target` by temporary file and rename, only when the bytes differ."""
+    with contextlib.suppress(FileNotFoundError):
+        if target.read_bytes() == data:
+            return False
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        mode = target.stat().st_mode & 0o777
+    except FileNotFoundError:
+        mode = 0o644
+    handle, temporary = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(data)
+        os.chmod(temporary, mode)
+        os.replace(temporary, target)
+    except BaseException:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temporary)
+        raise
+    return True
+
+
+# ---------------------------------------------------------------- the HTML page
+
+
+@functools.cache
+def _tokens_css() -> str:
+    """The foundation's tokens, from the one copy the pack keeps (`bin/sd_research_tokens.py`)."""
+    path = Path(__file__).resolve().parents[2] / "bin" / "sd_research_tokens.py"
+    spec = importlib.util.spec_from_file_location("sd_research_tokens", path)
+    if spec is None or spec.loader is None:
+        raise RecordRefused(f"{path} cannot be loaded, so the page has no foundation tokens")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return str(module.FOUNDATION_TOKENS_CSS)
+
+
+PAGE_CSS = """/* Hallmark · macrostructure: Long Document (ledger + reading column) · tone: instrument panel, calm
+ * theme: ui-design foundation tokens, unchanged · anchor hue: none (neutral chrome, cyan links)
+ * Static and script-free under the Documents policy: system fonts stand in for Plex. */
+html, body { overflow-x: clip; }
+body { margin: 0; background: var(--color-paper); color: var(--color-ink); font: var(--text-base)/1.5 var(--font-ui); }
+main { max-width: var(--measure-list); margin: 0 auto; padding: var(--space-xl) var(--space-md) var(--space-3xl); }
+h1 { font-size: var(--text-xl); font-weight: 600; margin: 0 0 var(--space-2xs); }
+.meta { color: var(--color-muted); font-size: var(--text-sm); margin: 0 0 var(--space-lg); }
+.data { font-family: var(--font-data); font-variant-numeric: tabular-nums; white-space: nowrap; }
+a { color: var(--color-accent); }
+a:focus-visible { outline: var(--rule-focus) solid var(--color-focus); outline-offset: 2px; }
+table.rows { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+.rows th { text-align: left; font: 600 var(--text-xs)/1.2 var(--font-label); color: var(--color-muted);
+  padding: var(--space-xs); border-bottom: var(--rule-hair) solid var(--color-rule); }
+.rows td { padding: var(--space-xs); height: var(--row); vertical-align: top; overflow-wrap: anywhere;
+  border-bottom: var(--rule-hair) solid var(--color-rule-2); }
+.empty { color: var(--color-muted); }
+section.row { margin-top: var(--space-2xl); padding-top: var(--space-lg); border-top: var(--rule-hair) solid var(--color-rule); }
+section.row > h2 { font-size: var(--text-lg); font-weight: 600; margin: 0 0 var(--space-sm); overflow-wrap: anywhere; }
+dl.fields { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-3xs) var(--space-md);
+  font-size: var(--text-sm); margin: 0 0 var(--space-md); }
+dl.fields dt { color: var(--color-muted); font-family: var(--font-label); }
+dl.fields dd { margin: 0; font-family: var(--font-data); overflow-wrap: anywhere; }
+.body { max-width: var(--measure); color: var(--color-ink-2); }
+.body h2, .body h3, .body h4, .body h5, .body h6 { font-size: var(--text-md); color: var(--color-ink); }
+.body pre { background: var(--color-well); padding: var(--space-sm); overflow-x: auto; font: var(--text-sm)/1.45 var(--font-data); }
+.body code { font-family: var(--font-data); }
+.body table { border-collapse: collapse; border: 0; }
+.body th, .body td { border: var(--rule-hair) solid var(--color-rule); }
+@media (max-width: 700px) { .rows .optional { display: none; } }
+"""
+
+
+def _page(root: Path, rules: Rules, rows: list[dict[str, Any]]) -> str:
+    """One base: a table of every row, then a section per row whose stage is not table-only."""
+    name = html.escape(PurePosixPath(rules.base).name)
+    newest = max((str(row["updated_at"]) for row in rows), default="")
+    score = "score" in rules.fields
+    head = ["Title", "Stage", *(["Score"] if score else []), "Created", "Item"]
+    lines = [f"<tr><td>{_title_cell(row)}</td><td>{html.escape(row['stage'] or '')}</td>"
+             + (f"<td class=\"data\">{html.escape(str(row['fields'].get('score') or ''))}</td>" if score else "")
+             + f"<td class=\"data optional\">{html.escape(str(row['created_at'] or '')[:10])}</td>"
+             f"<td class=\"data optional\">{row['id']}</td></tr>" for row in rows]
+    table = ("<table class=\"rows\"><caption class=\"meta\">Every row, oldest first</caption><thead><tr>"
+             + "".join(f"<th scope=\"col\">{label}</th>" for label in head) + "</tr></thead><tbody>"
+             + "".join(lines) + "</tbody></table>") if rows else "<p class=\"empty\">No rows.</p>"
+    sections = [_section(root, row) for row in rows if row["stage"] not in TABLE_ONLY]
+    return ("<!doctype html>\n<html lang=\"en\" data-theme=\"system\"><head><meta charset=\"utf-8\">"
+            "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            f"<title>{name} · base mirror</title><style>\n{_tokens_css()}\n{PAGE_CSS}</style></head>"
+            f"<body><main><h1>{name}</h1><p class=\"meta\">Read-only mirror of the workflow database: "
+            f"{len(rows)} row(s), the newest changed <span class=\"data\">{html.escape(newest)}</span>. "
+            f"Move or edit a row on the dashboard.</p>\n{table}\n" + "\n".join(sections)
+            + "\n</main></body></html>\n")
+
+
+def _title_cell(row: dict[str, Any]) -> str:
+    title = html.escape(row["title"] or "")
+    return title if row["stage"] in TABLE_ONLY else f"<a href=\"#item-{row['id']}\">{title}</a>"
+
+
+def _section(root: Path, row: dict[str, Any]) -> str:
+    fields = "".join(f"<dt>{html.escape(name)}</dt><dd>{html.escape(_shown(value))}</dd>"
+                     for name, value in row["fields"].items() if name != "kind")
+    return (f"<section class=\"row\" id=\"item-{row['id']}\"><h2>{html.escape(row['title'] or '')}</h2>"
+            f"<dl class=\"fields\"><dt>stage</dt><dd>{html.escape(row['stage'] or '')}</dd>{fields}</dl>"
+            f"<div class=\"body\">{_body_html(root, row)}</div></section>")
+
+
+def _shown(value: Any) -> str:
+    if value is None or value == "":
+        return "not set"
+    return ", ".join(str(item) for item in value) if isinstance(value, list) else str(value)
+
+
+def _body_html(root: Path, row: dict[str, Any]) -> str:
+    """The body through `md_to_html`, with the vault-only syntax drawn as text first.
+
+    A Meta Bind status control goes, line and all: the stage column shows it.
+    Any other control becomes its field's value, read-only. A wikilink becomes
+    its alias or target, and a remote image a link. Code fences stay as written.
+    """
+    out: list[str] = []
+    closing = None
+    for line in row["body"].split("\n"):
+        if closing is not None:
+            closing = None if closing.fullmatch(line.strip()) else closing
+            out.append(line)
+            continue
+        closing = _fence_closer(line.strip())
+        if closing is not None:
+            out.append(line)
+            continue
+        if any(control.group(1) == "status" for control in CONTROL.finditer(line)):
+            continue
+        line = CONTROL.sub(lambda control: _shown(row["fields"].get(control.group(1))), line)
+        line = WIKILINK.sub(lambda link: (link.group(2) or link.group(1)).strip(), line)
+        out.append(REMOTE_IMAGE.sub(lambda image: f"[{image.group(1) or image.group(2)}]({image.group(2)})", line))
+    try:
+        return md_to_html("\n".join(out), str((root / (row["path"] or "")).parent))
+    except WorkflowError:
+        return f"<pre>{html.escape(row['body'])}</pre>"

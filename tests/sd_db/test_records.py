@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from sd_db import connect, create_item
 from sd_db.migrate import initialise
-from sd_db.records import RecordRefused, add_row, edit_row, get_row, list_rows, rules_for
+from sd_db.records import RecordRefused, add_row, edit_row, get_row, list_rows, render, rules_for
 from sd_db.sources import MigrationRefused, run
 from sd_db.sources.vault import Reader
 from sd_db.workflow import MissingItem, StaleItem, item_state
@@ -63,6 +63,12 @@ class RecordsCase(unittest.TestCase):
                                                    environ={"OBSIDIAN_VAULT": str(vault)}))
         self.assertTrue(sitting.clean)
         self.home = root / "home"
+        # Each write renders the mirror (sd:3976): into this vault, with these rules.
+        for patcher in (patch.dict("os.environ", {"OBSIDIAN_VAULT": str(vault)}),
+                        patch("sd_db.records.plugin_entries", return_value=[flipped()])):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.assertTrue(render(self.db, home=self.home, entries=[flipped()]).ok)
         self.idea = self.rules("blog-idea")
         self.topic = self.rules("topic")
 
