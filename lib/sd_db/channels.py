@@ -10,6 +10,9 @@ and never read as a setting.
 
 A channel named with `{}` writes to its default folder; a channel left out is
 off. NULL is no setting, which is not the same as `{}`: clearing writes NULL.
+
+`record_url` puts where a document was published on the item that owns it
+(sd:3979): the item row holds the URL, and the dashboard reads the row.
 """
 
 from __future__ import annotations
@@ -19,6 +22,9 @@ import re
 import unicodedata
 from typing import Any
 
+from . import paths
+from .database import transaction
+from .errors import SdDbError
 from .repos import RepoRefusal
 
 #: The channels a repository may name, in the order a refusal lists them.
@@ -106,3 +112,56 @@ def canonical(text: str | None) -> str:
         return json.dumps(json.loads(text), sort_keys=True, separators=(",", ":"))
     except ValueError:
         return text
+
+
+class UrlRefusal(SdDbError):
+    """A published URL that cannot be recorded on its item; nothing was written."""
+
+
+def record_url(connection: Any, item: int, repo: str, document: str, title: str, channel: str, url: str,
+               who: str) -> str:
+    """Record that `document` of `repo` was published to `channel` at `url`, on item `item`.
+
+    One transaction. The URL goes in `fields.published`, keyed
+    `<repo>::<document>` with the repository's stored key, so two
+    repositories with one basename keep two entries; a `comment` note
+    `Published <channel> <document>: <url>` gives the history. Returns
+    `unchanged` when the field already holds this URL (no note), else
+    `recorded`. Refuses, writing nothing, while a restore is unresolved (the
+    row may be older than the receipts) and for an item that is not there.
+    """
+    from .writes import add_note, now, unresolved_state
+
+    if channel not in CHANNELS:
+        raise UrlRefusal(f"{channel!r} is not a channel; expected {', '.join(CHANNELS[:-1])} or {CHANNELS[-1]}")
+    if type(item) is not int or item < 1:
+        raise UrlRefusal(f"item must be an sd item number, not {item!r}")
+    key = f"{paths.key(repo)}::{document}"
+    with transaction(connection):
+        if unresolved_state(connection, "restore"):
+            raise UrlRefusal("a restore is unresolved, so the item rows may be older than the receipts; "
+                             "resolve the restore, then run again")
+        row = connection.execute("SELECT fields FROM item WHERE id = ?", (item,)).fetchone()
+        if row is None:
+            raise UrlRefusal(f"sd:{item} is not an item in this database")
+        try:
+            fields = json.loads(row["fields"]) if row["fields"] else {}
+        except ValueError as error:
+            raise UrlRefusal(f"sd:{item}'s fields are not JSON ({error}); left as they are") from error
+        if not isinstance(fields, dict):
+            raise UrlRefusal(f"sd:{item}'s fields are not an object; left as they are")
+        published = fields.get("published")
+        published = dict(published) if isinstance(published, dict) else {}
+        entry = published.get(key)
+        entry = dict(entry) if isinstance(entry, dict) else {}
+        if entry.get(channel) == url and entry.get("title") == title:
+            return "unchanged"
+        moved = entry.get(channel) != url
+        entry.update({"title": title, channel: url})
+        published[key] = entry
+        fields["published"] = published
+        connection.execute("UPDATE item SET fields = ?, updated_at = ? WHERE id = ?",
+                           (json.dumps(fields, sort_keys=True), now(), item))
+        if moved:
+            add_note(connection, item, "comment", f"Published {channel} {document}: {url}", session=who)
+    return "recorded"

@@ -46,7 +46,7 @@ from pathlib import Path
 from typing import Any, NamedTuple
 from urllib.parse import quote, urlsplit
 
-from sd_lib import git_output, main_worktree_root
+from sd_lib import git_output, import_sd_db, main_worktree_root
 
 
 def dashboard_config(environ: Mapping[str, str]) -> Path:
@@ -102,6 +102,16 @@ LEGACY_QUEUE = Path(
 #: write lands in somebody else's vault layout.
 VAULT = os.environ.get("OBSIDIAN_VAULT", "")
 BRIEFS = "Briefs"
+
+#: The home whose workflow database an item's published URL is recorded in
+#: (sd:3979). `None` is `$HOME`, read at call time as `sd_db` reads it; on a
+#: satellite that database is the hub's. A test points it at a fixture.
+DATABASE_HOME: Path | None = None
+
+#: How long, in milliseconds, recording a URL waits for the database's lock.
+#: Short: the render runs in a git hook, and a record that does not land is
+#: retried by the next render or drain.
+DATABASE_BOUND = 5000
 
 #: Where the dashboard's HTML is written, relative to the repo. Gitignored:
 #: it is generated on every commit, and a generated tree in history turns each
@@ -730,8 +740,13 @@ def vault_owner(target: Path) -> str | None:
     return ""
 
 
-def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
+def write_obsidian(repo: Path, docs: list[dict[str, Any]],
+                   wrote: list[dict[str, Any]] | None = None) -> list[str]:
     """Write every document's Markdown into the vault, under its repo folder.
+
+    Each entry whose copy was written is appended to `wrote`, when given: the
+    render records the vault link of those alone (sd:3979). A skipped copy is
+    not there, so nothing points an item at a copy that was not written.
 
     Obsidian is where these documents live, so this is not a mirror of the
     published form -- it is the Markdown itself, carried across with a
@@ -797,6 +812,8 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
             reports.append("obsidian: cannot write %s.md (%s)" % (out, problem))
             continue
         written += 1
+        if wrote is not None:
+            wrote.append(cfg)
     if written:
         reports.append("obsidian: wrote %d document(s) to %s" % (written, folder))
     return reports
@@ -1014,7 +1031,8 @@ def mirror_fingerprint(request: dict[str, Any], target: dict[str, str], what: st
     document moved to another container is a new mirror; the designation's
     own page or file id, because a `page=` the user wrote is an instruction
     the drain has to see; and the source path and `source_url`, because the
-    request carries them and the mirror's pointer line names them. A request
+    request carries them and the mirror's pointer line names them; and the
+    `item`, because `delivered` records the URL on it. A request
     with no `source_url` hashes exactly what it did before the field existed,
     so a repository without a GitHub origin re-queues nothing on upgrade; one
     with it re-queues each document once, which is what corrects a pointer a
@@ -1031,6 +1049,11 @@ def mirror_fingerprint(request: dict[str, Any], target: dict[str, str], what: st
                  designated=request.get(what, ""))
     if request.get("source_url"):
         named.update(source_url=request["source_url"])
+    # The item the drain's `delivered` records the URL on (sd:3979): a change
+    # re-queues once, so the URL reaches the new item. Absent, the digest is
+    # what it was before the field joined it.
+    if request.get("item") is not None:
+        named.update(item=request["item"])
     digest = hashlib.sha256(json.dumps(named, sort_keys=True).encode("utf-8"))
     digest.update(str(request.get("content", "")).encode("utf-8"))
     return digest.hexdigest()
@@ -1108,7 +1131,7 @@ def already_queued(path: Path, receipt: Path, wanted: str,
     return ""
 
 
-def mirror_delivered(name: str, fingerprint: str, url: str = "") -> str:
+def mirror_delivered(name: str, fingerprint: str, url: str = "") -> tuple[int, str]:
     """Record that the drain wrote the generation `fingerprint` of request
     `name`, and remove the request only while it is still that generation.
 
@@ -1119,61 +1142,108 @@ def mirror_delivered(name: str, fingerprint: str, url: str = "") -> str:
     of the request, as it stood in step 1 -- and leaves a newer request in
     place for the next drain.
 
-    Returns a one-line report. Recording comes before removing: a receipt
-    that says `delivered` with the request still present costs one skipped
-    re-render at worst, while a removed request with nothing recorded is the
-    defect this exists to close.
+    Returns the exit status and a one-line report: 0 when every step
+    finished, 2 when a request naming an item came with no URL (nothing
+    written), 1 when any step did not finish (sd:3979). Recording comes
+    before removing: a receipt that says `delivered` with the request still
+    present costs one skipped re-render at worst, while a removed request
+    with nothing recorded is the defect this exists to close.
 
     The read, the comparison and the unlink happen under the queue lock. The
     comparison against a record read before the lock, or before the receipt
     write, is the window a render fits in: it wrote B after the read, and
     the unlink took B with A's fingerprint on the receipt.
 
-    `url` is where the drain's mirror landed. It goes on the receipt with the
-    item the request names, so a reader of the receipts can show an item
-    where its document was published (sd:3514).
+    `url` is where the drain's mirror landed. It goes on the receipt, and on
+    the item the drained generation names (sd:3514, sd:3979).
     """
     try:
         with queue_locked():
             return acknowledge_request(name, fingerprint, url)
     except OSError as problem:
-        return "delivered: cannot lock the queue at %s (%s); request left in place" % (
+        return 1, "delivered: cannot lock the queue at %s (%s); request left in place" % (
             queue_lock_path(), problem)
 
 
-def acknowledge_request(name: str, fingerprint: str, url: str = "") -> str:
+def record_item_url(item: Any, repo: str, document: str, title: str, channel: str,
+                    url: str) -> tuple[str, str]:
+    """Record `url` on `item` in the workflow database: `(answer, "")` with
+    `recorded` or `unchanged`, or `("", reason)` when it was not recorded.
+
+    A failed import, open or write is a reason, never a pass: the caller
+    leaves its state for the next run. A machine with no database is one too.
+    """
+    imported = import_sd_db()
+    if imported.module is None:
+        return "", imported.problem
+    try:
+        from sd_db import channels  # noqa: PLC0415
+        connection = imported.module.connect(home=DATABASE_HOME, busy_timeout=DATABASE_BOUND)
+    except Exception as problem:  # an unknown is not a pass: every failure is the reason
+        return "", "cannot open the workflow database: %s" % (problem or type(problem).__name__)
+    try:
+        return channels.record_url(connection, item, repo, document, title, channel, url,
+                                   "sd-research-kit"), ""
+    except Exception as problem:  # refused or failed: the row is as it was
+        return "", str(problem) or type(problem).__name__
+    finally:
+        connection.close()
+
+
+def acknowledge_request(name: str, fingerprint: str, url: str = "") -> tuple[int, str]:
     """The acknowledgement itself, for a caller holding the queue lock.
 
     Read here, under the lock, and compared here: the record this reads is
     the one the unlink acts on, because nothing can write the file between
     the two while the lock is held.
+
+    The item record comes first, then the receipt, then the removal, and the
+    item is recorded for the generation the drain read only: a newer pending
+    request names its own item, which the next drain records. A stop after
+    the record leaves the request, and the rerun's record answers `unchanged`.
     """
     path = QUEUE / name
     pending = load_record(path)
     if not pending:
-        return "delivered: no readable request at %s" % path
+        return 1, "delivered: no readable request at %s" % path
+    drained = pending.get("fingerprint") == fingerprint
+    item = pending.get("item") if drained else None
+    if item is not None:
+        if not url:
+            return 2, ("delivered: %s names sd:%s; give --url <url> so the item can link "
+                       "it; nothing written" % (name, item))
+        _, problem = record_item_url(
+            item, str(pending.get("repo", "")), str(pending.get("document", "")),
+            str(pending.get("title", "")), str(pending.get("destination", "")), url)
+        if problem:
+            return 1, ("delivered: sd:%s not recorded (%s); request and receipt left in "
+                       "place" % (item, problem))
     receipt = receipts() / name
     record = load_record(receipt)
     record.update(delivered=fingerprint)
     if url:
         record.update(url=url)
-    if "item" in pending:
-        record.update(item=pending["item"])
+    # The item of the generation delivered, or none: a newer request's item
+    # is not where this URL went.
+    if item is not None:
+        record.update(item=item)
+    else:
+        record.pop("item", None)
     try:
         receipts().mkdir(parents=True, exist_ok=True)
         receipt.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
     except OSError as problem:
-        return "delivered: cannot write receipt for %s (%s); request left in place" % (
+        return 1, "delivered: cannot write receipt for %s (%s); request left in place" % (
             name, problem)
-    if pending.get("fingerprint") != fingerprint:
-        return ("delivered: recorded %s for %s; a newer request is pending and "
-                "stays" % (fingerprint[:12], name))
+    if not drained:
+        return 0, ("delivered: recorded %s for %s; a newer request is pending and "
+                   "stays" % (fingerprint[:12], name))
     try:
         path.unlink()
     except OSError as problem:
-        return "delivered: recorded %s for %s; cannot remove the request (%s)" % (
+        return 1, "delivered: recorded %s for %s; cannot remove the request (%s)" % (
             fingerprint[:12], name, problem)
-    return "delivered: recorded %s for %s; request removed" % (fingerprint[:12], name)
+    return 0, "delivered: recorded %s for %s; request removed" % (fingerprint[:12], name)
 
 
 def delivered_main(argv: list[str]) -> int:
@@ -1198,8 +1268,9 @@ def delivered_main(argv: list[str]) -> int:
               file=sys.stderr)
         return 2
     name = Path(argv[0]).name
-    print(mirror_delivered(name, argv[1], url))
-    return 0
+    status, said = mirror_delivered(name, argv[1], url)
+    print(said, file=sys.stdout if status == 0 else sys.stderr)
+    return status
 
 
 def enqueue(repo: Path, docs: list[dict[str, Any]]) -> list[str]:
@@ -1313,9 +1384,10 @@ def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, An
 def designated_item(cfg: dict[str, Any]) -> tuple[dict[str, int], list[str]]:
     """`{"item": <n>}` for the sd item a DOCS entry names, and what was wrong.
 
-    Where `delivered --url` lands the URL (sd:3514). Not part of the
-    fingerprint: naming an item changes nothing on the destination, so it
-    queues nothing on its own. A bad value is reported and not carried.
+    Where `delivered --url` and the render's vault link land the URL
+    (sd:3514, sd:3979). Part of the fingerprint when present, so naming or
+    changing an item queues the document once and the next drain records
+    its URL there. A bad value is reported and not carried.
     """
     item = cfg.get("item")
     if item is None:
@@ -1378,7 +1450,8 @@ def publish(repo: Path, project: str | None, docs: list[dict[str, Any]]) -> list
     copies that cannot leak are written before the ones that can, so a run that
     stops halfway has published locally and disclosed nothing.
     """
-    reports = write_obsidian(repo, docs)
+    wrote: list[dict[str, Any]] = []
+    reports = write_obsidian(repo, docs, wrote)
     reports.append(ignore_dashboard(repo))
     reports.append(register_root(
         repo, project_label(repo, project), repo / DASHBOARD_DIR))
@@ -1388,6 +1461,42 @@ def publish(repo: Path, project: str | None, docs: list[dict[str, Any]]) -> list
     # request of its own to write.
     reports += migrate_legacy_queue()
     reports += enqueue(repo, docs)
+    reports += record_obsidian(repo, wrote)
+    return reports
+
+
+def record_obsidian(repo: Path, wrote: list[dict[str, Any]]) -> list[str]:
+    """Record each written vault copy's link on the item its entry names (sd:3979).
+
+    Only the copies `write_obsidian` wrote, and only where the render would
+    queue a mirror: the main checkout on its default branch, with no
+    `SD_SKIP_MIRROR` and no `SD_MIRROR_DRY_RUN`. A record that does not land
+    is reported and never fails the render or its hook; the next render
+    tries again, and an equal URL costs one read.
+    """
+    named = [(cfg, designated_item(cfg)[0]["item"]) for cfg in wrote if designated_item(cfg)[0]]
+    if not named:
+        return []
+    held = str(ENVIRON.get(SKIP_MIRROR, "")).strip()
+    why = ("%s (%s)" % (held, SKIP_MIRROR) if held
+           else "%s=1" % MIRROR_DRY_RUN if ENVIRON.get(MIRROR_DRY_RUN)
+           else publish_refusal(repo, "mirror"))
+    if why:
+        return ["item: obsidian link for sd:%d not recorded (%s)" % (item, why) for _, item in named]
+    home = repo_home(repo)
+    vault = Path(VAULT).expanduser()
+    folder = vault_folder(repo)
+    reports = []
+    for cfg, item in named:
+        out = str(cfg.get("out", "")).strip()
+        relative = (folder / out).relative_to(vault).as_posix() if folder else out
+        url = "obsidian://open?vault=%s&file=%s" % (quote(vault.name, safe=""), quote(relative, safe=""))
+        answer, problem = record_item_url(item, str(home), out, str(cfg.get("title", out)),
+                                          "obsidian", url)
+        if problem:
+            reports.append("item: obsidian link for sd:%d not recorded (%s)" % (item, problem))
+        elif answer != "unchanged":
+            reports.append("item: obsidian link for sd:%d recorded: %s" % (item, url))
     return reports
 
 
