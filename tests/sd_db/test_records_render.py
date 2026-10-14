@@ -6,6 +6,7 @@ the driver flipped to `db`, as in `test_records`. Every vault is a temp dir.
 """
 
 import contextlib
+import datetime
 import io
 import json
 import os
@@ -20,10 +21,16 @@ from sd_db.migrate import initialise
 from sd_db.records import MIRROR_KEY, add_row, edit_row, get_row, render, rules_for
 from sd_db.remote import HubOnly
 from sd_db.sources import run, verify
+from sd_db.sources.frontmatter import read as read_frontmatter
 from sd_db.sources.vault import Reader
 from sd_db.testing.wire import hub_only
 
 from . import support
+
+try:
+    import yaml  # type: ignore[import-untyped]
+except ImportError:  # the gate's venv has it; a bare interpreter checks the importer's reader alone
+    yaml = None
 from .test_records import flipped
 
 IDEAS = "System/Databases/Blog Ideas"
@@ -31,6 +38,12 @@ TOPICS = "System/Databases/Topics"
 
 STATUS_CONTROL = "**Status:** `INPUT[inlineSelect(option(inbox), option(accepted), option(declined)):status]`"
 RATING_CONTROL = "**My rating:** `INPUT[inlineSelect(option(1), option(2), option(3)):my-rating]`"
+
+#: Text YAML reads as something else when bare: a comment, a mapping, a flow
+#: collection, an anchor, a tag, a bool, a null, a number in another form.
+TRICKY = ["#hashtag first", "a: b", "ends:", " padded ", "it's", 'say "hi"', "- dash", "? q", "[x]", "{x}",
+          "&anchor", "*alias", "!tag", "|pipe", ">gt", "%pct", "@at", "`tick", ",comma", "yes", "No", "null",
+          "~", "true", "off", "08", "1e3", "0x1F", ".inf", "1:20", "1_000", "+1", "a #b", "2026-06-15 noon"]
 
 #: A note body with every shape the HTML mirror redraws, and one code fence it must leave alone.
 RICH = f"""---
@@ -124,6 +137,36 @@ class TheMarkdownMirror(MirrorCase):
         self.assertTrue(self.render().ok)
         reader = Reader.from_plugins([support.plugin_entry()], environ=self.env)
         self.assertEqual(verify(self.db, reader, reader.freeze()), [])
+        if yaml is not None:  # every mirror note is YAML too, and says what the importer reads
+            for path in self.vault.rglob("*.md"):
+                text = path.read_text(encoding="utf-8")
+                loaded, (found, _) = yaml.safe_load(text.split("---\n")[1]), read_frontmatter(text)
+                self.assertEqual({key: str(value) if isinstance(value, (int, datetime.date)) else value
+                                  for key, value in loaded.items()}, found, path)
+
+    def test_every_value_reads_back_as_the_same_text_in_the_importer_and_in_yaml(self):
+        self.render()
+        self.move("first idea", None, fields={"description": "a: b", "score": "8", "tags": TRICKY})
+        self.assertTrue(self.beat()["ok"], self.beat())
+        text = self.note("first idea")
+        found, _ = read_frontmatter(text)
+        self.assertEqual((found["description"], found["score"], found["tags"]), ("a: b", "8", TRICKY))
+        reader = Reader.from_plugins([support.plugin_entry()], environ=self.env)
+        self.assertEqual(verify(self.db, reader, reader.freeze()), [])
+        if yaml is not None:  # the pack venv has PyYAML; Obsidian reads the block as YAML
+            loaded = yaml.safe_load(text.split("---\n")[1])
+            self.assertEqual((loaded["description"], loaded["tags"]), ("a: b", TRICKY))
+            # Numbers and dates stay bare, so Obsidian keeps them number and date properties.
+            self.assertEqual((loaded["score"], loaded["dateCreated"]), (8, datetime.date(2026, 6, 15)))
+
+    def test_a_value_no_quoting_can_carry_is_refused_and_its_file_kept(self):
+        self.render()
+        before = self.note("first idea")
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.move("first idea", None, fields={"description": "\"it's\" both"})
+        mirror = self.render()
+        self.assertIn("would not read back", dict(mirror.refused)[f"{IDEAS}/first idea.md"])
+        self.assertEqual(self.note("first idea"), before)
 
     def test_an_added_row_carries_its_date_so_its_note_reads_back(self):
         self.render()
@@ -368,6 +411,9 @@ class TheHtmlMirror(MirrorCase):
         page = self.page()
         for banned in ("<script", "<link", 'src="http', "url(http", "@import"):
             self.assertNotIn(banned, page)
+        # A body link to `javascript:` stays a dead link, even opened from disk with no served policy.
+        self.assertIn('<meta http-equiv="Content-Security-Policy" content="script-src \'none\'; '
+                      'object-src \'none\'">', page)
         self.assertIn("<style>", page)
         self.assertIn("--color-paper", page)
 

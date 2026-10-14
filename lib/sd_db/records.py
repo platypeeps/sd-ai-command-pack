@@ -60,7 +60,7 @@ from typing import Any
 from .database import refuse_hub_only, transaction
 from .publication_render import _fence_closer, md_to_html
 from .sources import MigrationRefused
-from .sources.frontmatter import FrontmatterError, _scalar
+from .sources.frontmatter import FrontmatterError
 from .sources.frontmatter import read as read_frontmatter
 from .sources.vault import DUE, NOT_FIELDS, SOURCE, plugin_entries, store_root
 from .workflow import MissingItem, WorkflowError, _checked_state, _text, item_state
@@ -617,10 +617,34 @@ def _frontmatter_line(name: str, value: Any) -> str:
     return f"{name}: {_frontmatter_value(value)}"
 
 
+#: Words a YAML 1.1 or 1.2 reader turns into a bool, a null or a float when bare.
+YAML_WORDS = {"y", "n", "yes", "no", "true", "false", "on", "off", "null", "~", ".inf", "-.inf", "+.inf", ".nan"}
+#: Bare text a YAML reader may read as a number, a date or a time: digits, signs, dots, colons, `_`, `e`, `x`.
+NUMBER_LIKE = re.compile(r"[-+.]?[0-9][0-9a-zA-Z_.:+-]*")
+#: Bare numbers and dates that stay bare, so Obsidian keeps them number and date properties.
+TYPED = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?|[0-9]{4}-[0-9]{2}-[0-9]{2}")
+
+
 def _frontmatter_value(value: Any) -> str:
-    """Bare when the reader gives the text back as it is, else in double quotes, which it strips."""
+    """The text as a YAML scalar that the importer's reader and a YAML reader both read back as it is.
+
+    Bare when YAML reads it as the same string, or as the number or date it
+    is. Else in double quotes, or single when it holds `"` or `\\`: the
+    importer's reader strips the quotes and unescapes nothing, so a text
+    that needs both kinds has no form, and the row refuses.
+    """
     text = str(value)
-    return text if text and _scalar(text) == text else f'"{text}"'
+    if any(ord(char) < 32 or char == "\x7f" for char in text):
+        raise RecordRefused(f"{text!r} holds a control character, so it would not read back from a note")
+    if TYPED.fullmatch(text) or not (
+            text != text.strip() or text[:1] in "-?:,[]{}#&*!|>'\"%@`" or ": " in text or " #" in text
+            or text.endswith(":") or text.lower() in YAML_WORDS or NUMBER_LIKE.fullmatch(text)):
+        return text
+    if '"' not in text and "\\" not in text:
+        return f'"{text}"'
+    if "'" not in text:
+        return f"'{text}'"
+    raise RecordRefused(f"{text!r} needs quotes and holds both kinds, so it would not read back from a note")
 
 
 def _hand_edit(row: dict[str, Any], held: bytes) -> str | None:
@@ -763,6 +787,8 @@ def _page(root: Path, rules: Rules, rows: list[dict[str, Any]]) -> str:
     sections = [_section(root, row) for row in rows if row["stage"] not in TABLE_ONLY]
     return ("<!doctype html>\n<html lang=\"en\" data-theme=\"system\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+            # A body link to `javascript:` stays dead even opened from disk, with no served policy.
+            "<meta http-equiv=\"Content-Security-Policy\" content=\"script-src 'none'; object-src 'none'\">"
             f"<title>{name} · base mirror</title><style>\n{_tokens_css()}\n{PAGE_CSS}</style></head>"
             f"<body><main><h1>{name}</h1><p class=\"meta\">Read-only mirror of the workflow database: "
             f"{len(rows)} row(s), the newest changed <span class=\"data\">{html.escape(newest)}</span>. "
