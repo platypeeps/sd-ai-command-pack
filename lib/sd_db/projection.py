@@ -25,6 +25,7 @@ import json
 import re
 import sqlite3
 import uuid
+from datetime import UTC, datetime
 from typing import Any
 
 from .database import transaction
@@ -221,21 +222,6 @@ def _parent_check(connection: sqlite3.Connection, item: int, of: int) -> None:
                                     "a task of a task is one level too deep")
 
 
-def designated_rows(connection: sqlite3.Connection) -> list[tuple[sqlite3.Row, dict[str, Any]]]:
-    """Every item holding a readable designation, by id. One that is unreadable is left out here."""
-    found = []
-    for row in connection.execute(
-            "SELECT * FROM item WHERE fields LIKE ? ORDER BY id", (f'%"{FIELD}"%',)).fetchall():
-        try:
-            fields = json.loads(row["fields"])
-            held = designation(fields, row["id"]) if isinstance(fields, dict) else None
-        except (ValueError, ProjectionRefusal):
-            continue
-        if held is not None:
-            found.append((row, held))
-    return found
-
-
 def designate(connection: sqlite3.Connection, item: int, specs: list[str], *, who: str,
               expected_revision: str | None = None) -> dict:
     """Apply `sd task edit N --experiment ...` to item `item`, in one transaction.
@@ -247,7 +233,7 @@ def designate(connection: sqlite3.Connection, item: int, specs: list[str], *, wh
     change. An equal designation writes nothing. Returns the item's state.
     """
     from .workflow import StaleItem, item_state
-    from .writes import add_note, now
+    from .writes import add_note
 
     if not specs:
         raise ProjectionRefusal("--experiment needs a value: yes, of:M, row:ID, new or off")
@@ -277,7 +263,8 @@ def designate(connection: sqlite3.Connection, item: int, specs: list[str], *, wh
         same = held is not None and all(held.get(key) == value.get(key) for key in KEYS if key != "since")
         if same:
             return item_state(connection, item)
-        value["since"] = now()
+        # To the microsecond: an off and back within one second is still a change of designation.
+        value["since"] = datetime.now(UTC).isoformat(timespec="microseconds")
         _store(connection, item, fields, validate(value))
         add_note(connection, item, "comment", f"Updated experiments by {who}", session=who)
     return item_state(connection, item)
@@ -339,3 +326,277 @@ def record_row(connection: sqlite3.Connection, item: int, fingerprint: str, url:
             target = intent.get("target") or TARGETS.get(held["as"], "experiments")
             add_note(connection, item, "comment", f"Projected to {target}: {url}", session=who)
     return "recorded"
+
+
+# The queue and the plan (E2). Nothing below reaches Notion: `project` writes a
+# request per designated item, the drain fetches the row, and `plan` decides
+# from that fetch what the drain writes.
+
+#: Every property sd writes, per target, with its Notion type. The first is the title.
+PROPERTIES = {
+    "experiments": {"Experiment": "title", "Status": "select", "Stage": "select"},
+    "tasks": {"Task": "title", "Status": "select", "Experiment": "relation", "Due": "date", "Priority": "select"},
+}
+
+#: The sd-owned properties: written on every plan, under the guard. The rest of `PROPERTIES` are seeds.
+OWNED = {"experiments": ("Status",), "tasks": ("Status", "Experiment", "Due")}
+
+#: The options each select must offer: every value the maps can write there.
+OPTIONS = {"Status": tuple(dict.fromkeys(STATUS.values())),
+           "Stage": (IDEA_STAGE, *dict.fromkeys(STAGE.values())),
+           "Priority": tuple(dict.fromkeys(PRIORITY.values()))}
+
+#: Notion types a select may be read as: the team's `Status` is a select, and Notion's own status type
+#: takes an option by name the same way.
+SELECTS = ("select", "status")
+
+#: The one line the row's body holds, written at create (Q2). The drain's search after an interrupted
+#: create matches its first words.
+POINTER = "Projected from sd:{item}. sd keeps Status current; edit anything else."
+
+
+def _empty(value: Any) -> Any:
+    """One spelling for a live or wanted value: None for empty, a sorted id list for a relation."""
+    if value is None or value == "" or value == []:
+        return None
+    if isinstance(value, list):
+        return sorted(row_id(entry) or str(entry) for entry in value)
+    return value.strip() if isinstance(value, str) else value
+
+
+def wanted(connection: sqlite3.Connection, row: sqlite3.Row, held: dict[str, Any]) -> dict[str, Any]:
+    """The sd-owned values item `row` wants on its row, `_empty` spelled."""
+    values: dict[str, Any] = {"Status": status_value(row["status"])}
+    if held["as"] == "task":
+        _, parent_fields = _fields(connection, held["of"])
+        parent = designation(parent_fields, held["of"])
+        if parent is None or parent["as"] != "experiment":
+            raise ProjectionRefusal(f"parent sd:{held['of']} is not designated experiment")
+        values["Experiment"] = _empty([parent["row"]] if parent.get("row") else None)
+        values["Due"] = _empty(row["due"])
+    return values
+
+
+def fingerprint(request: dict[str, Any]) -> str:
+    """The generation of a request: the item, its designation, the database and the sd-owned values.
+
+    Not the title, `Stage` or `Priority`: those are seeds, written once, so a change to one queues nothing.
+    """
+    import hashlib
+
+    named = {key: request.get(key) for key in ("item", "as", "of", "since", "row", "database", "values")}
+    return hashlib.sha256(json.dumps(named, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def request_for(connection: sqlite3.Connection, row: sqlite3.Row, held: dict[str, Any],
+                databases: dict[str, str]) -> dict[str, Any]:
+    """The `notion-row` request item `row` asks for, with its fingerprint. Refuses an `off` designation."""
+    from . import paths
+
+    if held["as"] not in TARGETS:
+        raise ProjectionRefusal(f"sd:{row['id']} is designated off")
+    target = TARGETS[held["as"]]
+    request = {
+        "destination": "notion-row", "item": row["id"], "document": f"sd:{row['id']}",
+        "as": held["as"], "of": held.get("of"), "since": held["since"], "row": held.get("row"),
+        "database": databases[target], "target": target,
+        # The disk path `sd-status` compares, as a research request carries.
+        "repo": str(paths.expand(row["repo"])) if row["repo"] else "",
+        "values": wanted(connection, row, held),
+    }
+    request["fingerprint"] = fingerprint(request)
+    return request
+
+
+def designated_rows(connection: sqlite3.Connection,
+                    problems: list[str] | None = None) -> list[tuple[sqlite3.Row, dict[str, Any]]]:
+    """Every item holding a designation, by id; one that cannot be read goes to `problems`."""
+    found = []
+    for row in connection.execute(
+            "SELECT * FROM item WHERE fields LIKE ? ORDER BY id", (f'%"{FIELD}"%',)).fetchall():
+        try:
+            fields = json.loads(row["fields"])
+            held = designation(fields, row["id"]) if isinstance(fields, dict) else None
+        except (ValueError, ProjectionRefusal) as error:
+            if problems is not None:
+                problems.append(f"sd:{row['id']}: the designation cannot be read ({error})")
+            continue
+        if held is not None:
+            found.append((row, held))
+    return found
+
+
+def _channels(connection: sqlite3.Connection, row: sqlite3.Row) -> None:
+    """Refuse an item whose repo's channels setting leaves out `notion`, or cannot be read (sd:3462)."""
+    if not row["repo"]:
+        return
+    from . import paths
+    from .channels import outbound
+    from .repos import repo_channels
+
+    try:
+        setting = outbound(repo_channels(connection, paths.expand(row["repo"])))
+    except SdDbError as error:
+        raise ProjectionRefusal(f"the channels setting of {row['repo']} cannot be read ({error}); "
+                                "unknown is not a pass") from None
+    if setting is not None and "notion" not in setting:
+        raise ProjectionRefusal(f"the channels setting of {row['repo']} leaves out notion; not projected")
+
+
+def _schema(live: dict[str, Any], target: str, names: tuple[str, ...] | list[str]) -> None:
+    """Refuse a live schema that lacks, retypes or narrows a property this plan writes, naming it."""
+    schema = live.get("schema")
+    if not isinstance(schema, dict):
+        raise ProjectionRefusal("the live file holds no schema; fetch the database before the plan")
+    for name in names:
+        kind = PROPERTIES[target][name]
+        found = schema.get(name)
+        if not isinstance(found, dict):
+            raise ProjectionRefusal(f"{name}: the {target} database has no such property; fix Notion or the mapping")
+        if found.get("type") not in (SELECTS if kind == "select" else (kind,)):
+            raise ProjectionRefusal(f"{name}: the {target} database has it as {found.get('type')!r}, not {kind}")
+        missing = [option for option in OPTIONS.get(name, ()) if option not in (found.get("options") or [])]
+        if kind == "select" and missing:
+            raise ProjectionRefusal(f"{name}: the {target} database has no option {missing[0]!r}; "
+                                    "sd adds no option")
+
+
+def _live_row(entry: Any, database: str, what: str) -> dict[str, Any]:
+    """A fetched row: its id and parent, read, and its parent the request's database."""
+    if not isinstance(entry, dict) or not row_id(entry.get("id")):
+        raise ProjectionRefusal(f"the live file's {what} has no page id")
+    parent = row_id(entry.get("parent"))
+    if parent != database:
+        raise ProjectionRefusal(f"the {what} {row_id(entry.get('id'))} is in database {parent or 'unknown'}, "
+                                f"not {database}; never written across databases")
+    if not isinstance(entry.get("properties"), dict):
+        raise ProjectionRefusal(f"the live file's {what} holds no properties")
+    return entry
+
+
+def _question(item: int, reason: str, options: list[str]) -> ProjectionRefusal:
+    """A refusal the drain turns into one question note on the item, unless one is open."""
+    lines = "\n".join(f"Option: {option}" for option in options)
+    return ProjectionRefusal(f"{reason}; file one question on sd:{item} unless one is open:\n{reason}\n{lines}")
+
+
+def _shown(value: Any) -> str:
+    if value is None:
+        return "nothing"
+    return ", ".join(value) if isinstance(value, list) else str(value)
+
+
+def plan(connection: sqlite3.Connection, request: dict[str, Any], live: dict[str, Any] | None, *,
+         databases: dict[str, str], who: str) -> dict[str, Any]:
+    """The guard, in code: what the drain writes to the row for `request`, given the `live` fetch.
+
+    `live` None is the drain's `--missing`: the pinned row was not found. One
+    transaction. Refuses, writing nothing, a request that is not a fresh
+    recompute of its item (stale), an item whose repo leaves `notion` out, a
+    schema that does not fit the mapping, a row in another database, and a
+    row it cannot identify. Otherwise records the intent on the item --
+    `writing`, and `creating` for a create -- bound to the request's
+    generation and the designation it was planned under, and returns the
+    properties to write. An sd-owned field whose live value differs from
+    `written` is refused and listed in `yielded`, with one note per episode.
+    """
+    from .writes import add_note
+
+    item = request.get("item")
+    if not isinstance(item, int) or isinstance(item, bool):
+        raise ProjectionRefusal(f"stale: the request names no item ({item!r}); run project")
+    with transaction(connection):
+        row, fields = _fields(connection, item)
+        held = designation(fields, item)
+        if held is None or held["as"] not in TARGETS:
+            raise ProjectionRefusal(f"stale: sd:{item} is no longer designated; run project")
+        try:
+            fresh = request_for(connection, row, held, databases)
+        except ProjectionRefusal as refusal:
+            raise ProjectionRefusal(f"stale: {refusal}; run project") from None
+        if fresh["fingerprint"] != request.get("fingerprint"):
+            raise ProjectionRefusal(f"stale: sd:{item} changed since project queued this request; run project")
+        _channels(connection, row)
+        target, database, values = fresh["target"], fresh["database"], fresh["values"]
+        if live is None:
+            if not held.get("row"):
+                raise ProjectionRefusal(f"--missing names a pinned row, and sd:{item} pins none")
+            raise _question(item, f"Row {held['row']} of sd:{item} was not found in the {target} database",
+                            ["stop projecting it, `sd task edit %d --experiment off`" % item,
+                             "create a new row, `sd task edit %d --experiment new`" % item])
+        if target == "tasks" and values["Experiment"] is None:
+            raise ProjectionRefusal(f"parent sd:{held['of']} has no row yet; drain experiments first")
+        if row_id(live.get("database")) != database:
+            raise ProjectionRefusal(f"the live schema is database {row_id(live.get('database')) or 'unknown'}, "
+                                    f"and the request names {database}")
+        value = dict(held)
+        live_row = None
+        if held.get("row"):
+            live_row = _live_row(live.get("row"), database, "row")
+            if row_id(live_row["id"]) != held["row"]:
+                raise ProjectionRefusal(f"the live row is {row_id(live_row['id'])}, and sd:{item} pins {held['row']}")
+        elif held.get("creating"):
+            creating = held["creating"]
+            if row_id(creating.get("database")) != database:
+                raise _question(item, f"sd:{item} was being created in database {creating.get('database')}, and "
+                                      f"the configured database is now {database}",
+                                ["no row exists, create it, `sd task edit %d --experiment new`" % item,
+                                 "this is the row, `sd task edit %d --experiment row:ID`" % item])
+            if not isinstance(live.get("candidates"), list):
+                raise ProjectionRefusal(f"search: an earlier create of sd:{item} may have landed; search the "
+                                        f"{target} database for pages whose body opens with "
+                                        f"`{POINTER.format(item=item).split(' sd keeps')[0]}` and plan again "
+                                        "with them as candidates")
+            candidates = [_live_row(entry, database, "candidate") for entry in live["candidates"]]
+            if len(candidates) != 1:
+                found = ", ".join(row_id(entry["id"]) for entry in candidates) or "none"
+                raise _question(item, f"An earlier create of sd:{item} may have landed; rows found by the "
+                                      f"pointer sd:{item}: {found}",
+                                ["no row exists, create it, `sd task edit %d --experiment new`" % item,
+                                 "this is the row, `sd task edit %d --experiment row:ID`" % item])
+            live_row = candidates[0]
+            value["row"] = row_id(live_row["id"])
+            value.pop("creating")
+        planned = {"as": held["as"], "of": held.get("of"), "since": held["since"], "row": value.get("row")}
+        if live_row is None:
+            _schema(live, target, list(PROPERTIES[target]))
+            title = next(iter(PROPERTIES[target]))
+            properties = {title: row["title"], **{name: given for name, given in values.items() if given is not None}}
+            if target == "experiments":
+                properties["Stage"] = stage_value(row["kind"], row["status"])
+            elif priority_value(row["priority"]) is not None:
+                properties["Priority"] = priority_value(row["priority"])
+            value["creating"] = {"generation": fresh["fingerprint"], "database": database, "designation": planned,
+                                 "target": target}
+            writes = dict(values)
+            result = {"action": "create", "database": database, "properties": properties,
+                      "body": POINTER.format(item=item)}
+        else:
+            _schema(live, target, OWNED[target])
+            unconfirmed = (held.get("writing") or {}).get("values", {})
+            written = held.get("written", {})
+            writes, yielded = {}, []
+            for name in OWNED[target]:
+                now_live, last = _empty(live_row["properties"].get(name)), _empty(written.get(name))
+                if now_live == last:
+                    if now_live != values[name]:
+                        writes[name] = values[name]
+                    continue
+                yielded.append(name)
+                if name not in held.get("yielded", []):
+                    hand = f"set it to {_shown(last)}" if last is not None else "clear it"
+                    own = ("; this may be sd's own unconfirmed write"
+                           if name in unconfirmed and _empty(unconfirmed[name]) == now_live else "")
+                    add_note(connection, item, "comment",
+                             f"{name} on the {target} row is not sd's ({_shown(now_live)}; sd last wrote "
+                             f"{_shown(last)}; {hand} to hand it back){own}", session=who)
+            value["yielded"] = yielded
+            if not yielded:
+                value.pop("yielded")
+            properties = dict(writes)
+            result = {"action": "update", "row": value["row"], "properties": properties, "yielded": yielded}
+        value["writing"] = {"generation": fresh["fingerprint"], "designation": planned, "values": writes,
+                            "target": target}
+        value.pop("confirmed", None)
+        _store(connection, item, fields, validate(value))
+    return {"item": item, "target": target, "fingerprint": fresh["fingerprint"], **result}
