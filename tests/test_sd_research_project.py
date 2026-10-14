@@ -39,6 +39,11 @@ def day(start: str, end: str | None = None, time_zone: str | None = None) -> dic
     return {"start": start, "end": end, "time_zone": time_zone}
 
 
+def linked(*pages: str, more: bool = False) -> dict[str, Any]:
+    """A relation as the drain hands it: every page id, and Notion's word that none is left out."""
+    return {"ids": list(pages), "has_more": more}
+
+
 def schema(target: str) -> dict[str, Any]:
     """The live schema of a database as the drain hands it over, matching the mapping."""
     status = {"type": "select", "options": ["Todo", "In Progress", "Blocked", "Done"]}
@@ -95,7 +100,8 @@ class Projection(base.Fixture):
              **properties: Any) -> dict[str, Any]:
         database = EXPERIMENTS if target == "experiments" else TASKS
         fetched: dict[str, Any] = {"database": database, "schema": schema(target)}
-        properties = {**{name: None for name in self.projection.OWNED[target]}, **properties}
+        properties = {**{name: None for name in self.projection.OWNED[target]},
+                      **({"Experiment": linked()} if target == "tasks" else {}), **properties}
         if row is not None:
             fetched["row"] = {"id": url(row), "parent": database, "properties": properties}
         if candidates is not None:
@@ -504,7 +510,7 @@ class PlanTests(Projection):
                                 (self.task,))
         self.project()
         self.project()
-        live = dict(Status="Todo", Experiment=[url(ROW)])
+        live = dict(Status="Todo", Experiment=linked(url(ROW)))
         self.planned(self.task, self.live("tasks", row=TASK_ROW, **live))
         # Notion took Due, then the drain stopped before `delivered`.
         self.project()
@@ -544,7 +550,7 @@ class PlanTests(Projection):
         self.deliver(self.task, row=TASK_ROW)
         self.connection.execute("UPDATE item SET due = '2026-11-09' WHERE id = ?", (self.task,))
         self.project()
-        live = dict(Status="Todo", Experiment=[url(ROW)])
+        live = dict(Status="Todo", Experiment=linked(url(ROW)))
         for held in (day("2026-11-02", "2026-11-05"), day("2026-11-02T09:00:00.000-06:00"),
                      day("2026-11-02", time_zone="America/New_York")):
             with self.subTest(held=held):
@@ -562,6 +568,27 @@ class PlanTests(Projection):
                 self.assertEqual(self.held(self.task), before)
         planned = self.planned(self.task, self.live("tasks", row=TASK_ROW, Due=day("2026-11-02"), **live))
         self.assertEqual(planned["properties"], {"Due": "2026-11-09"})
+
+    def test_a_relation_without_proof_it_is_whole_is_refused(self) -> None:
+        self.created()
+        self.designate(self.task, "of:%d" % self.experiment)
+        self.project()
+        self.planned(self.task, self.live("tasks"))
+        self.deliver(self.task, row=TASK_ROW)
+        self.status(self.task, "in_progress")
+        self.project()
+        before = self.held(self.task)
+        for cut in ([url(ROW)], [], None, {"ids": [url(ROW)]}, linked(url(ROW), more=True),
+                    {"ids": url(ROW), "has_more": False}):
+            with self.subTest(cut=cut):
+                live = self.live("tasks", row=TASK_ROW, Status="Todo", Experiment=cut)
+                status, said = self.plan(self.task, live)
+                self.assertEqual(status, 1, said)
+                self.assertIn("Experiment: hand the whole relation", said)
+                self.assertEqual(self.held(self.task), before)
+        planned = self.planned(self.task, self.live("tasks", row=TASK_ROW, Status="Todo",
+                                                    Experiment=linked(url(ROW), url(OTHER))))
+        self.assertEqual(planned["yielded"], ["Experiment"])
 
     def test_a_live_row_lacking_status_names_it(self) -> None:
         self.created()
@@ -730,7 +757,8 @@ class ContractTests(unittest.TestCase):
                        "a failed read is unknown, not missing", "experiments before tasks",
                        "a `notion-row` request reads the channel `notion`",
                        "fetch and plan again", "Steps 4 and 5 do not apply to a row",
-                       "a date's whole value, never its start alone"):
+                       "a date's whole value, never its start alone",
+                       "a relation's whole value, never a page of it"):
             with self.subTest(phrase=phrase):
                 self.assertIn(phrase, text)
 

@@ -370,10 +370,19 @@ def _empty(value: Any) -> Any:
 def _live(target: str, name: str, value: Any) -> Any:
     """A live value, `_empty` spelled, kept whole: a date is its start only when that is all it holds.
 
+    A relation needs Notion's `has_more` false: a bare list may be the first page of a longer one.
+
     A date with an end, a time or a time zone stays an object, which never equals a date sd wrote, so the
     guard yields it. A bare date string may be a start the drain cut off, so it is refused as unknown.
     """
-    if PROPERTIES[target][name] != "date" or value is None:
+    kind = PROPERTIES[target][name]
+    if kind == "relation":
+        if not (isinstance(value, dict) and value.get("has_more") is False and isinstance(value.get("ids"), list)
+                and all(isinstance(entry, str) for entry in value["ids"])):
+            raise ProjectionRefusal(f"{name}: hand the whole relation, an object with every page id in ids and "
+                                    "has_more false; a bare list may be one page of it")
+        return _empty(value["ids"])
+    if kind != "date" or value is None:
         return _empty(value)
     keys = ("start", "end", "time_zone")
     if not (isinstance(value, dict) and all(key in value for key in keys) and isinstance(value["start"], str)
