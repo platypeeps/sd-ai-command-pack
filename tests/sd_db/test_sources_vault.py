@@ -134,6 +134,24 @@ class TheImport(VaultCase):
         self.assertIn("the blog-idea body of first idea", json.loads(row["body"])["markdown"])
         self.assertEqual(json.loads(row["fields"])["kind"], "blog-idea")
 
+    def test_a_date_created_given_after_the_first_import_moves_created_at(self):
+        """sd:4624: an update set every column but `created_at`, so the note failed verify forever."""
+        relative = "System/Databases/Blog Ideas/first idea.md"
+        self.edit(relative, "dateCreated: 2026-06-15\n", "")
+        run(self.connection, self.reader())
+        self.edit(relative, "status: inbox\n", "status: inbox\ndateCreated: 2026-10-05\n")
+        sitting = run(self.connection, self.reader())
+        self.assertTrue(sitting.clean, sitting.report())
+        self.assertEqual(sitting.counts.updated, 1)
+        self.assertEqual(self.items()[f"blog-idea:{relative}"]["created_at"], "2026-10-05")
+
+    def test_a_note_that_drops_date_created_keeps_the_row_s_created_at(self):
+        relative = "System/Databases/Blog Ideas/first idea.md"
+        run(self.connection, self.reader())
+        self.edit(relative, "dateCreated: 2026-06-15\n", "")
+        run(self.connection, self.reader())
+        self.assertEqual(self.items()[f"blog-idea:{relative}"]["created_at"], "2026-06-15")
+
     def test_only_the_declared_kinds_are_imported(self):
         declared = entry(workflow={"topic": {"status": dict(TOPIC)}})
         sitting = run(self.connection, self.reader([declared]))
