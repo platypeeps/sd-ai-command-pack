@@ -20,6 +20,7 @@ from unittest.mock import patch
 from sd_db import connect
 from sd_db.migrate import initialise
 from sd_db.sources import MigrationRefused, digest, run
+from sd_db.sources.frontmatter import FrontmatterError
 from sd_db.sources.frontmatter import read as read_frontmatter
 from sd_db.sources.vault import SOURCE, Reader, plugin_entries, stages_in
 from sd_db.writes import upsert_item
@@ -158,6 +159,41 @@ class TheImport(VaultCase):
         self.assertEqual(sitting.counts.seen, 2)
         self.assertEqual({json.loads(row["fields"])["kind"] for row in self.items().values()},
                          {"topic"})
+
+
+class TheQuotedScalars(VaultCase):
+    """sd:4626: a quoted value lands as YAML reads it, its escapes undone."""
+
+    IDEA = "System/Databases/Blog Ideas/first idea.md"
+
+    def description(self, line):
+        self.edit(self.IDEA, 'description: "first idea, at inbox"', line)
+        run(self.connection, self.reader())
+        return json.loads(self.items()[f"blog-idea:{self.IDEA}"]["fields"])["description"]
+
+    def test_a_double_quoted_value_lands_with_its_escapes_undone(self):
+        self.assertEqual(self.description(r'description: "\"x\" y"'), '"x" y')
+
+    def test_a_double_quoted_backslash_and_unicode_escape_land_as_text(self):
+        self.assertEqual(self.description(r'description: "a \\ b \u00e9 \/"'), "a \\ b \u00e9 /")
+
+    def test_a_single_quoted_doubled_quote_lands_as_one(self):
+        self.assertEqual(self.description("description: 'it''s \\n'"), "it's \\n")
+
+    def test_an_escape_yaml_does_not_know_refuses_and_writes_nothing(self):
+        self.edit(self.IDEA, 'description: "first idea, at inbox"', r'description: "C:\path"')
+        with self.assertRaisesRegex(FrontmatterError, r"\\p"):
+            run(self.connection, self.reader())
+        self.assertEqual(self.items(), {})
+
+    def test_a_quote_left_unescaped_inside_refuses(self):
+        for line in ('description: "a" and "b"', "description: 'it's'"):
+            with self.subTest(line=line):
+                self.edit(self.IDEA, 'description: "first idea, at inbox"', line)
+                with self.assertRaises(FrontmatterError):
+                    run(self.connection, self.reader())
+                self.edit(self.IDEA, line, 'description: "first idea, at inbox"')
+        self.assertEqual(self.items(), {})
 
 
 META_BIND = "**Status:** `INPUT[inlineSelect(option(inbox), option(drafting)):status]`"
