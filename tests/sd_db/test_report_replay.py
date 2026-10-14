@@ -670,6 +670,29 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
                 self.assertEqual(self.tick(run, 1, exit_code=0, text=self.DISK, job=job)["item"]["id"], first)
                 self.assert_fresh(self.tick("c", 31, exit_code=0, text=self.DISK, job=job), first)
 
+    def test_a_future_stamped_finding_does_not_outrank_the_recovery(self):
+        """Codex on the chain row: a bad future stamp held the chain the way
+        `_beat`'s `FUTURE_ALLOWANCE` keeps it from holding health."""
+        log = self.root / "ahead.log"; log.write_text(self.DISK)
+        ahead = reporting.ingest_log(self.db, job="probe", run_id="ahead", started="2026-09-08T00:00:00Z",
+                                     ended="2026-09-08T01:30:00Z", exit_code=0, log_path=log, now=NOW)["item"]["id"]
+        self.ack(ahead)
+        self.tick("clean", 16, exit_code=0, text="ok\n")
+        log = self.root / "after.log"; log.write_text(self.DISK)
+        after = reporting.ingest_log(self.db, job="probe", run_id="after", started="2026-09-08T01:00:00Z",
+                                     ended="2026-09-08T01:31:00Z", exit_code=0, log_path=log,
+                                     now=datetime(2026, 9, 8, 1, 32, tzinfo=UTC))
+        self.assert_fresh(after, ahead)
+
+    def test_a_future_stamped_fold_does_not_freeze_the_body(self):
+        item = self.tick("a", 1)["item"]["id"]
+        log = self.root / "ahead.log"; log.write_text("boom ahead\n")
+        reporting.ingest_log(self.db, job="probe", run_id="ahead", started="2026-09-08T00:00:00Z",
+                             ended="2026-09-08T01:30:00Z", exit_code=1, log_path=log, now=NOW)
+        self.tick("c", 31)
+        body = json.loads(self.db.execute("SELECT body FROM item WHERE id=?", (item,)).fetchone()["body"])
+        self.assertEqual((body, self.repeats(item)["last_run_id"]), ({"text": "boom at 31\n"}, "c"))
+
     def test_a_late_report_after_a_clean_run_starts_no_chain(self):
         """A hand recovery of an older run with findings, filed after a newer clean run."""
         self.tick("b", 16, exit_code=0, text="ok\n")

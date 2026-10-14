@@ -164,12 +164,13 @@ def _check_times(started, ended):
 
 def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_path,
            attention=False, attention_basis="explicit report", truncated=False, removed=None,
-           actor=None, record=None, chain=None):
+           actor=None, record=None, chain=None, now=None):
     """File one run's report, or answer a replay of it with the report it filed.
 
     `chain` is the one `done` report this run may fold into: the report the
     previous run of the job on this host went to, which only `ingest_log`
-    knows (`CHAIN_KEY`). Without it no done report is a target.
+    knows (`CHAIN_KEY`). Without it no done report is a target. `now` is the
+    clock a fold's `last_ended` is checked against, as `_beat` checks.
 
     `actor` and `record` are for a report that records an operator act rather
     than a cron run. `actor` says who and what acted, stored beside `removed`
@@ -282,11 +283,13 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         if target:
             stored = json.loads(target["fields"])
             repeats = stored.get("repeats") or {"count": 1, "first_ended": stored["report"]["ended"], "run_ids": []}
-            newest = ended >= repeats.get("last_ended", stored["report"]["ended"])
+            latest = repeats.get("last_ended", stored["report"]["ended"])
+            newest = not ended < latest <= stamp(((now or datetime.now(UTC)) + FUTURE_ALLOWANCE).isoformat())
             repeats.update(count=repeats["count"] + 1, run_ids=(repeats["run_ids"] + [run_id])[-REMEMBERED_RUNS:])
             if newest:
                 # A late run (a hand recovery) counts, but the body and
-                # `last_*` stay the newest run's.
+                # `last_*` stay the newest run's; a stamp past the allowance
+                # is not the newest.
                 repeats.update(last_run_id=run_id, last_ended=ended)
             set_item_fields(connection, target["id"], fields={**stored, "repeats": repeats},
                             **({"body": {"text": text}} if newest else {}))
@@ -498,8 +501,9 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
         # became the current health can recover from anything: an older run
         # was never the tick after the failure.
         previous = health(connection, job)
+        clock = now or datetime.now(UTC)
         beat = _beat(connection, job=job, run_id=run_id, healthy=not attention,
-                     ended=ended, exit_code=exit_code, now=now or datetime.now(UTC))
+                     ended=ended, exit_code=exit_code, now=clock)
         wrote = beat in ("written", "tied")
         recovered = not attention and wrote and previous is False
         # This run's own heartbeat says it was clean, and it filed no report,
@@ -523,13 +527,14 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
         # order as `_beat` ranks them; an older one, a hand recovery, takes
         # no done target and moves nothing. A replay moved it the first time,
         # and is told by its run id, not by `beat`: once compaction took its
-        # heartbeat, a replay reads as a new run that ties the newest end.
+        # heartbeat, a replay reads as a new run that ties the newest end. A
+        # row stamped past `FUTURE_ALLOWANCE` outranks nothing, as in `_beat`.
         chain_key = f"{CHAIN_KEY}{job}@{host}"
         newest_row = connection.execute(
             "SELECT id, body FROM state WHERE kind='heartbeat' AND key=? ORDER BY id DESC LIMIT 1", (chain_key,)).fetchone()
         last = json.loads(newest_row["body"]) if newest_row else {}
         replay = beat == "recorded" or bool(filed) or bool(attention and _folded_into(connection, job, run_id))
-        moves = not replay and ended >= (last.get("ended") or "")
+        moves = not replay and not ended < (last.get("ended") or "") <= stamp((clock + FUTURE_ALLOWANCE).isoformat())
         if not (attention or filed):
             if moves:
                 _set_chain(connection, chain_key, newest_row, {"run_id": run_id, "ended": ended, "item": None})
@@ -539,7 +544,7 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
         state = ingest(connection, job=job, run_id=run_id, started=started, ended=ended,
                        exit_code=exit_code, text=text, source_path=str(path.resolve()),
                        attention=attention, attention_basis=basis, truncated=truncated,
-                       chain=last.get("item") if moves and type(last.get("item")) is int else None)
+                       chain=last.get("item") if moves and type(last.get("item")) is int else None, now=clock)
         if moves:
             _set_chain(connection, chain_key, newest_row, {
                 "run_id": run_id, "ended": ended, "item": state["item"]["id"] if attention and not exit_code else None})
