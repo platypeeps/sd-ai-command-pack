@@ -60,7 +60,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import paths
-from .database import connect, local_path, refuse_hub_only, schema_version, tables, transaction
+from .database import BUSY_TIMEOUT, connect, local_path, refuse_hub_only, schema_version, tables, transaction
 from .errors import BackupError, SchemaTooOld, SdDbError
 from .migrate import migrate as migrate_database
 from .schema import SCHEMA_VERSION, TABLES, migrations
@@ -697,9 +697,13 @@ def _snapshot(connection: sqlite3.Connection, copy: Path, *,
               source: Path | None = None) -> tuple[dict[str, int], dict[str, list[int] | None] | None]:
     """Count the source and copy it to `copy` inside one read transaction.
 
-    With `source`, also its `_fingerprint`, read after `BEGIN` and before the
-    first read fixes the transaction's view: a commit before it is in the
-    copy, and one after it changes the fingerprint. Only a connection that
+    With `source`, also its `_fingerprint`, read while a second connection
+    holds the write lock, from before the first read fixes this
+    transaction's view until after: a commit before it is in the copy, and
+    one after it changes the fingerprint. The lock is the point: a writer
+    writes its frames to the log before it publishes the commit, so without
+    it a commit whose frames are already in the fingerprint could become
+    visible only after the view was fixed (round 3). Only a connection that
     writes nothing may ask: a checkpoint row, or the log copied back into the
     file on close, would change the fingerprint after the fact.
 
@@ -714,8 +718,26 @@ def _snapshot(connection: sqlite3.Connection, copy: Path, *,
     """
     connection.execute("BEGIN")
     try:
-        store = None if source is None else _fingerprint(source)
-        expected = _counts(connection)
+        holder = None
+        if source is not None:
+            # Waits for a writer mid-commit; takes no write of its own, and
+            # closes while this read is open, so it is not the last connection
+            # to close and copies nothing back into the file.
+            try:
+                holder = sqlite3.connect(f"file:{source}?mode=rw", uri=True, isolation_level=None,
+                                         timeout=BUSY_TIMEOUT / 1000)
+                holder.execute("BEGIN IMMEDIATE")
+            except sqlite3.Error as error:
+                if holder is not None:
+                    holder.close()
+                raise BackupError(f"the write lock for the store's fingerprint was not taken: {error}") from None
+        try:
+            store = None if source is None else _fingerprint(source)
+            expected = _counts(connection)
+        finally:
+            if holder is not None:
+                holder.execute("ROLLBACK")
+                holder.close()
         try:
             target = sqlite3.connect(copy, isolation_level=None)
             try:

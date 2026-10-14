@@ -17,6 +17,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from unittest import mock
@@ -1220,15 +1221,55 @@ class MigrateNeedsABackupOfThisStore(BackupCase):
         def counted(connection):
             found = real(connection)
             if not calls:
-                calls.append(1)
-                self.raw_write()
+                # The view is fixed; this write waits for the lock and lands after it.
+                calls.append(threading.Thread(target=self.raw_write))
+                calls[0].start()
             return found
 
         with mock.patch.object(backup_module, "_counts", counted):
-            run(home=self.home)
+            try:
+                run(home=self.home)
+            finally:
+                for thread in calls:
+                    thread.join()
         completed = self.migrate(1)
         self.assertIn("the store was written after the newest backup", completed.stderr)
         self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_writer_mid_commit_lands_in_the_copy(self):
+        # Round 3: a writer puts its frames in the log before it publishes the
+        # commit. The read-only run takes the write lock around the
+        # fingerprint and the read that fixes its view, so it waits for the
+        # commit and copies it.
+        self.one_back_with_an_item()
+        holding = threading.Event()
+
+        def writer():
+            raw = sqlite3.connect(self.database, isolation_level=None)
+            try:
+                raw.execute("BEGIN IMMEDIATE")
+                raw.execute("UPDATE item SET title = 'Written in the gap'")
+                holding.set()
+                time.sleep(1)
+                raw.execute("COMMIT")
+            finally:
+                raw.close()
+
+        thread = threading.Thread(target=writer)
+        thread.start()
+        self.assertTrue(holding.wait(10))
+        try:
+            snapshot = run(home=self.home)
+        finally:
+            thread.join()
+        copy = sqlite3.connect(f"file:{snapshot.directory / 'sd.db'}?mode=ro", uri=True)
+        try:
+            self.assertEqual([("Written in the gap",)], copy.execute("SELECT title FROM item").fetchall())
+        finally:
+            copy.close()
+        self.migrate(0)
+        self.assertEqual(self.version(), SCHEMA_VERSION)
 
     @hub_only
     def test_a_write_between_the_check_and_the_migration_is_refused(self):
