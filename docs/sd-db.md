@@ -174,6 +174,24 @@ The machine that hosts a repository gates and merges it, and no request crosses 
 Schedule `sd-ship lane run --hosted` on every machine: it runs each lane the machine hosts.
 [WORKFLOW.md § Parallel work](../WORKFLOW.md#parallel-work) covers the lane from the ship side.
 
+## Channels
+
+`repo.channels` names the publish channels a repository uses, and the folder each one writes to (sd:3462).
+It is a JSON object; NULL, shown as `none`, means no setting, and every row starts there.
+The design is `docs/work/2026-10-13-channels/design.md`.
+
+    bin/sd-db repo channels PATH                                         # print: canonical JSON or none
+    bin/sd-db repo channels PATH obsidian=Briefs/x notion=Example drive= # set; prints before -> after
+    bin/sd-db repo channels PATH none                                    # clear
+
+The keys are `obsidian`, `notion` and `drive`; `drive=` names the default folder, and a channel left out is off.
+A folder is a name, never an id or a URL: no leading `/`, no `.` or `..` segment, no control character.
+A Notion folder is one page name, with no `/`.
+`sd_db.channels.validate` checks every write; `repos.set_channels` is the one writer, `repos.repo_channels` the reader.
+The verb refuses an unregistered path when it sets, and prints `none` with a note when it reads one.
+A stored value the validator refuses, or a database not yet migrated, exits 1 and prints no value.
+A change takes effect at the next `sd-research-kit render` in the checkout, or the next commit.
+
 ## `judgments`: what the judgment models cost, by stage
 
 `bin/sd-db judgments` compares the stages that route a decision through a judgment model.

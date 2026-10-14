@@ -21,7 +21,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from .. import credentials, judgment, removal, review, usage
+from .. import channels, credentials, judgment, removal, review, usage
 from ..backup import restore as restore_snapshot
 from ..database import connect, default_path, schema_version, tables
 from ..errors import SdDbError
@@ -29,9 +29,9 @@ from ..migrate import initialise, migrate
 from ..repos import absolute_under_home
 from ..repos import add as add_repo
 from ..repos import registered
-from ..repos import registered_for
+from ..repos import registered_for, row_for
 from ..repos import ConfMissing, seed as seed_repos
-from ..repos import LANE_HUB, set_ci, set_lane_host, set_managed, set_runner_merge
+from ..repos import LANE_HUB, repo_channels, set_channels, set_ci, set_lane_host, set_managed, set_runner_merge
 from ..schema import SCHEMA_VERSION
 from ..sources import docs_work, index_cache, issues, register
 from ..sources import run as run_sitting
@@ -455,6 +455,7 @@ def command_repo(argv: list[str]) -> int:
     """`repo add <path>`, `repo seed [conf]`, `repo list [--managed]`,
     `repo runner-merge <path> <manual|auto>`, `repo managed <path> <yes|no>`,
     `repo ci <path> <github|local>`, `repo lane-host <path> <host|hub>`,
+    `repo channels <path> [obsidian=.. notion=.. drive=.. | none]`,
     `repo remove <path> ...`.
 
     The `repo` table is what criterion 6 enumerates from, so an empty one
@@ -470,12 +471,14 @@ def command_repo(argv: list[str]) -> int:
     the pack waits for GitHub Actions or runs `sd-check` locally. `lane-host` sets
     `repo.lane_host` (sd:3075), the machine that runs the repository's lane;
     `hub` writes NULL, and it prints the value before and after.
+    `channels` prints or sets `repo.channels` (sd:3462), the repository's
+    publish channels; `channels_words` reads its words.
 
     `list` prints `managed`, `ci`, `lane_host`, then `runner_merge`, so
     the merge setting stays the last field of each row, where the operator's
     instructions read it.
     """
-    verbs = ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "remove")
+    verbs = ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "remove")
     if not argv or argv[0] not in verbs:
         print(f"sd-db repo: expected {', '.join(verbs[:-1])} or {verbs[-1]}",
               file=sys.stderr)
@@ -537,6 +540,8 @@ def command_repo(argv: list[str]) -> int:
             path, before = set_lane_host(connection, rest[0], rest[1])
             print(f"sd-db: {path} lane_host before: {before}, after: {rest[1]}")
             return 0
+        if verb == "channels":
+            return _repo_channels(connection, rest)
         if rest not in ([], ["--managed"]):
             print(f"sd-db repo list: unknown argument {' '.join(rest)}; "
                   f"expected nothing or --managed", file=sys.stderr)
@@ -560,6 +565,52 @@ def command_repo(argv: list[str]) -> int:
         return 0
     finally:
         connection.close()
+
+
+def channels_words(words: list[str]) -> dict | None:
+    """`obsidian=Briefs/x notion=Example drive=` as a channels value; `none` alone is None.
+
+    `channel=` names the channel's default folder, and a channel left out is
+    off. `channels.validate` judges the result; this refuses only words that
+    are not `channel=folder`, a channel named twice, and `none` beside others.
+    """
+    if words == ["none"]:
+        return None
+    if "none" in words:
+        raise SdDbError("sd-db repo channels: none clears the setting and goes alone")
+    value: dict = {}
+    for word in words:
+        channel, equals, folder = word.partition("=")
+        if not equals:
+            raise SdDbError(f"sd-db repo channels: {word!r} is not channel=folder; "
+                            f"`drive=` names the default folder")
+        if channel in value:
+            raise SdDbError(f"sd-db repo channels: {channel} is named twice")
+        value[channel] = {"folder": folder} if folder else {}
+    return value
+
+
+def _repo_channels(connection, rest: list[str]) -> int:
+    """`repo channels PATH` prints the setting, canonical JSON or `none`; more words set it.
+
+    A read that fails raises to `main`, which exits 1 with the cause; only a
+    NULL row or no row prints `none`, and no row says so on stderr.
+    """
+    if not rest:
+        print("sd-db repo channels: needs a path, then nothing to print the setting, none to clear it, "
+              "or obsidian=FOLDER notion=PAGE drive=FOLDER", file=sys.stderr)
+        return 1
+    path, words = rest[0], rest[1:]
+    if not words:
+        if row_for(connection, Path(path).expanduser().resolve()) is None:
+            print(f"sd-db: {path} is not a registered repository; no row is no setting", file=sys.stderr)
+        print(channels.dumps(repo_channels(connection, path)))
+        return 0
+    value = channels_words(words)
+    target, before = set_channels(connection, path, value)
+    print(f"sd-db: {target} channels {before} -> {channels.dumps(value)}")
+    print(f"sd-db: run `sd-research-kit render` in {target} to publish under it, or wait for the next commit")
+    return 0
 
 
 def command_work(argv: list[str]) -> int:
