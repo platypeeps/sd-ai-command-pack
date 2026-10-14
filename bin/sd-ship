@@ -1995,18 +1995,23 @@ class Ship(SharedReview):
         if self.args.abandon_copilot_review is not None and not self.args.manual:
             raise Refusal("--abandon-copilot-review requires explicit manual merge authority")
 
+    def still_hosted(self) -> None:
+        """The lane host and the fence again, after the last network read before the `PUT`.
+
+        The local gate and those reads can stall for minutes under the lock, and
+        a hub demoted meanwhile merges nothing (sd:4044).
+        """
+        elsewhere = lane_host_refusal(self.root, self.connection, self.database)
+        if elsewhere:
+            raise Refusal(elsewhere, code="lane_elsewhere", boundary="runtime", state="operator_decision",
+                          next_action="Run it on the lane host, or move the lane: dashboard, Management, Move lane.")
+
     def still_gated(self, base: str, head: str, protection: dict) -> None:
         """The last read before the `PUT`: ownership and the gate as first observed.
 
         A protection object appearing under a declaration, or the declaration's
         object going missing, is a change of gate, not a fresh answer to use.
         """
-        # The lane host and the fence again: the local gate can run for minutes under
-        # the lock, and a hub demoted meanwhile must merge nothing (sd:4044).
-        elsewhere = lane_host_refusal(self.root, self.connection, self.database)
-        if elsewhere:
-            raise Refusal(elsewhere, code="lane_elsewhere", boundary="runtime", state="operator_decision",
-                          next_action="Run it on the lane host, or move the lane: dashboard, Management, Move lane.")
         try:
             again = self.api.gate(base, head)
         except Refusal as error:
@@ -2154,6 +2159,7 @@ class Ship(SharedReview):
             raise Refusal("HEAD moved immediately before merge")
         self.merge_authority()
         self.still_gated(base, head, protection)
+        self.still_hosted()
         # `row_authorized_merge` is written here, with the phase that says a
         # merge is going out, and it is written on every dispatch rather than
         # only when there is something to say: `still_gated` above took the

@@ -372,6 +372,43 @@ class TheLiveServer(StubCase):
         self.rename(HUB_NAME + ".")
         self.assertIsNone(self.server.fence(), "a refusal outlived its window")
 
+    def test_a_commit_asks_afresh_inside_the_window(self):
+        """codex pass: a frame passed on a cached answer, then the hub was renamed; the commit asks again."""
+        rid = remote.new_request_id()
+
+        def demote():
+            self.rename("old-hub.example.test.")
+        answers = self.session(
+            remote.request("execute", sql="BEGIN IMMEDIATE", params=None, rid=rid),
+            remote.request("execute", sql="INSERT INTO probe (name) VALUES ('stale')", params=None),
+            remote.request("execute", sql="COMMIT", params=None, rid=rid),
+            remote.request("close"),
+            between=demote, after=2)
+        self.assertTrue(all(a["ok"] for a in answers[:3]), answers)
+        self.assertFalse(answers[3]["ok"], answers)
+        self.assertIn("this machine is not the hub", answers[3]["error"]["text"])
+        self.assertEqual(answers[4:], [None])
+        self.assertEqual(self.rows(), 0, "a demoted hub committed a row")
+
+    def test_a_write_outside_a_transaction_asks_afresh_inside_the_window(self):
+        """codex pass: a write with no transaction commits by itself, so it asks as a COMMIT does."""
+        def demote():
+            self.rename("old-hub.example.test.")
+        for frame in (remote.request("execute", sql="INSERT INTO probe (name) VALUES ('stale')", params=None),
+                      remote.request("execute", sql="INSERT INTO probe (name) VALUES ('stale')", params=None,
+                                     rid=remote.new_request_id()),
+                      remote.request("executemany", sql="INSERT INTO probe (name) VALUES (?)",
+                                     params=[remote.encode_params(["stale"])]),
+                      remote.request("executescript", sql="INSERT INTO probe (name) VALUES ('stale');")):
+            with self.subTest(op=frame["op"], rid=frame["rid"]):
+                self.rename(HUB_NAME + ".")
+                self.server.fenced = None
+                answers = self.session(frame, remote.request("close"), between=demote)
+                self.assertFalse(answers[1]["ok"], answers)
+                self.assertIn("this machine is not the hub", answers[1]["error"]["text"])
+                self.assertEqual(answers[2:], [None])
+                self.assertEqual(self.rows(), 0, "a demoted hub wrote a row")
+
     def test_no_setting_serves_as_before_and_asks_tailscale_nothing(self):
         self.name_hub(None)
         self.enterContext(mock.patch.object(serve, "FENCE_SECONDS", 0.0))

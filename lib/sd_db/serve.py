@@ -314,6 +314,10 @@ class Session(socketserver.BaseRequestHandler):
         self.routing = False
         #: Why `_authorize` refused the statement, for the error frame.
         self.denied: str | None = None
+        #: The fence's refusal `_authorize` met: the session closes (sd:4044).
+        self.fenced: str | None = None
+        #: `_authorize` asked the fence afresh in this frame already.
+        self.asked = False
 
     def _authorize(self, action: int, arg1, arg2, database_name, trigger) -> int:
         """SQLite's authorizer on the session's connection.
@@ -345,6 +349,17 @@ class Session(socketserver.BaseRequestHandler):
         if action == sqlite3.SQLITE_FUNCTION and (arg2 or "").lower() == "load_extension":
             # Off on the connection already; refused by name all the same.
             return self._deny("load_extension is not served over the wire")
+        if (not self.routing and self.kind != "write" and not self.asked
+                and self.server.node is not None and not (  # type: ignore[attr-defined]
+                    action in READS or action == sqlite3.SQLITE_PRAGMA and arg2 is None)):
+            # A write outside the hub's write transaction commits by itself, so it
+            # asks the fence afresh, as `_commit` does (sd:4044).
+            self.asked = True
+            fenced = self.server.fence(fresh=True)  # type: ignore[attr-defined]
+            if fenced is not None:
+                self.fenced = fenced
+        if self.fenced is not None:
+            return self._deny(f"this machine is not the hub: {self.fenced}")
         if not self.routing and action not in ROWS and not (
                 action in READS and (arg2 or "").lower() != "load_extension"
                 or action == sqlite3.SQLITE_PRAGMA and arg2 is None):
@@ -499,6 +514,11 @@ class Session(socketserver.BaseRequestHandler):
             with self.server.owners.lock(rid):  # type: ignore[attr-defined]
                 if _fault is not None:
                     _fault("before-commit", self)
+                if self.server.node is not None:  # type: ignore[attr-defined]
+                    # Afresh, not cached: the frame's own check may predate a stall (sd:4044).
+                    fenced = self.server.fence(fresh=True)  # type: ignore[attr-defined]
+                    if fenced is not None:
+                        raise Fenced(f"refused: this machine is not the hub: {fenced}")
                 # A transaction that changed nothing gets no row: committed
                 # or not, it wrote nothing, so `absent` and its "run the verb
                 # again" stay true, and a quiet tick adds no row to the hub.
@@ -599,6 +619,7 @@ class Session(socketserver.BaseRequestHandler):
                 sock.settimeout(None)
                 received = time.monotonic()
                 self.denied = None
+                self.asked = False
                 writing = connection is not None and first_sql != ""
                 if writing:
                     frames += 1
@@ -736,8 +757,10 @@ class Session(socketserver.BaseRequestHandler):
                         raise remote.RemoteError(f"unknown operation {op!r}")
                 except Exception as error:  # every failure goes back as a frame  # noqa: F841 (ruff misreads the rebinding)
                     if self.denied is not None:
-                        # SQLite says only "not authorized"; `_authorize` said why.
-                        error = remote.StatementRefused(self.denied)
+                        # SQLite says only "not authorized"; `_authorize` said why,
+                        # and a fence refusal closes the session.
+                        error = (Fenced(f"refused: this machine is not the hub: {self.fenced}")
+                                 if self.fenced is not None else remote.StatementRefused(self.denied))
                         server.log.line(f"session {self.number} {error}")
                     answer = {"ok": False, "error": remote.describe_error(error)}
                     if connection is not None:
@@ -820,12 +843,13 @@ class Server(socketserver.ThreadingTCPServer):
         self.fence_guard = threading.Lock()
         super().__init__((LOOPBACK if node is None else str(node.address), port), Session)
 
-    def fence(self) -> str | None:
+    def fence(self, *, fresh: bool = False) -> str | None:
         """Why this machine no longer holds the hub role, or `None`: asked again past
-        `FENCE_SECONDS`, or once the wall clock jumped (a sleep). Unknown refuses."""
+        `FENCE_SECONDS`, once the wall clock jumped (a sleep), or `fresh`, as a commit
+        asks. Unknown refuses."""
         with self.fence_guard:
             ticks, wall = time.monotonic(), time.time()
-            if self.fenced is not None:
+            if self.fenced is not None and not fresh:
                 since, at, refusal = self.fenced
                 if ticks - since < FENCE_SECONDS and abs((wall - at) - (ticks - since)) <= CLOCK_SLACK:
                     return refusal
