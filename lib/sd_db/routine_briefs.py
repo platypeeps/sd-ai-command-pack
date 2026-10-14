@@ -350,6 +350,10 @@ def _copy(connection: sqlite3.Connection, vault: Path | str | None, copies: dict
     before = last[1] if last is not None else {}
     folders = {repo: _folder(connection, repo) for repo in sorted({row["repo"] for row in briefs})}
     copies["folder"] = folders
+    for named in filter(None, folders.values()):
+        if not (root / named).resolve().is_relative_to(root.resolve()):
+            raise BriefRefused(f"{root / named} leads outside the vault, through a link; the render writes "
+                               f"copies inside {root} only")
     for row in briefs:
         folder = folders[row["repo"]]
         if folder is not None:

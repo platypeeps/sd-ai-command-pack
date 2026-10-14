@@ -158,6 +158,16 @@ class TheRefusals(Copies):
         self.assertIn("not a directory", render(self.db, missing)["reason"])
         self.assertFalse(missing.exists())
 
+    def test_a_folder_that_links_outside_the_vault_is_refused_and_nothing_written_there(self):
+        self.add()
+        outside = self.root / "outside"
+        outside.mkdir()
+        self.folder.parent.mkdir(parents=True)
+        self.folder.symlink_to(outside)
+        copies = self.render()
+        self.assertIn("outside the vault", copies["reason"])
+        self.assertEqual((list(outside.iterdir()), self.beat()["state"]), ([], "failed"))
+
     def test_a_setting_it_cannot_read_writes_nothing_and_never_the_default_folder(self):
         self.add()
         self.db.execute("UPDATE repo SET channels = ? WHERE path = ?", ('{"obsidian": {"folder": "/abs"}}', self.repo))
