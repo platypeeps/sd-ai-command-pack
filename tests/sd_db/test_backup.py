@@ -1132,8 +1132,51 @@ class MigrateNeedsABackupOfThisStore(BackupCase):
         (snapshot.directory / "sd.db").unlink()
         (snapshot.directory / "sd.db").symlink_to(self.database)
         completed = self.migrate(1)
-        self.assertIn("is a link", completed.stderr)
+        self.assertIn("refuses linked or mounted entries", completed.stderr)
         self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_an_update_after_the_backup_is_refused(self):
+        # An UPDATE leaves every count as it was; only the store's own file says it moved.
+        connection = self.open()
+        item = create_item(connection, kind="task", title="Before the backup")
+        connection.close()
+        one_migration_back(self.database)
+        snapshot = run(home=self.home)
+        manifest = snapshot.directory / BACKUP_MANIFEST
+        taken = manifest.stat().st_mtime - 2
+        os.utime(manifest, (taken, taken))
+        raw = sqlite3.connect(self.database, isolation_level=None)
+        raw.execute("UPDATE item SET title = 'After the backup' WHERE id = ?", (item,))
+        raw.close()
+        completed = self.migrate(1)
+        self.assertIn("the store was written after the newest backup", completed.stderr)
+        self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_deleted_or_changed_file_in_the_backup_is_refused(self):
+        self.configuration()
+        one_migration_back(self.database)
+        for change in ("delete", "corrupt"):
+            with self.subTest(change=change):
+                snapshot = run(home=self.home)
+                kept = snapshot.directory / "providers.yaml"
+                if change == "delete":
+                    kept.unlink()
+                else:
+                    kept.write_text("providers: {changed: true}\n", encoding="utf-8")
+                completed = self.migrate(1)
+                self.assertIn("its files differ from its manifest", completed.stderr)
+                self.assertEqual(self.version(), SCHEMA_VERSION - 1)
+
+    @hub_only
+    def test_a_checkpointed_backup_taken_just_before_passes(self):
+        """The path repo-sync takes: the previous library backs up a current store,
+        writing its checkpoint row, and the next library migrates it."""
+        snapshot = run(home=self.home)
+        self.assertTrue(snapshot.checkpointed)
+        with mock.patch.object(backup_module, "SCHEMA_VERSION", SCHEMA_VERSION + 1):
+            self.assertEqual(backup_module.migration_backup(self.home), snapshot.directory)
 
     def test_a_store_with_nothing_pending_needs_no_backup(self):
         self.assertIn("nothing applied", self.migrate(0).stdout)

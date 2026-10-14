@@ -795,7 +795,8 @@ def _record_backup(directory: Path, source: Path, run_id: str, counts: dict[str,
     _write_recovery_record(directory / BACKUP_MANIFEST, (json.dumps(value, sort_keys=True) + "\n").encode())
 
 
-def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = False) -> tuple[int, int, str]:
+def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = False,
+                  read_only: bool = False) -> tuple[int, int, str]:
     """The directory's identity when it is a verified backup; else `BackupError` saying why.
 
     `moved` accepts a copy away from where it was written, such as the hourly
@@ -803,6 +804,10 @@ def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = F
     so the path proves nothing about it; what proves it is the rest: every
     file hashes to the manifest, and the database verifies against the
     manifest's run and counts.
+
+    `read_only` accepts a snapshot whose manifest says `checkpoint: false`,
+    taken before `migrate` (`migration_backup`). Retention never passes it,
+    so such a snapshot is still never owned.
     """
     try:
         if directory.is_symlink() or not directory.is_dir() or directory.parent.is_symlink():
@@ -834,7 +839,8 @@ def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = F
             raise BackupError("its manifest records another directory")
         if value["entries"] != _retention_inventory(directory, moved=moved):
             raise BackupError("its files differ from its manifest")
-        if verify(directory / database, run_id=run_id, expected=counts) != counts:
+        checkpointed = not (read_only and value.get("checkpoint") is False)
+        if verify(directory / database, run_id=run_id, expected=counts, checkpointed=checkpointed) != counts:
             raise BackupError("its database holds other counts than its manifest")
         details = directory.stat()
         return details.st_dev, details.st_ino, hashlib.sha256(material).hexdigest()
@@ -886,17 +892,24 @@ def passed(connection: sqlite3.Connection, snapshot: Snapshot) -> bool:
 def migration_backup(home: Path | str) -> Path | None:
     """The snapshot that lets `sd-db migrate` run, or None when nothing is pending (sd:3507).
 
-    The newest dated directory under `backup_root` must verify -- integrity,
-    and the counts its manifest records -- and be this store: the same
-    schema version and the same row counts. A database waiting for `migrate`
-    refuses every library write, so equal counts mean the snapshot holds
-    every row the migration rewrites. A read-only snapshot has no checkpoint
-    row, which is why `passed`, the prune's check, cannot answer here.
+    The newest dated directory under `backup_root` must pass the checks
+    retention and `restore_newest` make -- every file hashes to its manifest,
+    and the copy verifies against its run and counts (`_check_backup`), and
+    `restore` would take it (`check_restorable`) -- and be this store as it
+    stands: the same schema version, the same row counts, and no write to
+    the store since. A read-only snapshot has no checkpoint row, so it is
+    checked with `read_only`, and its time is the manifest's, the last file
+    `run` writes; so is a checkpointed one's, because writing its own
+    checkpoint row moves the store after the row's time.
     Raises `BackupError` naming why not and both ways out.
     """
     database = local_path(home)
     if not database.exists():
         return None
+    # Read first: the read below opens `mode=ro` and writes nothing, but the
+    # times are the evidence and nothing may move them before they are read.
+    written = max(path.stat().st_mtime_ns for path in (database, database.with_name(database.name + "-wal"))
+                  if path == database or (path.exists() and path.stat().st_size))
     live = connect(database, write=False)
     try:
         version = schema_version(live)
@@ -915,27 +928,26 @@ def migration_backup(home: Path | str) -> Path | None:
     if not dated:
         raise BackupError(f"migrate refuses: no backup under {root}; {remedy}")
     newest = dated[-1]
-    if (newest / database.name).is_symlink() or (newest / BACKUP_MANIFEST).is_symlink():
-        raise BackupError(f"migrate refuses: the newest backup {newest} is a link, not a copy; {remedy}")
     try:
-        manifest = json.loads((newest / BACKUP_MANIFEST).read_text(encoding="utf-8"))
-        held = manifest["counts"]
-        verify(newest / database.name, run_id=manifest["run_id"], expected=held,
-               checkpointed=manifest["checkpoint"] is not False)
-        copy = sqlite3.connect(f"file:{newest / database.name}?mode=ro", uri=True)
-        try:
-            found = schema_version(copy)
-        finally:
-            copy.close()
-    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error, BackupError) as error:
+        _check_backup(newest, read_only=True)
+        manifest = newest / BACKUP_MANIFEST
+        taken = manifest.stat().st_mtime_ns
+        held = json.loads(manifest.read_bytes())["counts"]
+        check = check_restorable(newest / database.name)
+        if not check.accepted:
+            raise BackupError(f"restore refuses it: {check.refusal}")
+    except (OSError, ValueError, KeyError, BackupError) as error:
         raise BackupError(f"migrate refuses: the newest backup {newest} does not verify: {error}; {remedy}") from None
-    if found != version:
-        raise BackupError(f"migrate refuses: the newest backup {newest} is at schema version {found}, "
+    if check.version != version:
+        raise BackupError(f"migrate refuses: the newest backup {newest} is at schema version {check.version}, "
                           f"the store at {version}; {remedy}")
     if held != counts:
         differ = ", ".join(f"{name}: store {counts.get(name)}, backup {held.get(name)}"
                            for name in sorted(set(counts) | set(held)) if counts.get(name) != held.get(name))
         raise BackupError(f"migrate refuses: the store changed since the newest backup {newest} ({differ}); {remedy}")
+    if written > taken:
+        raise BackupError(f"migrate refuses: the store was written after the newest backup {newest} finished; "
+                          f"{remedy}")
     return newest
 
 
