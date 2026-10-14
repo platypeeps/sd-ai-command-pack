@@ -474,7 +474,14 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
 
 def reports(connection, *, limit=200):
     return [dict(row) for row in connection.execute(
-        "SELECT * FROM item WHERE kind='report' ORDER BY created_at DESC,id DESC LIMIT ?", (min(200, max(1, limit)),))]
+        "SELECT * FROM item WHERE kind='report' AND source IS NOT 'brief' ORDER BY created_at DESC,id DESC LIMIT ?",
+        (min(200, max(1, limit)),))]
+
+
+def _refuse_brief(row):
+    """A routine brief is a `report` row filed `done` for good (sd:3459): no verb moves it."""
+    if row["source"] == "brief":
+        raise workflow.WorkflowError("a routine brief stays done; only filing or replacing the brief changes it")
 
 
 def acknowledge(connection, item, *, expected_revision, who, resolve_ingest_followups=False):
@@ -521,6 +528,7 @@ def acknowledge(connection, item, *, expected_revision, who, resolve_ingest_foll
         state = workflow._checked_state(connection, item, expected_revision)
         if state["item"]["kind"] != "report":
             raise workflow.WorkflowError("only report items can be acknowledged here")
+        _refuse_brief(state["item"])
         open_followups = [note for note in state["notes"] if note["kind"] == "followup" and not note["resolved_at"]]
         ingests = _ingest_followup_for(state["item"]["fields"]) if resolve_ingest_followups else None
         resolving = [note["id"] for note in open_followups
@@ -559,6 +567,7 @@ def reopen(connection, item, *, expected_revision, who, reason=None):
         state = workflow._checked_state(connection, item, expected_revision)
         if state["item"]["kind"] != "report":
             raise workflow.WorkflowError("only report items can be reopened here")
+        _refuse_brief(state["item"])
         if state["item"]["status"] != "done":
             return state
         target = "planning"
