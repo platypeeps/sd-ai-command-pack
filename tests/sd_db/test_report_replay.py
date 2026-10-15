@@ -1011,11 +1011,31 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         self.assertEqual((shrunk["recorded"], shrunk["item"]["id"], self.items()), ("folded", first, before))
         self.assertEqual(self.row(first)["status"], "planning")
         self.assertNotIn("swap high", json.loads(self.row(first)["body"])["text"])
-        # The set coming back folds as before; a new finding still supersedes.
-        self.assertEqual(self.tick("c", 31, both)["item"]["id"], first)
-        grown = self.tick("d", 46, "SD_REPORT_ATTENTION: disk low [1]\nSD_REPORT_ATTENTION: cpu hot [3]\n")
-        self.assertNotEqual(grown["item"]["id"], first)
+        # The report's set is now {A}: the same set folds; B coming back is a
+        # new finding, so it files its own report and supersedes this one.
+        self.assertEqual(self.tick("c", 31, "SD_REPORT_ATTENTION: disk low [1]\n")["item"]["id"], first)
+        grown = self.tick("d", 46, both)
+        self.assertEqual(grown["recorded"], "report")
         self.assertEqual(self.row(first)["status"], "done")
+
+    def test_a_finding_back_after_a_shrink_is_shown_even_when_cut(self):
+        """Codex: {A,B}, {A}, then a cut {A,B} folded by the first basis and kept body {A}: B was nowhere."""
+        both = "SD_REPORT_ATTENTION: a\nSD_REPORT_ATTENTION: b\n"
+        first = self.tick("a", 1, both)["item"]["id"]
+        self.tick("b", 16, "SD_REPORT_ATTENTION: a\n")
+        back = self.tick("c", 31, self.past_the_cut(both, ""))
+        self.assertNotEqual(back["item"]["id"], first)
+        self.assertEqual(back["item"]["status"], "planning")
+
+    def test_a_finding_back_after_a_shrink_does_not_fold_into_the_acknowledged_report(self):
+        """Codex: {A,B}, {A}, acknowledge, {A,B} folded into the done report by the first basis."""
+        both = "SD_REPORT_ATTENTION: a\nSD_REPORT_ATTENTION: b\n"
+        first = self.tick("a", 1, both)["item"]["id"]
+        self.tick("b", 16, "SD_REPORT_ATTENTION: a\n")
+        reporting.acknowledge(self.db, first, who="fixture", resolve_ingest_followups=True,
+                              expected_revision=workflow.item_state(self.db, first)["revision"])
+        back = self.tick("c", 31, both)
+        self.assertEqual((back["recorded"], back["item"]["status"]), ("report", "planning"))
 
     def test_a_reordered_set_folds(self):
         first = self.tick("a", 1, "SD_REPORT_ATTENTION: a\nSD_REPORT_ATTENTION: b\n")["item"]["id"]

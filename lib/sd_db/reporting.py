@@ -133,11 +133,16 @@ def _folded_into(connection, job, run_id):
         " ORDER BY id DESC LIMIT 1", (job + ":", job + ";", job, run_id)).fetchone()
 
 
+#: A report's current set of findings: `repeats.basis` once a shrunken set
+#: replaced its body (sd:4658), else its first run's basis.
+CURRENT_BASIS = "COALESCE(json_extract(fields, '$.repeats.basis'), json_extract(fields, '$.report.attention_basis'))"
+
+
 def _fold_target(connection, job, attention_basis, *, chain=None):
     """The attention report a repeat of `job` folds into, or `None`.
 
     The newest `cron-report` row for this job that is not `done`, has
-    `fields.attention` exactly true, the same `attention_basis`, and no
+    `fields.attention` exactly true, the same current basis (`CURRENT_BASIS`), and no
     `record` marker. A `done` row qualifies only as `chain`, after every
     open one (sd:4629): the report the previous run on this host went to,
     so the operator's acknowledgement holds while the findings repeat
@@ -162,7 +167,7 @@ def _fold_target(connection, job, attention_basis, *, chain=None):
         f" AND NOT ({UNREADABLE_FIELDS})"
         " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.job') END = ?"
         " AND CASE WHEN json_valid(fields) THEN json_type(fields, '$.attention') END = 'true'"
-        " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.attention_basis') END = ?"
+        f" AND CASE WHEN json_valid(fields) THEN {CURRENT_BASIS} END = ?"
         " AND CASE WHEN json_valid(fields) THEN json_type(fields, '$.record') END IS NULL"
         " ORDER BY status = 'done', id DESC LIMIT 1",
         (job + ":", job + ";", chain, job, attention_basis)).fetchone()
@@ -317,8 +322,7 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
             # every one of them, and its body replaces the larger set's.
             lines = set(attention_basis.split("\n"))
             target = next((row for row in _host_reports(connection, job, host)
-                           if isinstance(basis := json.loads(row["fields"])["report"].get("attention_basis"), str)
-                           and lines <= set(basis.split("\n"))), None)
+                           if isinstance(basis := _current_basis(row), str) and lines <= set(basis.split("\n"))), None)
         if target:
             stored = json.loads(target["fields"])
             repeats = stored.get("repeats") or {"count": 1, "first_ended": stored["report"]["ended"], "run_ids": []}
@@ -338,6 +342,10 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
             whole = not truncated or kept_cut
             if newest and whole and truncated != kept_cut:
                 repeats["body_truncated"] = truncated
+            # The kept body's set is the report's set from now on (sd:4658):
+            # a finding missing from it is new when it comes back.
+            if newest and whole and attention_basis != _current_basis(target):
+                repeats["basis"] = attention_basis
             set_item_fields(connection, target["id"], fields={**stored, "repeats": repeats},
                             **({"body": {"text": text}} if newest and whole else {}))
             return workflow.item_state(connection, target["id"])
@@ -347,6 +355,12 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         if attention:
             add_note(connection, item, "followup", _ingest_followup(job, ended, attention_basis), session=INGEST_SESSION)
         return workflow.item_state(connection, item)
+
+
+def _current_basis(item):
+    """Report `item`'s current set of findings, as `CURRENT_BASIS` reads it."""
+    fields = json.loads(item["fields"])
+    return (fields.get("repeats") or {}).get("basis", fields["report"].get("attention_basis"))
 
 
 def _kept_cut(item):
