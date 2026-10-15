@@ -338,7 +338,9 @@ class PlanTests(Projection):
         status, said = self.plan(self.experiment, self.live())
         self.assertEqual(status, 1)
         self.assertIn("cannot be read", said)
-        set_channels(self.connection, str(repo), {"notion": {}})
+        # The operator replaces the value they read (sd:4191): with no `before`, a set over a value this build cannot read
+        # refuses rather than lose the keys it does not name.
+        set_channels(self.connection, str(repo), {"notion": {}}, before='{"slack": {}}')
         self.assertEqual(self.plan(self.experiment, self.live())[0], 0)
 
     def test_missing_refuses_and_prints_no_create(self) -> None:
