@@ -19,6 +19,7 @@ import unittest
 from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
+from unittest import mock
 
 from sd_db import connect, create_assignment, create_item, upsert_repo
 from sd_db.backup import BACKUP_MANIFEST, prune_older, run
@@ -63,6 +64,24 @@ class Case(unittest.TestCase):
         """The copy rsync leaves on the share: same files, another path."""
         copy = self.nas / (name or directory.name)
         shutil.copytree(directory, copy, symlinks=True)
+        return copy
+
+    def pre_json(self, copy):
+        """What a build before c9ceaf7bb left: a bare-timestamp checkpoint body, no `checkpoint` key."""
+        manifest = json.loads((copy / BACKUP_MANIFEST).read_text())
+        raw = sqlite3.connect(copy / "sd.db")
+        with raw:
+            raw.execute("UPDATE state SET body = json_extract(body, '$.at') WHERE kind='checkpoint' AND key=?",
+                        (manifest["run_id"],))
+        raw.close()
+        del manifest["checkpoint"]
+        manifest["entries"]["sd.db"] = hashlib.sha256((copy / "sd.db").read_bytes()).hexdigest()
+        (copy / BACKUP_MANIFEST).write_text(json.dumps(manifest))
+        return copy
+
+    def stopped(self, copy):
+        """What a run that failed before `_record_backup` leaves: everything but the manifest."""
+        (copy / BACKUP_MANIFEST).unlink()
         return copy
 
     def fresh_home(self, name="promoted"):
@@ -130,6 +149,93 @@ class MovedCopies(Case):
 
         self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [old])
 
+    def test_a_pre_json_copy_past_the_window_is_pruned(self):
+        # sd:4694: a bare-timestamp checkpoint was unreadable, so these copies never aged out.
+        old = self.pre_json(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))))
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [old])
+        self.assertFalse(old.exists())
+
+    def test_a_stopped_run_past_the_window_is_pruned(self):
+        old = self.stopped(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))))
+        (old / ".DS_Store").write_bytes(b"\0Bud1")
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [old])
+        self.assertFalse(old.exists())
+
+    def test_old_format_copies_inside_the_window_stay(self):
+        young = self.pre_json(self.mirror(self.snapshot(datetime(2026, 10, 10, 9, 0, tzinfo=UTC))))
+        # Named for an old day, taken inside the window: its own checkpoint row is the age.
+        renamed = self.stopped(self.mirror(self.snapshot(NOW), "2026-10-01"))
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+        self.assertTrue(young.exists())
+        self.assertTrue(renamed.exists())
+        self.assertEqual(lines, [])
+
+    def test_an_unidentified_folder_past_the_window_is_kept_and_listed(self):
+        foreign = self.stopped(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))))
+        (foreign / "notes.txt").write_text("not something a backup writes\n")
+        empty = self.nas / "2026-10-02"
+        empty.mkdir()
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+        self.assertTrue(foreign.exists())
+        self.assertTrue(empty.exists())
+        self.assertEqual(len(lines), 2, lines)
+        self.assertIn(f"kept {foreign}: ", lines[0])
+        self.assertIn("notes.txt", lines[0])
+        self.assertIn(f"kept {empty}: ", lines[1])
+
+    def test_the_dry_run_lists_what_would_go_and_deletes_nothing(self):
+        pre = self.pre_json(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))))
+        halted = self.stopped(self.mirror(self.snapshot(datetime(2026, 10, 2, 9, 0, tzinfo=UTC))))
+        (self.nas / "2026-10-03").mkdir()
+
+        completed = self.job("--prune-only", "--dry-run", "--destination", str(self.nas), "--keep-days", "7")
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn(f"would remove {pre}\n", completed.stdout)
+        self.assertIn(f"would remove {halted}\n", completed.stdout)
+        self.assertIn(f"kept {self.nas / '2026-10-03'}: ", completed.stdout)
+        self.assertIn("dry run: 2 copies older than 7 days would be removed", completed.stdout)
+        self.assertTrue(pre.exists())
+        self.assertTrue(halted.exists())
+
+    def test_a_removal_stopped_halfway_is_finished_by_the_next_prune(self):
+        old = self.stopped(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))))
+        doomed = self.nas / ".2026-10-01.removing"
+
+        def stop_after_one_file(path):
+            (path / "sd.db").unlink()
+            raise KeyboardInterrupt  # the job's time bound, between two unlinks
+
+        with mock.patch.object(backup.shutil, "rmtree", stop_after_one_file), self.assertRaises(KeyboardInterrupt):
+            prune_older(self.nas, 7, now=NOW, moved=True)
+        self.assertEqual(sorted(self.nas.iterdir()), [doomed])
+        # Not a dated name: restore never reads the half left behind.
+        with self.assertRaisesRegex(BackupError, r"\(0 refused\)"):
+            backup.restore_newest([self.nas], home=self.fresh_home())
+        dry: list[str] = []
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, dry_run=True, report=dry.append), [])
+        self.assertTrue(doomed.exists())
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertFalse(old.exists())
+        self.assertEqual(list(self.nas.iterdir()), [])
+        self.assertEqual(dry, [f"would finish removing {doomed}, which an earlier prune stopped inside"])
+        self.assertEqual(lines, [f"finished removing {doomed}, which an earlier prune stopped inside"])
+
+    def test_the_dry_run_needs_the_prune_only_mode(self):
+        completed = self.job("--dry-run", "--destination", str(self.nas))
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        self.assertIn("--dry-run needs --prune-only", completed.stderr)
+        self.assertEqual(list(self.nas.iterdir()), [])
+
     def test_the_job_prunes_copies_without_taking_a_snapshot(self):
         old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
         taken = sorted(self.local.iterdir())
@@ -172,6 +278,35 @@ class TheNewest(Case):
         self.assertIn("differ from its manifest", result.refused[0][1])
         self.assertEqual(len(lines), 1)
         self.assertIn(str(bad), lines[0])
+
+    def test_stopped_runs_are_one_line_and_a_real_refusal_keeps_its_own(self):
+        good = self.mirror(self.snapshot(datetime(2026, 10, 9, 9, 0, tzinfo=UTC), title="first"))
+        for when in (datetime(2026, 10, 10, 9, 0, tzinfo=UTC), datetime(2026, 10, 11, 9, 30, tzinfo=UTC)):
+            self.stopped(self.mirror(self.snapshot(when)))
+        bad = self.mirror(self.snapshot(NOW, title="second"))
+        (bad / "runner-recovery-note").write_text("written on the share\n")
+        lines: list[str] = []
+        home = self.fresh_home()
+
+        result = backup.restore_newest([self.nas], home=home, report=lines.append)
+
+        self.assertEqual(result.snapshot, good)
+        self.assertEqual(len(result.refused), 3)
+        self.assertEqual(len(lines), 2, lines)
+        self.assertEqual(lines[0], f"refused 2 snapshot(s) under {self.nas} with no manifest, left by runs that "
+                                   "stopped before recording one, taken 2026-10-10T09:00:00+00:00 to "
+                                   "2026-10-11T09:30:00+00:00")
+        self.assertIn(f"refused {bad}: ", lines[1])
+
+    def test_a_pre_json_snapshot_restores(self):
+        old = self.pre_json(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC), title="first")))
+        home = self.fresh_home()
+
+        result = backup.restore_newest([self.nas], home=home)
+
+        self.assertEqual((result.snapshot, result.refused), (old, []))
+        self.assertEqual(result.taken_at, datetime(2026, 10, 1, 9, 0, tzinfo=UTC))
+        self.assertEqual(self.items(home), ["first"])
 
     def test_a_newest_snapshot_restore_would_refuse_is_skipped(self):
         # `run` keeps a snapshot of a source with broken references as a forensic copy.
