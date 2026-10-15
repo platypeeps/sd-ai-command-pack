@@ -23,9 +23,23 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import (create_item, database, initialise, ledger, publication_journal, removal, remote, repos,
-                   retention, runner_exec, seed, ship, writing)
-from sd_db.backup import restore, run as take_backup
+from sd_db import (
+    create_item,
+    database,
+    initialise,
+    ledger,
+    publication_journal,
+    remote,
+    removal,
+    repos,
+    retention,
+    runner_exec,
+    seed,
+    ship,
+    writing,
+)
+from sd_db.backup import restore
+from sd_db.backup import run as take_backup
 from sd_db.database import default_path
 from sd_db.operations import control_gate
 from sd_db.registry import parse

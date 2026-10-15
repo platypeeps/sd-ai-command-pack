@@ -8,18 +8,28 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import connect, create_assignment, create_item, upsert_repo
-from sd_db import contributions
+from sd_db import connect, contributions, create_assignment, create_item, upsert_repo
 from sd_db.database import transaction
 from sd_db.migrate import initialise
 from sd_db.reads import item_by_id
-from sd_db.writes import add_note, set_item_fields
-from sd_db.writes import TransitionRefused, transition
 from sd_db.workflow import (
-    HAND_KINDS, REPO_LESS_KINDS, TASK_STATUSES, MissingItem, MissingNote, StaleItem, WorkflowError,
-    add_item_note, allowed_statuses, capture_task, change_status, edit_item, item_state,
-    resolve_item_note, schema_kinds,
+    HAND_KINDS,
+    REPO_LESS_KINDS,
+    TASK_STATUSES,
+    MissingItem,
+    MissingNote,
+    StaleItem,
+    WorkflowError,
+    add_item_note,
+    allowed_statuses,
+    capture_task,
+    change_status,
+    edit_item,
+    item_state,
+    resolve_item_note,
+    schema_kinds,
 )
+from sd_db.writes import TransitionRefused, add_note, set_item_fields, transition
 
 
 class WorkflowCase(unittest.TestCase):

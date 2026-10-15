@@ -19,7 +19,13 @@ from unittest.mock import patch
 from sd_db import connect, upsert_repo
 from sd_db.migrate import initialise
 from sd_db.schema import SCHEMA_VERSION, migrations
-from sd_db.workflow import WorkflowError, capture_task, change_status, edit_item, item_state
+from sd_db.workflow import (
+    WorkflowError,
+    capture_task,
+    change_status,
+    edit_item,
+    item_state,
+)
 
 
 def engine():

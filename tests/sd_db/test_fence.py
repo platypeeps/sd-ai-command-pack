@@ -12,8 +12,8 @@ never named its hub) go on; `elsewhere` (another node holds the name) and
 
 from __future__ import annotations
 
-import ipaddress
 import io
+import ipaddress
 import os
 import socket
 import subprocess
@@ -23,7 +23,17 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import database, hub, initialise, remote, serve, ship, tailnet, upsert_repo, writes
+from sd_db import (
+    database,
+    hub,
+    initialise,
+    remote,
+    serve,
+    ship,
+    tailnet,
+    upsert_repo,
+    writes,
+)
 from sd_db.testing import Stubs
 
 from . import support

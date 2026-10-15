@@ -7,8 +7,17 @@ from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import connect, ensure_seeded, read_registry, seed, set_bill_cap, set_provider_state
-from sd_db import provider_controls, registry, writes
+from sd_db import (
+    connect,
+    ensure_seeded,
+    provider_controls,
+    read_registry,
+    registry,
+    seed,
+    set_bill_cap,
+    set_provider_state,
+    writes,
+)
 from sd_db.errors import RegistryError
 from sd_db.migrate import initialise
 from sd_db.registry import beside, merge, parse

@@ -10,10 +10,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import connect, initialise, upsert_repo
-from sd_db import protection
+from sd_db import connect, initialise, protection, upsert_repo
 from sd_db.contribution_github import Client, Response
-from sd_db.shadow_sync import _SearchBudget, read_watermark, sync as tracker_sync
+from sd_db.shadow_sync import _SearchBudget, read_watermark
+from sd_db.shadow_sync import sync as tracker_sync
 
 from .test_shadow_sync import Gh, node
 

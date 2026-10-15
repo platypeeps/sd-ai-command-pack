@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import ast
 import unittest
+
 from . import support
 
 PACKAGE = support.LIB / "sd_db"

@@ -35,9 +35,22 @@ from sd_db.shadow_sync import (
     window_start,
     write_watermark,
 )
-from .test_shadow_jira import (BROKEN_ANSWERS, JIRA_ENV, NON_ASCII_HOST, NON_ASCII_HOST_REASON, NOT_A_HOST,
-                                    NOT_A_HOST_REASON, SECRET, UNSPLITTABLE,
-                                    RawServer, jira_issue, jira_transport, no_socket, without_jira_environment)
+
+from .test_shadow_jira import (
+    BROKEN_ANSWERS,
+    JIRA_ENV,
+    NON_ASCII_HOST,
+    NON_ASCII_HOST_REASON,
+    NOT_A_HOST,
+    NOT_A_HOST_REASON,
+    SECRET,
+    UNSPLITTABLE,
+    RawServer,
+    jira_issue,
+    jira_transport,
+    no_socket,
+    without_jira_environment,
+)
 
 
 def node(number, *, url=None, kind="Issue", state="OPEN", title="a title"):

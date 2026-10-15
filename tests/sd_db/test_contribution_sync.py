@@ -10,16 +10,24 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import connect, initialise, upsert_repo
+from sd_db import connect, initialise, protection, upsert_repo
 from sd_db import contribution_sync as adapter
 from sd_db import contributions as core
-from sd_db import protection
-from sd_db.database import transaction
 from sd_db.contribution_github import Client
+from sd_db.database import transaction
 from sd_db.shadow_sync import _SearchBudget, read_watermark, sync
 
 from . import test_contribution_github as fixtures
-from .test_contribution_github import AT, BASE, ISSUE_URL, ROOT, URL, Api, IssueApi, Response
+from .test_contribution_github import (
+    AT,
+    BASE,
+    ISSUE_URL,
+    ROOT,
+    URL,
+    Api,
+    IssueApi,
+    Response,
+)
 
 
 class SyncCase(unittest.TestCase):

@@ -14,6 +14,7 @@ from sd_db.database import connect, schema_version, set_schema_version, tables
 from sd_db.errors import SchemaTooNew, SchemaTooOld
 from sd_db.migrate import initialise, migrate
 from sd_db.schema import SCHEMA_VERSION, TABLES
+
 from . import support
 
 PACKAGE_ROOT = support.LIB

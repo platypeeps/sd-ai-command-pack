@@ -16,8 +16,8 @@ from sd_db.errors import SdDbError
 from sd_db.ledger import claim, lose, reserve, settle
 from sd_db.testing.wire import hub_only
 
-from .test_ledger import ME, REGISTRY, LedgerCase, dead_pid
 from . import support
+from .test_ledger import ME, REGISTRY, LedgerCase, dead_pid
 
 REGISTRY_WITH_EXTRA_BILL = REGISTRY.replace("  open:   { cost: subscription }\n", "  open:   { cost: subscription }\n  extra:  { cost: subscription }\n")
 

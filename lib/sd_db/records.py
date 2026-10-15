@@ -64,7 +64,15 @@ from .sources.frontmatter import FrontmatterError
 from .sources.frontmatter import read as read_frontmatter
 from .sources.vault import DUE, NOT_FIELDS, SOURCE, plugin_entries, store_root
 from .workflow import MissingItem, WorkflowError, _checked_state, _text, item_state
-from .writes import _transition, add_note, create_item, now, record_state, set_item_fields, unresolved_state
+from .writes import (
+    _transition,
+    add_note,
+    create_item,
+    now,
+    record_state,
+    set_item_fields,
+    unresolved_state,
+)
 
 #: Keys a caller may not set in `fields`: `status` is `stage`, `mirror-hash`
 #: is the mirror file's, `kind` is the declared kind.

@@ -18,13 +18,21 @@ from unittest.mock import patch
 from sd_db import connect, record_state, records
 from sd_db.jobs import cli
 from sd_db.migrate import initialise
-from sd_db.records import MIRROR_KEY, add_row, edit_row, get_row, mirror_state, render, rules_for
+from sd_db.records import (
+    MIRROR_KEY,
+    add_row,
+    edit_row,
+    get_row,
+    mirror_state,
+    render,
+    rules_for,
+)
 from sd_db.remote import HubOnly
 from sd_db.sources import run, verify
 from sd_db.sources.frontmatter import read as read_frontmatter
 from sd_db.sources.vault import Reader
-from sd_db.writes import set_item_fields
 from sd_db.testing.wire import hub_only
+from sd_db.writes import set_item_fields
 
 from . import support
 

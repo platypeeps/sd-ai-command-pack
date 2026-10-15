@@ -31,7 +31,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..writes import upsert_shadow
-from . import Counts, Frozen, MigrationRefused, Record, shadow_identity, shadow_tracker, shadow_url
+from . import (
+    Counts,
+    Frozen,
+    MigrationRefused,
+    Record,
+    shadow_identity,
+    shadow_tracker,
+    shadow_url,
+)
 
 #: `~/.cache/sd-ai-command-pack/index.sqlite`, honouring `XDG_CACHE_HOME`.
 CACHE_RELATIVE = Path("sd-ai-command-pack/index.sqlite")

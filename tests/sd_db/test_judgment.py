@@ -14,15 +14,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import connect
-from sd_db import judgment
+from sd_db import connect, judgment
 from sd_db.judgment import (
     CAUSES,
     GATE_PRIMITIVE,
-    JudgmentRefused,
     MAX_ANSWER,
     MAX_NAME,
     MAX_ORDERING,
+    JudgmentRefused,
     by_stage,
     document,
     json_text,

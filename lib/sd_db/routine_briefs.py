@@ -43,7 +43,15 @@ from .database import refuse_hub_only, transaction
 from .records import RecordRefused, _closing, _file_key, hash_holds, hashed, unhashed
 from .reporting import MAX_REPORT
 from .workflow import MissingItem, WorkflowError, _text, item_state
-from .writes import add_note, create_item, item_by_external, now, record_state, set_item_fields, unresolved_state
+from .writes import (
+    add_note,
+    create_item,
+    item_by_external,
+    now,
+    record_state,
+    set_item_fields,
+    unresolved_state,
+)
 
 SOURCE = "brief"
 

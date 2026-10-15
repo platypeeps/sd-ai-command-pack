@@ -20,14 +20,25 @@ import tempfile
 import threading
 import time
 import unittest
-from unittest import mock
 from datetime import UTC, datetime, timedelta
 from importlib import import_module
 from pathlib import Path
+from unittest import mock
 
 from sd_db import add_note, connect, create_assignment, create_item, upsert_repo
-from sd_db.backup import (BACKUP_MANIFEST, KEEP, _dated_directory, backup_root,
-                          check_restorable, passed, prune, prune_older, restore, run, verify)
+from sd_db.backup import (
+    BACKUP_MANIFEST,
+    KEEP,
+    _dated_directory,
+    backup_root,
+    check_restorable,
+    passed,
+    prune,
+    prune_older,
+    restore,
+    run,
+    verify,
+)
 from sd_db.errors import BackupError, SdDbError
 from sd_db.jobs import backup as job_backup
 from sd_db.migrate import initialise
@@ -35,6 +46,7 @@ from sd_db.schema import SCHEMA_DIR, SCHEMA_VERSION, migrations
 from sd_db.testing import Stubs, add_unknown_table, break_foreign_keys, make_store
 from sd_db.testing.wire import hub_only
 from sd_db.writes import record_state, unresolved_state
+
 from . import support
 
 PACKAGE_ROOT = support.LIB

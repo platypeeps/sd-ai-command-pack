@@ -2,15 +2,16 @@
 
 import os
 import re
+import sqlite3
 import subprocess
 import sys
-import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
 
 from sd_db.schema import SCHEMA_VERSION
 from sd_db.testing.wire import hub_only
+
 from . import support
 
 PACKAGE_ROOT = support.LIB
@@ -833,6 +834,7 @@ class InterruptAsCommitReturns(RemoveCase):
 
     def test_main_returns_4_and_prints_the_lines(self):
         from contextlib import contextmanager
+
         from sd_db import removal
         from sd_db.jobs import cli
 

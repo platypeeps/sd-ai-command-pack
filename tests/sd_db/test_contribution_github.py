@@ -6,8 +6,16 @@ import time
 import unittest
 from unittest.mock import patch
 
-from sd_db.contribution_github import (Client, Response, Unavailable, canonical_issue_url, dependency, issue,
-                                       issue_parts, pull)
+from sd_db.contribution_github import (
+    Client,
+    Response,
+    Unavailable,
+    canonical_issue_url,
+    dependency,
+    issue,
+    issue_parts,
+    pull,
+)
 from sd_db.shadow_sync import _SearchBudget
 
 URL = "https://github.com/example/project/pull/7"

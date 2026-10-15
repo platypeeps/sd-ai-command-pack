@@ -966,7 +966,11 @@ def revisions(connection: sqlite3.Connection, items) -> dict[int, str]:
     `expected_revision` is checked against. An id `item_state` refuses is
     refused here the same way, the missing item included.
     """
-    from .workflow import MissingItem, _identifier, _revision  # workflow imports this module
+    from .workflow import (  # workflow imports this module
+        MissingItem,
+        _identifier,
+        _revision,
+    )
 
     ids = list(dict.fromkeys(items))
     for item in ids:

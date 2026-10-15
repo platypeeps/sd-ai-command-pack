@@ -47,12 +47,14 @@ import sqlite3
 from dataclasses import dataclass
 from decimal import Decimal
 
-from . import paths, reporting
 from . import database as _database
+from . import paths, reporting
 from .database import transaction
 from .errors import RegistryError, SdDbError
-from .registry import Provider, Registry, read as read_registry
-from .writes import now as _now, stamp, update_assignment
+from .registry import Provider, Registry
+from .registry import read as read_registry
+from .writes import now as _now
+from .writes import stamp, update_assignment
 
 #: The report job a settlement above its bound is filed under, as an
 #: attention report (`reporting.ingest`), which is the row that pushes.

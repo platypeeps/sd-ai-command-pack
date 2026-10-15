@@ -9,14 +9,13 @@ clean tick filed a recovery that never happened.
 import json
 import tempfile
 import unittest
-from unittest import mock
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest import mock
 
 from sd_db import reporting, retention, workflow
 from sd_db.database import connect
 from sd_db.migrate import initialise
-
 
 #: The clock every tick here reads, injected: after every fixture stamp below
 #: except the ones that are deliberately in the future.

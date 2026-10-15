@@ -27,7 +27,6 @@ from sd_db.writes import upsert_item
 
 from . import support
 
-
 BLOG_IDEA, TOPIC, entry = support.BLOG_IDEA, support.TOPIC, support.plugin_entry
 
 
