@@ -130,7 +130,7 @@ class TheLauncher(LauncherTree):
         self.assertEqual(run.returncode, 1)
         self.assertEqual(run.stdout, "")
         self.assertIn("lib backup []\nto stderr", run.stderr)
-        self.assertEqual(self.mails(), [repr(["-t", "sd-db backup FAILED", "-k", "status", "-F", "-c", "email",
+        self.assertEqual(self.mails(), [repr(["-t", "sd-db backup FAILED", "-k", "status", "-F", "-c", "ntfy,email",
                                               "-b", "lib backup []\nto stderr"])])
 
     def test_a_broken_source_mails_its_own_title_and_keeps_exit_three(self) -> None:

@@ -39,10 +39,10 @@ Usage: sd-db <verb> [arguments]
               -h or --help anywhere prints this text and acts on nothing.
   backup [ARGS]
               Snapshot the database and prove the copy (sd_db.jobs.backup).
-              A failure prints its output on stderr, mails it through
-              SD_NOTIFY or `notify` on PATH, and exits 1. Exit 3 is a
-              backup that passed over a source with broken references;
-              it mails too.
+              A failure prints its output on stderr, sends it on ntfy
+              and email through SD_NOTIFY or `notify` on PATH, and exits
+              1. Exit 3 is a backup that passed over a source with broken
+              references; it sends too.
   serve [ARGS]
               Serve the database to sd_db.remote connections (sd_db.serve).
   help        This text.
@@ -59,11 +59,15 @@ def usage(code: int) -> int:
 
 
 def report_failure(body: str, title: str) -> None:
-    """Mail a failed backup; best effort on the channel, never on the exit code."""
+    """Report a failed backup; best effort on the channel, never on the exit code.
+
+    ntfy and email both, `-b` best effort: an ntfy-only machine skips email,
+    an email-only one skips ntfy, and either still counts as sent (sd:4693).
+    """
     notify = os.environ.get("SD_NOTIFY") or shutil.which("notify")
     try:
         sent = bool(notify) and subprocess.run(
-            [str(notify), "-t", title, "-k", "status", "-F", "-c", "email", "-b", body], check=False).returncode == 0
+            [str(notify), "-t", title, "-k", "status", "-F", "-c", "ntfy,email", "-b", body], check=False).returncode == 0
     except OSError:
         sent = False
     if not sent:

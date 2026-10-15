@@ -1402,7 +1402,7 @@ class TheJobsFailures(JobRun):
         mails = self.mails()
         self.assertEqual(len(mails), 1)
         self.assertEqual(mails[0].argv, [
-            "-t", "sd-db backup FAILED", "-k", "status", "-F", "-c", "email",
+            "-t", "sd-db backup FAILED", "-k", "status", "-F", "-c", "ntfy,email",
             "-b", completed.stderr.rstrip("\n"),
         ])
         self.assertEqual(self.stubs.calls("local-notify"), [])
@@ -1417,7 +1417,7 @@ class TheJobsFailures(JobRun):
         mails = self.stubs.calls("local-notify")
         self.assertEqual(len(mails), 1)
         self.assertEqual(mails[0].argv, [
-            "-t", "sd-db backup FAILED", "-k", "status", "-F", "-c", "email",
+            "-t", "sd-db backup FAILED", "-k", "status", "-F", "-c", "ntfy,email",
             "-b", completed.stderr.rstrip("\n"),
         ])
 
@@ -1434,7 +1434,7 @@ class TheJobsFailures(JobRun):
         mails = self.mails()
         self.assertEqual(len(mails), 1)
         self.assertIn("-c", mails[0].argv)
-        self.assertIn("email", mails[0].argv)
+        self.assertIn("ntfy,email", mails[0].argv)
         self.assertIn("did not open", " ".join(mails[0].argv))
         self.assertIn("did not open", completed.stderr)
         self.assertEqual(self.database.stat().st_size, size_before)
@@ -1457,7 +1457,7 @@ class TheJobsFailures(JobRun):
 
         mails = self.mails()
         self.assertEqual(len(mails), 1)
-        self.assertIn("email", mails[0].argv)
+        self.assertIn("ntfy,email", mails[0].argv)
         self.assertIn("backup directory was not created", " ".join(mails[0].argv))
         # The checkpoint row is written before the snapshot and stays; nothing
         # else is. That is the row the next successful run's copy is checked
