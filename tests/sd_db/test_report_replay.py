@@ -567,8 +567,11 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         # A job that prints the same two lines every run still folds.
         again = self.tick("c", 31, exit_code=0, text="SD_REPORT_ATTENTION: swap high [7]\n" + disk)
         self.assertEqual((again["recorded"], again["item"]["id"]), ("folded", carried["item"]["id"]))
-        # A disk-only run folds into the disk report, never into the carried one.
-        self.assertEqual(self.tick("d", 46, exit_code=0, text=disk)["item"]["id"], open_)
+        # A disk-only run never folds into the carried one. Since sd:4641 the
+        # carried report superseded the disk report, and this one supersedes it.
+        last = self.tick("d", 46, exit_code=0, text=disk)
+        self.assertEqual((last["recorded"], last["why"]), ("report", "disk low [123]"))
+        self.assertNotIn(last["item"]["id"], (open_, carried["item"]["id"]))
 
     def test_a_late_run_is_counted_but_keeps_the_newer_body(self):
         """A hand recovery of an older run counts, and the body stays the newest run's."""
@@ -743,9 +746,9 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         self.ack(carried["item"]["id"])
         one = self.tick("f", 55, exit_code=0, text="SD_REPORT_ATTENTION: disk low [123]; disk low [456]\n")
         self.assertEqual((one["recorded"], one["item"]["status"]), ("report", "planning"))
-        # One line twice is one finding, and folds.
+        # One line twice is one finding.
         twice = self.tick("c", 31, exit_code=0, text="SD_REPORT_ATTENTION: disk low [123]\nSD_REPORT_ATTENTION: disk low [123]\n")
-        self.assertEqual((twice["recorded"], twice["item"]["id"]), ("folded", lost))
+        self.assertEqual(twice["why"], "disk low [123]")
 
     def test_a_basis_past_the_limit_still_files(self):
         """A carried slice grows a line per lost night; past `ingest`'s 2000
@@ -789,5 +792,135 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         self.assertEqual(self.repeats(first), repeats)
         self.assertEqual(self.followups(first), 1)
 
+
+
+class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
+    """sd:4641, rule (e) of sd:4629: one open findings report per job and host.
+
+    A shrinking or changed set of findings opened a second report beside the
+    first. Now a new clean-exit findings report closes the older open one of
+    the same job and host as superseded; a superseded report never counts as
+    acknowledged; only reports that store a host take part.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory(); self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name).resolve()
+        self.path = self.root / "sd.db"; initialise(self.path)
+        self.db = connect(self.path); self.addCleanup(self.db.close)
+        host = mock.patch("sd_db.ship.this_host", return_value="hosta"); host.start(); self.addCleanup(host.stop)
+
+    def tick(self, run, minute, text, *, exit_code=0, job="probe"):
+        log = self.root / f"{job}-{run}.log"
+        if not log.exists():
+            log.write_text(text)
+        return reporting.ingest_log(
+            self.db, job=job, run_id=run, started="2026-09-08T00:00:00Z",
+            ended=f"2026-09-08T00:{minute:02d}:00Z", exit_code=exit_code, log_path=log, now=NOW)
+
+    def row(self, item):
+        return self.db.execute("SELECT * FROM item WHERE id=?", (item,)).fetchone()
+
+    def status_notes(self, item):
+        return [row["body"] for row in self.db.execute(
+            "SELECT body FROM note WHERE item=? AND kind='status_change' ORDER BY id", (item,))]
+
+    def open_followups(self, item):
+        return self.db.execute("SELECT COUNT(*) FROM note WHERE item=? AND kind='followup' AND resolved_at IS NULL",
+                               (item,)).fetchone()[0]
+
+    TWO = "SD_REPORT_ATTENTION: 2 finding(s) [12]\n"
+    ONE = "SD_REPORT_ATTENTION: 1 finding(s) [1]\n"
+
+    def test_a_report_stores_its_host(self):
+        item = self.tick("a", 1, self.TWO)["item"]["id"]
+        self.assertEqual(json.loads(self.row(item)["fields"])["report"]["host"], "hosta")
+
+    def test_a_shrinking_set_supersedes_the_open_report(self):
+        older = self.tick("a", 1, self.TWO)["item"]["id"]
+        newer = self.tick("b", 16, self.ONE)
+        self.assertEqual((newer["recorded"], newer["item"]["status"]), ("report", "planning"))
+        self.assertEqual(self.row(older)["status"], "done")
+        self.assertRegex(self.status_notes(older)[-1],
+                         rf"^planning -> done by cron: superseded by sd:{newer['item']['id']}")
+        self.assertEqual(self.open_followups(older), 0)
+        self.assertEqual(self.open_followups(newer["item"]["id"]), 1)
+
+    def test_a_superseded_report_never_counts_as_acknowledged(self):
+        """Even named by the host's chain row, it takes no repeat."""
+        older = self.tick("a", 1, self.TWO)["item"]["id"]
+        self.tick("b", 16, self.ONE)
+        self.db.execute("UPDATE state SET body=json_set(body, '$.item', ?) WHERE key=?",
+                        (older, reporting.CHAIN_KEY + "probe@hosta"))
+        self.db.commit()
+        again = self.tick("c", 31, self.TWO)
+        self.assertEqual((again["recorded"], again["item"]["status"]), ("report", "planning"))
+        self.assertNotEqual(again["item"]["id"], older)
+
+    def test_another_hosts_report_is_not_superseded(self):
+        with mock.patch("sd_db.ship.this_host", return_value="hostb"):
+            other = self.tick("a", 1, self.TWO)["item"]["id"]
+        self.tick("b", 16, self.ONE)
+        self.assertEqual(self.row(other)["status"], "planning")
+
+    def test_a_report_without_a_stored_host_is_not_superseded(self):
+        """No backfill: a row filed before the host was stored stays open."""
+        older = self.tick("a", 1, self.TWO)["item"]["id"]
+        self.db.execute("UPDATE item SET fields=json_remove(fields, '$.report.host') WHERE id=?", (older,))
+        self.db.commit()
+        self.tick("b", 16, self.ONE)
+        self.assertEqual(self.row(older)["status"], "planning")
+
+    def test_failures_neither_supersede_nor_are_superseded(self):
+        failed = self.tick("a", 1, "boom\n", exit_code=1)["item"]["id"]
+        findings = self.tick("b", 16, self.TWO)["item"]["id"]
+        self.assertEqual(self.row(failed)["status"], "planning")
+        self.tick("c", 31, "boom again\n", exit_code=2)
+        self.assertEqual(self.row(findings)["status"], "planning")
+
+    def test_a_late_report_supersedes_nothing(self):
+        newer = self.tick("b", 16, self.TWO)["item"]["id"]
+        self.tick("a", 1, self.ONE)
+        self.assertEqual(self.row(newer)["status"], "planning")
+
+    def test_a_report_a_person_owes_work_on_stays_open(self):
+        older = self.tick("a", 1, self.TWO)["item"]["id"]
+        workflow.add_item_note(self.db, older, kind="followup", body="Replace the disk.", who="operator")
+        self.tick("b", 16, self.ONE)
+        self.assertEqual(self.row(older)["status"], "planning")
+
+    def test_a_row_filed_before_the_host_was_stored_still_replays(self):
+        item = self.tick("a", 1, self.TWO)["item"]["id"]
+        self.db.execute("UPDATE item SET fields=json_remove(fields, '$.report.host') WHERE id=?", (item,))
+        self.db.commit()
+        again = self.tick("a", 1, self.TWO)
+        self.assertEqual((again["recorded"], again["item"]["id"]), ("report", item))
+
+    def test_a_machine_with_no_host_name_still_files(self):
+        with mock.patch("sd_db.ship.this_host", return_value=""):
+            older = self.tick("a", 1, self.TWO)["item"]["id"]
+            newer = self.tick("b", 16, self.ONE)["item"]["id"]
+        self.assertNotIn("host", json.loads(self.row(newer)["fields"])["report"])
+        self.assertEqual(self.row(older)["status"], "planning")
+
+    def test_a_superseded_report_the_operator_then_acknowledges_counts(self):
+        """The newest status change decides: reopened and acknowledged, it is acknowledged."""
+        older = self.tick("a", 1, self.TWO)["item"]["id"]
+        self.tick("b", 16, self.ONE)
+        reporting.reopen(self.db, older, expected_revision=workflow.item_state(self.db, older)["revision"], who="fixture")
+        reporting.acknowledge(self.db, older, expected_revision=workflow.item_state(self.db, older)["revision"],
+                              who="fixture", resolve_ingest_followups=True)
+        self.db.execute("UPDATE state SET body=json_set(body, '$.item', ?) WHERE key=?",
+                        (older, reporting.CHAIN_KEY + "probe@hosta"))
+        self.db.commit()
+        again = self.tick("c", 31, self.TWO)
+        self.assertEqual((again["recorded"], again["item"]["id"]), ("folded", older))
+
+    def test_reopening_a_superseded_report_returns_it_to_planning(self):
+        older = self.tick("a", 1, self.TWO)["item"]["id"]
+        self.tick("b", 16, self.ONE)
+        state = reporting.reopen(self.db, older, expected_revision=workflow.item_state(self.db, older)["revision"],
+                                 who="fixture")
+        self.assertEqual(state["item"]["status"], "planning")
 
 if __name__ == "__main__": unittest.main()

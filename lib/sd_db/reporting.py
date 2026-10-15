@@ -29,6 +29,11 @@ HEARTBEAT_KEY = "cron-report:"
 #: above is one row per job, and every host overwrites it.
 CHAIN_KEY = "cron-chain:"
 
+#: The reason `_supersede` gives its transition, after `-> done by cron: `.
+#: The status-change note is how a superseded report is told from an
+#: acknowledged one (sd:4641): it never counts as acknowledged.
+SUPERSEDED = "superseded by sd:"
+
 #: How far past the clock a recorded `ended` may be and still count as the
 #: newest tick. `cron-jobs.sh` stamps `ended` on this machine moments before it
 #: ingests, so a real run is seconds ahead at most; five minutes covers a
@@ -124,9 +129,10 @@ def _fold_target(connection, job, attention_basis, *, chain=None):
     `record` marker. A `done` row qualifies only as `chain`, after every
     open one (sd:4629): the report the previous run on this host went to,
     so the operator's acknowledgement holds while the findings repeat
-    without a break and no longer (`ingest_log`). The `external_id` range
-    is `_folded_into`'s: done rows are never deleted, so the read seeks this
-    job's rows only. Every JSON function sits inside
+    without a break and no longer (`ingest_log`). A row whose newest status
+    change is `_supersede`'s never qualifies: nobody acknowledged it
+    (sd:4641). The `external_id` range is `_folded_into`'s: done rows are
+    never deleted, so the read seeks this job's rows only. Every JSON function sits inside
     `CASE WHEN json_valid(fields)`, the way `clean_candidates` and
     `clean_reports` read: a `CASE` evaluates its branch only when the test
     is true, whatever order the query plan picks for `AND` terms, so a row
@@ -138,7 +144,9 @@ def _fold_target(connection, job, attention_basis, *, chain=None):
     return connection.execute(
         "SELECT id, fields FROM item WHERE kind='report' AND source='cron-report'"
         " AND external_id > ? AND external_id < ?"
-        " AND (status != 'done' OR id IS ?)"
+        " AND (status != 'done' OR id IS ? AND NOT EXISTS (SELECT 1 FROM note WHERE note.item = item.id"
+        "      AND note.id = (SELECT MAX(id) FROM note AS last WHERE last.item = item.id AND last.kind = 'status_change')"
+        f"      AND note.body LIKE '% -> done by {INGEST_SESSION}: {SUPERSEDED}%'))"
         f" AND NOT ({UNREADABLE_FIELDS})"
         " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.job') END = ?"
         " AND CASE WHEN json_valid(fields) THEN json_type(fields, '$.attention') END = 'true'"
@@ -164,8 +172,12 @@ def _check_times(started, ended):
 
 def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_path,
            attention=False, attention_basis="explicit report", truncated=False, removed=None,
-           actor=None, record=None, chain=None, now=None):
+           actor=None, record=None, chain=None, now=None, host=None):
     """File one run's report, or answer a replay of it with the report it filed.
+
+    `host` is the machine the run ran on, which `ingest_log` passes, stored as
+    `fields.report.host`: the key `_supersede` reads (sd:4641). A row filed
+    before it existed replays against its fields without it.
 
     `chain` is the one `done` report this run may fold into: the report the
     previous run of the job on this host went to, which only `ingest_log`
@@ -246,6 +258,8 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         raise workflow.WorkflowError("report record marker must be a job name")
     if chain is not None and type(chain) is not int:
         raise workflow.WorkflowError("report chain must be an item id")
+    if host is not None and (not isinstance(host, str) or not 1 <= len(host) <= 255):
+        raise workflow.WorkflowError("report host must be a short name")
     started, ended = _check_times(started, ended)
     external = job + ":" + run_id
     provenance = {"job": job, "run_id": run_id, "started": started, "ended": ended,
@@ -257,6 +271,8 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         provenance["removed"] = removed
     if actor is not None:
         provenance["actor"] = actor
+    if host is not None:
+        provenance["host"] = host
     fields = {"attention": attention, "report": provenance}
     if record is not None:
         fields["record"] = record
@@ -267,7 +283,10 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
             # open report's own run replays against its fields without it.
             stored = json.loads(previous["fields"])
             stored.pop("repeats", None)
-            if stored != fields:
+            expected = fields
+            if "host" not in (stored.get("report") or {}):
+                expected = {**fields, "report": {k: v for k, v in provenance.items() if k != "host"}}
+            if stored != expected:
                 raise workflow.WorkflowError("this report identity already has different evidence")
             return workflow.item_state(connection, previous["id"])
         # A record replays only through the exact identity above: it was
@@ -300,6 +319,41 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         if attention:
             add_note(connection, item, "followup", _ingest_followup(job, ended, attention_basis), session=INGEST_SESSION)
         return workflow.item_state(connection, item)
+
+
+def _supersede(connection, *, job, host, by):
+    """Close the older open findings reports of `job` on `host` as superseded by report `by` (sd:4641).
+
+    A new clean-exit findings report is the host's whole current set, so an
+    older open one -- a larger set that shrank, or a set that changed --
+    would only sit beside it. Only rows that store this `host` take part
+    (no backfill), only clean exits with `attention`, never a `record`, and
+    never a row with a followup the ingest did not write: somebody owes work
+    on it. The ingest's own followup is resolved, as `acknowledge` resolves
+    it, and the status note names `by`; `_fold_target` reads that note, so a
+    superseded report never counts as acknowledged. `ingest_log` calls this
+    only for the host's newest run, so a late run closes nothing.
+    """
+    rows = connection.execute(
+        "SELECT id, fields FROM item WHERE kind='report' AND source='cron-report' AND status != 'done'"
+        " AND external_id > ? AND external_id < ? AND id != ?"
+        " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.job') = ?"
+        "      AND json_extract(fields, '$.report.host') = ?"
+        "      AND json_type(fields, '$.attention') = 'true'"
+        "      AND json_type(fields, '$.report.exit_code') = 'integer' AND json_extract(fields, '$.report.exit_code') = 0"
+        "      AND json_type(fields, '$.record') IS NULL END",
+        (job + ":", job + ";", by, job, host)).fetchall()
+    for row in rows:
+        ingests = _ingest_followup_for(row["fields"])
+        followups = connection.execute(
+            "SELECT id, session, body FROM note WHERE item=? AND kind='followup' AND resolved_at IS NULL",
+            (row["id"],)).fetchall()
+        if any(note["session"] != INGEST_SESSION or note["body"] != ingests for note in followups):
+            continue
+        for note in followups:
+            resolve_note(connection, note["id"])
+        transition(connection, row["id"], "done", who=INGEST_SESSION, reason=f"{SUPERSEDED}{by}" + (
+            "; resolved the ingest's followup " + ", ".join(str(note["id"]) for note in followups) if followups else ""))
 
 
 def _set_chain(connection, key, row, body):
@@ -544,7 +598,10 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
         state = ingest(connection, job=job, run_id=run_id, started=started, ended=ended,
                        exit_code=exit_code, text=text, source_path=str(path.resolve()),
                        attention=attention, attention_basis=basis, truncated=truncated,
-                       chain=last.get("item") if moves and type(last.get("item")) is int else None, now=clock)
+                       chain=last.get("item") if moves and type(last.get("item")) is int else None, now=clock,
+                       host=host or None)
+        if moves and host and attention and not exit_code and state["item"]["external_id"] == job + ":" + run_id:
+            _supersede(connection, job=job, host=host, by=state["item"]["id"])
         if moves:
             _set_chain(connection, chain_key, newest_row, {
                 "run_id": run_id, "ended": ended, "item": state["item"]["id"] if attention and not exit_code else None})
