@@ -312,8 +312,12 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
                 # `last_*` stay the newest run's; a stamp past the allowance
                 # is not the newest.
                 repeats.update(last_run_id=run_id, last_ended=ended)
+            # A cut body never replaces a whole one (sd:4641): the row's
+            # `report.truncated` is the first run's, and the dashboard reads
+            # it. The basis matched, so the findings are the same.
+            whole = not truncated or stored["report"].get("truncated") is True
             set_item_fields(connection, target["id"], fields={**stored, "repeats": repeats},
-                            **({"body": {"text": text}} if newest else {}))
+                            **({"body": {"text": text}} if newest and whole else {}))
             return workflow.item_state(connection, target["id"])
         item = create_item(connection, kind="report", title=f"{job}: {'needs attention' if attention else 'run report'}",
                            status="planning", source="cron-report", external_id=external,

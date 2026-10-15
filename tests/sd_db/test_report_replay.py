@@ -958,6 +958,14 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         run = self.tick("a", 1, self.past_the_cut("", "SD_REPORT_ATTENTION: disk low [9]\n"))
         self.assertEqual((run["recorded"], run["why"]), ("report", "disk low [9]"))
 
+    def test_a_truncated_repeat_keeps_the_complete_body(self):
+        """Codex on round 1: the fold stored the cut body under the first run's `truncated: false`."""
+        first = self.tick("a", 1, self.ONE + "all of it\n")["item"]["id"]
+        again = self.tick("b", 16, self.past_the_cut(self.ONE, ""))
+        self.assertEqual((again["recorded"], again["item"]["id"]), ("folded", first))
+        self.assertTrue("all of it" in json.loads(self.row(first)["body"])["text"], "the cut body replaced it")
+        self.assertEqual(json.loads(self.row(first)["fields"])["repeats"]["last_run_id"], "b")
+
     def test_reopening_a_superseded_report_returns_it_to_planning(self):
         older = self.tick("a", 1, self.TWO)["item"]["id"]
         self.tick("b", 16, self.ONE)
