@@ -51,6 +51,11 @@ failure table no longer promises `unchanged` after a refused record (R4-2).
 
 A fifth round found no blocking findings. That spends the design review cap of 5.
 
+Amended 2026-10-15 after the first live drain (sd:4742): a plan that wrote nothing left `creating`, and the next
+plan asked for `--experiment new`; and a create plan repeated before its write answered `search:` for good. The
+pointer search finding no row now prints the create again, under the same intent, and a repeated plan is the same
+answer. Two failure rows below carry it.
+
 ## Terms
 
 - **Experiments database**: the team database in the work Notion space that holds one row per experiment.
@@ -195,9 +200,12 @@ The row id is recorded in the designation, `fields.experiments.row`, the way dra
   searches the target database for the pointer text `sd:<n>`, whatever the row is titled now, and hands the plan
   every row whose body opens with that pointer. One row is adopted: the plan records its id as `row` and drops the
   old `creating`. Adopting the row does not make its fields sd's: `written` is still empty, so every populated
-  sd-owned field is refused with the may-be-sd note until a person hands it back. None or two make the plan refuse, and the drain
+  sd-owned field is refused with the may-be-sd note until a person hands it back. None means the plan wrote nothing
+  (a dry run, or a drain stopped before its write): the plan prints the create again under the same intent, and
+  nobody runs `--experiment new` (sd:4742). Two make the plan refuse, and the drain
   files one question on the item (Option: no row exists, create it, which is `--experiment new`; Option: this is the
-  row, which is `--experiment row:ID`). sd never creates twice on its own, because search can lag a create.
+  row, which is `--experiment row:ID`). The search is the one evidence that no create landed; a search that lags a
+  create by the seconds between a drain's write and its next plan is the accepted window, beside Q4's.
 - **No step 4.** The request file never holds a row id, so no `project` re-run can graft a row onto another
   generation, and `recorded()` is not used for rows. The request copies the designation's `row` for the report and the fingerprint.
 
@@ -322,7 +330,8 @@ contract text.
 | plan: record intent | `written`, `writing`, `yielded`, `creating` | the transaction fails | nothing is printed and nothing written; exit 1 | `test_projection_plan`: a refused write prints no plan |
 | plan: designation changed after plan | nothing more | `sd task edit --experiment` runs while a drain is between plan and `delivered` | `delivered` compares the intent's stored designation with the current one and refuses a mismatch; the next plan drops that intent, and fields Notion took under it are refused as unconfirmed | `test_delivered`: each changed key refuses even when a later `project` rewrote the request to match, fail-first |
 | Notion: fetch to write | a colleague's value overwritten | a person edits an sd-owned field between the fetch the plan read and the write | the drain plans on a fetch made just before the write, and fetches and plans again if anything comes between; the remaining window of one plan and one call is accepted under Q4 | none: no Notion code in the pack; the contract text names the order |
-| Notion: create | a row, `creating` on the item | stopped after create, before `delivered` | the next plan sees `creating`; the drain searches by the pointer text, not the title; the plan adopts exactly one row and records its id; none or two refuse and file one question; sd never creates twice on its own; the adopted row's populated fields are refused until handed back | `test_projection_plan`: with `creating` set, no candidate and two candidates refuse with no create; one candidate is adopted, its id recorded, its populated fields refused with the may-be-sd note, and a hand-back makes them sd's, fail-first |
+| Notion: create | a row, `creating` on the item | stopped after create, before `delivered` | the next plan sees `creating`; the drain searches by the pointer text, not the title; the plan adopts exactly one row and records its id; none prints the create again (the search is the evidence that none landed); two refuse and file one question; the adopted row's populated fields are refused until handed back | `test_projection_plan`: with `creating` set, two candidates refuse with no create; one candidate is adopted, its id recorded, its populated fields refused with the may-be-sd note, and a hand-back makes them sd's, fail-first |
+| plan: create planned, nothing written | `creating` on the item | a plan-only run (a dry run, or a drain stopped before its write) left `creating`, so the next live plan answers `search:` | the drain searches by the pointer; none found, the plan prints the same create again and keeps the intent, so no `--experiment new` is needed and no pinned row is dropped; a search that lags a create by seconds is the accepted window | `test_projection_plan`: with `creating` set and an empty search the plan prints the create with its intent generation unchanged, and `delivered` confirms the write, fail-first (sd:4742) |
 | Notion: create, then the config moves | a row in the old database | the operator changes `SD_NOTION_EXPERIMENTS` while `creating` names the old database | the plan refuses, naming both databases; the operator answers with `--experiment new` or `row:ID` | `test_projection_plan`: `creating` for another database refuses, fail-first |
 | Notion: update | the row's properties | stopped or failed after Notion took some values, before `delivered` | the next plan finds those fields differ from `written` and refuses them, with a note saying they may be sd's own write; a person hands them back by setting the noted value | `test_projection_plan`: a partly written row refuses the unconfirmed fields with the may-be-sd note, and a hand-back completes it, fail-first |
 | delivered: record row | `row`, `url`, `written`, `confirmed` on the item, one note | hub down, restore open, item unknown, no intent for the fingerprint, the designation moved since the plan, the URL's id is not the designation's row | refused before any write; request and receipt stay; exit 1; a hub or restore cause clears and the re-run confirms the intent; a moved designation or a row mismatch stays refused, and the next plan drops that intent | `test_delivered`: each refusal leaves request, receipt and item unchanged, fail-first |

@@ -466,7 +466,10 @@ Draining is six steps per request, and the order matters:
      answers `search:` found an earlier create that may have landed: search
      the database for pages whose body opens with the pointer
      `Projected from sd:<n>.`, whatever their title, and plan again with each
-     as a `candidates` entry shaped like `row`, an empty list for none.
+     as a `candidates` entry shaped like `row`, an empty list for none. An
+     empty list prints the create again: that search alone tells a plan that
+     wrote nothing, a dry run or a drain stopped before its write, from a
+     create that landed (sd:4742).
      The plan prints JSON: `action` `create` with `properties` and the
      `body` line, or `update` with the `row` and the `properties` to write,
      `null` clearing one. Write exactly that, in one call, straight after the
@@ -599,7 +602,7 @@ procedure whose failure mode is the bug it prevents is not a fix.
 | step 5, before step 6 | id recorded in both | updates that page, runs step 6 |
 | step 6's item record, before its receipt | URL on the item, request in place | updates that page, runs step 6; the record answers `unchanged` |
 | a render during steps 2–5 | a newer request under the same name | step 6 leaves it; the next drain writes it |
-| a row's plan, before its write | `creating` or `writing` on the item | plans again; after a create's plan, searches by the pointer, adopts one match and asks about none or two |
+| a row's plan, before its write | `creating` or `writing` on the item | plans again; after a create's plan, searches by the pointer, adopts one match, prints the create again on none and asks about two |
 | a row's write, before step 6 | values Notion took, unconfirmed | refuses those fields as possibly sd's own write, until a person hands them back |
 
 Every row survives a render in between, because a render carries a recorded id

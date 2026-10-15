@@ -581,17 +581,21 @@ def plan(connection: sqlite3.Connection, request: dict[str, Any], live: dict[str
                 raise ProjectionRefusal(f"search: an earlier create of sd:{item} may have landed; search the "
                                         f"{target} database for pages whose body opens with "
                                         f"`{POINTER.format(item=item).split(' sd keeps')[0]}` and plan again "
-                                        "with them as candidates")
+                                        "with them as candidates; an empty list prints the create again")
             candidates = [_live_row(entry, database, "candidate") for entry in live["candidates"]]
-            if len(candidates) != 1:
-                found = ", ".join(row_id(entry["id"]) for entry in candidates) or "none"
+            if len(candidates) > 1:
+                found = ", ".join(row_id(entry["id"]) for entry in candidates)
                 raise _question(item, f"An earlier create of sd:{item} may have landed; rows found by the "
                                       f"pointer sd:{item}: {found}",
                                 ["no row exists, create it, `sd task edit %d --experiment new`" % item,
                                  "this is the row, `sd task edit %d --experiment row:ID`" % item])
-            live_row = candidates[0]
-            value["row"] = row_id(live_row["id"])
-            value.pop("creating")
+            # None found: the search is what tells a plan that wrote nothing (a dry run, or a drain
+            # stopped before its write) from a create that landed, so the create is printed again
+            # under the same intent, and no `--experiment new` is asked for (sd:4742).
+            if candidates:
+                live_row = candidates[0]
+                value["row"] = row_id(live_row["id"])
+                value.pop("creating")
         planned = {"as": held["as"], "of": held.get("of"), "since": held["since"], "row": value.get("row")}
         if live_row is None:
             _schema(live, target, list(PROPERTIES[target]))

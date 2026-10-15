@@ -466,29 +466,26 @@ class PlanTests(Projection):
         self.assertIn("search: an earlier create of sd:%d may have landed" % self.experiment, said)
         self.assertIn("`Projected from sd:%d.`" % self.experiment, said)
         self.assertNotIn("Option:", said)
-        for found in ([], [ROW, OTHER]):
-            with self.subTest(found=found):
-                status, said = self.plan(self.experiment, self.live(candidates=found, Status="Todo"))
-                self.assertEqual(status, 1)
-                self.assertNotIn('"action"', said)
-                self.assertIn("Option: no row exists, create it", said)
-                self.assertIn("creating", self.held(self.experiment))
+        status, said = self.plan(self.experiment, self.live(candidates=[ROW, OTHER], Status="Todo"))
+        self.assertEqual(status, 1)
+        self.assertNotIn('"action"', said)
+        self.assertIn("Option: no row exists, create it", said)
+        self.assertIn("creating", self.held(self.experiment))
 
-    def test_one_candidate_is_adopted_and_its_fields_wait_for_a_hand_back(self) -> None:
+    def test_a_plan_only_create_intent_creates_when_the_search_finds_no_row(self) -> None:
+        # sd:4742 (a): a plan that wrote nothing (a dry run, or a drain stopped before its write) leaves
+        # `creating`. The search by the pointer finding no row is what tells it from a landed create, so the
+        # next plan prints the create again instead of asking for `--experiment new`.
         self.queued()
-        self.planned(self.experiment, self.live())
-        planned = self.planned(self.experiment, self.live(candidates=[ROW], Status="Todo"))
-        self.assertEqual((planned["action"], planned["row"], planned["yielded"]), ("update", ROW, ["Status"]))
+        first = self.planned(self.experiment, self.live())
+        status, said = self.plan(self.experiment, self.live(candidates=[]))
+        self.assertEqual(status, 0, said)
+        self.assertNotIn("Option:", said)
+        self.assertEqual(json.loads(said), first)
         held = self.held(self.experiment)
-        self.assertEqual(held["row"], ROW)
-        self.assertNotIn("creating", held)
-        self.assertEqual(self.comments(self.experiment)[-1],
-                         "Status on the experiments row is not sd's (Todo; sd last wrote nothing; clear it to hand "
-                         "it back); this may be sd's own unconfirmed write")
+        self.assertEqual(held["creating"]["generation"], self.request(self.experiment)["fingerprint"])
         self.assertEqual(self.deliver(self.experiment)[0], 0)
-        self.project()
-        planned = self.planned(self.experiment, self.live(row=ROW))
-        self.assertEqual((planned["properties"], planned["yielded"]), ({"Status": "Todo"}, []))
+        self.assertEqual(self.held(self.experiment)["row"], ROW)
 
     def test_creating_in_another_database_refuses_naming_both(self) -> None:
         self.queued()
