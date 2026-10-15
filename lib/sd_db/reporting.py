@@ -13,6 +13,8 @@ from .database import transaction
 from .writes import STATUSES, add_note, create_item, now, record_state, resolve_note, set_item_fields, stamp, transition
 
 MAX_REPORT = 200_000
+#: The line prefix a job declares a finding with (`ingest_log`).
+MARK = b"SD_REPORT_ATTENTION: "
 
 #: The `state` key a job's health is recorded under, one row per job by the
 #: `heartbeat` retention rule. Prefixed, because `key` is a flat namespace
@@ -528,6 +530,13 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
     with path.open("rb") as stream:
         stream.seek(offset)
         data = stream.read(MAX_REPORT + 1)
+        # The body stops at `MAX_REPORT`, the findings do not (sd:4641): a
+        # line past the cut was read as no finding, and a clean run with one
+        # filed nothing, folded into an acknowledged report, or superseded
+        # the report that still held it. Every decision below reads them all.
+        stream.seek(offset)
+        marks = [line[len(MARK):].decode("utf-8", errors="replace").removesuffix("\n") for line in stream
+                 if line.startswith(MARK)]
     truncated = len(data) > MAX_REPORT
     text = data[:MAX_REPORT].decode("utf-8", errors="replace")
     # A successful exit does not prove there were no findings. Jobs can emit
@@ -541,7 +550,7 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
     # one cause's failure into another's report. A basis past `ingest`'s
     # limit keeps its head and a digest of the whole, so it files. A line
     # holds no newline, so joining on one keeps two lines apart from one.
-    declared = "\n".join(dict.fromkeys(re.findall(r"(?m)^SD_REPORT_ATTENTION: (.+)$", text)))
+    declared = "\n".join(dict.fromkeys(mark for mark in marks if mark))
     attention = exit_code != 0 or bool(declared)
     host = ship.this_host()
     basis = (f"job exited {exit_code} on {host}" + (f": {declared}" if declared else "")
@@ -605,7 +614,10 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
                        attention=attention, attention_basis=basis, truncated=truncated,
                        chain=last.get("item") if moves and type(last.get("item")) is int else None, now=clock,
                        host=host or None)
-        if moves and host and attention and not exit_code and state["item"]["external_id"] == job + ":" + run_id:
+        # A truncated body is not the whole set to show in place of the older
+        # report's, even with every finding named in the basis.
+        if (moves and host and attention and not exit_code and not truncated
+                and state["item"]["external_id"] == job + ":" + run_id):
             _supersede(connection, job=job, host=host, by=state["item"]["id"])
         if moves:
             _set_chain(connection, chain_key, newest_row, {

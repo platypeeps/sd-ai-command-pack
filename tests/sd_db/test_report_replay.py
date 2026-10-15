@@ -929,6 +929,35 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         again = self.tick("c", 31, self.TWO)
         self.assertEqual((again["recorded"], again["item"]["id"]), ("folded", older))
 
+    PAD = "x" * 99 + "\n"
+
+    def past_the_cut(self, head, tail):
+        """A log whose `tail` lines sit past `MAX_REPORT`, where the body stops."""
+        return head + self.PAD * (reporting.MAX_REPORT // len(self.PAD) + 1) + tail
+
+    def test_a_truncated_log_supersedes_nothing(self):
+        """Review round 1: the body stops at `MAX_REPORT`, so it is not the whole set."""
+        older = self.tick("a", 1, self.TWO)["item"]["id"]
+        newer = self.tick("b", 16, self.past_the_cut(self.ONE, "SD_REPORT_ATTENTION: 2 finding(s) [12]\n"))
+        self.assertTrue(json.loads(newer["item"]["fields"])["report"]["truncated"])
+        self.assertEqual(self.row(older)["status"], "planning")
+
+    def test_a_finding_past_the_cut_still_names_the_basis(self):
+        """The basis reads every declared line of the slice, not only the stored body's."""
+        newer = self.tick("a", 1, self.past_the_cut(self.ONE, "SD_REPORT_ATTENTION: disk low [9]\n"))
+        self.assertEqual(newer["why"], "1 finding(s) [1]\ndisk low [9]")
+
+    def test_a_finding_past_the_cut_does_not_fold_into_an_acknowledged_report(self):
+        acked = self.tick("a", 1, self.ONE)["item"]["id"]
+        reporting.acknowledge(self.db, acked, expected_revision=workflow.item_state(self.db, acked)["revision"],
+                              who="fixture", resolve_ingest_followups=True)
+        again = self.tick("b", 16, self.past_the_cut(self.ONE, "SD_REPORT_ATTENTION: disk low [9]\n"))
+        self.assertEqual((again["recorded"], again["item"]["status"]), ("report", "planning"))
+
+    def test_a_clean_run_whose_only_finding_is_past_the_cut_files_a_report(self):
+        run = self.tick("a", 1, self.past_the_cut("", "SD_REPORT_ATTENTION: disk low [9]\n"))
+        self.assertEqual((run["recorded"], run["why"]), ("report", "disk low [9]"))
+
     def test_reopening_a_superseded_report_returns_it_to_planning(self):
         older = self.tick("a", 1, self.TWO)["item"]["id"]
         self.tick("b", 16, self.ONE)
