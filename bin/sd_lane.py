@@ -79,8 +79,10 @@ released claim writes nothing more; a hub fault is tried again for
 build stops it at once (sd:3359). Such a stop leaves a record beside the
 runner lock, so the next run settles the entry as a hub fault and not as
 a death (`record_hub_stop`, sd:4184). A holder on this machine is dead
-when the runner lock is free and its pid is gone; one on another machine
-once its lease passed, which the lane host checks at claim. In prepare its
+when the runner lock is free and its pid is gone. One on another machine is
+never judged dead here: a lease that passed may be a machine asleep, which
+wakes and merges beside the lane host (sd:4660). Its own host settles it by
+the same pid rule, or the operator releases it. In prepare its
 entry goes back to pending, failing at the `RECLAIMS`th time; in merge it
 fails, since a merge may have landed. `lane cancel` on a running entry
 releases it by the same rule, unless its holder here is alive.
@@ -1952,7 +1954,8 @@ def reclaim_dead(entries: list[dict[str, Any]], stops: dict[str, Any] | None = N
     Called with this machine's runner lock held, so no runner here is live;
     the holder's pid must also be gone, which a reused pid only makes wait.
     A pid that cannot be read keeps the entry `running`. A holder on another
-    machine is left to its lease. A holder whose token has a record in
+    machine is left to its own host, or to the operator's release: a lease
+    that passed is no proof that it stopped (sd:4660). A holder whose token has a record in
     `stops` (`hub_stops`) stopped on a hub fault, and `resume_stopped`
     settles it instead; a record that did not parse is None, and reclaims.
     """
@@ -2070,31 +2073,32 @@ def held(entries: list[dict[str, Any]], entry: dict[str, Any], token: str) -> di
                "and stops", code=CLAIM_LOST)
 
 
-def claim_entry(queue: Queue, token: str, reclaimed: list[dict[str, Any]] | None = None) -> dict[str, Any] | None:
+def claim_entry(queue: Queue, token: str) -> dict[str, Any] | None:
     """Take the first pending entry not held, by position, under a new holder; None when none.
 
     One transaction reads the lane host and claims, so a move is before the
     claim or after it. It refuses while another entry of the repository
-    runs. A holder on another host is dead once its `lease_until` passed: it
-    is reclaimed (`reclaim`) and listed in `reclaimed` (sd:3283). A retried
+    runs, whatever its lease says: a holder on another host whose lease
+    passed may be asleep, not dead, and would merge beside this one once it
+    woke (sd:4660). Its own host settles it once its pid is gone
+    (`reclaim_dead`), or the operator releases it (`cancel`). A retried
     claim that finds its own token running landed before.
     """
-    found: list[dict[str, Any]] = []
-
     def claim_first(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
         host = this_host()
-        found.clear()
         for row in entries:
             if row.get("status") != "running":
                 continue
             holder = row.get("holder") or {}
             if holder.get("token") == token:
                 return dict(row)
+            busy = f"sd:{row.get('item')} is running under {holder.get('host')} pid {holder.get('pid')}"
             if holder.get("host") != host and lease_passed(row):
-                found.append(reclaim(row))
-                continue
-            raise LaneError(f"sd:{row.get('item')} is running under {holder.get('host')} pid {holder.get('pid')}; "
-                            "one entry of a repository runs at a time", code="lane_busy")
+                busy += (f"; its lease passed at {row.get('lease_until')}, which is no proof that "
+                         f"{holder.get('host')} stopped. That host settles it once its runner is gone; once you "
+                         f"know it stopped, `sd-ship lane cancel {row.get('item')} --expected-claim "
+                         f"{holder.get('token')}:{row.get('step')}` releases it")
+            raise LaneError(f"{busy}; one entry of a repository runs at a time", code="lane_busy")
         for row in entries:
             if runnable(row):
                 row.update(status="running", started_at=stamp_now(), step="prepare",
@@ -2102,10 +2106,7 @@ def claim_entry(queue: Queue, token: str, reclaimed: list[dict[str, Any]] | None
                            lease_until=prepare_lease())
                 return dict(row)
         return None
-    claimed = runner_write(queue, claim_first, check=host_check(queue))
-    if reclaimed is not None:  # only once the claim's transaction landed
-        reclaimed.extend(found)
-    return claimed
+    return runner_write(queue, claim_first, check=host_check(queue))
 
 
 def prepare_lease() -> str:
@@ -2516,15 +2517,13 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
             if loaded is not None:
                 answer["stopped"] = loaded
                 break
-            token, reclaimed = secrets.token_hex(16), list[dict[str, Any]]()
+            token = secrets.token_hex(16)
             try:
-                entry = claim_entry(queue, token, reclaimed)
+                entry = claim_entry(queue, token)
             except Stop as error:  # the claim may have landed unseen
                 answer["stopped"], entry = record_hub_stop(queue, token, error), None
             except LaneError as error:  # moved, unknown or busy
                 answer["stopped"], entry = str(error), None
-            if reclaimed:
-                answer["reclaimed"] = [*answer.get("reclaimed", []), *reclaimed]
             if entry is None:
                 break
             if ahead is not None and ahead.is_alive():
