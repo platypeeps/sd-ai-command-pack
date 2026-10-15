@@ -80,6 +80,19 @@ class Case(unittest.TestCase):
         (copy / BACKUP_MANIFEST).write_text(json.dumps(manifest))
         return copy
 
+    def uncheckpointed(self, copy, *, read_only=True):
+        """A copy whose database holds no row for its run. `read_only` is what a snapshot taken
+        before `migrate` writes: the manifest says `checkpoint: false` and no row was ever written."""
+        manifest = json.loads((copy / BACKUP_MANIFEST).read_text())
+        raw = sqlite3.connect(copy / "sd.db")
+        with raw:
+            raw.execute("DELETE FROM state WHERE kind='checkpoint' AND key=?", (manifest["run_id"],))
+        raw.close()
+        manifest["checkpoint"] = not read_only
+        manifest["entries"]["sd.db"] = hashlib.sha256((copy / "sd.db").read_bytes()).hexdigest()
+        (copy / BACKUP_MANIFEST).write_text(json.dumps(manifest))
+        return copy
+
     def stopped(self, copy):
         """What a run that failed before `_record_backup` leaves: everything but the manifest."""
         (copy / BACKUP_MANIFEST).unlink()
@@ -221,6 +234,21 @@ class MovedCopies(Case):
         self.assertTrue((kept / "sd.db").exists())
         self.assertEqual(lines, [f"kept {kept}: no manifest (stopped run?)"])
 
+    def test_a_copy_taken_before_migrate_is_kept_with_its_reason(self):
+        # sd:4700: four NAS copies read `'NoneType' object is not subscriptable` here.
+        read_only = self.uncheckpointed(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))))
+        missing = self.uncheckpointed(self.mirror(self.snapshot(datetime(2026, 10, 2, 9, 0, tzinfo=UTC))),
+                                      read_only=False)
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertTrue((read_only / "sd.db").exists())
+        self.assertTrue((missing / "sd.db").exists())
+        self.assertEqual(lines, [
+            f"kept {read_only}: it was taken read-only before `migrate`, so no checkpoint row dates it",
+            f"kept {missing}: its database holds no checkpoint row for its run"])
+
     def test_a_pre_json_copy_inside_the_window_stays(self):
         young = self.pre_json(self.mirror(self.snapshot(datetime(2026, 10, 10, 9, 0, tzinfo=UTC))))
         lines: list[str] = []
@@ -350,6 +378,17 @@ class TheNewest(Case):
         self.assertEqual((result.snapshot, result.refused), (old, []))
         self.assertEqual(result.taken_at, datetime(2026, 10, 1, 9, 0, tzinfo=UTC))
         self.assertEqual(self.items(home), ["first"])
+
+    def test_a_copy_taken_before_migrate_is_refused_by_name_and_the_next_restores(self):
+        good = self.mirror(self.snapshot(datetime(2026, 10, 12, 9, 0, tzinfo=UTC), title="first"))
+        read_only = self.uncheckpointed(self.mirror(self.snapshot(NOW, title="second")))
+        home = self.fresh_home()
+
+        result = backup.restore_newest([self.nas], home=home)
+
+        self.assertEqual(result.snapshot, good)
+        self.assertEqual(result.refused, [
+            (read_only, "it was taken read-only before `migrate`, so no checkpoint row dates it")])
 
     def test_a_tie_goes_to_the_new_format_snapshot(self):
         when = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
