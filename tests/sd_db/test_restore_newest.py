@@ -369,6 +369,19 @@ class TheNewest(Case):
         self.assertEqual(result.taken_at, datetime(2026, 10, 1, 9, 0, tzinfo=UTC))
         self.assertEqual(self.items(home), ["first"])
 
+    def test_a_tie_goes_to_the_new_format_snapshot(self):
+        when = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+        new = self.mirror(self.snapshot(when, title="first"))
+        # Same checkpoint time, a later name, the old body: the name must not win the tie.
+        old = self.pre_json(self.mirror(self.snapshot(when, title="second")))
+        self.assertGreater(old.name, new.name)
+        home = self.fresh_home()
+
+        result = backup.restore_newest([self.nas], home=home)
+
+        self.assertEqual(result.snapshot, new)
+        self.assertEqual(self.items(home), ["first"])
+
     def test_a_newest_snapshot_restore_would_refuse_is_skipped(self):
         # `run` keeps a snapshot of a source with broken references as a forensic copy.
         self.mirror(self.snapshot(datetime(2026, 10, 12, 9, 0, tzinfo=UTC), title="first"))

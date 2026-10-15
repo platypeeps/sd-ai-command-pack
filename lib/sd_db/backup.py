@@ -1133,7 +1133,14 @@ def prune(root: Path, keep: int | None = KEEP) -> list[Path]:
 
 
 def _taken_at(directory: Path) -> datetime:
+    return _checkpoint(directory)[0]
+
+
+def _checkpoint(directory: Path) -> tuple[datetime, bool]:
     """When the backup in `directory` was taken: its checkpoint row's time, read from its own database.
+
+    The flag is True for the current `{"at": ...}` body, False for the bare
+    timestamp of a build before sd:3578, so a tie can prefer the current one.
 
     The name is not the time: a copy can be renamed, and a day's names restart
     on a hub with an empty root. `run` writes the row before the snapshot, so
@@ -1150,21 +1157,20 @@ def _taken_at(directory: Path) -> datetime:
                                      (value["run_id"],)).fetchone()
         finally:
             connection.close()
-        taken = _checkpoint_time(row[0])
+        taken, current = _checkpoint_time(row[0])
     except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as error:
         raise BackupError(f"its checkpoint time could not be read: {error}") from None
     if taken.tzinfo is None:
         raise BackupError("its checkpoint time names no zone")
-    return taken
+    return taken, current
 
 
-def _checkpoint_time(body: str) -> datetime:
-    """A backup run's checkpoint body: `{"at": ...}`, or the bare timestamp a build before sd:3578 wrote."""
+def _checkpoint_time(body: str) -> tuple[datetime, bool]:
+    """A backup run's checkpoint body: `{"at": ...}` (True), or the bare timestamp a build before sd:3578 wrote."""
     try:
-        value = json.loads(body)["at"]
+        return datetime.fromisoformat(json.loads(body)["at"]), True
     except json.JSONDecodeError:
-        value = body
-    return datetime.fromisoformat(value)
+        return datetime.fromisoformat(body), False
 
 
 #: Every top-level name `run` writes into a snapshot directory before its manifest.
@@ -1206,7 +1212,7 @@ def _stopped_run(directory: Path) -> datetime:
             connection.close()
         if row is None:
             raise BackupError("it holds no backup manifest, and its sd.db no backup run's checkpoint")
-        taken = _checkpoint_time(row[0])
+        taken = _checkpoint_time(row[0])[0]
     except BackupError:
         raise
     except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as error:
@@ -1919,7 +1925,9 @@ def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None
             if path.is_symlink() or not DATED_NAME.fullmatch(path.name):
                 continue
             try:
-                candidates.append((_taken_at(path), _directory_order(path), path))
+                # On a tie the current body goes first, then the later name (sd:4694).
+                taken_at, current = _checkpoint(path)
+                candidates.append((taken_at, current, _directory_order(path), path))
             except BackupError as error:
                 try:
                     stopped.append(_stopped_run(path))
@@ -1930,7 +1938,7 @@ def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None
         if stopped and report is not None:
             report(f"refused {len(stopped)} snapshot(s) under {root} with no manifest, left by runs that stopped "
                    f"before recording one, taken {min(stopped).isoformat()} to {max(stopped).isoformat()}")
-    for taken_at, _, path in sorted(candidates, reverse=True):
+    for taken_at, _, _, path in sorted(candidates, reverse=True):
         with tempfile.TemporaryDirectory(prefix="sd-newest-") as stage:
             local = Path(stage) / path.name
             try:
