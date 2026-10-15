@@ -11,6 +11,22 @@ and never read as a setting.
 A channel named with `{}` writes to its default folder; a channel left out is
 off. NULL is no setting, which is not the same as `{}`: clearing writes NULL.
 
+`feed` is inbound (sd:3980): the repo's one RSS/Atom subscription,
+`{"feed": {"url": "https://example.test/feed.xml"}}`, which `sd-watchlist`
+reads. It is not a publish channel: `outbound` drops it before a publisher
+reads the setting, so a feed alone leaves publishing as no setting does.
+
+`jira` and `github` are inbound too (sd:3461): the repo's issue sources,
+`{"jira": {"project": "EXAMPLE"}, "github": {"repo": "example/project"}}`.
+Each names the `repo` value its tracker's `shadow` rows carry, and
+`repos.issue_sources` reads them for Today and Tasks.
+
+`email` is inbound too (sd:4191): the labels of the mail aliases the repo
+owns, `{"email": {"aliases": ["board"]}}`. Each names an
+`alias|<label>|<address>` line in `local-mail-intake`'s conf; the address
+stays in that file, so the row holds names only. `repos.mail_aliases`
+reads them for Today.
+
 `record_url` puts where a document was published on the item that owns it
 (sd:3979): the item row holds the URL, and the dashboard reads the row.
 """
@@ -30,8 +46,25 @@ from .repos import RepoRefusal
 #: The channels a repository may name, in the order a refusal lists them.
 CHANNELS = ("obsidian", "notion", "drive")
 
+#: The inbound sources a repository may name beside its channels (sd:3980).
+INBOUND = ("feed", "jira", "github", "email")
+
 #: The one key a channel's object may hold.
 FOLDER = "folder"
+
+#: The one key the feed's object holds.
+URL = "url"
+
+#: The one key each issue source's object holds, and the spelling of its value:
+#: a Jira project key, a GitHub `owner/name` (sd:3461).
+ISSUE_KEYS = {"jira": "project", "github": "repo"}
+ISSUE_SPELLING = {"jira": re.compile(r"[A-Z][A-Z0-9_]+"),
+                  "github": re.compile(r"[A-Za-z0-9][A-Za-z0-9-]*/(?!\.\.?$)[A-Za-z0-9._-]+")}
+
+#: The one key the email object holds, and the spelling and count of its labels (sd:4191).
+ALIASES = "aliases"
+ALIAS_LABEL = re.compile(r"[a-z0-9][a-z0-9_-]{0,63}")
+MAX_ALIASES = 8
 
 #: A Notion page id, compact or hyphenated: an id the drain resolves, never a folder name.
 PAGE_ID = re.compile(r"[0-9a-f]{32}|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.IGNORECASE)
@@ -68,7 +101,84 @@ def _folder(channel: str, folder: Any) -> str:
     return folder
 
 
-def validate(value: Any) -> dict[str, dict[str, str]]:
+def _feed(entry: dict) -> dict[str, str]:
+    """The feed's object: one http or https URL with a host, no credentials and no space."""
+    from urllib.parse import urlsplit
+
+    extra = sorted(set(entry) - {URL})
+    url = entry.get(URL)
+    if extra or not isinstance(url, str) or not url:
+        raise ChannelRefusal("feed: expected {\"url\": URL} and nothing else; `feed=URL` sets it")
+    if any(character.isspace() or unicodedata.category(character).startswith("C") for character in url):
+        raise ChannelRefusal(f"feed: url {url!r} holds a space, a control or a format character")
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname:
+        raise ChannelRefusal(f"feed: url {url!r} must be an http or https URL with a host")
+    if parts.username is not None or parts.password is not None:
+        raise ChannelRefusal(f"feed: url {url!r} holds credentials; the setting holds none")
+    return {URL: url}
+
+
+def _issue_source(source: str, entry: dict) -> dict[str, str]:
+    """An issue source's object: its one key, in its tracker's spelling."""
+    key = ISSUE_KEYS[source]
+    value = entry.get(key)
+    if set(entry) != {key} or not isinstance(value, str) or not ISSUE_SPELLING[source].fullmatch(value):
+        example = "EXAMPLE" if source == "jira" else "owner/name"
+        raise ChannelRefusal(f"{source}: expected {{\"{key}\": \"{example}\"}} and nothing else, not {entry!r}; "
+                             f"`{source}={example}` sets it")
+    return {key: value}
+
+
+def _email(entry: dict) -> dict[str, Any]:
+    """The email object: one to eight alias labels, each a name, no repeats, stored sorted."""
+    labels = entry.get(ALIASES)
+    if set(entry) != {ALIASES} or not isinstance(labels, list) or not labels:
+        raise ChannelRefusal("email: expected {\"aliases\": [LABEL, ...]} and nothing else; "
+                             "`email=LABEL,LABEL` sets it")
+    for label in labels:
+        if not isinstance(label, str) or not ALIAS_LABEL.fullmatch(label):
+            raise ChannelRefusal(f"email: alias {label!r} is not a label: lower-case letters, digits, - and _, "
+                                 f"at most 64; the address stays in mail-intake's conf")
+    if len(set(labels)) != len(labels):
+        raise ChannelRefusal("email: an alias is named twice")
+    if len(labels) > MAX_ALIASES:
+        raise ChannelRefusal(f"email: {len(labels)} aliases; at most {MAX_ALIASES}")
+    return {ALIASES: sorted(labels)}
+
+
+def outbound(setting: dict[str, dict[str, Any]] | None) -> dict[str, dict[str, Any]] | None:
+    """The publish channels of a setting, or None when it names none (sd:3980).
+
+    A setting naming only inbound sources says nothing about publishing, so
+    it publishes as no setting does; beside an outbound channel, a channel
+    left out is still off.
+    """
+    channels = {name: entry for name, entry in (setting or {}).items() if name in CHANNELS}
+    return channels or None
+
+
+def kept(value: dict[str, dict[str, Any]], stored: str | None) -> dict[str, dict[str, Any]]:
+    """`value` with what it leaves out taken from `stored` (sd:3980, sd:3461).
+
+    The outbound channels are one replacement: a value naming none keeps the
+    stored ones, and a value naming any replaces them all. Each inbound source
+    is its own: a value that leaves one out keeps it, so `feed=URL` never
+    deletes the Jira or GitHub source or the mail aliases. A stored value that is NULL or that the
+    validator refuses keeps nothing: a set replaces it whole.
+    """
+    try:
+        old = validate(json.loads(stored)) if stored else {}
+    except (ValueError, ChannelRefusal):
+        old = {}
+    out = dict(value)
+    if not any(key in value for key in CHANNELS):
+        out.update({key: old[key] for key in CHANNELS if key in old})
+    out.update({key: old[key] for key in INBOUND if key in old and key not in value})
+    return out
+
+
+def validate(value: Any) -> dict[str, dict[str, Any]]:
     """`value` as a setting, or `ChannelRefusal` naming what is wrong.
 
     Returns a new dict holding the same keys, so a caller never stores the
@@ -78,12 +188,22 @@ def validate(value: Any) -> dict[str, dict[str, str]]:
         raise ChannelRefusal(f"channels must be an object of obsidian, notion or drive, not {type(value).__name__}")
     if not value:
         raise ChannelRefusal("channels {} names no channel; clear the setting with `none` instead")
-    out: dict[str, dict[str, str]] = {}
+    out: dict[str, dict[str, Any]] = {}
     for channel, entry in value.items():
-        if channel not in CHANNELS:
-            raise ChannelRefusal(f"{channel!r} is not a channel; expected {', '.join(CHANNELS[:-1])} or {CHANNELS[-1]}")
+        if channel not in CHANNELS + INBOUND:
+            raise ChannelRefusal(f"{channel!r} is not a channel; expected {', '.join(CHANNELS[:-1])} or {CHANNELS[-1]}, "
+                                 f"or the inbound {', '.join(INBOUND[:-1])} or {INBOUND[-1]}")
         if not isinstance(entry, dict):
             raise ChannelRefusal(f"{channel}: expected an object holding folder or nothing, not {entry!r}")
+        if channel == "feed":
+            out[channel] = _feed(entry)
+            continue
+        if channel in ISSUE_KEYS:
+            out[channel] = _issue_source(channel, entry)
+            continue
+        if channel == "email":
+            out[channel] = _email(entry)
+            continue
         extra = sorted(set(entry) - {FOLDER})
         if extra:
             raise ChannelRefusal(f"{channel}: {extra[0]!r} is not a channel key; a channel holds folder or nothing")
@@ -91,7 +211,7 @@ def validate(value: Any) -> dict[str, dict[str, str]]:
     return out
 
 
-def dumps(value: dict[str, dict[str, str]] | None) -> str:
+def dumps(value: dict[str, dict[str, Any]] | None) -> str:
     """The canonical text: sorted, compact JSON, or `none` for no setting.
 
     What the column stores and what the verb prints and compares as `before`.

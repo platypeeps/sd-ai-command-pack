@@ -159,24 +159,36 @@ class Fixture(Configured):
 
 
 class RegisterTests(Fixture):
-    def test_the_default_directory_is_registered_without_a_path(self) -> None:
-        """The dashboard finds `docs/dashboard/`. A path here is drift."""
+    def test_the_default_directory_writes_no_row(self) -> None:
+        """The dashboard finds `docs/dashboard/` and names it from the database
+        (sd:3986); it reads no `label|` line, so writing one is clutter (sd:4631).
+        """
+        before = self.conf.read_text(encoding="utf-8")
         said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
-        self.assertIn("registered my-research", said)
-        self.assertEqual(self.rows(), ["label|my-research|MINE"])
+        self.assertIn("finds my-research by itself", said)
+        self.assertEqual(self.rows(), [])
+        self.assertNotIn("label|my-research", self.conf.read_text(encoding="utf-8"))
+        self.assertEqual(self.conf.read_text(encoding="utf-8"), before)
         self.assertEqual(len(self.roots()), 1, "no root| row, so no path to go stale")
 
-    def test_a_second_run_of_the_default_adds_nothing(self) -> None:
-        PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
-        said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
-        self.assertIn("already registered", said)
-        self.assertEqual(self.rows(), ["label|my-research|MINE"])
-
-    def test_a_new_label_rewrites_the_row_rather_than_adding_one(self) -> None:
+    def test_a_second_run_of_the_default_writes_nothing(self) -> None:
         PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
         said = PUBLISH.register_root(self.repo, "YOURS", self.repo / "docs" / "dashboard")
-        self.assertIn("relabelled", said)
-        self.assertEqual(self.rows(), ["label|my-research|YOURS"])
+        self.assertIn("finds my-research by itself", said)
+        self.assertEqual(self.rows(), [])
+
+    def test_the_default_directory_needs_no_dashboard_config(self) -> None:
+        PUBLISH.DASHBOARD_CONFIG = self.root / "absent"
+        said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        self.assertIn("finds my-research by itself", said)
+        self.assertFalse((self.root / "absent").exists(), "nothing created either")
+
+    def test_a_label_row_already_in_the_file_is_left_alone(self) -> None:
+        """The page names a stale `label|` line and Rename replaces it; a
+        render neither rewrites nor deletes the operator's file."""
+        self.conf.write_text(HEADER + "label|my-research|OLD\n", encoding="utf-8")
+        PUBLISH.register_root(self.repo, "NEW", self.repo / "docs" / "dashboard")
+        self.assertEqual(self.rows(), ["label|my-research|OLD"])
 
     def test_a_directory_the_dashboard_cannot_find_still_gets_a_path(self) -> None:
         said = PUBLISH.register_root(self.repo, "MINE", self.repo / "build")
@@ -242,17 +254,17 @@ class DashboardConfigTests(unittest.TestCase):
         conf.write_text(HEADER, encoding="utf-8")
         module = self.loaded(SYSTEM_TOOLS_CONFIG=str(self.root / "config"))
 
-        said = module.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        said = module.register_root(self.repo, "MINE", self.repo / "build")
         self.assertNotIn("not registered", said)
         self.assertIn("registered my-research", said)
-        self.assertIn("label|my-research|MINE\n", conf.read_text(encoding="utf-8"))
+        self.assertIn("root|my-research|MINE|", conf.read_text(encoding="utf-8"))
 
-        said = module.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        said = module.register_root(self.repo, "MINE", self.repo / "build")
         self.assertIn("already registered", said)
 
     def test_no_file_at_the_config_path_is_reported_not_raised(self) -> None:
         module = self.loaded(SYSTEM_TOOLS_CONFIG=str(self.root / "empty"))
-        said = module.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
+        said = module.register_root(self.repo, "MINE", self.repo / "build")
         self.assertIn("not registered", said)
         self.assertIn(str(self.root / "empty" / "project-dashboard" / "documents.conf"), said)
 
@@ -934,8 +946,8 @@ class BuildMigrationTests(Fixture):
             HEADER + "root|my-research|MINE|%s\n" % (self.repo / "build"),
             encoding="utf-8")
         said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
-        self.assertIn("moved", said)
-        self.assertEqual(self.rows(), ["label|my-research|MINE"], "moved, not duplicated")
+        self.assertIn("retired", said)
+        self.assertEqual(self.rows(), [], "retired: the dashboard finds docs/dashboard itself")
 
     def test_a_row_naming_another_repo_is_still_left_alone(self) -> None:
         """Moving a row is this repository reclaiming its own; a key that names
@@ -948,26 +960,18 @@ class BuildMigrationTests(Fixture):
 
 
 class RootRowUpgradeTests(Fixture):
-    """The rows this renderer wrote before it knew about `label|`."""
+    """The rows this renderer wrote before the dashboard found its own root."""
 
-    def test_a_root_row_for_the_default_location_becomes_a_label_row(self) -> None:
-        """The regression: every rendered repo carries one of these today, and
-        a re-render must retire it rather than leave the stale path standing."""
+    def test_a_root_row_for_the_default_location_is_retired(self) -> None:
+        """Every rendered repo may carry one of these: a re-render retires it
+        rather than leave the stale path standing, and writes no `label|`."""
         self.conf.write_text(
             HEADER + "root|my-research|MINE|%s\n" % (self.repo / "docs" / "dashboard"),
             encoding="utf-8")
         said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
-        self.assertIn("moved", said)
-        self.assertEqual(self.rows(), ["label|my-research|MINE"])
-        self.assertEqual([r for r in self.roots() if "my-research" in r], [],
-                         "the path is gone, not duplicated")
-
-    def test_the_upgrade_keeps_the_label_the_row_carried(self) -> None:
-        self.conf.write_text(
-            HEADER + "root|my-research|TRACES|%s\n" % (self.repo / "docs" / "dashboard"),
-            encoding="utf-8")
-        PUBLISH.register_root(self.repo, "TRACES", self.repo / "docs" / "dashboard")
-        self.assertEqual(self.rows(), ["label|my-research|TRACES"])
+        self.assertIn("retired", said)
+        self.assertEqual(self.rows(), [])
+        self.assertIn("root|hoa|", self.conf.read_text(encoding="utf-8"), "other rows stay")
 
     def test_a_root_row_for_a_genuinely_other_path_survives_untouched(self) -> None:
         """`hoa` publishes into `reports`, and the fixture header carries it.
@@ -978,9 +982,9 @@ class RootRowUpgradeTests(Fixture):
         row = "root|hoa|Stage Run HOA|~/repos/hoa/reports"
         self.assertEqual(self.rows("hoa"), [row], "the fixture starts with it")
         said = PUBLISH.register_root(self.repo, "MINE", self.repo / "docs" / "dashboard")
-        self.assertIn("registered my-research", said)
+        self.assertIn("finds my-research by itself", said)
         self.assertEqual(self.rows("hoa"), [row])
-        self.assertEqual(self.rows(), ["label|my-research|MINE"])
+        self.assertEqual(self.rows(), [])
 
     def test_a_foreign_row_for_this_key_is_still_left_alone(self) -> None:
         self.conf.write_text(
@@ -1383,7 +1387,7 @@ class ObsidianItemTests(Fixture):
         said = self.publish()
         self.assertTrue((self.briefs() / "a.md").is_file())
         self.assertTrue(any("not recorded (" in line for line in said), said)
-        self.assertTrue(any("registered" in line for line in said), said)
+        self.assertTrue(any("finds my-research by itself" in line for line in said), said)
 
     def test_a_document_without_an_item_records_nothing(self) -> None:
         said = self.publish([dict(src="10-x/a.md", out="a", title="A")])
@@ -1896,15 +1900,15 @@ class WorktreeIdentityTests(Fixture):
 
     def test_the_dashboard_row_carries_the_primary_checkouts_key(self) -> None:
         said = PUBLISH.register_root(self.wt, "MINE", self.wt / "docs" / "dashboard")
-        self.assertIn("registered my-research", said)
+        self.assertIn("finds my-research by itself", said)
         self.assertEqual(self.rows("wt-x"), [])
-        self.assertEqual(self.rows(), ["label|my-research|MINE"])
+        self.assertEqual(self.rows(), [])
 
-    def test_a_worktree_and_the_primary_write_the_same_row(self) -> None:
+    def test_a_worktree_and_the_primary_write_no_row(self) -> None:
         PUBLISH.register_root(self.primary, "MINE", self.primary / "docs" / "dashboard")
         said = PUBLISH.register_root(self.wt, "MINE", self.wt / "docs" / "dashboard")
-        self.assertIn("already registered", said)
-        self.assertEqual(self.rows(), ["label|my-research|MINE"])
+        self.assertIn("finds my-research by itself", said)
+        self.assertEqual(self.rows(), [])
 
     def test_the_vault_folder_is_the_primary_checkouts(self) -> None:
         self.assertEqual(PUBLISH.vault_folder(self.wt), self.briefs())
@@ -2352,6 +2356,17 @@ class ChannelsTests(Fixture):
         self.row(None)
         self.assert_origin_main()
 
+    def test_a_setting_naming_only_a_feed_matches_the_origin_main_fixture(self) -> None:
+        """sd:3980: the inbound feed is not a publish channel, so it leaves
+        no outbound channel off."""
+        self.row({"feed": {"url": "https://example.test/feed.xml"}})
+        self.assert_origin_main()
+
+    def test_a_setting_naming_only_issue_sources_matches_the_origin_main_fixture(self) -> None:
+        """sd:3461: the Jira and GitHub issue sources are inbound too."""
+        self.row({"jira": {"project": "EXAMPLE"}, "github": {"repo": "example/project"}})
+        self.assert_origin_main()
+
     # Folders.
 
     def test_a_notion_folder_replaces_the_repo_subfolder(self) -> None:
@@ -2588,7 +2603,7 @@ class ChannelsTests(Fixture):
                 self.assertEqual(self.queue_bytes(), queue)
                 self.assertFalse((self.briefs() / "a.md").exists())
                 self.assertTrue(said[0].startswith(PUBLISH.HELD), said)
-                self.assertTrue(any("registered" in line or "already" in line for line in said), said)
+                self.assertTrue(any("finds my-research by itself" in line for line in said), said)
                 self.assertEqual(PUBLISH.exit_status(said), 1)
 
     def test_a_hold_exits_1_by_hand_and_0_from_the_hook(self) -> None:

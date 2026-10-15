@@ -6,6 +6,7 @@ an empty table makes that criterion pass over nothing. These are the two ways
 it fills and the one path it refuses.
 """
 
+import json
 import os
 import sqlite3
 import subprocess
@@ -30,6 +31,9 @@ from sd_db.repos import (
     checkouts,
     clone_lines,
     conf_paths,
+    issue_sources,
+    mail_aliases,
+    mine_issues,
     read_conf,
     registered,
     repo_channels,
@@ -645,6 +649,141 @@ class TheChannelsWriter(RepoCase):
         self.assertIn("not a registered repository", str(caught.exception))
         self.assertEqual(registered(self.connection), [])
 
+    def test_a_set_keeps_the_half_it_does_not_name(self):
+        """sd:3980 self-review: the dashboard form posts the outbound channels
+        alone, and `feed=URL` names the feed alone. Each keeps the stored
+        other half, so neither deletes what it never showed; `None` clears
+        both."""
+        path = self._registered()
+        feed = {"url": "https://example.test/feed.xml"}
+        set_channels(self.connection, path, {"feed": feed, "obsidian": {}})
+        stored = self._stored(path)
+        set_channels(self.connection, path, {"obsidian": {"folder": "Briefs/changed"}}, before=stored)
+        self.assertEqual(self._stored(path), '{"feed":{"url":"https://example.test/feed.xml"},'
+                                             '"obsidian":{"folder":"Briefs/changed"}}')
+        set_channels(self.connection, path, {"feed": {"url": "https://example.test/other.xml"}})
+        self.assertEqual(self._stored(path), '{"feed":{"url":"https://example.test/other.xml"},'
+                                             '"obsidian":{"folder":"Briefs/changed"}}')
+        set_channels(self.connection, path, None)
+        self.assertIsNone(self._stored(path))
+
+    def test_issue_sources_map_each_tracker_to_its_shadow_repo_and_keep_the_other_inbound_keys(self):
+        """sd:3461: `jira` and `github` are inbound like `feed`, so a set of
+        the outbound channels keeps them, and `issue_sources` answers the
+        shadow `repo` value each tracker's rows carry."""
+        path = self._registered()
+        self.assertEqual(issue_sources(self.connection, path), {})
+        set_channels(self.connection, path, {"jira": {"project": "EXAMPLE"}, "github": {"repo": "example/project"},
+                                             "feed": {"url": "https://example.test/feed.xml"}})
+        set_channels(self.connection, path, {"drive": {}})
+        self.assertEqual(issue_sources(self.connection, path), {"jira": "EXAMPLE", "github": "example/project"})
+        self.assertEqual(self._stored(path), '{"drive":{},"feed":{"url":"https://example.test/feed.xml"},'
+                                             '"github":{"repo":"example/project"},"jira":{"project":"EXAMPLE"}}')
+
+    def test_mine_issues_reads_the_open_assigned_and_filed_issues_of_each_repo_s_sources(self):
+        """sd:4636: Today and Tasks show a repository's issues that are the
+        operator's. A watched row, a row of unknown reason (synced before
+        migration 34), a closed one, a pull request, and a row from another
+        repository or tracker stay out; GitHub's `owner/name` matches in any case."""
+        path = self._registered()
+        self.assertEqual(mine_issues(self.connection), {})
+        set_channels(self.connection, path, {"jira": {"project": "EXAMPLE"}, "github": {"repo": "example/project"}})
+        rows = [("github", "Example/Project", "https://github.com/example/project/issues/1", "issue", "open", "assigned"),
+                ("github", "example/project", "https://github.com/example/project/issues/2", "issue", "open", "filed"),
+                ("github", "example/project", "https://github.com/example/project/issues/3", "issue", "open", "watched"),
+                ("github", "example/project", "https://github.com/example/project/issues/4", "issue", "open", None),
+                ("github", "example/project", "https://github.com/example/project/issues/5", "issue", "closed",
+                 "assigned"),
+                ("github", "example/project", "https://github.com/example/project/pull/6", "pull", "open", "filed"),
+                ("github", "example/other", "https://github.com/example/other/issues/7", "issue", "open", "assigned"),
+                ("jira", "EXAMPLE", "https://example.test/browse/EXAMPLE-8", "issue", "open", "filed"),
+                ("jira", "example/project", "https://example.test/browse/EXAMPLE-9", "issue", "open", "assigned"),
+                ("github", "EXAMPLE", "https://github.com/example/project/issues/10", "issue", "open", "assigned")]
+        for number, (tracker, repo, url, kind, state, reason) in enumerate(rows, start=1):
+            self.connection.execute(
+                "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, reason, first_seen, last_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 't1', ?)",
+                (tracker, repo, url, number, kind, f"issue {number}", state, reason, f"t{number:02d}"))
+        found = mine_issues(self.connection)
+        self.assertEqual(list(found), [path])
+        self.assertEqual([(row["tracker"], row["number"], row["reason"]) for row in found[path]],
+                         [("jira", 8, "filed"), ("github", 2, "filed"), ("github", 1, "assigned")])
+        self.assertEqual(set(found[path][0]), {"tracker", "url", "number", "title", "state", "reason", "last_seen"})
+
+    def test_mail_aliases_read_the_labels_and_ride_along_with_every_other_set(self):
+        """sd:4191: `email` is inbound like `feed`, so a set of the outbound
+        channels or of another source keeps it, and `mail_aliases` answers
+        the labels, `[]` for none."""
+        path = self._registered()
+        self.assertEqual(mail_aliases(self.connection, path), [])
+        set_channels(self.connection, path, {"email": {"aliases": ["committee", "board"]}})
+        self.assertEqual(mail_aliases(self.connection, path), ["board", "committee"])
+        set_channels(self.connection, path, {"drive": {}})
+        set_channels(self.connection, path, {"jira": {"project": "EXAMPLE"}})
+        self.assertEqual(self._stored(path), '{"drive":{},"email":{"aliases":["board","committee"]},'
+                                             '"jira":{"project":"EXAMPLE"}}')
+        self.assertEqual(mail_aliases(self.connection, path), ["board", "committee"])
+
+    def test_mail_aliases_raise_on_what_the_setting_reader_cannot_read(self):
+        """Unknown is not none: a stored value the validator refuses and an
+        open restore raise, as `issue_sources` does; never `[]`."""
+        path = self._registered()
+        self.connection.execute(
+            "UPDATE repo SET channels = '{\"email\": {\"aliases\": [\"a@example.test\"]}}' WHERE path = ?",
+            (path,))
+        with self.assertRaises(ChannelRefusal):
+            mail_aliases(self.connection, path)
+        set_channels(self.connection, path, None)
+        set_channels(self.connection, path, {"email": {"aliases": ["board"]}})
+        self.connection.execute(
+            "INSERT INTO state (kind, key, timestamp, body) VALUES ('restore', '2026-10-14', 't', '{}')")
+        with self.assertRaises(ChannelRefusal):
+            mail_aliases(self.connection, path)
+
+    INBOUND = {"feed": {"url": "https://example.test/feed.xml"}, "jira": {"project": "EXAMPLE"},
+               "github": {"repo": "example/project"}, "email": {"aliases": ["board"]}}
+    CHANGED = {"feed": {"url": "https://example.test/other.xml"}, "jira": {"project": "OTHER"},
+               "github": {"repo": "example/other"}, "email": {"aliases": ["committee"]}}
+
+    def test_a_set_of_one_inbound_key_keeps_the_other_inbound_keys_and_the_channels(self):
+        """sd:3461 lane review: each inbound source is set on its own, so
+        `feed=URL` never deletes Jira or GitHub, and `jira=KEY` never deletes
+        the feed or GitHub. Each omitted inbound key keeps its stored value."""
+        path = self._registered()
+        for key in self.INBOUND:
+            with self.subTest(key=key):
+                set_channels(self.connection, path, {**self.INBOUND, "obsidian": {}})
+                set_channels(self.connection, path, {key: self.CHANGED[key]})
+                self.assertEqual(json.loads(self._stored(path)),
+                                 {**self.INBOUND, key: self.CHANGED[key], "obsidian": {}})
+                set_channels(self.connection, path, None)
+                self.assertIsNone(self._stored(path))
+
+    def test_a_set_of_the_channels_still_replaces_the_channels_and_keeps_every_inbound_key(self):
+        """Outbound keys stay one replacement: a channel left out is off."""
+        path = self._registered()
+        set_channels(self.connection, path, {**self.INBOUND, "obsidian": {}, "drive": {}})
+        set_channels(self.connection, path, {"notion": {"folder": "Example"}})
+        self.assertEqual(json.loads(self._stored(path)), {**self.INBOUND, "notion": {"folder": "Example"}})
+
+    def test_a_managed_repo_takes_no_github_source_and_reads_none_after_a_later_flip(self):
+        """Managed repositories use no GitHub issues (sd:3461). A set naming
+        `github` on one refuses and writes nothing; a source set before
+        `repo managed PATH yes` reads as none, and still rides along when the
+        dashboard sets the outbound channels, so that form keeps working."""
+        path = self._registered()
+        set_managed(self.connection, path, "yes")
+        with self.assertRaises(RepoRefusal) as caught:
+            set_channels(self.connection, path, {"github": {"repo": "example/project"}, "drive": {}})
+        self.assertIn("managed", str(caught.exception))
+        self.assertIsNone(self._stored(path))
+        set_managed(self.connection, path, "no")
+        set_channels(self.connection, path, {"github": {"repo": "example/project"}, "jira": {"project": "EXAMPLE"}})
+        set_managed(self.connection, path, "yes")
+        self.assertEqual(issue_sources(self.connection, path), {"jira": "EXAMPLE"})
+        set_channels(self.connection, path, {"drive": {}})
+        self.assertIn('"github":{"repo":"example/project"}', self._stored(path))
+
     def test_a_stale_before_refuses_and_writes_nothing_null_included(self):
         """Two forms both opened on a NULL row cannot both write."""
         path = self._registered()
@@ -669,6 +808,22 @@ class TheChannelsWriter(RepoCase):
         self.connection.execute("UPDATE repo SET channels = '{\"slack\": {}}' WHERE path = ?", (path,))
         self.assertEqual(set_channels(self.connection, path, {"drive": {}}, before='{"slack":{}}'),
                          (path, '{"slack":{}}'))
+        self.assertEqual(self._stored(path), '{"drive":{}}')
+
+    def test_a_set_with_no_before_refuses_over_a_stored_value_it_cannot_read(self):
+        """sd:4191 self-review: a stored value this build refuses may hold a
+        key a newer build wrote. A set that never read it would replace it
+        whole and lose the keys it does not name, so it refuses and writes
+        nothing; `none` clears, and a set naming the value as `before` replaces."""
+        path = self._registered()
+        newer = '{"jira":{"project":"EXAMPLE"},"obsidian":{"folder":"Notes"},"slack":{}}'
+        self.connection.execute("UPDATE repo SET channels = ? WHERE path = ?", (newer, path))
+        with self.assertRaises(ChannelRefusal) as caught:
+            set_channels(self.connection, path, {"drive": {}})
+        self.assertIn("slack", str(caught.exception))
+        self.assertIn("none", str(caught.exception))
+        self.assertEqual(self._stored(path), newer)
+        self.assertEqual(set_channels(self.connection, path, {"drive": {}}, before=newer), (path, newer))
         self.assertEqual(self._stored(path), '{"drive":{}}')
 
     def test_it_writes_while_a_restore_is_open(self):
@@ -722,6 +877,74 @@ class TheChannelsVerb(RepoCase):
         rc, out, _ = self._run(path, "none")
         self.assertEqual(rc, 0)
         self.assertIn('channels {"drive":{},"obsidian":{}} -> none', out)
+        self.assertIsNone(self._stored(path))
+
+    def test_a_feed_word_sets_the_repos_subscription(self):
+        """sd:3980: `feed=URL` is the inbound subscription; a URL keeps its
+        own `=` signs, and `feed=` with no URL refuses."""
+        path = self._registered()
+        rc, out, err = self._run(path, "feed=https://example.test/feed?a=b", "obsidian=")
+        self.assertEqual(rc, 0, err)
+        text = '{"feed":{"url":"https://example.test/feed?a=b"},"obsidian":{}}'
+        self.assertEqual(self._stored(path), text)
+        self.assertEqual(self._run(path), (0, f"{text}\n", ""))
+        rc, out, err = self._run(path, "drive=")
+        kept = '{"drive":{},"feed":{"url":"https://example.test/feed?a=b"}}'
+        self.assertIn(f"channels {text} -> {kept}", out)
+        text = kept
+        rc, out, err = self._run(path, "feed=")
+        self.assertEqual((rc, out), (1, ""))
+        self.assertIn("feed", err)
+        self.assertEqual(self._stored(path), text)
+
+    def test_jira_and_github_words_set_the_issue_sources(self):
+        """sd:3461: `jira=KEY github=owner/name`; an empty one refuses."""
+        path = self._registered()
+        rc, out, err = self._run(path, "jira=EXAMPLE", "github=example/project")
+        self.assertEqual(rc, 0, err)
+        text = '{"github":{"repo":"example/project"},"jira":{"project":"EXAMPLE"}}'
+        self.assertIn(f"channels none -> {text}", out)
+        for word in ("jira=", "github="):
+            rc, out, err = self._run(path, word)
+            self.assertEqual((rc, out), (1, ""))
+            self.assertIn(word[:-1], err)
+        self.assertEqual(self._stored(path), text)
+
+    def test_an_email_word_sets_the_mail_alias_labels(self):
+        """sd:4191: `email=board,committee` names the labels; `email=` and an
+        address refuse naming `email` and change nothing."""
+        path = self._registered()
+        rc, out, err = self._run(path, "email=committee,board")
+        self.assertEqual(rc, 0, err)
+        text = '{"email":{"aliases":["board","committee"]}}'
+        self.assertIn(f"channels none -> {text}", out)
+        for word in ("email=", "email=a@example.test", "email=board,,committee", "email=board,board"):
+            with self.subTest(word=word):
+                rc, out, err = self._run(path, word)
+                self.assertEqual((rc, out), (1, ""))
+                self.assertIn("email", err)
+                self.assertEqual(self._stored(path), text)
+
+    def test_one_inbound_word_keeps_the_other_sources_and_prints_what_is_stored(self):
+        """sd:3461 lane review: `feed=URL`, `jira=KEY` and `github=owner/name`
+        each change one source; the others and the channels stay, and the
+        verb prints them in `after`. `none` still clears all of it."""
+        path = self._registered()
+        rc, out, err = self._run(path, "feed=https://example.test/feed.xml", "jira=EXAMPLE",
+                                 "github=example/project", "obsidian=")
+        self.assertEqual(rc, 0, err)
+        for word, key, value in (("feed=https://example.test/other.xml", "feed", {"url": "https://example.test/other.xml"}),
+                                 ("jira=OTHER", "jira", {"project": "OTHER"}),
+                                 ("github=example/other", "github", {"repo": "example/other"})):
+            with self.subTest(word=word):
+                before = json.loads(self._stored(path))
+                rc, out, err = self._run(path, word)
+                self.assertEqual(rc, 0, err)
+                after = {**before, key: value}
+                self.assertEqual(json.loads(self._stored(path)), after)
+                self.assertIn(" -> " + json.dumps(after, sort_keys=True, separators=(",", ":")), out)
+        rc, out, _ = self._run(path, "none")
+        self.assertEqual(rc, 0)
         self.assertIsNone(self._stored(path))
 
     def test_a_change_names_the_render_that_publishes_it(self):

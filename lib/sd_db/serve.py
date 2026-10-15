@@ -117,7 +117,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import database, remote, tailnet
+from . import database, hub, remote, tailnet
 from .runner import RunnerRefused
 from .runner_journal import lock
 from .writes import now
@@ -134,6 +134,10 @@ OPEN_LIMIT = 64 * 1024
 
 class PeerRefused(remote.RemoteError):
     """The session's TCP peer is not one this listener admits. Nothing opened."""
+
+
+class Fenced(remote.RemoteError):
+    """This machine no longer holds the hub role (hub failover, D5); the session closes and rolls back."""
 
 
 #: The PRAGMAs a session may run, from a grep for `PRAGMA` across
@@ -163,6 +167,13 @@ PRAGMAS_WITH_ARGUMENT = frozenset({
 #: (5 s): a hub writer that starts waiting when a satellite goes silent gets
 #: the lock before its own wait ends (gap (g) of the design).
 IDLE_TIMEOUT = 4.0
+#: Seconds the tailnet listener trusts its last fence answer (sd:4044). An
+#: old hub that slept or lost its network keeps its process while the console
+#: renames it, so the check at start is not enough: every frame asks again
+#: past this, or past a wall clock that moved `CLOCK_SLACK` more than the
+#: monotonic one, which does not count a sleep.
+FENCE_SECONDS = 5.0
+CLOCK_SLACK = 1.0
 #: What `Session._authorize` counts as a read, with `load_extension` left
 #: out of `SQLITE_FUNCTION` and a `PRAGMA` read only with no argument.
 #: SAVEPOINT, RELEASE and ROLLBACK TO move no data: the library's nested
@@ -334,6 +345,16 @@ class Session(socketserver.BaseRequestHandler):
         if action == sqlite3.SQLITE_FUNCTION and (arg2 or "").lower() == "load_extension":
             # Off on the connection already; refused by name all the same.
             return self._deny("load_extension is not served over the wire")
+        if (not self.routing and self.kind != "write" and self.server.node is not None  # type: ignore[attr-defined]
+                and action not in READS and action != sqlite3.SQLITE_PRAGMA):
+            # A write outside the hub's write transaction commits when it ends, after
+            # any fence answer taken before it, and a batch commits each write; only
+            # `_commit` asks afresh at the commit itself (sd:4044). The client sends a
+            # lone write with a request id, which `_autocommit` wraps. No allowed
+            # PRAGMA with an argument writes the file.
+            return self._deny("a write outside a write transaction is served on the tailnet only with a "
+                              "request id, so its COMMIT asks the fence; send a batch inside "
+                              "BEGIN IMMEDIATE ... COMMIT")
         if not self.routing and action not in ROWS and not (
                 action in READS and (arg2 or "").lower() != "load_extension"
                 or action == sqlite3.SQLITE_PRAGMA and arg2 is None):
@@ -488,6 +509,11 @@ class Session(socketserver.BaseRequestHandler):
             with self.server.owners.lock(rid):  # type: ignore[attr-defined]
                 if _fault is not None:
                     _fault("before-commit", self)
+                if self.server.node is not None:  # type: ignore[attr-defined]
+                    # Afresh, not cached: the frame's own check may predate a stall (sd:4044).
+                    fenced = self.server.fence(fresh=True)  # type: ignore[attr-defined]
+                    if fenced is not None:
+                        raise Fenced(f"refused: this machine is not the hub: {fenced}")
                 # A transaction that changed nothing gets no row: committed
                 # or not, it wrote nothing, so `absent` and its "run the verb
                 # again" stay true, and a quiet tick adds no row to the hub.
@@ -609,6 +635,11 @@ class Session(socketserver.BaseRequestHandler):
                             f"protocol version {frame.get('v')!r} refused; this hub speaks "
                             f"{remote.PROTOCOL_VERSION}"
                         )
+                    if server.node is not None:
+                        # Every frame, open or not: a demoted hub writes nothing and serves no stale read.
+                        fenced = server.fence()
+                        if fenced is not None:
+                            raise Fenced(f"refused: this machine is not the hub: {fenced}")
                     if connection is None:
                         if op != "open":
                             raise remote.RemoteError(f"the first frame must be open, not {op!r}")
@@ -730,6 +761,10 @@ class Session(socketserver.BaseRequestHandler):
                         server.log.line(f"session {self.number} refused before open: {error}")
                         hang_up = isinstance(error, PeerRefused)
                         restart = isinstance(error, remote.HubRestartNeeded)
+                    if isinstance(error, Fenced):
+                        # Closing the connection rolls back what the session held.
+                        server.log.line(f"session {self.number} closed: this machine is no longer the hub: {error}")
+                        hang_up = True
                 if connection is not None:
                     # A ROLLBACK, or a transaction SQLite ended on an error.
                     self._settle(connection)
@@ -795,7 +830,25 @@ class Server(socketserver.ThreadingTCPServer):
         self.node = node
         self.idle_timeout = idle_timeout
         self.owners = Owners()
+        #: `(monotonic, wall, refusal)` of the last fence answer; see `fence`.
+        self.fenced: tuple[float, float, str | None] | None = None
+        self.fence_guard = threading.Lock()
         super().__init__((LOOPBACK if node is None else str(node.address), port), Session)
+
+    def fence(self, *, fresh: bool = False) -> str | None:
+        """Why this machine no longer holds the hub role, or `None`: asked again past
+        `FENCE_SECONDS`, once the wall clock jumped (a sleep), or `fresh`, as a commit
+        asks. Unknown refuses."""
+        with self.fence_guard:
+            ticks, wall = time.monotonic(), time.time()
+            if self.fenced is not None and not fresh:
+                since, at, refusal = self.fenced
+                if ticks - since < FENCE_SECONDS and abs((wall - at) - (ticks - since)) <= CLOCK_SLACK:
+                    return refusal
+            found = hub.role_at(self.database)
+            refusal = found.reason if found.refuses else None
+            self.fenced = (ticks, wall, refusal)
+            return refusal
 
     def admit(self, peer, frame: dict, session: int = 0) -> None:
         """Refuse a session before anything opens, and before any SQL runs."""
@@ -869,6 +922,11 @@ def serve(port: int, database_path: Path, stream=sys.stderr, *, loopback: bool =
             node = tailnet.this_node()
         except tailnet.TailnetError as error:
             log.line(f"cannot serve on the tailnet: {error}")
+            return 1
+        # The fence (hub failover, D5): a returning old hub serves its stale database to nobody.
+        found = hub.role_at(target)
+        if found.refuses:
+            log.line(f"cannot serve on the tailnet: this machine is not the hub: {found.reason}")
             return 1
     resolved = target.resolve()
     guard = resolved.with_name(resolved.name + LOCK_SUFFIX)

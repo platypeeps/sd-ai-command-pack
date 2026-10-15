@@ -13,7 +13,7 @@ from unittest import mock
 
 from sd_db import connect
 from sd_db import schema as schema_module
-from sd_db.channels import ChannelRefusal, dumps, validate
+from sd_db.channels import ChannelRefusal, dumps, outbound, validate
 from sd_db.errors import SchemaTooOld
 from sd_db.migrate import initialise, migrate
 from sd_db.repos import RepoRefusal, repo_channels
@@ -40,7 +40,7 @@ class TheValidator(unittest.TestCase):
                 validate(value)
 
     def test_each_key_outside_the_vocabulary_refuses_by_name(self):
-        for key in ("slack", "email", "jira", "github", "Obsidian", ""):
+        for key in ("slack", "mail", "reddit", "Jira", "Obsidian", ""):
             with self.subTest(key=key), self.assertRaises(ChannelRefusal) as caught:
                 validate({"obsidian": {}, key: {}})
             self.assertIn(repr(key), str(caught.exception))
@@ -115,6 +115,91 @@ class TheValidator(unittest.TestCase):
         value = {"obsidian": {"folder": "Briefs/x"}, "drive": {}}
         self.assertEqual(dumps(value), '{"drive":{},"obsidian":{"folder":"Briefs/x"}}')
         self.assertEqual(dumps(None), "none")
+
+
+class TheFeed(unittest.TestCase):
+    """sd:3980: a repo's one RSS/Atom subscription, the inbound `feed` key.
+
+    `sd-watchlist` reads it; it is not an outbound channel, so it neither
+    turns publishing on nor leaves the outbound channels off."""
+
+    FEED = "https://example.test/feed.xml"
+
+    def test_a_feed_url_is_a_setting_beside_the_outbound_channels(self):
+        value = {"feed": {"url": self.FEED}, "notion": {}}
+        self.assertEqual(validate(value), value)
+        self.assertEqual(validate({"feed": {"url": "http://example.test/r/x/.rss?sort=new"}}),
+                         {"feed": {"url": "http://example.test/r/x/.rss?sort=new"}})
+
+    def test_a_feed_needs_one_http_url_and_nothing_else(self):
+        for entry in ({}, {"url": ""}, {"url": 3}, {"url": "example.test/feed"}, {"url": "ftp://example.test/f"},
+                      {"url": "file:///etc/passwd"}, {"url": "https://"}, {"url": "https://user:pw@example.test/f"},
+                      {"url": "https://example.test/f\n"}, {"url": "https://example.test/ f"},
+                      {"url": self.FEED, "folder": "x"}, {"folder": "x"}):
+            with self.subTest(entry=entry), self.assertRaises(ChannelRefusal) as caught:
+                validate({"feed": entry})
+            self.assertIn("feed", str(caught.exception))
+
+    def test_publishing_reads_only_the_outbound_channels(self):
+        """A setting that names only a feed says nothing about publishing:
+        it publishes as no setting. Beside an outbound channel, the feed is
+        dropped and the outbound rule stands: a channel left out is off."""
+        self.assertIsNone(outbound({"feed": {"url": self.FEED}}))
+        self.assertEqual(outbound({"feed": {"url": self.FEED}, "drive": {}}), {"drive": {}})
+        self.assertIsNone(outbound(None))
+        self.assertEqual(outbound({"obsidian": {"folder": "Notes"}}), {"obsidian": {"folder": "Notes"}})
+
+
+class TheIssueSources(unittest.TestCase):
+    """sd:3461: a repo's Jira project and GitHub repository, inbound keys.
+
+    Each names the `repo` value its tracker's shadow rows carry: a Jira
+    project key, a GitHub `owner/name`."""
+
+    def test_a_project_and_a_repository_are_a_setting_beside_the_channels(self):
+        value = {"jira": {"project": "EXAMPLE_2"}, "github": {"repo": "example-org/my.project_x"}, "drive": {}}
+        self.assertEqual(validate(value), value)
+        self.assertEqual(outbound(value), {"drive": {}})
+        self.assertIsNone(outbound({"jira": {"project": "EXAMPLE"}}))
+
+    def test_each_needs_its_one_key_in_its_trackers_spelling(self):
+        refused = [("jira", entry) for entry in (
+            {}, {"project": ""}, {"project": 3}, {"project": "example"}, {"project": "2X"}, {"project": "EX AMPLE"},
+            {"project": "EX-1"}, {"project": "EXAMPLE\n"}, {"project": "EXAMPLE", "repo": "a/b"}, {"repo": "a/b"})]
+        refused += [("github", entry) for entry in (
+            {}, {"repo": ""}, {"repo": "example"}, {"repo": "a/b/c"}, {"repo": "/b"}, {"repo": "a/"},
+            {"repo": "a/.."}, {"repo": "a/."}, {"repo": "https://example.test/a/b"}, {"repo": "a b/c"},
+            {"repo": "-a/b"}, {"repo": "a/b\n"}, {"repo": "a/b", "project": "X"}, {"project": "X"})]
+        for name, entry in refused:
+            with self.subTest(name=name, entry=entry), self.assertRaises(ChannelRefusal) as caught:
+                validate({name: entry})
+            self.assertIn(name, str(caught.exception))
+
+
+class TheMailAliases(unittest.TestCase):
+    """sd:4191: the repo's mail alias labels, the inbound `email` key.
+
+    Each names an `alias|<label>|<address>` line in mail-intake's private
+    conf; the address stays there, so the row holds names only. It is
+    inbound: it neither turns publishing on nor leaves a channel off."""
+
+    def test_labels_are_a_setting_beside_the_channels_stored_sorted(self):
+        value = {"email": {"aliases": ["committee", "board-2", "x_1"]}, "drive": {}}
+        self.assertEqual(validate(value), {"email": {"aliases": ["board-2", "committee", "x_1"]}, "drive": {}})
+        self.assertEqual(outbound(value), {"drive": {}})
+        self.assertIsNone(outbound({"email": {"aliases": ["board"]}}))
+
+    def test_each_label_is_a_name_never_an_address(self):
+        entries: tuple[dict, ...] = (
+            {}, {"aliases": []}, {"aliases": "board"}, {"aliases": [3]}, {"aliases": [""]},
+            {"aliases": ["a@example.test"]}, {"aliases": ["board committee"]}, {"aliases": ["Board"]},
+            {"aliases": ["-board"]}, {"aliases": ["https://example.test/a"]}, {"aliases": ["board\n"]},
+            {"aliases": ["board", "board"]}, {"aliases": [f"a{n}" for n in range(9)]},
+            {"aliases": ["x" * 65]}, {"aliases": ["board"], "folder": "x"}, {"folder": "x"})
+        for entry in entries:
+            with self.subTest(entry=entry), self.assertRaises(ChannelRefusal) as caught:
+                validate({"email": entry})
+            self.assertIn("email", str(caught.exception))
 
 
 class TheReader(unittest.TestCase):

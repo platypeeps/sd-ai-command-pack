@@ -92,9 +92,9 @@ A skill that emits its own HTML meets the same rule by itself.
 The dashboard finds `docs/dashboard/` by itself: every checkout under its
 `REPO_ROOT` holding that directory is a document root, enumerated from disk.
 So a repository publishing to the default location enters the Documents tab
-by having the directory, and the only thing left to say is what to call it:
-
-    label|<key>|<label>
+by having the directory. Its name is the workflow database's `view` row, set
+on the Documents page, and the dashboard reads no `label|` line (sd:3986), so
+the default location needs no row in `documents.conf` at all.
 
 `root|<key>|<label>|<directory>` stays for a directory the dashboard cannot
 find — somewhere outside `docs/dashboard/`, as `hoa` publishes into `reports`.
@@ -104,18 +104,20 @@ location.** It is the default written down a second time, and it goes stale the
 moment the repository moves while still looking authoritative — which is the
 drift the enumeration removed.
 
-Whatever installs the repository's documents writes that line, and writes it
-once. For a research repo that is `sd-research-kit render`, which registers
-`docs/dashboard/` at the end of every run; `sd-research-kit publish` does the
-same without rebuilding. Registration is idempotent, and a key already naming
-another directory is reported rather than overwritten.
+For a research repo, `sd-research-kit render` checks the file at the end of
+every run, and `sd-research-kit publish` does the same without rebuilding. It
+writes no row for `docs/dashboard/`, and a `label|` row an earlier renderer
+wrote stays where it is: the Documents page names it, and Rename replaces it.
+A `root|` row for a directory outside the default is written once and is
+idempotent, and a key already naming another directory is reported rather than
+overwritten.
 
 One exception to "reported rather than overwritten": a row for this
 repository's key naming a directory *inside this repository* is this
 repository's row, and is rewritten in place rather than duplicated. That
 retires a `build/` row — the published directory before `docs/dashboard/` —
 and it retires a `root|` row for the default location that an earlier renderer
-wrote, replacing it with the `label|` row and keeping the label it carried. A
+wrote, because that row outranks the directory the dashboard finds. A
 row naming *another* repository's directory is still a collision, and is still
 only reported.
 
@@ -205,8 +207,10 @@ never whether: an outward mirror still needs its key on the document.
   the setting wins over the default. A pinned `page=` or `file=` wins over both;
   where the setting names a folder, the render names each pinned document, and
   deleting the pin creates the page under the new folder.
-- **A channel left out is off.** A document designated for it is refused for
-  that channel by name, and its other channels still publish. Without
+- **A channel left out is off.** Only `obsidian`, `notion` and `drive` are
+  channels. The inbound `feed` key (sd:3980) is not one: a setting naming only
+  a feed is no setting here. A document designated for a channel left out is
+  refused for that channel by name, and its other channels still publish. Without
   `obsidian` the render writes no vault copy and says so. The dashboard copy is
   not a channel and always publishes.
 - **A pending request for a channel left out stays.** The render names it with
@@ -293,6 +297,32 @@ next render's request name a page, and naming one is what stops a second copy.
 Recording the target makes it machine-readable for the first time. Before this,
 the page title and parent lived in no file the kit read, so verifying a mirror
 against its source was manual and therefore skipped.
+
+### An item's row in the team experiments databases
+
+An item, not a document, may project as one row in a team experiments database
+(sd:3982). The operator designates it with `sd task edit N --experiment yes`
+(an experiment) or `--experiment of:M` (a task of experiment M); nothing is
+inferred. `row:ID` pins an existing row, `new` drops the pinned one, and `off`
+stops the projection and keeps the row. Two per-machine variables, beside the
+Notion folder ids, name the databases by data source id:
+
+    SD_NOTION_EXPERIMENTS=<data source id>
+    SD_NOTION_EXPERIMENT_TASKS=<data source id>
+
+Unset, or holding a name, `sd-research-kit project` refuses and names the
+variable. sd writes `Status` on both databases, and `Experiment` and `Due` on a
+task, under a guard: a field is written only while its live value is the one
+sd last wrote and saw confirmed. A field a person changed is refused, listed in
+`yielded`, and named in one note on the item, with the value that hands it
+back. The title, `Stage` and `Priority` are written once, at create, with one
+body line, `Projected from sd:<n>. sd keeps Status current; edit anything else.`
+Everything else on the row is the team's.
+
+`sd-research-kit project` queues one `notion-row` request per designated item
+whose row would change, as `sd-item-<n>.notion-row.json` in the same queue. Its
+`--plan` form is the guard, in code; the drain below calls it and writes only
+what it prints.
 
 ## How an outward mirror is updated
 
@@ -384,8 +414,11 @@ Draining is six steps per request, and the order matters:
    externally is not mirrored to a shared destination, and designating it did
    not lift that. Report it and leave the request in place. Then read the
    channels setting of the `repo` the request names, with
-   `bin/sd-db repo channels <repo>`. A setting that leaves out the request's
-   destination refuses it: report it and leave it in place. A read that exits
+   `bin/sd-db repo channels <repo>`. Read only its `obsidian`, `notion` and
+   `drive` keys; a setting naming none of them, such as one holding only a
+   `feed`, is no setting. A setting that leaves out the request's
+   destination refuses it: report it and leave it in place. A destination name
+   is not a channel name: a `notion-row` request reads the channel `notion`. A read that exits
    non-zero, an unresolved restore among the causes, leaves every request of
    that repo unwritten, with or without `item`: unknown is not "no
    restriction". `none` is no setting, and so is a
@@ -411,6 +444,40 @@ Draining is six steps per request, and the order matters:
      and code blocks survive. A `folder` of the form `Briefs/<repo>` resolves
      under My Drive's root; create the repo folder when it is missing, and do
      not adopt a `Briefs` folder found somewhere else.
+
+   - `notion-row` -- the Notion connector, one database row. Run
+     `sd-research-kit project` first, at the start of the drain, and drain
+     experiments before tasks: a task's plan refuses while its experiment has
+     no row. For each request, fetch the database named by `database` (its
+     data source id) and, where the request names a `row`, that page. Write
+     what you fetched to a file as JSON: `database`, the data source id;
+     `schema`, each property's `type` and, for a select, its `options`; and
+     `row`, the page's `id`, `parent` (its data source id) and `properties`.
+     Hand each property whole, exactly as Notion holds it: a select's option
+     name, untrimmed, or null; a date's whole value, never its start alone,
+     as `{"start", "end", "time_zone"}` with all three keys, or null; a
+     relation's whole value, never a page of it, as `{"ids", "has_more"}`
+     with every page id and `has_more` false, even when empty. A property
+     left out or cut short is refused, never read as empty. Then run
+     `sd-research-kit project --plan <request> --live <file>`. A pinned row
+     that is not found or is in the trash takes `--missing` instead of
+     `--live`; a fetch that fails any other way stops this request and calls
+     no plan, because a failed read is unknown, not missing. A plan that
+     answers `search:` found an earlier create that may have landed: search
+     the database for pages whose body opens with the pointer
+     `Projected from sd:<n>.`, whatever their title, and plan again with each
+     as a `candidates` entry shaped like `row`, an empty list for none.
+     The plan prints JSON: `action` `create` with `properties` and the
+     `body` line, or `update` with the `row` and the `properties` to write,
+     `null` clearing one. Write exactly that, in one call, straight after the
+     plan; anything that comes between them means fetch and plan again. An
+     update with no properties writes nothing and still goes to step 6. A
+     plan that refuses exits 1 and records nothing: report it and leave the
+     request. A refusal that ends with `Option:` lines is a question: file it
+     on the item with `sd task note <n> '<text>' --kind question` unless an
+     open question already says the same, and leave the request. Never
+     create a row the plan did not print, and never edit the schema or add
+     a select option.
 
    Never convert a document into a format its destination does not read
    natively. The source for every mirror is the request's `content`: the
@@ -448,6 +515,9 @@ Draining is six steps per request, and the order matters:
    and whether the channels setting named it can change after the request
    was queued, so this holds in every container. Any other match is not
    this tool's: report it and leave the request in place.
+   Steps 4 and 5 do not apply to a row: the plan records `creating` on the
+   item before the create, and step 6 records the row id there. A request
+   never holds a row id.
 4. Write the id into the request file, the moment the destination returns it.
    The request is the durable record, because it is the one file the drain is
    certain it can write and the one the next drain is certain to read. A
@@ -512,6 +582,13 @@ Draining is six steps per request, and the order matters:
    says the sync still owes work, which is the safe thing for it to say if
    any earlier step half-finished.
 
+   For a `notion-row` request, `--url` is the row's page URL and step 6
+   confirms the plan of the generation it is given: it records the row id
+   and moves the planned values to `written`, refusing a plan the item's
+   designation has moved past since. A re-run after a failed receipt answers
+   `unchanged`. A field a person holds keeps the item queued: each
+   `project` queues it again, so the next drain sees a hand-back.
+
 **What each failure leaves behind.** This is stated, not implied, because a
 procedure whose failure mode is the bug it prevents is not a fix.
 
@@ -522,6 +599,8 @@ procedure whose failure mode is the bug it prevents is not a fix.
 | step 5, before step 6 | id recorded in both | updates that page, runs step 6 |
 | step 6's item record, before its receipt | URL on the item, request in place | updates that page, runs step 6; the record answers `unchanged` |
 | a render during steps 2–5 | a newer request under the same name | step 6 leaves it; the next drain writes it |
+| a row's plan, before its write | `creating` or `writing` on the item | plans again; after a create's plan, searches by the pointer, adopts one match and asks about none or two |
+| a row's write, before step 6 | values Notion took, unconfirmed | refuses those fields as possibly sd's own write, until a person hands them back |
 
 Every row survives a render in between, because a render carries a recorded id
 forward under step 4 rather than overwriting the request.

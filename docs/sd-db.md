@@ -35,6 +35,26 @@ It sends every open of the default database to the hub, one TCP session per conn
 
 Loopback is not a user boundary: every local account reaches `127.0.0.1`, so the token checks the account.
 
+### The fence: a returning old hub
+
+After a failover the old hub comes back with its own database and no `hub.json`, so it would act as the hub at once.
+The fence stops it (sd:4044): a machine with its own database holds the hub role only while its tailnet name matches `sd.hub_name`.
+
+    sd config set sd.hub_name hub.example.test   # the hub's MagicDNS name, or its bare machine name
+    bin/sd-db fence                             # sd-db: fence: holder: this node is hub.example.test, ...
+
+| Answer | When | `serve` on the tailnet, a lane on this machine's database | `bin/sd-db fence` |
+| --- | --- | --- | --- |
+| `holder` | this node's MagicDNS name matches | go on | exit 0 |
+| `off` | `sd.hub_name` is unset | go on, as before the fence | exit 0 |
+| `elsewhere` | another name, or a satellite | refuse, naming the holder | exit 1 |
+| `unknown` | the setting does not read, or Tailscale does not name this node | refuse | exit 1 |
+
+The setting is read first, so `off` asks Tailscale nothing. Each check reads the name again; a failed read refuses again for 30 seconds without asking.
+`sd config set sd.hub_name` refuses on a machine with no database: the fence reads the row alone.
+`serve --loopback` is not fenced: it leaves the machine for nobody.
+Writes that stay on the machine stay allowed; scripts that write off the machine (the NAS copy, the `hub-pin` push) run `bin/sd-db fence` first.
+
 ### Peer identity on the tailnet
 
 The listener takes the peer from the TCP socket, never from a frame.
@@ -170,6 +190,7 @@ On any other machine it raises `LaneElsewhere` (`lane_elsewhere`) and locks noth
 A read fault, a database that cannot be opened, or clones that disagree raise `LaneUnknown` (`lane_unknown`).
 Uncertain ownership never grants the hub.
 A missing row reads as the hub.
+A lane this machine would run on its own database passes the fence too: `elsewhere` raises `LaneElsewhere` naming the holder, `unknown` raises `LaneUnknown`.
 The hub's lock file sits beside the database; a satellite host's sits under `$XDG_STATE_HOME/sd/ship-locks/`.
 
 The machine that hosts a repository gates and merges it, and no request crosses a machine.
@@ -187,6 +208,13 @@ The design is `docs/work/2026-10-13-channels/design.md`.
     bin/sd-db repo channels PATH none                                    # clear
 
 The keys are `obsidian`, `notion` and `drive`; `drive=` names the default folder, and a channel left out is off.
+`feed=URL` adds the repo's one RSS/Atom subscription (sd:3980), an http or https URL with no credentials; `sd-watchlist` reads it.
+The feed is inbound, not a channel: a setting naming only a feed publishes as no setting, and `channels.outbound` drops it for every publisher.
+`jira=KEY` and `github=OWNER/NAME` name the repo's issue sources (sd:3461), inbound like the feed: the `repo` value that tracker's `shadow` rows carry, a Jira project key or a GitHub `owner/name`.
+`repos.issue_sources` reads them for Today and Tasks; a managed repo refuses `github` and reads one set before as none, since managed repos use no GitHub issues.
+`email=LABEL,LABEL` names the mail aliases the repo owns (sd:4191), inbound too: one to eight labels of `alias|<label>|<address>` lines in `local-mail-intake`'s conf, lower-case names, stored sorted. The address stays in that file, so an `@` refuses. `repos.mail_aliases` reads them for Today. Before rolling the pack back past this key, or running `sd-db` from an older checkout, clear it from each repo that names it: a build from before it refuses the whole setting, and its next set replaces the whole setting, every other key with it. This build refuses such a set instead: over a stored value it cannot read, a set with no `before` exits 1, and `none` then a set is the way through. Design: `docs/work/2026-10-14-email-slack-channels/design.md`.
+`repos.mine_issues` reads each repo's open issues whose `shadow.reason` is `assigned` or `filed` (sd:4636); both collectors write the reason, `watched` rows stay synced and hidden, and a row synced before migration 34 reads unknown until a collect sees it again.
+A set naming any channel replaces the channels; one naming none keeps them, so the dashboard form never drops a source. Each inbound key (feed, jira, github, email) is set on its own: a set that leaves one out keeps it. `none` clears all of it; to drop one source, clear and set the rest again. The verb prints `before -> after`, as stored.
 A folder is a name, never an id or a URL: no leading `/`, no `.` or `..` segment, no control character.
 A Notion folder is one page name, with no `/`.
 `sd_db.channels.validate` checks every write; `repos.set_channels` is the one writer, `repos.repo_channels` the reader.

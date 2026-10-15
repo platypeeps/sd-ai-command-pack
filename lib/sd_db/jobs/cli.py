@@ -122,6 +122,25 @@ def command_status(_argv: list[str]) -> int:
     return 0
 
 
+def command_fence(argv: list[str]) -> int:
+    """`fence`: whether this machine holds the hub role (hub failover, D5).
+
+    The check `serve`, the lane host and the writes that leave the hub run.
+    Exit 0 for `holder` and `off` (no `sd.hub_name`); `elsewhere` and
+    `unknown` exit 1, and a caller refuses on either.
+    """
+    if argv:
+        print("sd-db fence: takes no arguments", file=sys.stderr)
+        return 1
+    from ..hub import Role, read, role_at
+    satellite = read(_home())
+    # A satellite holds no database and no role, whatever the hub's setting says.
+    found = (Role("elsewhere", satellite.host, f"this machine is a satellite of {satellite.host} (hub.json)")
+             if satellite is not None else role_at(default_path(_home())))
+    print(f"sd-db: fence: {found.state}: {found.reason}")
+    return 1 if found.refuses else 0
+
+
 def command_restore(argv: list[str]) -> int:
     """`restore DIR`, or `restore --newest ROOT...`: the newest verified snapshot under the roots (sd:4011)."""
     if argv[:1] == ["--newest"]:
@@ -488,7 +507,7 @@ def command_repo(argv: list[str]) -> int:
     `repo list [--managed | --clones PROFILE]`,
     `repo runner-merge <path> <manual|auto>`, `repo managed <path> <yes|no>`,
     `repo ci <path> <github|local>`, `repo lane-host <path> <host|hub>`,
-    `repo channels <path> [obsidian=.. notion=.. drive=.. | none]`,
+    `repo channels <path> [obsidian=.. notion=.. drive=.. feed=URL jira=KEY github=OWNER/NAME email=LABEL,.. | none]`,
     `repo clones <path> <P,Q | none | +P | -P>`, `repo dependabot <path> <yes|no>`,
     `repo remove <path> ...`.
 
@@ -658,7 +677,9 @@ def channels_words(words: list[str]) -> dict | None:
     """`obsidian=Briefs/x notion=Example drive=` as a channels value; `none` alone is None.
 
     `channel=` names the channel's default folder, and a channel left out is
-    off. `channels.validate` judges the result; this refuses only words that
+    off. `feed=URL` is the inbound subscription (sd:3980); a URL keeps its own
+    `=`. `jira=KEY` and `github=owner/name` are the issue sources (sd:3461), and
+    `email=LABEL,LABEL` the mail alias labels (sd:4191). `channels.validate` judges the result; this refuses only words that
     are not `channel=folder`, a channel named twice, and `none` beside others.
     """
     if words == ["none"]:
@@ -673,7 +694,14 @@ def channels_words(words: list[str]) -> dict | None:
                             f"`drive=` names the default folder")
         if channel in value:
             raise SdDbError(f"sd-db repo channels: {channel} is named twice")
-        value[channel] = {"folder": folder} if folder else {}
+        if channel == "feed":
+            value[channel] = {"url": folder}
+        elif channel in channels.ISSUE_KEYS:
+            value[channel] = {channels.ISSUE_KEYS[channel]: folder}
+        elif channel == "email":
+            value[channel] = {channels.ALIASES: folder.split(",") if folder else []}
+        else:
+            value[channel] = {"folder": folder} if folder else {}
     return value
 
 
@@ -685,7 +713,8 @@ def _repo_channels(connection, rest: list[str]) -> int:
     """
     if not rest:
         print("sd-db repo channels: needs a path, then nothing to print the setting, none to clear it, "
-              "or obsidian=FOLDER notion=PAGE drive=FOLDER", file=sys.stderr)
+              "or obsidian=FOLDER notion=PAGE drive=FOLDER feed=URL jira=KEY github=OWNER/NAME email=LABEL,LABEL",
+              file=sys.stderr)
         return 1
     path, words = rest[0], rest[1:]
     if not words:
@@ -695,7 +724,10 @@ def _repo_channels(connection, rest: list[str]) -> int:
         return 0
     value = channels_words(words)
     target, before = set_channels(connection, path, value)
-    print(f"sd-db: {target} channels {before} -> {channels.dumps(value)}")
+    # What is stored, not the words: what the words leave out is kept (sd:3980, sd:3461).
+    after = "none" if value is None else channels.dumps(
+        channels.kept(channels.validate(value), None if before == "none" else before))
+    print(f"sd-db: {target} channels {before} -> {after}")
     print(f"sd-db: run `sd-research-kit render` in {target} to publish under it, or wait for the next commit")
     return 0
 
@@ -1062,6 +1094,7 @@ COMMANDS = {
     "init": command_init,
     "migrate": command_migrate,
     "status": command_status,
+    "fence": command_fence,
     "restore": command_restore,
     "repo": command_repo,
     "item": command_item,

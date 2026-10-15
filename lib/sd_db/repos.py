@@ -683,6 +683,70 @@ def set_runner_merge(
     return target, before
 
 
+def issue_sources(connection: sqlite3.Connection, path: Path | str) -> dict[str, str]:
+    """One repository's issue sources: tracker to the `shadow.repo` its rows carry (sd:3461).
+
+    `{"jira": "EXAMPLE", "github": "example/project"}`, either left out when
+    unset; `{}` for no setting. It reads through `repo_channels`, so what that
+    cannot read raises here too. A managed repository's `github` reads as
+    none, whenever it was set: managed repositories use no GitHub issues.
+    """
+    from . import channels
+
+    setting = repo_channels(connection, path) or {}
+    sources = {name: setting[name][key] for name, key in channels.ISSUE_KEYS.items() if name in setting}
+    if "github" in sources:
+        probe = paths.keys(str(Path(path).expanduser().resolve()))
+        row = connection.execute(
+            f"SELECT managed FROM repo WHERE path IN ({paths.placeholders(probe)})", probe).fetchone()
+        if row is None or row["managed"]:
+            del sources["github"]
+    return sources
+
+
+def mail_aliases(connection: sqlite3.Connection, path: Path | str) -> list[str]:
+    """One repository's mail alias labels, sorted; `[]` for none (sd:4191).
+
+    Each names an `alias|<label>|<address>` line in `local-mail-intake`'s
+    conf, whose arrivals Today shows under this repository. It reads through
+    `repo_channels`, so what that cannot read raises here too, never `[]`.
+    """
+    from . import channels
+
+    setting = repo_channels(connection, path) or {}
+    return list(setting.get("email", {}).get(channels.ALIASES, []))
+
+
+#: The `shadow.reason` values that make an issue the operator's (sd:4636).
+#: `watched` and NULL (unknown) rows stay synced and stay off Today and Tasks.
+MINE = ("assigned", "filed")
+
+
+def mine_issues(connection: sqlite3.Connection) -> dict[str, list[dict]]:
+    """Each repository's open issues that are the operator's, for Today and Tasks (sd:4636).
+
+    `{path: [row, ...]}` for every registered repository whose issue sources
+    match at least one open issue `assigned` to or `filed` by the operator,
+    newest `last_seen` first. A row's tracker and `shadow.repo` must match one
+    of `issue_sources`; GitHub's `owner/name` matches in any case, as GitHub
+    reads it. Pull requests stay out: they are contributions, not issues.
+    """
+    found: dict[str, list[dict]] = {}
+    for (path,) in connection.execute("SELECT path FROM repo WHERE channels IS NOT NULL ORDER BY path").fetchall():
+        sources = issue_sources(connection, path)
+        if not sources:
+            continue
+        match = " OR ".join("(tracker = ? AND repo = ? COLLATE NOCASE)" for _ in sources)
+        rows = connection.execute(
+            "SELECT tracker, url, number, title, state, reason, last_seen FROM shadow "
+            f"WHERE ({match}) AND kind = 'issue' AND state = 'open' "
+            f"AND reason IN ({', '.join('?' * len(MINE))}) ORDER BY last_seen DESC, id DESC",
+            [value for pair in sources.items() for value in pair] + list(MINE)).fetchall()
+        if rows:
+            found[path] = [dict(row) for row in rows]
+    return found
+
+
 #: The words `repo managed` takes, mapped to what the column holds. Words and
 #: not `1`/`0` so the verb reads like `runner-merge`'s `manual|auto`.
 MANAGED_VALUES = {"yes": 1, "no": 0}
@@ -911,23 +975,47 @@ def set_channels(
 
     It does not refuse during an unresolved restore: the restore's recovery
     is to set each repository's channels again before resolving it.
+
+    The outbound channels are one replacement, and each inbound key (`feed`,
+    `jira`, `github`, `email`) is its own (sd:3980, sd:3461, sd:4191;
+    `channels.kept`). A value naming no channel keeps the stored channels, so
+    the dashboard form never deletes a source, and a value leaving an inbound key out keeps it, so
+    `feed=URL` never deletes the channels or the issue sources. `None` clears
+    all of it. A stored value this build refuses (a key a newer build wrote,
+    sd:4191) is replaced only by a caller that names it as `before`; with no
+    `before`, a set refuses rather than lose the keys it cannot read. A value
+    naming `github` refuses on a managed repository, which uses no GitHub
+    issues; one kept from before `repo managed PATH yes` rides along.
     """
+    import json
+
     from . import channels
     from .workflow import StaleItem
 
-    text = None if value is None else channels.dumps(channels.validate(value))
+    value = None if value is None else channels.validate(value)
     given = str(Path(path).expanduser().resolve())
     probe = paths.keys(given)
     with transaction(connection):
         row = connection.execute(
-            f"SELECT path, channels FROM repo WHERE path IN ({paths.placeholders(probe)})",
+            f"SELECT path, channels, managed FROM repo WHERE path IN ({paths.placeholders(probe)})",
             probe).fetchone()
         if row is None:
             raise RepoRefusal(
                 f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
+        if value and "github" in value and row["managed"]:
+            raise RepoRefusal(f"{row['path']} is managed, and managed repositories use no GitHub issues; "
+                              f"name github only on a repository outside the managed list")
         was = channels.canonical(row["channels"])
         if before is not None and channels.canonical(before) != was:
             raise StaleItem(f"channels for {row['path']} is {was} now, not {before}; read the page again")
+        if value is not None and before is None and row["channels"] is not None:
+            try:
+                channels.validate(json.loads(row["channels"]))
+            except (ValueError, channels.ChannelRefusal) as error:
+                raise channels.ChannelRefusal(
+                    f"the stored channels of {row['path']} cannot be read by this build ({error}), so a set "
+                    f"would lose the keys it does not name; clear it with `none`, then set it again") from error
+        text = None if value is None else channels.dumps(channels.kept(value, row["channels"]))
         connection.execute("UPDATE repo SET channels = ?, updated_at = ? WHERE path = ?",
                            (text, now(), row["path"]))
     return row["path"], was
