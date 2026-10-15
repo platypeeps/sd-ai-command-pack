@@ -473,7 +473,10 @@ Draining is six steps per request, and the order matters:
      The plan prints JSON: `action` `create` with `properties` and the
      `body` line, or `update` with the `row` and the `properties` to write,
      `null` clearing one. Write exactly that, in one call, straight after the
-     plan; anything that comes between them means fetch and plan again. An
+     plan; anything that comes between them means fetch and plan again. A
+     plan repeated under one request is the same answer, however often: a
+     create goes through `search:` once more, and the plan the write follows
+     is the one that counts, not the first (sd:4742). An
      update with no properties writes nothing and still goes to step 6. A
      plan that refuses exits 1 and records nothing: report it and leave the
      request. A refusal that ends with `Option:` lines is a question: file it

@@ -487,6 +487,41 @@ class PlanTests(Projection):
         self.assertEqual(self.deliver(self.experiment)[0], 0)
         self.assertEqual(self.held(self.experiment)["row"], ROW)
 
+    def test_a_create_plan_repeated_before_its_write_is_the_same_create(self) -> None:
+        # sd:4742 (b): anything between a plan and its write means plan again. For a create that plan
+        # answers `search:`, and the search finding nothing returns the same create under the same intent,
+        # however often it is repeated; the plan the write follows is the one that counts.
+        self.queued()
+        first = self.planned(self.experiment, self.live())
+        held = self.held(self.experiment)
+        notes = self.comments(self.experiment)
+        for _ in range(2):
+            status, said = self.plan(self.experiment, self.live())
+            self.assertEqual(status, 1)
+            self.assertIn("search:", said)
+            self.assertIn("an empty list prints the create again", said)
+            self.assertEqual(self.planned(self.experiment, self.live(candidates=[])), first)
+            self.assertEqual(self.held(self.experiment), held)
+        self.assertEqual(self.comments(self.experiment), notes)
+        text = " ".join(CONTRACT.read_text(encoding="utf-8").split())
+        self.assertIn("the plan the write follows is the one that counts", text)
+
+    def test_one_candidate_is_adopted_and_its_fields_wait_for_a_hand_back(self) -> None:
+        self.queued()
+        self.planned(self.experiment, self.live())
+        planned = self.planned(self.experiment, self.live(candidates=[ROW], Status="Todo"))
+        self.assertEqual((planned["action"], planned["row"], planned["yielded"]), ("update", ROW, ["Status"]))
+        held = self.held(self.experiment)
+        self.assertEqual(held["row"], ROW)
+        self.assertNotIn("creating", held)
+        self.assertEqual(self.comments(self.experiment)[-1],
+                         "Status on the experiments row is not sd's (Todo; sd last wrote nothing; clear it to hand "
+                         "it back); this may be sd's own unconfirmed write")
+        self.assertEqual(self.deliver(self.experiment)[0], 0)
+        self.project()
+        planned = self.planned(self.experiment, self.live(row=ROW))
+        self.assertEqual((planned["properties"], planned["yielded"]), ({"Status": "Todo"}, []))
+
     def test_creating_in_another_database_refuses_naming_both(self) -> None:
         self.queued()
         self.planned(self.experiment, self.live())
