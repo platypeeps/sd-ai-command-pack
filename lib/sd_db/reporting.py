@@ -314,8 +314,12 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
                 repeats.update(last_run_id=run_id, last_ended=ended)
             # A cut body never replaces a whole one (sd:4641): the row's
             # `report.truncated` is the first run's, and the dashboard reads
-            # it. The basis matched, so the findings are the same.
-            whole = not truncated or stored["report"].get("truncated") is True
+            # it, so `body_truncated` says what the kept body is. The basis
+            # matched, so the findings are the same.
+            kept_cut = repeats.get("body_truncated", stored["report"].get("truncated")) is True
+            whole = not truncated or kept_cut
+            if newest and whole and truncated != kept_cut:
+                repeats["body_truncated"] = truncated
             set_item_fields(connection, target["id"], fields={**stored, "repeats": repeats},
                             **({"body": {"text": text}} if newest and whole else {}))
             return workflow.item_state(connection, target["id"])

@@ -966,6 +966,13 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         self.assertTrue("all of it" in json.loads(self.row(first)["body"])["text"], "the cut body replaced it")
         self.assertEqual(json.loads(self.row(first)["fields"])["repeats"]["last_run_id"], "b")
 
+    def test_a_whole_body_after_a_cut_one_is_kept_from_the_next_cut_one(self):
+        """Codex: cut, whole, cut; the first run's flag said the row was cut, so the third replaced the whole."""
+        first = self.tick("a", 1, self.past_the_cut(self.ONE, ""))["item"]["id"]
+        self.tick("b", 16, self.ONE + "all of it\n")
+        self.tick("c", 31, self.past_the_cut(self.ONE, ""))
+        self.assertTrue("all of it" in json.loads(self.row(first)["body"])["text"], "the cut body replaced it")
+
     def test_reopening_a_superseded_report_returns_it_to_planning(self):
         older = self.tick("a", 1, self.TWO)["item"]["id"]
         self.tick("b", 16, self.ONE)
