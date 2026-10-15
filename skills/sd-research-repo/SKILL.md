@@ -157,6 +157,12 @@ records the differences that are on purpose. Both are in
    by hand. Then record the page or file in the repo's README table. A request
    whose handling restrictions forbid an external mirror is reported and left
    in place, never drained.
+
+   A `notion-row` request, `sd-item-<n>.notion-row.json`, is an sd item's row
+   in the team experiments databases, not a document. Drain it only by the
+   publication contract's `notion-row` block: `sd-research-kit project` first,
+   then `project --plan` for each request, writing exactly what the plan
+   prints; never by the document steps above.
 9. Report what was done, what was verified, and what was not.
 
 ## Sub-agent dispatch

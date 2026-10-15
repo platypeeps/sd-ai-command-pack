@@ -41,6 +41,7 @@ import json
 import os
 import re
 import sys
+import uuid
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -1235,17 +1236,44 @@ def record_item_url(item: Any, repo: str, document: str, title: str, channel: st
     A failed import, open or write is a reason, never a pass: the caller
     leaves its state for the next run. A machine with no database is one too.
     """
-    imported = import_sd_db()
-    if imported.module is None:
-        return "", imported.problem
+    connection, problem = open_database()
+    if connection is None:
+        return "", problem
     try:
         from sd_db import channels  # noqa: PLC0415
-        connection = imported.module.connect(home=DATABASE_HOME, busy_timeout=DATABASE_BOUND)
-    except Exception as problem:  # an unknown is not a pass: every failure is the reason
-        return "", "cannot open the workflow database: %s" % (problem or type(problem).__name__)
-    try:
         return channels.record_url(connection, item, repo, document, title, channel, url,
                                    "sd-research-kit"), ""
+    except Exception as problem:  # refused or failed: the row is as it was
+        return "", str(problem) or type(problem).__name__
+    finally:
+        connection.close()
+
+
+def open_database() -> tuple[Any, str]:
+    """The workflow database at `DATABASE_HOME`: `(connection, "")`, or `(None, reason)`.
+
+    A failed import or open is a reason, never a pass; a machine with no
+    database is one too.
+    """
+    imported = import_sd_db()
+    if imported.module is None:
+        return None, imported.problem
+    try:
+        return imported.module.connect(home=DATABASE_HOME, busy_timeout=DATABASE_BOUND), ""
+    except Exception as problem:  # an unknown is not a pass: every failure is the reason
+        return None, "cannot open the workflow database: %s" % (problem or type(problem).__name__)
+
+
+def record_item_row(item: Any, fingerprint: str, url: str) -> tuple[str, str]:
+    """Confirm the row plan of generation `fingerprint` on `item` (sd:3982):
+    `(answer, "")` with `recorded` or `unchanged`, or `("", reason)`.
+    """
+    connection, problem = open_database()
+    if connection is None:
+        return "", problem
+    try:
+        from sd_db import projection  # noqa: PLC0415
+        return projection.record_row(connection, item, fingerprint, url, "sd-research-kit"), ""
     except Exception as problem:  # refused or failed: the row is as it was
         return "", str(problem) or type(problem).__name__
     finally:
@@ -1270,7 +1298,19 @@ def acknowledge_request(name: str, fingerprint: str, url: str = "") -> tuple[int
         return 1, "delivered: no readable request at %s" % path
     drained = pending.get("fingerprint") == fingerprint
     item = pending.get("item") if drained else None
-    if item is not None:
+    if pending.get("destination") == ROW_DESTINATION:
+        # A row's facts are recorded for the generation its plan bound them
+        # to, even under a newer request: `record_row` checks that binding on
+        # the item, and the file name keeps one item per request (sd:3982).
+        item = pending.get("item")
+        if not url:
+            return 2, ("delivered: %s is a row request; give --url <row url>; nothing "
+                       "written" % name)
+        _, problem = record_item_row(item, fingerprint, url)
+        if problem:
+            return 1, ("delivered: sd:%s not recorded (%s); request and receipt left in "
+                       "place" % (item, problem))
+    elif item is not None:
         if not url:
             return 2, ("delivered: %s names sd:%s; give --url <url> so the item can link "
                        "it; nothing written" % (name, item))
@@ -1333,6 +1373,174 @@ def delivered_main(argv: list[str]) -> int:
     status, said = mirror_delivered(name, argv[1], url)
     print(said, file=sys.stdout if status == 0 else sys.stderr)
     return status
+
+
+#: The destination of an item's row request (sd:3982). Not a row in
+#: `DESTINATIONS`: that table is the keys a DOCS entry may name, and an item is
+#: not a document, so a `notion-row=` key on a document stays a typo.
+ROW_DESTINATION = "notion-row"
+
+#: Where rows go: each target's data source id, a per-machine variable beside
+#: the two Notion folder ids. Never defaulted: an id belongs to one workspace.
+ROW_DATABASES = (("experiments", "SD_NOTION_EXPERIMENTS"), ("tasks", "SD_NOTION_EXPERIMENT_TASKS"))
+
+
+def row_databases() -> tuple[dict[str, str], str]:
+    """Each target's database id, hyphenated lowercase, or `({}, reason)` naming the variable.
+
+    A bare id, a hyphenated one and `collection://<id>` are accepted; a name
+    is not, for the reason `NotionScope` gives for folders.
+    """
+    found: dict[str, str] = {}
+    for target, setting in ROW_DATABASES:
+        value = str(ENVIRON.get(setting, "")).strip()
+        named = notion_id(value.removeprefix("collection://")) if value else ""
+        if not named:
+            return {}, ("%s %s; set it to the %s database's data source id"
+                        % (setting, "holds no id" if value else "is unset", target))
+        found[target] = str(uuid.UUID(named))
+    return found, ""
+
+
+def row_request_name(item: Any) -> str:
+    """The queue file of item `item`'s row request: one per item, whatever its target."""
+    return "sd-item-%s.%s.json" % (item, ROW_DESTINATION)
+
+
+def project() -> tuple[int, list[str]]:
+    """Queue one `notion-row` request per designated item whose row would change (sd:3982).
+
+    Reads every item first and writes after: a read that fails (no database,
+    a hub that does not answer, a build mismatch, a restore open) writes
+    nothing and leaves earlier requests as they were. An item whose
+    designation lists a `yielded` field is queued again whatever the receipt
+    says, so each drain sees a hand-back. A request pending for an item no
+    longer designated is named with its path, never deleted. Exit 1 when
+    anything was not queued; the requests written still stand.
+    """
+    databases, problem = row_databases()
+    if problem:
+        return 1, ["project: %s; nothing queued" % problem]
+    connection, problem = open_database()
+    if connection is None:
+        return 1, ["project: %s; nothing queued, and requests queued earlier stay" % problem]
+    problems: list[str] = []
+    requests: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    try:
+        from sd_db import projection  # noqa: PLC0415
+        from sd_db.writes import unresolved_state  # noqa: PLC0415
+        if unresolved_state(connection, "restore"):
+            return 1, ["project: a restore is unresolved, so the item rows may be older than the "
+                       "receipts; nothing queued, and requests queued earlier stay"]
+        for row, held in projection.designated_rows(connection, problems):
+            if held["as"] == "off":
+                continue
+            try:
+                requests.append((projection.request_for(connection, row, held, databases), held))
+            except projection.ProjectionRefusal as refusal:
+                problems.append("sd:%s: %s" % (row["id"], refusal))
+    except Exception as error:  # an unknown is not a pass: nothing is written
+        return 1, ["project: cannot read the designated items (%s); nothing queued, and requests "
+                   "queued earlier stay" % (error or type(error).__name__)]
+    finally:
+        connection.close()
+    reports = ["project: %s; not queued" % line for line in problems]
+    try:
+        QUEUE.mkdir(parents=True, exist_ok=True)
+        with queue_locked():
+            reports += write_row_requests(requests)
+    except OSError as error:
+        return 1, reports + ["project: cannot write the queue at %s (%s)" % (QUEUE, error)]
+    return (1 if problems else 0), reports
+
+
+def write_row_requests(requests: list[tuple[dict[str, Any], dict[str, Any]]]) -> list[str]:
+    """Write each request that is neither pending nor delivered, for a caller holding the queue lock."""
+    reports: list[str] = []
+    named = set()
+    for request, held in requests:
+        name = row_request_name(request["item"])
+        named.add(name)
+        path = QUEUE / name
+        state = already_queued(path, receipts() / name, request["fingerprint"], {})
+        if state == "delivered" and held.get("yielded"):
+            state = ""
+        if state == "pending":
+            reports.append("project: sd:%s: already queued for %s (unchanged): %s"
+                           % (request["item"], request["target"], path))
+            continue
+        if state == "delivered":
+            reports.append("project: sd:%s: unchanged since it was last projected; not queued again"
+                           % request["item"])
+            continue
+        path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        reports += record_queued(name, dict(queued=request["fingerprint"], repo=request["repo"],
+                                            document=request["document"], destination=ROW_DESTINATION))
+        held_back = " (sd holds no claim on %s until handed back)" % ", ".join(held["yielded"]) \
+            if held.get("yielded") else ""
+        reports.append("project: queued sd:%s -> %s%s" % (request["item"], request["target"], held_back))
+    for path in sorted(QUEUE.glob(row_request_name("*"))):
+        if path.name not in named:
+            reports.append("project: %s is pending for an item no longer designated; --plan refuses it "
+                           "as stale. Delete it by hand with no drain running" % path)
+    return reports
+
+
+def plan_request(path: Path, live_path: Path | None) -> tuple[int, str]:
+    """`project --plan`: the guard's answer for one request, as JSON, or `(1, reason)`.
+
+    `live_path` None is `--missing`. The request must sit under its own
+    item's name, so the `delivered` that follows acts on the request planned.
+    """
+    request = load_record(path)
+    if request.get("destination") != ROW_DESTINATION:
+        return 1, "plan: %s is not a readable %s request" % (path, ROW_DESTINATION)
+    if path.name != row_request_name(request.get("item")):
+        return 1, "plan: %s names sd:%s, whose request is %s" % (
+            path, request.get("item"), row_request_name(request.get("item")))
+    live: Any = None
+    if live_path is not None:
+        try:
+            live = json.loads(live_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError) as error:
+            return 1, "plan: cannot read the live fetch %s (%s)" % (live_path, error)
+        if not isinstance(live, dict):
+            return 1, "plan: the live fetch %s is not an object" % live_path
+    databases, problem = row_databases()
+    if problem:
+        return 1, "plan: %s" % problem
+    connection, problem = open_database()
+    if connection is None:
+        return 1, "plan: %s" % problem
+    try:
+        from sd_db import projection  # noqa: PLC0415
+        planned = projection.plan(connection, request, live, databases=databases, who="sd-research-kit")
+    except Exception as error:  # refused or failed: nothing was recorded
+        return 1, "plan: %s" % (str(error) or type(error).__name__)
+    finally:
+        connection.close()
+    return 0, json.dumps(planned, indent=2, sort_keys=True)
+
+
+def project_main(argv: list[str]) -> int:
+    """The `project` verb: `project`, or `project --plan <request> --live <file>|--missing`."""
+    if not argv:
+        status, reports = project()
+        for line in reports:
+            print(line, file=sys.stdout if status == 0 else sys.stderr)
+        return status
+    if argv[:1] == ["--plan"] and len(argv) in (3, 4) and argv[1]:
+        if argv[2:] == ["--missing"]:
+            status, said = plan_request(Path(argv[1]), None)
+        elif len(argv) == 4 and argv[2] == "--live" and argv[3]:
+            status, said = plan_request(Path(argv[1]), Path(argv[3]))
+        else:
+            status, said = 2, ""
+        if status != 2:
+            print(said, file=sys.stdout if status == 0 else sys.stderr)
+            return status
+    print("usage: sd-research-kit project [--plan <request> --live <file>|--missing]", file=sys.stderr)
+    return 2
 
 
 def enqueue(repo: Path, docs: list[dict[str, Any]],
