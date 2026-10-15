@@ -47,7 +47,7 @@ from .contribution_sync import QUEUE
 from .database import refuse_hub_only, transaction
 from .errors import SdDbError
 from .reporting import MAX_REPORT
-from .sources import docs_work, index_cache, issues, register, vault
+from .sources import docs_work, index_cache, issues, register
 from .writes import add_note, now, transition
 
 #: The `sd_db.backup` module. The package binds the name `backup` to that
@@ -62,13 +62,14 @@ MAX_ACTOR = 200
 
 #: The importers whose next run can upsert a removed row back by its
 #: `(source, external_id)` key. Reported, not refused (D6). The names are the
-#: source modules' own `SOURCE` constants, the five `jobs/cli.py` `SOURCES`
+#: source modules' own `SOURCE` constants, the `jobs/cli.py` `SOURCES`
 #: enumerates, plus the `source` that `reporting.ingest` writes; a retyped
 #: list drifted (the #350 review, N-1: it named `drafts`, which nothing
-#: writes, and missed `docs/work` and `vault`).
+#: writes, and missed `docs/work`). `vault` is not here: its import is gone
+#: (sd:4627), so nothing brings a removed `vault` row back.
 #: `test_imported_is_every_source_module_and_the_report_writer` enumerates
-#: `sources/*.py` from the filesystem, so a sixth importer fails it by name.
-IMPORTED = (docs_work.SOURCE, register.SOURCE, vault.SOURCE, issues.SOURCE, index_cache.SOURCE, "cron-report")
+#: `sources/*.py` from the filesystem, so a new importer fails it by name.
+IMPORTED = (docs_work.SOURCE, register.SOURCE, issues.SOURCE, index_cache.SOURCE, "cron-report")
 
 #: The most chunk notes one record may need (R2, `design.md` section 4.2):
 #: 16 notes of `reporting.MAX_REPORT` bytes is 3.2 MB, four times the largest

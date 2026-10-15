@@ -1,9 +1,9 @@
 """Vault base rows, read and written once the database is their source (sd:3973).
 
-Five Obsidian bases land in `item` through the vault import: kind `idea`,
-`source` `vault`, the plugin kind in `fields.kind`, the ladder word in
-`stage`. From the flip of the plugin's `store.driver` to `db` on, these
-functions are how a row changes; the vault holds only a rendered mirror.
+Five Obsidian bases landed in `item` through the vault import, since removed
+(sd:4627): kind `idea`, `source` `vault`, the plugin kind in `fields.kind`, the
+ladder word in `stage`. These functions are how a row changes; the vault holds
+only a rendered mirror.
 
 **The plugin owns the rules.** `rules_for(kind)` reads them from the pack's
 plugin list, which validated them: the kind's fields, its stage graph, its
@@ -20,7 +20,7 @@ gives it, writes a `comment` note `Stage <from> -> <to> by <who>`, and calls
 public status writers refuse a vault row (`writes.refuse_base_status`).
 
 **Bodies are stored verbatim.** Nothing reads, strips or rewrites a body
-line: the import stores the note's body as it is, and so does every write here.
+line: every write here stores the body as given.
 
 **Each write is one transaction.** The row, its notes and its status change
 commit together or not at all, so a stopped write leaves nothing to finish.
@@ -32,9 +32,8 @@ A file it did not write, or one changed since, is a hand edit: it stays, and
 the render reports it. It runs after each committed write, for that kind,
 and on demand (`sd-db records render`); a write never fails for its render.
 
-**The vault stays the source until the flip.** While the plugin's driver is
-`vault`, the next import would overwrite a row edited here with its note, so
-both writers refuse until the driver says `db`.
+**Only the `db` driver writes.** A plugin list that still reports the removed
+`vault` driver (an older installed pack) makes both writers refuse.
 """
 
 from __future__ import annotations
@@ -227,7 +226,7 @@ def add_row(connection: sqlite3.Connection, rules: Rules, *, title: str, who: st
     it. Every floored field must be given. The body is stored as given.
     """
     who = _text(who, "who")
-    _refuse_before_flip(rules)
+    _refuse_removed_driver(rules)
     values = _checked_fields(rules, fields or {})
     if "dateCreated" in rules.fields and not values.get("dateCreated"):
         # Every vault note carries it; without it the mirror note would import with no date.
@@ -267,7 +266,7 @@ def edit_row(connection: sqlite3.Connection, item: int, rules: Rules, *, revisio
     who = _text(who, "who")
     if not isinstance(revision, str):
         raise RecordRefused("an edit names the revision it was based on")
-    _refuse_before_flip(rules)
+    _refuse_removed_driver(rules)
     changes = _checked_fields(rules, fields or {})
     for name, value in changes.items():
         if name in rules.floor:
@@ -305,11 +304,12 @@ def edit_row(connection: sqlite3.Connection, item: int, rules: Rules, *, revisio
     return edited
 
 
-def _refuse_before_flip(rules: Rules) -> None:
+def _refuse_removed_driver(rules: Rules) -> None:
+    """A plugin list from an older installed pack can still report `vault`; the library writes only `db`."""
     if rules.driver != "db":
-        raise RecordRefused(f"plugin {rules.prefix}'s `store.driver` is {rules.driver!r}, so the vault is "
-                            f"still the source of {rules.kind} rows and the next import would overwrite this "
-                            f"write; write the note instead")
+        raise RecordRefused(f"plugin {rules.prefix}'s `store.driver` is {rules.driver!r}, which was removed "
+                            f"(sd:4627): set it to \"db\" and install a newer pack before writing "
+                            f"{rules.kind} rows")
 
 
 def _checked_fields(rules: Rules, fields: dict[str, Any]) -> dict[str, Any]:
@@ -552,9 +552,7 @@ def _render(connection: sqlite3.Connection, rules: list[Rules], mirror: Mirror) 
                             "re-apply edits from the mirror, then resume the restore")
     roots = []
     for one in rules:
-        if one.driver != "db":
-            raise RecordRefused(f"plugin {one.prefix}'s `store.driver` is {one.driver!r}, so the vault is "
-                                f"still the source of {one.kind} notes and nothing renders over them")
+        _refuse_removed_driver(one)
         root = one.vault
         if root is None:
             raise RecordRefused(f"plugin {one.prefix} keeps its notes under {one.root}, which is not set")
@@ -612,7 +610,7 @@ def _note(rules: Rules, row: dict[str, Any]) -> str:
     if found != {**fields, "status": row["stage"]} or body != row["body"]:
         raise RecordRefused(f"item {row['id']} would not read back from its note, since the frontmatter "
                             f"reader has no form for one of its values; kept as it is")
-    # The import's payload beyond the fields: title, created and due (`sources.vault.Reader.freeze`).
+    # The payload beyond the fields that a rollback to a pack with the vault import would read: title, created and due.
     due = str(fields.get(rules.due) or "").strip() or None if rules.due else None
     payload = (str(fields.get("title") or PurePosixPath(row["path"] or "").stem).strip(),
                str(fields.get("dateCreated") or "").strip(), due)

@@ -22,8 +22,7 @@ from sd_db.records import (
     render,
     rules_for,
 )
-from sd_db.sources import MigrationRefused, run
-from sd_db.sources.vault import Reader
+from sd_db.sources import MigrationRefused
 from sd_db.workflow import MissingItem, StaleItem, item_state
 
 from . import support
@@ -65,9 +64,7 @@ class RecordsCase(support.TempRootCase):
         self.addCleanup(self.db.close)
         vault = support.vault(root / "vault", ideas={"first idea": "inbox", "second idea": "drafting"},
                               topics={"a topic": "active"})
-        sitting = run(self.db, Reader.from_plugins([support.plugin_entry()],
-                                                   environ={"OBSIDIAN_VAULT": str(vault)}))
-        self.assertTrue(sitting.clean)
+        support.land_vault(self.db, vault)
         self.home = root / "home"
         # Each write renders the mirror (sd:3976): into the vault its rules name, with these rules.
         self.env = {"OBSIDIAN_VAULT": str(vault)}
@@ -328,13 +325,13 @@ class TheImportShape(RecordsCase):
 
 
 class BeforeTheFlip(RecordsCase):
-    def test_both_writers_refuse_while_the_vault_is_the_source(self):
+    def test_both_writers_refuse_the_removed_vault_driver(self):
         entry = flipped()
         entry["store"]["driver"] = "vault"
         rules, row, before = self.rules("blog-idea", [entry]), self.row("first idea"), self.counts()
-        with self.assertRaisesRegex(RecordRefused, "next import would overwrite"):
+        with self.assertRaisesRegex(RecordRefused, "which was removed"):
             edit_row(self.db, row["id"], rules, revision=row["revision"], who="operator", stage="accepted")
-        with self.assertRaisesRegex(RecordRefused, "next import would overwrite"):
+        with self.assertRaisesRegex(RecordRefused, "which was removed"):
             add_row(self.db, rules, title="third idea", who="operator", fields={"score": "7"})
         self.assertEqual(self.counts(), before)
 

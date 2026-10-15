@@ -21,7 +21,6 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -243,7 +242,7 @@ def refuse_base_status(row: Any) -> None:
     """Refuse a status write on a vault base row, naming the move that applies (sd:3972).
 
     Its status is its plugin map's answer to its stage, so only a stage move
-    changes it: the import here, through `_transition`. Every status write a
+    changes it: `records.edit_row`, through `_transition`. Every status write a
     person or a job asks for refuses, one of the current status too.
     """
     # Read when the rule runs: `sources` imports this module.
@@ -346,46 +345,6 @@ def item_by_external(
 PROMOTED_COLUMNS = ("kind", "title", "status", "stage", "path", "created_at", "fields", "body")
 
 
-def promoted_rows(connection: sqlite3.Connection, source: str, external_id: str | None = None) -> list[sqlite3.Row]:
-    """Writing-piece rows promoted from `source`, or from its one record `external_id`.
-
-    Only a piece row counts: an imported note can carry any frontmatter. Only
-    a whole snapshot counts too: without one there is nothing to compare, so
-    the record imports as if it had never been promoted.
-    """
-    query = ("SELECT id, fields FROM item WHERE source = 'writing-piece' AND piece IS NOT NULL "
-             "AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.promoted_from.source') = ? END")
-    values: tuple = (source,)
-    if external_id is not None:
-        query += " AND json_extract(fields, '$.promoted_from.external_id') = ?"
-        values += (external_id,)
-    return [row for row in connection.execute(query, values)
-            if _whole_snapshot(json.loads(row["fields"])["promoted_from"])]
-
-
-def _whole_snapshot(origin: dict) -> bool:
-    """A string identity and every column with the type its `item` column
-    holds, JSON text where the column is JSON: what verify and import read
-    without raising (sd:2926)."""
-    snapshot = origin.get("row")
-    if not isinstance(origin.get("external_id"), str) or not isinstance(snapshot, dict):
-        return False
-    if not set(PROMOTED_COLUMNS) <= set(snapshot):
-        return False
-    for key in PROMOTED_COLUMNS:
-        value = snapshot[key]
-        if value is None and key in ("stage", "path", "fields", "body"):
-            continue
-        if not isinstance(value, str):
-            return False
-        if key in ("fields", "body"):
-            try:
-                json.loads(value)
-            except ValueError:
-                return False
-    return True
-
-
 def upsert_item(
     connection: sqlite3.Connection,
     *,
@@ -396,13 +355,9 @@ def upsert_item(
     status: str,
     who: str,
     created_at: str | None = None,
-    promoted_view: Callable[[dict], dict] | None = None,
     **columns: Any,
 ) -> tuple[int, str]:
     """Land a row a migration read from a source, once. Returns `(id, what)`.
-
-    `promoted_view`, when given, reads a promoted idea's snapshot the way the
-    source now reads its records, before the comparison (sd:3972).
 
     `what` is `inserted`, `updated` or `unchanged`, which is what makes the
     second run of a migration assertable: criterion 5 asks each one to report
@@ -426,18 +381,6 @@ def upsert_item(
         columns["repo"] = paths.key(columns["repo"])
     found = item_by_external(connection, source, external_id)
     if found is None:
-        # An idea promoted to a writing piece kept its source identity and the
-        # row it was then in `promoted_from`; the piece owns the row now, so a
-        # changed record is reported, not written (sd:1994).
-        promoted = promoted_rows(connection, source, external_id)
-        if promoted:
-            snapshot = json.loads(promoted[0]["fields"])["promoted_from"]["row"]
-            if promoted_view is not None:
-                snapshot = promoted_view(snapshot)
-            incoming = {"kind": kind, "title": title, "status": status, **columns}
-            same = all(snapshot[key] == (_json(value) if key in ("fields", "body") and not isinstance(
-                value, (str, type(None))) else value) for key, value in incoming.items() if key in snapshot)
-            return int(promoted[0]["id"]), "unchanged" if same else "promoted_changed"
         item = create_item(
             connection,
             kind=kind,

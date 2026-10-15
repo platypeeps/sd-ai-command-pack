@@ -1063,13 +1063,13 @@ class ImportedSources(Store):
 
     @hub_only
     def test_an_item_from_each_importer_is_reported_and_one_from_drafts_is_not(self):
-        for source in ("docs/work", "vault", "register", "github-issues", "index.sqlite", "cron-report"):
+        for source in ("docs/work", "register", "github-issues", "index.sqlite", "cron-report"):
             with self.subTest(source=source):
                 item = self.item(source=source, external_id=f"probe:{source}")
                 self.assertEqual(self.plan(item)["warnings"],
                                  [f"item {item} was imported from {source} as probe:{source}; "
                                   f"the next import can bring it back"])
-        for source, external in (("drafts", "probe:drafts"), ("register", None), (None, "probe:none")):
+        for source, external in (("drafts", "probe:drafts"), ("vault", "probe:vault"), ("register", None), (None, "probe:none")):
             with self.subTest(source=source, external=external):
                 self.assertEqual(self.plan(self.item(source=source, external_id=external))["warnings"], [])
 

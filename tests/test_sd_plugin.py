@@ -672,7 +672,7 @@ class IssuesAndVendorTests(PluginFixture):
 # `initial-status` plus every word its `transitions` name.
 WORKFLOW_STATUS = {"inbox": "planning", "approved": "ready",
                    "declined": "done", "published": "done"}
-STORE = {"driver": "vault", "root": "$OBSIDIAN_VAULT", "bases": {"tip": "Tips"}}
+STORE = {"driver": "db", "root": "$OBSIDIAN_VAULT", "bases": {"tip": "Tips"}}
 
 
 class WorkflowTests(PluginFixture):
@@ -685,7 +685,8 @@ class WorkflowTests(PluginFixture):
 
     def declared(self, workflow: object, *, store: object = STORE,
                  kind: dict[str, object] | None = None) -> pathlib.Path:
-        body = dict(WELL_FORMED_KIND, fields=["status", "score", "my-rating", "due"])
+        # Under the `db` driver the status is the row's stage, which no `unique-fields` check reads.
+        body = dict(WELL_FORMED_KIND, fields=["status", "score", "my-rating", "due"], **{"unique-fields": ["score"]})
         manifest: dict[str, object] = {"workflow": workflow}
         if store is not None:
             manifest["store"] = store

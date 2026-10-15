@@ -382,14 +382,13 @@ def _kind_change(connection: sqlite3.Connection, row: dict, new: str, repo: str 
             f"selects kind = 'idea' AND piece IS NOT NULL, so its kind stays idea")
     if old == "idea" and row["source"] == VAULT:
         # An idea with no `piece` is a free idea *unless* the vault put it
-        # there. `sources.vault.Reader.land` lands its rows with `piece` NULL
-        # and calls `upsert_item(..., kind='idea')` on every run, and
-        # `upsert_item` writes back any column that differs -- so the edit
-        # held until the next import and then silently reverted. The row has
-        # a producer; that it carries no `piece` says only which producer.
+        # there. A base row is an `idea` whose `fields.kind` names the plugin
+        # kind, and `sd_db.records` lists it by that item kind, so a changed
+        # kind would drop it from its plugin's list. The row has a producer;
+        # that it carries no `piece` says only which producer.
         raise WorkflowError(
-            f"item {row['id']} is a vault note; the vault import rewrites its kind on every run, "
-            f"so change the note in the vault rather than the row")
+            f"item {row['id']} is a base row from the vault; its kind belongs to its plugin, "
+            f"so change its stage or fields rather than its kind")
     if old not in HAND_KINDS and old != "idea":
         raise WorkflowError(f"{old} items are owned by their producer; their kind cannot be changed here")
     try:

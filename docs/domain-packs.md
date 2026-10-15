@@ -63,7 +63,7 @@ run — `sd config get <prefix>.<key>`.
 | `issues` | no | `repo`, as `owner/name`, so a reader of `sd plugin list` need not guess | `validate_issues` |
 | `dashboard` | no | a `tile` plus its `tabs`, and `actions` the dashboard may offer | `validate_dashboard`, `validate_actions` |
 | `vendor` | no | upstream content this checkout carries a copy of, named and hashed | `validate_vendor` |
-| `workflow` | no | the kinds the vault importer turns into rows, each ladder word mapped to a row status | `validate_workflow` |
+| `workflow` | no | the kinds kept as rows, each ladder word mapped to a row status | `validate_workflow` |
 
 All validators are in `bin/sd`. An empty block is refused rather than treated as
 absent — `"kinds": {}` is a block somebody meant to fill.
@@ -94,11 +94,11 @@ mentions. A ladder therefore needs `status` in `fields` to act on — declaring
 ### `store`
 
 ```json
-"store": {"driver": "vault", "root": "$OBSIDIAN_VAULT",
+"store": {"driver": "db", "root": "$OBSIDIAN_VAULT",
           "bases": {"tip": "System/Databases/Tips and Tricks"}}
 ```
 
-All three keys are required together, the driver is `vault` or `db`, and `root` must
+All three keys are required together, the driver is `db` (the `vault` driver was removed; a manifest that names it refuses and says to set `db`), and `root` must
 be an environment-variable reference (`^\$[A-Z][A-Z0-9_]*$`) — never a literal
 path, because a committed absolute path with a username in it is portable to one
 machine. Coverage is checked both ways: a base naming an undeclared kind, or a
@@ -111,7 +111,7 @@ registration for that would fail a correct manifest.
 Under `db` the database rows are the source and the vault holds a mirror. Every
 `sd store` verb reads and writes rows through `sd_db.records`, `status` is the
 row's stage, and every kind needs a `workflow` map. `sd store` refuses
-`human-only` moves and `protected-fields` writes, as it does under `vault`; the
+`human-only` moves and `protected-fields` writes; the
 operator makes them on the dashboard. `sd plugin list --json` reports each
 kind's checked rules under `rules`, which is where the library reads them.
 
@@ -196,13 +196,13 @@ exactly what it caught, three runs before anyone read the line.
 
 **Rows.** A domain repo's work reaches `sd today` and the dashboard through the
 shared database, by repository path. That needs no manifest key. `kinds` and
-`store` are for notes the plugin keeps *outside* the database, in a vault;
-`workflow` names the kinds whose notes the vault importer copies into rows.
+`store` are for artifacts the plugin keeps as database rows, mirrored into a vault;
+`workflow` names those kinds and maps each ladder word to a row status.
 
 ## What a domain pack may not do
 
 - Take the prefix `sd` or `se`, or one another root holds.
-- Use a driver other than `vault`, or a literal path as `store.root`.
+- Use a driver other than `db`, or a literal path as `store.root`.
 - Reach outside its own checkout in `vendor.*.path` or `sections.template`.
 - Write into this repository. The pack renders out; nothing renders in.
 

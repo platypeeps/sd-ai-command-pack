@@ -28,9 +28,7 @@ from sd_db.records import (
     rules_for,
 )
 from sd_db.remote import HubOnly
-from sd_db.sources import run, verify
 from sd_db.sources.frontmatter import read as read_frontmatter
-from sd_db.sources.vault import Reader
 from sd_db.testing.wire import hub_only
 from sd_db.writes import set_item_fields
 
@@ -95,8 +93,7 @@ class MirrorCase(support.TempRootCase):
                                    topics={"a topic": "active"})
         (self.vault / IDEAS / "rich idea.md").write_text(RICH, encoding="utf-8")
         self.env = {"OBSIDIAN_VAULT": str(self.vault)}
-        sitting = run(self.db, Reader.from_plugins([support.plugin_entry()], environ=self.env))
-        self.assertTrue(sitting.clean)
+        support.land_vault(self.db, self.vault)
         self.home = root / "home"
 
     def render(self, **extra):
@@ -145,8 +142,6 @@ class TheMarkdownMirror(MirrorCase):
         self.move("first idea", "accepted", fields={"description": "  padded: and \"quoted\"  ", "my-rating": None})
         self.move("a topic", "parked", kind="topic", body="new body\n\nwith  spaces \n")
         self.assertTrue(self.render().ok)
-        reader = Reader.from_plugins([support.plugin_entry()], environ=self.env)
-        self.assertEqual(verify(self.db, reader, reader.freeze()), [])
         if yaml is not None:  # every mirror note is YAML too, and says what the importer reads
             for path in self.vault.rglob("*.md"):
                 text = path.read_text(encoding="utf-8")
@@ -161,8 +156,6 @@ class TheMarkdownMirror(MirrorCase):
         text = self.note("first idea")
         found, _ = read_frontmatter(text)
         self.assertEqual((found["description"], found["score"], found["tags"]), ("a: b", "8", TRICKY))
-        reader = Reader.from_plugins([support.plugin_entry()], environ=self.env)
-        self.assertEqual(verify(self.db, reader, reader.freeze()), [])
         if yaml is not None:  # the pack venv has PyYAML; Obsidian reads the block as YAML
             loaded = yaml.safe_load(text.split("---\n")[1])
             self.assertEqual((loaded["description"], loaded["tags"]), ("a: b", TRICKY))
@@ -195,8 +188,6 @@ class TheMarkdownMirror(MirrorCase):
         rules = rules_for("blog-idea", home=self.home, environ=self.env, entries=[flipped()])
         add_row(self.db, rules, title="added idea", who="operator", fields={"score": "7"}, body="# added\n")
         self.assertTrue(self.beat()["ok"], self.beat())
-        reader = Reader.from_plugins([support.plugin_entry()], environ=self.env)
-        self.assertEqual(verify(self.db, reader, reader.freeze()), [])
 
     def test_a_row_whose_created_date_its_fields_do_not_give_is_refused(self):
         self.render()
@@ -325,7 +316,7 @@ class TheRefusals(MirrorCase):
         before = self.files()
         self.assertEqual(render(self.db, home=self.home, environ=self.env, entries=[entry]).kinds, [])
         mirror = render(self.db, home=self.home, environ=self.env, entries=[entry], kinds=["topic"])
-        self.assertIn("still the source", str(mirror.reason))
+        self.assertIn("which was removed", str(mirror.reason))
         self.assertEqual(self.files(), before)
 
     def test_mirror_state_is_the_last_heartbeat_and_none_before_any_render(self):

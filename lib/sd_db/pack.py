@@ -2,7 +2,7 @@
 
 The installer records the checkout it ran from in `installed.json`; nothing
 under `bin/` is copied, so a caller that runs the pack's `bin/sd` runs it
-from that checkout. `sources.vault` reads the plugin list that way.
+from that checkout. `sources.vault.plugin_entries` reads the plugin list that way.
 
 The probe of `sd_lib` that the `docs/work` retire asked for went with the
 retire (sd:3231): the pack reads every item's status from its row (sd:3015).
