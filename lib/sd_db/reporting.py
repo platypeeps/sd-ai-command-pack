@@ -13,6 +13,8 @@ from .database import transaction
 from .writes import STATUSES, add_note, create_item, now, record_state, resolve_note, set_item_fields, stamp, transition
 
 MAX_REPORT = 200_000
+#: The line prefix a job declares a finding with (`ingest_log`).
+MARK = b"SD_REPORT_ATTENTION: "
 
 #: The `state` key a job's health is recorded under, one row per job by the
 #: `heartbeat` retention rule. Prefixed, because `key` is a flat namespace
@@ -28,6 +30,11 @@ HEARTBEAT_KEY = "cron-report:"
 #: an unbroken repeat and nothing after a break (sd:4629): the heartbeat
 #: above is one row per job, and every host overwrites it.
 CHAIN_KEY = "cron-chain:"
+
+#: The reason `_supersede` gives its transition, after `-> done by cron: `.
+#: The status-change note is how a superseded report is told from an
+#: acknowledged one (sd:4641): it never counts as acknowledged.
+SUPERSEDED = "superseded by sd:"
 
 #: How far past the clock a recorded `ended` may be and still count as the
 #: newest tick. `cron-jobs.sh` stamps `ended` on this machine moments before it
@@ -124,9 +131,10 @@ def _fold_target(connection, job, attention_basis, *, chain=None):
     `record` marker. A `done` row qualifies only as `chain`, after every
     open one (sd:4629): the report the previous run on this host went to,
     so the operator's acknowledgement holds while the findings repeat
-    without a break and no longer (`ingest_log`). The `external_id` range
-    is `_folded_into`'s: done rows are never deleted, so the read seeks this
-    job's rows only. Every JSON function sits inside
+    without a break and no longer (`ingest_log`). A row whose newest status
+    change is `_supersede`'s never qualifies: nobody acknowledged it
+    (sd:4641). The `external_id` range is `_folded_into`'s: done rows are
+    never deleted, so the read seeks this job's rows only. Every JSON function sits inside
     `CASE WHEN json_valid(fields)`, the way `clean_candidates` and
     `clean_reports` read: a `CASE` evaluates its branch only when the test
     is true, whatever order the query plan picks for `AND` terms, so a row
@@ -138,7 +146,9 @@ def _fold_target(connection, job, attention_basis, *, chain=None):
     return connection.execute(
         "SELECT id, fields FROM item WHERE kind='report' AND source='cron-report'"
         " AND external_id > ? AND external_id < ?"
-        " AND (status != 'done' OR id IS ?)"
+        " AND (status != 'done' OR id IS ? AND NOT EXISTS (SELECT 1 FROM note WHERE note.item = item.id"
+        "      AND note.id = (SELECT MAX(id) FROM note AS last WHERE last.item = item.id AND last.kind = 'status_change')"
+        f"      AND note.body LIKE '% -> done by {INGEST_SESSION}: {SUPERSEDED}%'))"
         f" AND NOT ({UNREADABLE_FIELDS})"
         " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.job') END = ?"
         " AND CASE WHEN json_valid(fields) THEN json_type(fields, '$.attention') END = 'true'"
@@ -164,8 +174,12 @@ def _check_times(started, ended):
 
 def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_path,
            attention=False, attention_basis="explicit report", truncated=False, removed=None,
-           actor=None, record=None, chain=None, now=None):
+           actor=None, record=None, chain=None, now=None, host=None):
     """File one run's report, or answer a replay of it with the report it filed.
+
+    `host` is the machine the run ran on, which `ingest_log` passes, stored as
+    `fields.report.host`: the key `_supersede` reads (sd:4641). A row filed
+    before it existed replays against its fields without it.
 
     `chain` is the one `done` report this run may fold into: the report the
     previous run of the job on this host went to, which only `ingest_log`
@@ -246,6 +260,8 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         raise workflow.WorkflowError("report record marker must be a job name")
     if chain is not None and type(chain) is not int:
         raise workflow.WorkflowError("report chain must be an item id")
+    if host is not None and (not isinstance(host, str) or not 1 <= len(host) <= 255):
+        raise workflow.WorkflowError("report host must be a short name")
     started, ended = _check_times(started, ended)
     external = job + ":" + run_id
     provenance = {"job": job, "run_id": run_id, "started": started, "ended": ended,
@@ -257,6 +273,8 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         provenance["removed"] = removed
     if actor is not None:
         provenance["actor"] = actor
+    if host is not None:
+        provenance["host"] = host
     fields = {"attention": attention, "report": provenance}
     if record is not None:
         fields["record"] = record
@@ -267,7 +285,10 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
             # open report's own run replays against its fields without it.
             stored = json.loads(previous["fields"])
             stored.pop("repeats", None)
-            if stored != fields:
+            expected = fields
+            if "host" not in (stored.get("report") or {}):
+                expected = {**fields, "report": {k: v for k, v in provenance.items() if k != "host"}}
+            if stored != expected:
                 raise workflow.WorkflowError("this report identity already has different evidence")
             return workflow.item_state(connection, previous["id"])
         # A record replays only through the exact identity above: it was
@@ -291,8 +312,16 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
                 # `last_*` stay the newest run's; a stamp past the allowance
                 # is not the newest.
                 repeats.update(last_run_id=run_id, last_ended=ended)
+            # A cut body never replaces a whole one (sd:4641): the row's
+            # `report.truncated` is the first run's, and the dashboard reads
+            # it, so `body_truncated` says what the kept body is. The basis
+            # matched, so the findings are the same.
+            kept_cut = _kept_cut(target)
+            whole = not truncated or kept_cut
+            if newest and whole and truncated != kept_cut:
+                repeats["body_truncated"] = truncated
             set_item_fields(connection, target["id"], fields={**stored, "repeats": repeats},
-                            **({"body": {"text": text}} if newest else {}))
+                            **({"body": {"text": text}} if newest and whole else {}))
             return workflow.item_state(connection, target["id"])
         item = create_item(connection, kind="report", title=f"{job}: {'needs attention' if attention else 'run report'}",
                            status="planning", source="cron-report", external_id=external,
@@ -300,6 +329,52 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         if attention:
             add_note(connection, item, "followup", _ingest_followup(job, ended, attention_basis), session=INGEST_SESSION)
         return workflow.item_state(connection, item)
+
+
+def _kept_cut(item):
+    """Whether report `item`'s kept body is cut: `repeats.body_truncated`, else its first run's flag."""
+    fields = json.loads(item["fields"])
+    return (fields.get("repeats") or {}).get("body_truncated", fields["report"].get("truncated")) is True
+
+
+def _supersede(connection, *, job, host, by):
+    """Close the other open findings reports of `job` on `host` as superseded by report `by` (sd:4641).
+
+    A clean-exit findings run with a whole body, filed or folded into `by`,
+    is the host's whole current set, so another open one -- a larger set
+    that shrank, or a set that changed -- would only sit beside it. Only rows that store this `host` take part
+    (no backfill), only clean exits with `attention`, never a `record`, and
+    never a row with a followup the ingest did not write: somebody owes work
+    on it. A row another host's newest run folded into stays open too, since
+    `_fold_target` ignores the host: that host's chain row still names it,
+    and its findings are not this host's to close. The ingest's own followup is resolved, as `acknowledge` resolves
+    it, and the status note names `by`; `_fold_target` reads that note, so a
+    superseded report never counts as acknowledged. `ingest_log` calls this
+    only for the host's newest run, so a late run closes nothing.
+    """
+    rows = connection.execute(
+        "SELECT id, fields FROM item WHERE kind='report' AND source='cron-report' AND status != 'done'"
+        " AND external_id > ? AND external_id < ? AND id != ?"
+        " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.job') = ?"
+        "      AND json_extract(fields, '$.report.host') = ?"
+        "      AND json_type(fields, '$.attention') = 'true'"
+        "      AND json_type(fields, '$.report.exit_code') = 'integer' AND json_extract(fields, '$.report.exit_code') = 0"
+        "      AND json_type(fields, '$.record') IS NULL END"
+        " AND NOT EXISTS (SELECT 1 FROM state WHERE kind='heartbeat' AND substr(key, 1, ?) = ? AND key != ?"
+        "      AND CASE WHEN json_valid(body) THEN json_extract(body, '$.item') END = item.id)",
+        (job + ":", job + ";", by, job, host, len(f"{CHAIN_KEY}{job}@"), f"{CHAIN_KEY}{job}@",
+         f"{CHAIN_KEY}{job}@{host}")).fetchall()
+    for row in rows:
+        ingests = _ingest_followup_for(row["fields"])
+        followups = connection.execute(
+            "SELECT id, session, body FROM note WHERE item=? AND kind='followup' AND resolved_at IS NULL",
+            (row["id"],)).fetchall()
+        if any(note["session"] != INGEST_SESSION or note["body"] != ingests for note in followups):
+            continue
+        for note in followups:
+            resolve_note(connection, note["id"])
+        transition(connection, row["id"], "done", who=INGEST_SESSION, reason=f"{SUPERSEDED}{by}" + (
+            "; resolved the ingest's followup " + ", ".join(str(note["id"]) for note in followups) if followups else ""))
 
 
 def _set_chain(connection, key, row, body):
@@ -469,6 +544,13 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
     with path.open("rb") as stream:
         stream.seek(offset)
         data = stream.read(MAX_REPORT + 1)
+        # The body stops at `MAX_REPORT`, the findings do not (sd:4641): a
+        # line past the cut was read as no finding, and a clean run with one
+        # filed nothing, folded into an acknowledged report, or superseded
+        # the report that still held it. Every decision below reads them all.
+        stream.seek(offset)
+        marks = [line[len(MARK):].decode("utf-8", errors="replace").removesuffix("\n") for line in stream
+                 if line.startswith(MARK)]
     truncated = len(data) > MAX_REPORT
     text = data[:MAX_REPORT].decode("utf-8", errors="replace")
     # A successful exit does not prove there were no findings. Jobs can emit
@@ -482,13 +564,16 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
     # one cause's failure into another's report. A basis past `ingest`'s
     # limit keeps its head and a digest of the whole, so it files. A line
     # holds no newline, so joining on one keeps two lines apart from one.
-    declared = "\n".join(dict.fromkeys(re.findall(r"(?m)^SD_REPORT_ATTENTION: (.+)$", text)))
+    declared = "\n".join(dict.fromkeys(mark for mark in marks if mark))
     attention = exit_code != 0 or bool(declared)
     host = ship.this_host()
     basis = (f"job exited {exit_code} on {host}" + (f": {declared}" if declared else "")
              if exit_code else declared or "not supplied by the job")
     if len(basis) > 2000:
         basis = f"{basis[:1900]} [sha256 {hashlib.sha256(basis.encode()).hexdigest()[:16]}]"
+    # Each invalid byte decodes to a three-byte replacement character, so
+    # this second cut can drop text the first kept: that body is cut too.
+    truncated = truncated or len(text.encode()) > MAX_REPORT
     text = text.encode()[:MAX_REPORT].decode("utf-8", errors="ignore")
     with transaction(connection):
         # A run that already filed a report is answered with that report, the
@@ -544,7 +629,15 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
         state = ingest(connection, job=job, run_id=run_id, started=started, ended=ended,
                        exit_code=exit_code, text=text, source_path=str(path.resolve()),
                        attention=attention, attention_basis=basis, truncated=truncated,
-                       chain=last.get("item") if moves and type(last.get("item")) is int else None, now=clock)
+                       chain=last.get("item") if moves and type(last.get("item")) is int else None, now=clock,
+                       host=host or None)
+        # A truncated body is not the whole set to show in place of the older
+        # report's, even with every finding named in the basis: neither this
+        # run's nor the one the report it folded into kept. A whole run
+        # supersedes whether it filed or folded: a cut run left the older
+        # report open, and its whole repeats fold.
+        if moves and host and attention and not exit_code and not truncated and not _kept_cut(state["item"]):
+            _supersede(connection, job=job, host=host, by=state["item"]["id"])
         if moves:
             _set_chain(connection, chain_key, newest_row, {
                 "run_id": run_id, "ended": ended, "item": state["item"]["id"] if attention and not exit_code else None})
