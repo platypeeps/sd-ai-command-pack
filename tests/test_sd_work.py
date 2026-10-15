@@ -697,6 +697,50 @@ class TaskCLI(unittest.TestCase):
         self.assertIsNone(readback["item"]["repo"])
         self.assertEqual(readback["revision"], state["revision"])
 
+    # Stands in for a library whose `edit_item` reports success and writes nothing.
+    DROPPING_EDIT = (
+        "import sd_db.workflow as workflow\n"
+        "def edit_item(connection, item, changes, **keywords):\n"
+        "    return workflow.item_state(connection, item)\n"
+        "workflow.edit_item = edit_item\n")
+
+    def _detached(self, name):
+        root = self._checkout(name)
+        subprocess.run(["git", "checkout", "-q", "--detach"], cwd=str(root), check=True,
+                       capture_output=True, text=True, env=clean_environment())
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.repos.add(connection, root, home=self.home)
+        return root
+
+    def test_belongs_to_names_a_registered_checkout_on_a_detached_head(self):
+        """sd:4740. `~/...`, `.` and an absolute path each set the repo from a detached HEAD."""
+        root = self._detached("detached")
+        for spelling, cwd in ((f"~/{root.name}", self.home), (".", root), (str(root), self.home)):
+            item = json.loads(self.call("task", "add", "Mis-filed", "--json").stdout)["item"]["id"]
+            self.call("task", "edit", item, "--belongs-to", spelling, cwd=cwd)
+            row = json.loads(self.call("store", "item", item, "--json").stdout)["item"]
+            self.assertEqual(row["repo"], sd_lib.stored_repo(root), spelling)
+
+    def test_a_belongs_to_that_changed_nothing_is_a_refusal_naming_the_path(self):
+        """sd:4740. A library that returns the row unchanged exited 0 and printed it."""
+        root = self._detached("dropped")
+        state = json.loads(self.call("task", "add", "Mis-filed", "--json").stdout)
+        item = state["item"]["id"]
+        environment = self.shimmed(self.DROPPING_EDIT)
+        refused = self.call("task", "edit", item, "--belongs-to", f"~/{root.name}", code=1, env=environment)
+        self.assertIn(f"--belongs-to ~/{root.name}", refused.stderr)
+        self.assertIn(f"expected item {item} to belong to {sd_lib.stored_repo(root)}", refused.stderr)
+        self.assertIn("belongs to no checkout", refused.stderr)
+        readback = json.loads(self.call("store", "item", item, "--json").stdout)
+        self.assertEqual(readback["revision"], state["revision"])
+
+    def test_a_no_repo_that_changed_nothing_is_a_refusal(self):
+        """sd:4740. The same read-back guards the clearing spelling."""
+        root = self._detached("kept")
+        item = json.loads(self.call("task", "add", "Filed", "--belongs-to", str(root), "--json").stdout)["item"]["id"]
+        refused = self.call("task", "edit", item, "--no-repo", code=1, env=self.shimmed(self.DROPPING_EDIT))
+        self.assertIn(f"expected item {item} to belong to no checkout", refused.stderr)
+
     def test_a_home_that_cannot_be_expanded_is_a_refusal_not_a_traceback(self):
         """sd:1000 (1c0e15d3a773): `~nobody/x` raised RuntimeError out of `expanduser`."""
         state = json.loads(self.call("task", "add", "Stays put", "--json").stdout)
