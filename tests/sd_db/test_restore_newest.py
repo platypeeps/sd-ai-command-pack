@@ -112,6 +112,47 @@ class Refusals(Case):
         self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
         self.assertIn("--prune-only needs --destination and --keep-days", completed.stdout + completed.stderr)
 
+    def test_the_dry_run_needs_the_prune_only_mode(self):
+        completed = self.job("--dry-run", "--destination", str(self.nas))
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        self.assertIn("--dry-run needs --prune-only", completed.stderr)
+        self.assertEqual(list(self.nas.iterdir()), [])
+
+    def test_a_leftover_that_is_itself_a_mount_point_is_kept(self):
+        leftover = self.nas / ".2026-10-01.removing"
+        leftover.mkdir()
+        (leftover / "sd.db").write_bytes(b"on another volume")
+        real = Path.lstat
+
+        def mounted(path, *args, **kwargs):
+            details = real(path, *args, **kwargs)
+            if path == leftover:
+                fields = list(details)
+                fields[stat.ST_DEV] += 1
+                return os.stat_result(fields)
+            return details
+
+        lines: list[str] = []
+        with mock.patch.object(Path, "lstat", mounted):
+            self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertTrue((leftover / "sd.db").exists())
+        self.assertEqual(lines, [f"kept {leftover}: it holds a linked, mounted or special entry"])
+
+    def test_a_leftover_with_an_unreadable_folder_is_kept_and_listed(self):
+        # `rglob` skips a folder it cannot list; the walk must not, or `rmtree` stops halfway.
+        leftover = self.nas / ".2026-10-01.removing"
+        (leftover / "executions" / "inner").mkdir(parents=True)
+        (leftover / "executions").chmod(0)
+        self.addCleanup((leftover / "executions").chmod, 0o700)
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertTrue(leftover.exists())
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn(f"kept {leftover}: it could not be read", lines[0])
+
 
 # Each test takes a snapshot, which `run` refuses off the hub.
 @hub_only
@@ -227,20 +268,6 @@ class MovedCopies(Case):
         self.assertEqual(dry, [f"would finish removing {doomed}, which an earlier prune stopped inside"])
         self.assertEqual(lines, [f"finished removing {doomed}, which an earlier prune stopped inside"])
 
-    def test_a_leftover_with_an_unreadable_folder_is_kept_and_listed(self):
-        # `rglob` skips a folder it cannot list; the walk must not, or `rmtree` stops halfway.
-        leftover = self.nas / ".2026-10-01.removing"
-        (leftover / "executions" / "inner").mkdir(parents=True)
-        (leftover / "executions").chmod(0)
-        self.addCleanup((leftover / "executions").chmod, 0o700)
-        lines: list[str] = []
-
-        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
-
-        self.assertTrue(leftover.exists())
-        self.assertEqual(len(lines), 1, lines)
-        self.assertIn(f"kept {leftover}: it could not be read", lines[0])
-
     def test_a_leftover_holding_a_special_entry_is_kept_and_listed(self):
         leftover = self.nas / ".2026-10-01.removing"
         leftover.mkdir()
@@ -252,33 +279,6 @@ class MovedCopies(Case):
 
         self.assertEqual(sorted(self.nas.iterdir()), [leftover, young])
         self.assertEqual(lines, [f"kept {leftover}: it holds a linked, mounted or special entry"])
-
-    def test_a_leftover_that_is_itself_a_mount_point_is_kept(self):
-        leftover = self.nas / ".2026-10-01.removing"
-        leftover.mkdir()
-        (leftover / "sd.db").write_bytes(b"on another volume")
-        real = Path.lstat
-
-        def mounted(path, *args, **kwargs):
-            details = real(path, *args, **kwargs)
-            if path == leftover:
-                fields = list(details)
-                fields[stat.ST_DEV] += 1
-                return os.stat_result(fields)
-            return details
-
-        lines: list[str] = []
-        with mock.patch.object(Path, "lstat", mounted):
-            self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
-
-        self.assertTrue((leftover / "sd.db").exists())
-        self.assertEqual(lines, [f"kept {leftover}: it holds a linked, mounted or special entry"])
-
-    def test_the_dry_run_needs_the_prune_only_mode(self):
-        completed = self.job("--dry-run", "--destination", str(self.nas))
-        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
-        self.assertIn("--dry-run needs --prune-only", completed.stderr)
-        self.assertEqual(list(self.nas.iterdir()), [])
 
     def test_the_job_prunes_copies_without_taking_a_snapshot(self):
         old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
