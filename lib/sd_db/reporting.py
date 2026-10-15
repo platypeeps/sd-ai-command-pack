@@ -329,7 +329,9 @@ def _supersede(connection, *, job, host, by):
     would only sit beside it. Only rows that store this `host` take part
     (no backfill), only clean exits with `attention`, never a `record`, and
     never a row with a followup the ingest did not write: somebody owes work
-    on it. The ingest's own followup is resolved, as `acknowledge` resolves
+    on it. A row another host's newest run folded into stays open too, since
+    `_fold_target` ignores the host: that host's chain row still names it,
+    and its findings are not this host's to close. The ingest's own followup is resolved, as `acknowledge` resolves
     it, and the status note names `by`; `_fold_target` reads that note, so a
     superseded report never counts as acknowledged. `ingest_log` calls this
     only for the host's newest run, so a late run closes nothing.
@@ -341,8 +343,11 @@ def _supersede(connection, *, job, host, by):
         "      AND json_extract(fields, '$.report.host') = ?"
         "      AND json_type(fields, '$.attention') = 'true'"
         "      AND json_type(fields, '$.report.exit_code') = 'integer' AND json_extract(fields, '$.report.exit_code') = 0"
-        "      AND json_type(fields, '$.record') IS NULL END",
-        (job + ":", job + ";", by, job, host)).fetchall()
+        "      AND json_type(fields, '$.record') IS NULL END"
+        " AND NOT EXISTS (SELECT 1 FROM state WHERE kind='heartbeat' AND substr(key, 1, ?) = ? AND key != ?"
+        "      AND CASE WHEN json_valid(body) THEN json_extract(body, '$.item') END = item.id)",
+        (job + ":", job + ";", by, job, host, len(f"{CHAIN_KEY}{job}@"), f"{CHAIN_KEY}{job}@",
+         f"{CHAIN_KEY}{job}@{host}")).fetchall()
     for row in rows:
         ingests = _ingest_followup_for(row["fields"])
         followups = connection.execute(

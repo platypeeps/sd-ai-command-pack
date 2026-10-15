@@ -863,6 +863,19 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         self.tick("b", 16, self.ONE)
         self.assertEqual(self.row(other)["status"], "planning")
 
+    def test_a_report_another_host_folded_into_stays_open(self):
+        """Host B's run folded into host A's report: A's shrinking set must not hide B's finding."""
+        shared = self.tick("a", 1, self.TWO)["item"]["id"]
+        with mock.patch("sd_db.ship.this_host", return_value="hostb"):
+            self.assertEqual(self.tick("b", 2, self.TWO)["item"]["id"], shared)
+        self.tick("c", 16, self.ONE)
+        self.assertEqual(self.row(shared)["status"], "planning")
+        # Once B's newest run went elsewhere, A's next new set closes it.
+        with mock.patch("sd_db.ship.this_host", return_value="hostb"):
+            self.tick("d", 17, "clean\n")
+        self.tick("e", 31, "SD_REPORT_ATTENTION: 3 finding(s) [123]\n")
+        self.assertEqual(self.row(shared)["status"], "done")
+
     def test_a_report_without_a_stored_host_is_not_superseded(self):
         """No backfill: a row filed before the host was stored stays open."""
         older = self.tick("a", 1, self.TWO)["item"]["id"]
