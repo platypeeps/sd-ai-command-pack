@@ -990,6 +990,15 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         self.assertEqual((whole["recorded"], whole["item"]["id"]), ("folded", cut))
         self.assertRegex(self.status_notes(older)[-1], rf"superseded by sd:{cut}")
 
+    def test_a_run_folded_into_a_cut_body_supersedes_nothing(self):
+        """Codex: this host's whole run folded into another host's cut report, which kept its body."""
+        older = self.tick("a", 1, self.TWO)["item"]["id"]
+        with mock.patch("sd_db.ship.this_host", return_value="hostb"):
+            cut = self.tick("b", 31, self.past_the_cut(self.ONE, ""))["item"]["id"]
+        whole = self.tick("c", 16, self.ONE)
+        self.assertEqual((whole["recorded"], whole["item"]["id"]), ("folded", cut))
+        self.assertEqual(self.row(older)["status"], "planning")
+
     def test_reopening_a_superseded_report_returns_it_to_planning(self):
         older = self.tick("a", 1, self.TWO)["item"]["id"]
         self.tick("b", 16, self.ONE)

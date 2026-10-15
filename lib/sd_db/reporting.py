@@ -316,7 +316,7 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
             # `report.truncated` is the first run's, and the dashboard reads
             # it, so `body_truncated` says what the kept body is. The basis
             # matched, so the findings are the same.
-            kept_cut = repeats.get("body_truncated", stored["report"].get("truncated")) is True
+            kept_cut = _kept_cut(target)
             whole = not truncated or kept_cut
             if newest and whole and truncated != kept_cut:
                 repeats["body_truncated"] = truncated
@@ -329,6 +329,12 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         if attention:
             add_note(connection, item, "followup", _ingest_followup(job, ended, attention_basis), session=INGEST_SESSION)
         return workflow.item_state(connection, item)
+
+
+def _kept_cut(item):
+    """Whether report `item`'s kept body is cut: `repeats.body_truncated`, else its first run's flag."""
+    fields = json.loads(item["fields"])
+    return (fields.get("repeats") or {}).get("body_truncated", fields["report"].get("truncated")) is True
 
 
 def _supersede(connection, *, job, host, by):
@@ -626,10 +632,11 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
                        chain=last.get("item") if moves and type(last.get("item")) is int else None, now=clock,
                        host=host or None)
         # A truncated body is not the whole set to show in place of the older
-        # report's, even with every finding named in the basis. A whole run
+        # report's, even with every finding named in the basis: neither this
+        # run's nor the one the report it folded into kept. A whole run
         # supersedes whether it filed or folded: a cut run left the older
         # report open, and its whole repeats fold.
-        if moves and host and attention and not exit_code and not truncated:
+        if moves and host and attention and not exit_code and not truncated and not _kept_cut(state["item"]):
             _supersede(connection, job=job, host=host, by=state["item"]["id"])
         if moves:
             _set_chain(connection, chain_key, newest_row, {
