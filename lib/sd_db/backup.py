@@ -1064,13 +1064,40 @@ def _retention_root(root: Path) -> None:
 REMOVING_NAME = re.compile(r"\.(\d{4}-\d{2}-\d{2}(?:\.[1-9]\d*)?)\.removing")
 
 
-def _finish_removals(root: Path, *, dry_run: bool = False) -> list[Path]:
+def _contained(directory: Path) -> None:
+    """Refuse a linked, mounted or special entry, or a subtree that cannot be read, below `directory`.
+
+    `os.walk` with `onerror`, not `rglob`: `rglob` skips a folder it cannot
+    list, which would pass the check and stop `rmtree` halfway.
+    """
+    def unreadable(error: OSError) -> None:
+        raise BackupError(f"it could not be read: {error}")
+
+    device = directory.stat().st_dev
+    for folder, folders, files in os.walk(directory, onerror=unreadable):
+        for name in (*folders, *files):
+            details = os.lstat(os.path.join(folder, name))
+            if details.st_dev != device or not (stat.S_ISREG(details.st_mode) or stat.S_ISDIR(details.st_mode)):
+                raise BackupError("it holds a linked, mounted or special entry")
+
+
+def _finish_removals(root: Path, *, dry_run: bool = False, report=None) -> list[Path]:
+    """Remove what an earlier removal stopped inside; a leftover that fails `_contained` stays, and is named."""
     finished = []
     for path in sorted(root.iterdir()):
-        if REMOVING_NAME.fullmatch(path.name) and not path.is_symlink() and path.is_dir():
+        if not REMOVING_NAME.fullmatch(path.name):
+            continue
+        try:
+            if path.is_symlink() or not path.is_dir():
+                raise BackupError("it is a link or not a directory")
+            _contained(path)
             if not dry_run:
                 shutil.rmtree(path)
-            finished.append(path)
+        except (BackupError, OSError) as error:
+            if report is not None:
+                report(f"kept {path}: {error}")
+            continue
+        finished.append(path)
     return finished
 
 
@@ -1163,11 +1190,7 @@ def _stopped_run(directory: Path) -> datetime:
             raise BackupError("it holds no backup manifest and no sd.db")
         if unknown := [name for name in names if name not in SNAPSHOT_ENTRIES]:
             raise BackupError(f"it holds no backup manifest, and {', '.join(unknown)} is not something a backup writes")
-        device = directory.stat().st_dev
-        for path in directory.rglob("*"):
-            details = path.lstat()
-            if (details.st_dev != device or not (stat.S_ISREG(details.st_mode) or stat.S_ISDIR(details.st_mode))):
-                raise BackupError("it holds no backup manifest, and a linked, mounted or special entry")
+        _contained(directory)
         connection = sqlite3.connect(f"file:{directory / 'sd.db'}?mode=ro", uri=True)
         try:
             row = connection.execute(
@@ -1222,7 +1245,7 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
     _retention_root(root)
     cutoff = (now - timedelta(days=days)).date()
     window = now - timedelta(days=days)
-    for path in _finish_removals(root, dry_run=dry_run):
+    for path in _finish_removals(root, dry_run=dry_run, report=report):
         if report is not None:
             report(f"{'would finish' if dry_run else 'finished'} removing {path}, which an earlier prune stopped inside")
 

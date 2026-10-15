@@ -230,6 +230,33 @@ class MovedCopies(Case):
         self.assertEqual(dry, [f"would finish removing {doomed}, which an earlier prune stopped inside"])
         self.assertEqual(lines, [f"finished removing {doomed}, which an earlier prune stopped inside"])
 
+    def test_a_stopped_run_with_an_unreadable_folder_is_kept_and_listed(self):
+        # `rglob` skips a folder it cannot list; the walk must not, or `rmtree` stops halfway.
+        old = self.stopped(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))))
+        (old / "executions" / "inner").mkdir(parents=True)
+        (old / "executions").chmod(0)
+        self.addCleanup((old / "executions").chmod, 0o700)
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertEqual(sorted(self.nas.iterdir()), [old])
+        self.assertTrue((old / "sd.db").exists())
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn(f"kept {old}: it could not be read", lines[0])
+
+    def test_a_leftover_holding_a_special_entry_is_kept_and_listed(self):
+        leftover = self.nas / ".2026-10-01.removing"
+        leftover.mkdir()
+        os.mkfifo(leftover / "pipe")
+        young = self.mirror(self.snapshot(NOW))
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertEqual(sorted(self.nas.iterdir()), [leftover, young])
+        self.assertEqual(lines, [f"kept {leftover}: it holds a linked, mounted or special entry"])
+
     def test_the_dry_run_needs_the_prune_only_mode(self):
         completed = self.job("--dry-run", "--destination", str(self.nas))
         self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
