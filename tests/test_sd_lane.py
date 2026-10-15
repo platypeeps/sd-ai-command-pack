@@ -2249,13 +2249,8 @@ class ClaimAndLease(SharedQueue):
         self.assertEqual(len(merged), 1)
 
 
-class HubSkew(SharedQueue):
-    """sd:4184. The hub's `sd_db` moved past this machine's mid-run five times on 2026-10-14.
-
-    `sd-ship` answered `hub_unavailable`, but the runner's own write that settles the entry met the same
-    refusal, so the entry stayed `running` under a runner that had stopped. The next run reclaimed it as
-    dead: eight prepares spent a reclaim, and a merge failed. One test per failure-table row.
-    """
+class RefusingHub(SharedQueue):
+    """A hub that refuses this machine's build once `refusing` holds a value, as after an upgrade (sd:4184)."""
 
     def setUp(self) -> None:
         self.authority = sd_lane.default_runner_merge  # the real reader, before the suite replaces it
@@ -2296,6 +2291,15 @@ class HubSkew(SharedQueue):
 
     def records(self) -> list[pathlib.Path]:
         return sorted((self.store().lane / "queue").glob("hub-stop-*.json"))
+
+
+class HubSkew(RefusingHub):
+    """sd:4184. The hub's `sd_db` moved past this machine's mid-run five times on 2026-10-14.
+
+    `sd-ship` answered `hub_unavailable`, but the runner's own write that settles the entry met the same
+    refusal, so the entry stayed `running` under a runner that had stopped. The next run reclaimed it as
+    dead: eight prepares spent a reclaim, and a merge failed. One test per failure-table row.
+    """
 
     def test_a_prepare_that_meets_the_upgrade_goes_back_to_pending_with_a_hub_retry(self) -> None:
         """Failure table, put-back after prepare: sd:3695 and seven more spent a reclaim as a dead runner's."""
@@ -2544,6 +2548,118 @@ class HubSkew(SharedQueue):
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual((answer["reclaimed"][0].get("hub_stop"), self.entries()[0].get("reclaims"), record.exists()),
                          (None, 1, False))
+
+
+class PostMergeOwed(RefusingHub):
+    """sd:4630. `post_merge` read only its own run's merged rows, so a run killed between a merge and its
+    `make post-merge` never ran the target for that merge, and no later run did. One test per failure-table row.
+    """
+
+    def setUp(self) -> None:
+        super().setUp()
+        git(self.repo, "switch", "-q", "--detach")  # a deploying checkout is pinned (sd:3647)
+        (self.repo / "Makefile").write_text("post-merge:\n\t@echo ran >> post-merge.out\n", encoding="utf-8")
+
+    def runs(self) -> int:
+        """How many times the target ran."""
+        out = self.repo / "post-merge.out"
+        return len(out.read_text(encoding="utf-8").splitlines()) if out.exists() else 0
+
+    def noted(self) -> list[int]:
+        return [item for item, body, _ in self.notes if body.startswith("Post-merge: ")]
+
+    def killed_before_the_target(self, ship: Any = None) -> None:
+        """A run that merges, then dies before `post_merge`: the last step `run_lane` takes before it."""
+        with mock.patch.object(sd_lane, "finish_speculation", side_effect=Killed), self.assertRaises(Killed):
+            sd_lane.run_lane(self.repo, self.environ, ship or self.ship)
+
+    def claim_dead(self) -> None:
+        """The run that claimed the target died: its claim names a pid that is gone."""
+        runner = subprocess.Popen([sys.executable, "-c", ""])
+        runner.wait()
+        sd_lane.update(self.store(), lambda rows: [row["post_merge"].update(pid=runner.pid) for row in rows
+                                                   if isinstance(row.get("post_merge"), dict)])
+
+    def test_a_kill_after_the_merge_runs_the_target_in_the_next_run_and_only_there(self) -> None:
+        """Failure table, between the outcome write and the target: the merge was recorded, the target lost."""
+        self.killed_before_the_target()
+        self.assertEqual((self.entries()[0]["status"], self.runs()), ("merged", 0))
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((answer.get("post_merge"), self.runs(), self.noted()),
+                         (f"make post-merge passed in {self.repo}", 1, [1]))
+        self.assertEqual(self.entries()[0]["post_merge"]["ran"], f"make post-merge passed in {self.repo}")
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(("post_merge" in answer, self.runs(), self.noted()), (False, 1, [1]))
+
+    def test_a_kill_in_the_landing_leaves_the_target_owed_on_the_reclaimed_entry(self) -> None:
+        """Failure table, landing: the merge landed, the outcome write never came; reclaim fails the entry."""
+        with mock.patch.object(sd_lane, "land", side_effect=Killed), self.assertRaises(Killed):
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.make_dead()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual((answer["reclaimed"][0]["step"], entry["status"], self.runs(), self.noted()),
+                         ("merge", "failed", 1, [1]))
+
+    def test_a_kill_in_the_target_runs_it_again_once_its_runner_is_gone_and_not_before(self) -> None:
+        """Failure table, target: the claim's runner died mid-target; a live claim is another run's, left alone."""
+        with mock.patch.object(sd_lane, "make_post_merge", side_effect=Killed), self.assertRaises(Killed):
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        sd_lane.run_lane(self.repo, self.environ, self.ship)  # this process holds the claim: it is alive
+        self.assertEqual(self.runs(), 0)
+        self.claim_dead()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.runs(), self.noted()), (1, [1]))
+
+    def test_a_merge_the_next_run_applies_from_a_hub_stop_record_runs_the_target_there(self) -> None:
+        """Failure table, hub stop (sd:4184): the outcome write was refused, then the run died before the target."""
+        self.killed_before_the_target(self.upgrade_after("merge"))
+        self.follow()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(([row["status"] for row in answer["reclaimed"]], self.runs(), self.noted()),
+                         (["merged"], 1, [1]))
+
+    def test_a_hub_stop_record_an_older_version_wrote_still_owes_the_target(self) -> None:
+        """Failure table, older state: a record from before the mark has a merged outcome without it."""
+        self.killed_before_the_target(self.upgrade_after("merge"))
+        [record] = self.records()
+        written = json.loads(record.read_text(encoding="utf-8"))
+        written["outcome"].pop("post_merge", None)
+        record.write_text(json.dumps(written), encoding="utf-8")
+        self.follow()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.entries()[0]["status"], self.runs(), self.noted()), ("merged", 1, [1]))
+
+    def test_a_hub_that_refuses_the_claim_leaves_the_target_to_the_next_run(self) -> None:
+        """Failure table, claim: the claim write met the refusal; unknown runs nothing, and the next run runs it."""
+        answer = sd_lane.run_lane(self.repo, self.environ, self.upgrade_after("merge"))
+        self.assertEqual((answer["ran"][0]["recorded"], self.runs()), (False, 0))
+        self.assertIn("the next run", answer["post_merge"])
+        self.follow()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.runs(), self.noted()), (1, [1]))
+
+    def test_a_result_the_hub_refused_is_said_and_the_target_runs_again_after_its_runner(self) -> None:
+        """Failure table, result: the target ran, its result write failed; at least once, never lost."""
+        real = sd_lane.update
+
+        def refused_after_the_target(queue: Any, change: Any, check: Any = None) -> Any:
+            if self.runs():
+                raise sd_lane.LaneError("the hub went away", code=sd_lane.HUB_UNAVAILABLE)
+            return real(queue, change, check)
+        with mock.patch.object(sd_lane, "update", refused_after_the_target):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertIn("could not be recorded", answer["post_merge"])
+        self.assertEqual((self.runs(), self.noted()), (1, [1]))
+        self.claim_dead()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.runs(), 2)
+
+    def test_an_entry_merged_before_the_mark_never_runs_the_target(self) -> None:
+        """Older state: rows an older version merged carry no mark, and a run that merges nothing runs nothing."""
+        sd_lane.update(self.store(), lambda rows: rows[0].update(status="merged", finished_at=sd_lane.stamp_now()))
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(("post_merge" in answer, self.runs()), (False, 0))
 
 
 class AnyHost(SharedQueue):

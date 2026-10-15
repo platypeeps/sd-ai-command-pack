@@ -144,7 +144,10 @@ post-merge`, bounded by `POST_MERGE_SECONDS` (sd:3566). Each merged item
 gets a note: a comment when it passed, else a followup. A failure never
 fails a merged entry. It holds the lane
 root folder's lock meanwhile, and a runner that starts then runs nothing
-(sd:3273): a lane with no runner lock yet has none to try.
+(sd:3273): a lane with no runner lock yet has none to try. A merge marks
+its entry `post_merge: owed` before the landing, and a run runs the target
+once for every owed entry, so a run killed in between leaves the target
+to the next run, not to nobody (`post_merge`, sd:4630).
 
 Only a repository's lane host drains its queue (sd:3003): the machine
 `repo.lane_host` names, or the hub when it is NULL. Elsewhere `run` refuses
@@ -311,6 +314,8 @@ HUB_STOP_PREFIX = "hub-stop-"
 LANDING_SECONDS = 1800
 #: The bound on the main checkout's `make post-merge` after a run that merged (sd:3566).
 POST_MERGE_SECONDS = 600
+#: A merged entry's `post_merge` until a run claims its target; then the claim, then `{"ran", "at"}` (sd:4630).
+POST_MERGE_OWED = "owed"
 #: After this long a run starts no new entry (sd:3287): one started just inside it, the longest entry seen,
 #: then `make post-merge` and five minutes of the run's own reads and landings end before the job TERMs the
 #: runner. A 55-minute budget assumed 30 to 45 minutes an entry, and runners died mid-merge (sd:3481).
@@ -1679,24 +1684,46 @@ def land_note(fields: dict[str, Any], body: str, entry: dict[str, Any], environ:
     return fields
 
 
-def post_merge(root: pathlib.Path, environ: dict[str, str], answer: dict[str, Any]) -> dict[str, Any]:
-    """`answer` with `post_merge`: the target, once a run that merged released its runner lock (sd:3566).
+def post_merge(root: pathlib.Path, queue: Queue, environ: dict[str, str], answer: dict[str, Any]) -> dict[str, Any]:
+    """`answer` with `post_merge`: the target, once a run released its runner lock (sd:3566), for each owed entry.
 
     Not between entries: the system repository's target runs `repo-sync.sh
     refresh`, which waits for every lane's runner lock, so under this lane's
-    own it waited out its bound. Each merged item gets a note, a comment
+    own it waited out its bound. It runs once for every entry whose
+    `post_merge` is owed, this run's merges and those a killed run left
+    (sd:4630): one write claims them all (`take_owed`), the target runs, a
+    second write records its result, then each item gets a note, a comment
     when the target passed, else a followup; it never fails a merged entry.
-    A run that merged nothing, or a Makefile without the rule, adds nothing.
+    A claim write that fails runs nothing: the marks stay for the next run.
+    A result write that fails leaves the claim, which a later run takes
+    again once this process is gone, so the target may run twice, never
+    zero times. Nothing owed, or a Makefile without the rule, adds nothing.
     """
-    landed = [row for row in answer.get("ran", []) if row.get("status") == "merged"]
-    if not landed:
+    token = secrets.token_hex(16)
+    try:
+        taken = update(queue, lambda entries: take_owed(entries, token))
+    except LaneError as error:  # unknown: a claim may have landed, which the next run takes once this pid is gone
+        if not any(row.get("status") == "merged" for row in answer.get("ran", [])):
+            return answer
+        return {**answer, "post_merge": (f"make post-merge not run: the owed entries could not be claimed ({error}); "
+                                         "the next run runs it")[:1200]}
+    if not taken:
         return answer
+    # This run's last landing, else the newest owed entry's, says whether a branch checkout moved.
+    landed = ([row for row in answer.get("ran", []) if row.get("status") == "merged"]
+              or sorted(taken, key=lambda row: str(row.get("finished_at") or "")))
     main = sd_lib.main_worktree_root(root).resolve()
     ran = make_post_merge(main, environ, str(landed[-1].get("fast_forward") or ""))
+    try:
+        update(queue, lambda entries: record_post_merge(entries, token, ran))
+    except LaneError as error:
+        if ran is not None:
+            ran = (f"{ran}; its result could not be recorded ({error}), so a later run may run the target "
+                   "again")[:1200]
     if ran is None:
         return answer
     kind = "comment" if ran.startswith("make post-merge passed") else "followup"
-    for row in landed:
+    for row in taken:
         try:
             written = default_note(row["item"], f"Post-merge: {ran}", main, kind)
         except Exception as error:  # noqa: BLE001 -- the merge stands; the answer keeps what the note could not
@@ -1704,6 +1731,35 @@ def post_merge(root: pathlib.Path, environ: dict[str, str], answer: dict[str, An
         if written != "written":
             ran = f"{ran}; the note on sd:{row['item']} {written}"[:1200]
     return {**answer, "post_merge": ran}
+
+
+def owes_post_merge(row: dict[str, Any]) -> bool:
+    """Whether a settled entry's target is still owed: marked so, or claimed by a run on this host that died."""
+    mark = row.get("post_merge")
+    if row.get("status") == "running" or mark is None:
+        return False
+    if mark == POST_MERGE_OWED:
+        return True
+    return (isinstance(mark, dict) and "token" in mark and mark.get("host") == this_host()
+            and not runner_alive(mark.get("pid")))
+
+
+def take_owed(entries: list[dict[str, Any]], token: str) -> list[dict[str, Any]]:
+    """Claim every owed target for this run under `token`; copies of the entries claimed."""
+    taken = []
+    for row in entries:
+        if owes_post_merge(row):
+            row["post_merge"] = {"host": this_host(), "pid": os.getpid(), "token": token, "at": stamp_now()}
+            taken.append(dict(row))
+    return taken
+
+
+def record_post_merge(entries: list[dict[str, Any]], token: str, ran: str | None) -> None:
+    """Settle each target `token` claimed with what `make_post_merge` answered; None is a Makefile without the rule."""
+    for row in entries:
+        mark = row.get("post_merge")
+        if isinstance(mark, dict) and mark.get("token") == token:
+            row["post_merge"] = {"ran": ran or "no post-merge rule", "at": stamp_now()}
 
 
 def origin_makefile(main: pathlib.Path) -> tuple[str, str | None]:
@@ -1899,14 +1955,18 @@ def resume_stopped(row: dict[str, Any], record: dict[str, Any]) -> dict[str, Any
     """Settle a running entry whose runner stopped on a hub fault, by its `record`; never as a death (sd:4184).
 
     A recorded `outcome` is the end the runner reached and could not write,
-    a merge included, and lands as `finish_entry` writes it. Otherwise the
-    entry goes back to pending at its place, as `requeue` puts it back after
-    a hub fault: `hub_retries` plus one, held once they pass `HUB_RETRIES`.
+    a merge included, and lands as `finish_entry` writes it; a merge's
+    target is owed, as an older version's record does not say (sd:4630).
+    Otherwise the entry goes back to pending at its place, as `requeue` puts
+    it back after a hub fault: `hub_retries` plus one, held once they pass
+    `HUB_RETRIES`.
     """
     holder, step, outcome = row.get("holder") or {}, row.get("step"), record.get("outcome")
     if isinstance(outcome, dict) and outcome.get("status") in ("merged", *BLOCKED):
         row.update(outcome, finished_at=str(record.get("at") or stamp_now()))
         row.pop("lease_until", None)
+        if row["status"] == "merged":  # an older version's record has no mark; the target is owed all the same
+            row.setdefault("post_merge", POST_MERGE_OWED)
     else:
         fault = {"step": step, "reason": str(record.get("reason") or "")[:REASON_CHARS], "at": record.get("at")}
         back_to_pending(row, str(record.get("expected_head") or row["expected_head"]), last_holder=holder,
@@ -2083,6 +2143,13 @@ def advance(queue: Queue, entry: dict[str, Any], token: str) -> None:
     if elsewhere:
         raise Moved(f"{elsewhere[0]} sd:{entry['item']} is pending again at its place, for that host.",
                     code=LANE_ELSEWHERE)
+
+
+def owe_post_merge(queue: Queue, entry: dict[str, Any], token: str) -> None:
+    """Mark the running entry `post_merge: owed` once its merge landed, so a kill in the landing leaves the target
+    owed on the entry reclaim fails (sd:4630). One try: a write that fails leaves the mark to `finish_entry`."""
+    with contextlib.suppress(LaneError):
+        update(queue, lambda entries: held(entries, entry, token).update(post_merge=POST_MERGE_OWED))
 
 
 def finish_entry(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, Any]) -> None:
@@ -2456,7 +2523,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
             if ahead is not None and row is not None and row.get("status") == "merged":
                 ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
         answer = finish_speculation(ahead, answer)
-    return post_merge(root, environ, answer)
+    return post_merge(root, queue, environ, answer)
 
 
 def finish_speculation(ahead: SpeculativeGate | None, answer: dict[str, Any]) -> dict[str, Any]:
@@ -2527,6 +2594,9 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
             if met is not None:
                 return ({"item": entry["item"], **outcome, "status": "pending"},
                         f"sd:{entry['item']} met {met} in {outcome.get('step')}")
+            if outcome.get("status") == "merged":  # before the landing, so a kill in it still owes the target
+                outcome["post_merge"] = POST_MERGE_OWED
+                owe_post_merge(queue, entry, token)
             outcome.update(settle(local, outcome, environ, note, queue.lock_file, root))
     except Stop as error:
         return None, record_hub_stop(queue, token, error, entry, tree=tree)
