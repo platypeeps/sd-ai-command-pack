@@ -311,6 +311,14 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         # run ended, not what it found.
         target = (_fold_target(connection, job, attention_basis, chain=chain if exit_code == 0 else None)
                   if attention and record is None else None)
+        if not target and attention and record is None and exit_code == 0 and host is not None:
+            # A set that only shrank is the same report with fewer findings
+            # (sd:4658): it folds into this host's open report that holds
+            # every one of them, and its body replaces the larger set's.
+            lines = set(attention_basis.split("\n"))
+            target = next((row for row in _host_reports(connection, job, host)
+                           if isinstance(basis := json.loads(row["fields"])["report"].get("attention_basis"), str)
+                           and lines <= set(basis.split("\n"))), None)
         if target:
             stored = json.loads(target["fields"])
             repeats = stored.get("repeats") or {"count": 1, "first_ended": stored["report"]["ended"], "run_ids": []}
@@ -347,34 +355,42 @@ def _kept_cut(item):
     return (fields.get("repeats") or {}).get("body_truncated", fields["report"].get("truncated")) is True
 
 
-def _supersede(connection, *, job, host, by):
-    """Close the other open findings reports of `job` on `host` as superseded by report `by` (sd:4641).
+def _host_reports(connection, job, host, *, but=None):
+    """The open clean-exit findings reports of `job` that `host` filed, newest first, other than `but`.
 
-    A clean-exit findings run with a whole body, filed or folded into `by`,
-    is the host's whole current set, so another open one -- a larger set
-    that shrank, or a set that changed -- would only sit beside it. Only rows that store this `host` take part
-    (no backfill), only clean exits with `attention`, never a `record`, and
-    never a row with a followup the ingest did not write: somebody owes work
-    on it. A row another host's newest run folded into stays open too, since
+    Only rows that store this `host` (sd:4641, no backfill), with `attention`
+    and no `record`, and none another host's newest run folded into, since
     `_fold_target` ignores the host: that host's chain row still names it,
-    and its findings are not this host's to close. The ingest's own followup is resolved, as `acknowledge` resolves
-    it, and the status note names `by`; `_fold_target` reads that note, so a
-    superseded report never counts as acknowledged. `ingest_log` calls this
-    only for the host's newest run, so a late run closes nothing.
+    and its findings are not this host's to close or to shrink.
     """
-    rows = connection.execute(
+    return connection.execute(
         "SELECT id, fields FROM item WHERE kind='report' AND source='cron-report' AND status != 'done'"
-        " AND external_id > ? AND external_id < ? AND id != ?"
+        " AND external_id > ? AND external_id < ? AND id IS NOT ?"
         " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.job') = ?"
         "      AND json_extract(fields, '$.report.host') = ?"
         "      AND json_type(fields, '$.attention') = 'true'"
         "      AND json_type(fields, '$.report.exit_code') = 'integer' AND json_extract(fields, '$.report.exit_code') = 0"
         "      AND json_type(fields, '$.record') IS NULL END"
         " AND NOT EXISTS (SELECT 1 FROM state WHERE kind='heartbeat' AND substr(key, 1, ?) = ? AND key != ?"
-        "      AND CASE WHEN json_valid(body) THEN json_extract(body, '$.item') END = item.id)",
-        (job + ":", job + ";", by, job, host, len(f"{CHAIN_KEY}{job}@"), f"{CHAIN_KEY}{job}@",
+        "      AND CASE WHEN json_valid(body) THEN json_extract(body, '$.item') END = item.id)"
+        " ORDER BY id DESC",
+        (job + ":", job + ";", but, job, host, len(f"{CHAIN_KEY}{job}@"), f"{CHAIN_KEY}{job}@",
          f"{CHAIN_KEY}{job}@{host}")).fetchall()
-    for row in rows:
+
+
+def _supersede(connection, *, job, host, by):
+    """Close the other open findings reports of `job` on `host` as superseded by report `by` (sd:4641).
+
+    A clean-exit findings run with a whole body, filed or folded into `by`,
+    is the host's whole current set, so another open one -- a larger set
+    that changed -- would only sit beside it. A set that only shrank folds
+    instead (sd:4658). Only `_host_reports` rows take part, and never one
+    with a followup the ingest did not write: somebody owes work on it. The
+    ingest's own followup is resolved, as `acknowledge` resolves it, and the status note names `by`; `_fold_target` reads that note, so a
+    superseded report never counts as acknowledged. `ingest_log` calls this
+    only for the host's newest run, so a late run closes nothing.
+    """
+    for row in _host_reports(connection, job, host, but=by):
         ingests = _ingest_followup_for(row["fields"])
         followups = connection.execute(
             "SELECT id, session, body FROM note WHERE item=? AND kind='followup' AND resolved_at IS NULL",
