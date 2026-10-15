@@ -33,7 +33,7 @@ Gap: `repos.set_lane_host` is hub-only and refuses while the lane runs elsewhere
 6. **Offline lease, a self-limit only.** Each hub contact sets `lease_until = now + OFFLINE_MAX` locally, bound to the boot token (`operations._boot_token`), and copies it into the hub heartbeat. Past the lease, or after a reboot since the last contact, the owner claims nothing and starts no GitHub merge until a hub contact. `MERGE_DEADLINE` (10 minutes) is the merge call's client timeout; the runner checks the lease just before the call. Before the call the runner commits a `merge-sent` mark on the entry, with its outbox op. A timeout leaves the outcome unknown, so the mark stays open until GitHub reads the PR merged or closed; while a mark of the repo is open, the owner starts no other merge in it and hand-over refuses. The operator settles a PR that stays open by closing it: GitHub orders the close against the merge, so the PR then reads merged or closed for good. The lease limits only the owner's own work: a suspended owner can pass its last check and merge later, and a timed-out call can still land on GitHub. So no party reads an elapsed lease, a missed heartbeat or a timeout as proof that the owner stopped; the hub shows them and acts on none.
 7. **The lane moves only on a confirmed stop.** Hub epochs fence hub writes, not an offline host's GitHub merge, so ownership moves only once the old owner's runner is proven stopped: (a) its relinquish record reached the hub (hand-over, below); (b) the old machine's session confirms that hand-over wrote its relinquish record there although the hub did not answer; or (c) the operator confirms the old host is shut down, not asleep or unreachable, and the reboot rule in point 6 keeps it from merging when it returns. No timeout transfers a lane.
    Each move is a compare-and-set on the epoch its proof was taken at. A relinquish record is final for its epoch: only a newly granted epoch, to another host or back to the old one, lets that runner merge again, so a proof taken at the old epoch can never meet a resumed owner. A move inherits the old owner's open `merge-sent` marks, and every entry the mirror shows running in merge as one more; the new owner starts no merge in the repo until each settles.
-8. **Ownership hold after a restore or promote.** A restored hub can bring back an older grant, and a demoted hub can still answer `holder`, so the hub's epoch alone proves nothing then. Restore and promote put every local-mode repo on hold (`lane_local=2`): the hub renews no lease, grants no move and applies no queue op for it, while `deliver` and `note` ops still apply. The hold clears only when the operator confirms the current owner with the proofs of point 7, after the promote confirmed the old hub stopped.
+8. **Ownership hold after a restore or promote.** A restored hub can bring back an older grant, and a demoted hub can still answer `holder`, so the hub's epoch alone proves nothing then. A backup can also predate the grant itself and show a hub lane, so restore and promote put every repo on hold, hub lanes included (`lane_local=2`): the hub runs no lane for it, renews no lease, grants no move or assignment and applies no queue op, while `deliver` and `note` ops still apply. The hold clears only when the operator confirms the current owner with the proofs of point 7, after the promote confirmed the old hub stopped; one confirmation may clear every repo that no satellite's `lane.db` owns.
 
 While the hub is down: enqueue from another machine, enqueue of an unseeded item, dashboard edits (they wait as requests), seed refresh and any claim past the lease or after a reboot all block. A merge closes the item locally; the hub's `deliver_work` re-checks at replay, and a refusal becomes a lane alert and a note while the merge stands.
 The hub's `lane list` shows mirror rows plus one line per owned repo: owner, last contact, outbox depth, oldest unsent op, lease end. Staleness is shown, never enforced.
@@ -46,7 +46,7 @@ Rejected:
 ## Non-goals
 
 - Two satellites owning one lane, or failing a lane over automatically.
-- Lanes on the hub: they keep today's path.
+- Lanes on the hub: they keep today's path, except the hold after a restore or promote (Approach point 8).
 - Replacing sd:4046 or sd:4184; build churn still needs its own fix.
 
 ## Failure table
@@ -65,7 +65,7 @@ Rejected:
 | replay | none | fence `elsewhere` | hold; retry against the new hub | `role()` stub `elsewhere`: nothing applied |
 | replay | none | op epoch differs from the hub's | facts apply; queue ops go to `lane-orphan:v1`; runner stops | old owner after `--owner-dead` |
 | replay after restore | hub mark below the owner's acked seq | hub restored from backup | rewind; facts replay, queue ops wait for the ownership hold to clear | older database restored: facts reapplied once, queue ops held |
-| restore or promote | ownership rows | an older grant returns, or a demoted hub still grants | ownership hold on every local-mode repo: no lease renewal, move or queue op until the operator confirms the owner | restore a database from before a move: the old owner's contact renews nothing |
+| restore or promote | ownership rows | an older grant returns, or a demoted hub still grants | ownership hold on every repo, hub lanes included: no lane run, lease renewal, move or queue op until the operator confirms the owner | restore from before a move: the old owner's contact renews nothing; restore from before the first grant: the hub runs no lane |
 | restore past retention | acked ops lost on the hub | op pruned before the restore | gap hold; operator re-delivers from GitHub per item | prune then restore: `outbox_gap` |
 | promote (sd:4012) | hub role moves | promoted hub is behind | as restore; if it is the owner, drain into local first | promote the owner host fixture |
 | dashboard edit | `lane-edit` row | owner unreachable for hours | waits; the hub never applies it on a timeout; applied at the next boundary under its revision, by the new owner after a move | stale revision refused and mirrored; owner silent a day: request still pending |
@@ -101,7 +101,7 @@ A dead owner: `sd-db repo lane-host PATH HOST --owner-dead` moves the lane only 
 - [ ] With the hub one build ahead, the same replay applies (handshake on `ops_version` only).
 - [ ] A dead-owner move refuses without a confirmed stop, however old the last heartbeat; with one it moves, and the old owner's next contact stops its runner and files its queue ops under `lane-orphan:v1`.
 - [ ] After a reboot, a local-mode owner claims and merges nothing until a hub contact.
-- [ ] A restore puts every local-mode repo on the ownership hold; no lease renews until the operator confirms the owner.
+- [ ] A restore puts every repo on the ownership hold; no lane runs and no lease renews until the operator confirms the owner.
 - [ ] Every failure-table row has its test, each failing before its code.
 
 ## Risks
