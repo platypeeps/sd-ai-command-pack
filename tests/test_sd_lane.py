@@ -2049,11 +2049,10 @@ class ClaimAndLease(SharedQueue):
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, claim="deliver")
         sd_lane.claim_entry(self.store(), "seen")
-        self.elsewhere()
         revision = sd_lane.queue_revision(self.entries())
-        sd_lane.update(self.store(), lambda rows: rows[0].update(lease_until="2020-01-01T00:00:00Z"))
-        reclaimed: list[dict] = []
-        again = sd_lane.claim_entry(self.store(), "new", reclaimed)
+        self.make_dead()
+        reclaimed = sd_lane.runner_write(self.store(), sd_lane.reclaim_dead)
+        again = sd_lane.claim_entry(self.store(), "new")
         self.elsewhere()
         self.assertEqual((reclaimed[0]["status"], again["item"], sd_lane.queue_revision(self.entries())),
                          ("pending", 1, revision))  # the revision alone cannot tell the two claims apart
@@ -3084,29 +3083,39 @@ class AnyHost(SharedQueue):
         self.assertEqual((self.entries()[0]["status"], (aside / "stale.txt").read_text(encoding="utf-8")),
                          ("merged", "left by a killed run\n"))
 
-    def test_a_claim_whose_write_fails_reports_no_reclaim(self) -> None:
-        """Failure table, claim: a cross-host reclaim inside a claim the hub never took is not reported."""
+    def test_an_expired_lease_on_another_host_is_no_proof_that_it_stopped(self) -> None:
+        """Failure table, claim (sd:4660): a holder on another host may be asleep, not dead, once its lease passed.
+
+        The lane host used to reclaim it at claim, so a satellite that woke could merge beside the lane host.
+        Now the claim refuses and writes nothing; the sleeper's token still holds, and only a stop proof,
+        here the operator's release, lets the lane host run the entry.
+        """
         sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
-        sd_lane.claim_entry(self.store(), "elsewhere")
+        entry = sd_lane.claim_entry(self.store(), "sleeper")
         sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(host="build-2")
                        or rows[0].update(lease_until="2020-01-01T00:00:00Z"))
-        reclaimed: list = []
-        with self.failing_store(lambda entry: True), self.assertRaises(sd_lane.Stop):
-            sd_lane.claim_entry(self.store(), "mine", reclaimed)
-        self.assertEqual((reclaimed, self.entries()[0]["status"]), ([], "running"))
-
-    def test_an_expired_lease_on_another_host_is_reclaimed_at_claim(self) -> None:
-        """Failure table, claim: a holder on another host is dead once its lease passed; the lane host reclaims it."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
-        sd_lane.claim_entry(self.store(), "elsewhere")
-        sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(host="build-2"))
+        before = self.rows()
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
-        self.assertIn("one entry of a repository runs at a time", answer["stopped"])
-        self.assertEqual((self.calls, self.entries()[0]["status"]), ([], "running"))
-        sd_lane.update(self.store(), lambda rows: rows[0].update(lease_until="2020-01-01T00:00:00Z"))
-        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
-        self.assertEqual([(row["item"], row["status"]) for row in answer["reclaimed"]], [(1, "pending")])
+        self.assertNotIn("reclaimed", answer)
+        self.assertIn("is no proof that build-2 stopped", answer["stopped"])
+        self.assertIn("sd-ship lane cancel 1 --expected-claim sleeper:prepare", answer["stopped"])
+        self.assertEqual((self.calls, self.rows()), ([], before))
+        sd_lane.renew(self.store(), entry, "sleeper")  # the sleeper wakes: its claim still holds, so it alone runs
+        sd_lane.cancel(self.repo, 1, self.environ, expected_claim="sleeper:prepare")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual(self.entries()[0]["status"], "merged")
+
+    def test_a_holder_on_another_host_is_settled_by_its_own_host_once_its_pid_is_gone(self) -> None:
+        """Failure table, claim (sd:4660): the holder's own machine proves the death by its pid, and settles it."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.claim_entry(self.store(), "gone")
+        runner = subprocess.Popen([sys.executable, "-c", ""])
+        runner.wait()
+        sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(host="build-2", pid=runner.pid))
+        self.assertEqual(sd_lane.runner_write(self.store(), sd_lane.reclaim_dead), [])  # not this machine's to judge
+        with mock.patch("sd_db.ship.this_host", lambda: "build-2"):
+            settled = sd_lane.runner_write(self.store(), sd_lane.reclaim_dead)
+        self.assertEqual(([row["status"] for row in settled], self.entries()[0]["status"]), (["pending"], "pending"))
 
     def test_a_move_during_prepare_puts_the_entry_back_and_the_new_host_claims_it(self) -> None:
         """Failure table, before merge: the lane moved mid-prepare; no merge here, the entry keeps its place."""

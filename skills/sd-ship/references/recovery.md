@@ -168,6 +168,8 @@ A file for another record, head, reserved pass or review tool binding, or a dama
 When the hub refuses the runner's own write too, the runner leaves a `hub-stop-*.json` record in the lane's `queue/` folder.
 The next run puts the entry back from that record, not as a dead runner's entry (sd:4184).
 Past its hub retries the entry is held, never failed; `sd-ship lane release` runs it again.
+A running entry whose holder is on another machine stays running after its lease passes: that machine may be asleep, not stopped (sd:4660).
+Its own host settles it once its runner is gone; once you know it stopped, `sd-ship lane cancel ID --expected-claim TOKEN:STEP` releases it.
 It does the same once for any other retryable prepare refusal whose `passes_spent` is 0, such as `timing_plan_invalid`; `gate_failed` is not retried (sd:3478).
 
 The repository gate runs after a review that does not block.
