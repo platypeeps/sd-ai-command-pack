@@ -1157,7 +1157,15 @@ def _checkpoint(directory: Path) -> tuple[datetime, bool]:
                                      (value["run_id"],)).fetchone()
         finally:
             connection.close()
+        if row is None:
+            # A snapshot taken read-only before `migrate` never had a row (sd:4700); it is
+            # never owned, so it is never dated or pruned either.
+            if value.get("checkpoint") is False:
+                raise BackupError("it was taken read-only before `migrate`, so no checkpoint row dates it")
+            raise BackupError("its database holds no checkpoint row for its run")
         taken, current = _checkpoint_time(row[0])
+    except BackupError:
+        raise
     except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as error:
         raise BackupError(f"its checkpoint time could not be read: {error}") from None
     if taken.tzinfo is None:
