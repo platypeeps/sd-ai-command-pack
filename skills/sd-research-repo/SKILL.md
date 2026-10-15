@@ -161,8 +161,9 @@ records the differences that are on purpose. Both are in
    A `notion-row` request, `sd-item-<n>.notion-row.json`, is an sd item's row
    in the team experiments databases, not a document. Drain it only by the
    publication contract's `notion-row` block: `sd-research-kit project` first,
-   then `project --plan` for each request, writing exactly what the plan
-   prints; never by the document steps above.
+   then `project --plan` for each request, `project --writing` just before
+   a create call, writing exactly what the plan prints; never by the
+   document steps above.
 9. Report what was done, what was verified, and what was not.
 
 ## Sub-agent dispatch

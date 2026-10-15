@@ -1486,18 +1486,29 @@ def write_row_requests(requests: list[tuple[dict[str, Any], dict[str, Any]]]) ->
     return reports
 
 
-def plan_request(path: Path, live_path: Path | None) -> tuple[int, str]:
-    """`project --plan`: the guard's answer for one request, as JSON, or `(1, reason)`.
+def row_request(path: Path, verb: str) -> tuple[dict[str, Any], str]:
+    """The `notion-row` request at `path`, or `({}, reason)`.
 
-    `live_path` None is `--missing`. The request must sit under its own
-    item's name, so the `delivered` that follows acts on the request planned.
+    The request must sit under its own item's name, so the mark and the
+    `delivered` that follow act on the request planned.
     """
     request = load_record(path)
     if request.get("destination") != ROW_DESTINATION:
-        return 1, "plan: %s is not a readable %s request" % (path, ROW_DESTINATION)
+        return {}, "%s: %s is not a readable %s request" % (verb, path, ROW_DESTINATION)
     if path.name != row_request_name(request.get("item")):
-        return 1, "plan: %s names sd:%s, whose request is %s" % (
-            path, request.get("item"), row_request_name(request.get("item")))
+        return {}, "%s: %s names sd:%s, whose request is %s" % (
+            verb, path, request.get("item"), row_request_name(request.get("item")))
+    return request, ""
+
+
+def plan_request(path: Path, live_path: Path | None) -> tuple[int, str]:
+    """`project --plan`: the guard's answer for one request, as JSON, or `(1, reason)`.
+
+    `live_path` None is `--missing`.
+    """
+    request, problem = row_request(path, "plan")
+    if problem:
+        return 1, problem
     live: Any = None
     if live_path is not None:
         try:
@@ -1522,8 +1533,32 @@ def plan_request(path: Path, live_path: Path | None) -> tuple[int, str]:
     return 0, json.dumps(planned, indent=2, sort_keys=True)
 
 
+def mark_request(path: Path) -> tuple[int, str]:
+    """`project --writing`: the drain's mark just before its create call, or `(1, reason)` (sd:4742).
+
+    The next plan reads the mark as "the create may have landed" and searches
+    for the row; without it, a plan-only run reads as nothing written.
+    """
+    request, problem = row_request(path, "writing")
+    if problem:
+        return 1, problem
+    connection, problem = open_database()
+    if connection is None:
+        return 1, "writing: %s" % problem
+    try:
+        from sd_db import projection  # noqa: PLC0415
+        projection.mark_writing(connection, request["item"], request.get("fingerprint"))
+    except Exception as error:  # refused or failed: nothing was recorded
+        return 1, "writing: %s" % (str(error) or type(error).__name__)
+    finally:
+        connection.close()
+    return 0, "writing: sd:%s's create is marked; create the row now, in one call, then run delivered" % (
+        request["item"])
+
+
 def project_main(argv: list[str]) -> int:
-    """The `project` verb: `project`, or `project --plan <request> --live <file>|--missing`."""
+    """The `project` verb: `project`, `project --plan <request> --live <file>|--missing`, or
+    `project --writing <request>`."""
     if not argv:
         status, reports = project()
         for line in reports:
@@ -1539,7 +1574,12 @@ def project_main(argv: list[str]) -> int:
         if status != 2:
             print(said, file=sys.stdout if status == 0 else sys.stderr)
             return status
-    print("usage: sd-research-kit project [--plan <request> --live <file>|--missing]", file=sys.stderr)
+    if argv[:1] == ["--writing"] and len(argv) == 2 and argv[1]:
+        status, said = mark_request(Path(argv[1]))
+        print(said, file=sys.stdout if status == 0 else sys.stderr)
+        return status
+    print("usage: sd-research-kit project [--plan <request> --live <file>|--missing] [--writing <request>]",
+          file=sys.stderr)
     return 2
 
 

@@ -466,11 +466,24 @@ Draining is six steps per request, and the order matters:
      answers `search:` found an earlier create that may have landed: search
      the database for pages whose body opens with the pointer
      `Projected from sd:<n>.`, whatever their title, and plan again with each
-     as a `candidates` entry shaped like `row`, an empty list for none.
+     as a `candidates` entry shaped like `row`, an empty list for none. One
+     match is adopted; none or two ask, since a create may have landed and
+     search can lag it, and `--experiment new` is the answer that none did.
      The plan prints JSON: `action` `create` with `properties` and the
      `body` line, or `update` with the `row` and the `properties` to write,
-     `null` clearing one. Write exactly that, in one call, straight after the
-     plan; anything that comes between them means fetch and plan again. An
+     `null` clearing one. A create is written only after its mark:
+     `sd-research-kit project --writing <request>` records on the item that
+     the write follows, and the create call comes straight after it, in one
+     call; never create without the mark, and never mark without creating
+     right after. A plan that printed a create and was not marked left the
+     item as nothing written, so a dry run leaves no trace to recover from,
+     and the next plan prints the create again; a mark left behind is what
+     the next plan searches for (sd:4742). Write exactly what the plan
+     printed, in one call, straight after the plan; anything that comes
+     between them means fetch and plan again. A plan repeated under one
+     request is the same answer, however often: before the mark, the same
+     create; after it, `search:`. The plan the write follows is the one that
+     counts, not the first. An
      update with no properties writes nothing and still goes to step 6. A
      plan that refuses exits 1 and records nothing: report it and leave the
      request. A refusal that ends with `Option:` lines is a question: file it
@@ -599,7 +612,8 @@ procedure whose failure mode is the bug it prevents is not a fix.
 | step 5, before step 6 | id recorded in both | updates that page, runs step 6 |
 | step 6's item record, before its receipt | URL on the item, request in place | updates that page, runs step 6; the record answers `unchanged` |
 | a render during steps 2–5 | a newer request under the same name | step 6 leaves it; the next drain writes it |
-| a row's plan, before its write | `creating` or `writing` on the item | plans again; after a create's plan, searches by the pointer, adopts one match and asks about none or two |
+| a row's plan, before its write | `creating` (`planned`) or `writing` on the item | plans again: the same create, or the update from the row as it is |
+| a create's mark, before `delivered` | `creating` marked `writing` | searches by the pointer, adopts one match and asks about none or two |
 | a row's write, before step 6 | values Notion took, unconfirmed | refuses those fields as possibly sd's own write, until a person hands them back |
 
 Every row survives a render in between, because a render carries a recorded id
