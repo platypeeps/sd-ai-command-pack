@@ -701,7 +701,7 @@ def _refuse_brief(row):
         raise workflow.WorkflowError("a routine brief stays done; only filing or replacing the brief changes it")
 
 
-def acknowledge(connection, item, *, expected_revision, who, resolve_ingest_followups=False):
+def acknowledge(connection, item, *, expected_revision, who, resolve_followups=False):
     """Move one report to `done` on the operator's say-so, naming the operator.
 
     `who` has no default. The `transition` this makes is the one thing the
@@ -718,45 +718,34 @@ def acknowledge(connection, item, *, expected_revision, who, resolve_ingest_foll
     a followup on every report for a run that needs attention, under
     `INGEST_SESSION`, so every failure report is born refusing this verb
     (sd:921: 51 watchdog reports on the live store, none acknowledgeable).
-    `resolve_ingest_followups=True` resolves the followups the ingest wrote
-    -- those and no other -- in the transaction that makes the transition, so
-    a refusal or a failed write leaves them open, and the status note says
-    which notes it resolved under the same `who`. `resolve_note` itself
-    records only `resolved_at`; the status note is where the name lives. A
-    followup a person wrote is work somebody still owes and blocks whatever
-    the keyword says: acknowledging the report is not the same statement as
-    having done that work.
-
-    The ingest's followup is recognised by two things together: `session` is
-    `INGEST_SESSION`, and the text is exactly what `ingest` derives from this
-    report's own `fields.report`. The session alone would not do -- a caller
-    of `workflow.add_item_note` chooses its `who`, and `"cron"` is a word --
-    but a note that also reproduces the report's job, end stamp and
-    attention basis word for word was written by the ingest or by someone
-    forging it on purpose. Only this path reads `fields`; the default one
-    never does, so a report whose fields are unreadable still finishes from
-    the command line. The keyword is exactly `True` or `False`, as
-    `ingest` takes `attention`: it changes what is persisted, so a truthy
-    string does not get to mean yes.
+    `resolve_followups=True` resolves every open followup the report owns --
+    the ingest's and a person's -- in the transaction that makes the
+    transition, so a refusal or a failed write leaves them open, and the
+    status note says which notes it resolved under the same `who`.
+    `resolve_note` itself records only `resolved_at`; the status note is
+    where the name lives. Without the keyword a person's followup is work
+    somebody still owes and blocks: acknowledging the report is the
+    operator's say-so, so the keyword is the operator's statement that the
+    work is done or dropped (sd:4722). The keyword is exactly `True` or
+    `False`, as `ingest` takes `attention`: it changes what is persisted, so
+    a truthy string does not get to mean yes.
     """
-    if type(resolve_ingest_followups) is not bool:
-        raise workflow.WorkflowError("resolve_ingest_followups must be exactly True or False")
+    if type(resolve_followups) is not bool:
+        raise workflow.WorkflowError("resolve_followups must be exactly True or False")
     with transaction(connection):
         state = workflow._checked_state(connection, item, expected_revision)
         if state["item"]["kind"] != "report":
             raise workflow.WorkflowError("only report items can be acknowledged here")
         _refuse_brief(state["item"])
         open_followups = [note for note in state["notes"] if note["kind"] == "followup" and not note["resolved_at"]]
-        ingests = _ingest_followup_for(state["item"]["fields"]) if resolve_ingest_followups else None
-        resolving = [note["id"] for note in open_followups
-                     if note["session"] == INGEST_SESSION and note["body"] == ingests]
+        resolving = [note["id"] for note in open_followups] if resolve_followups else []
         blocking = [note["id"] for note in open_followups if note["id"] not in resolving]
         if blocking:
             raise workflow.WorkflowError("resolve the report's followups before acknowledging it: "
                                          + "; ".join(f"resolve followup {note}" for note in blocking))
         for note in resolving:
             resolve_note(connection, note)
-        reason = ("resolved the ingest's followup" + ("s " if len(resolving) > 1 else " ")
+        reason = ("resolved followup" + ("s " if len(resolving) > 1 else " ")
                   + ", ".join(str(note) for note in resolving)) if resolving else None
         transition(connection, item, "done", who=who, reason=reason)
         return workflow.item_state(connection, item)
@@ -773,7 +762,7 @@ def reopen(connection, item, *, expected_revision, who, reason=None):
     returned as it stands: an Undo that races a reload changes nothing.
 
     `who` has no default, as on `acknowledge`. Followups that the
-    acknowledgement resolved stay resolved: `resolve_ingest_followups`
+    acknowledgement resolved stay resolved: `resolve_followups`
     records them in the status note, and this verb does not guess which
     ones to open again. The dashboard's Acknowledge never resolves any.
     """

@@ -281,13 +281,13 @@ class Controls(unittest.TestCase):
         self.assertEqual((self.status(first), self.status(second)), ("done", "done"))
 
     def test_the_single_item_flags_are_refused_with_all_clean(self):
-        # `--if-revision` and `--resolve-ingest-followups` belong to the
+        # `--if-revision` and `--resolve-followups` belong to the
         # single-item verb. The bulk verb has no revision to check and never
         # touches a followup, so with `--all-clean` each is refused before the
         # store is opened rather than read and ignored (review of #1002).
         self.clean_reports()
         before = self.dump()
-        for form in (("--if-revision", "0" * 64), ("--resolve-ingest-followups",)):
+        for form in (("--if-revision", "0" * 64), ("--resolve-followups",)):
             with self.subTest(form=form):
                 refused = self.cli("reports", "acknowledge", "--all-clean", "--before", "2026-09-10", *form)
                 self.assertEqual(refused.returncode, 1, refused.stdout)
@@ -361,7 +361,7 @@ class Controls(unittest.TestCase):
         def bulk(**flags):
             fields = dict(
                 control_group="reports", control_action="acknowledge", item=None, if_revision=None,
-                resolve_ingest_followups=False, json=True, all_clean=True, before="2026-09-10",
+                resolve_followups=False, json=True, all_clean=True, before="2026-09-10",
                 apply=False, if_plan=None, who=None,
             )
             return argparse.Namespace(**{**fields, **flags})
@@ -394,7 +394,7 @@ class Controls(unittest.TestCase):
         """sd:3504. The dashboard's Undo had no CLI: `sd reports reopen` is it."""
         report, revision, _ = self.failed_run()
         done = self.cli("reports", "acknowledge", report, "--if-revision", revision,
-                        "--resolve-ingest-followups", "--json")
+                        "--resolve-followups", "--json")
         self.assertEqual(done.returncode, 0, done.stderr)
         stale = self.cli("reports", "reopen", f"sd:{report}", "--if-revision", revision, "--json")
         self.assertEqual(stale.returncode, 1, stale.stdout)
@@ -405,7 +405,7 @@ class Controls(unittest.TestCase):
         self.assertEqual(state["item"]["status"], "planning")
         self.assertIn("reopened: too early", state["notes"][-1]["body"])
 
-    def test_the_flag_resolves_the_ingests_own_followup_and_is_off_by_default(self):
+    def test_the_flag_resolves_the_followup_and_is_off_by_default(self):
         # Every failure report is born with the followup the ingest wrote, so
         # without the flag the verb refuses it and names the note (sd:941).
         report, revision, note = self.failed_run()
@@ -421,18 +421,19 @@ class Controls(unittest.TestCase):
         # With the flag, one call resolves that note and finishes the report,
         # and the status note says which note it resolved.
         result = self.cli(
-            "reports", "acknowledge", report, "--if-revision", revision, "--resolve-ingest-followups", "--json"
+            "reports", "acknowledge", report, "--if-revision", revision, "--resolve-followups", "--json"
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         state = json.loads(result.stdout)
         self.assertEqual(state["item"]["status"], "done")
         self.assertEqual(self.followups(report), ("done", [(note, "cron", True)]))
         self.assertIn(
-            f"planning -> done by {getpass.getuser()}: resolved the ingest's followup {note}",
+            f"planning -> done by {getpass.getuser()}: resolved followup {note}",
             [entry["body"] for entry in state["notes"] if entry["kind"] == "status_change"],
         )
 
-    def test_a_followup_a_person_wrote_still_blocks_with_the_flag_on(self):
+    def test_a_followup_a_person_wrote_blocks_without_the_flag_and_resolves_with_it(self):
+        # sd:4722: the flag covers every open followup the report owns.
         report, revision, cron = self.failed_run()
         noted = self.cli(
             "task", "note", report, "--kind", "followup", "--body", "check the disk too",
@@ -440,18 +441,20 @@ class Controls(unittest.TestCase):
         )
         self.assertEqual(noted.returncode, 0, noted.stderr)
         owed = json.loads(noted.stdout)["note"]["id"]
-        refused = self.cli("reports", "acknowledge", report, "--resolve-ingest-followups", "--json")
+        refused = self.cli("reports", "acknowledge", report, "--json")
         self.assertEqual(refused.returncode, 1)
         self.assertIn(f"resolve followup {owed}", refused.stderr)
-        self.assertNotIn(f"resolve followup {cron}", refused.stderr)
         self.assertNotIn("Traceback", refused.stderr)
+        self.assertEqual(self.followups(report)[0], "planning")
+        done = self.cli("reports", "acknowledge", report, "--resolve-followups", "--json")
+        self.assertEqual(done.returncode, 0, done.stderr)
         status, notes = self.followups(report)
-        self.assertEqual(status, "planning")
-        self.assertEqual(sorted(notes), sorted([(cron, "cron", False), (owed, getpass.getuser(), False)]))
+        self.assertEqual(status, "done")
+        self.assertEqual(sorted(notes), sorted([(cron, "cron", True), (owed, getpass.getuser(), True)]))
 
     def test_the_flag_refuses_a_library_without_the_keyword_naming_the_provisioner(self):
         # A library that predates system #394 takes no
-        # `resolve_ingest_followups`; the flag must not reach it as a
+        # `resolve_followups`; the flag must not reach it as a
         # TypeError. The verb runs in-process here so the library function can
         # be replaced by one with the old signature.
         report, revision, note = self.failed_run()
@@ -461,7 +464,7 @@ class Controls(unittest.TestCase):
 
         args = argparse.Namespace(
             control_group="reports", control_action="acknowledge", item=int(report),
-            if_revision=revision, resolve_ingest_followups=True, json=True,
+            if_revision=revision, resolve_followups=True, json=True,
             all_clean=False, before=None, apply=False, if_plan=None, who=None,
         )
         from sd_db import reporting
@@ -473,7 +476,7 @@ class Controls(unittest.TestCase):
                 sd_controls.run(args)
         self.assertEqual(
             str(raised.exception),
-            "this sd_db takes no --resolve-ingest-followups; "
+            "this sd_db takes no --resolve-followups; "
             "run bin/ and lib/ from one pack checkout",
         )
         self.assertEqual(self.followups(report), ("planning", [(note, "cron", False)]))

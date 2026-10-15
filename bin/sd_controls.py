@@ -29,7 +29,7 @@ BULK_FLAGS = ("before", "apply", "if_plan", "who")
 #: same reason in the other direction: the bulk verb checks a plan, not a
 #: revision, and never resolves a followup, so a flag it read and ignored
 #: would let the caller believe it did.
-ITEM_FLAGS = ("if_revision", "resolve_ingest_followups")
+ITEM_FLAGS = ("if_revision", "resolve_followups")
 
 
 def bulk_cutoff(args: argparse.Namespace, reporting: Any) -> str | None:
@@ -98,11 +98,11 @@ def acknowledge_reports(args: argparse.Namespace, connection: Any, reporting: An
     # call; the signature is read first so the refusal names the
     # remedy instead.
     keywords: dict[str, bool] = {}
-    if args.resolve_ingest_followups:
-        if "resolve_ingest_followups" not in inspect.signature(reporting.acknowledge).parameters:
-            raise WorkRefusal("this sd_db takes no --resolve-ingest-followups; "
+    if args.resolve_followups:
+        if "resolve_followups" not in inspect.signature(reporting.acknowledge).parameters:
+            raise WorkRefusal("this sd_db takes no --resolve-followups; "
                               "run bin/ and lib/ from one pack checkout")
-        keywords["resolve_ingest_followups"] = True
+        keywords["resolve_followups"] = True
     return reporting.acknowledge(connection, args.item, expected_revision=revision, who=getpass.getuser(),
                                  **keywords)
 
@@ -315,11 +315,10 @@ def register(groups: Any) -> None:
                 command.add_argument("--if-plan", metavar="TOKEN", help="the plan the dry run printed")
                 command.add_argument("--who", metavar="NAME",
                                      help="the name recorded as acting, beside the login and this program")
-                command.add_argument("--resolve-ingest-followups", action="store_true",
-                                     help="also resolve the followup the ingest itself wrote for this report "
-                                          "(session cron, the text derived from the report's own fields), in "
-                                          "the same transaction; a followup a person wrote still blocks, and "
-                                          "the refusal names each followup, which `sd note resolve <id>` closes")
+                command.add_argument("--resolve-followups", action="store_true",
+                                     help="also resolve every open followup this report owns, in the same "
+                                          "transaction; without it the refusal names each followup, which "
+                                          "`sd note resolve <id>` closes")
             if action == "reopen":
                 command.add_argument("item", type=item_id, help=ITEM_HELP)
                 command.add_argument("--if-revision")
