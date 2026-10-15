@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -256,6 +257,39 @@ class MovedCopies(Case):
 
         self.assertEqual(sorted(self.nas.iterdir()), [leftover, young])
         self.assertEqual(lines, [f"kept {leftover}: it holds a linked, mounted or special entry"])
+
+    def test_a_leftover_that_is_itself_a_mount_point_is_kept(self):
+        leftover = self.nas / ".2026-10-01.removing"
+        leftover.mkdir()
+        (leftover / "sd.db").write_bytes(b"on another volume")
+        real = Path.lstat
+
+        def mounted(path, *args, **kwargs):
+            details = real(path, *args, **kwargs)
+            if path == leftover:
+                fields = list(details)
+                fields[stat.ST_DEV] += 1
+                return os.stat_result(fields)
+            return details
+
+        lines: list[str] = []
+        with mock.patch.object(Path, "lstat", mounted):
+            self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertTrue((leftover / "sd.db").exists())
+        self.assertEqual(lines, [f"kept {leftover}: it holds a linked, mounted or special entry"])
+
+    def test_the_dry_run_writes_nothing_beside_a_wal_mode_copy(self):
+        # A run stopped between the copy and its `journal_mode = DELETE` leaves a WAL-mode sd.db.
+        halted = self.stopped(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))))
+        raw = sqlite3.connect(halted / "sd.db")
+        raw.execute("PRAGMA journal_mode = WAL")
+        raw.close()
+        before = sorted(path.name for path in halted.iterdir())
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, dry_run=True), [halted])
+
+        self.assertEqual(sorted(path.name for path in halted.iterdir()), before)
 
     def test_the_dry_run_needs_the_prune_only_mode(self):
         completed = self.job("--dry-run", "--destination", str(self.nas))

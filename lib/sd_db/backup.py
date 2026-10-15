@@ -1065,15 +1065,18 @@ REMOVING_NAME = re.compile(r"\.(\d{4}-\d{2}-\d{2}(?:\.[1-9]\d*)?)\.removing")
 
 
 def _contained(directory: Path) -> None:
-    """Refuse a linked, mounted or special entry, or a subtree that cannot be read, below `directory`.
+    """Refuse a linked, mounted or special entry, or a subtree that cannot be read, at or below `directory`.
 
     `os.walk` with `onerror`, not `rglob`: `rglob` skips a folder it cannot
-    list, which would pass the check and stop `rmtree` halfway.
+    list, which would pass the check and stop `rmtree` halfway. The device is
+    the parent's, so a `directory` that is itself a mount point is refused too.
     """
     def unreadable(error: OSError) -> None:
         raise BackupError(f"it could not be read: {error}")
 
-    device = directory.stat().st_dev
+    device = directory.parent.stat().st_dev
+    if directory.lstat().st_dev != device:
+        raise BackupError("it holds a linked, mounted or special entry")
     for folder, folders, files in os.walk(directory, onerror=unreadable):
         for name in (*folders, *files):
             details = os.lstat(os.path.join(folder, name))
@@ -1191,7 +1194,10 @@ def _stopped_run(directory: Path) -> datetime:
         if unknown := [name for name in names if name not in SNAPSHOT_ENTRIES]:
             raise BackupError(f"it holds no backup manifest, and {', '.join(unknown)} is not something a backup writes")
         _contained(directory)
-        connection = sqlite3.connect(f"file:{directory / 'sd.db'}?mode=ro", uri=True)
+        # `immutable`: a copy stopped before `_snapshot` set `journal_mode = DELETE` is in WAL
+        # mode, and a plain read-only open would write `-wal` and `-shm` beside it, in a dry run too.
+        # Its sidecars are not names `run` writes, so a copy holding them is refused above.
+        connection = sqlite3.connect(f"file:{directory / 'sd.db'}?mode=ro&immutable=1", uri=True)
         try:
             row = connection.execute(
                 "SELECT body FROM state WHERE kind = 'checkpoint' AND length(key) = 32"
