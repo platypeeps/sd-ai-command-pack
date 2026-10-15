@@ -15,8 +15,10 @@ The rest of the designation is the guard's state, written by the plan and by
 `record_row` and never by hand: `written` holds, per sd-owned field, the value
 sd last wrote and saw confirmed; `writing` and `creating` are the intents a
 plan recorded, each bound to its generation (the request fingerprint) and the
-designation it was planned under; `confirmed` is the generation last
-confirmed; `yielded` lists the fields a person holds.
+designation it was planned under, and `creating` carries a `state`, `planned`
+until the drain marks it `writing` just before its create call (sd:4742);
+`confirmed` is the generation last confirmed; `yielded` lists the fields a
+person holds.
 """
 
 from __future__ import annotations
@@ -94,10 +96,19 @@ def priority_value(priority: Any) -> str | None:
     return PRIORITY.get(priority) if type(priority) is int else None
 
 
+#: The states of a create intent (sd:4742): `planned` is what a plan leaves, and `writing` is the drain's
+#: mark just before its create call. A plan reads `planned` as "nothing was written" and prints the create
+#: again; it reads `writing` as "the create may have landed" and searches. An intent an older pack recorded
+#: has no state and reads as `writing`, the safe reading.
+PLANNED, WRITING = "planned", "writing"
+
+
 def _intent(name: str, value: Any) -> None:
     if not isinstance(value, dict) or not isinstance(value.get("generation"), str) \
             or not isinstance(value.get("designation"), dict):
         raise ProjectionRefusal(f"experiments.{name} must be an intent with a generation and a designation")
+    if name == "creating" and value.get("state") not in (None, PLANNED, WRITING):
+        raise ProjectionRefusal(f"experiments.creating.state must be {PLANNED} or {WRITING}, not {value['state']!r}")
 
 
 def validate(value: Any) -> dict[str, Any]:
@@ -270,6 +281,41 @@ def designate(connection: sqlite3.Connection, item: int, specs: list[str], *, wh
     return item_state(connection, item)
 
 
+def _moved(planned: dict[str, Any], held: dict[str, Any]) -> list[str]:
+    """The designation keys that changed between the designation an intent was planned under and `held`."""
+    moved = [key for key in ("as", "of", "since") if planned.get(key) != held.get(key)]
+    if planned.get("row") != held.get("row"):
+        moved.append("row")
+    return moved
+
+
+def mark_writing(connection: sqlite3.Connection, item: int, fingerprint: str) -> None:
+    """The drain's mark just before its create call (sd:4742): `creating` from `planned` to `writing`.
+
+    One transaction. Refuses, writing nothing, an item with no create planned
+    for `fingerprint`, a designation that moved since the plan, and an intent
+    already marked: a second mark would stand for a second write that may
+    have landed, and the next plan searches for that one.
+    """
+    if not isinstance(fingerprint, str) or not fingerprint:
+        raise ProjectionRefusal("give the fingerprint of the generation planned")
+    with transaction(connection):
+        _, fields = _fields(connection, item)
+        held = designation(fields, item)
+        creating = (held or {}).get("creating")
+        if held is None or not creating or creating.get("generation") != fingerprint:
+            raise ProjectionRefusal(f"sd:{item} has no create planned for {fingerprint[:12]}; plan again")
+        moved = _moved(creating["designation"], held)
+        if moved:
+            raise ProjectionRefusal(f"sd:{item}'s designation moved since the plan ({', '.join(moved)}); "
+                                    "plan again")
+        if creating.get("state") != PLANNED:
+            raise ProjectionRefusal(f"sd:{item}'s create is already marked writing; the next plan searches for it")
+        value = dict(held)
+        value["creating"] = {**creating, "state": WRITING}
+        _store(connection, item, fields, validate(value))
+
+
 def record_row(connection: sqlite3.Connection, item: int, fingerprint: str, url: str, who: str) -> str:
     """Confirm the plan of generation `fingerprint` on item `item`, whose row is at `url`.
 
@@ -305,10 +351,7 @@ def record_row(connection: sqlite3.Connection, item: int, fingerprint: str, url:
                 return "unchanged"
             raise ProjectionRefusal(f"sd:{item} has no plan outstanding for {fingerprint[:12]}; run project and "
                                     "plan again")
-        planned = intent["designation"]
-        moved = [key for key in ("as", "of", "since") if planned.get(key) != held.get(key)]
-        if planned.get("row") != held.get("row"):
-            moved.append("row")
+        moved = _moved(intent["designation"], held)
         if moved:
             raise ProjectionRefusal(f"sd:{item}'s designation moved since the plan ({', '.join(moved)}); "
                                     "the next plan drops that intent")
@@ -577,22 +620,22 @@ def plan(connection: sqlite3.Connection, request: dict[str, Any], live: dict[str
                                       f"the configured database is now {database}",
                                 ["no row exists, create it, `sd task edit %d --experiment new`" % item,
                                  "this is the row, `sd task edit %d --experiment row:ID`" % item])
-            if not isinstance(live.get("candidates"), list):
-                raise ProjectionRefusal(f"search: an earlier create of sd:{item} may have landed; search the "
-                                        f"{target} database for pages whose body opens with "
-                                        f"`{POINTER.format(item=item).split(' sd keeps')[0]}` and plan again "
-                                        "with them as candidates; an empty list prints the create again")
-            candidates = [_live_row(entry, database, "candidate") for entry in live["candidates"]]
-            if len(candidates) > 1:
-                found = ", ".join(row_id(entry["id"]) for entry in candidates)
-                raise _question(item, f"An earlier create of sd:{item} may have landed; rows found by the "
-                                      f"pointer sd:{item}: {found}",
-                                ["no row exists, create it, `sd task edit %d --experiment new`" % item,
-                                 "this is the row, `sd task edit %d --experiment row:ID`" % item])
-            # None found: the search is what tells a plan that wrote nothing (a dry run, or a drain
-            # stopped before its write) from a create that landed, so the create is printed again
-            # under the same intent, and no `--experiment new` is asked for (sd:4742).
-            if candidates:
+            # A `planned` intent wrote nothing (a dry run, or a drain stopped before its mark): the same
+            # create is printed again, with no search (sd:4742). Only a `writing` mark means a create may
+            # have landed, and an intent with no state reads as marked.
+            if creating.get("state") != PLANNED:
+                if not isinstance(live.get("candidates"), list):
+                    raise ProjectionRefusal(f"search: an earlier create of sd:{item} may have landed; search the "
+                                            f"{target} database for pages whose body opens with "
+                                            f"`{POINTER.format(item=item).split(' sd keeps')[0]}` and plan "
+                                            "again with them as candidates")
+                candidates = [_live_row(entry, database, "candidate") for entry in live["candidates"]]
+                if len(candidates) != 1:
+                    found = ", ".join(row_id(entry["id"]) for entry in candidates) or "none"
+                    raise _question(item, f"An earlier create of sd:{item} may have landed; rows found by the "
+                                          f"pointer sd:{item}: {found}",
+                                    ["no row exists, create it, `sd task edit %d --experiment new`" % item,
+                                     "this is the row, `sd task edit %d --experiment row:ID`" % item])
                 live_row = candidates[0]
                 value["row"] = row_id(live_row["id"])
                 value.pop("creating")
@@ -606,7 +649,7 @@ def plan(connection: sqlite3.Connection, request: dict[str, Any], live: dict[str
             elif priority_value(row["priority"]) is not None:
                 properties["Priority"] = priority_value(row["priority"])
             value["creating"] = {"generation": fresh["fingerprint"], "database": database, "designation": planned,
-                                 "target": target}
+                                 "target": target, "state": PLANNED}
             writes = dict(values)
             result = {"action": "create", "database": database, "properties": properties,
                       "body": POINTER.format(item=item)}

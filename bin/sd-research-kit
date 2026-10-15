@@ -70,13 +70,15 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                 that generation. --url records where the mirror landed, with
                 the item= the document names. The one verb with arguments:
                 it acts on the machine's queue, not on a checkout
-  project [--plan <request> --live <file>|--missing]
+  project [--plan <request> --live <file>|--missing] [--writing <request>]
                 queue one notion-row request per item designated with
                 `sd task edit N --experiment`, for the items whose row would
                 change; needs SD_NOTION_EXPERIMENTS and
                 SD_NOTION_EXPERIMENT_TASKS. --plan is the drain's guard: it
                 reads the request, the item and the row the drain fetched,
                 records the intent on the item and prints what to write.
+                --writing marks a planned create just before the drain's
+                create call, so a stop after it is searched for, not redone.
                 Acts on the machine's queue, not on a checkout
   checklinks    verify every relative markdown link and backticked in-repo path
                 resolves; exit 1 if anything is broken
@@ -104,8 +106,8 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
   conventions   print the path of the standard every research repo follows
 
 Every verb acts on the current working directory. There is no repo argument;
-`delivered` and `project --plan` name a request in the machine's queue, which
-is not a repository.
+`delivered`, `project --plan` and `project --writing` name a request in the
+machine's queue, which is not a repository.
 """
 
 

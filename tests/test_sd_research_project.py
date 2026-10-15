@@ -121,6 +121,13 @@ class Projection(base.Fixture):
         self.assertEqual(status, 0, said)
         return json.loads(said)
 
+    def mark(self, item: int, path: Path | None = None) -> tuple[int, str]:
+        """The drain's mark just before its create call: `project --writing <request>`."""
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            status = PUBLISH.project_main(["--writing", str(path or self.path(item))])
+        return status, out.getvalue()
+
     def deliver(self, item: int, fingerprint: str | None = None, row: str = ROW, *extra: str) -> tuple[int, str]:
         given = fingerprint or self.request(item)["fingerprint"]
         out = io.StringIO()
@@ -459,56 +466,118 @@ class PlanTests(Projection):
         self.assertNotIn("creating", self.held(self.experiment))
 
     def test_an_interrupted_create_never_creates_twice(self) -> None:
+        # sd:4742: the drain marks the intent `writing` just before its create call; a stop after that leaves
+        # the mark, and the next plan searches. None found asks (the create may have landed and search can
+        # lag); two ask; never a create.
         self.queued()
         self.planned(self.experiment, self.live())
+        status, said = self.mark(self.experiment)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(self.held(self.experiment)["creating"]["state"], "writing")
         status, said = self.plan(self.experiment, self.live())
         self.assertEqual(status, 1)
         self.assertIn("search: an earlier create of sd:%d may have landed" % self.experiment, said)
         self.assertIn("`Projected from sd:%d.`" % self.experiment, said)
         self.assertNotIn("Option:", said)
-        status, said = self.plan(self.experiment, self.live(candidates=[ROW, OTHER], Status="Todo"))
-        self.assertEqual(status, 1)
-        self.assertNotIn('"action"', said)
-        self.assertIn("Option: no row exists, create it", said)
-        self.assertIn("creating", self.held(self.experiment))
+        for found in ([], [ROW, OTHER]):
+            with self.subTest(found=found):
+                status, said = self.plan(self.experiment, self.live(candidates=found, Status="Todo"))
+                self.assertEqual(status, 1)
+                self.assertNotIn('"action"', said)
+                self.assertIn("may have landed", said)
+                self.assertIn("Option: no row exists, create it, `sd task edit %d --experiment new`"
+                              % self.experiment, said)
+                self.assertEqual(self.held(self.experiment)["creating"]["state"], "writing")
 
-    def test_a_plan_only_create_intent_creates_when_the_search_finds_no_row(self) -> None:
-        # sd:4742 (a): a plan that wrote nothing (a dry run, or a drain stopped before its write) leaves
-        # `creating`. The search by the pointer finding no row is what tells it from a landed create, so the
-        # next plan prints the create again instead of asking for `--experiment new`.
+    def test_a_planned_create_intent_prints_the_same_create_again_without_a_search(self) -> None:
+        # sd:4742 (a): a plan-only run (a dry run, or a drain stopped before its mark) leaves the intent in
+        # state `planned`: nothing was written, so the next plan prints the same create again, asks for no
+        # search and never for `--experiment new`.
         self.queued()
         first = self.planned(self.experiment, self.live())
-        status, said = self.plan(self.experiment, self.live(candidates=[]))
+        self.assertEqual(self.held(self.experiment)["creating"]["state"], "planned")
+        status, said = self.plan(self.experiment, self.live())
         self.assertEqual(status, 0, said)
         self.assertNotIn("Option:", said)
         self.assertEqual(json.loads(said), first)
         held = self.held(self.experiment)
-        self.assertEqual(held["creating"]["generation"], self.request(self.experiment)["fingerprint"])
+        self.assertEqual((held["creating"]["state"], held["creating"]["generation"]),
+                         ("planned", self.request(self.experiment)["fingerprint"]))
+        self.assertEqual(self.mark(self.experiment)[0], 0)
         self.assertEqual(self.deliver(self.experiment)[0], 0)
         self.assertEqual(self.held(self.experiment)["row"], ROW)
 
+    def test_a_create_intent_without_a_state_reads_as_writing(self) -> None:
+        # A `creating` intent an older pack recorded has no state: the safe reading is that its write may
+        # have landed, so an empty search asks rather than creates.
+        self.queued()
+        self.planned(self.experiment, self.live())
+        row = self.connection.execute("SELECT fields FROM item WHERE id = ?", (self.experiment,)).fetchone()
+        fields = json.loads(row["fields"])
+        fields["experiments"]["creating"].pop("state")
+        self.connection.execute("UPDATE item SET fields = ? WHERE id = ?", (json.dumps(fields), self.experiment))
+        status, said = self.plan(self.experiment, self.live(candidates=[]))
+        self.assertEqual(status, 1)
+        self.assertNotIn('"action"', said)
+        self.assertIn("Option: no row exists, create it", said)
+        self.assertNotIn("state", self.held(self.experiment)["creating"])
+
+    def test_the_writing_mark_is_bound_to_the_planned_generation_and_made_once(self) -> None:
+        self.queued()
+        status, said = self.mark(self.experiment)
+        self.assertEqual(status, 1)
+        self.assertIn("no create planned", said)
+        self.assertNotIn("creating", self.held(self.experiment))
+        self.planned(self.experiment, self.live())
+        held = self.held(self.experiment)
+        other = self.root / self.name(self.task)
+        other.write_bytes(self.path(self.experiment).read_bytes())
+        self.assertEqual(self.mark(self.experiment, other)[0], 1)
+        self.status(self.experiment, "in_progress")
+        self.project()  # a newer generation: the planned one is not this request's
+        status, said = self.mark(self.experiment)
+        self.assertEqual(status, 1)
+        self.assertIn("no create planned", said)
+        self.status(self.experiment, "planning")
+        self.project()
+        self.designate(self.experiment, "off")
+        self.designate(self.experiment, "yes")  # `since` moved since the plan
+        status, said = self.mark(self.experiment)
+        self.assertEqual(status, 1)
+        self.assertIn("moved since the plan", said)
+        self.assertEqual(self.held(self.experiment)["creating"], held["creating"])
+        self.project()
+        self.planned(self.experiment, self.live())
+        self.assertEqual(self.mark(self.experiment)[0], 0)
+        status, said = self.mark(self.experiment)
+        self.assertEqual(status, 1)
+        self.assertIn("already marked writing", said)
+        self.assertEqual(self.held(self.experiment)["creating"]["state"], "writing")
+
     def test_a_create_plan_repeated_before_its_write_is_the_same_create(self) -> None:
-        # sd:4742 (b): anything between a plan and its write means plan again. For a create that plan
-        # answers `search:`, and the search finding nothing returns the same create under the same intent,
-        # however often it is repeated; the plan the write follows is the one that counts.
+        # sd:4742 (b): anything between a plan and its write means plan again. Before the mark that plan is
+        # the same create under the same intent, however often; after the mark it answers `search:`. The plan
+        # the write follows is the one that counts.
         self.queued()
         first = self.planned(self.experiment, self.live())
         held = self.held(self.experiment)
         notes = self.comments(self.experiment)
         for _ in range(2):
-            status, said = self.plan(self.experiment, self.live())
-            self.assertEqual(status, 1)
-            self.assertIn("search:", said)
-            self.assertIn("an empty list prints the create again", said)
-            self.assertEqual(self.planned(self.experiment, self.live(candidates=[])), first)
+            self.assertEqual(self.planned(self.experiment, self.live()), first)
             self.assertEqual(self.held(self.experiment), held)
         self.assertEqual(self.comments(self.experiment), notes)
+        self.assertEqual(self.mark(self.experiment)[0], 0)
+        status, said = self.plan(self.experiment, self.live())
+        self.assertEqual(status, 1)
+        self.assertIn("search:", said)
         text = " ".join(CONTRACT.read_text(encoding="utf-8").split())
-        self.assertIn("the plan the write follows is the one that counts", text)
+        self.assertIn("The plan the write follows is the one that counts", text)
+        self.assertIn("sd-research-kit project --writing", text)
 
     def test_one_candidate_is_adopted_and_its_fields_wait_for_a_hand_back(self) -> None:
         self.queued()
         self.planned(self.experiment, self.live())
+        self.assertEqual(self.mark(self.experiment)[0], 0)
         planned = self.planned(self.experiment, self.live(candidates=[ROW], Status="Todo"))
         self.assertEqual((planned["action"], planned["row"], planned["yielded"]), ("update", ROW, ["Status"]))
         held = self.held(self.experiment)
@@ -559,6 +628,7 @@ class PlanTests(Projection):
     def test_a_row_read_without_an_owned_property_refuses_and_records_nothing(self) -> None:
         self.queued()
         self.planned(self.experiment, self.live())
+        self.assertEqual(self.mark(self.experiment)[0], 0)
         live = self.live(candidates=[ROW], Status="Blocked")
         del live["candidates"][0]["properties"]["Status"]
         before = self.held(self.experiment)
