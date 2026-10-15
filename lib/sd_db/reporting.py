@@ -565,6 +565,9 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
              if exit_code else declared or "not supplied by the job")
     if len(basis) > 2000:
         basis = f"{basis[:1900]} [sha256 {hashlib.sha256(basis.encode()).hexdigest()[:16]}]"
+    # Each invalid byte decodes to a three-byte replacement character, so
+    # this second cut can drop text the first kept: that body is cut too.
+    truncated = truncated or len(text.encode()) > MAX_REPORT
     text = text.encode()[:MAX_REPORT].decode("utf-8", errors="ignore")
     with transaction(connection):
         # A run that already filed a report is answered with that report, the

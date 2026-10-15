@@ -973,6 +973,14 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         self.tick("c", 31, self.past_the_cut(self.ONE, ""))
         self.assertTrue("all of it" in json.loads(self.row(first)["body"])["text"], "the cut body replaced it")
 
+    def test_a_body_cut_by_its_replacement_characters_is_truncated(self):
+        """Codex: each invalid byte decodes to three, so the second cut dropped text unflagged."""
+        older = self.tick("a", 1, self.TWO)["item"]["id"]
+        (self.root / "probe-b.log").write_bytes(b"\xff" * 70_000 + b"\n" + self.ONE.encode())
+        newer = self.tick("b", 16, "")
+        self.assertTrue(json.loads(newer["item"]["fields"])["report"]["truncated"])
+        self.assertEqual(self.row(older)["status"], "planning")
+
     def test_reopening_a_superseded_report_returns_it_to_planning(self):
         older = self.tick("a", 1, self.TWO)["item"]["id"]
         self.tick("b", 16, self.ONE)
