@@ -12,6 +12,7 @@ import json
 import os
 import shutil
 import sqlite3
+import stat
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,7 @@ import unittest
 from datetime import UTC, datetime
 from importlib import import_module
 from pathlib import Path
+from unittest import mock
 
 from sd_db import connect, create_assignment, create_item, upsert_repo
 from sd_db.backup import BACKUP_MANIFEST, prune_older, run
@@ -65,6 +67,24 @@ class Case(unittest.TestCase):
         shutil.copytree(directory, copy, symlinks=True)
         return copy
 
+    def pre_json(self, copy):
+        """What a build before c9ceaf7bb left: a bare-timestamp checkpoint body, no `checkpoint` key."""
+        manifest = json.loads((copy / BACKUP_MANIFEST).read_text())
+        raw = sqlite3.connect(copy / "sd.db")
+        with raw:
+            raw.execute("UPDATE state SET body = json_extract(body, '$.at') WHERE kind='checkpoint' AND key=?",
+                        (manifest["run_id"],))
+        raw.close()
+        del manifest["checkpoint"]
+        manifest["entries"]["sd.db"] = hashlib.sha256((copy / "sd.db").read_bytes()).hexdigest()
+        (copy / BACKUP_MANIFEST).write_text(json.dumps(manifest))
+        return copy
+
+    def stopped(self, copy):
+        """What a run that failed before `_record_backup` leaves: everything but the manifest."""
+        (copy / BACKUP_MANIFEST).unlink()
+        return copy
+
     def fresh_home(self, name="promoted"):
         home = self.base / name
         (home / ".local/share/sd").mkdir(parents=True)
@@ -91,6 +111,47 @@ class Refusals(Case):
         completed = self.job("--prune-only", "--destination", str(self.nas))
         self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
         self.assertIn("--prune-only needs --destination and --keep-days", completed.stdout + completed.stderr)
+
+    def test_the_dry_run_needs_the_prune_only_mode(self):
+        completed = self.job("--dry-run", "--destination", str(self.nas))
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        self.assertIn("--dry-run needs --prune-only", completed.stderr)
+        self.assertEqual(list(self.nas.iterdir()), [])
+
+    def test_a_leftover_that_is_itself_a_mount_point_is_kept(self):
+        leftover = self.nas / ".2026-10-01.removing"
+        leftover.mkdir()
+        (leftover / "sd.db").write_bytes(b"on another volume")
+        real = Path.lstat
+
+        def mounted(path, *args, **kwargs):
+            details = real(path, *args, **kwargs)
+            if path == leftover:
+                fields = list(details)
+                fields[stat.ST_DEV] += 1
+                return os.stat_result(fields)
+            return details
+
+        lines: list[str] = []
+        with mock.patch.object(Path, "lstat", mounted):
+            self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertTrue((leftover / "sd.db").exists())
+        self.assertEqual(lines, [f"kept {leftover}: it holds a linked, mounted or special entry"])
+
+    def test_a_leftover_with_an_unreadable_folder_is_kept_and_listed(self):
+        # `rglob` skips a folder it cannot list; the walk must not, or `rmtree` stops halfway.
+        leftover = self.nas / ".2026-10-01.removing"
+        (leftover / "executions" / "inner").mkdir(parents=True)
+        (leftover / "executions").chmod(0)
+        self.addCleanup((leftover / "executions").chmod, 0o700)
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertTrue(leftover.exists())
+        self.assertEqual(len(lines), 1, lines)
+        self.assertIn(f"kept {leftover}: it could not be read", lines[0])
 
 
 # Each test takes a snapshot, which `run` refuses off the hub.
@@ -129,6 +190,95 @@ class MovedCopies(Case):
         (old / "._sd.db").write_bytes(b"\0\5\26\7")
 
         self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [old])
+
+    def test_a_pre_json_copy_past_the_window_is_pruned(self):
+        # sd:4694: a bare-timestamp checkpoint was unreadable, so these copies never aged out.
+        old = self.pre_json(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))))
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [old])
+        self.assertFalse(old.exists())
+
+    def test_a_stopped_run_past_the_window_is_kept_and_listed(self):
+        # A run that stopped before its manifest proves nothing about what is in the folder.
+        old = self.stopped(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))))
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertTrue((old / "sd.db").exists())
+        self.assertEqual(lines, [f"kept {old}: no manifest (stopped run?)"])
+
+    def test_a_dated_folder_holding_a_copied_store_is_kept(self):
+        # A hand-kept copy of the live store holds earlier backup checkpoints too (sd:4694 lane review).
+        self.snapshot(datetime(2026, 9, 30, 9, 0, tzinfo=UTC))
+        kept = self.nas / "2026-10-01"
+        kept.mkdir()
+        shutil.copy2(self.home / ".local/share/sd/sd.db", kept / "sd.db")
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertTrue((kept / "sd.db").exists())
+        self.assertEqual(lines, [f"kept {kept}: no manifest (stopped run?)"])
+
+    def test_a_pre_json_copy_inside_the_window_stays(self):
+        young = self.pre_json(self.mirror(self.snapshot(datetime(2026, 10, 10, 9, 0, tzinfo=UTC))))
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+        self.assertTrue(young.exists())
+        self.assertEqual(lines, [])
+
+    def test_the_dry_run_lists_what_would_go_and_deletes_nothing(self):
+        pre = self.pre_json(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))))
+        halted = self.stopped(self.mirror(self.snapshot(datetime(2026, 10, 2, 9, 0, tzinfo=UTC))))
+
+        completed = self.job("--prune-only", "--dry-run", "--destination", str(self.nas), "--keep-days", "7")
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn(f"would remove {pre}\n", completed.stdout)
+        self.assertIn(f"kept {halted}: no manifest (stopped run?)\n", completed.stdout)
+        self.assertIn("dry run: 1 copy older than 7 days would be removed", completed.stdout)
+        self.assertTrue(pre.exists())
+        self.assertTrue(halted.exists())
+
+    def test_a_removal_stopped_halfway_is_finished_by_the_next_prune(self):
+        old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
+        doomed = self.nas / ".2026-10-01.removing"
+
+        def stop_after_one_file(path):
+            (path / "sd.db").unlink()
+            raise KeyboardInterrupt  # the job's time bound, between two unlinks
+
+        with mock.patch.object(backup.shutil, "rmtree", stop_after_one_file), self.assertRaises(KeyboardInterrupt):
+            prune_older(self.nas, 7, now=NOW, moved=True)
+        self.assertEqual(sorted(self.nas.iterdir()), [doomed])
+        # Not a dated name: restore never reads the half left behind.
+        with self.assertRaisesRegex(BackupError, r"\(0 refused\)"):
+            backup.restore_newest([self.nas], home=self.fresh_home())
+        dry: list[str] = []
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, dry_run=True, report=dry.append), [])
+        self.assertTrue(doomed.exists())
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertFalse(old.exists())
+        self.assertEqual(list(self.nas.iterdir()), [])
+        self.assertEqual(dry, [f"would finish removing {doomed}, which an earlier prune stopped inside"])
+        self.assertEqual(lines, [f"finished removing {doomed}, which an earlier prune stopped inside"])
+
+    def test_a_leftover_holding_a_special_entry_is_kept_and_listed(self):
+        leftover = self.nas / ".2026-10-01.removing"
+        leftover.mkdir()
+        os.mkfifo(leftover / "pipe")
+        young = self.mirror(self.snapshot(NOW))
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertEqual(sorted(self.nas.iterdir()), [leftover, young])
+        self.assertEqual(lines, [f"kept {leftover}: it holds a linked, mounted or special entry"])
 
     def test_the_job_prunes_copies_without_taking_a_snapshot(self):
         old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
@@ -172,6 +322,47 @@ class TheNewest(Case):
         self.assertIn("differ from its manifest", result.refused[0][1])
         self.assertEqual(len(lines), 1)
         self.assertIn(str(bad), lines[0])
+
+    def test_stopped_runs_are_one_line_and_a_real_refusal_keeps_its_own(self):
+        good = self.mirror(self.snapshot(datetime(2026, 10, 9, 9, 0, tzinfo=UTC), title="first"))
+        for when in (datetime(2026, 10, 10, 9, 0, tzinfo=UTC), datetime(2026, 10, 11, 9, 30, tzinfo=UTC)):
+            self.stopped(self.mirror(self.snapshot(when)))
+        bad = self.mirror(self.snapshot(NOW, title="second"))
+        (bad / "runner-recovery-note").write_text("written on the share\n")
+        lines: list[str] = []
+        home = self.fresh_home()
+
+        result = backup.restore_newest([self.nas], home=home, report=lines.append)
+
+        self.assertEqual(result.snapshot, good)
+        self.assertEqual(len(result.refused), 3)
+        self.assertEqual(len(lines), 2, lines)
+        self.assertEqual(lines[0], f"refused 2 snapshot(s) under {self.nas} with no manifest (stopped runs?), "
+                                   "named 2026-10-10 to 2026-10-11")
+        self.assertIn(f"refused {bad}: ", lines[1])
+
+    def test_a_pre_json_snapshot_restores(self):
+        old = self.pre_json(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC), title="first")))
+        home = self.fresh_home()
+
+        result = backup.restore_newest([self.nas], home=home)
+
+        self.assertEqual((result.snapshot, result.refused), (old, []))
+        self.assertEqual(result.taken_at, datetime(2026, 10, 1, 9, 0, tzinfo=UTC))
+        self.assertEqual(self.items(home), ["first"])
+
+    def test_a_tie_goes_to_the_new_format_snapshot(self):
+        when = datetime(2026, 10, 12, 9, 0, tzinfo=UTC)
+        new = self.mirror(self.snapshot(when, title="first"))
+        # Same checkpoint time, a later name, the old body: the name must not win the tie.
+        old = self.pre_json(self.mirror(self.snapshot(when, title="second")))
+        self.assertGreater(old.name, new.name)
+        home = self.fresh_home()
+
+        result = backup.restore_newest([self.nas], home=home)
+
+        self.assertEqual(result.snapshot, new)
+        self.assertEqual(self.items(home), ["first"])
 
     def test_a_newest_snapshot_restore_would_refuse_is_skipped(self):
         # `run` keeps a snapshot of a source with broken references as a forensic copy.

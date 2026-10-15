@@ -68,8 +68,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prune-only", action="store_true",
                         help="take no snapshot; delete copies under --destination, such as a mirror "
                              "on a share, whose checkpoint is more than --keep-days days old")
+    parser.add_argument("--dry-run", action="store_true",
+                        help="with --prune-only: list what would be deleted and delete nothing")
     arguments = parser.parse_args(argv)
     home = Path(os.environ.get("HOME", "~")).expanduser()
+    if arguments.dry_run and not arguments.prune_only:
+        print("sd-db backup: --dry-run needs --prune-only", file=sys.stderr)
+        return 1
     if arguments.prune_only:
         # The hourly job's NAS prune (sd:4011). The copies were written in
         # another directory, so their manifests name it; `moved` verifies
@@ -80,12 +85,18 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if arguments.require_mount is not None:
                 require_mount(arguments.require_mount, arguments.destination)
-            removed = prune_older(arguments.destination, arguments.keep_days, now=datetime.now(UTC), moved=True)
+            removed = prune_older(arguments.destination, arguments.keep_days, now=datetime.now(UTC), moved=True,
+                                  dry_run=arguments.dry_run, report=lambda line: print(f"sd-db backup: {line}"))
         except (BackupError, OSError) as failure:
             print(f"sd-db backup: {failure}", file=sys.stderr)
             return 1
-        print(f"sd-db backup: {len(removed)} {'copy' if len(removed) == 1 else 'copies'} older than "
-              f"{arguments.keep_days} days removed under {arguments.destination}")
+        copies = f"{len(removed)} {'copy' if len(removed) == 1 else 'copies'} older than {arguments.keep_days} days"
+        if arguments.dry_run:
+            for path in removed:
+                print(f"sd-db backup: would remove {path}")
+            print(f"sd-db backup: dry run: {copies} would be removed under {arguments.destination}; nothing was deleted")
+        else:
+            print(f"sd-db backup: {copies} removed under {arguments.destination}")
         return 0
     try:
         snapshot = run(home=home, destination=arguments.destination, keep=arguments.keep,

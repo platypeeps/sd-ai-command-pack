@@ -1058,12 +1058,64 @@ def _retention_root(root: Path) -> None:
         raise BackupError("backup retention root must be an existing unlinked directory")
 
 
-def _remove_owned(directories: list[tuple[Path, tuple[int, int, str]]], *, moved: bool = False) -> list[Path]:
+#: A directory retention has decided to remove, renamed first: a removal
+#: stopped halfway leaves this name, which nothing reads as a backup, and the
+#: next prune finishes it (`_finish_removals`) instead of keeping half a snapshot.
+REMOVING_NAME = re.compile(r"\.(\d{4}-\d{2}-\d{2}(?:\.[1-9]\d*)?)\.removing")
+
+
+def _contained(directory: Path) -> None:
+    """Refuse a linked, mounted or special entry, or a subtree that cannot be read, at or below `directory`.
+
+    `os.walk` with `onerror`, not `rglob`: `rglob` skips a folder it cannot
+    list, which would pass the check and stop `rmtree` halfway. The device is
+    the parent's, so a `directory` that is itself a mount point is refused too.
+    """
+    def unreadable(error: OSError) -> None:
+        raise BackupError(f"it could not be read: {error}")
+
+    device = directory.parent.stat().st_dev
+    if directory.lstat().st_dev != device:
+        raise BackupError("it holds a linked, mounted or special entry")
+    for folder, folders, files in os.walk(directory, onerror=unreadable):
+        for name in (*folders, *files):
+            details = os.lstat(os.path.join(folder, name))
+            if details.st_dev != device or not (stat.S_ISREG(details.st_mode) or stat.S_ISDIR(details.st_mode)):
+                raise BackupError("it holds a linked, mounted or special entry")
+
+
+def _finish_removals(root: Path, *, dry_run: bool = False, report=None) -> list[Path]:
+    """Remove what an earlier removal stopped inside; a leftover that fails `_contained` stays, and is named."""
+    finished = []
+    for path in sorted(root.iterdir()):
+        if not REMOVING_NAME.fullmatch(path.name):
+            continue
+        try:
+            if path.is_symlink() or not path.is_dir():
+                raise BackupError("it is a link or not a directory")
+            _contained(path)
+            if not dry_run:
+                shutil.rmtree(path)
+        except (BackupError, OSError) as error:
+            if report is not None:
+                report(f"kept {path}: {error}")
+            continue
+        finished.append(path)
+    return finished
+
+
+def _remove_owned(directories: list[tuple[Path, tuple[int, int, str]]], identify) -> list[Path]:
     removed = []
     for path, identity in directories:
-        if _owned_backup(path, moved=moved) != identity:
+        try:
+            again = identify(path)
+        except BackupError:
+            again = None
+        if again != identity:
             raise BackupError(f"backup changed before retention: {path}; preserved for review")
-        shutil.rmtree(path)
+        doomed = path.with_name(f".{path.name}.removing")
+        path.rename(doomed)
+        shutil.rmtree(doomed)
         removed.append(path)
     return removed
 
@@ -1074,13 +1126,21 @@ def prune(root: Path, keep: int | None = KEEP) -> list[Path]:
     if keep is None:
         return []
     _retention_root(root)
+    _finish_removals(root)
     directories = [(path, identity) for path in root.iterdir() if (identity := _owned_backup(path)) is not None]
     directories.sort(key=lambda value: _directory_order(value[0]))
-    return _remove_owned(directories[:-keep] if keep else directories)
+    return _remove_owned(directories[:-keep] if keep else directories, _owned_backup)
 
 
 def _taken_at(directory: Path) -> datetime:
+    return _checkpoint(directory)[0]
+
+
+def _checkpoint(directory: Path) -> tuple[datetime, bool]:
     """When the backup in `directory` was taken: its checkpoint row's time, read from its own database.
+
+    The flag is True for the current `{"at": ...}` body, False for the bare
+    timestamp of a build before sd:3578, so a tie can prefer the current one.
 
     The name is not the time: a copy can be renamed, and a day's names restart
     on a hub with an empty root. `run` writes the row before the snapshot, so
@@ -1097,15 +1157,24 @@ def _taken_at(directory: Path) -> datetime:
                                      (value["run_id"],)).fetchone()
         finally:
             connection.close()
-        taken = datetime.fromisoformat(json.loads(row[0])["at"])
+        taken, current = _checkpoint_time(row[0])
     except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as error:
         raise BackupError(f"its checkpoint time could not be read: {error}") from None
     if taken.tzinfo is None:
         raise BackupError("its checkpoint time names no zone")
-    return taken
+    return taken, current
 
 
-def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False) -> list[Path]:
+def _checkpoint_time(body: str) -> tuple[datetime, bool]:
+    """A backup run's checkpoint body: `{"at": ...}` (True), or the bare timestamp a build before sd:3578 wrote."""
+    try:
+        return datetime.fromisoformat(json.loads(body)["at"]), True
+    except json.JSONDecodeError:
+        return datetime.fromisoformat(body), False
+
+
+def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dry_run: bool = False,
+                report=None) -> list[Path]:
     """Delete owned backups taken more than `days` days before `now`.
 
     Age comes from the directory's day, which `_dated_directory` takes from
@@ -1128,12 +1197,33 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False) ->
     hourly mirror on a share (sd:4011): each is verified by its manifest's
     hashes (`_check_backup`), and its checkpoint time must also lie past the
     window, so a copy named for an older day than its data stays.
+
+    A copy whose checkpoint body is the bare timestamp of a build before
+    sd:3578 is dated and pruned like any other (sd:4694). A directory with no
+    manifest always stays: a run that stopped before writing one leaves such a
+    directory, but so can a hand-kept copy of the store, and nothing in it
+    tells the two apart. Every directory past the window that stays, `report`
+    hears with its reason. `dry_run` returns what would go and removes nothing.
     """
     _check_keep_days(days)
     _retention_root(root)
     cutoff = (now - timedelta(days=days)).date()
+    window = now - timedelta(days=days)
+    for path in _finish_removals(root, dry_run=dry_run, report=report):
+        if report is not None:
+            report(f"{'would finish' if dry_run else 'finished'} removing {path}, which an earlier prune stopped inside")
+
+    def identify(path: Path) -> tuple[int, int, str] | None:
+        """The identity checked again before removal; None for a directory inside the window."""
+        manifest = path / BACKUP_MANIFEST
+        if not manifest.exists() and not manifest.is_symlink():
+            raise BackupError("no manifest (stopped run?)")
+        if moved and _taken_at(path) >= window:
+            return None
+        return _check_backup(path, moved=moved)
+
     directories = []
-    for path in root.iterdir():
+    for path in sorted(root.iterdir()):
         if not DATED_NAME.fullmatch(path.name):
             continue
         try:
@@ -1142,16 +1232,18 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False) ->
             continue
         if day >= cutoff:
             continue
-        if moved:
-            try:
-                if _taken_at(path) >= now - timedelta(days=days):
-                    continue
-            except BackupError:
-                continue
-        if (identity := _owned_backup(path, moved=moved)) is not None:
+        try:
+            identity = identify(path)
+        except BackupError as error:
+            if report is not None:
+                report(f"kept {path}: {error}")
+            continue
+        if identity is not None:
             directories.append((path, identity))
     directories.sort(key=lambda value: _directory_order(value[0]))
-    return _remove_owned(directories, moved=moved)
+    if dry_run:
+        return [path for path, _ in directories]
+    return _remove_owned(directories, identify)
 
 
 def _mount_point(path: Path) -> Path:
@@ -1776,14 +1868,26 @@ def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None
         except (BackupError, OSError) as error:
             refuse(root, str(error))
             continue
+        # A folder with no manifest is one line for the lot, not one each (sd:4694).
+        stopped: list[Path] = []
         for path in entries:
             if path.is_symlink() or not DATED_NAME.fullmatch(path.name):
                 continue
             try:
-                candidates.append((_taken_at(path), _directory_order(path), path))
+                # On a tie the current body goes first, then the later name (sd:4694).
+                taken_at, current = _checkpoint(path)
+                candidates.append((taken_at, current, _directory_order(path), path))
             except BackupError as error:
-                refuse(path, str(error))
-    for taken_at, _, path in sorted(candidates, reverse=True):
+                if (path / BACKUP_MANIFEST).exists() or (path / BACKUP_MANIFEST).is_symlink():
+                    refuse(path, str(error))
+                else:
+                    stopped.append(path)
+                    refused.append((path, "no manifest (stopped run?)"))
+        if stopped and report is not None:
+            names = sorted((path.name for path in stopped), key=lambda name: _directory_order(Path(name)))
+            report(f"refused {len(stopped)} snapshot(s) under {root} with no manifest (stopped runs?), "
+                   f"named {names[0]} to {names[-1]}")
+    for taken_at, _, _, path in sorted(candidates, reverse=True):
         with tempfile.TemporaryDirectory(prefix="sd-newest-") as stage:
             local = Path(stage) / path.name
             try:
