@@ -1173,55 +1173,6 @@ def _checkpoint_time(body: str) -> tuple[datetime, bool]:
         return datetime.fromisoformat(body), False
 
 
-#: Every top-level name `run` writes into a snapshot directory before its manifest.
-SNAPSHOT_ENTRIES = frozenset({
-    "sd.db", "publications", "runner-journal", "publication-recovery-evidence", "runner-recovery-evidence",
-    "recovery-evidence-sha256.json", "executions", "execution-evidence.json", *CONFIGURATION})
-
-
-def _stopped_run(directory: Path) -> datetime:
-    """When the run that left `directory` with no manifest began; else `BackupError` saying why (sd:4694).
-
-    `run` writes the manifest last and removes nothing when it fails, so a run
-    that stopped after its `mkdir` leaves a dated directory without one. Such
-    a directory is identified only when every entry in it is one `run` writes,
-    none is a link, a mount or a special file, and its `sd.db` opens and holds
-    a backup run's checkpoint row. The newest such row is the run's own: it is
-    written before the copy. Anything else is not identified, and stays.
-    """
-    try:
-        if directory.is_symlink() or not directory.is_dir() or not DATED_NAME.fullmatch(directory.name):
-            raise BackupError("it is a link or not a dated directory")
-        if (directory / BACKUP_MANIFEST).exists() or (directory / BACKUP_MANIFEST).is_symlink():
-            raise BackupError("it holds a backup manifest")
-        names = sorted(path.name for path in directory.iterdir() if not FINDER_METADATA.fullmatch(path.name))
-        if "sd.db" not in names:
-            raise BackupError("it holds no backup manifest and no sd.db")
-        if unknown := [name for name in names if name not in SNAPSHOT_ENTRIES]:
-            raise BackupError(f"it holds no backup manifest, and {', '.join(unknown)} is not something a backup writes")
-        _contained(directory)
-        # `immutable`: a copy stopped before `_snapshot` set `journal_mode = DELETE` is in WAL
-        # mode, and a plain read-only open would write `-wal` and `-shm` beside it, in a dry run too.
-        # Its sidecars are not names `run` writes, so a copy holding them is refused above.
-        connection = sqlite3.connect(f"file:{directory / 'sd.db'}?mode=ro&immutable=1", uri=True)
-        try:
-            row = connection.execute(
-                "SELECT body FROM state WHERE kind = 'checkpoint' AND length(key) = 32"
-                " AND key NOT GLOB '*[^0-9a-f]*' ORDER BY id DESC LIMIT 1").fetchone()
-        finally:
-            connection.close()
-        if row is None:
-            raise BackupError("it holds no backup manifest, and its sd.db no backup run's checkpoint")
-        taken = _checkpoint_time(row[0])[0]
-    except BackupError:
-        raise
-    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error) as error:
-        raise BackupError(f"it holds no backup manifest, and could not be read: {error}") from None
-    if taken.tzinfo is None:
-        raise BackupError("its checkpoint time names no zone")
-    return taken
-
-
 def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dry_run: bool = False,
                 report=None) -> list[Path]:
     """Delete owned backups taken more than `days` days before `now`.
@@ -1247,11 +1198,12 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
     hashes (`_check_backup`), and its checkpoint time must also lie past the
     window, so a copy named for an older day than its data stays.
 
-    A directory with no manifest, left by a run that stopped before writing
-    one, goes too once its checkpoint row is past the window (`_stopped_run`);
-    so does a copy whose checkpoint body is the bare timestamp of a build
-    before sd:3578 (sd:4694). Every other directory past the window stays, and
-    `report` hears it and why. `dry_run` returns what would go and removes nothing.
+    A copy whose checkpoint body is the bare timestamp of a build before
+    sd:3578 is dated and pruned like any other (sd:4694). A directory with no
+    manifest always stays: a run that stopped before writing one leaves such a
+    directory, but so can a hand-kept copy of the store, and nothing in it
+    tells the two apart. Every directory past the window that stays, `report`
+    hears with its reason. `dry_run` returns what would go and removes nothing.
     """
     _check_keep_days(days)
     _retention_root(root)
@@ -1265,10 +1217,7 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
         """The identity checked again before removal; None for a directory inside the window."""
         manifest = path / BACKUP_MANIFEST
         if not manifest.exists() and not manifest.is_symlink():
-            if (taken := _stopped_run(path)) >= window:
-                return None
-            details = path.stat()
-            return details.st_dev, details.st_ino, taken.isoformat()
+            raise BackupError("no manifest (stopped run?)")
         if moved and _taken_at(path) >= window:
             return None
         return _check_backup(path, moved=moved)
@@ -1919,8 +1868,8 @@ def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None
         except (BackupError, OSError) as error:
             refuse(root, str(error))
             continue
-        # A run that stopped before its manifest is one line for the lot, not one each (sd:4694).
-        stopped: list[datetime] = []
+        # A folder with no manifest is one line for the lot, not one each (sd:4694).
+        stopped: list[Path] = []
         for path in entries:
             if path.is_symlink() or not DATED_NAME.fullmatch(path.name):
                 continue
@@ -1929,15 +1878,15 @@ def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None
                 taken_at, current = _checkpoint(path)
                 candidates.append((taken_at, current, _directory_order(path), path))
             except BackupError as error:
-                try:
-                    stopped.append(_stopped_run(path))
-                except BackupError:
+                if (path / BACKUP_MANIFEST).exists() or (path / BACKUP_MANIFEST).is_symlink():
                     refuse(path, str(error))
                 else:
-                    refused.append((path, "it holds no manifest: its run stopped before recording one"))
+                    stopped.append(path)
+                    refused.append((path, "no manifest (stopped run?)"))
         if stopped and report is not None:
-            report(f"refused {len(stopped)} snapshot(s) under {root} with no manifest, left by runs that stopped "
-                   f"before recording one, taken {min(stopped).isoformat()} to {max(stopped).isoformat()}")
+            names = sorted((path.name for path in stopped), key=lambda name: _directory_order(Path(name)))
+            report(f"refused {len(stopped)} snapshot(s) under {root} with no manifest (stopped runs?), "
+                   f"named {names[0]} to {names[-1]}")
     for taken_at, _, _, path in sorted(candidates, reverse=True):
         with tempfile.TemporaryDirectory(prefix="sd-newest-") as stage:
             local = Path(stage) / path.name
