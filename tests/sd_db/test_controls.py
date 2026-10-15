@@ -506,17 +506,15 @@ class AnAcknowledgementNamesItsOperator(unittest.TestCase):
 
 
 class AnAcknowledgementResolvesTheIngestsOwnFollowup(unittest.TestCase):
-    """`reporting.acknowledge` can resolve the followup `ingest` wrote (sd:921).
+    """`reporting.acknowledge` can resolve the report's open followups (sd:921, sd:4722).
 
     Every report `ingest` opens for a failed run carries one unresolved
-    followup, written by the ingest itself under session `"cron"`. The
-    refusal at `acknowledge` then blocks every one of them: 51 watchdog
-    reports on the live store on 2026-09-15, none acknowledgeable from the
-    command line. `resolve_ingest_followups=True` resolves those notes, and
-    only those, inside the same transaction as the transition, and the
-    status note records that it did under the same `who`. A followup a
-    person wrote is somebody's owed work and still blocks, keyword or not;
-    the refusal names the notes and the verb that resolves one.
+    followup, written by the ingest itself under session `"cron"`, and a
+    person may add more. The refusal at `acknowledge` blocks them all.
+    `resolve_followups=True` resolves every open one inside the same
+    transaction as the transition, and the status note records that it did
+    under the same `who`. Without the keyword the refusal names the notes
+    and the verb that resolves one.
     """
 
     def setUp(self):
@@ -554,61 +552,47 @@ class AnAcknowledgementResolvesTheIngestsOwnFollowup(unittest.TestCase):
         item, revision = self.failed_run()
         (note, _, _), = self.followups(item)
         state = reporting.acknowledge(self.db, item, expected_revision=revision, who="operator",
-                                      resolve_ingest_followups=True)
+                                      resolve_followups=True)
         self.assertEqual(state["item"]["status"], "done")
         self.assertEqual(self.followups(item), [(note, "cron", True)])
         self.assertEqual(self.statuses(item), [("opened as planning", "cron"),
-                                               (f"planning -> done by operator: resolved the ingest's followup {note}", "operator")])
+                                               (f"planning -> done by operator: resolved followup {note}", "operator")])
 
-    def test_a_followup_a_person_wrote_still_blocks_and_nothing_is_resolved(self):
+    def test_a_followup_a_person_wrote_blocks_without_the_keyword(self):
         item, _ = self.failed_run()
         owed = add_note(self.db, item, "followup", "check the disk too", session="alex")
         revision = workflow.item_state(self.db, item)["revision"]
         (cron, _, _), _ = self.followups(item)
         with self.assertRaises(workflow.WorkflowError) as raised:
-            reporting.acknowledge(self.db, item, expected_revision=revision, who="operator",
-                                  resolve_ingest_followups=True)
+            reporting.acknowledge(self.db, item, expected_revision=revision, who="operator")
         self.assertIn(f"resolve followup {owed}", str(raised.exception))
-        self.assertNotIn(f"resolve followup {cron}", str(raised.exception))
+        self.assertIn(f"resolve followup {cron}", str(raised.exception))
         self.assertEqual(workflow.item_state(self.db, item)["item"]["status"], "planning")
         self.assertEqual(self.followups(item), [(cron, "cron", False), (owed, "alex", False)])
 
-    def test_a_person_writing_under_the_ingests_session_still_blocks(self):
-        """`workflow.add_item_note` writes its `who` as `note.session`, so `"cron"` is a word anyone can say.
-
-        The ingest's followup is its session and its text together, the text
-        derived from the report's own provenance; a followup that only borrows
-        the session is somebody's note and stays open.
-        """
+    def test_the_keyword_resolves_a_followup_a_person_wrote_too(self):
+        """sd:4722: the keyword covers every open followup, not only the ingest's."""
         item, _ = self.failed_run()
-        borrowed = workflow.add_item_note(self.db, item, body="check the disk too", kind="followup", who="cron")["note"]["id"]
+        owed = add_note(self.db, item, "followup", "check the disk too", session="alex")
         revision = workflow.item_state(self.db, item)["revision"]
         (cron, _, _), _ = self.followups(item)
-        with self.assertRaises(workflow.WorkflowError) as raised:
-            reporting.acknowledge(self.db, item, expected_revision=revision, who="operator",
-                                  resolve_ingest_followups=True)
-        self.assertIn(f"resolve followup {borrowed}", str(raised.exception))
-        self.assertEqual(self.followups(item), [(cron, "cron", False), (borrowed, "cron", False)])
+        state = reporting.acknowledge(self.db, item, expected_revision=revision, who="operator",
+                                      resolve_followups=True)
+        self.assertEqual(state["item"]["status"], "done")
+        self.assertEqual(self.followups(item), [(cron, "cron", True), (owed, "alex", True)])
+        self.assertEqual(self.statuses(item)[-1],
+                         (f"planning -> done by operator: resolved followups {cron}, {owed}", "operator"))
 
-    def test_unreadable_fields_refuse_with_the_note_rather_than_resolving_on_a_guess(self):
-        """The text is derived from `fields.report`; fields that cannot say match nothing.
-
-        The default path never reads `fields` (the dashboard's notice sends
-        such a report to the command line on that promise), so it is checked
-        here too: the same row finishes once the note is resolved by hand.
-        """
+    def test_the_keyword_works_on_a_report_whose_fields_are_unreadable(self):
+        """Nothing reads `fields` any more, so a report with broken ones still finishes."""
         item, _ = self.failed_run()
         (note, _, _), = self.followups(item)
         self.db.execute("UPDATE item SET fields=? WHERE id=?", ("{not json", item)); self.db.commit()
         revision = workflow.item_state(self.db, item)["revision"]
-        with self.assertRaises(workflow.WorkflowError) as raised:
-            reporting.acknowledge(self.db, item, expected_revision=revision, who="operator",
-                                  resolve_ingest_followups=True)
-        self.assertIn(f"resolve followup {note}", str(raised.exception))
-        self.assertEqual(self.followups(item), [(note, "cron", False)])
-        resolve_note(self.db, note)
-        revision = workflow.item_state(self.db, item)["revision"]
-        self.assertEqual(reporting.acknowledge(self.db, item, expected_revision=revision, who="operator")["item"]["status"], "done")
+        state = reporting.acknowledge(self.db, item, expected_revision=revision, who="operator",
+                                      resolve_followups=True)
+        self.assertEqual(state["item"]["status"], "done")
+        self.assertEqual(self.followups(item), [(note, "cron", True)])
 
     def test_the_keyword_is_exactly_a_bool_because_it_changes_what_is_persisted(self):
         item, revision = self.failed_run()
@@ -617,7 +601,7 @@ class AnAcknowledgementResolvesTheIngestsOwnFollowup(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(workflow.WorkflowError, "exactly True or False"):
                     reporting.acknowledge(self.db, item, expected_revision=revision, who="operator",
-                                          resolve_ingest_followups=value)
+                                          resolve_followups=value)
         self.assertEqual(workflow.item_state(self.db, item)["item"]["status"], "planning")
         self.assertEqual(self.followups(item), [(note, "cron", False)])
 
@@ -628,7 +612,7 @@ class AnAcknowledgementResolvesTheIngestsOwnFollowup(unittest.TestCase):
         with patch.object(reporting, "transition", side_effect=RuntimeError("fixture")):
             with self.assertRaises(RuntimeError):
                 reporting.acknowledge(self.db, item, expected_revision=revision, who="operator",
-                                      resolve_ingest_followups=True)
+                                      resolve_followups=True)
         self.assertEqual(self.followups(item), [(note, "cron", False)])
         self.assertEqual(workflow.item_state(self.db, item)["item"]["status"], "planning")
 
@@ -639,14 +623,14 @@ class AnAcknowledgementResolvesTheIngestsOwnFollowup(unittest.TestCase):
                            body={"text": "all quiet"}, session="cron")
         revision = workflow.item_state(self.db, item)["revision"]
         state = reporting.acknowledge(self.db, item, expected_revision=revision, who="operator",
-                                      resolve_ingest_followups=True)
+                                      resolve_followups=True)
         self.assertEqual(state["item"]["status"], "done")
         self.assertEqual(self.statuses(item), [("opened as planning", "cron"), ("planning -> done by operator", "operator")])
 
     def test_the_keyword_is_off_by_default_and_who_still_has_no_default(self):
         parameters = inspect.signature(reporting.acknowledge).parameters
-        self.assertIs(parameters["resolve_ingest_followups"].default, False)
-        self.assertIs(parameters["resolve_ingest_followups"].kind, inspect.Parameter.KEYWORD_ONLY)
+        self.assertIs(parameters["resolve_followups"].default, False)
+        self.assertIs(parameters["resolve_followups"].kind, inspect.Parameter.KEYWORD_ONLY)
         self.assertIs(parameters["who"].default, inspect.Parameter.empty)
 
 

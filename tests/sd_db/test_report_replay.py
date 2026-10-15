@@ -414,7 +414,7 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
     def test_the_run_after_an_acknowledge_opens_a_fresh_report(self):
         first = self.tick("a", 1)
         self.tick("b", 16)
-        reporting.acknowledge(self.db, first["item"]["id"], who="fixture", resolve_ingest_followups=True,
+        reporting.acknowledge(self.db, first["item"]["id"], who="fixture", resolve_followups=True,
                               expected_revision=workflow.item_state(self.db, first["item"]["id"])["revision"])
         fresh = self.tick("c", 31)
         self.assertEqual(fresh["recorded"], "report")
@@ -433,7 +433,7 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         # replay found no report and opened a fresh one, with a followup.
         first = self.tick("a", 1)["item"]["id"]
         self.tick("b", 16)
-        reporting.acknowledge(self.db, first, who="fixture", resolve_ingest_followups=True,
+        reporting.acknowledge(self.db, first, who="fixture", resolve_followups=True,
                               expected_revision=workflow.item_state(self.db, first)["revision"])
         before = tuple(self.db.iterdump())
         again = self.tick("b", 16)
@@ -497,7 +497,7 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
                 # The readable one is acknowledged so the next subtest starts
                 # from no readable open target; the unreadable one stays open,
                 # which is the property: open, and still never a target.
-                reporting.acknowledge(self.db, fresh["item"]["id"], who="fixture", resolve_ingest_followups=True,
+                reporting.acknowledge(self.db, fresh["item"]["id"], who="fixture", resolve_followups=True,
                                       expected_revision=workflow.item_state(self.db, fresh["item"]["id"])["revision"])
 
     def test_a_record_report_neither_folds_nor_is_a_target(self):
@@ -523,7 +523,7 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         self.assertEqual(self.repeats(item)["last_run_id"], "b")
 
     def ack(self, item):
-        reporting.acknowledge(self.db, item, who="fixture", resolve_ingest_followups=True,
+        reporting.acknowledge(self.db, item, who="fixture", resolve_followups=True,
                               expected_revision=workflow.item_state(self.db, item)["revision"])
 
     def test_an_acknowledged_findings_report_stays_closed_while_its_findings_repeat(self):
@@ -922,7 +922,7 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         self.tick("b", 16, self.ONE)
         reporting.reopen(self.db, older, expected_revision=workflow.item_state(self.db, older)["revision"], who="fixture")
         reporting.acknowledge(self.db, older, expected_revision=workflow.item_state(self.db, older)["revision"],
-                              who="fixture", resolve_ingest_followups=True)
+                              who="fixture", resolve_followups=True)
         self.db.execute("UPDATE state SET body=json_set(body, '$.item', ?) WHERE key=?",
                         (older, reporting.CHAIN_KEY + "probe@hosta"))
         self.db.commit()
@@ -950,7 +950,7 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
     def test_a_finding_past_the_cut_does_not_fold_into_an_acknowledged_report(self):
         acked = self.tick("a", 1, self.ONE)["item"]["id"]
         reporting.acknowledge(self.db, acked, expected_revision=workflow.item_state(self.db, acked)["revision"],
-                              who="fixture", resolve_ingest_followups=True)
+                              who="fixture", resolve_followups=True)
         again = self.tick("b", 16, self.past_the_cut(self.ONE, "SD_REPORT_ATTENTION: disk low [9]\n"))
         self.assertEqual((again["recorded"], again["item"]["status"]), ("report", "planning"))
 
@@ -1032,7 +1032,7 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         both = "SD_REPORT_ATTENTION: a\nSD_REPORT_ATTENTION: b\n"
         first = self.tick("a", 1, both)["item"]["id"]
         self.tick("b", 16, "SD_REPORT_ATTENTION: a\n")
-        reporting.acknowledge(self.db, first, who="fixture", resolve_ingest_followups=True,
+        reporting.acknowledge(self.db, first, who="fixture", resolve_followups=True,
                               expected_revision=workflow.item_state(self.db, first)["revision"])
         back = self.tick("c", 31, both)
         self.assertEqual((back["recorded"], back["item"]["status"]), ("report", "planning"))
@@ -1047,7 +1047,7 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
             other = self.tick("a", 1, both)["item"]["id"]
         self.assertNotEqual(self.tick("b", 16, "SD_REPORT_ATTENTION: a\n")["item"]["id"], other)
         mine = self.tick("c", 31, both)["item"]["id"]
-        reporting.acknowledge(self.db, mine, who="fixture", resolve_ingest_followups=True,
+        reporting.acknowledge(self.db, mine, who="fixture", resolve_followups=True,
                               expected_revision=workflow.item_state(self.db, mine)["revision"])
         self.assertNotEqual(self.tick("d", 46, "SD_REPORT_ATTENTION: a\n")["item"]["id"], mine)
 
