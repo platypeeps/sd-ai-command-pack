@@ -2611,6 +2611,19 @@ class PostMergeOwed(RefusingHub):
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual((self.runs(), self.noted()), (1, [1]))
 
+    def test_a_kill_after_the_result_write_loses_only_the_notes_and_never_runs_the_target_again(self) -> None:
+        """Failure table, notes: the result landed, then the run died before the notes; once, not twice."""
+        def killed_at_the_post_merge_note(item: int, body: str, *args: Any) -> str:
+            if body.startswith("Post-merge: "):
+                raise Killed
+            return self.note(item, body, *args)
+        with mock.patch.object(sd_lane, "default_note", killed_at_the_post_merge_note), self.assertRaises(Killed):
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.claim_dead()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.runs(), self.noted(), self.entries()[0]["post_merge"]["ran"]),
+                         (1, [], f"make post-merge passed in {self.repo}"))
+
     def test_a_merge_the_next_run_applies_from_a_hub_stop_record_runs_the_target_there(self) -> None:
         """Failure table, hub stop (sd:4184): the outcome write was refused, then the run died before the target."""
         self.killed_before_the_target(self.upgrade_after("merge"))
@@ -2654,6 +2667,34 @@ class PostMergeOwed(RefusingHub):
         self.claim_dead()
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual(self.runs(), 2)
+
+    def test_a_mark_write_that_failed_then_a_kill_in_the_landing_still_owes_the_target(self) -> None:
+        """Failure table, mark: the hub refused the mark after the merge, and the run died in the landing."""
+        real = sd_lane.update
+
+        def refused_after_the_merge(queue: Any, change: Any, check: Any = None) -> Any:
+            if self.calls and self.calls[-1][2] == "merge":
+                raise sd_lane.LaneError("the hub went away", code=sd_lane.HUB_UNAVAILABLE)
+            return real(queue, change, check)
+        with mock.patch.object(sd_lane, "update", refused_after_the_merge), \
+                mock.patch.object(sd_lane, "land", side_effect=Killed), self.assertRaises(Killed):
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.make_dead()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], self.runs(), self.noted(), self.records()), ("merged", 1, [1], []))
+
+    def test_a_target_that_could_not_start_stays_owed_and_only_its_first_try_notes(self) -> None:
+        """Failure table, unknown: the Makefile or origin could not be read; that is no run, so the mark stays."""
+        unknown = "make post-merge unknown: the Makefile could not be read"
+        with mock.patch.object(sd_lane, "make_post_merge", return_value=unknown):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+            self.assertEqual((answer["post_merge"], self.entries()[0]["post_merge"], self.noted(), self.note_kinds[-1]),
+                             (unknown, sd_lane.POST_MERGE_OWED, [1], "followup"))
+            sd_lane.run_lane(self.repo, self.environ, self.ship)  # a retry that meets it again notes nothing
+        self.assertEqual(self.noted(), [1])
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.runs(), self.noted()), (1, [1, 1]))
 
     def test_an_entry_merged_before_the_mark_never_runs_the_target(self) -> None:
         """Older state: rows an older version merged carry no mark, and a run that merges nothing runs nothing."""

@@ -316,6 +316,8 @@ LANDING_SECONDS = 1800
 POST_MERGE_SECONDS = 600
 #: A merged entry's `post_merge` until a run claims its target; then the claim, then `{"ran", "at"}` (sd:4630).
 POST_MERGE_OWED = "owed"
+#: The `make_post_merge` answers of a target that never started: its entries stay owed, and the next run retries.
+NOT_STARTED = ("make post-merge unknown", "make post-merge did not start")
 #: After this long a run starts no new entry (sd:3287): one started just inside it, the longest entry seen,
 #: then `make post-merge` and five minutes of the run's own reads and landings end before the job TERMs the
 #: runner. A 55-minute budget assumed 30 to 45 minutes an entry, and runners died mid-merge (sd:3481).
@@ -1695,42 +1697,51 @@ def post_merge(root: pathlib.Path, queue: Queue, environ: dict[str, str], answer
     second write records its result, then each item gets a note, a comment
     when the target passed, else a followup; it never fails a merged entry.
     A claim write that fails runs nothing: the marks stay for the next run.
+    A target that did not start (`NOT_STARTED`) stays owed, and only its
+    first try, in the run that merged, notes the item.
     A result write that fails leaves the claim, which a later run takes
     again once this process is gone, so the target may run twice, never
     zero times. Nothing owed, or a Makefile without the rule, adds nothing.
     """
-    token = secrets.token_hex(16)
+    token, landed = secrets.token_hex(16), [row for row in answer.get("ran", []) if row.get("status") == "merged"]
     try:
         taken = update(queue, lambda entries: take_owed(entries, token))
     except LaneError as error:  # unknown: a claim may have landed, which the next run takes once this pid is gone
-        if not any(row.get("status") == "merged" for row in answer.get("ran", [])):
+        if not landed:
             return answer
         return {**answer, "post_merge": (f"make post-merge not run: the owed entries could not be claimed ({error}); "
                                          "the next run runs it")[:1200]}
     if not taken:
         return answer
     # This run's last landing, else the newest owed entry's, says whether a branch checkout moved.
-    landed = ([row for row in answer.get("ran", []) if row.get("status") == "merged"]
-              or sorted(taken, key=lambda row: str(row.get("finished_at") or "")))
+    last = (landed or sorted(taken, key=lambda row: str(row.get("finished_at") or "")))[-1]
     main = sd_lib.main_worktree_root(root).resolve()
-    ran = make_post_merge(main, environ, str(landed[-1].get("fast_forward") or ""))
+    ran = make_post_merge(main, environ, str(last.get("fast_forward") or ""))
+    retry = (ran or "").startswith(NOT_STARTED)
     try:
-        update(queue, lambda entries: record_post_merge(entries, token, ran))
+        update(queue, lambda entries: record_post_merge(entries, token, ran, retry))
     except LaneError as error:
         if ran is not None:
             ran = (f"{ran}; its result could not be recorded ({error}), so a later run may run the target "
                    "again")[:1200]
     if ran is None:
         return answer
+    # Its first try noted a target that did not start; a retry notes only a run.
+    noted = [row for row in taken if not retry or row["item"] in {merged.get("item") for merged in landed}]
+    return {**answer, "post_merge": note_post_merge(noted, ran, main)}
+
+
+def note_post_merge(rows: list[dict[str, Any]], ran: str, main: pathlib.Path) -> str:
+    """Note each row's item with `ran`, a comment when the target passed, else a followup; `ran` with any failure."""
     kind = "comment" if ran.startswith("make post-merge passed") else "followup"
-    for row in taken:
+    for row in rows:
         try:
             written = default_note(row["item"], f"Post-merge: {ran}", main, kind)
         except Exception as error:  # noqa: BLE001 -- the merge stands; the answer keeps what the note could not
             written = f"failed: {type(error).__name__}: {error}"
         if written != "written":
             ran = f"{ran}; the note on sd:{row['item']} {written}"[:1200]
-    return {**answer, "post_merge": ran}
+    return ran
 
 
 def owes_post_merge(row: dict[str, Any]) -> bool:
@@ -1754,12 +1765,15 @@ def take_owed(entries: list[dict[str, Any]], token: str) -> list[dict[str, Any]]
     return taken
 
 
-def record_post_merge(entries: list[dict[str, Any]], token: str, ran: str | None) -> None:
-    """Settle each target `token` claimed with what `make_post_merge` answered; None is a Makefile without the rule."""
+def record_post_merge(entries: list[dict[str, Any]], token: str, ran: str | None, retry: bool) -> None:
+    """Settle each target `token` claimed with what `make_post_merge` answered; None is a Makefile without the rule.
+
+    A target that did not start (`retry`) is owed again: an unread Makefile is unknown, not "ran".
+    """
     for row in entries:
         mark = row.get("post_merge")
         if isinstance(mark, dict) and mark.get("token") == token:
-            row["post_merge"] = {"ran": ran or "no post-merge rule", "at": stamp_now()}
+            row["post_merge"] = POST_MERGE_OWED if retry else {"ran": ran or "no post-merge rule", "at": stamp_now()}
 
 
 def origin_makefile(main: pathlib.Path) -> tuple[str, str | None]:
@@ -2145,11 +2159,14 @@ def advance(queue: Queue, entry: dict[str, Any], token: str) -> None:
                     code=LANE_ELSEWHERE)
 
 
-def owe_post_merge(queue: Queue, entry: dict[str, Any], token: str) -> None:
+def owe_post_merge(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, Any]) -> None:
     """Mark the running entry `post_merge: owed` once its merge landed, so a kill in the landing leaves the target
-    owed on the entry reclaim fails (sd:4630). One try: a write that fails leaves the mark to `finish_entry`."""
-    with contextlib.suppress(LaneError):
+    owed on the entry reclaim fails (sd:4630). One try: when the hub refuses it, the merged `outcome` goes to a
+    hub-stop record instead, which the next run's reclaim applies if this run dies before `finish_entry`."""
+    try:
         update(queue, lambda entries: held(entries, entry, token).update(post_merge=POST_MERGE_OWED))
+    except LaneError as error:  # unknown: the record covers a write that did not land; `settle_checkout` drops it
+        record_hub_stop(queue, token, Stop(str(error), code=error.code), entry, outcome=outcome)
 
 
 def finish_entry(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[str, Any]) -> None:
@@ -2596,7 +2613,7 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
                         f"sd:{entry['item']} met {met} in {outcome.get('step')}")
             if outcome.get("status") == "merged":  # before the landing, so a kill in it still owes the target
                 outcome["post_merge"] = POST_MERGE_OWED
-                owe_post_merge(queue, entry, token)
+                owe_post_merge(queue, entry, token, outcome)
             outcome.update(settle(local, outcome, environ, note, queue.lock_file, root))
     except Stop as error:
         return None, record_hub_stop(queue, token, error, entry, tree=tree)
