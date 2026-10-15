@@ -17,7 +17,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import records
+from sd_db import records, upsert_item
+from sd_db.sources.frontmatter import read as read_frontmatter
+from sd_db.sources.vault import NOT_FIELDS, SOURCE
 
 #: The pack checkout this suite runs from.
 PACK = Path(__file__).resolve().parents[2]
@@ -179,7 +181,7 @@ def plugin_entry(prefix="sdw", root="$OBSIDIAN_VAULT", workflow=None, **extra):
         "root": f"/plugins/{prefix}",
         "readable": True,
         "prefix": prefix,
-        "store": {"driver": "vault", "root": root, "bases": {
+        "store": {"driver": "db", "root": root, "bases": {
             "blog-idea": "System/Databases/Blog Ideas",
             "topic": "System/Databases/Topics",
         }},
@@ -213,6 +215,26 @@ def vault(root: Path, *, ideas: dict[str, str], topics: dict[str, str]) -> Path:
                 encoding="utf-8",
             )
     return root
+
+
+def land_vault(db, root: Path) -> None:
+    """Rows for the notes `vault()` wrote: the shape the removed vault import landed (sd:4627).
+
+    Kind `idea`, `source` `vault`, the plugin kind in `fields.kind`, the ladder
+    word in `stage`, `path` and the identity under the vault root.
+    """
+    for kind, base, stages in (("blog-idea", "System/Databases/Blog Ideas", BLOG_IDEA),
+                               ("topic", "System/Databases/Topics", TOPIC)):
+        for path in sorted((root / base).rglob("*.md")):
+            matter, body = read_frontmatter(path.read_text(encoding="utf-8"))
+            stage = str(matter["status"]).strip()
+            relative = path.relative_to(root).as_posix()
+            upsert_item(db, source=SOURCE, external_id=f"{kind}:{relative}", kind="idea",
+                        title=str(matter.get("title") or path.stem).strip(), status=stages[stage],
+                        who="test", created_at=str(matter.get("dateCreated") or "").strip() or None,
+                        path=relative, stage=stage, fields={**{str(key): value for key, value in matter.items()
+                                                                if str(key) not in NOT_FIELDS}, "kind": kind},
+                        body={"markdown": body})
 
 
 class TempRootCase(unittest.TestCase):

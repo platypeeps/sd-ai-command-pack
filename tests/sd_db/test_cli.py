@@ -298,7 +298,8 @@ class TheMigrationVerbs(MigrationVerbCase):
         self.assertIn("Usage: sd-db <verb>", completed.stderr)
         self.assertNotIn("retire S", completed.stderr)
         completed = self.sd_db("import", "docs-work", expect=1)
-        self.assertIn("the sources are index, issues, register, vault", completed.stderr)
+        self.assertIn("the sources are index, issues, register", completed.stderr)
+        self.assertNotIn("vault", completed.stderr)
 
     def test_repo_lane_host_sets_the_host_prints_before_and_after_and_hub_writes_null(self):
         """sd:3075, acceptance 1. An unset row reads `hub`; the verb names a
@@ -397,7 +398,13 @@ class TheMigrationVerbs(MigrationVerbCase):
     def test_an_unknown_source_names_the_sources(self):
         completed = self.sd_db("import", "nowhere", expect=1)
         self.assertIn("register", completed.stderr)
-        self.assertIn("vault", completed.stderr)
+        self.assertNotIn("vault", completed.stderr)
+
+    def test_the_vault_import_is_removed_and_says_so(self):
+        for verb in ("import", "verify"):
+            with self.subTest(verb=verb):
+                completed = self.sd_db(verb, "vault", expect=1)
+                self.assertIn("the vault import was removed (sd:4627)", completed.stderr)
 
 
 # The remove-verb cases' own imports.

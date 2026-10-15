@@ -5,10 +5,9 @@
 operations as the dashboard. Ordinary task progress needs no repository or
 GitHub issue. Code delivery records verified commit evidence separately.
 
-`sd store items` reads workflow rows. `sd store list` reads plugin artifacts
-from their configured store, including the vault; a note written by hand or
-by Obsidian is visible to the next listing without synchronization.
-Where a plugin artifact kind is kept comes
+`sd store items` reads workflow rows. `sd store list` reads a plugin's artifact
+rows from the database (the `db` store driver); the vault holds only their
+mirror. Where a plugin artifact kind is kept comes
 from the manifest's `store` block -- a sibling of `dashboard`, not a ninth
 `kinds.*` key, because the eight describe what a kind *is* and none of that
 changes when the same kind is kept somewhere else.
@@ -70,10 +69,8 @@ import pathlib
 import queue
 import re
 import sqlite3
-import stat
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator
@@ -146,13 +143,15 @@ REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 # describe the *shape* of a kind -- what fields it has, what statuses it moves
 # between, what a person may not overwrite -- and none of that changes when the
 # same kind is kept somewhere else. Where it is kept is a driver's business, so
-# it lives in the driver's block, the count of eight keys is untouched,
-# and step 11's vault reorganisation rewrites `bases` and nothing else.
+# it lives in the driver's block, the count of eight keys is untouched.
 STORE_KEYS = frozenset({"driver", "root", "bases"})
 # A closed set rather than an `if`. A manifest that says `"driver": "vualt"`
 # refuses by name instead of falling through to a default. Under `db` the rows
 # are the source, through `sd_db.records`, and the vault holds a mirror (sd:3975).
-DRIVERS = frozenset({"vault", "db"})
+DRIVERS = frozenset({"db"})
+#: The `vault` driver read and wrote the notes themselves. It was removed once
+#: no plugin named it (sd:4627); a manifest that still does refuses by name.
+REMOVED_DRIVERS = frozenset({"vault"})
 #: Who a `db` store write names in its notes.
 STORE_WHO = "sd store"
 # The root is an environment variable reference and never a literal path.
@@ -746,6 +745,11 @@ def validate_store(manifest: dict[str, object], kinds: dict[str, object]) -> dic
         raise Refusal("`store` is declared but the manifest declares no `kinds` to keep")
 
     driver = store["driver"]
+    if driver in REMOVED_DRIVERS:
+        raise Refusal(
+            f"`store.driver` is {driver!r}, which was removed (sd:4627): rows are the source now. "
+            f"Set `store.driver` to \"db\"; the plugin's notes must already be rows (an earlier "
+            f"pack's `sd-db import {driver}` makes them)")
     if driver not in DRIVERS:
         raise Refusal(
             f"`store.driver` is {driver!r}; the driver(s) are {', '.join(sorted(DRIVERS))}")
@@ -823,19 +827,19 @@ def refuse_db_kinds(kinds: dict[str, object], workflow: object) -> None:
 
 def validate_workflow(manifest: dict[str, object], kinds: dict[str, object],
                       store: dict[str, object] | None) -> dict[str, dict[str, object]]:
-    """`workflow`: the kinds the vault importer turns into rows (sd:1098).
+    """`workflow`: the kinds kept as rows, each ladder word mapped to a row status (sd:1098).
 
     A top-level block rather than a ninth `kinds.*` key, for the reason
     `store` is one: whether a kind becomes a row is a fact about the
     backbone's database, not about the note. Each kind needs a `store.bases`
-    entry, because the importer reads the base, and may name the field that
+    entry, because the mirror writes into the base, and may name the field that
     holds its due date.
     """
 
     workflow = manifest.get("workflow")
-    if store is not None and store["driver"] == "db":
-        refuse_db_kinds(kinds, workflow)
     if workflow is None:
+        if store is not None:
+            refuse_db_kinds(kinds, workflow)
         return {}
     if not isinstance(workflow, dict) or not workflow:
         raise Refusal("`workflow` is not a non-empty object")
@@ -847,7 +851,7 @@ def validate_workflow(manifest: dict[str, object], kinds: dict[str, object],
         if name not in kinds:
             raise Refusal(f"`workflow` names {name!r}, which is not a declared kind")
         if name not in bases:
-            raise Refusal(f"{what} has no `store.bases` entry, so the importer has nothing to read")
+            raise Refusal(f"{what} has no `store.bases` entry, so the mirror has nowhere to write")
         if not isinstance(entry, dict):
             raise Refusal(f"{what} is not an object")
         unknown = sorted(set(entry) - {"status", "due-field"})
@@ -865,6 +869,8 @@ def validate_workflow(manifest: dict[str, object], kinds: dict[str, object],
                 raise Refusal(f"`workflow[{name!r}].due-field` is {due!r}, "
                               f"which is not one of the kind's `fields`")
             checked[name]["due-field"] = due
+    if store is not None:
+        refuse_db_kinds(kinds, checked)
     return checked
 
 
@@ -1468,7 +1474,7 @@ def config_list(args: argparse.Namespace) -> int:
     return 0
 
 
-# ------------------------------------------------------------------ the vault driver
+# ------------------------------------------------------------------ the vault root
 
 # Carried across from `local-project-dashboard/collectors.py:173-227`, and the
 # reason is the whole of it: macOS gates `~/Documents` behind TCC, and a
@@ -1568,82 +1574,6 @@ def store_root(store: dict[str, object]) -> pathlib.Path:
     return root
 
 
-def frontmatter(text: str) -> dict[str, str]:
-    """A note's frontmatter, read the way the vault's own notes were written.
-
-    Deliberately the same reader as `pack.py:244-258`, down to what it cannot
-    see: a block value spanning lines (`contexts:` followed by `  - Personal`)
-    comes back as the empty string, because the continuation line does not
-    match and the key does. That is a limitation and not a bug to fix here --
-    the notes in the vault were written by that reader's twin, and a stricter
-    parser would disagree with the corpus it has to read. A real YAML parser is
-    not an option either: D-C1 keeps this to the standard library.
-    """
-
-    fields: dict[str, str] = {}
-    lines = text.splitlines()
-    if not lines or lines[0].rstrip() != "---":
-        return fields
-    for line in lines[1:]:
-        # Column zero, not `.strip()`. An indented `---` is content inside a
-        # block scalar and never the fence, and this reader has to agree with
-        # `frontmatter_span` about where the block ends -- 8-iv's `set` checks
-        # a transition against what this returns while editing the line that
-        # one locates, and the two disagreeing means judging a note by a value
-        # that is not in it. Measured against the live corpus when this
-        # changed: 0 of 244 notes parse differently.
-        if line.rstrip() == "---":
-            break
-        match = re.match(r"^([A-Za-z0-9_-]+):\s*(.*)$", line)
-        if match:
-            fields[match.group(1)] = match.group(2).strip().strip('"')
-    return fields
-
-
-def note_body(text: str) -> str:
-    """Everything after the frontmatter, or the whole note when it has none."""
-
-    # Column zero, for the reason `frontmatter` gives. This is the third site
-    # that has to agree, and `read_note` is what reaches it, so `sd store get`
-    # is where the disagreement shows: an indented `---` inside a block scalar
-    # ended the block here but not in `frontmatter`, and the note came back
-    # with its fields read past the point its body had been cut from.
-    lines = text.splitlines(keepends=True)
-    if not lines or lines[0].rstrip() != "---":
-        return text
-    for index, line in enumerate(lines[1:], start=1):
-        if line.rstrip() == "---":
-            return "".join(lines[index + 1:])
-    # An unterminated block is not frontmatter at all. Returning the tail would
-    # silently drop the top of a note whose first line happened to be `---`.
-    return text
-
-
-def note_text(path: pathlib.Path) -> str:
-    """The note's bytes, refused the way `read_note` refuses.
-
-    `store get` and `store list --full` print the file itself rather than the
-    parsed body, so they read it a second time. `read_note` has already
-    refused an unreadable note by then in both callers, which leaves only the
-    narrow window where a note becomes unreadable between the two reads -- a
-    bare `read_text` answers that with a traceback where the rest of this file
-    answers with a refusal.
-    """
-
-    try:
-        return path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        raise Refusal(f"cannot read {path}: {error}") from None
-
-
-def read_note(path: pathlib.Path) -> tuple[dict[str, str], str]:
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        raise Refusal(f"cannot read {path}: {error}") from None
-    return frontmatter(text), note_body(text)
-
-
 def resolve_kind(
         reference: object) -> tuple[dict[str, object], dict[str, object], str, pathlib.Path]:
     """`<prefix>.<kind>` -> that kind, its store block, the kind name, its checkout.
@@ -1692,34 +1622,6 @@ def kind_base(store: dict[str, object], name: str,
     return (store_root(store) if root is None else root) / str(bases[name])
 
 
-def note_paths(base: pathlib.Path) -> list[pathlib.Path]:
-    """The kind's notes: `*.md` under `base`, one level deep, regular files only.
-
-    `is_file()` rather than a suffix test alone, and it is not cosmetic. A
-    directory named `Draft.md` and a symlink pointing at nothing both match the
-    suffix, and the first would fail the whole listing on `IsADirectoryError`
-    -- one strange entry in a vault taking out every query against it. They are
-    skipped instead.
-
-    A symlink to a real note **is** read, deliberately. `digest()` refuses
-    symlinks because a lock must pin content that is where it claims to be;
-    this is a read of the user's own vault, whose owner and whose manifest
-    author are the same person, and refusing a symlinked database folder would
-    reject a legitimate layout to guard a boundary that does not exist here.
-    Declined in review, with the reasoning recorded rather than assumed.
-    """
-
-    try:
-        return sorted(
-            path for path in base.iterdir() if path.suffix == ".md" and path.is_file())
-    except FileNotFoundError:
-        # A declared kind whose folder nobody has made yet holds no notes;
-        # `store_root` has already refused a vault that is not there (sd:2688).
-        return []
-    except OSError as error:
-        raise Refusal(f"cannot list {base}: {error}") from None
-
-
 def store_fields(kind: dict[str, object]) -> list[str]:
     declared = kind["fields"]
     assert isinstance(declared, list)  # validate_kind builds it; narrows for the type checker
@@ -1742,20 +1644,12 @@ def status_filter(kind: dict[str, object], wanted: str | None) -> str | None:
     return wanted
 
 
-# --- 8-iv: the write path -------------------------------------------------
+# --- rows as notes ---------------------------------------------------------
 #
-# Everything below edits a note **by the line**. Nothing here parses a
-# frontmatter block into a dictionary and writes the dictionary back, and that
-# is the whole design rather than a style preference: `frontmatter()` above is
-# deliberately lossy, and a round trip through it drops every list value and
-# strips the quotes off every quoted scalar. Measured on the corpus this has to
-# write to, that is 244 of 244 notes losing 1,166 list items, and 146 of them
-# additionally emitting malformed YAML. R11-D27 carries the numbers.
+# `get` and `list --full` print a row the way its mirror note reads: its fields
+# as a frontmatter block, then the body. The block is rendered by the line, never
+# round-tripped through a parser, so a value that needs quoting is quoted.
 
-
-#: A frontmatter key at the start of its line. The same character class the
-#: reader accepts, so a key this can edit is a key that one can see.
-FIELD_LINE = re.compile(r"^([A-Za-z0-9_-]+):(.*)$")
 
 #: A value needing quotes to survive a YAML reader: one holding a colon-space,
 #: opening a wikilink, a flow collection or a comment, or bounded by spaces.
@@ -1780,20 +1674,18 @@ NEEDS_QUOTING = re.compile(
 
 
 def render_value(value: str) -> str:
-    """A scalar as the vault's own notes spell it.
+    """A scalar as the mirror notes spell it.
 
     Quoting is not cosmetic here. `source-brief: [[2026-08-15 - Daily Intel
     Brief]]` and a `description:` holding a sentence colon both stop parsing
-    when emitted bare, which is the second of the two failures R11-D27 records.
+    when emitted bare.
 
     Two classes are **refused** rather than encoded, because this writer's
     counterpart is `frontmatter()`, which strips quotes without unescaping
     anything. A value it could not read back is a value this must not write:
 
-    * A control character -- a newline above all. `edit_field` writes one line,
-      and a value carrying `\n` would make that line two, silently inserting a
-      physical line into the block and breaking the one property this whole
-      design exists to hold.
+    * A control character -- a newline above all. A value carrying `\n` would
+      make its line two, silently inserting a physical line into the block.
     * A double quote. The quoted form would be `\\"`, and the reader's
       `.strip('"')` hands back the backslash. Refusing beats writing a value
       the store cannot read back; the corpus quotes plenty of scalars and none
@@ -1818,7 +1710,7 @@ def render_value(value: str) -> str:
         # writer's own reader would hand the value back unchanged, which is
         # what made the case look safe -- but the vault is read by Obsidian and
         # by every other tool pointed at it, and emitting YAML only this reader
-        # can parse is the failure R11-D27 exists to prevent.
+        # can parse is a failure.
         raise Refusal(
             "the value needs quoting and holds a backslash; inside quotes YAML reads"
             " that as an escape, so the note would not parse for anything but this reader")
@@ -1845,74 +1737,13 @@ def frontmatter_span(text: str) -> tuple[list[str], int, int]:
         # `---` is content inside a block scalar, not the closing fence: YAML
         # indents a block scalar's body, so a `---` within one is always
         # indented and a fence never is. Matching `.strip()` closed the block
-        # at the wrong line, and `edit_field` then inserted a new `key: value`
+        # at the wrong line, and a field write then inserted a new `key: value`
         # into the middle of the note's prose while leaving the real field in
         # place -- a corrupted note carrying a duplicate key.
         if lines[index].rstrip() == "---":
             return lines, 1, index
     raise Refusal("the note's frontmatter block is never closed")
 
-
-def field_lines(lines: list[str], first: int, close: int, key: str) -> list[int]:
-    """Every line in the block that declares `key`. Refuses when there is more than one.
-
-    Frontmatter with a duplicate key is malformed. `count=1` picking the first
-    of two is a silent choice wearing the clothes of a fix, and it would leave
-    the note's reader and the note's writer disagreeing about which line won.
-    """
-
-    hits = [
-        i for i in range(first, close)
-        if (m := FIELD_LINE.match(lines[i])) and m.group(1) == key]
-    if len(hits) > 1:
-        raise Refusal(
-            f"the note carries {key!r} on {len(hits)} lines"
-            f" ({', '.join(str(i + 1) for i in hits)}); refusing to guess which one is meant")
-    return hits
-
-
-def edit_field(text: str, key: str, value: str) -> str:
-    """`key: value` in the frontmatter, replacing one line and nothing else.
-
-    The file comes back byte-for-byte identical apart from the single line this
-    writes -- list values, quoting, key order, blank lines and the body are all
-    untouched, because none of them are ever read in.
-
-    A key carried twice is refused rather than edited. Frontmatter with a
-    duplicate key is malformed, `count=1` picking the first of two is a silent
-    choice wearing the clothes of a fix, and the note's reader would disagree
-    with the note's writer about which one won.
-    """
-
-    lines, first, close = frontmatter_span(text)
-    hits = field_lines(lines, first, close, key)
-    # A new line takes the block's own ending rather than a hardcoded "\n",
-    # which would mix endings in a CRLF note.
-    opener = lines[0]
-    ending = opener[len(opener.rstrip("\r\n")):] or "\n"
-    if hits:
-        # Keep whatever line ending the file already uses on that line.
-        target = lines[hits[0]]
-        ending = target[len(target.rstrip("\r\n")):] or "\n"
-        lines[hits[0]] = f"{key}: {render_value(value)}{ending}"
-    else:
-        # A key the note does not carry goes immediately before the closing
-        # fence. That is the only position the backbone can choose without
-        # knowing what the keys mean; `pack.py` inserted after a named anchor
-        # per field, and that knowledge is what the backbone must not hold.
-        lines.insert(close, f"{key}: {render_value(value)}{ending}")
-    return "".join(lines)
-
-
-#: A block-sequence continuation: an indented `- ` under a key that has no
-#: inline value. This is the shape `frontmatter()` cannot see and `edit_field`
-#: would orphan, so it is matched on the raw line rather than parsed.
-LIST_ITEM = re.compile(r"^\s+-\s")
-
-#: A YAML comment line. Skipped between a key and its items for the same
-#: reason a blank line is: neither is a value, and stopping at one steps over
-#: the sequence it precedes.
-YAML_COMMENT = re.compile(r"^\s*#")
 
 #: A `{{name}}` placeholder in a template. Matched greedily enough to catch a
 #: misspelling, because the failure this prevents is a typo shipping literal
@@ -1932,45 +1763,6 @@ SMUGGLED_HEADING = re.compile(r"^ {0,3}## ")
 #: the outer fence on the inner one and left `note_heading_lines` reading a
 #: fenced `## Score` as the real heading.
 CODE_FENCE = re.compile(r"^ {0,3}(?P<marker>`{3,}|~{3,})(?P<info>.*)$")
-
-
-def refuse_list_value(text: str, key: str) -> None:
-    """A field whose value is a YAML block sequence, refused rather than edited.
-
-    `edit_field` replaces the one line that declares the key. For a scalar that
-    is the whole value; for a list it is only the header, and the `  - ` items
-    below it would be left behind as orphans under whatever scalar replaced
-    them. The note would still parse -- that is what makes it dangerous -- and
-    the orphaned items would read as a sequence belonging to the *next* key.
-
-    This is R11-D27's hazard reached from the other side. That decision is why
-    the write path is a line edit and not a parse-and-rewrite; this is the case
-    a line edit gets wrong on its own, and it is detected from the note's own
-    bytes rather than from a manifest declaration. A manifest can only protect
-    the fields someone remembered to declare, and the 244 notes carrying
-    `contexts:` and `tags:` today are declared by nothing.
-    """
-
-    lines, first, close = frontmatter_span(text)
-    hits = field_lines(lines, first, close, key)
-    if not hits:
-        return
-    header = FIELD_LINE.match(lines[hits[0]])
-    assert header is not None   # field_lines matched it with the same pattern
-    if header.group(2).strip():
-        return                  # an inline value; the line is the whole value
-    for line in lines[hits[0] + 1:close]:
-        # Blanks and comments are both skipped rather than treated as the end
-        # of the block. Returning on a comment let `contexts:\n# note\n  - x`
-        # through the guard and straight into the orphaning edit.
-        if not line.strip() or YAML_COMMENT.match(line):
-            continue
-        if LIST_ITEM.match(line):
-            raise Refusal(
-                f"{key!r} holds a list, and `sd store set` edits a single line;"
-                " editing it would leave its items orphaned."
-                " Edit the note in the vault instead")
-        return
 
 
 def refuse_protected(kind: dict[str, object], field: str, verb: str) -> None:
@@ -2017,15 +1809,12 @@ def refuse_below_floor(kind: dict[str, object], field: str, value: str) -> None:
         raise Refusal(f"`floor` puts {field!r} at {floors[field]} or above; {value!r} is under it")
 
 
-def refuse_human_only(kind: dict[str, object], status: str,
-                      remedy: str = "edit the note in the vault instead") -> None:
+def refuse_human_only(kind: dict[str, object], status: str, remedy: str) -> None:
     """A status the manifest reserves for a person.
 
     There is deliberately no flag that lifts this. A `--force` would make the
     key decorative and read in every review as though it protected something;
-    the escape hatch is a human editing the note in the vault, which the 8-iii
-    freshness test proves is visible to the next query with no sync step.
-    Under the `db` driver the person is the operator on the dashboard.
+    the person is the operator on the dashboard.
     """
 
     actions = kind.get("human-only") or {}
@@ -2034,20 +1823,6 @@ def refuse_human_only(kind: dict[str, object], status: str,
         if reserved == status:
             raise Refusal(
                 f"`human-only` reserves {action!r} (status {status!r}) for a person; {remedy}")
-
-
-def refuse_bad_transition(kind: dict[str, object], current: str, wanted: str) -> None:
-    transitions = kind.get("transitions")
-    if transitions is None:
-        return
-    assert isinstance(transitions, dict)
-    if current == wanted:
-        return
-    allowed = transitions.get(current, [])
-    if wanted not in allowed:
-        raise Refusal(
-            f"`transitions` allows {current!r} -> {', '.join(sorted(allowed)) or 'nothing'};"
-            f" {wanted!r} is not among them")
 
 
 def refuse_title_taken(root: pathlib.Path, path: pathlib.Path) -> None:
@@ -2093,31 +1868,6 @@ def refuse_title_taken(root: pathlib.Path, path: pathlib.Path) -> None:
                     f"{found.relative_to(root)}; titles share one namespace across the vault")
 
 
-def refuse_duplicate_unique(
-        kind: dict[str, object], base: pathlib.Path, values: dict[str, str],
-        skip: pathlib.Path | None = None) -> None:
-    """`unique-fields`, checked against the notes on disk rather than an index.
-
-    The vault is the system-of-record, so the only honest answer to "is this
-    value taken" is the one every other note gives right now.
-    """
-
-    unique = kind.get("unique-fields") or []
-    assert isinstance(unique, list)
-    wanted = {field: values[field] for field in unique if values.get(field)}
-    if not wanted:
-        return
-    for path in note_paths(base):
-        if skip is not None and path == skip:
-            continue
-        found, _ = read_note(path)
-        for field, value in wanted.items():
-            if found.get(field) == value:
-                raise Refusal(
-                    f"`unique-fields` declares {field!r} unique and {path.stem!r}"
-                    f" already holds {value!r}")
-
-
 def note_path(base: pathlib.Path, title: str) -> pathlib.Path:
     """A title becomes a filename in `base`, and cannot become anywhere else.
 
@@ -2130,9 +1880,8 @@ def note_path(base: pathlib.Path, title: str) -> pathlib.Path:
     exercise: with it removed, `a/b` and `../escaped` are both accepted.
 
     The *parent* is resolved and the note itself is not. Resolving the whole
-    path follows a symlinked note out to wherever it points and refuses it,
-    which `note_paths` deliberately allows -- a vault whose owner and whose
-    manifest author are the same person may link a note in.
+    path follows a symlinked note out to wherever it points and refuses it;
+    the vault's owner and the manifest's author are the same person.
 
     The three degenerate names are refused before that only because they make a
     contained but useless path (`..` becomes `...md`) and deserve the clearer
@@ -2217,7 +1966,7 @@ def section_span(lines: list[str], headings: list[tuple[int, str]],
     `## ` line.
 
     A name carried by two headings is refused rather than resolved, for the
-    reason `field_lines` refuses a duplicated key: picking the first of two is
+    reason a duplicated key is refused: picking the first of two is
     a silent choice wearing the clothes of a fix, and it would leave the note's
     reader and the note's writer disagreeing about which one won.
     """
@@ -2263,9 +2012,8 @@ def line_ending(line: str) -> str:
     r"""The line's own ending, or a newline when it has none.
 
     Hardcoding "\n" is how a CRLF note came back carrying both endings in one
-    file. `edit_field` and `fill_sections` each work this rule out inline; a
-    third and fourth copy inside the section editor is where it would drift, so
-    it is named once here.
+    file. `fill_sections` works this rule out inline; a second copy inside the
+    section editor is where it would drift, so it is named once here.
     """
 
     return line[len(line.rstrip("\r\n")):] or "\n"
@@ -2287,30 +2035,20 @@ def section_lines(body: str, ending: str) -> list[str]:
     return [ending] + [line + ending for line in body.rstrip("\r\n").splitlines()]
 
 
-def edit_section(text: str, name: str, body: str, order: list[str], *, fenced: bool = True) -> str:
-    """One `## ` section's body, replacing those lines and nothing else.
+def edit_section(text: str, name: str, body: str, order: list[str]) -> str:
+    """One `## ` section's body of a row, replacing those lines and nothing else.
 
-    The same discipline `edit_field` follows, for the same reason (R11-D27):
-    the note is spliced by the line and never parsed and written back. The
-    frontmatter is carried through as raw lines and is not read at all here, so
-    a list value, a quoted scalar and a key order that `frontmatter()` cannot
-    round-trip all survive a section edit untouched.
-
-    `fenced=False` edits a `db` row's body, which holds no frontmatter block.
+    The body is spliced by the line and never parsed and written back, and
+    holds no frontmatter block.
     """
 
     lines = text.splitlines(keepends=True)
-    # The body only. A column-zero `## ` cannot occur inside a YAML block
-    # scalar, whose content is indented, but scanning from the closing fence
-    # costs nothing and keeps this from ever depending on that.
-    close = frontmatter_span(text)[2] if fenced else -1
-    headings = note_heading_lines(lines, close + 1)
+    headings = note_heading_lines(lines, 0)
 
     span = section_span(lines, headings, name)
     if span is None:
         # The heading is being created, so it has no line ending of its own to
-        # copy; the opening fence is the note's own, the same fallback
-        # `edit_field` uses when it inserts a key the note did not carry.
+        # copy; the first line is the body's own.
         ending = line_ending(lines[0]) if lines else "\n"
         at = insertion_point(lines, headings, name, order)
         filled = section_lines(body, ending)
@@ -2327,9 +2065,8 @@ def edit_section(text: str, name: str, body: str, order: list[str], *, fenced: b
         lines[at:at] = block
     else:
         start, end = span
-        # The heading's own line ending, never a hardcoded newline --
-        # `edit_field` and `fill_sections` follow the same rule, and a CRLF
-        # note that took LF-terminated text came back with both endings in one
+        # The heading's own line ending, never a hardcoded newline: a CRLF
+        # body that took LF-terminated text came back with both endings in one
         # file.
         ending = line_ending(lines[start])
         filled = section_lines(body, ending)
@@ -2440,48 +2177,6 @@ def resolve_pair_files(
             raise UsageError(f"{pair!r} is not {spellings}")
         out.append(f"{head}{sep}{read_pair_file(flag, head, path)}")
     return out
-
-
-def write_atomically(path: pathlib.Path, text: str) -> None:
-    """Write via a temporary file in the same directory, then rename.
-
-    `write_text` truncates before it writes, so a failure part way through
-    leaves a half-written note -- and for `add` that half-written file then
-    makes every retry refuse, because the path now exists. `os.replace` is
-    atomic within a filesystem, and the temporary lives beside the target so
-    the rename never crosses one.
-    """
-
-    try:
-        mode = stat.S_IMODE(path.stat().st_mode)
-    except OSError:
-        mode = None   # a new note; the process umask decides, as `write_text` would
-
-    tmp = None
-    try:
-        # `newline=""` disables translation on write. The default rewrites
-        # every `\n` to `os.linesep`, which on Windows turns an LF note into a
-        # CRLF one -- every line changed by a function whose whole purpose is
-        # to change one. The edited line already carries whatever ending it
-        # had; nothing here may add to that.
-        handle = tempfile.NamedTemporaryFile(
-            "w", encoding="utf-8", newline="", dir=path.parent,
-            prefix=f".{path.name}.", suffix=".tmp", delete=False)
-        tmp = pathlib.Path(handle.name)
-        with handle:
-            handle.write(text)
-        # `NamedTemporaryFile` creates at 0600 and `os.replace` carries the
-        # temporary's mode onto the target, so editing one field of a
-        # world-readable note quietly made it owner-only. The note's own mode
-        # is the one to keep: this is an edit, and an edit does not decide who
-        # may read the file.
-        if mode is not None:
-            os.chmod(tmp, mode)
-        os.replace(tmp, path)
-    except OSError as error:
-        if tmp is not None and tmp.exists():
-            tmp.unlink(missing_ok=True)
-        raise Refusal(f"cannot write {path}: {error}") from None
 
 
 def render_field(field: str, value: str | list[str]) -> str:
@@ -2605,7 +2300,7 @@ def fill_sections(body: str, filled: dict[str, str]) -> str:
         if text is None:
             continue
         # The heading's own line ending, never a hardcoded "\n" -- the same
-        # rule `edit_field` follows. A CRLF template took LF-terminated text
+        # rule `edit_section` follows. A CRLF template took LF-terminated text
         # and came back with both endings in one file.
         ending = line[len(line.rstrip("\r\n")):] or "\n"
         out.append(ending + ending.join(text.rstrip("\r\n").splitlines()) + ending)
@@ -2675,60 +2370,32 @@ def rendered_body(kind: dict[str, object], root: pathlib.Path, args: argparse.Na
 
 
 def store_add(args: argparse.Namespace) -> int:
-    """A new note, rendered through the kind's `sections.template`.
+    """A new row, its body rendered from the kind's template as a note's is.
 
-    `add` is the safe verb: a note that does not exist yet has nothing to
-    preserve, so this is the one place a block is written whole rather than
-    edited by the line.
+    The vault is read for one thing: its other notes share the row's file-name
+    namespace, which the mirror will write into (`refuse_title_taken`).
     """
 
     kind, store, name, root = resolve_kind(args.kind)
-    if store["driver"] == "db":
-        return db_add(args, kind, store, name, root)
-    vault = store_root(store)
-    base = kind_base(store, name, vault)
-    path = note_path(base, args.title)
-    if path.exists():
-        raise Refusal(f"{path} already exists; `sd store set` edits a note that is there")
-    refuse_title_taken(vault, path)
-
     fields = store_fields(kind)
     values = parse_assignments(
         resolve_pair_files(args.field or [], "--field-file", sequences=True), fields)
     for field in values:
         refuse_protected(kind, field, "add")
     refuse_scalar_lists(kind, values)
-    floors = kind.get("floor") or {}
-    assert isinstance(floors, dict)
-    # Every floored field, not only the ones supplied. Iterating the supplied
-    # values let a floor be skipped by omission: the field then defaulted to
-    # `""` at render time and the note was written under its own floor.
-    for field in floors:
-        value = values.get(str(field), "")
-        assert not isinstance(value, list)   # scalar_only refused it above
-        refuse_below_floor(kind, str(field), value)
+    stage = values.pop("status", None)
+    assert not isinstance(stage, list)  # refuse_scalar_lists refused it
     if "status" in fields:
-        initial = str(kind["initial-status"])
-        wanted = values.setdefault("status", initial)
-        assert isinstance(wanted, str)       # scalar_only refused a list above
-        if wanted != initial:
-            refuse_bad_transition(kind, initial, wanted)
-        refuse_human_only(kind, wanted)
-    # The list-valued fields are dropped rather than passed through. Every
-    # `unique-fields` entry is in `scalar_only`, so nothing a uniqueness check
-    # would have read can be a list, and filtering here says that in the type
-    # rather than leaving the checker to take it on trust.
-    refuse_duplicate_unique(
-        kind, base, {f: v for f, v in values.items() if isinstance(v, str)})
+        refuse_human_only(kind, stage or str(kind["initial-status"]), DB_HUMAN)
     body = rendered_body(kind, root, args)
-
-    block = "".join(render_field(field, values.get(field, "")) for field in fields)
-    try:
-        base.mkdir(parents=True, exist_ok=True)
-    except OSError as error:
-        raise Refusal(f"cannot create {base}: {error}") from None
-    write_atomically(path, f"---\n{block}---\n{body}")
-    print(f"wrote {path}")
+    vault = store_root(store)
+    refuse_title_taken(vault, note_path(kind_base(store, name, vault), args.title))
+    # Every declared field, as `add` writes every key of a note; an empty one is `None`, as `key:` reads.
+    held = {field: values.get(field) for field in fields if field != "status"}
+    with db_store(name) as (records, rules, connection):
+        row = records.add_row(connection, rules, title=args.title, who=STORE_WHO,
+                              fields=held, body=body, stage=stage)
+    print(f"added item {row['id']} at {row['path']}")
     return 0
 
 
@@ -2774,32 +2441,21 @@ def set_request(args: argparse.Namespace,
 
 
 def store_set(args: argparse.Namespace) -> int:
-    """Fields and `## ` sections of one note, edited by the line.
-
-    Read R11-D27 before changing this to parse the note. It reads as the
-    cleaner implementation and it destroys every note it touches.
+    """Fields and `## ` sections of one row, in one write at the revision it was read at.
 
     Several fields in one call rather than one per call, and sections
-    alongside them, because the writes are then one atomic replace instead of
-    three. The verbs this replaces moved keys together: `pack.py tips
-    set-published` wrote `status`, `url` and `used-by` in a single write, and
-    `pack.py vault set-score` wrote the `score` field and the `## Score` body
-    in another. Three `sd store set` calls in a row can stop after the first,
-    leaving a note published with no URL -- a state `pack.py` could not reach,
-    so migrating to it would have been a regression wearing a refactor's
-    clothes.
+    alongside them, because the write is then one instead of three: three
+    calls in a row can stop after the first, leaving a row published with no URL.
 
-    `set-section` still exists and is not deprecated by this. It is the verb
-    for a note whose sections change and whose frontmatter does not, and its
-    two positionals say that where `set`'s four cannot.
+    `set-section` is the verb for a row whose sections change and whose
+    fields do not, and its two positionals say that where `set`'s four cannot.
 
-    Every refusal below runs against every supplied field before anything is
-    edited. A per-field loop that validated and wrote as it went would be the
-    same partial-write hazard this verb exists to close.
+    Every refusal runs against every supplied field before anything is
+    written.
     """
 
     # The shape of the invocation first, before the manifest is resolved or the
-    # vault is touched. Whether the two spellings were mixed is a property of
+    # database is touched. Whether the two spellings were mixed is a property of
     # the command line alone, and answering it with "no note titled 'T'" tells
     # the caller about the wrong thing -- and with exit 1 where the mistake is
     # an exit 2.
@@ -2816,58 +2472,22 @@ def store_set(args: argparse.Namespace) -> int:
     if args.field is not None and args.value is None:
         raise UsageError("the positional form is `set KIND TITLE FIELD VALUE`")
 
-    kind, store, name, _ = resolve_kind(args.kind)
-    if store["driver"] == "db":
-        return db_edit(args, kind, name, *set_request(args, kind))
-    base = kind_base(store, name)
-    path = note_path(base, args.title)
-    if not path.is_file():
-        raise Refusal(f"no note titled {args.title!r} in {base}")
+    kind, _, name, _ = resolve_kind(args.kind)
     scalars, filled, order = set_request(args, kind)
-
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        raise Refusal(f"cannot read {path}: {error}") from None
-
-    # Structure before semantics, and the order is load-bearing. Every check
-    # below this point reads a field value, and a note with no block or with
-    # the same key on two lines has no unambiguous value to read -- judging a
-    # transition against whichever line the reader happened to keep would
-    # refuse or allow for a reason that is not in the file. `edit_field` would
-    # refuse these anyway, but only after a semantic check had already reported
-    # a different complaint about a note it could not read properly.
-    lines, first, close = frontmatter_span(text)
-    for field in scalars:
-        field_lines(lines, first, close, field)
-
-    # `frontmatter(text)`, not `read_note(path)`: the note is already in hand,
-    # and a second read would let the transition below be judged against a
-    # version of the file that is not the one `edit_field` goes on to edit.
-    found = frontmatter(text)
-    if "status" in scalars:
-        refuse_human_only(kind, scalars["status"])
-        refuse_bad_transition(kind, found.get("status", ""), scalars["status"])
-    # One call with every field, not one per field: `unique-fields` may name
-    # more than one key, and a note is a duplicate on the set it would end up
-    # holding rather than on each key considered alone.
-    refuse_duplicate_unique(kind, base, scalars, skip=path)
-    # Last of the refusals, and the only one that reads the note's shape rather
-    # than the manifest: a field holding a block sequence cannot be edited by
-    # the line without orphaning its items.
-    for field in scalars:
-        refuse_list_value(text, field)
-
-    updated = text
-    for field, value in scalars.items():
-        updated = edit_field(updated, field, value)
-    for section, body in filled.items():
-        updated = edit_section(updated, section, body, order)
-    if updated == text:
-        print(f"{path} already holds that")
-        return 0
-    write_atomically(path, updated)
-    print(f"set {', '.join([*scalars, *filled])} in {path}")
+    stage = scalars.pop("status", None)
+    if stage is not None:
+        refuse_human_only(kind, stage, DB_HUMAN)
+    with db_store(name) as (records, rules, connection):
+        row = records.get_row(connection, kind=name, title=args.title)
+        body = row["body"]
+        for section, text in filled.items():
+            body = edit_section(body, section, text, order)
+        done = records.edit_row(connection, row["id"], rules, revision=row["revision"], who=STORE_WHO,
+                                stage=stage, fields=scalars, body=body if filled else None)
+    if done["revision"] == row["revision"]:
+        print(f"item {row['id']} already holds that")
+    else:
+        print(f"set {', '.join([*(['status'] if stage else []), *scalars, *filled])} in item {row['id']}")
     return 0
 
 
@@ -2891,104 +2511,64 @@ def section_request(args: argparse.Namespace,
 
 
 def store_set_section(args: argparse.Namespace) -> int:
-    """One or more `## ` sections of one note, edited by the line.
-
-    Read R11-D27 before changing this to parse the note. It reads as the
-    cleaner implementation and it destroys every note it touches: `frontmatter()`
-    is deliberately lossy, and a note written back through it loses every list
-    value and every quoted scalar it carried.
-
-    Several sections in one call rather than one per call, because the writes
-    are then one atomic replace instead of three. `pack.py topics
-    set-ground-truth` and its neighbours each rewrote the file separately, so
-    an interrupted run left a note with some sections updated and some not.
+    """One or more `## ` sections of one row, in one write at the revision it was read at.
 
     There is no `--force` and no way to create a section the manifest does not
     declare. `sections.order` is what `add` renders the template against, and a
-    section outside it would be a note whose shape its own manifest calls wrong.
+    section outside it would be a row whose shape its own manifest calls wrong.
     """
 
-    kind, store, name, _ = resolve_kind(args.kind)
-    if store["driver"] == "db":
-        return db_edit(args, kind, name, {}, *section_request(args, kind))
-    base = kind_base(store, name)
-    path = note_path(base, args.title)
-    if not path.is_file():
-        raise Refusal(f"no note titled {args.title!r} in {base}")
+    kind, _, name, _ = resolve_kind(args.kind)
     filled, order = section_request(args, kind)
-
-    try:
-        text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        raise Refusal(f"cannot read {path}: {error}") from None
-
-    updated = text
-    for section, body in filled.items():
-        updated = edit_section(updated, section, body, order)
-    if updated == text:
-        print(f"{path} already holds that text")
-        return 0
-    write_atomically(path, updated)
-    print(f"set {', '.join(filled)} in {path}")
+    with db_store(name) as (records, rules, connection):
+        row = records.get_row(connection, kind=name, title=args.title)
+        body = row["body"]
+        for section, text in filled.items():
+            body = edit_section(body, section, text, order)
+        done = records.edit_row(connection, row["id"], rules, revision=row["revision"], who=STORE_WHO,
+                                stage=None, fields={}, body=body)
+    if done["revision"] == row["revision"]:
+        print(f"item {row['id']} already holds that")
+    else:
+        print(f"set {', '.join(filled)} in item {row['id']}")
     return 0
 
 
 def store_list(args: argparse.Namespace) -> int:
-    """Every note of one kind, read from the vault at the moment of asking.
+    """Every row of one kind. `--full` adds the body: under `--json` each row gains a `body` key,
+    and as plain text each row prints whole, frontmatter block first, the way `store get` prints one.
 
-    Nothing is cached and no index is consulted. The vault is the
-    system-of-record (R5-D1), so a note written by hand, by Obsidian, or by
-    another tool is visible to the next `sd store list` with no sync step in
-    between -- which is the property step 8 exists to establish and the one the
-    replaced stack could not offer.
-
-    `--full` adds the body. Under `--json` each row gains a `body` key; as
-    plain text each note is printed whole -- frontmatter included, the way
-    `store get` prints one -- because that is the shape
-    `pack.py topics list --full` had and the routines read.
-
-    What it does *not* do is widen the fields to every key the note carries,
-    the way `store get --json` does: `get` names one note, so a surprise field
-    there is the answer to the question asked, while a listing is a table and a
-    row that grows columns stops being one. The routines this exists for read
-    `## Covers`, `## Feeds` and `## Ground truth` off the whole topic set at
-    once, which took an N+1 walk of `get` before this.
+    `get` reports every field of the row; a listing is a table, so it holds the
+    kind's declared fields only.
     """
 
-    kind, store, name, _ = resolve_kind(args.kind)
-    if store["driver"] == "db":
-        return db_list(args, kind, name)
+    kind, _, name, _ = resolve_kind(args.kind)
     wanted = status_filter(kind, args.status)
     fields = store_fields(kind)
-    rows = []
-    for path in note_paths(kind_base(store, name)):
-        found, body = read_note(path)
-        if wanted is not None and found.get("status") != wanted:
-            continue
-        row = {"title": path.stem, **{field: found.get(field, "") for field in fields}}
+    with db_store(name, write=False) as (records, _, connection):
+        found = records.list_rows(connection, name, stage=wanted)
+    listed = []
+    for row in found:
+        held = db_fields(kind, row)
+        entry = {"title": pathlib.PurePosixPath(row["path"]).stem,
+                 **{field: "" if held[field] is None else held[field] for field in fields}}
         if args.full:
-            row["body"] = body
-        rows.append((path, row))
+            entry["body"] = row["body"]
+        listed.append(entry)
     if args.json:
-        json.dump([row for _, row in rows], sys.stdout, indent=2, sort_keys=True)
+        json.dump(listed, sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
         return 0
-    if args.full:
-        for path, row in rows:
-            # The blank line between notes is `pack.py topics list --full`'s,
-            # kept so a routine retargeted at `sd` reads the same shape it did.
-            # A note whose file does not end in a newline gets one first:
-            # otherwise the `print()` below only terminates its last line and
-            # the next `===` header follows with no separator at all.
-            print(f"=== {row['title']} ===")
-            text = note_text(path)
+    for row, entry in zip(found, listed, strict=True):
+        if args.full:
+            text = db_text(kind, row)
+            print(f"=== {entry['title']} ===")
             sys.stdout.write(text if text.endswith("\n") else text + "\n")
             print()
-        print(f"# {len(rows)} note(s)", file=sys.stderr)
-        return 0
-    for _, row in rows:
-        print("\t".join([*(row[field] or "?" for field in fields), row["title"]]))
-    print(f"# {len(rows)} note(s)", file=sys.stderr)
+        else:
+            print("\t".join([*(", ".join(entry[field]) if isinstance(entry[field], list)
+                               else entry[field] or "?" for field in fields), entry["title"]]))
+    print(f"# {len(listed)} row(s)", file=sys.stderr)
     return 0
 
 
@@ -3020,44 +2600,31 @@ def section_of(kind: dict[str, object], args: argparse.Namespace, read: Callable
 
 
 def store_get(args: argparse.Namespace) -> int:
-    """One note: its fields and its whole body.
+    """One row: its fields and its whole body.
 
     This is the only thing `interface = 1` promises beyond the exit codes, so
-    `--json` reports **every** frontmatter key the note carries rather than the
-    subset the kind declares. A note that grew a field the manifest has not
-    caught up with is exactly the case a caller needs to see, and filtering to
-    the declared list would hide it while looking complete.
+    `--json` reports **every** field the row carries rather than the subset the
+    kind declares. A row that grew a field the manifest has not caught up with
+    is exactly the case a caller needs to see, and filtering to the declared
+    list would hide it while looking complete.
     """
 
-    kind, store, name, _ = resolve_kind(args.kind)
-    if store["driver"] == "db":
-        return db_get(args, kind, name)
-    base = kind_base(store, name)
-    path = note_path(base, args.title)
-    if not path.is_file():
-        raise Refusal(f"no note titled {args.title!r} in {base}")
-
+    kind, _, name, _ = resolve_kind(args.kind)
+    with db_store(name, write=False) as (records, _, connection):
+        row = records.get_row(connection, kind=name, title=args.title)
     if args.section:
-        # A section the kind declares but the note does not carry reads as
-        # empty and exits 0, rather than refusing. That is what makes
-        # read-edit-write cover creation: `pack.py topics add-feed` carried a
-        # whole second branch to create `## Feeds` on first use, and a caller
-        # that appends a line to what it read here and writes it back gets that
-        # for free, with no case to get wrong.
-        if section_body := section_of(kind, args, lambda: note_text(path)):
+        if section_body := section_of(kind, args, lambda: db_text(kind, row)):
             print(section_body)
         return 0
-
-    fields, body = read_note(path)
     if args.json:
         json.dump(
-            {"kind": args.kind, "title": args.title, "path": str(path),
-             "fields": fields, "body": body},
+            {"kind": args.kind, "title": args.title, "path": row["path"],
+             "fields": db_fields(kind, row), "body": row["body"]},
             sys.stdout, indent=2, sort_keys=True)
         sys.stdout.write("\n")
         return 0
     print(f"=== {args.title} ===")
-    sys.stdout.write(note_text(path))
+    sys.stdout.write(db_text(kind, row))
     return 0
 
 
@@ -3065,8 +2632,8 @@ def store_get(args: argparse.Namespace) -> int:
 #
 # Under `store.driver: db` the rows are the source and the vault holds a
 # mirror, so these verbs read and write rows through `sd_db.records`; only
-# `add` reads the vault, for title collisions. The library checks the stage graph, floors, unique fields
-# and the revision. It leaves `human-only` and `protected-fields` to its
+# `add` reads the vault, for title collisions. The library checks the stage
+# graph, floors, unique fields and the revision. It leaves `human-only` and `protected-fields` to its
 # callers: the dashboard is the operator and may make those moves, and
 # `sd store` is how an agent writes, so they are checked here.
 
@@ -3122,110 +2689,6 @@ def db_text(kind: dict[str, object], row: dict[str, Any]) -> str:
     return f"---\n{block}---\n{row['body']}"
 
 
-def db_add(args: argparse.Namespace, kind: dict[str, object], store: dict[str, object],
-           name: str, root: pathlib.Path) -> int:
-    """A new row, its body rendered from the kind's template as a note's is.
-
-    The vault is read for one thing: its other notes share the row's file-name
-    namespace, which the mirror will write into (`refuse_title_taken`).
-    """
-
-    fields = store_fields(kind)
-    values = parse_assignments(
-        resolve_pair_files(args.field or [], "--field-file", sequences=True), fields)
-    for field in values:
-        refuse_protected(kind, field, "add")
-    refuse_scalar_lists(kind, values)
-    stage = values.pop("status", None)
-    assert not isinstance(stage, list)  # refuse_scalar_lists refused it
-    if "status" in fields:
-        refuse_human_only(kind, stage or str(kind["initial-status"]), DB_HUMAN)
-    body = rendered_body(kind, root, args)
-    vault = store_root(store)
-    refuse_title_taken(vault, note_path(kind_base(store, name, vault), args.title))
-    # Every declared field, as `add` writes every key of a note; an empty one is `None`, as `key:` reads.
-    held = {field: values.get(field) for field in fields if field != "status"}
-    with db_store(name) as (records, rules, connection):
-        row = records.add_row(connection, rules, title=args.title, who=STORE_WHO,
-                              fields=held, body=body, stage=stage)
-    print(f"added item {row['id']} at {row['path']}")
-    return 0
-
-
-def db_edit(args: argparse.Namespace, kind: dict[str, object], name: str,
-            scalars: dict[str, str], filled: dict[str, str], order: list[str]) -> int:
-    """One row's stage, fields and sections in one write, at the revision it was read at."""
-
-    stage = scalars.pop("status", None)
-    if stage is not None:
-        refuse_human_only(kind, stage, DB_HUMAN)
-    with db_store(name) as (records, rules, connection):
-        row = records.get_row(connection, kind=name, title=args.title)
-        body = row["body"]
-        for section, text in filled.items():
-            body = edit_section(body, section, text, order, fenced=False)
-        done = records.edit_row(connection, row["id"], rules, revision=row["revision"], who=STORE_WHO,
-                                stage=stage, fields=scalars, body=body if filled else None)
-    if done["revision"] == row["revision"]:
-        print(f"item {row['id']} already holds that")
-    else:
-        print(f"set {', '.join([*(['status'] if stage else []), *scalars, *filled])} in item {row['id']}")
-    return 0
-
-
-def db_list(args: argparse.Namespace, kind: dict[str, object], name: str) -> int:
-    """Every row of one kind, in the shape `store_list` prints notes."""
-
-    wanted = status_filter(kind, args.status)
-    fields = store_fields(kind)
-    with db_store(name, write=False) as (records, _, connection):
-        found = records.list_rows(connection, name, stage=wanted)
-    listed = []
-    for row in found:
-        held = db_fields(kind, row)
-        entry = {"title": pathlib.PurePosixPath(row["path"]).stem,
-                 **{field: "" if held[field] is None else held[field] for field in fields}}
-        if args.full:
-            entry["body"] = row["body"]
-        listed.append(entry)
-    if args.json:
-        json.dump(listed, sys.stdout, indent=2, sort_keys=True)
-        sys.stdout.write("\n")
-        return 0
-    for row, entry in zip(found, listed, strict=True):
-        if args.full:
-            text = db_text(kind, row)
-            print(f"=== {entry['title']} ===")
-            sys.stdout.write(text if text.endswith("\n") else text + "\n")
-            print()
-        else:
-            print("\t".join([*(", ".join(entry[field]) if isinstance(entry[field], list)
-                               else entry[field] or "?" for field in fields), entry["title"]]))
-    print(f"# {len(listed)} row(s)", file=sys.stderr)
-    return 0
-
-
-def db_get(args: argparse.Namespace, kind: dict[str, object], name: str) -> int:
-    """One row, in the shapes `store_get` prints a note."""
-
-    with db_store(name, write=False) as (records, _, connection):
-        row = records.get_row(connection, kind=name, title=args.title)
-    if args.section:
-        if section_body := section_of(kind, args, lambda: db_text(kind, row)):
-            print(section_body)
-        return 0
-    if args.json:
-        json.dump(
-            {"kind": args.kind, "title": args.title, "path": row["path"],
-             "fields": db_fields(kind, row), "body": row["body"]},
-            sys.stdout, indent=2, sort_keys=True)
-        sys.stdout.write("\n")
-        return 0
-    print(f"=== {args.title} ===")
-    sys.stdout.write(db_text(kind, row))
-    return 0
-
-
 class Pair(argparse.Action):
     """`--x` and `--x-file` accumulate into one list, in command-line order.
 
@@ -3234,7 +2697,7 @@ class Pair(argparse.Action):
     rather than on where it was typed: `--field tags+=a --field-file tags+=b
     --field tags+=c` would write a, c, b. A note's tag order is visible in its
     frontmatter, and a reordering here is a diff nobody asked for that nothing
-    downstream would call wrong -- R11-D27's lesson: the note still parses, so
+    downstream would call wrong: the note still parses, so
     the silence is not evidence. `migrate-golden-corpus` used to be the witness
     that would have caught it; the bracket was spent and deleted on 2026-09-02,
     which is why this is pinned by a test rather than left to the writer.
@@ -3399,7 +2862,7 @@ def build_parser() -> argparse.ArgumentParser:
     made.set_defaults(handler=store_add)
 
     # No `--force`. `human-only` is the whole reason this verb refuses, and a
-    # flag that lifts the refusal would make the key decorative (R11-D27).
+    # flag that lifts the refusal would make the key decorative.
     edit = kept.add_parser(
         "set", help="fields and `## ` sections of one note, edited by the line")
     edit.add_argument("kind", help="<prefix>.<kind>, as `sd plugin list` reports it")

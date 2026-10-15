@@ -454,7 +454,7 @@ The target must be in the store's CHECK (`workflow.schema_kinds`) and in `workfl
 A `work`, `report` or `skill-review` row keeps its kind, because its producer owns it.
 So does an `idea` with a `piece`, and a row whose `fields` carry `contribution` or `skill_review` (`workflow.PRODUCED_FIELDS`).
 The edit writes a `comment` note, `Changed kind <old> -> <new> by <who>`, in the same transaction.
-`writes.upsert_item` also writes `kind` on every import, with no note: a vault-imported `idea` moved by hand goes back on the next import.
+A vault base row's kind is refused: `records` lists it by item kind `idea`.
 
 `work-idea`, `personal-idea` and `personal` (`workflow.REPO_LESS_KINDS`) are filed with no repository.
 Read them as a group with `reads.backlog_items(connection, repo=reads.NO_REPO)` or the dashboard's `/tasks?repo=no%20repo`.
@@ -469,7 +469,7 @@ Once a plugin's `store.driver` is `db`, its vault base rows live in `item` and `
 - One HTML page per base goes to `<vault>/docs/dashboard/base-<kind>.html`, for the dashboard's Documents tab.
 - A file is overwritten only when its `mirror-hash` matches its content, or it has none and reads as its row. Any other file is a hand edit: it stays, and the render reports it.
 - A note in the base folder that no row holds is reported and kept.
-- It refuses off the hub, while a `restore` is unresolved, for a kind still on the `vault` driver, and when a base folder does not exist.
+- It refuses off the hub, while a `restore` is unresolved, for a kind whose plugin list still reports the removed `vault` driver, and when a base folder does not exist.
 
 Each committed `records` write renders its kind, or every kind after a failed render. A write never fails for its render: it prints `mirror not updated: <reason>`.
 Every render records the `heartbeat` state row `records-mirror`, body `{at, ok, kinds, written, refused, reason}`.

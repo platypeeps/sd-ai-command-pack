@@ -48,7 +48,7 @@ from ..repos import (
 from ..repos import add as add_repo
 from ..repos import seed as seed_repos
 from ..schema import SCHEMA_VERSION
-from ..sources import docs_work, index_cache, issues, register, vault
+from ..sources import docs_work, index_cache, issues, register
 from ..sources import run as run_sitting
 from ..sources import verify as verify_source
 from ..sources.frontmatter import FrontmatterError
@@ -492,7 +492,6 @@ def _review_export(item: int, key_path: str | None, out: Path) -> int:
 SOURCES = {
     "index": lambda connection: index_cache.Reader.at(),
     "register": lambda connection: register.Reader.at(),
-    "vault": lambda connection: vault.Reader.at(home=_home()),
     "issues": lambda connection: issues.Reader(),
 }
 
@@ -893,6 +892,9 @@ def _last_commit(root: Path, relative: str) -> str | None:
 
 
 def _source(name: str, connection):
+    if name == "vault":
+        raise SdDbError("the vault import was removed (sd:4627): every plugin keeps its rows in the "
+                        "database, and the vault holds only their mirror")
     if name not in SOURCES:
         raise SdDbError(
             f"no source {name!r}; the sources are {', '.join(sorted(SOURCES))}"

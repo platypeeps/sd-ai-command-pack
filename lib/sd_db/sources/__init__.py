@@ -1,8 +1,8 @@
 """The migrations, and the fixed order they run in.
 
-Requirement 2 filled the database from five sources. Four remain; the
+Requirement 2 filled the database from five sources. Three remain; the
 `docs/work` importer and its retire are gone, since every item's status
-lives in its row (sd:3231). Each is one command, one source, idempotent,
+lives in its row (sd:3231), and so is the `vault` importer (sd:4627). Each is one command, one source, idempotent,
 reporting counts, in the order **freeze, import, verify**.
 
     frozen = source.freeze()           # read the source once, at one moment
@@ -11,7 +11,7 @@ reporting counts, in the order **freeze, import, verify**.
 
 **The freeze is a refusal, not a row.** A sitting freezes its source by
 refusing to run while anything is still writing it -- an uncommitted `prd.md`,
-a vault file open in Obsidian's own writer -- and it lifts the freeze by
+a file open in an editor's own writer -- and it lifts the freeze by
 returning, leaving the source exactly as it found it. There is no `freeze`
 kind in `state` because there is nothing to remember: a process that died
 mid-sitting left a source that was never modified. What *is* remembered is
@@ -134,8 +134,6 @@ class Counts:
     inserted: int = 0
     updated: int = 0
     unchanged: int = 0
-    #: Records of an idea promoted to a writing piece that changed since; reported, not written.
-    promoted_changed: int = 0
 
     def record(self, what: str) -> None:
         self.seen += 1
@@ -147,7 +145,6 @@ class Counts:
             "inserted": self.inserted,
             "updated": self.updated,
             "unchanged": self.unchanged,
-            "promoted_changed": self.promoted_changed,
         }
 
 
@@ -165,10 +162,10 @@ class Difference:
 
 
 class Source(Protocol):
-    """What a migration is. Four of these, and no base class between them.
+    """What a migration is. Three of these, and no base class between them.
 
     The sources share this shape and nothing else: one reads SQLite, one
-    reads a markdown register, one reads a vault, one reads GitHub. A base
+    reads a markdown register, one reads GitHub. A base
     class would have to abstract over that and would buy nothing, since the
     contract is three methods.
     """
@@ -244,8 +241,6 @@ class Sitting:
             f"{self.source}: {self.counts.seen} seen, "
             f"{self.counts.inserted} inserted, {self.counts.updated} updated, "
             f"{self.counts.unchanged} unchanged"
-            + (f", {self.counts.promoted_changed} promoted and changed since, not written"
-               if self.counts.promoted_changed else "")
         ]
         lines.extend(self.notes)
         if self.clean:

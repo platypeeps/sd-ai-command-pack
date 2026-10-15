@@ -1591,33 +1591,6 @@ MUTATIONS: dict[str, Mutation] = {
             "    if False:  # leg d: the closed-vocabulary guard, defeated",
         test="tests.test_sd_plugin.KindTests.test_a_ninth_key_refuses",
     ),
-    "bin/sd::edit_field": Mutation(
-        path="bin/sd",
-        old='        lines[hits[0]] = f"{key}: {render_value(value)}{ending}"',
-        new='        lines = [f"{key}: {render_value(value)}{ending}"]'
-            "  # leg d: the note rebuilt from the one line",
-        test="tests.test_sd_store.WriteTests"
-             ".test_a_set_leaves_every_line_it_did_not_edit_byte_identical",
-    ),
-    #: A stale index rather than an empty query. The audit's mutation emptied
-    #: the listing, which reddens the named test but is not the violation
-    #: `R5-D1` names; this one writes the kind's listing to a file on the
-    #: first query and reads that file instead of the vault on every query
-    #: after, so the note the test drops in by hand between two queries is
-    #: what the second one cannot see. The file takes a `.json` suffix, so
-    #: `note_paths` would not list it even on the first query.
-    "bin/sd::store_list": Mutation(
-        path="bin/sd",
-        old="    for path in note_paths(kind_base(store, name)):",
-        new='    index = kind_base(store, name) / ".index.json"'
-            "  # leg d: an index consulted instead of the vault\n"
-            "    if not index.exists():\n"
-            "        index.write_text(json.dumps("
-            "[str(p) for p in note_paths(kind_base(store, name))]))\n"
-            "    for path in map(pathlib.Path, json.loads(index.read_text())):",
-        test="tests.test_sd_store.FreshnessTests"
-             ".test_a_note_written_directly_into_the_vault_is_visible_to_the_next_query",
-    ),
     "tests/test_doc_citations.py::"
     "test_line_citations_into_a_symbol_match_their_baseline": Mutation(
         path=PROSE_RULES_PAGE,

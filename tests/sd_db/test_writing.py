@@ -12,8 +12,6 @@ from unittest.mock import patch
 
 from sd_db import connect, upsert_repo, writing
 from sd_db.migrate import initialise
-from sd_db.sources import verify as verify_source
-from sd_db.sources.vault import Reader as VaultReader
 from sd_db.testing.wire import hub_only
 from sd_db.workflow import StaleItem, WorkflowError
 from sd_db.writes import create_item, now
@@ -41,11 +39,6 @@ from sd_db.writing import (
 )
 
 from . import support
-
-
-def vault_reader(vault):
-    """The vault import over the writing pack's two declared kinds (sd:1425)."""
-    return VaultReader.from_plugins([support.plugin_entry()], environ={"OBSIDIAN_VAULT": str(vault)})
 
 
 class WritingCase(unittest.TestCase):
@@ -528,19 +521,6 @@ class Promote(WritingCase):
             promote(self.db, self.idea, who="operator")
         self.assertIsNone(self.db.execute("SELECT piece FROM item WHERE id = ?", (self.idea,)).fetchone()[0])
 
-    def test_a_promoted_vault_idea_is_not_imported_again(self):
-        vault = self.root / "vault"
-        note = vault / "System/Databases/Blog Ideas/vault-idea.md"
-        note.parent.mkdir(parents=True)
-        (vault / "System/Databases/Topics").mkdir(parents=True)
-        note.write_text("---\ntitle: Vault idea\nstatus: inbox\ndateCreated: 2026-01-02\n---\nThe angle.\n")
-        reader = vault_reader(vault)
-        reader.land(self.db, reader.freeze())
-        idea = self.db.execute("SELECT id FROM item WHERE title = 'Vault idea'").fetchone()[0]
-        promote(self.db, idea, who="operator")
-        self.assertEqual(reader.land(self.db, reader.freeze()).unchanged, 1)
-        self.assertEqual(self.db.execute("SELECT count(*) FROM item WHERE title = 'Vault idea'").fetchone()[0], 1)
-
     def test_an_orphan_index_linked_out_of_the_repository_is_refused(self):
         outside = self.root / "outside.md"
         outside.write_text(TEMPLATE.replace('title: ""', 'title: "An idea: Über café!"').replace("YYYY-MM-DD", "2026-01-02"))
@@ -556,126 +536,7 @@ class Promote(WritingCase):
         self.assertIn("The angle.", state["writing"]["document"])
         self.assertIn("The angle.", json.loads(state["item"]["body"])["source"])
 
-    def test_the_vault_verify_is_clean_after_a_promote(self):
-        vault = self.root / "vault"
-        note = vault / "System/Databases/Blog Ideas/vault-idea.md"
-        note.parent.mkdir(parents=True)
-        (vault / "System/Databases/Topics").mkdir(parents=True)
-        note.write_text("---\ntitle: Vault idea\nstatus: inbox\ndateCreated: 2026-01-02\n---\nThe angle.\n")
-        reader = vault_reader(vault)
-        reader.land(self.db, reader.freeze())
-        promote(self.db, self.db.execute("SELECT id FROM item WHERE title = 'Vault idea'").fetchone()[0], who="operator")
-        self.assertEqual(verify_source(self.db, reader, reader.freeze()), [])
-
-    def test_a_note_carrying_promoted_from_suppresses_nothing(self):
-        vault = self.root / "vault"
-        note = vault / "System/Databases/Blog Ideas/vault-idea.md"
-        note.parent.mkdir(parents=True)
-        (vault / "System/Databases/Topics").mkdir(parents=True)
-        note.write_text("---\ntitle: Vault idea\nstatus: inbox\ndateCreated: 2026-01-02\n---\nThe angle.\n")
-        identity = "blog-idea:System/Databases/Blog Ideas/vault-idea.md"
-        create_item(self.db, kind="idea", title="Decoy", source="vault", external_id="decoy",
-                    fields={"promoted_from": {"source": "vault", "external_id": identity}})
-        reader = vault_reader(vault)
-        missing = [d.identity for d in verify_source(self.db, reader, reader.freeze()) if d.what == "missing from the rows"]
-        self.assertEqual(missing, [identity])
-        self.assertEqual(reader.land(self.db, reader.freeze()).inserted, 1)
-
-    def test_a_snapshot_the_previous_import_took_still_reads_unchanged(self):
-        """Review round 1: a piece promoted from a row the older importer wrote keeps
-        `status` in its snapshot's fields; the body, control and all, compares as stored (sd:3972)."""
-        vault = self.root / "vault"
-        note = vault / "System/Databases/Blog Ideas/vault-idea.md"
-        note.parent.mkdir(parents=True)
-        (vault / "System/Databases/Topics").mkdir(parents=True)
-        control = "**Status:** `INPUT[inlineSelect(option(inbox), option(drafting)):status]`"
-        note.write_text("---\ntitle: Vault idea\nstatus: inbox\ndateCreated: 2026-01-02\n---\n"
-                        f"{control}\n\nThe angle.\n")
-        reader = vault_reader(vault)
-        reader.land(self.db, reader.freeze())
-        idea = self.db.execute("SELECT id FROM item WHERE title = 'Vault idea'").fetchone()[0]
-        promote(self.db, idea, who="operator")
-        fields = json.loads(self.db.execute("SELECT fields FROM item WHERE id = ?", (idea,)).fetchone()[0])
-        snapshot = fields["promoted_from"]["row"]
-        snapshot["fields"] = json.dumps({**json.loads(snapshot["fields"]), "status": "inbox"}, sort_keys=True)
-        snapshot["body"] = json.dumps({"markdown": f"{control}\n\nThe angle."}, sort_keys=True)
-        self.db.execute("UPDATE item SET fields = ? WHERE id = ?", (json.dumps(fields), idea))
-        self.db.commit()
-        counts = reader.land(self.db, reader.freeze())
-        self.assertEqual((counts.unchanged, counts.promoted_changed, counts.inserted), (1, 0, 0))
-        self.assertEqual(verify_source(self.db, reader, reader.freeze()), [])
-
-    def test_an_edit_to_a_promoted_vault_note_is_reported_not_written(self):
-        vault = self.root / "vault"
-        note = vault / "System/Databases/Blog Ideas/vault-idea.md"
-        note.parent.mkdir(parents=True)
-        (vault / "System/Databases/Topics").mkdir(parents=True)
-        note.write_text("---\ntitle: Vault idea\nstatus: inbox\ndateCreated: 2026-01-02\n---\nThe angle.\n")
-        reader = vault_reader(vault)
-        reader.land(self.db, reader.freeze())
-        idea = self.db.execute("SELECT id FROM item WHERE title = 'Vault idea'").fetchone()[0]
-        promote(self.db, idea, who="operator")
-        before = piece_state(self.db, idea)
-        note.write_text("---\ntitle: Vault idea, retitled\nstatus: accepted\ndateCreated: 2026-01-02\n---\nA new angle.\n")
-        counts = reader.land(self.db, reader.freeze())
-        self.assertEqual((counts.promoted_changed, counts.unchanged, counts.inserted), (1, 0, 0))
-        self.assertEqual(piece_state(self.db, idea), before)
-        changed = {d.what for d in verify_source(self.db, reader, reader.freeze())
-                   if d.identity == "blog-idea:System/Databases/Blog Ideas/vault-idea.md"}
-        self.assertEqual(changed, {"title", "stage", "status", "fields", "body"})
-
-    def broken_snapshot(self, snapshot, edit=None):
-        """A promoted vault idea whose `promoted_from.row` is not a whole snapshot.
-
-        `edit`, when given, changes `promoted_from` in place instead."""
-        vault = self.root / "vault"
-        note = vault / "System/Databases/Blog Ideas/vault-idea.md"
-        note.parent.mkdir(parents=True)
-        (vault / "System/Databases/Topics").mkdir(parents=True)
-        note.write_text("---\ntitle: Vault idea\nstatus: inbox\ndateCreated: 2026-01-02\n---\nThe angle.\n")
-        reader = vault_reader(vault)
-        reader.land(self.db, reader.freeze())
-        idea = self.db.execute("SELECT id FROM item WHERE title = 'Vault idea'").fetchone()[0]
-        promote(self.db, idea, who="operator")
-        fields = json.loads(self.db.execute("SELECT fields FROM item WHERE id = ?", (idea,)).fetchone()[0])
-        if edit is not None:
-            edit(fields["promoted_from"])
-        elif snapshot is None:
-            del fields["promoted_from"]["row"]
-        else:
-            fields["promoted_from"]["row"] = snapshot
-        self.db.execute("UPDATE item SET fields = ? WHERE id = ?", (json.dumps(fields), idea))
-        identity = "blog-idea:System/Databases/Blog Ideas/vault-idea.md"
-        missing = [d.identity for d in verify_source(self.db, reader, reader.freeze()) if d.what == "missing from the rows"]
-        self.assertEqual(missing, [identity])
-        self.assertEqual(reader.land(self.db, reader.freeze()).inserted, 1)
-        self.assertEqual(verify_source(self.db, reader, reader.freeze()), [])
-
-    def test_a_promotion_with_no_snapshot_imports_normally(self):
-        self.broken_snapshot(None)
-
-    def test_a_promotion_with_an_empty_snapshot_imports_normally(self):
-        self.broken_snapshot({})
-
-    def test_a_promotion_with_an_array_snapshot_imports_normally(self):
-        self.broken_snapshot([1])
-
     # sd:2926: every key present, a value of the wrong type.
-    def test_a_snapshot_with_object_valued_fields_imports_normally(self):
-        self.broken_snapshot(None, edit=lambda origin: origin["row"].update(fields={}))
-
-    def test_a_snapshot_with_fields_that_are_not_json_imports_normally(self):
-        self.broken_snapshot(None, edit=lambda origin: origin["row"].update(body="not json"))
-
-    def test_a_snapshot_with_a_numeric_title_imports_normally(self):
-        self.broken_snapshot(None, edit=lambda origin: origin["row"].update(title=5))
-
-    def test_a_snapshot_with_a_null_created_at_imports_normally(self):
-        self.broken_snapshot(None, edit=lambda origin: origin["row"].update(created_at=None))
-
-    def test_a_promotion_whose_identity_is_not_a_string_imports_normally(self):
-        self.broken_snapshot(None, edit=lambda origin: origin.update(external_id=["x"]))
-
     def test_an_open_outer_transaction_is_refused(self):
         self.db.execute("BEGIN")
         try:

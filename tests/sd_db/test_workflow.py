@@ -546,12 +546,12 @@ class KindEditing(WorkflowCase):
         self.assertEqual(edited["item"]["kind"], "personal-idea")
         self.assertEqual(edited["notes"][-1]["body"], "Changed kind idea -> personal-idea by alex")
 
-    def test_a_vault_idea_keeps_its_kind_because_the_import_would_revert_it(self):
+    def test_a_vault_base_row_keeps_its_kind_because_its_plugin_lists_it_by_that_kind(self):
         # The vault lands its rows with `piece` NULL, so the piece rule
-        # misses them. Its next import rewrote the kind back to idea.
+        # misses them; `records.list_rows` selects them by item kind idea.
         item = create_item(self.db, kind="idea", title="Vault note", source="vault",
                            external_id="notes/vault-note.md")
-        self.refused(item, {"kind": "personal-idea"}, "vault note")
+        self.refused(item, {"kind": "personal-idea"}, "base row from the vault")
 
     def test_an_unknown_kind_is_refused_and_nothing_is_written(self):
         item = self.capture()["item"]["id"]
