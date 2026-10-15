@@ -42,8 +42,10 @@ import sqlite3
 
 from .database import transaction
 from .errors import SdDbError
-from .registry import Registry, beside, ensure_seeded, read as read_registry
-from .writes import now as _now, stamp
+from .registry import Registry, beside, ensure_seeded
+from .registry import read as read_registry
+from .writes import now as _now
+from .writes import stamp
 
 
 class MeterRefused(SdDbError):

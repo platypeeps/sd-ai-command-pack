@@ -60,11 +60,20 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import paths
-from .database import BUSY_TIMEOUT, connect, local_path, refuse_hub_only, schema_version, tables, transaction
+from .database import (
+    BUSY_TIMEOUT,
+    connect,
+    local_path,
+    refuse_hub_only,
+    schema_version,
+    tables,
+    transaction,
+)
 from .errors import BackupError, SchemaTooOld, SdDbError
 from .migrate import migrate as migrate_database
 from .schema import SCHEMA_VERSION, TABLES, migrations
-from .writes import add_note, now as stamp_now, record_state
+from .writes import add_note, record_state
+from .writes import now as stamp_now
 
 #: Where a run writes when no destination is named: the `Backup` folder on the
 #: USB disk attached to this Mac. Snapshots taken before 2026-09-25 went to

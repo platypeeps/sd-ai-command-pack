@@ -12,17 +12,33 @@ from unittest.mock import patch
 
 from sd_db import connect, upsert_repo, writing
 from sd_db.migrate import initialise
-from sd_db.testing.wire import hub_only
-from sd_db.workflow import StaleItem, WorkflowError
-from sd_db.writing import (
-    change_stage, cutover_pieces, cutover_preview, import_piece, list_pieces,
-    piece_for_key, piece_state, preflight, record_gate, update_piece_metadata,
-    verify_pieces, readiness, recover_cutover, park_piece, checkout, piece_files, promote,
-    adversarial_brief, record_adversarial, reconcile_companion,
-)
 from sd_db.sources import verify as verify_source
 from sd_db.sources.vault import Reader as VaultReader
+from sd_db.testing.wire import hub_only
+from sd_db.workflow import StaleItem, WorkflowError
 from sd_db.writes import create_item, now
+from sd_db.writing import (
+    adversarial_brief,
+    change_stage,
+    checkout,
+    cutover_pieces,
+    cutover_preview,
+    import_piece,
+    list_pieces,
+    park_piece,
+    piece_files,
+    piece_for_key,
+    piece_state,
+    preflight,
+    promote,
+    readiness,
+    reconcile_companion,
+    record_adversarial,
+    record_gate,
+    recover_cutover,
+    update_piece_metadata,
+    verify_pieces,
+)
 
 from . import support
 

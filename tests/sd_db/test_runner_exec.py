@@ -30,7 +30,6 @@ from sd_db.writes import (
     upsert_repo,
 )
 
-
 # How long a fixture command may run before the suite stops it itself.
 GUARD_SECONDS = 60
 

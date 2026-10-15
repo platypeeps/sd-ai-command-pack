@@ -27,8 +27,17 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from unittest.mock import patch
 
 from sd_db import shadow_jira
-from sd_db.shadow_jira import (MAX_PAGES, MAX_REQUESTS, PAGE_SIZE, _http, collect, missing, search, settings,
-                               window_minutes)
+from sd_db.shadow_jira import (
+    MAX_PAGES,
+    MAX_REQUESTS,
+    PAGE_SIZE,
+    _http,
+    collect,
+    missing,
+    search,
+    settings,
+    window_minutes,
+)
 from sd_db.shadow_sync import iso
 
 NOW = datetime(2026, 8, 31, 12, 0, 0, tzinfo=timezone.utc)

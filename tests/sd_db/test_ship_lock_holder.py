@@ -17,8 +17,8 @@ import unittest
 from pathlib import Path
 
 from sd_db import initialise, ship
-from sd_db.workflow import WorkflowError
 from sd_db.testing.wire import hub_only
+from sd_db.workflow import WorkflowError
 
 REPOSITORY = "fixture/repo"
 

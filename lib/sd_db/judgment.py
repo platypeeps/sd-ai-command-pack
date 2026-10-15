@@ -579,7 +579,8 @@ def registered_usd(
     if tokens_in is None and tokens_out is None and machine_ms is None:
         return None
     from .calls import _price
-    from .registry import beside, read as read_registry
+    from .registry import beside
+    from .registry import read as read_registry
     try:
         entry = read_registry(beside(connection)).providers.get(provider)
     except Exception:          # a price list may not cost the ledger its row

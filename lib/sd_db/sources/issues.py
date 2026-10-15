@@ -28,7 +28,15 @@ from dataclasses import dataclass, field
 
 from ..shadow_sync import available, normalize, search
 from ..writes import upsert_shadow
-from . import Counts, Frozen, MigrationRefused, Record, shadow_identity, shadow_tracker, shadow_url
+from . import (
+    Counts,
+    Frozen,
+    MigrationRefused,
+    Record,
+    shadow_identity,
+    shadow_tracker,
+    shadow_url,
+)
 
 SOURCE = "github-issues"
 

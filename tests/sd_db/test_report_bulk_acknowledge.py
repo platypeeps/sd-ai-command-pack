@@ -22,7 +22,13 @@ from unittest import mock
 import sd_db
 from sd_db import reporting, retention, workflow, writes
 from sd_db.migrate import initialise
-from sd_db.writes import add_note, create_assignment, create_item, record_state, resolve_note
+from sd_db.writes import (
+    add_note,
+    create_assignment,
+    create_item,
+    record_state,
+    resolve_note,
+)
 
 #: The cutoff every fixture below is judged at, and the clock the dry run and
 #: the apply are handed: two days after it.

@@ -11,12 +11,25 @@ from unittest.mock import patch
 from sd_db import connect, create_item, upsert_repo
 from sd_db.migrate import initialise
 from sd_db.progress import (
-    cancel_work, completion_record, deliver_associated_work, deliver_work, item_for_artifact,
-    relink_artifact, task_guard, tracker_freshness, tracker_items,
+    cancel_work,
+    completion_record,
+    deliver_associated_work,
+    deliver_work,
+    item_for_artifact,
+    relink_artifact,
+    task_guard,
+    tracker_freshness,
+    tracker_items,
 )
 from sd_db.shadow_sync import write_watermark
 from sd_db.workflow import (
-    StaleItem, WorkflowError, allowed_statuses, change_status, edit_item, item_state, register_work_item,
+    StaleItem,
+    WorkflowError,
+    allowed_statuses,
+    change_status,
+    edit_item,
+    item_state,
+    register_work_item,
 )
 from sd_db.writes import TransitionRefused, record_state, transition, upsert_shadow
 

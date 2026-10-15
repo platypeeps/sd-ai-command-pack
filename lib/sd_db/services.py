@@ -21,7 +21,17 @@ from pathlib import Path
 from xml.parsers.expat import ExpatError
 
 from .database import transaction
-from .operations import LABEL_PREFIX, PREFIX, _FAILURE_SIGNALS, _digest, _restoring, _revision, _run, _signal_name, control_gate
+from .operations import (
+    _FAILURE_SIGNALS,
+    LABEL_PREFIX,
+    PREFIX,
+    _digest,
+    _restoring,
+    _revision,
+    _run,
+    _signal_name,
+    control_gate,
+)
 from .workflow import WorkflowError, _text
 from .writes import now, record_state, resolve_state
 

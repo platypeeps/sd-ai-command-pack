@@ -20,6 +20,7 @@ from unittest import mock
 
 from sd_db import connect, review, workflow, writes
 from sd_db.migrate import initialise
+
 from . import support
 
 KEY_A = b"subject,tier\nexample.test/a@1a2b3c4:src/one.py,cheap\nexample.test/a@1a2b3c4:src/two.py,deep\n"

@@ -13,8 +13,21 @@ from sd_db.errors import SdDbError
 from sd_db.migrate import initialise
 from sd_db.schema import migrations
 from sd_db.testing.wire import hub_only
-from sd_db.writes import add_note, record_state, resolve_state, set_item_fields, transition, upsert_shadow
-from sd_db.writing import cutover_pieces, cutover_preview, import_piece, list_pieces, park_piece
+from sd_db.writes import (
+    add_note,
+    record_state,
+    resolve_state,
+    set_item_fields,
+    transition,
+    upsert_shadow,
+)
+from sd_db.writing import (
+    cutover_pieces,
+    cutover_preview,
+    import_piece,
+    list_pieces,
+    park_piece,
+)
 
 #: A fixed instant, so the week window does not depend on when the suite runs.
 NOW = "2026-09-06T12:00:00Z"

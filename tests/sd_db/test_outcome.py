@@ -28,12 +28,22 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import create_item, database, errors, initialise, reads, registry, remote, serve, usage
+from sd_db import (
+    create_item,
+    database,
+    errors,
+    initialise,
+    reads,
+    registry,
+    remote,
+    serve,
+    usage,
+)
 from sd_db.database import transaction
 from sd_db.serve import read_token
 
-from .test_registry import SHIPPED
 from . import support
+from .test_registry import SHIPPED
 
 HERE = support.LIB
 #: Long enough for a loaded machine to restart a child server inside it.

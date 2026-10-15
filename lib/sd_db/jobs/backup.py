@@ -13,7 +13,6 @@ from ..database import connect
 from ..errors import BackupError, SdDbError
 from ..retention import prune
 
-
 #: The job's exit code when the BACKUP PASSED but the SOURCE is referentially
 #: broken. It is not 1, because 1 means the documented failure -- the library
 #: raised, nothing was written, no prune ran -- and `sd-db` mails that as

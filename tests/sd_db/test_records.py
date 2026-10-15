@@ -13,7 +13,15 @@ from unittest.mock import patch
 
 from sd_db import connect, create_item
 from sd_db.migrate import initialise
-from sd_db.records import RecordRefused, add_row, edit_row, get_row, list_rows, render, rules_for
+from sd_db.records import (
+    RecordRefused,
+    add_row,
+    edit_row,
+    get_row,
+    list_rows,
+    render,
+    rules_for,
+)
 from sd_db.sources import MigrationRefused, run
 from sd_db.sources.vault import Reader
 from sd_db.workflow import MissingItem, StaleItem, item_state

@@ -23,9 +23,10 @@ from unittest import mock
 
 import sd_db
 from sd_db import create_item, database, initialise, remote, schema
-from sd_db.serve import read_token
 from sd_db.database import transaction
+from sd_db.serve import read_token
 from sd_db.testing import Stubs, surface
+
 from . import support
 
 HERE = support.LIB

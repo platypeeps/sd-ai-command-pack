@@ -41,7 +41,7 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import operations, repos, reporting, runner_journal, workflow
+from . import operations, reporting, repos, runner_journal, workflow
 from . import paths as sdpaths
 from .contribution_sync import QUEUE
 from .database import refuse_hub_only, transaction

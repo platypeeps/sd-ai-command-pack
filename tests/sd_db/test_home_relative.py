@@ -20,7 +20,17 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import connect, create_item, judgment, ledger, paths, reads, removal, repos, workflow
+from sd_db import (
+    connect,
+    create_item,
+    judgment,
+    ledger,
+    paths,
+    reads,
+    removal,
+    repos,
+    workflow,
+)
 from sd_db.jobs.cli import command_status
 from sd_db.migrate import migrate
 from sd_db.schema import SCHEMA_DIR, SCHEMA_VERSION
