@@ -607,6 +607,86 @@ class RenderTests(unittest.TestCase):
         self.assertIn("## Score\r\n\r\ns\r\n", created)
 
 
+class EditSectionTests(unittest.TestCase):
+    """`edit_section` called directly: the db driver splices a row's body through it.
+
+    The cases were vault-note tests until the vault driver went (sd:4627); the
+    function stayed, so they now run on text, with no note or database.
+    """
+
+    ORDER = ["Tip", "Score", "Provenance"]
+
+    def edit(self, text: str, name: str, body: str) -> str:
+        return sd_module().edit_section(text, name, body, self.ORDER)
+
+    def test_the_body_outside_the_edited_section_is_untouched(self) -> None:
+        text = "## Tip\n\nkeep me\n\n## Score\n\ngone\n\n## Provenance\n\nkeep me too\n"
+        self.assertEqual(
+            self.edit(text, "Score", "x"),
+            "## Tip\n\nkeep me\n\n## Score\n\nx\n\n## Provenance\n\nkeep me too\n")
+
+    def test_a_fenced_heading_does_not_end_the_section_it_sits_in(self) -> None:
+        text = "## Tip\n\nRun it:\n\n```markdown\n## Score\nnot a heading\n```\n\n## Score\n\nreal score\n"
+        after = self.edit(text, "Tip", "replaced")
+        self.assertNotIn("not a heading", after)
+        self.assertIn("## Score\n\nreal score\n", after)
+        self.assertEqual(after.count("## Score"), 1)
+
+    def test_a_fenced_heading_is_not_the_section_that_gets_edited(self) -> None:
+        text = "## Tip\n\n```markdown\n## Score\nfenced\n```\n\n## Score\n\nreal\n"
+        after = self.edit(text, "Score", "written")
+        self.assertIn("```markdown\n## Score\nfenced\n```", after)
+        self.assertIn("## Score\n\nwritten\n", after)
+
+    def test_a_tilde_fence_does_not_close_a_backtick_fence(self) -> None:
+        text = "## Tip\n\n```\n~~~\n## Score\nstill fenced\n```\n\n## Score\n\nreal\n"
+        after = self.edit(text, "Score", "written")
+        self.assertIn("## Score\nstill fenced\n", after)
+        self.assertIn("## Score\n\nwritten\n", after)
+
+    def test_a_longer_fence_is_not_closed_by_a_shorter_one(self) -> None:
+        text = "## Tip\n\n````markdown\n```\n## Score\n````\n\n## Score\n\nreal score\n"
+        after = self.edit(text, "Score", "written")
+        self.assertIn("````markdown\n```\n## Score\n````\n", after)
+        self.assertIn("## Score\n\nwritten\n", after)
+        self.assertNotIn("real score", after)
+
+    def test_an_info_string_holding_a_backtick_does_not_open_a_fence(self) -> None:
+        text = "## Tip\n\n```` `x` ````\n\n## Score\n\nreal\n"
+        after = self.edit(text, "Score", "written")
+        self.assertEqual(after, "## Tip\n\n```` `x` ````\n\n## Score\n\nwritten\n")
+
+    def test_an_indented_heading_is_the_section_it_looks_like(self) -> None:
+        text = "## Tip\n\nt\n\n   ## Score\n\nindented\n"
+        after = self.edit(text, "Score", "written")
+        self.assertEqual(after.count("## Score"), 1, f"a second heading was created:\n{after}")
+        self.assertNotIn("indented", after)
+        self.assertIn("written", after)
+
+    def test_an_indented_heading_ends_the_section_above_it(self) -> None:
+        text = "## Tip\n\nmine\n\n  ## Provenance\n\nnot mine\n"
+        after = self.edit(text, "Tip", "replaced")
+        self.assertEqual(after, "## Tip\n\nreplaced\n\n  ## Provenance\n\nnot mine\n")
+
+    def test_a_missing_section_is_created_in_the_declared_order(self) -> None:
+        text = "## Tip\n\ntip text\n\n## Provenance\n\nwhere from\n"
+        after = self.edit(text, "Score", "8/10")
+        self.assertEqual(
+            after, "## Tip\n\ntip text\n\n## Score\n\n8/10\n\n## Provenance\n\nwhere from\n")
+
+    def test_a_section_with_no_later_neighbour_is_appended(self) -> None:
+        after = self.edit("## Tip\n\ntip text\n", "Provenance", "a link")
+        self.assertEqual(after, "## Tip\n\ntip text\n\n## Provenance\n\na link\n")
+
+    def test_an_appended_heading_does_not_land_on_an_unterminated_last_line(self) -> None:
+        after = self.edit("## Tip\n\nno newline at the end", "Score", "s")
+        self.assertEqual(after, "## Tip\n\nno newline at the end\n\n## Score\n\ns\n")
+
+    def test_an_empty_body_leaves_one_blank_line_and_no_text(self) -> None:
+        after = self.edit("## Tip\n\nold\n\n## Score\n\ns\n", "Tip", "")
+        self.assertEqual(after, "## Tip\n\n## Score\n\ns\n")
+
+
 class VaultWideTitleTests(StoreFixture):
     """`pack.py`'s `vault_title_taken`, which the retarget would have dropped.
 
