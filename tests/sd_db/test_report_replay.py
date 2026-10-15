@@ -981,6 +981,15 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         self.assertTrue(json.loads(newer["item"]["fields"])["report"]["truncated"])
         self.assertEqual(self.row(older)["status"], "planning")
 
+    def test_a_whole_repeat_supersedes_what_a_cut_run_left_open(self):
+        """Codex: whole A, cut B, whole B folded into B and left A open for good."""
+        older = self.tick("a", 1, self.TWO)["item"]["id"]
+        cut = self.tick("b", 16, self.past_the_cut(self.ONE, ""))["item"]["id"]
+        self.assertEqual(self.row(older)["status"], "planning")
+        whole = self.tick("c", 31, self.ONE)
+        self.assertEqual((whole["recorded"], whole["item"]["id"]), ("folded", cut))
+        self.assertRegex(self.status_notes(older)[-1], rf"superseded by sd:{cut}")
+
     def test_reopening_a_superseded_report_returns_it_to_planning(self):
         older = self.tick("a", 1, self.TWO)["item"]["id"]
         self.tick("b", 16, self.ONE)
