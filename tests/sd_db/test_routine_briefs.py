@@ -21,7 +21,15 @@ from unittest.mock import patch
 
 from sd_db import connect, reads, records, reporting, repos, routine_briefs, workflow
 from sd_db.migrate import initialise
-from sd_db.routine_briefs import BriefConflict, BriefUnusable, add, import_folder, read_draft, rows, show
+from sd_db.routine_briefs import (
+    BriefConflict,
+    BriefUnusable,
+    add,
+    import_folder,
+    read_draft,
+    rows,
+    show,
+)
 
 from . import support
 

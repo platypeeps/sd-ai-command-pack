@@ -21,7 +21,8 @@ imported by tests in both repositories and by nothing at runtime.
 
 from __future__ import annotations
 
-from .backup import restore, run as backup
+from .backup import restore
+from .backup import run as backup
 from .brief import Brief, note_brief
 from .calls import CallRefused, CallResult, bound_for, call, estimate_tokens
 from .database import connect, default_path, schema_version, tables, transaction
@@ -35,7 +36,17 @@ from .errors import (
 from .judgment import JudgmentRefused
 from .judgment import by_stage as judgments_by_stage
 from .judgment import record as record_judgment
-from .ledger import LedgerRefused, Released, claim, exposure, lose, release_orphans, reserve, set_budget, settle
+from .ledger import (
+    LedgerRefused,
+    Released,
+    claim,
+    exposure,
+    lose,
+    release_orphans,
+    reserve,
+    set_budget,
+    settle,
+)
 from .meter import MeterRefused, latest, sample
 from .migrate import initialise, migrate
 from .reads import (
@@ -51,7 +62,8 @@ from .reads import (
     status_changes,
     today_items,
 )
-from .registry import Provider, Registry, ensure_seeded, read as read_registry, registry_path, seed
+from .registry import Provider, Registry, ensure_seeded, registry_path, seed
+from .registry import read as read_registry
 from .repos import Checkout, RepoRefusal
 from .repos import add as add_repo
 from .repos import registered as registered_repos
@@ -91,8 +103,8 @@ from .writes import (
     snooze,
     snoozed,
     start_trial,
-    trials,
     transition,
+    trials,
     unresolved_state,
     update_assignment,
     upsert_item,

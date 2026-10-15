@@ -113,8 +113,8 @@ the tracker and never holds the watermark.
 from __future__ import annotations
 
 import itertools
-import os
 import json
+import os
 import re
 import sqlite3
 import time

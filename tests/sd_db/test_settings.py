@@ -17,8 +17,8 @@ from typing import Any, cast
 from unittest import mock
 
 from sd_db import connect, set_view, views
-from sd_db.errors import SdDbError
 from sd_db import schema as schema_module
+from sd_db.errors import SdDbError
 from sd_db.migrate import initialise, migrate
 from sd_db.writes import SettingStale, read_settings, set_setting
 

@@ -27,16 +27,41 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-from sd_db import reads, reporting, retention, runner, runner_exec, runner_journal, ship, workflow
+from sd_db import (
+    reads,
+    reporting,
+    retention,
+    runner,
+    runner_exec,
+    runner_journal,
+    ship,
+    workflow,
+)
 from sd_db.backup import Snapshot, passed, run
 from sd_db.database import connect, transaction
 from sd_db.migrate import initialise
-from sd_db.retention import (CLEAN_REPORT_AGE, EXEC_OUTPUT_AGE, JOB, OUTPUT_EXPIRED, RETENTION,
-                             RetentionRefused, prune, settle_clean_reports)
+from sd_db.retention import (
+    CLEAN_REPORT_AGE,
+    EXEC_OUTPUT_AGE,
+    JOB,
+    OUTPUT_EXPIRED,
+    RETENTION,
+    RetentionRefused,
+    prune,
+    settle_clean_reports,
+)
 from sd_db.testing import Stubs
 from sd_db.testing.wire import hub_only
-from sd_db.writes import (add_note, create_assignment, create_item, record_cost, record_state, resolve_note,
-                          upsert_repo)
+from sd_db.writes import (
+    add_note,
+    create_assignment,
+    create_item,
+    record_cost,
+    record_state,
+    resolve_note,
+    upsert_repo,
+)
+
 from . import support
 
 PACKAGE_ROOT = support.LIB

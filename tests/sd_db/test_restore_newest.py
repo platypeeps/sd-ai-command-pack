@@ -28,6 +28,7 @@ from sd_db.schema import SCHEMA_VERSION
 from sd_db.testing import break_foreign_keys
 from sd_db.testing.wire import hub_only
 from sd_db.writes import unresolved_state
+
 from . import support
 
 #: The module, so a missing name fails one test, not the whole file.

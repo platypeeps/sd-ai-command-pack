@@ -27,7 +27,17 @@ from .database import refuse_hub_only, transaction
 from .progress import _fields, _git
 from .sources.frontmatter import split as split_frontmatter
 from .workflow import StaleItem, WorkflowError, _checked_state, _text, item_state
-from .writes import PROMOTED_COLUMNS, _transition, add_note, create_item, now, record_state, resolve_state, set_item_fields, upsert_repo
+from .writes import (
+    PROMOTED_COLUMNS,
+    _transition,
+    add_note,
+    create_item,
+    now,
+    record_state,
+    resolve_state,
+    set_item_fields,
+    upsert_repo,
+)
 from .yaml_lite import _Flow
 
 STAGES = ("inbox", "accepted", "researching", "drafting", "review", "ready", "published", "declined")

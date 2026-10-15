@@ -10,7 +10,17 @@ from pathlib import Path
 
 from . import reads, ship, workflow
 from .database import transaction
-from .writes import STATUSES, add_note, create_item, now, record_state, resolve_note, set_item_fields, stamp, transition
+from .writes import (
+    STATUSES,
+    add_note,
+    create_item,
+    now,
+    record_state,
+    resolve_note,
+    set_item_fields,
+    stamp,
+    transition,
+)
 
 MAX_REPORT = 200_000
 #: The line prefix a job declares a finding with (`ingest_log`).

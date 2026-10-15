@@ -27,17 +27,29 @@ from ..backup import restore as restore_snapshot
 from ..database import connect, default_path, schema_version, tables
 from ..errors import SdDbError
 from ..migrate import initialise, migrate
-from ..repos import absolute_under_home
+from ..repos import (
+    LANE_HUB,
+    ConfMissing,
+    absolute_under_home,
+    clone_lines,
+    registered,
+    registered_for,
+    repo_channels,
+    row_for,
+    seed_clones,
+    set_channels,
+    set_ci,
+    set_clones,
+    set_dependabot,
+    set_lane_host,
+    set_managed,
+    set_runner_merge,
+)
 from ..repos import add as add_repo
-from ..repos import registered
-from ..repos import registered_for, row_for
-from ..repos import ConfMissing, seed as seed_repos
-from ..repos import clone_lines, seed_clones, set_clones, set_dependabot
-from ..repos import LANE_HUB, repo_channels, set_channels, set_ci, set_lane_host, set_managed, set_runner_merge
+from ..repos import seed as seed_repos
 from ..schema import SCHEMA_VERSION
-from ..sources import docs_work, index_cache, issues, register
+from ..sources import docs_work, index_cache, issues, register, vault
 from ..sources import run as run_sitting
-from ..sources import vault
 from ..sources import verify as verify_source
 from ..sources.frontmatter import FrontmatterError
 from ..sources.frontmatter import read as read_frontmatter

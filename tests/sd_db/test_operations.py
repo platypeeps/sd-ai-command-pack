@@ -11,14 +11,19 @@ from unittest.mock import patch
 from sd_db import connect, create_assignment, upsert_repo
 from sd_db.errors import SdDbError
 from sd_db.migrate import initialise
-from sd_db.writes import record_state, transition, update_assignment
-from sd_db.workflow import StaleItem, WorkflowError, capture_task
-from sd_db.operations import PREFIX
 from sd_db.operations import (
-    LaunchdBackend, assignment_state, cancel_assignment, cancel_job,
-    inventory, job_state, retry_job,
+    PREFIX,
+    LaunchdBackend,
+    assignment_state,
+    cancel_assignment,
+    cancel_job,
+    inventory,
+    job_state,
+    retry_job,
 )
 from sd_db.testing.wire import hub_only
+from sd_db.workflow import StaleItem, WorkflowError, capture_task
+from sd_db.writes import record_state, transition, update_assignment
 
 
 class Operations(unittest.TestCase):

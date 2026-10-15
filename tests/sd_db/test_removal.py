@@ -25,12 +25,26 @@ from pathlib import Path
 from unittest import mock
 
 import sd_db
-from sd_db import contribution_sync, contributions, removal, reporting, retention, runner_journal
+from sd_db import (
+    contribution_sync,
+    contributions,
+    removal,
+    reporting,
+    retention,
+    runner_journal,
+)
 from sd_db.contribution_sync import QUEUE
 from sd_db.migrate import initialise
-from sd_db.writes import (add_note, create_assignment, create_item, record_state, resolve_note, resolve_state,
-                          upsert_repo)
 from sd_db.testing.wire import hub_only
+from sd_db.writes import (
+    add_note,
+    create_assignment,
+    create_item,
+    record_state,
+    resolve_note,
+    resolve_state,
+    upsert_repo,
+)
 
 backup = removal.backups
 
@@ -1026,6 +1040,7 @@ class ImportedSources(Store):
 
     def test_imported_is_every_source_module_and_the_report_writer(self):
         import importlib
+
         import sd_db.sources
         import sd_db.sources.docs_work
         declared = set()

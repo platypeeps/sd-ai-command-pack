@@ -1,18 +1,18 @@
 """Retention deletes only complete, unchanged backups with recorded ownership."""
 import json
-from importlib import import_module
 import os
 import subprocess
 import sys
 import unittest
-from unittest.mock import patch
 from datetime import UTC, datetime, timedelta
+from importlib import import_module
+from unittest.mock import patch
 
 from sd_db.errors import BackupError
 from sd_db.jobs.backup import retention
 from sd_db.testing.wire import hub_only
 
-from .test_backup import BackupCase, ENTRYPOINT
+from .test_backup import ENTRYPOINT, BackupCase
 
 backup = import_module("sd_db.backup")
 

@@ -20,10 +20,17 @@ from . import repos
 from .database import transaction
 from .errors import SdDbError
 from .reads import BRIEF_KINDS, item_by_id, item_notes
-from .recurrence import ANCHORS, RecurrenceError, first_barren_start, next_after, parse as parse_rule
+from .recurrence import ANCHORS, RecurrenceError, first_barren_start, next_after
+from .recurrence import parse as parse_rule
 from .writes import (
-    STATUSES, TransitionRefused, add_note, create_item, refuse_base_status, resolve_note,
-    set_item_fields, transition,
+    STATUSES,
+    TransitionRefused,
+    add_note,
+    create_item,
+    refuse_base_status,
+    resolve_note,
+    set_item_fields,
+    transition,
 )
 
 USER_FIELDS = frozenset({"title", "body", "priority", "due", "repo", "kind"})

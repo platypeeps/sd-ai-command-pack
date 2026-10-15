@@ -19,9 +19,8 @@ from pathlib import Path
 from unittest import mock
 
 from sd_db import connect, ship
-from sd_db.errors import SdDbError
-from sd_db.workflow import StaleItem
 from sd_db.channels import ChannelRefusal
+from sd_db.errors import SdDbError
 from sd_db.migrate import initialise, migrate
 from sd_db.repos import (
     CI_MODES,
@@ -41,8 +40,8 @@ from sd_db.repos import (
     seed,
     seed_clones,
     set_channels,
-    set_clones,
     set_ci,
+    set_clones,
     set_dependabot,
     set_lane_host,
     set_managed,
@@ -50,6 +49,7 @@ from sd_db.repos import (
     worktrees_root,
 )
 from sd_db.schema import migrations
+from sd_db.workflow import StaleItem
 from sd_db.writes import upsert_repo
 
 from . import support

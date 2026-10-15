@@ -14,8 +14,8 @@ from unittest import mock
 
 from sd_db import SdDbError, connect, upsert_repo
 from sd_db.jobs import cli
-from sd_db.repos import registered_for, remote_identity, same_remote
 from sd_db.migrate import initialise
+from sd_db.repos import registered_for, remote_identity, same_remote
 from sd_db.workflow import WorkflowError, register_work_item
 
 from . import support
