@@ -212,6 +212,22 @@ def _belongs_to(value: str) -> str:
     return sd_lib.stored_repo(sd_lib.main_worktree_root(root))
 
 
+def _repo_landed(args: argparse.Namespace, wanted: str | None, result: dict[str, Any]) -> None:
+    """Refuse a `--belongs-to` or `--no-repo` whose row does not hold the checkout afterwards (sd:4740).
+
+    A library that took the edit and wrote nothing returned the row as it was,
+    and the verb printed it with exit 0: a failed write read as a pass. The
+    row `edit_item` returns is the read-back, so the check costs no query.
+    """
+    held = result["item"]["repo"] or None
+    if (held is None) if wanted is None else sd_lib.same_repo(held, wanted):
+        return
+    flag = "--no-repo" if wanted is None else f"--belongs-to {args.belongs_to}"
+    raise WorkRefusal(
+        f"{flag}: expected item {args.item} to belong to {wanted or 'no checkout'}, but it belongs to "
+        f"{held or 'no checkout'}; the library reported the edit and did not make it")
+
+
 def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
     """The fields `edit` was asked to set, or a refusal naming the omission.
 
@@ -1160,6 +1176,8 @@ def run(args: argparse.Namespace) -> int:
             moved = "repo" in changes
             result = workflow.edit_item(
                 connection, args.item, changes, who=who, expected_revision=revision)
+            if moved:
+                _repo_landed(args, changes["repo"], result)
         elif action == "status":
             result, following = _change_status(workflow, connection, args, who)
         elif action == "note":
