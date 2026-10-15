@@ -704,6 +704,19 @@ def issue_sources(connection: sqlite3.Connection, path: Path | str) -> dict[str,
     return sources
 
 
+def mail_aliases(connection: sqlite3.Connection, path: Path | str) -> list[str]:
+    """One repository's mail alias labels, sorted; `[]` for none (sd:4191).
+
+    Each names an `alias|<label>|<address>` line in `local-mail-intake`'s
+    conf, whose arrivals Today shows under this repository. It reads through
+    `repo_channels`, so what that cannot read raises here too, never `[]`.
+    """
+    from . import channels
+
+    setting = repo_channels(connection, path) or {}
+    return list(setting.get("email", {}).get(channels.ALIASES, []))
+
+
 #: The `shadow.reason` values that make an issue the operator's (sd:4636).
 #: `watched` and NULL (unknown) rows stay synced and stay off Today and Tasks.
 MINE = ("assigned", "filed")
@@ -964,14 +977,18 @@ def set_channels(
     is to set each repository's channels again before resolving it.
 
     The outbound channels are one replacement, and each inbound key (`feed`,
-    `jira`, `github`) is its own (sd:3980, sd:3461; `channels.kept`). A value
-    naming no channel keeps the stored channels, so the dashboard form never
-    deletes a source, and a value leaving an inbound key out keeps it, so
+    `jira`, `github`, `email`) is its own (sd:3980, sd:3461, sd:4191;
+    `channels.kept`). A value naming no channel keeps the stored channels, so
+    the dashboard form never deletes a source, and a value leaving an inbound key out keeps it, so
     `feed=URL` never deletes the channels or the issue sources. `None` clears
-    all of it. A value naming `github` refuses on a managed repository, which
-    uses no GitHub issues; one kept from before `repo managed PATH yes` rides
-    along.
+    all of it. A stored value this build refuses (a key a newer build wrote,
+    sd:4191) is replaced only by a caller that names it as `before`; with no
+    `before`, a set refuses rather than lose the keys it cannot read. A value
+    naming `github` refuses on a managed repository, which uses no GitHub
+    issues; one kept from before `repo managed PATH yes` rides along.
     """
+    import json
+
     from . import channels
     from .workflow import StaleItem
 
@@ -991,6 +1008,13 @@ def set_channels(
         was = channels.canonical(row["channels"])
         if before is not None and channels.canonical(before) != was:
             raise StaleItem(f"channels for {row['path']} is {was} now, not {before}; read the page again")
+        if value is not None and before is None and row["channels"] is not None:
+            try:
+                channels.validate(json.loads(row["channels"]))
+            except (ValueError, channels.ChannelRefusal) as error:
+                raise channels.ChannelRefusal(
+                    f"the stored channels of {row['path']} cannot be read by this build ({error}), so a set "
+                    f"would lose the keys it does not name; clear it with `none`, then set it again") from error
         text = None if value is None else channels.dumps(channels.kept(value, row["channels"]))
         connection.execute("UPDATE repo SET channels = ?, updated_at = ? WHERE path = ?",
                            (text, now(), row["path"]))

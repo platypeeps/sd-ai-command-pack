@@ -507,7 +507,7 @@ def command_repo(argv: list[str]) -> int:
     `repo list [--managed | --clones PROFILE]`,
     `repo runner-merge <path> <manual|auto>`, `repo managed <path> <yes|no>`,
     `repo ci <path> <github|local>`, `repo lane-host <path> <host|hub>`,
-    `repo channels <path> [obsidian=.. notion=.. drive=.. feed=URL | none]`,
+    `repo channels <path> [obsidian=.. notion=.. drive=.. feed=URL jira=KEY github=OWNER/NAME email=LABEL,.. | none]`,
     `repo clones <path> <P,Q | none | +P | -P>`, `repo dependabot <path> <yes|no>`,
     `repo remove <path> ...`.
 
@@ -678,7 +678,8 @@ def channels_words(words: list[str]) -> dict | None:
 
     `channel=` names the channel's default folder, and a channel left out is
     off. `feed=URL` is the inbound subscription (sd:3980); a URL keeps its own
-    `=`. `jira=KEY` and `github=owner/name` are the issue sources (sd:3461). `channels.validate` judges the result; this refuses only words that
+    `=`. `jira=KEY` and `github=owner/name` are the issue sources (sd:3461), and
+    `email=LABEL,LABEL` the mail alias labels (sd:4191). `channels.validate` judges the result; this refuses only words that
     are not `channel=folder`, a channel named twice, and `none` beside others.
     """
     if words == ["none"]:
@@ -697,6 +698,8 @@ def channels_words(words: list[str]) -> dict | None:
             value[channel] = {"url": folder}
         elif channel in channels.ISSUE_KEYS:
             value[channel] = {channels.ISSUE_KEYS[channel]: folder}
+        elif channel == "email":
+            value[channel] = {channels.ALIASES: folder.split(",") if folder else []}
         else:
             value[channel] = {"folder": folder} if folder else {}
     return value
@@ -710,7 +713,8 @@ def _repo_channels(connection, rest: list[str]) -> int:
     """
     if not rest:
         print("sd-db repo channels: needs a path, then nothing to print the setting, none to clear it, "
-              "or obsidian=FOLDER notion=PAGE drive=FOLDER feed=URL jira=KEY github=OWNER/NAME", file=sys.stderr)
+              "or obsidian=FOLDER notion=PAGE drive=FOLDER feed=URL jira=KEY github=OWNER/NAME email=LABEL,LABEL",
+              file=sys.stderr)
         return 1
     path, words = rest[0], rest[1:]
     if not words:

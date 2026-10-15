@@ -32,6 +32,7 @@ from sd_db.repos import (
     clone_lines,
     conf_paths,
     issue_sources,
+    mail_aliases,
     mine_issues,
     read_conf,
     registered,
@@ -709,10 +710,40 @@ class TheChannelsWriter(RepoCase):
                          [("jira", 8, "filed"), ("github", 2, "filed"), ("github", 1, "assigned")])
         self.assertEqual(set(found[path][0]), {"tracker", "url", "number", "title", "state", "reason", "last_seen"})
 
+    def test_mail_aliases_read_the_labels_and_ride_along_with_every_other_set(self):
+        """sd:4191: `email` is inbound like `feed`, so a set of the outbound
+        channels or of another source keeps it, and `mail_aliases` answers
+        the labels, `[]` for none."""
+        path = self._registered()
+        self.assertEqual(mail_aliases(self.connection, path), [])
+        set_channels(self.connection, path, {"email": {"aliases": ["committee", "board"]}})
+        self.assertEqual(mail_aliases(self.connection, path), ["board", "committee"])
+        set_channels(self.connection, path, {"drive": {}})
+        set_channels(self.connection, path, {"jira": {"project": "EXAMPLE"}})
+        self.assertEqual(self._stored(path), '{"drive":{},"email":{"aliases":["board","committee"]},'
+                                             '"jira":{"project":"EXAMPLE"}}')
+        self.assertEqual(mail_aliases(self.connection, path), ["board", "committee"])
+
+    def test_mail_aliases_raise_on_what_the_setting_reader_cannot_read(self):
+        """Unknown is not none: a stored value the validator refuses and an
+        open restore raise, as `issue_sources` does; never `[]`."""
+        path = self._registered()
+        self.connection.execute(
+            "UPDATE repo SET channels = '{\"email\": {\"aliases\": [\"a@example.test\"]}}' WHERE path = ?",
+            (path,))
+        with self.assertRaises(ChannelRefusal):
+            mail_aliases(self.connection, path)
+        set_channels(self.connection, path, None)
+        set_channels(self.connection, path, {"email": {"aliases": ["board"]}})
+        self.connection.execute(
+            "INSERT INTO state (kind, key, timestamp, body) VALUES ('restore', '2026-10-14', 't', '{}')")
+        with self.assertRaises(ChannelRefusal):
+            mail_aliases(self.connection, path)
+
     INBOUND = {"feed": {"url": "https://example.test/feed.xml"}, "jira": {"project": "EXAMPLE"},
-               "github": {"repo": "example/project"}}
+               "github": {"repo": "example/project"}, "email": {"aliases": ["board"]}}
     CHANGED = {"feed": {"url": "https://example.test/other.xml"}, "jira": {"project": "OTHER"},
-               "github": {"repo": "example/other"}}
+               "github": {"repo": "example/other"}, "email": {"aliases": ["committee"]}}
 
     def test_a_set_of_one_inbound_key_keeps_the_other_inbound_keys_and_the_channels(self):
         """sd:3461 lane review: each inbound source is set on its own, so
@@ -777,6 +808,22 @@ class TheChannelsWriter(RepoCase):
         self.connection.execute("UPDATE repo SET channels = '{\"slack\": {}}' WHERE path = ?", (path,))
         self.assertEqual(set_channels(self.connection, path, {"drive": {}}, before='{"slack":{}}'),
                          (path, '{"slack":{}}'))
+        self.assertEqual(self._stored(path), '{"drive":{}}')
+
+    def test_a_set_with_no_before_refuses_over_a_stored_value_it_cannot_read(self):
+        """sd:4191 self-review: a stored value this build refuses may hold a
+        key a newer build wrote. A set that never read it would replace it
+        whole and lose the keys it does not name, so it refuses and writes
+        nothing; `none` clears, and a set naming the value as `before` replaces."""
+        path = self._registered()
+        newer = '{"jira":{"project":"EXAMPLE"},"obsidian":{"folder":"Notes"},"slack":{}}'
+        self.connection.execute("UPDATE repo SET channels = ? WHERE path = ?", (newer, path))
+        with self.assertRaises(ChannelRefusal) as caught:
+            set_channels(self.connection, path, {"drive": {}})
+        self.assertIn("slack", str(caught.exception))
+        self.assertIn("none", str(caught.exception))
+        self.assertEqual(self._stored(path), newer)
+        self.assertEqual(set_channels(self.connection, path, {"drive": {}}, before=newer), (path, newer))
         self.assertEqual(self._stored(path), '{"drive":{}}')
 
     def test_it_writes_while_a_restore_is_open(self):
@@ -862,6 +909,21 @@ class TheChannelsVerb(RepoCase):
             self.assertEqual((rc, out), (1, ""))
             self.assertIn(word[:-1], err)
         self.assertEqual(self._stored(path), text)
+
+    def test_an_email_word_sets_the_mail_alias_labels(self):
+        """sd:4191: `email=board,committee` names the labels; `email=` and an
+        address refuse naming `email` and change nothing."""
+        path = self._registered()
+        rc, out, err = self._run(path, "email=committee,board")
+        self.assertEqual(rc, 0, err)
+        text = '{"email":{"aliases":["board","committee"]}}'
+        self.assertIn(f"channels none -> {text}", out)
+        for word in ("email=", "email=a@example.test", "email=board,,committee", "email=board,board"):
+            with self.subTest(word=word):
+                rc, out, err = self._run(path, word)
+                self.assertEqual((rc, out), (1, ""))
+                self.assertIn("email", err)
+                self.assertEqual(self._stored(path), text)
 
     def test_one_inbound_word_keeps_the_other_sources_and_prints_what_is_stored(self):
         """sd:3461 lane review: `feed=URL`, `jira=KEY` and `github=owner/name`

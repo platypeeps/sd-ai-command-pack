@@ -40,7 +40,7 @@ class TheValidator(unittest.TestCase):
                 validate(value)
 
     def test_each_key_outside_the_vocabulary_refuses_by_name(self):
-        for key in ("slack", "email", "reddit", "Jira", "Obsidian", ""):
+        for key in ("slack", "mail", "reddit", "Jira", "Obsidian", ""):
             with self.subTest(key=key), self.assertRaises(ChannelRefusal) as caught:
                 validate({"obsidian": {}, key: {}})
             self.assertIn(repr(key), str(caught.exception))
@@ -174,6 +174,32 @@ class TheIssueSources(unittest.TestCase):
             with self.subTest(name=name, entry=entry), self.assertRaises(ChannelRefusal) as caught:
                 validate({name: entry})
             self.assertIn(name, str(caught.exception))
+
+
+class TheMailAliases(unittest.TestCase):
+    """sd:4191: the repo's mail alias labels, the inbound `email` key.
+
+    Each names an `alias|<label>|<address>` line in mail-intake's private
+    conf; the address stays there, so the row holds names only. It is
+    inbound: it neither turns publishing on nor leaves a channel off."""
+
+    def test_labels_are_a_setting_beside_the_channels_stored_sorted(self):
+        value = {"email": {"aliases": ["committee", "board-2", "x_1"]}, "drive": {}}
+        self.assertEqual(validate(value), {"email": {"aliases": ["board-2", "committee", "x_1"]}, "drive": {}})
+        self.assertEqual(outbound(value), {"drive": {}})
+        self.assertIsNone(outbound({"email": {"aliases": ["board"]}}))
+
+    def test_each_label_is_a_name_never_an_address(self):
+        entries: tuple[dict, ...] = (
+            {}, {"aliases": []}, {"aliases": "board"}, {"aliases": [3]}, {"aliases": [""]},
+            {"aliases": ["a@example.test"]}, {"aliases": ["board committee"]}, {"aliases": ["Board"]},
+            {"aliases": ["-board"]}, {"aliases": ["https://example.test/a"]}, {"aliases": ["board\n"]},
+            {"aliases": ["board", "board"]}, {"aliases": [f"a{n}" for n in range(9)]},
+            {"aliases": ["x" * 65]}, {"aliases": ["board"], "folder": "x"}, {"folder": "x"})
+        for entry in entries:
+            with self.subTest(entry=entry), self.assertRaises(ChannelRefusal) as caught:
+                validate({"email": entry})
+            self.assertIn("email", str(caught.exception))
 
 
 class TheReader(unittest.TestCase):
