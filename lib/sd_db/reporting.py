@@ -133,11 +133,16 @@ def _folded_into(connection, job, run_id):
         " ORDER BY id DESC LIMIT 1", (job + ":", job + ";", job, run_id)).fetchone()
 
 
+#: A report's current set of findings: `repeats.basis` once a shrunken set
+#: replaced its body (sd:4658), else its first run's basis.
+CURRENT_BASIS = "COALESCE(json_extract(fields, '$.repeats.basis'), json_extract(fields, '$.report.attention_basis'))"
+
+
 def _fold_target(connection, job, attention_basis, *, chain=None):
     """The attention report a repeat of `job` folds into, or `None`.
 
     The newest `cron-report` row for this job that is not `done`, has
-    `fields.attention` exactly true, the same `attention_basis`, and no
+    `fields.attention` exactly true, the same current basis (`CURRENT_BASIS`), and no
     `record` marker. A `done` row qualifies only as `chain`, after every
     open one (sd:4629): the report the previous run on this host went to,
     so the operator's acknowledgement holds while the findings repeat
@@ -162,7 +167,7 @@ def _fold_target(connection, job, attention_basis, *, chain=None):
         f" AND NOT ({UNREADABLE_FIELDS})"
         " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.job') END = ?"
         " AND CASE WHEN json_valid(fields) THEN json_type(fields, '$.attention') END = 'true'"
-        " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.attention_basis') END = ?"
+        f" AND CASE WHEN json_valid(fields) THEN {CURRENT_BASIS} END = ?"
         " AND CASE WHEN json_valid(fields) THEN json_type(fields, '$.record') END IS NULL"
         " ORDER BY status = 'done', id DESC LIMIT 1",
         (job + ":", job + ";", chain, job, attention_basis)).fetchone()
@@ -311,6 +316,13 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         # run ended, not what it found.
         target = (_fold_target(connection, job, attention_basis, chain=chain if exit_code == 0 else None)
                   if attention and record is None else None)
+        if not target and attention and record is None and exit_code == 0 and host is not None:
+            # A set that only shrank is the same report with fewer findings
+            # (sd:4658): it folds into this host's open report that holds
+            # every one of them, and its body replaces the larger set's.
+            lines = set(attention_basis.split("\n"))
+            target = next((row for row in _host_reports(connection, job, host)
+                           if isinstance(basis := _current_basis(row), str) and lines <= set(basis.split("\n"))), None)
         if target:
             stored = json.loads(target["fields"])
             repeats = stored.get("repeats") or {"count": 1, "first_ended": stored["report"]["ended"], "run_ids": []}
@@ -330,6 +342,10 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
             whole = not truncated or kept_cut
             if newest and whole and truncated != kept_cut:
                 repeats["body_truncated"] = truncated
+            # The kept body's set is the report's set from now on (sd:4658):
+            # a finding missing from it is new when it comes back.
+            if newest and whole and attention_basis != _current_basis(target):
+                repeats["basis"] = attention_basis
             set_item_fields(connection, target["id"], fields={**stored, "repeats": repeats},
                             **({"body": {"text": text}} if newest and whole else {}))
             return workflow.item_state(connection, target["id"])
@@ -341,10 +357,39 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         return workflow.item_state(connection, item)
 
 
+def _current_basis(item):
+    """Report `item`'s current set of findings, as `CURRENT_BASIS` reads it."""
+    fields = json.loads(item["fields"])
+    return (fields.get("repeats") or {}).get("basis", fields["report"].get("attention_basis"))
+
+
 def _kept_cut(item):
     """Whether report `item`'s kept body is cut: `repeats.body_truncated`, else its first run's flag."""
     fields = json.loads(item["fields"])
     return (fields.get("repeats") or {}).get("body_truncated", fields["report"].get("truncated")) is True
+
+
+def _host_reports(connection, job, host, *, but=None):
+    """The open clean-exit findings reports of `job` that `host` filed, newest first, other than `but`.
+
+    Only rows that store this `host` (sd:4641, no backfill), with `attention`
+    and no `record`, and none another host's newest run folded into, since
+    `_fold_target` ignores the host: that host's chain row still names it,
+    and its findings are not this host's to close or to shrink.
+    """
+    return connection.execute(
+        "SELECT id, fields FROM item WHERE kind='report' AND source='cron-report' AND status != 'done'"
+        " AND external_id > ? AND external_id < ? AND id IS NOT ?"
+        " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.job') = ?"
+        "      AND json_extract(fields, '$.report.host') = ?"
+        "      AND json_type(fields, '$.attention') = 'true'"
+        "      AND json_type(fields, '$.report.exit_code') = 'integer' AND json_extract(fields, '$.report.exit_code') = 0"
+        "      AND json_type(fields, '$.record') IS NULL END"
+        " AND NOT EXISTS (SELECT 1 FROM state WHERE kind='heartbeat' AND substr(key, 1, ?) = ? AND key != ?"
+        "      AND CASE WHEN json_valid(body) THEN json_extract(body, '$.item') END = item.id)"
+        " ORDER BY id DESC",
+        (job + ":", job + ";", but, job, host, len(f"{CHAIN_KEY}{job}@"), f"{CHAIN_KEY}{job}@",
+         f"{CHAIN_KEY}{job}@{host}")).fetchall()
 
 
 def _supersede(connection, *, job, host, by):
@@ -352,29 +397,14 @@ def _supersede(connection, *, job, host, by):
 
     A clean-exit findings run with a whole body, filed or folded into `by`,
     is the host's whole current set, so another open one -- a larger set
-    that shrank, or a set that changed -- would only sit beside it. Only rows that store this `host` take part
-    (no backfill), only clean exits with `attention`, never a `record`, and
-    never a row with a followup the ingest did not write: somebody owes work
-    on it. A row another host's newest run folded into stays open too, since
-    `_fold_target` ignores the host: that host's chain row still names it,
-    and its findings are not this host's to close. The ingest's own followup is resolved, as `acknowledge` resolves
-    it, and the status note names `by`; `_fold_target` reads that note, so a
+    that changed -- would only sit beside it. A set that only shrank folds
+    instead (sd:4658). Only `_host_reports` rows take part, and never one
+    with a followup the ingest did not write: somebody owes work on it. The
+    ingest's own followup is resolved, as `acknowledge` resolves it, and the status note names `by`; `_fold_target` reads that note, so a
     superseded report never counts as acknowledged. `ingest_log` calls this
     only for the host's newest run, so a late run closes nothing.
     """
-    rows = connection.execute(
-        "SELECT id, fields FROM item WHERE kind='report' AND source='cron-report' AND status != 'done'"
-        " AND external_id > ? AND external_id < ? AND id != ?"
-        " AND CASE WHEN json_valid(fields) THEN json_extract(fields, '$.report.job') = ?"
-        "      AND json_extract(fields, '$.report.host') = ?"
-        "      AND json_type(fields, '$.attention') = 'true'"
-        "      AND json_type(fields, '$.report.exit_code') = 'integer' AND json_extract(fields, '$.report.exit_code') = 0"
-        "      AND json_type(fields, '$.record') IS NULL END"
-        " AND NOT EXISTS (SELECT 1 FROM state WHERE kind='heartbeat' AND substr(key, 1, ?) = ? AND key != ?"
-        "      AND CASE WHEN json_valid(body) THEN json_extract(body, '$.item') END = item.id)",
-        (job + ":", job + ";", by, job, host, len(f"{CHAIN_KEY}{job}@"), f"{CHAIN_KEY}{job}@",
-         f"{CHAIN_KEY}{job}@{host}")).fetchall()
-    for row in rows:
+    for row in _host_reports(connection, job, host, but=by):
         ingests = _ingest_followup_for(row["fields"])
         followups = connection.execute(
             "SELECT id, session, body FROM note WHERE item=? AND kind='followup' AND resolved_at IS NULL",

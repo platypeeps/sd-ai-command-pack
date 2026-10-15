@@ -566,11 +566,12 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         # A job that prints the same two lines every run still folds.
         again = self.tick("c", 31, exit_code=0, text="SD_REPORT_ATTENTION: swap high [7]\n" + disk)
         self.assertEqual((again["recorded"], again["item"]["id"]), ("folded", carried["item"]["id"]))
-        # A disk-only run never folds into the carried one. Since sd:4641 the
-        # carried report superseded the disk report, and this one supersedes it.
+        # Since sd:4641 the carried report superseded the disk report, and
+        # since sd:4658 a disk-only run is a shrunken set: it folds into the
+        # carried report, whose body becomes the disk-only one.
         last = self.tick("d", 46, exit_code=0, text=disk)
-        self.assertEqual((last["recorded"], last["why"]), ("report", "disk low [123]"))
-        self.assertNotIn(last["item"]["id"], (open_, carried["item"]["id"]))
+        self.assertEqual((last["recorded"], last["item"]["id"]), ("folded", carried["item"]["id"]))
+        self.assertNotIn("swap high", json.loads(last["item"]["body"])["text"])
 
     def test_a_late_run_is_counted_but_keeps_the_newer_body(self):
         """A hand recovery of an older run counts, and the body stays the newest run's."""
@@ -997,6 +998,62 @@ class ANewFindingsReportSupersedesTheOlderOne(unittest.TestCase):
         whole = self.tick("c", 16, self.ONE)
         self.assertEqual((whole["recorded"], whole["item"]["id"]), ("folded", cut))
         self.assertEqual(self.row(older)["status"], "planning")
+
+    def items(self):
+        return self.db.execute("SELECT COUNT(*) FROM item WHERE kind='report'").fetchone()[0]
+
+    def test_a_shrinking_set_folds_into_the_open_report(self):
+        """sd:4658: {A,B} then {A} is the same report with body {A}, and no new item."""
+        both = "SD_REPORT_ATTENTION: disk low [1]\nSD_REPORT_ATTENTION: swap high [2]\n"
+        first = self.tick("a", 1, both)["item"]["id"]
+        before = self.items()
+        shrunk = self.tick("b", 16, "SD_REPORT_ATTENTION: disk low [1]\n")
+        self.assertEqual((shrunk["recorded"], shrunk["item"]["id"], self.items()), ("folded", first, before))
+        self.assertEqual(self.row(first)["status"], "planning")
+        self.assertNotIn("swap high", json.loads(self.row(first)["body"])["text"])
+        # The report's set is now {A}: the same set folds; B coming back is a
+        # new finding, so it files its own report and supersedes this one.
+        self.assertEqual(self.tick("c", 31, "SD_REPORT_ATTENTION: disk low [1]\n")["item"]["id"], first)
+        grown = self.tick("d", 46, both)
+        self.assertEqual(grown["recorded"], "report")
+        self.assertEqual(self.row(first)["status"], "done")
+
+    def test_a_finding_back_after_a_shrink_is_shown_even_when_cut(self):
+        """Codex: {A,B}, {A}, then a cut {A,B} folded by the first basis and kept body {A}: B was nowhere."""
+        both = "SD_REPORT_ATTENTION: a\nSD_REPORT_ATTENTION: b\n"
+        first = self.tick("a", 1, both)["item"]["id"]
+        self.tick("b", 16, "SD_REPORT_ATTENTION: a\n")
+        back = self.tick("c", 31, self.past_the_cut(both, ""))
+        self.assertNotEqual(back["item"]["id"], first)
+        self.assertEqual(back["item"]["status"], "planning")
+
+    def test_a_finding_back_after_a_shrink_does_not_fold_into_the_acknowledged_report(self):
+        """Codex: {A,B}, {A}, acknowledge, {A,B} folded into the done report by the first basis."""
+        both = "SD_REPORT_ATTENTION: a\nSD_REPORT_ATTENTION: b\n"
+        first = self.tick("a", 1, both)["item"]["id"]
+        self.tick("b", 16, "SD_REPORT_ATTENTION: a\n")
+        reporting.acknowledge(self.db, first, who="fixture", resolve_ingest_followups=True,
+                              expected_revision=workflow.item_state(self.db, first)["revision"])
+        back = self.tick("c", 31, both)
+        self.assertEqual((back["recorded"], back["item"]["status"]), ("report", "planning"))
+
+    def test_a_reordered_set_folds(self):
+        first = self.tick("a", 1, "SD_REPORT_ATTENTION: a\nSD_REPORT_ATTENTION: b\n")["item"]["id"]
+        self.assertEqual(self.tick("b", 16, "SD_REPORT_ATTENTION: b\nSD_REPORT_ATTENTION: a\n")["item"]["id"], first)
+
+    def test_a_shrinking_set_does_not_fold_into_another_hosts_or_an_acknowledged_report(self):
+        both = "SD_REPORT_ATTENTION: a\nSD_REPORT_ATTENTION: b\n"
+        with mock.patch("sd_db.ship.this_host", return_value="hostb"):
+            other = self.tick("a", 1, both)["item"]["id"]
+        self.assertNotEqual(self.tick("b", 16, "SD_REPORT_ATTENTION: a\n")["item"]["id"], other)
+        mine = self.tick("c", 31, both)["item"]["id"]
+        reporting.acknowledge(self.db, mine, who="fixture", resolve_ingest_followups=True,
+                              expected_revision=workflow.item_state(self.db, mine)["revision"])
+        self.assertNotEqual(self.tick("d", 46, "SD_REPORT_ATTENTION: a\n")["item"]["id"], mine)
+
+    def test_a_failure_never_folds_into_a_larger_set(self):
+        first = self.tick("a", 1, "SD_REPORT_ATTENTION: a\nSD_REPORT_ATTENTION: b\n")["item"]["id"]
+        self.assertNotEqual(self.tick("b", 16, "SD_REPORT_ATTENTION: a\n", exit_code=1)["item"]["id"], first)
 
     def test_reopening_a_superseded_report_returns_it_to_planning(self):
         older = self.tick("a", 1, self.TWO)["item"]["id"]
