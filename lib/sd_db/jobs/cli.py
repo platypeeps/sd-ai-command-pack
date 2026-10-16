@@ -393,8 +393,8 @@ def _judgments_unlabelled(argv: list[str]) -> int:
     return 0
 
 
-REVIEW_USAGE = ("sd-db review: takes `file <batch.json>`, "
-                "`export <item> [--key <file>] --out <path>` or `apply <queue>`")
+REVIEW_USAGE = ("sd-db review: takes `file <batch.json>`, `file --kev <file.jsonl> --batch <name> [--blind]`, "
+                "`export <item> [--key <file>] --out <path> [--format review|reviews]` or `apply <queue>`")
 
 
 def command_review(argv: list[str]) -> int:
@@ -408,14 +408,21 @@ def command_review(argv: list[str]) -> int:
     action, rest = (argv[0], argv[1:]) if argv else ("", [])
     if action == "file" and len(rest) == 1:
         return _review_file(Path(rest[0]))
+    if action == "file" and rest[:1] == ["--kev"]:
+        blind = rest[-1:] == ["--blind"]
+        given = rest[:-1] if blind else rest
+        if len(given) == 4 and given[2] == "--batch":
+            return _review_file(Path(given[1]), kev=given[3], blind=blind)
     if action == "export":
         options: dict[str, str] = {}
         item = rest.pop(0) if rest else ""
-        while len(rest) >= 2 and rest[0] in ("--key", "--out") and rest[0][2:] not in options:
+        while len(rest) >= 2 and rest[0] in ("--key", "--out", "--format") and rest[0][2:] not in options:
             options[rest[0][2:]] = rest[1]
             rest = rest[2:]
-        if item.isdigit() and not rest and "out" in options:
-            return _review_export(int(item), options.get("key"), Path(options["out"]))
+        if (item.isdigit() and not rest and "out" in options
+                and options.get("format", "review") in ("review", "reviews")):
+            return _review_export(int(item), options.get("key"), Path(options["out"]),
+                                  as_reviews=options.get("format") == "reviews")
     if action == "apply" and len(rest) == 1:
         connection = _open_for_write()
         try:
@@ -437,18 +444,27 @@ def command_review(argv: list[str]) -> int:
     return 1
 
 
-def _review_file(path: Path) -> int:
+def _review_file(path: Path, *, kev: str | None = None, blind: bool = False) -> int:
+    """File a batch file, or with `kev` (the batch name) a Kev label file (sd:4789).
+
+    A Kev file files whole or not at all: no 90-day suppression drops a line.
+    """
     try:
-        batch = json.loads(path.read_text(encoding="utf-8"))
+        text = path.read_text(encoding="utf-8")
+        batch = (review.from_kev(text, batch=kev, mode="blind" if blind else "open", source=f"kev:{path.name}")
+                 if kev is not None else json.loads(text))
     except OSError as failure:
         print(f"sd-db review file: cannot read {path}: {failure.strerror}", file=sys.stderr)
+        return 1
+    except review.ReviewError as failure:
+        print(f"sd-db review file: {path}: {failure}; nothing filed", file=sys.stderr)
         return 1
     except ValueError as failure:
         print(f"sd-db review file: {path} is not JSON: {failure}; nothing filed", file=sys.stderr)
         return 1
     connection = _open_for_write()
     try:
-        result = review.file(connection, batch, who=getpass.getuser())
+        result = review.file(connection, batch, who=getpass.getuser(), suppress=kev is None)
     finally:
         connection.close()
     for dropped in result["dropped"]:
@@ -462,7 +478,7 @@ def _review_file(path: Path) -> int:
     return 0
 
 
-def _review_export(item: int, key_path: str | None, out: Path) -> int:
+def _review_export(item: int, key_path: str | None, out: Path, *, as_reviews: bool = False) -> int:
     try:
         key = None if key_path is None else Path(key_path).read_bytes()
     except OSError as failure:
@@ -475,7 +491,7 @@ def _review_export(item: int, key_path: str | None, out: Path) -> int:
         connection.close()
     manifest = lines[0]
     try:
-        review.write(lines, out)
+        review.write(review.reviews(lines) if as_reviews else lines, out)
     except OSError as failure:
         print(f"sd-db review export: cannot write {out}: {failure.strerror}; sd:{item} is {'closed' if manifest['closed'] else 'open'}, "
               f"and the same command writes it again", file=sys.stderr)

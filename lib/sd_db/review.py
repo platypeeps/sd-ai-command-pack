@@ -50,7 +50,7 @@ from . import workflow, writes
 from .database import transaction
 from .writes import add_note, reopen_note, resolve_note
 
-__all__ = ["ReviewError", "apply", "export", "file", "read", "rule", "withdraw", "write"]
+__all__ = ["DROP", "ReviewError", "apply", "export", "file", "from_kev", "read", "reviews", "rule", "withdraw", "write"]
 
 #: The batch file's one schema.
 SCHEMA = 1
@@ -86,6 +86,12 @@ EXPIRED = "Expired, not ruled"
 #: How long a rejected subject keeps a suggestion out of its queue.
 SUPPRESS_DAYS = 90
 UNKNOWN = "unknown"
+#: A Kev file's questions end with this option: a drop is a label like any other, so Undo and the export
+#: treat it the same way, and `reviews` reads it as Kev's `drop` verdict (sd:4789).
+DROP = "(drop)"
+#: The queue a Kev label file files under, and the evidence line that carries its proposed label.
+KEV_QUEUE = "kev"
+PROPOSED = "Proposed label: "
 
 
 class ReviewError(workflow.WorkflowError):
@@ -95,11 +101,20 @@ class ReviewError(workflow.WorkflowError):
 # ---------------------------------------------------------------- the batch file
 
 
+def _unicode(value: str, name: str) -> None:
+    """Refuse text UTF-8 cannot store: a JSON escape can carry a lone surrogate."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ReviewError(f"{name} is not valid Unicode") from None
+
+
 def _line(value: Any, name: str, *, limit: int | None = None) -> str:
     """One line of text, as filed: no padding, no line break, no NUL."""
     if (not isinstance(value, str) or not value or value != value.strip() or "\x00" in value
             or len(value.splitlines()) != 1):
         raise ReviewError(f"{name} must be one line of text with no padding")
+    _unicode(value, name)
     if limit is not None and len(value) > limit:
         raise ReviewError(f"{name} is {len(value)} characters; the limit is {limit}")
     return value
@@ -119,6 +134,7 @@ def _question(found: Any, where: str) -> dict:
     if not isinstance(text, str) or not text.strip() or "\x00" in text:
         raise ReviewError(f"{where} text must be text")
     text = text.strip()
+    _unicode(text, f"{where} text")
     if len(text.encode("utf-8")) > TEXT_BYTES:
         raise ReviewError(f"{where} text is over {TEXT_BYTES} bytes")
     if any(TAGGED.match(line) for line in text.splitlines()):
@@ -348,13 +364,16 @@ def _difference(filed: dict, found: dict) -> str:
             f"(digest {header['digest']} filed)")
 
 
-def file(connection: sqlite3.Connection, batch: Any, *, who: str, now: str | None = None) -> dict:
+def file(connection: sqlite3.Connection, batch: Any, *, who: str, now: str | None = None,
+         suppress: bool = True) -> dict:
     """File `batch` (the parsed batch file): the item, the header and each question, in one transaction.
 
     The same file again finds its item and writes nothing; another file under
     the same queue and batch is refused, naming the first difference. A
     subject whose question the queue rejected in the last 90 days is dropped,
     then questions past `limit` are; each drop is returned with its reason.
+    `suppress=False` skips the 90-day check, for a label file whose every
+    question must file or none (`from_kev`).
     """
     found = _checked(batch)
     digest = _digest(batch)
@@ -369,7 +388,7 @@ def file(connection: sqlite3.Connection, batch: Any, *, who: str, now: str | Non
                                   f"{_difference(filed, found)}")
             return {"item": held["id"], "ref": ref, "created": False, "filed": len(filed["questions"]),
                     "dropped": []}
-        rejected = _rejected(connection, found["queue"], since)
+        rejected = _rejected(connection, found["queue"], since) if suppress else {}
         kept = [question for question in found["questions"] if question["subject"] not in rejected]
         dropped = [{"subject": question["subject"], "reason": rejected[question["subject"]]}
                    for question in found["questions"] if question["subject"] in rejected]
@@ -557,6 +576,107 @@ def write(lines: list[dict], out: Path | str) -> None:
     except BaseException:
         part.unlink(missing_ok=True)
         raise
+
+
+# ---------------------------------------------------------------- Kev label files (sd:4789)
+
+
+def _kev_text(value: Any) -> str:
+    """A Kev field as Kev's review app shows it: a string, or an object as `key: value` lines."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return "\n".join(f"{key}: {item if isinstance(item, str) else json.dumps(item)}"
+                         for key, item in value.items())
+    return "" if value is None else str(value)
+
+
+def _kev_question(line: Any, where: str) -> dict:
+    if not isinstance(line, dict):
+        raise ReviewError(f"{where} is not a JSON object")
+    question = line.get("question")
+    if (not isinstance(line.get("id"), str) or not isinstance(line.get("document"), str)
+            or not isinstance(line.get("proposed_label"), str) or not isinstance(question, dict)):
+        raise ReviewError(f"{where} needs a string id, document and proposed_label, and a question object")
+    options = question.get("options")
+    if not isinstance(options, dict) or not 1 <= len(options) <= OPTION_COUNT.stop - 2:
+        raise ReviewError(f"{where} needs question.options as an object of 1 to {OPTION_COUNT.stop - 2} "
+                          f"keys; {DROP} is added as the last option")
+    if DROP in options:
+        raise ReviewError(f"{where} names an option {DROP}, which the import adds itself")
+    proposed = line["proposed_label"]
+    if proposed and proposed not in options:
+        raise ReviewError(f"{where} proposes {proposed!r}, which is not one of its options")
+    described = [f"{key}: {_kev_text(text)}" if text is not None else key for key, text in options.items()]
+    text = "\n\n".join(part for part in (_kev_text(question.get("instructions")).strip(),
+                                        "\n".join(described), line["document"].strip()) if part)
+    evidence = [f"{PROPOSED}{proposed}"] if proposed else []
+    judges = line.get("judges") or []
+    if not isinstance(judges, list) or not all(isinstance(judge, dict) for judge in judges):
+        raise ReviewError(f"{where} judges must be a list of objects")
+    for judge in judges:
+        said = " ".join(_kev_text(judge.get("rationale")).split())
+        evidence.append(f"Judge {' '.join(_kev_text(judge.get('model')).split()) or 'unnamed'}: "
+                        f"{' '.join(_kev_text(judge.get('label')).split()) or '-'}" + (f", {said}" if said else ""))
+    return _question({"subject": line["id"], "text": text, "evidence": evidence,
+                      "options": [*options, DROP]}, where)
+
+
+def from_kev(text: str, *, batch: str, mode: str, source: str) -> dict:
+    """A Kev label file (the JSONL Kev's tools/review reads) as a batch file for `file`.
+
+    One question per non-blank line, in file order: the subject is the line's
+    `id`; the text is the instructions, each option as `key: description`,
+    then the document; the options are the option keys, then `DROP`. A
+    proposed label and each judge become evidence lines, which a blind batch
+    never shows. Every refusal names the line; nothing is cut or skipped.
+    """
+    if mode not in ("open", "blind"):
+        raise ReviewError("a Kev file files open or blind")
+    questions, seen = [], set()
+    # Only a newline ends a JSONL record: splitlines would also cut at U+2028 inside a string.
+    for number, raw in enumerate(text.split("\n"), 1):
+        if not raw.strip():
+            continue
+        where = f"line {number}"
+        try:
+            line = json.loads(raw)
+        except ValueError as failure:
+            raise ReviewError(f"{where} is not JSON: {failure}") from None
+        question = _kev_question(line, where)
+        if question["subject"] in seen:
+            raise ReviewError(f"{where} repeats id {question['subject']!r}")
+        seen.add(question["subject"])
+        questions.append(question)
+    if not questions:
+        raise ReviewError("the Kev file holds no line")
+    if len(questions) > LIMIT:
+        raise ReviewError(f"{len(questions)} lines; a batch holds at most {LIMIT}, so split the file")
+    found = {"schema": SCHEMA, "queue": KEV_QUEUE, "batch": _name(batch, "batch"), "title": f"Label: {batch}",
+             "source": source, "mode": mode, "questions": questions}
+    _checked(found)
+    return found
+
+
+def reviews(lines: list[dict]) -> list[dict]:
+    """`export` lines in Kev's reviews.jsonl shape: one line per labelled question, in batch order.
+
+    `verdict` is `drop` for `DROP` (label null); `accept` when an open
+    batch's label equals its non-empty proposed label; else `relabel`. A
+    blind or sealed batch never reads `accept`: its labeller saw no proposal.
+    """
+    blind = lines[0]["mode"] != "open"
+    out = []
+    for line in lines[1:]:
+        if line["label"] is None:
+            continue
+        proposed = next((entry[len(PROPOSED):] for entry in line["evidence"] if entry.startswith(PROPOSED)), "")
+        verdict = ("drop" if line["label"] == DROP
+                   else "accept" if proposed and line["label"] == proposed and not blind else "relabel")
+        out.append({"id": line["subject"], "verdict": verdict, "label": None if verdict == "drop" else line["label"],
+                    "proposed_label": proposed, "note": "\n".join(comment["text"] for comment in line["comments"]),
+                    "reviewed_at": line["ruled_at"]})
+    return out
 
 
 # ---------------------------------------------------------------- apply
