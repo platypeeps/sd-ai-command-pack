@@ -3084,6 +3084,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def follow_and_rerun(mismatch) -> None:
+    """On a satellite the hub refuses, follow its pins once and run this command again (sd:4748).
+
+    The follow is the system checkout's `repo-sync.sh follow`, found under
+    the registered plugin roots; no setting names it. Returns when the
+    refusal is to stand, as `sd_db.follow.attempt` decides.
+    """
+    sd_handoff_rows.library()
+    from sd_db import follow  # noqa: PLC0415 - after the helper
+
+    follow.attempt(mismatch, registry(sd_lib.machine_config()))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     if argv is None:
@@ -3093,6 +3106,9 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
     except SystemExit as exit_code:
         return 2 if exit_code.code else 0
+    # Only this entrypoint: its verbs run again from their start, and the
+    # follow's child and the re-run both carry the marker that stops a loop.
+    sd_lib.on_mismatch = follow_and_rerun
     try:
         return int(args.handler(args))
     except Refusal as refusal:

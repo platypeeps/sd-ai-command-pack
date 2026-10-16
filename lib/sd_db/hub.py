@@ -36,6 +36,7 @@ import json
 import os
 import sqlite3
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -55,6 +56,15 @@ CONNECT_TIMEOUT = 5.0
 #: hub that took the session and stopped answering held its caller, and a
 #: lane runner's lock with it, for as long as the socket lived.
 ANSWER_TIMEOUT = 120.0
+
+
+#: What `Hub.open` calls with a `BuildMismatch` before raising it (sd:4748):
+#: `follow.attempt` in an entrypoint that may run again from its start, which
+#: `bin/sd` installs through `sd_lib.import_sd_db`. `None` here and in every
+#: other process: a server, a lane runner or a ship sees the refusal. A hook
+#: that returns leaves the refusal to be raised; one that replaces the process
+#: does not return.
+on_mismatch: Callable[[remote.BuildMismatch], None] | None = None
 
 
 class HubConfigError(remote.RemoteError):
@@ -126,6 +136,10 @@ class Hub:
             raise remote.HubUnreachable(
                 self.host, self.port, f"{error.reason} (named in {self.config})"
             ) from error
+        except remote.BuildMismatch as mismatch:
+            if on_mismatch is not None:
+                on_mismatch(mismatch)
+            raise
 
 
 def read(home: Path | str | None = None) -> Hub | None:
