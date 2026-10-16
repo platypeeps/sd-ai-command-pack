@@ -264,7 +264,7 @@ The design is `docs/work/2026-10-16-repo-github-issues/design.md`.
 
 `repo list` shows it as `on` or `off`, between `ci` and `lane_host`; `runner_merge` stays the last field.
 `repos.github_issues` reads it for code: no row reads off, and a database not yet migrated raises `SchemaTooOld`.
-`bin/sd-issue-guard` reads it in a managed repository: on, `mcp__github__issue_write` `update` aimed at the row's own GitHub repository passes, and filing an issue stays denied.
+It loosens no guard: `bin/sd-issue-guard` and the global deny list still refuse `mcp__github__issue_write`, so an agent closes an issue with `gh issue close`, which neither blocks.
 
 ## `judgments`: what the judgment models cost, by stage
 
