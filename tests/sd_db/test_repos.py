@@ -18,9 +18,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest import mock
 
-from sd_db import connect, ship
+from sd_db import connect, paths, ship
 from sd_db.channels import ChannelRefusal
-from sd_db.errors import SdDbError
+from sd_db.errors import SchemaTooOld, SdDbError
 from sd_db.migrate import initialise, migrate
 from sd_db.repos import (
     CI_MODES,
@@ -30,6 +30,7 @@ from sd_db.repos import (
     checkouts,
     clone_lines,
     conf_paths,
+    github_issues,
     issue_sources,
     mail_aliases,
     mine_issues,
@@ -43,6 +44,7 @@ from sd_db.repos import (
     set_ci,
     set_clones,
     set_dependabot,
+    set_github_issues,
     set_lane_host,
     set_managed,
     set_runner_merge,
@@ -1121,6 +1123,79 @@ class TheDependabotWriter(RepoCase):
         self.assertEqual(set_dependabot(self.connection, path, "no"), (path, "yes"))
         with self.assertRaises(RepoRefusal):
             set_dependabot(self.connection, support.repository(self.checkouts / "two"), "yes")
+
+
+class TheGithubIssuesSetting(RepoCase):
+    """sd:4827. `repo.github_issues`: third-party GitHub issue intake, on or off per repo.
+
+    The writer mirrors `set_runner_merge`; the reader answers False for no row,
+    the column default, and raises on a store without the column rather than
+    reading it as off.
+    """
+
+    def _registered(self) -> str:
+        return add(self.connection, support.repository(self.checkouts / "one"), home=self.home)
+
+    def _value(self, path: str) -> int:
+        return self.connection.execute("SELECT github_issues FROM repo WHERE path = ?", (path,)).fetchone()[0]
+
+    def test_it_sets_the_column_names_what_it_replaced_and_the_reader_follows(self):
+        path = self._registered()
+        self.assertEqual(self._value(path), 0)
+        self.assertFalse(github_issues(self.connection, path))
+        self.assertEqual(set_github_issues(self.connection, path, "on"), (path, "off"))
+        self.assertEqual(self._value(path), 1)
+        self.assertTrue(github_issues(self.connection, path))
+        self.assertTrue(github_issues(self.connection, paths.expand(path)))
+        self.assertEqual(set_github_issues(self.connection, path, "on"), (path, "on"))
+        self.assertEqual(set_github_issues(self.connection, path, "off"), (path, "on"))
+        self.assertFalse(github_issues(self.connection, path))
+
+    def test_it_changes_no_other_field_on_the_row(self):
+        path = self._registered()
+        before = dict(self.connection.execute("SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
+        set_github_issues(self.connection, path, "on")
+        after = dict(self.connection.execute("SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
+        self.assertEqual({key for key in before if before[key] != after[key]} - {"updated_at"}, {"github_issues"})
+
+    def test_every_word_but_on_and_off_is_refused_and_writes_nothing(self):
+        """Property over edge inputs: case, padding, other flag words, empty,
+        control and non-ASCII text, and a seeded spread of random strings."""
+        import random
+
+        path = self._registered()
+        set_github_issues(self.connection, path, "on")
+        words = ["On", "ON", "oN", "Off", "OFF", " on", "on ", "on\n", "\ton", "yes", "no", "true", "false",
+                 "1", "0", "", " ", "o", "onn", "of", "offf", "on,off", "auto", "manual", "\x00", "ón", "ｏｎ"]
+        draw = random.Random(4827)
+        alphabet = "onfON \t\n\x00-_,1é"
+        words += ["".join(draw.choice(alphabet) for _ in range(draw.randrange(0, 6))) for _ in range(300)]
+        for word in (word for word in words if word not in ("on", "off")):
+            with self.subTest(word=word), self.assertRaises(RepoRefusal) as caught:
+                set_github_issues(self.connection, path, word)
+            self.assertIn("on or off", str(caught.exception))
+        self.assertEqual(self._value(path), 1)
+
+    def test_an_unregistered_path_is_refused_on_write_and_reads_off(self):
+        self._registered()
+        stranger = support.repository(self.checkouts / "two")
+        for where in (stranger, self.checkouts / "absent", self.root):
+            with self.subTest(where=where):
+                with self.assertRaises(RepoRefusal) as caught:
+                    set_github_issues(self.connection, where, "on")
+                self.assertIn("not a registered repository", str(caught.exception))
+                self.assertFalse(github_issues(self.connection, where))
+        self.assertEqual(len(registered(self.connection)), 1)
+
+    def test_a_store_before_35_raises_and_never_reads_as_off(self):
+        """Older state: the new library over a store not yet migrated."""
+        database = self.root / "old.db"
+        with mock.patch("sd_db.migrate.migrations", return_value=[m for m in migrations() if m[0] < 35]):
+            migrate(database)
+        old = connect(database, write=False)
+        self.addCleanup(old.close)
+        with self.assertRaises(SchemaTooOld):
+            github_issues(old, self.checkouts / "one")
 
 
 class TheCloneLines(RepoCase):

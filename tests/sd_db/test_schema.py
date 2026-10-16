@@ -2408,5 +2408,96 @@ class TheShadowReasonColumn(SchemaCase):
         self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
 
 
+class TheGithubIssuesColumn(SchemaCase):
+    """Migration 35 (sd:4827, system sd:4810). `repo.github_issues` turns on
+    third-party GitHub issue intake for one repository. Added, not rebuilt:
+    every existing row reads 0, off, and keeps its other values; the CHECK
+    holds 0 and 1; a failed file leaves 34; the reverse returns 34's shape."""
+
+    VERSION = 35
+    COLUMNS = ("path, remote, mode, runner_merge, pieces_source, created_at, updated_at, managed, ci, lane_host, "
+               "channels, clone_profiles, dependabot")
+    ROWS = [("/one", "git@github.com:platypeeps/one.git", "full", "auto", "file", "t1", "t2", 1, "local", "build-2",
+             '{"drive": {}}', "personal,work", 1),
+            ("/two", None, None, "manual", "row", "t3", "t4", 0, "github", None, None, None, 0)]
+
+    def _before(self):
+        self.migrate_through(self.VERSION - 1)
+        raw = sqlite3.connect(self.path)
+        raw.executemany(f"INSERT INTO repo ({self.COLUMNS}) VALUES ({', '.join('?' * 13)})", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(f"SELECT {self.COLUMNS} FROM repo ORDER BY path")]
+
+    def _reference(self, upto):
+        reference = sqlite3.connect(":memory:")
+        self.addCleanup(reference.close)
+        paths.install(reference)
+        for version, path in schema_module.migrations():
+            if version <= upto:
+                reference.executescript(path.read_text(encoding="utf-8"))
+        return reference
+
+    def test_every_existing_row_arrives_off_and_keeps_its_values(self):
+        self._before()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied),
+                         (self.VERSION - 1, list(range(self.VERSION, SCHEMA_VERSION + 1))))
+        self.assertEqual(migrate(self.path).applied, [])
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.ROWS)
+        self.assertEqual([row[0] for row in connection.execute("SELECT github_issues FROM repo ORDER BY path")],
+                         [0, 0])
+
+    def test_the_check_holds_0_and_1(self):
+        self._before()
+        migrate(self.path)
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        connection.execute("UPDATE repo SET github_issues = 1 WHERE path = '/two'")
+        for flag in (2, -1, None, "on", ""):
+            with self.subTest(flag=flag), self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE repo SET github_issues = ? WHERE path = '/two'", (flag,))
+        self.assertEqual([row[0] for row in connection.execute("SELECT github_issues FROM repo ORDER BY path")],
+                         [0, 1])
+
+    def test_a_failed_file_leaves_the_store_at_34_and_a_rerun_finishes_it(self):
+        """Failure table, row "`migrate` runs 035"."""
+        self._before()
+        raw = sqlite3.connect(self.path)
+        raw.execute("ALTER TABLE repo ADD COLUMN github_issues TEXT")
+        raw.commit()
+        raw.close()
+        with self.assertRaises(sqlite3.OperationalError):
+            self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        raw.execute("ALTER TABLE repo DROP COLUMN github_issues")
+        raw.commit()
+        raw.close()
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+    def test_the_reverse_returns_the_file_to_the_prior_version(self):
+        self._before()
+        self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        raw.execute("UPDATE repo SET github_issues = 1 WHERE path = '/one'")
+        raw.commit()
+        raw.close()
+        text = dict(schema_module.migrations())[self.VERSION].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        self.assertEqual(raw.execute("PRAGMA table_info(repo)").fetchall(),
+                         self._reference(self.VERSION - 1).execute("PRAGMA table_info(repo)").fetchall())
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+
 if __name__ == "__main__":
     unittest.main()

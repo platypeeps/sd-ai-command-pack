@@ -253,6 +253,19 @@ A row that cannot be such a line exits 1, names every such row, and prints nothi
 Such a line needs a row one or two folders deep, a GitHub remote, and a folder named as the repository.
 A database not yet migrated exits 1 too; neither case answers an empty list.
 
+## GitHub issues
+
+`repo.github_issues` is 1 for a repository that takes GitHub issues from outside reporters (sd:4827, system sd:4810).
+Every row starts at 0, off: agents use no GitHub issues there and file work as sd items.
+On, an agent maps each open issue to one sd item, comments for the reporter and closes the issue when the item is done.
+The design is `docs/work/2026-10-16-repo-github-issues/design.md`.
+
+    bin/sd-db repo github-issues PATH on        # or off; prints before -> after
+
+`repo list` shows it as `on` or `off`, between `ci` and `lane_host`; `runner_merge` stays the last field.
+`repos.github_issues` reads it for code: no row reads off, and a database not yet migrated raises `SchemaTooOld`.
+`bin/sd-issue-guard` reads it in a managed repository: on, `mcp__github__issue_write` `update` aimed at the row's own GitHub repository passes, and filing an issue stays denied.
+
 ## `judgments`: what the judgment models cost, by stage
 
 `bin/sd-db judgments` compares the stages that route a decision through a judgment model.

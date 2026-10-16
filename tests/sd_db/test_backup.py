@@ -900,14 +900,14 @@ def one_migration_back(database):
     """
     raw = sqlite3.connect(database, isolation_level=None)
     try:
-        # The reverse of 034_shadow_reason.sql, which its header carries as
-        # `--   ` lines: `shadow` loses `reason` and the version goes to 33. The helper is
+        # The reverse of 035_repo_github_issues.sql, which its header carries as
+        # `--   ` lines: `repo` loses `github_issues` and the version goes to 34. The helper is
         # rewritten with every migration: a migration that adds a table or a column would be refused if left in
         # place.
-        text = (SCHEMA_DIR / "034_shadow_reason.sql").read_text()
+        text = (SCHEMA_DIR / "035_repo_github_issues.sql").read_text()
         script = "\n".join(line[4:] for line in text.splitlines() if line.startswith("--   "))
-        assert "PRAGMA user_version = 33" in script, \
-            "034's reverse is not where this helper expects it"
+        assert "PRAGMA user_version = 34" in script, \
+            "035's reverse is not where this helper expects it"
         raw.executescript(script)
         assert raw.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION - 1
     finally:

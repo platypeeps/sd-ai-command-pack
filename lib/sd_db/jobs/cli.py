@@ -41,6 +41,7 @@ from ..repos import (
     set_ci,
     set_clones,
     set_dependabot,
+    set_github_issues,
     set_lane_host,
     set_managed,
     set_runner_merge,
@@ -536,7 +537,7 @@ def command_repo(argv: list[str]) -> int:
     `repo ci <path> <github|local>`, `repo lane-host <path> <host|hub>`,
     `repo channels <path> [obsidian=.. notion=.. drive=.. feed=URL jira=KEY github=OWNER/NAME email=LABEL,.. | none]`,
     `repo clones <path> <P,Q | none | +P | -P>`, `repo dependabot <path> <yes|no>`,
-    `repo remove <path> ...`.
+    `repo github-issues <path> <on|off>`, `repo remove <path> ...`.
 
     The `repo` table is what criterion 6 enumerates from, so an empty one
     makes that criterion pass over nothing. `add` and `seed` are the two ways
@@ -558,13 +559,16 @@ def command_repo(argv: list[str]) -> int:
     sweep's list outside its owner rule. `seed --clones PROFILE` adds PROFILE
     to the row of each line repo-sync's lists give it, and `list --clones
     PROFILE` prints those lines back, `<subdir> <owner/repo>`, for repo-sync.
+    `github-issues` sets `repo.github_issues` (sd:4827): whether the
+    repository takes third-party GitHub issues.
 
-    `list` prints `managed`, `ci`, `lane_host`, then `runner_merge`, so
-    the merge setting stays the last field of each row, where the operator's
-    instructions read it.
+    `list` prints `managed`, `ci`, `github_issues`, `lane_host`, then
+    `runner_merge`, so the merge setting stays the last field of each row,
+    where the operator's instructions read it. `github_issues` sits before
+    `lane_host` so the first four fields and the last two stay put.
     """
     verbs = ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "clones",
-             "dependabot", "remove")
+             "dependabot", "github-issues", "remove")
     if not argv or argv[0] not in verbs:
         print(f"sd-db repo: expected {', '.join(verbs[:-1])} or {verbs[-1]}",
               file=sys.stderr)
@@ -647,6 +651,13 @@ def command_repo(argv: list[str]) -> int:
             path, before = set_dependabot(connection, rest[0], rest[1])
             print(f"sd-db: {path} dependabot {before} -> {rest[1]}")
             return 0
+        if verb == "github-issues":
+            if len(rest) != 2:
+                print("sd-db repo github-issues: needs a path and on or off", file=sys.stderr)
+                return 1
+            path, before = set_github_issues(connection, rest[0], rest[1])
+            print(f"sd-db: {path} github_issues {before} -> {rest[1]}")
+            return 0
         if rest[:1] == ["--clones"] and len(rest) == 2:
             # The conf grammar, bare: `repo-sync` reads these lines as its list.
             for line in clone_lines(connection, rest[1]):
@@ -671,7 +682,8 @@ def command_repo(argv: list[str]) -> int:
         for row in rows:
             print(f"sd-db: {row['path']}  {row['remote'] or '-'}  "
                   f"{'yes' if row['managed'] else 'no'}  "
-                  f"{row['ci']}  {row['lane_host'] or LANE_HUB}  {row['runner_merge']}")
+                  f"{row['ci']}  {'on' if row['github_issues'] else 'off'}  "
+                  f"{row['lane_host'] or LANE_HUB}  {row['runner_merge']}")
         return 0
     finally:
         connection.close()

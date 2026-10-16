@@ -906,6 +906,57 @@ def set_dependabot(connection: sqlite3.Connection, path: Path | str, value: str)
     return row["path"], "yes" if row["dependabot"] else "no"
 
 
+#: The words `repo github-issues` takes, mapped to what the column holds.
+#: A switch reads `on|off`, the owner's words for it (sd:4810).
+GITHUB_ISSUES_VALUES = {"on": 1, "off": 0}
+
+
+def set_github_issues(connection: sqlite3.Connection, path: Path | str, value: str) -> tuple[str, str]:
+    """Set whether one repository takes third-party GitHub issues. Returns `(path, before)`.
+
+    `before` is the word, `on` or `off`. Same refusals as `set_runner_merge`:
+    a value that is not one of the two words, exactly, and a path no row holds.
+    """
+    if value not in GITHUB_ISSUES_VALUES:
+        raise RepoRefusal(f"{value!r} is not a github-issues setting; expected on or off")
+    given = str(Path(path).expanduser().resolve())
+    probe = paths.keys(given)
+    with transaction(connection):
+        row = connection.execute(
+            f"SELECT path, github_issues FROM repo WHERE path IN ({paths.placeholders(probe)})",
+            probe).fetchone()
+        if row is None:
+            raise RepoRefusal(
+                f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
+        connection.execute("UPDATE repo SET github_issues = ?, updated_at = ? WHERE path = ?",
+                           (GITHUB_ISSUES_VALUES[value], now(), row["path"]))
+    return row["path"], "on" if row["github_issues"] else "off"
+
+
+def github_issues(connection: sqlite3.Connection, path: Path | str) -> bool:
+    """Whether one repository takes third-party GitHub issues (sd:4827).
+
+    True only when its row holds 1. No row reads False, the column default:
+    a repository the table does not hold has not been switched on. A store
+    not yet at 35 raises `SchemaTooOld` rather than reading as off, so a
+    caller decides what an unread setting means.
+    """
+    from .database import schema_version
+    from .errors import SchemaTooOld
+    from .schema import SCHEMA_VERSION
+
+    probe = paths.keys(str(Path(path).expanduser().resolve()))
+    try:
+        row = connection.execute(
+            f"SELECT github_issues FROM repo WHERE path IN ({paths.placeholders(probe)}) ORDER BY path",
+            probe).fetchone()
+    except sqlite3.OperationalError as error:
+        if "no such column" in str(error):
+            raise SchemaTooOld(schema_version(connection), SCHEMA_VERSION) from error
+        raise
+    return row is not None and row["github_issues"] == 1
+
+
 #: What `repo.ci` accepts, in the order the CHECK constraint lists them:
 #: `github` runs checks in GitHub Actions, `local` runs `sd-check` on this
 #: machine and posts an `sd/local-gate` status instead (sd:1843).
