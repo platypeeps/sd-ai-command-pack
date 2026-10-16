@@ -7,6 +7,7 @@ item: sd:4188
 # Design — satellite-lane
 
 Status: agreed 2026-10-14 (three open questions answered); revised the same day after lane review: the lane moves only once the old owner is confirmed stopped, never on a timeout (lead's ruling on sd:4188). Build starts after sd:4046 and sd:4184 land and a day shows which stalls remain (operator, 2026-10-14).
+Status: superseded by sd:4748 on 2026-10-15: the day's six build-skew episodes stalled sessions, not lanes, so the satellite client follows the hub's pins and runs the refused command again instead of a satellite-owned lane.
 Builds on sd:3003 (`repo.lane_host`), sd:3282 (the queue in the hub database), sd:3340 (held review on disk), sd:4044 (fence) and sd:4012 (promote).
 
 ## Problem

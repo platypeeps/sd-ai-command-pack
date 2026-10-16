@@ -323,6 +323,16 @@ class HubRestartNeeded(RemoteError):
         )
 
 
+#: Sessions this process opened on a hub. `follow.attempt` reads it: a
+#: process past its first session is part way through a verb, and a re-run
+#: would do that part twice (sd:4748).
+_opened = 0
+
+
+def sessions_opened() -> int:
+    return _opened
+
+
 def handshake() -> dict:
     """This build, as the first frame states it (step 3).
 
@@ -645,6 +655,8 @@ class Connection:
                 raise
         self._call("open", path=self._path, write=self._write,
                    create=self._create, busy_timeout=self._busy_timeout, token=token, **handshake())
+        global _opened
+        _opened += 1
 
     def _reopen(self, lost: HubUnreachable | None) -> None:
         """A new session in place of one that dropped while it held nothing (sd:3336).

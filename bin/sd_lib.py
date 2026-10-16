@@ -1395,7 +1395,18 @@ def import_sd_db() -> Imported:
         if any(frame.filename.startswith(tree + os.sep) for frame in frames):
             return Imported(None, f"sd_db is provisioned at {tree} but will not import: {error}", tree)
         return Imported(None, f"sd_db is not installed here: {error}", "")
+    if on_mismatch is not None:
+        from sd_db import hub  # noqa: PLC0415 - the copy just imported
+
+        hub.on_mismatch = on_mismatch
     return Imported(sd_db, "", "")
+
+
+#: What `import_sd_db` sets `sd_db.hub.on_mismatch` to (sd:4748). `bin/sd`
+#: sets it to follow the hub's pins and run the command again on a satellite
+#: whose build the hub refuses. `None` in every other entrypoint: a ship, a
+#: review or a lane runner may not be run again from its start.
+on_mismatch: Callable[[Any], None] | None = None
 
 
 class Rows:

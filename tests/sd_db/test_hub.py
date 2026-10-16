@@ -22,7 +22,7 @@ from unittest import mock
 from sd_db import create_item, database, hub, initialise, remote
 from sd_db.database import connect, default_path, local_path
 
-from .test_wire import Served
+from .test_wire import Served, other_build
 
 
 def files_under(root: Path) -> list[str]:
@@ -243,6 +243,41 @@ class ThroughTheHub(Satellite):
                     self.assertEqual(self.title(self.served.database, item), shape)
         self.assertFalse(local_path(self.home).exists())
         self.assertFalse((self.home / ".local").exists())
+
+
+class ARefusedBuild(Satellite):
+    """sd:4748: `Hub.open` hands a build-mismatch refusal to `hub.on_mismatch` before raising it."""
+
+    def setUp(self):
+        super().setUp()
+        self.served = Served(self.root, "other.db", build=other_build(self.root))
+        self.addCleanup(self.served.stop)
+        self.name_hub(self.served.port, self.served.token_file)
+        self.addCleanup(setattr, hub, "on_mismatch", None)
+
+    def test_without_a_hook_the_refusal_is_raised_as_before(self):
+        with self.assertRaises(remote.BuildMismatch) as caught:
+            connect(home=self.home)
+        self.assertEqual(caught.exception.field, "build")
+
+    def test_the_hook_sees_the_mismatch_and_a_hook_that_returns_leaves_the_refusal(self):
+        seen: list[remote.BuildMismatch] = []
+        hub.on_mismatch = seen.append
+        with self.assertRaises(remote.BuildMismatch) as caught:
+            connect(home=self.home)
+        self.assertEqual(seen, [caught.exception])
+        self.assertEqual(seen[0].hub_build, remote.tree_digest(self.root / "other" / "sd_db"))
+        self.assertIn("run `repo-sync.sh", str(caught.exception))
+
+    def test_an_unreachable_hub_and_a_matching_hub_never_call_the_hook(self):
+        hub.on_mismatch = lambda mismatch: self.fail(f"called with {mismatch}")
+        self.served.stop()
+        with self.assertRaises(remote.HubUnreachable):
+            connect(home=self.home)
+        same = Served(self.root, "same.db")
+        self.addCleanup(same.stop)
+        self.name_hub(same.port, same.token_file)
+        connect(home=self.home, write=False).close()
 
 
 if __name__ == "__main__":
