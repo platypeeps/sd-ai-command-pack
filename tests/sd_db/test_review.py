@@ -733,6 +733,139 @@ class ABenchmarkPlugIn(ReviewCase):
         self.assertEqual(review.read(self.db, second)["open"], 3)
 
 
+
+def kev_line(ident: str, **changes) -> dict:
+    """One line of a Kev label file, as Kev's tools/review reads it."""
+    found: dict = {"id": ident, "document": f"attribute: {ident}\nscope: span", "source": "aura-field-audit",
+             "label_origin": "blind",
+             "question": {"type": "binary", "instructions": "Could this attribute carry free text?",
+                          "options": {"payload": "can carry free text", "skeleton": "structural metadata"}},
+             "proposed_label": "", "judges": [], "adjudication": None}
+    found.update(changes)
+    return found
+
+
+def kev_text(lines) -> str:
+    return "".join((line if isinstance(line, str) else json.dumps(line)) + "\n" for line in lines)
+
+
+class TheKevImport(ReviewCase):
+    """Kev's label JSONL as a Review batch (sd:4789): one question per line, `(drop)` as the last option."""
+
+    def kev(self, lines, *, mode="blind", name="aura"):
+        return review.from_kev(kev_text(lines), batch=name, mode=mode, source="kev:aura-name-labels.jsonl")
+
+    def test_each_line_is_a_question_with_the_option_keys_then_drop(self):
+        found = self.kev([kev_line("span:error.type"), "", kev_line("span:asgi.event.type")])
+        self.assertEqual((found["queue"], found["batch"], found["title"], found["mode"]),
+                         ("kev", "aura", "Label: aura", "blind"))
+        first = found["questions"][0]
+        self.assertEqual(first["subject"], "span:error.type")
+        self.assertEqual(first["options"], ["payload", "skeleton", review.DROP])
+        self.assertIn("payload: can carry free text", first["text"])
+        self.assertTrue(first["text"].endswith("attribute: span:error.type\nscope: span"))
+        self.assertEqual(first["evidence"], [])
+        item = self.file(found)
+        self.assertEqual(len(review.read(self.db, item)["questions"]), 2)
+
+    def test_the_proposal_and_judges_are_evidence_lines(self):
+        line = kev_line("span:a", proposed_label="payload", judges=[
+            {"model": "example/kev-4b", "label": "skeleton", "rationale": "an\nidentifier"}])
+        evidence = self.kev([line], mode="open")["questions"][0]["evidence"]
+        self.assertEqual(evidence, ["Proposed label: payload", "Judge example/kev-4b: skeleton, an identifier"])
+
+    def test_a_bad_line_refuses_the_file_naming_it_and_files_nothing(self):
+        before = self.counts()
+        cases: dict[str, list] = {
+            "not JSON": ["{"],
+            "duplicate": [kev_line("a"), kev_line("a")],
+            "not an option": [kev_line("a", proposed_label="maybe")],
+            "no options": [kev_line("a", question={"instructions": "x", "options": {}})],
+            "too many options": [kev_line("a", question={"instructions": "x",
+                                                         "options": {f"o{n}": None for n in range(9)}})],
+            "a drop option": [kev_line("a", question={"instructions": "x", "options": {review.DROP: None}})],
+            "options a list": [kev_line("a", question={"instructions": "x", "options": ["yes", "no"]})],
+            "no document": [{"id": "a", "proposed_label": "", "question": {"options": {"y": None}}}],
+            "long document": [kev_line("a", document="x" * 5000)],
+            "too many judges": [kev_line("a", judges=[{"model": f"m{n}", "label": "payload"} for n in range(6)])],
+            "empty": [],
+        }
+        for name, lines in cases.items():
+            with self.subTest(name), self.assertRaises(review.ReviewError) as caught:
+                self.file(self.kev([kev_line("ok"), *lines]) if lines else self.kev(lines))
+            if lines:
+                self.assertIn("line ", str(caught.exception))
+        self.assertEqual(self.counts(), before)
+
+    def test_extreme_input_files_or_refuses_and_never_truncates(self):
+        # Unicode ids and documents, the widest option set, and a document at the size limit file whole.
+        widest = {f"opción-{n}": "é" * 70 for n in range(8)}
+        lines = [kev_line("span:日本語.名前", document="ünïcødé 🚀\n" * 3),
+                 kev_line("span:wide", question={"instructions": "pick", "options": widest})]
+        item = self.file(self.kev(lines))
+        questions = review.read(self.db, item)["questions"]
+        self.assertEqual(questions[0]["subject"], "span:日本語.名前")
+        self.assertIn("ünïcødé 🚀", questions[0]["text"])
+        self.assertEqual(questions[1]["options"], [*widest, review.DROP])
+        # One byte over the 4 KiB question limit refuses rather than cuts.
+        for size in (2000, 3800, 4096, 10 ** 6):
+            with self.subTest(size=size):
+                line = kev_line("span:long", document="d" * size)
+                try:
+                    found = self.kev([line], name=f"long{size}")
+                except review.ReviewError as refused:
+                    self.assertIn("line 1", str(refused))
+                    continue
+                self.assertIn("d" * size, found["questions"][0]["text"])
+
+    def test_a_rejected_subject_in_the_queue_does_not_drop_a_kev_question(self):
+        lines = [kev_line("span:a", question={"instructions": "x", "options": {"Reject": None, "Approve": None}})]
+        first = self.file(self.kev(lines, name="one"))
+        self.rule(first, 0, "Reject")
+        second = review.file(self.db, self.kev(lines, name="two"), who="tester", suppress=False)
+        self.assertEqual((second["filed"], second["dropped"]), (1, []))
+
+    def test_filing_the_same_file_twice_returns_one_item(self):
+        lines = [kev_line("span:a"), kev_line("span:b")]
+        self.assertEqual(self.file(self.kev(lines)), self.file(self.kev(lines)))
+
+
+class TheReviewsExport(ReviewCase):
+    """`reviews(lines)`: an export in Kev's reviews.jsonl shape (sd:4789)."""
+
+    def labelled(self, mode):
+        lines = [kev_line("span:a", proposed_label="payload"), kev_line("span:b", proposed_label="payload"),
+                 kev_line("span:c"), kev_line("span:d")]
+        item = self.file(review.from_kev(kev_text(lines), batch="b", mode=mode, source="kev:t.jsonl"))
+        self.rule(item, 0, "payload")
+        self.rule(item, 1, "skeleton")
+        self.rule(item, 2, review.DROP)
+        note = review.read(self.db, item)["questions"][1]["note"]
+        workflow.add_item_note(self.db, item, who="tester", body=f"On note #{note}: unsure")
+        return review.reviews(review.export(self.db, item, who="tester"))
+
+    def test_an_open_batch_reads_accept_relabel_and_drop(self):
+        out = self.labelled("open")
+        self.assertEqual([sorted(line) for line in out],
+                         [["id", "label", "note", "proposed_label", "reviewed_at", "verdict"]] * 3)
+        self.assertEqual([(line["id"], line["verdict"], line["label"], line["proposed_label"], line["note"])
+                          for line in out],
+                         [("span:a", "accept", "payload", "payload", ""),
+                          ("span:b", "relabel", "skeleton", "payload", "unsure"),
+                          ("span:c", "drop", None, "", "")])
+        self.assertTrue(all(datetime.fromisoformat(line["reviewed_at"]).tzinfo for line in out))
+
+    def test_a_blind_batch_never_reads_accept(self):
+        self.assertEqual([line["verdict"] for line in self.labelled("blind")], ["relabel", "relabel", "drop"])
+
+    def test_a_plain_batch_reads_with_no_proposal(self):
+        item = self.file(batch())
+        self.rule(item, 0, "cheap")
+        self.assertEqual([(line["id"], line["verdict"], line["label"], line["proposed_label"])
+                          for line in review.reviews(review.export(self.db, item, who="tester"))],
+                         [("example.test/a@1a2b3c4:src/one.py", "relabel", "cheap", "")])
+
+
 class TheVerb(unittest.TestCase):
     """`bin/sd-db review` through the entrypoint, on a store under a temporary home."""
 
@@ -793,6 +926,27 @@ class TheVerb(unittest.TestCase):
         self.sd_db("review", "export", str(item), "--key", key, "--out", str(out))
         self.assertEqual(json.loads(out.read_text().splitlines()[1])["key"]["tier"], "cheap")
 
+    def test_a_kev_file_files_blind_and_exports_as_reviews(self):
+        path = self.write("aura.jsonl", kev_text([kev_line("span:a"), kev_line("span:b")]))
+        filed = self.sd_db("review", "file", "--kev", str(path), "--batch", "aura", "--blind")
+        self.assertIn("filed sd:", filed.stdout)
+        row = self.store().execute("SELECT id FROM item WHERE external_id = 'review:kev:aura'").fetchone()
+        self.assertIsNotNone(row)
+        self.assertIn("unchanged", self.sd_db("review", "file", "--kev", str(path), "--batch", "aura",
+                                               "--blind").stdout)
+        connection = connect(self.home / ".local/share/sd/sd.db")
+        self.addCleanup(connection.close)
+        self.assertEqual(review.read(connection, row[0])["header"]["mode"], "blind")
+        note = review.read(connection, row[0])["questions"][0]["note"]
+        revision = workflow.item_state(connection, row[0])["revision"]
+        review.rule(connection, row[0], note, "payload", expected_revision=revision, who="tester")
+        out = self.home / "reviews.jsonl"
+        self.sd_db("review", "export", str(row[0]), "--out", str(out), "--format", "reviews")
+        self.assertEqual([json.loads(line)["id"] for line in out.read_text().splitlines()], ["span:a"])
+        bad = self.write("bad.jsonl", kev_text([kev_line("span:a"), "{"]))
+        refused = self.sd_db("review", "file", "--kev", str(bad), "--batch", "bad", expect=1)
+        self.assertIn("line 2", refused.stderr)
+
     def test_invalid_json_refuses_and_files_nothing(self):
         refused = self.sd_db("review", "file", str(self.write("batch.json", '{"schema": 1, "queue": ')), expect=1)
         self.assertIn("not JSON", refused.stderr)
@@ -800,6 +954,7 @@ class TheVerb(unittest.TestCase):
 
     def test_a_bad_call_prints_the_usage_and_exits_1(self):
         for argv in (["review"], ["review", "file"], ["review", "export", "x", "--out", "y"],
+                     ["review", "file", "--kev", "f.jsonl"], ["review", "export", "1", "--out", "y", "--format", "csv"],
                      ["review", "export", "1"], ["review", "apply"], ["review", "undo", "1"]):
             with self.subTest(argv=argv):
                 self.assertIn("sd-db review", self.sd_db(*argv, expect=1).stderr)

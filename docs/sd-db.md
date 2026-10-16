@@ -400,6 +400,8 @@ The design is the review-queue design in the system repository; `lib/sd_db/revie
     bin/sd-db review export 4242 --out labels.jsonl       # labels with provenance, as JSONL
     bin/sd-db review export 4242 --key key.csv --out labels.jsonl  # sealed: closes the batch, then joins the key
     bin/sd-db review apply nightly                        # approvals to tasks; close or expire each batch
+    bin/sd-db review file --kev labels.jsonl --batch aura --blind   # a Kev label file as one blind batch
+    bin/sd-db review export 4242 --out reviews.jsonl --format reviews  # labels in Kev's reviews.jsonl shape
 
 A batch is one task under the ref `review:<queue>:<batch>`, so a second filing finds the first.
 Its first comment is the header; each question is a `question` note in the Decisions format, with one `Subject:` line.
@@ -411,6 +413,13 @@ Labels are read from the note history up to the first close, never from a questi
 The key is CSV; its first column names the subject.
 `apply` acts only on questions that offer `Approve` and `Reject`; each approval files one task under `review-approved:<note>`.
 It resolves a batch's open questions as `Expired, not ruled` after 7 days.
+
+`file --kev` reads the JSONL Kev's label review reads (sd:4789) and files it under queue `kev`, title `Label: <batch>`.
+Each line is one question: its `id` is the subject, and its options are the option keys, then `(drop)`.
+A proposed label and each judge become evidence lines, which the dashboard hides in a blind batch.
+A Kev file files whole or not at all: a bad line refuses it, naming the line, and no 90-day suppression drops a line.
+`--format reviews` writes one line per labelled question: `id`, `verdict` (`accept`, `relabel` or `drop`), `label`, `proposed_label`, `note` and `reviewed_at`.
+A blind batch never reads `accept`, because its labeller saw no proposal.
 
 ## The state kinds
 
