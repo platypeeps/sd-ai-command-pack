@@ -26,6 +26,11 @@ read first and the database is opened only when the command files an issue,
 so the common case costs the interpreter start and one tokenisation.
 `SD_ISSUE_GUARD=0` switches it off for a session that needs the old path.
 
+One exception (sd:4827): a repository whose row has `github_issues` on takes
+issues from outside reporters, and an agent closes them when their sd items are
+done. There `mcp__github__issue_write` with `method: update` passes when its
+`owner`/`repo` name that row's GitHub remote. Filing an issue stays denied.
+
 What counts as filing an issue from the shell: `gh` in command position --
 first in a pipeline segment, after `VAR=value` assignments and the wrappers
 `WRAPPERS` names -- whose first two positional words are `issue create` or its
@@ -144,12 +149,31 @@ def call_directory(payload: dict, environ: dict[str, str]) -> Path:
     return Path.cwd().resolve()
 
 
-def managed(where: Path) -> bool:
-    """Whether `where` is a checkout of a repository the operator manages.
+def updates_own_issue(payload: dict, remote: str | None, sd_db) -> bool:
+    """Whether the call is `issue_write` `update` aimed at the repository `remote` names.
 
-    Every way of not knowing is False: no library, no database, no git, no
-    row. The cost of a wrong False is an issue filed; the cost of a wrong
-    True is a session that cannot do what its repository allows.
+    GitHub reads owner and name in any case, so this does too. A missing,
+    empty or non-string field is not a match.
+    """
+    sent = payload.get("tool_input")
+    if payload.get("tool_name") != MCP_TOOL or not isinstance(sent, dict) or sent.get("method") != "update":
+        return False
+    owner, name = sent.get("owner"), sent.get("repo")
+    found = sd_db.repos.parse_remote(remote)
+    return (found.kind == "github" and isinstance(owner, str) and isinstance(name, str)
+            and (owner.lower(), name.lower()) == (found.owner.lower(), found.name.lower()))
+
+
+def denied(where: Path, payload: dict) -> bool:
+    """Whether to deny the call: `where` is a checkout of a repository the operator manages,
+    and the call is not an update of that repository's own issue with `github_issues` on.
+
+    Every way of not knowing the repository is managed is False: no library,
+    no database, no git, no row. The cost of a wrong False is an issue filed;
+    the cost of a wrong True is a session that cannot do what its repository
+    allows. Once the row says managed, every way of not knowing the exception
+    is True: the exception is what widens a pass, so an unread setting or an
+    unmatched target keeps the deny.
     """
     try:
         import sd_lib  # noqa: PLC0415 - deferred: only a matching call pays for it
@@ -162,14 +186,23 @@ def managed(where: Path) -> bool:
             return False
         origin = sd_lib.git_output(["remote", "get-url", "origin"], where)
         connection = sd_db.connect(write=False)
+    except Exception:  # noqa: BLE001 - not knowing is not a reason to deny
+        return False
+    try:
         try:
             key = sd_db.repos.registered_for(connection, str(Path(root).resolve()), origin)
             row = sd_db.repos.row_for(connection, key)
-            return bool(row is not None and row["managed"])
-        finally:
-            connection.close()
-    except Exception:  # noqa: BLE001 - not knowing is not a reason to deny
-        return False
+            if row is None or not row["managed"]:
+                return False
+        except Exception:  # noqa: BLE001 - as above
+            return False
+        try:
+            return not (updates_own_issue(payload, row["remote"], sd_db)
+                        and sd_db.repos.github_issues(connection, key))
+        except Exception:  # noqa: BLE001 - an unread exception grants nothing
+            return True
+    finally:
+        connection.close()
 
 
 def guard_call(stdin_text: str, environ: dict[str, str], out) -> int:
@@ -182,7 +215,7 @@ def guard_call(stdin_text: str, environ: dict[str, str], out) -> int:
         return 0
     if not isinstance(payload, dict) or payload.get("hook_event_name") != HOOK_EVENT:
         return 0
-    if not files_from(payload) or not managed(call_directory(payload, environ)):
+    if not files_from(payload) or not denied(call_directory(payload, environ), payload):
         return 0
     out.write(json.dumps({"hookSpecificOutput": {
         "hookEventName": HOOK_EVENT,

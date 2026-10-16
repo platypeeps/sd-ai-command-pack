@@ -17,6 +17,7 @@ import io
 import json
 import os
 import pathlib
+import sqlite3
 import subprocess  # nosec B404 - fixed argv, running the hook and git
 import sys
 import tempfile
@@ -195,23 +196,88 @@ class AManagedRepositoryIsDenied(Fixture):
             tool_input={"method": "get", "owner": "example", "repo": "managed"}))
 
 
-class GithubIssuesOnLoosensNothing(Fixture):
-    """sd:4827. `repo.github_issues` on changes nothing here yet. Letting
-    `issue_write` `update` through for an `on` repo is a follow-up under
-    sd:4810, with the global deny list's; that change replaces this test."""
+def issue_write(method: Any = "update", **target: Any) -> str:
+    fields = {"owner": "example", "repo": "managed", "issue_number": 7, "state": "closed", **target}
+    if method is not None:
+        fields["method"] = method
+    return payload(tool_name="mcp__github__issue_write",
+                   tool_input={key: value for key, value in fields.items() if value is not None})
 
-    def test_the_issue_writer_and_gh_issue_create_stay_denied_and_gh_issue_close_passes(self) -> None:
+
+class AManagedRepositoryWithGithubIssuesOn(Fixture):
+    """sd:4827. `repo.github_issues` on lets an agent close a reporter's issue
+    in this repository, and nothing else: an update aimed at this repository's
+    remote passes; filing an issue, and an update aimed anywhere else, do not."""
+
+    def setUp(self) -> None:
+        super().setUp()
         self.register(managed=True)
+        self.switch("on")
+
+    def switch(self, value: str) -> None:
         connection = sd_db.connect(home=self.home)
         try:
-            sd_db.repos.set_github_issues(connection, self.repo, "on")
+            sd_db.repos.set_github_issues(connection, self.repo, value)
         finally:
             connection.close()
-        for method in ("create", "update"):
-            self.assert_denied(payload(tool_name="mcp__github__issue_write",
-                                       tool_input={"method": method, "owner": "example", "repo": "managed"}))
+
+    def test_an_update_of_this_repository_passes(self) -> None:
+        self.assert_silent(issue_write())
+        self.assert_silent(issue_write(owner="Example", repo="MANAGED"))
+
+    def test_filing_an_issue_is_still_denied(self) -> None:
+        self.assertIn("sd task add", self.assert_denied(issue_write("create", title="x")))
         self.assert_denied(bash("gh issue create --title x"))
-        self.assert_silent(bash("gh issue close 7 --comment 'Fixed in the next release.'"))
+
+    def test_an_update_aimed_elsewhere_or_at_nothing_is_denied(self) -> None:
+        for call in (issue_write(owner="example", repo="other"), issue_write(owner="someone"),
+                     issue_write(owner=None), issue_write(repo=None), issue_write(owner=3),
+                     issue_write(owner="example/managed", repo="")):
+            with self.subTest(call=call):
+                self.assert_denied(call)
+
+    def test_a_missing_or_unknown_method_is_denied(self) -> None:
+        for method in (None, "Update", "delete", "", 1, ["update"]):
+            with self.subTest(method=method):
+                self.assert_denied(issue_write(method))
+
+    def test_off_denies_the_update_again(self) -> None:
+        self.switch("off")
+        self.assert_denied(issue_write())
+
+    def test_a_linked_worktree_passes_as_its_main_checkout(self) -> None:
+        git(self.repo, "-c", "user.name=t", "-c", "user.email=t@example.test",
+            "commit", "-q", "--allow-empty", "-m", "seed")
+        worktree = self.tmp / "wt"
+        git(self.repo, "worktree", "add", "-q", str(worktree))
+        self.assert_silent(issue_write(), cwd=worktree)
+        self.assert_denied(issue_write("create"), cwd=worktree)
+
+    def test_a_setting_that_cannot_be_read_denies(self) -> None:
+        """Failures: once the row is managed, an unread setting is not a pass."""
+        with mock.patch.object(sd_db.repos, "github_issues", side_effect=sd_db.errors.SchemaTooOld(34, 35)):
+            self.assert_denied(issue_write())
+
+
+class AManagedRepositoryOnAStoreBefore35(Fixture):
+    """Older state: the new hook over a store not yet migrated reads `managed`
+    and denies an update, as it did before the setting existed."""
+
+    def test_an_update_is_denied(self) -> None:
+        from sd_db.schema import migrations
+
+        through = [m for m in migrations() if m[0] < 35]
+        with mock.patch("sd_db.migrate.migrations", return_value=through):
+            sd_db.migrate(home=self.home)
+        connection = sqlite3.connect(self.home / ".local/share/sd/sd.db")
+        try:
+            connection.execute(
+                "INSERT INTO repo (path, remote, managed, created_at, updated_at) VALUES (?, ?, 1, 't', 't')",
+                (str(self.repo), ORIGIN))
+            connection.commit()
+        finally:
+            connection.close()
+        self.assert_denied(issue_write())
 
 
 class ASessionElsewhereKeepsWorking(Fixture):

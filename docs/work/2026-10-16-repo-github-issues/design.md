@@ -35,8 +35,8 @@ Adversarial review: one read-only `codex exec` round on 2026-10-16 found seven f
 After the round, the guard exception was dropped: the global deny list, which system
 `local-machine-setup/claude_settings.py` writes, held `mcp__github__issue_write` for every repo, so it could never run.
 Operator decision, 2026-10-16: lift that deny per repo with `github_issues` on, and close issues through
-`mcp__github__issue_write`, not `gh issue close`. This PR delivers the setting and its reader only; lifting the deny
-is a follow-up under sd:4810 (Slices).
+`mcp__github__issue_write`, not `gh issue close`. This PR restores the guard exception (one PR, not two); lifting
+the global deny is the system follow-up under sd:4810 (Slices).
 
 ## Problem
 
@@ -47,7 +47,8 @@ Today the exception lives in prose: one line in the operator's global instructio
 
 The ban is enforced twice, and both stay. `bin/sd-issue-guard` denies `gh issue create` and
 `mcp__github__issue_write` in every managed repo, and the operator's global deny list holds `issue_write` too.
-For an `on` repo the operator lifts both for `update` (Slices, step 3); `add_issue_comment` was never blocked.
+For an `on` repo both pass `update`: the guard in this PR, the deny list in the system follow-up.
+`add_issue_comment` was never blocked.
 
 ## Approach
 
@@ -86,18 +87,20 @@ this lands (Slices, Risks).
 - Code calls `repos.github_issues(connection, path) -> bool`: True only when the row holds 1.
   No row reads False, the column default: an unregistered repo is not switched on.
   A store not yet at 35 raises `SchemaTooOld`, as `repo_channels` does; it never reads as off silently.
-- The system's Today intake pass would call it (Slices, step 3). Nothing in the pack reads it yet.
+- `bin/sd-issue-guard` calls it (next section); the system's Today intake pass and deny list would call it too.
 
-### The guard and the deny list, in a follow-up
+### What the guard does
 
-This PR changes neither. `GithubIssuesOnLoosensNothing` pins that `sd-issue-guard` still denies
-`mcp__github__issue_write` with the setting on; the follow-up that lifts the deny replaces that test.
-Two changes close an issue through `mcp__github__issue_write` in an `on` repo, both under sd:4810:
+`sd-issue-guard` keeps denying in a managed repo, with one exception: `mcp__github__issue_write` with
+`method: update` passes when `repos.github_issues` is True for the checkout's row and the call's `owner`/`repo`
+name that row's GitHub remote (case-insensitive, as GitHub reads it).
+`gh issue create`, `issue_write` `create`, and any call whose method is missing or unknown stay denied everywhere.
+Off, or any doubt once the row is found (the read raises, the column is missing, the target is missing or names
+another repository), keeps today's deny. A non-managed repo stays silent as before, and so does a checkout the
+guard cannot place: that fail-open is the guard's own rule and this change leaves it.
 
-- System: `claude_settings.py` drops `mcp__github__issue_write` from `TOOL_DENY` for repos with `github_issues` on,
-  read through `repos.github_issues`.
-- Pack: `sd-issue-guard` lets `issue_write` `update` through when the row's `github_issues` is on and the call's
-  `owner`/`repo` name the row's remote (the exception reviewed in round 1, R3 fixed). `create` stays denied.
+The global deny list still refuses `issue_write` first. System `claude_settings.py` dropping it from `TOOL_DENY`
+for repos with `github_issues` on is the follow-up under sd:4810; until it lands the exception passes nothing.
 
 ### What agents do (system half writes the prose)
 
@@ -114,12 +117,13 @@ Off: today's ban, unchanged.
 - A one-argument read form (`repo github-issues PATH` printing the value): a new surface; `repo list` already answers.
 - Appending the field after `runner_merge`: it would move the last field the operator's rules read.
 - `gh issue close` as the close path: the operator chose the MCP tool (2026-10-16).
+- The guard exception as a second PR: the PR was not yet in the lane, and one PR costs one review.
 
 ## Non-goals
 
 - The agent prompt text, the dashboard control and a Today intake pass: system sd:4810.
 - Lifting the managed repo's refusal of `channels github=`, or collecting other people's issues into `shadow`.
-- Any change to `sd-issue-guard` or to the global deny list: follow-ups under sd:4810.
+- The global deny list: the system follow-up under sd:4810.
 - Deleting the interim prose of sd:4809: it goes when the system half lands.
 
 ## Older state
@@ -144,6 +148,7 @@ Off: today's ban, unchanged.
 | A process on the old library meets 35, or a satellite's build differs from the hub's | none | its open refuses (`SchemaTooNew`, a build mismatch) | restart it on the new library | existing `SchemaTooNew` and remote build tests |
 | Rollback to the previous commit | none until the reverse runs | the old library refuses a 35 store | stop the services, back up, run the reverse lines in 035's header, check out the old build, restart | `TheGithubIssuesColumn` runs the reverse; `one_migration_back` in `test_backup.py` uses it |
 | `repo github-issues PATH on` | one row's column and `updated_at` | a bad word, an unknown path, or the write fails | refusal before the write; a failed write rolls back; rerun the verb | verb and `set_github_issues` tests |
+| Guard sees `issue_write` `update` in an `on` repo | none | the target names another repo or none, the method is not `update`, or the setting cannot be read | deny | `AManagedRepositoryWithGithubIssuesOn` |
 | `repo list` after the field lands | none | a reader counts from the end past `lane_host` | that reader reads by position from the front (`$2`) | `test_repo_list_keeps_runner_merge_as_the_last_field`; the system follow-up's own test |
 
 ## Slices
@@ -152,7 +157,7 @@ Off: today's ban, unchanged.
    the hub check finds no lane repository after this PR lands and reports `ok`.
 2. Pack (this PR): migration 035, the verb, the list field, `repos.github_issues`, docs.
 3. Follow-ups under sd:4810: system `claude_settings.py` lifts the `mcp__github__issue_write` deny for `on` repos;
-   pack `sd-issue-guard` passes `issue_write` `update` aimed at an `on` repo's own remote; `shared.md` text for on
+   `shared.md` text for on
    and off; the dashboard control; an optional Today intake pass; removal of the interim prose of sd:4809.
 
 ## Acceptance criteria
@@ -161,14 +166,20 @@ Off: today's ban, unchanged.
 - [ ] `sd-db repo github-issues PATH on` prints `github_issues off -> on`; `repo list` shows `on` before
   `lane_host`, and `runner_merge` is still the last field.
 - [ ] `On`, `ON`, `yes`, `1`, ``, ` on` and an unregistered path exit 1 and write nothing.
-- [ ] In a managed repo with the setting on, this PR's guard still denies `issue_write` and `gh issue create`.
+- [ ] In a managed repo with the setting on, the guard passes `issue_write` `update` aimed at the row's repo and
+  denies `create`, an `update` aimed elsewhere and one with no target; off, or on a store at 34, it denies.
 - [ ] `test_schema`, `test_repos`, `test_cli`, `test_home_relative`, `test_backup`, `test_judgment_compare` and
   `test_sd_issue_guard` pass.
 - [ ] `sd-docs-lint` passes from the repo root.
 
 ## Risks
 
-- Until the follow-ups land, an `on` repo cannot close an issue through the MCP tool: the deny list and the guard
-  still refuse it. Accepted: the setting and its reader land first, so both follow-ups have a column to read.
+- Until the system follow-up lands, an `on` repo cannot close an issue through the MCP tool: the global deny list
+  still refuses it. Accepted: the column and the guard land first, so the deny list has a setting to read.
+- `issue_write` `update` can edit a reporter's title or body, not only close it. Accepted: one operator, and the
+  agent rule names closing only. Narrowing to `state` fields would add a key list the MCP server can outgrow.
+- The guard's evidence is the checkout's row (`registered_for`, path then origin) and the call's target, which must
+  name that row's remote. A worktree resolves to the row only when exactly one row holds its origin; otherwise the
+  guard stays silent, as before (sd:1219).
 - The field order shift breaks any unlisted reader that counts from the end past `lane_host`. The search covered
   the pack, the system repo and `platypeeps/*`; slice 1 fixes the one hit.
