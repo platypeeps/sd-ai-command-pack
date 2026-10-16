@@ -196,9 +196,9 @@ class AManagedRepositoryIsDenied(Fixture):
 
 
 class GithubIssuesOnLoosensNothing(Fixture):
-    """sd:4827. `repo.github_issues` on changes nothing here: the global deny
-    list holds `mcp__github__issue_write` whatever the hook says, so an agent
-    closes an issue with `gh issue close`, which neither blocks."""
+    """sd:4827. `repo.github_issues` on changes nothing here yet. Letting
+    `issue_write` `update` through for an `on` repo is a follow-up under
+    sd:4810, with the global deny list's; that change replaces this test."""
 
     def test_the_issue_writer_and_gh_issue_create_stay_denied_and_gh_issue_close_passes(self) -> None:
         self.register(managed=True)

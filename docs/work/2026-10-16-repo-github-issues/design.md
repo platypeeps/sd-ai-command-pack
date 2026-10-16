@@ -32,10 +32,11 @@ Adversarial review: one read-only `codex exec` round on 2026-10-16 found seven f
 - R6 the stop-mid-file test must drop its pre-added column before the rerun, as 033's does: fixed in the table.
 - R7 rollback needs the services stopped and the matching build: fixed in Older state.
 
-After the round, the guard exception was dropped (decision, 2026-10-16). The operator's global deny list, which
-system `local-machine-setup/claude_settings.py` writes, holds `mcp__github__issue_write` for every repo, and a
-permission deny wins over a silent hook. The exception could never run, so R1 to R4 now concern only the guard as it
-stands on `origin/main`. `gh issue close` is the close path: neither the deny list nor the guard blocks it.
+After the round, the guard exception was dropped: the global deny list, which system
+`local-machine-setup/claude_settings.py` writes, held `mcp__github__issue_write` for every repo, so it could never run.
+Operator decision, 2026-10-16: lift that deny per repo with `github_issues` on, and close issues through
+`mcp__github__issue_write`, not `gh issue close`. This PR delivers the setting and its reader only; lifting the deny
+is a follow-up under sd:4810 (Slices).
 
 ## Problem
 
@@ -46,7 +47,7 @@ Today the exception lives in prose: one line in the operator's global instructio
 
 The ban is enforced twice, and both stay. `bin/sd-issue-guard` denies `gh issue create` and
 `mcp__github__issue_write` in every managed repo, and the operator's global deny list holds `issue_write` too.
-Neither blocks `gh issue close` or `add_issue_comment`, which are what an agent in an `on` repo needs.
+For an `on` repo the operator lifts both for `update` (Slices, step 3); `add_issue_comment` was never blocked.
 
 ## Approach
 
@@ -87,17 +88,22 @@ this lands (Slices, Risks).
   A store not yet at 35 raises `SchemaTooOld`, as `repo_channels` does; it never reads as off silently.
 - The system's Today intake pass would call it (Slices, step 3). Nothing in the pack reads it yet.
 
-### The guard does not change
+### The guard and the deny list, in a follow-up
 
-`sd-issue-guard` reads no new column. With the setting on, it still denies `gh issue create` and
-`mcp__github__issue_write` in a managed repo; `GithubIssuesOnLoosensNothing` pins that, and that `gh issue close`
-passes. An agent comments with `add_issue_comment` or `gh issue comment` and closes with `gh issue close`.
+This PR changes neither. `GithubIssuesOnLoosensNothing` pins that `sd-issue-guard` still denies
+`mcp__github__issue_write` with the setting on; the follow-up that lifts the deny replaces that test.
+Two changes close an issue through `mcp__github__issue_write` in an `on` repo, both under sd:4810:
+
+- System: `claude_settings.py` drops `mcp__github__issue_write` from `TOOL_DENY` for repos with `github_issues` on,
+  read through `repos.github_issues`.
+- Pack: `sd-issue-guard` lets `issue_write` `update` through when the row's `github_issues` is on and the call's
+  `owner`/`repo` name the row's remote (the exception reviewed in round 1, R3 fixed). `create` stays denied.
 
 ### What agents do (system half writes the prose)
 
 On: read the repo's open issues; give each one sd item, `sd task add --ref github:<owner>/<repo>#N`; keep the
 process on the item; write reporter-facing comments only, naming no sd item, lane, gate, builder or `docs/work`;
-close the issue with `gh issue close` when its item is done; file no new issue.
+close the issue with `mcp__github__issue_write` `update` when its item is done; file no new issue.
 Off: today's ban, unchanged.
 `local-agent-prompt/prompt/shared.md` in the system repo carries that text; this PR changes no system file.
 
@@ -107,14 +113,13 @@ Off: today's ban, unchanged.
   managed repo refuses it, and the owner asked for a `runner_merge`-shaped setting with its own verb.
 - A one-argument read form (`repo github-issues PATH` printing the value): a new surface; `repo list` already answers.
 - Appending the field after `runner_merge`: it would move the last field the operator's rules read.
-- A guard exception for `issue_write` `update` in an `on` repo, built and reviewed in round 1: the global deny list
-  refuses `issue_write` first, so the exception was dead code; `gh issue close` already works.
+- `gh issue close` as the close path: the operator chose the MCP tool (2026-10-16).
 
 ## Non-goals
 
 - The agent prompt text, the dashboard control and a Today intake pass: system sd:4810.
 - Lifting the managed repo's refusal of `channels github=`, or collecting other people's issues into `shadow`.
-- Any change to `sd-issue-guard` or to the global deny list.
+- Any change to `sd-issue-guard` or to the global deny list: follow-ups under sd:4810.
 - Deleting the interim prose of sd:4809: it goes when the system half lands.
 
 ## Older state
@@ -146,8 +151,9 @@ Off: today's ban, unchanged.
 1. System: `machine-setup.sh`'s hub lane check reads the remote as `$2`, not `$(NF-4)`. It must merge first, or
    the hub check finds no lane repository after this PR lands and reports `ok`.
 2. Pack (this PR): migration 035, the verb, the list field, `repos.github_issues`, docs.
-3. System sd:4810: `shared.md` text for on and off, the dashboard control, an optional Today intake pass, and
-   removal of the interim prose of sd:4809.
+3. Follow-ups under sd:4810: system `claude_settings.py` lifts the `mcp__github__issue_write` deny for `on` repos;
+   pack `sd-issue-guard` passes `issue_write` `update` aimed at an `on` repo's own remote; `shared.md` text for on
+   and off; the dashboard control; an optional Today intake pass; removal of the interim prose of sd:4809.
 
 ## Acceptance criteria
 
@@ -155,15 +161,14 @@ Off: today's ban, unchanged.
 - [ ] `sd-db repo github-issues PATH on` prints `github_issues off -> on`; `repo list` shows `on` before
   `lane_host`, and `runner_merge` is still the last field.
 - [ ] `On`, `ON`, `yes`, `1`, ``, ` on` and an unregistered path exit 1 and write nothing.
-- [ ] In a managed repo with the setting on, the guard still denies `issue_write` and `gh issue create`, and
-  `gh issue close` passes.
+- [ ] In a managed repo with the setting on, this PR's guard still denies `issue_write` and `gh issue create`.
 - [ ] `test_schema`, `test_repos`, `test_cli`, `test_home_relative`, `test_backup`, `test_judgment_compare` and
   `test_sd_issue_guard` pass.
 - [ ] `sd-docs-lint` passes from the repo root.
 
 ## Risks
 
-- The setting is advice to agents, not a gate: nothing stops `gh issue close` in an `off` repo, as nothing does
-  today. Accepted: the one operator's agents follow the rule text, and the guard was never about closing.
+- Until the follow-ups land, an `on` repo cannot close an issue through the MCP tool: the deny list and the guard
+  still refuse it. Accepted: the setting and its reader land first, so both follow-ups have a column to read.
 - The field order shift breaks any unlisted reader that counts from the end past `lane_host`. The search covered
   the pack, the system repo and `platypeeps/*`; slice 1 fixes the one hit.
