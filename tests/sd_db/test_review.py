@@ -890,6 +890,17 @@ class TheReviewsExport(ReviewCase):
                           for line in review.reviews(review.export(self.db, item, who="tester"))],
                          [("example.test/a@1a2b3c4:src/one.py", "relabel", "cheap", "")])
 
+    def test_a_stop_before_the_rename_leaves_no_file_and_the_rerun_writes_it(self):
+        lines = self.labelled("open")
+        out = self.root / "reviews.jsonl"
+        with mock.patch.object(review.os, "replace", side_effect=KeyboardInterrupt("stopped")), \
+                self.assertRaises(KeyboardInterrupt):
+            review.write(lines, out)
+        self.assertEqual([p.name for p in self.root.iterdir() if p.name.startswith("reviews")], [])
+        review.write(lines, out)
+        self.assertEqual([json.loads(line)["id"] for line in out.read_text().splitlines()],
+                         ["span:a", "span:b", "span:c"])
+
 
 class TheVerb(unittest.TestCase):
     """`bin/sd-db review` through the entrypoint, on a store under a temporary home."""
