@@ -3,9 +3,8 @@
 --
 -- Agents follow one rule: work lives in sd items, not GitHub issues. A
 -- repository with this on answers its reporters: an agent maps each open issue
--- to one sd item, comments for the reporter and closes the issue when the item
--- is done. `bin/sd-issue-guard` then lets `issue_write` `update` through for
--- that repository's own issues; filing one stays denied.
+-- to one sd item, comments for the reporter and closes the issue with
+-- `gh issue close` when the item is done. Filing an issue stays denied.
 -- `sd-db repo github-issues PATH on|off` sets it, `repo list` shows it, and
 -- `repos.github_issues` reads it.
 --
