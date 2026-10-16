@@ -22,6 +22,12 @@ Guards:
 * Mid-command: a process that already opened a hub session is part way
   through its verb; a re-run would do its first part twice (`sd gate run`
   would run the gate command again). It keeps the refusal.
+* Stdin: a re-run reads the same descriptor 0. No `sd` verb reads stdin
+  before its first hub session, or at all (bin/sd and the modules it
+  dispatches to, read 2026-10-15), so a terminal, `/dev/null` or a file at
+  offset 0 replays. A file past offset 0 was read; a pipe or socket cannot
+  say whether it was. Both keep the refusal with the hint to run the
+  command again after a follow by hand.
 * Concurrency: two sessions following at once rely on follow's own refresh
   lock (`refresh_drain.py`). Its wait is capped at `DRAIN_WAIT`, so a lane
   run holding its runner lock on this satellite fails the follow instead of
@@ -38,6 +44,7 @@ from __future__ import annotations
 
 import os
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -73,6 +80,22 @@ def script(roots) -> Path | None:
     return None
 
 
+def stdin_consumed(fd: int = 0) -> str | None:
+    """Why a re-run could not read what this command's stdin held, or `None` when it can.
+
+    A closed descriptor is closed for the re-run too, so that replays.
+    """
+    try:
+        mode = os.fstat(fd).st_mode
+    except OSError:
+        return None
+    if stat.S_ISREG(mode):
+        return "stdin is a file already read" if os.lseek(fd, 0, os.SEEK_CUR) > 0 else None
+    if stat.S_ISFIFO(mode) or stat.S_ISSOCK(mode):
+        return "stdin is a pipe"
+    return None
+
+
 def _exec(argv: list[str], env: dict[str, str]) -> None:
     sys.stdout.flush()
     sys.stderr.flush()
@@ -80,13 +103,14 @@ def _exec(argv: list[str], env: dict[str, str]) -> None:
 
 
 def attempt(mismatch: remote.BuildMismatch, roots, *, environ=None, argv=None, out=None,
-            rerun=_exec, timeout: float = TIMEOUT) -> None:
+            rerun=_exec, timeout: float = TIMEOUT, stdin: int = 0) -> None:
     """Follow the hub's pins once and run this command again; return when the refusal stands.
 
     Prints one line to `out` naming both digests and what happened, so a
     session sees why it waited. Returns only when the caller is to raise the
-    refusal it holds: the marker is set, a session already opened, no follow
-    is registered, or the follow failed, was refused or timed out.
+    refusal it holds: the marker is set, a session already opened, stdin
+    cannot be read again, no follow is registered, or the follow failed, was
+    refused or timed out.
     """
     environ = os.environ if environ is None else environ
     argv = sys.argv if argv is None else argv
@@ -97,6 +121,11 @@ def attempt(mismatch: remote.BuildMismatch, roots, *, environ=None, argv=None, o
         return
     if remote.sessions_opened():
         out.write(f"sd: {digests}: the hub changed while this command ran; the refusal stands, run it again\n")
+        return
+    consumed = stdin_consumed(stdin)
+    if consumed:
+        out.write(f"sd: {digests}: {consumed}, which a re-run cannot read again; the refusal stands, "
+                  f"run the command again after `{SCRIPT.name} follow`\n")
         return
     path = script(roots)
     if path is None:
@@ -119,7 +148,7 @@ def attempt(mismatch: remote.BuildMismatch, roots, *, environ=None, argv=None, o
     if code != 0:
         _failed(out, digests, f"exited {code} after {elapsed:.0f} s", output)
         return
-    out.write(f"sd: {digests}: followed in {elapsed:.0f} s; running the command again\n")
+    out.write(f"sd: {digests}: follow exited 0 after {elapsed:.0f} s; running the command again\n")
     out.flush()
     rerun(list(argv), env)
 

@@ -75,10 +75,12 @@ class SatelliteFixture(unittest.TestCase):
     def moves_to_the_hubs_pin(self) -> str:
         return f'cp "{REPO_ROOT / "lib" / "sd_db" / "reads.py"}" "{self.changed}"\necho "follow  : done"\nexit 0'
 
-    def sd(self, *args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+    def sd(self, *args: str, env: dict[str, str] | None = None,
+           stdin: int = subprocess.DEVNULL, input: str | None = None) -> subprocess.CompletedProcess[str]:
+        # stdin is `/dev/null` unless a test feeds one: the follow's re-run rule reads it.
         return subprocess.run(
             [sys.executable, str(self.pack / "bin" / "sd"), *args], capture_output=True, text=True, timeout=120,
-            cwd=self.root,
+            cwd=self.root, **({"input": input} if input is not None else {"stdin": stdin}),
             env=clean_environment(PATH="/usr/bin:/bin", HOME=str(self.home),
                                   XDG_CONFIG_HOME=str(self.home / ".config"), **(env or {})))
 
@@ -95,7 +97,7 @@ class TheRefusedCommand(SatelliteFixture):
         self.assertEqual(self.logged(), ["args=follow marker=1 wait=120"])
         lines = done.stderr.splitlines()
         self.assertRegex(lines[0], r"^sd: sd_db build [0-9a-f]{16} here, [0-9a-f]{16} on the hub: following the hub's pins")
-        self.assertRegex(lines[1], r"^sd: sd_db build [0-9a-f]{16} here, [0-9a-f]{16} on the hub: followed in \d+ s; "
+        self.assertRegex(lines[1], r"^sd: sd_db build [0-9a-f]{16} here, [0-9a-f]{16} on the hub: follow exited 0 after \d+ s; "
                                    r"running the command again$")
         self.assertEqual(len(lines), 2, done.stderr)
 
@@ -117,6 +119,15 @@ class TheRefusedCommand(SatelliteFixture):
         self.assertEqual(self.logged(), ["args=follow marker=1 wait=120"])
         self.assertIn("running the command again", done.stderr)
         self.assertIn("still refused after a follow in this process chain; the refusal stands", done.stderr)
+        self.assertIn("sd_db build mismatch: build digest", done.stderr)
+
+    def test_a_pipe_fed_command_is_not_followed_and_the_refusal_names_the_hand_run(self):
+        self.follow(self.moves_to_the_hubs_pin())
+        done = self.sd("task", "show", str(self.item), input="piped body\n")
+        self.assertEqual(done.returncode, 1)
+        self.assertEqual(self.logged(), [], "a pipe-fed command must not follow")
+        self.assertIn("stdin is a pipe, which a re-run cannot read again; the refusal stands, "
+                      "run the command again after `repo-sync.sh follow`", done.stderr)
         self.assertIn("sd_db build mismatch: build digest", done.stderr)
 
     def test_no_registered_follow_surfaces_the_refusal(self):

@@ -9,6 +9,7 @@ recorder in place of `os.execve`. No hub: the mismatch is built by hand, as
 from __future__ import annotations
 
 import io
+import os
 import signal
 import stat
 import subprocess
@@ -38,6 +39,9 @@ class FollowCase(unittest.TestCase):
         patched = mock.patch.object(remote, "_opened", 0)
         patched.start()
         self.addCleanup(patched.stop)
+        # stdin is `/dev/null` unless a test passes one: the runner's own may be a pipe.
+        self.devnull = os.open(os.devnull, os.O_RDONLY)
+        self.addCleanup(os.close, self.devnull)
 
     def script(self, body: str, root: str = "system") -> Path:
         """A plugin root whose `local-repo-sync/repo-sync.sh` runs `body` and logs its arguments."""
@@ -51,7 +55,7 @@ class FollowCase(unittest.TestCase):
 
     def attempt(self, roots, environ=None, **options) -> str:
         follow.attempt(MISMATCH, roots, environ={"PATH": "/usr/bin:/bin", **(environ or {})},
-                       argv=["bin/sd", "task", "show", "1"], out=self.out,
+                       argv=["bin/sd", "task", "show", "1"], out=self.out, stdin=options.pop("stdin", self.devnull),
                        rerun=lambda argv, env: self.reruns.append((argv, env)), **options)
         return self.out.getvalue()
 
@@ -70,7 +74,7 @@ class TheFollow(FollowCase):
         self.assertEqual(env[follow.MARKER], "1")
         self.assertEqual(env["PATH"], "/usr/bin:/bin")
         self.assertRegex(text, r"sd_db build [0-9a-f]{16} here, 2222222222222222 on the hub")
-        self.assertRegex(text, r"followed in \d+ s; running the command again")
+        self.assertRegex(text, r"follow exited 0 after \d+ s; running the command again")
 
     def test_the_digests_named_are_this_build_and_the_hubs(self):
         with mock.patch.object(remote, "build_digest", return_value="1111111111111111"):
@@ -172,6 +176,40 @@ class TheGuards(FollowCase):
         self.assertEqual(self.reruns, [])
         self.assertIn(f"no registered plugin holds {follow.SCRIPT}", text)
         self.assertIn("`sd plugin add`", text)
+
+    def test_a_pipe_on_stdin_keeps_the_refusal_and_names_the_hand_run(self):
+        root = self.script("exit 0")
+        reader, writer = os.pipe()
+        self.addCleanup(os.close, reader)
+        os.write(writer, b"body the re-run could not read\n")
+        os.close(writer)
+        text = self.attempt([root], stdin=reader)
+        self.assertEqual(self.logged(), [], "a pipe-fed command must not follow")
+        self.assertEqual(self.reruns, [])
+        self.assertIn("stdin is a pipe, which a re-run cannot read again; the refusal stands, "
+                      "run the command again after `repo-sync.sh follow`", text)
+
+    def test_a_file_on_stdin_already_read_keeps_the_refusal(self):
+        root = self.script("exit 0")
+        body = self.root / "body.txt"
+        body.write_text("line one\nline two\n")
+        with body.open("rb") as handle:
+            handle.readline()
+            text = self.attempt([root], stdin=handle.fileno())
+        self.assertEqual(self.reruns, [])
+        self.assertIn("stdin is a file already read, which a re-run cannot read again", text)
+
+    def test_a_terminal_devnull_or_unread_file_on_stdin_reruns(self):
+        root = self.script("exit 0")
+        body = self.root / "body.txt"
+        body.write_text("unread\n")
+        with body.open("rb") as unread, open(os.devnull, "rb") as devnull:
+            for fd in (unread.fileno(), devnull.fileno()):
+                self.assertIsNone(follow.stdin_consumed(fd))
+        self.assertIsNone(follow.stdin_consumed(-1), "a closed stdin is closed for the re-run too")
+        with body.open("rb") as unread:
+            text = self.attempt([root], stdin=unread.fileno())
+        self.assertEqual(len(self.reruns), 1, text)
 
     def test_a_follow_that_cannot_start_keeps_the_refusal(self):
         root = self.script("exit 0")
