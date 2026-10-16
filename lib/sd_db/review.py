@@ -101,11 +101,20 @@ class ReviewError(workflow.WorkflowError):
 # ---------------------------------------------------------------- the batch file
 
 
+def _unicode(value: str, name: str) -> None:
+    """Refuse text UTF-8 cannot store: a JSON escape can carry a lone surrogate."""
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        raise ReviewError(f"{name} is not valid Unicode") from None
+
+
 def _line(value: Any, name: str, *, limit: int | None = None) -> str:
     """One line of text, as filed: no padding, no line break, no NUL."""
     if (not isinstance(value, str) or not value or value != value.strip() or "\x00" in value
             or len(value.splitlines()) != 1):
         raise ReviewError(f"{name} must be one line of text with no padding")
+    _unicode(value, name)
     if limit is not None and len(value) > limit:
         raise ReviewError(f"{name} is {len(value)} characters; the limit is {limit}")
     return value
@@ -125,6 +134,7 @@ def _question(found: Any, where: str) -> dict:
     if not isinstance(text, str) or not text.strip() or "\x00" in text:
         raise ReviewError(f"{where} text must be text")
     text = text.strip()
+    _unicode(text, f"{where} text")
     if len(text.encode("utf-8")) > TEXT_BYTES:
         raise ReviewError(f"{where} text is over {TEXT_BYTES} bytes")
     if any(TAGGED.match(line) for line in text.splitlines()):
@@ -624,7 +634,8 @@ def from_kev(text: str, *, batch: str, mode: str, source: str) -> dict:
     if mode not in ("open", "blind"):
         raise ReviewError("a Kev file files open or blind")
     questions, seen = [], set()
-    for number, raw in enumerate(text.splitlines(), 1):
+    # Only a newline ends a JSONL record: splitlines would also cut at U+2028 inside a string.
+    for number, raw in enumerate(text.split("\n"), 1):
         if not raw.strip():
             continue
         where = f"line {number}"

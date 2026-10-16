@@ -774,6 +774,31 @@ class TheKevImport(ReviewCase):
         evidence = self.kev([line], mode="open")["questions"][0]["evidence"]
         self.assertEqual(evidence, ["Proposed label: payload", "Judge example/kev-4b: skeleton, an identifier"])
 
+    def test_a_line_separator_inside_a_string_stays_in_its_record(self):
+        # JSON allows a literal U+2028 inside a string; only a newline ends a JSONL record.
+        raw = json.dumps(kev_line("a", document="a b"), ensure_ascii=False) + "\n"
+        found = review.from_kev(raw, batch="aura", mode="blind", source="kev:x.jsonl")
+        self.assertEqual(len(found["questions"]), 1)
+        self.assertTrue(found["questions"][0]["text"].endswith("a b"))
+        item = self.file(found)
+        # The note reader splits lines as the filing check does, so it shows U+2028 as a line break.
+        self.assertTrue(review.read(self.db, item)["questions"][0]["text"].endswith("a\nb"))
+
+    def test_text_that_is_not_unicode_refuses_naming_the_line_and_files_nothing(self):
+        # A JSON escape can carry a lone surrogate, which no UTF-8 write can store.
+        before = self.counts()
+        for name, line in {"id": kev_line("\ud800"), "document": kev_line("a", document="x\udfff"),
+                           "option": kev_line("a", question={"instructions": "x", "options": {"\ud800": None}}),
+                           "judge": kev_line("a", judges=[{"model": "m", "label": "\ud800"}])}.items():
+            with self.subTest(name), self.assertRaises(review.ReviewError) as caught:
+                self.file(self.kev([line]))
+            self.assertIn("line 1", str(caught.exception))
+        plain = batch()
+        plain["questions"][0]["subject"] = "example.test/\ud800"
+        with self.assertRaises(review.ReviewError):
+            self.file(plain)
+        self.assertEqual(self.counts(), before)
+
     def test_a_bad_line_refuses_the_file_naming_it_and_files_nothing(self):
         before = self.counts()
         cases: dict[str, list] = {
