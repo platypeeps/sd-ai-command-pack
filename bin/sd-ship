@@ -44,6 +44,7 @@ from sd_ship_review import (
     SharedReview,
     adjudicated_check,
     carry_forward,
+    dropped_catch_up,
     failing_check_tails,
     is_ancestor,
     named_commits,
@@ -1396,8 +1397,10 @@ class Ship(SharedReview):
         # an operator's checkout implicitly to make a check pass.
         git(self.root, "fetch", "--no-tags", "origin", f"refs/heads/{base}:refs/remotes/origin/{base}")
         git(self.root, "symbolic-ref", "refs/remotes/origin/HEAD", f"refs/remotes/origin/{base}")
-        if getattr(self.args, "catch_up", False) and not self.current_with(base, head):
-            head = self.catch_up(base, head)
+        if getattr(self.args, "catch_up", False):
+            dropped = self.dropped_catch_ups(base, head)
+            if dropped or not self.current_with(base, head):
+                head = self.catch_up(base, head, dropped)
         self.assert_current_base(base, head)
         title = self.args.title or self.state.get("title") or self.default_title(base, head)
         if not title or re.match(r"(?i)wip\b", title):
@@ -2123,26 +2126,56 @@ class Ship(SharedReview):
             waited += MERGE_RULES_INTERVAL_SECONDS * (attempt + 1)
         raise AssertionError("unreachable")
 
-    def catch_up(self, base: str, head: str) -> str:
+    def dropped_catch_ups(self, base: str, head: str) -> list[str]:
+        """Reviewed catch-up merges that `head` lacks, newest first, so one merge back brings the older (sd:4925)."""
+        heads = dict.fromkeys(reversed(self.history.ancestry_heads(self.state or {})))
+        return [reviewed for reviewed in heads
+                if dropped_catch_up(self.root, reviewed, head, f"refs/remotes/origin/{base}")]
+
+    def catch_up(self, base: str, head: str, reviewed: list[str] | tuple[str, ...] = ()) -> str:
         """Merge `origin/<base>` into the branch and return the new head (sd:2023).
 
         A merge, never a rebase, so the next push is a fast-forward of the
         branch already pushed and no reviewed head is orphaned. A conflict is
         aborted, so the branch is left exactly as it was. The review scopes the
         new head from ancestry, and merge gates it like any other.
+
+        `reviewed` are the reviewed catch-up merges a lane retry lost with its
+        worktree (`dropped_catch_ups`, sd:4925). Each is merged back first, a
+        fast-forward when the branch has not moved, so the review continues
+        from it instead of finding it orphaned.
         """
         if git(self.root, "status", "--porcelain", "--untracked-files=no"):
             raise Refusal("--catch-up needs a clean working tree", code="dirty_worktree", boundary="input",
                           state="operator_decision", next_action="Commit or stash the changes, then run prepare again.")
+        for commit in reviewed:
+            if is_ancestor(self.root, commit, current_head(self.root)):
+                continue  # an earlier one brought it in
+            message = f"Merge reviewed {commit[:12]} into {self.branch}"
+            if sd_lib.git_output(["merge", "--ff", "--no-edit", "-m", message, commit], self.root) is None:
+                self.abort_catch_up(head)
+                raise Refusal(f"merging the reviewed catch-up {commit} into {self.branch} conflicts; the branch is unchanged",
+                              code="merge_conflict", boundary="ci", state="operator_decision",
+                              next_action=f"Run git merge {commit}, resolve the conflict, commit, then run prepare again.")
+            print(f"sd-ship: merged back the reviewed catch-up {commit[:12]}, which {head[:12]} lacked; "
+                  "the review continues from it", file=sys.stderr)
+        if self.current_with(base, current_head(self.root)):
+            return current_head(self.root)
         remote, message = f"refs/remotes/origin/{base}", f"Merge origin/{base} into {self.branch}"
         merged = sd_lib.git_output(["merge", "--no-ff", "--no-edit", "-m", message, remote], self.root)
         if merged is None:
-            sd_lib.git_output(["merge", "--abort"], self.root)
+            self.abort_catch_up(head)
             notes = "".join(f"; {note}" for note in self.squash_notes(base, head))
             raise Refusal(f"merging origin/{base} into {self.branch} conflicts; the branch is unchanged{notes}",
                           code="merge_conflict", boundary="ci", state="operator_decision",
                           next_action=f"Run git merge origin/{base}, resolve the conflict, commit, then run prepare again.")
         return current_head(self.root)
+
+    def abort_catch_up(self, head: str) -> None:
+        """Abort a conflicted catch-up merge and drop any merge-back before it, so the branch is at `head` again."""
+        sd_lib.git_output(["merge", "--abort"], self.root)
+        if current_head(self.root) != head:
+            git(self.root, "reset", "--keep", head)
 
     def merge(self) -> dict:
         if not self.state.get("pull_request"):
