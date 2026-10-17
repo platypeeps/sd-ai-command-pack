@@ -647,15 +647,17 @@ class ApprovalFiles(ReviewCase):
         question = review.read(self.db, item)["questions"][0]
         self.assertEqual((question["label"], question["filed"], question["open"]), ("Approve", filed["id"], False))
 
-    def test_apply_then_files_nothing_new_and_closes_the_batch(self):
+    def test_rule_then_apply_files_exactly_one_item(self):
         item = self.file(nightly("2026-10-17", [self.SUBJECT]))
-        self.rule(item, 0, "Approve")
         before = self.counts()[0]
 
+        self.rule(item, 0, "Approve")
         result = review.apply(self.db, "nightly", who="tester")
 
         self.assertEqual((result["tasks"], result["existing"], result["closed"]), ([], [self.note(item)], [item]))
-        self.assertEqual(self.counts()[0], before)
+        self.assertEqual(self.counts()[0], before + 1)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM item WHERE external_id LIKE 'review-approved:%'")
+                         .fetchone()[0], 1)
 
     def test_a_rejection_files_nothing(self):
         item = self.file(nightly("2026-10-17", [self.SUBJECT]))
