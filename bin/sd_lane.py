@@ -2216,20 +2216,20 @@ def catch_up_of(tree: pathlib.Path, commit: str, expected: str) -> bool:
 
 
 def merged_back(tree: pathlib.Path, parents: list[str], default: list[str], depth: int = CATCH_UPS) -> bool:
-    """sd:4925. Whether `parents[1]` is built only from `parents[0]`'s history and the base.
+    """sd:4925. Whether `parents[1]` is a clean merge of `parents[0]`'s history and the base, or of such merges.
 
     Prepare merges back a reviewed catch-up that a dropped lane worktree
-    took with it (`dropped_catch_up`), so the review continues from it. That
-    commit is in the head's history, or a clean merge whose first parent is
-    built that way and whose second is on the base or built that way too.
+    took with it (`dropped_catch_up`), so the review continues from it. Its
+    first parent is in the head's history or such a merge; its second is
+    on the base or such a merge, never a side commit.
     """
     commit, head = parents[1], parents[0]
-    if read_git(tree, "merge-base", "--is-ancestor", commit, head, ok=(0, 1)).returncode == 0:
-        return True
     inner = read_git(tree, "rev-list", "--parents", "-n", "1", commit).stdout.split()[1:]
-    return (depth > 0 and len(inner) == 2 and clean_merge(tree, commit, *inner)
-            and merged_back(tree, [head, inner[0]], default, depth - 1)
-            and (landed(tree, inner[1], default) or merged_back(tree, [head, inner[1]], default, depth - 1)))
+    if depth <= 0 or len(inner) != 2 or not clean_merge(tree, commit, *inner):
+        return False
+    first = (read_git(tree, "merge-base", "--is-ancestor", inner[0], head, ok=(0, 1)).returncode == 0
+             or merged_back(tree, [head, inner[0]], default, depth - 1))
+    return first and (landed(tree, inner[1], default) or merged_back(tree, [head, inner[1]], default, depth - 1))
 
 
 def clean_merge(tree: pathlib.Path, commit: str, first: str, second: str) -> bool:

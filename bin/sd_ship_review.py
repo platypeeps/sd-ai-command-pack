@@ -143,33 +143,37 @@ def dropped_catch_up(root: pathlib.Path, reviewed: str, head: str, base_ref: str
     The retry merged the base again into the fixed branch, the reviewed
     merge was no ancestor of that, and `validate_dispatch` refused a branch
     that had only added commits. Such a merge holds nothing that `head`
-    and the base do not (`built_from`). Anything else, as after an amend or
-    a rebase, or a commit the store no longer holds, stays orphaned and is
-    refused as before.
+    and the base do not (`catch_up_merge`). Anything else, as after an
+    amend or a rebase, or a commit the store no longer holds, stays
+    orphaned and is refused as before.
     """
     if commit_absent(root, reviewed) or is_ancestor(root, reviewed, head):
         return False
-    return built_from(root, reviewed, head, base_ref, MERGE_BACK_DEPTH)
+    return catch_up_merge(root, reviewed, head, base_ref, MERGE_BACK_DEPTH)
 
 
-def built_from(root: pathlib.Path, commit: str, head: str, base_ref: str, depth: int) -> bool:
-    """Whether `commit` is in `head`'s history, or a clean merge of such commits and the base.
+def catch_up_merge(root: pathlib.Path, commit: str, head: str, base_ref: str, depth: int) -> bool:
+    """Whether `commit` is a clean merge of `head`'s history and the base, or of such merges.
 
-    Each merge has two parents, the first built from `head`'s history, the
-    second on the base or built from it as well (an earlier merge back),
-    and git's own merge of them as its tree, so it adds no content. A read
-    git cannot answer raises, as `is_ancestor` does; it is no "yes".
+    Two parents: the first in `head`'s history or such a merge, the second
+    on the base or such a merge (an earlier merge back), never a side
+    commit. Its tree is git's own merge of them, so it adds no content. No
+    other commit `head` reaches has the same parents: that one is an amend
+    of it, and merging the old merge back would publish what the amend
+    removed (sd:2600). A failed read is no "yes": `is_ancestor` raises, and
+    an unreadable commit is not a catch-up, so it stays orphaned.
     """
-    if is_ancestor(root, commit, head):
-        return True
     parents = (sd_lib.git_output(["rev-list", "--parents", "-n", "1", commit], root) or "").split()[1:]
     if depth <= 0 or len(parents) != 2:
         return False
     merged = sd_lib.git_output(["merge-tree", "--write-tree", "--no-messages", *parents], root)
     if not merged or merged != sd_lib.git_output(["rev-parse", f"{commit}^{{tree}}"], root):
         return False
-    return (built_from(root, parents[0], head, base_ref, depth - 1)
-            and (is_ancestor(root, parents[1], base_ref) or built_from(root, parents[1], head, base_ref, depth - 1)))
+    listed = sd_lib.git_output(["rev-list", "--parents", head, f"^{parents[0]}"], root)
+    if listed is None or any(line.split()[1:] == parents and line.split()[0] != commit for line in listed.splitlines()):
+        return False
+    first = is_ancestor(root, parents[0], head) or catch_up_merge(root, parents[0], head, base_ref, depth - 1)
+    return first and (is_ancestor(root, parents[1], base_ref) or catch_up_merge(root, parents[1], head, base_ref, depth - 1))
 
 
 def named_commits(root: pathlib.Path, have: str, lack: str, *, skip: tuple[str, ...] = (), shown: int = 3) -> str:

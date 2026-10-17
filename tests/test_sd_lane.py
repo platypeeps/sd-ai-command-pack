@@ -2829,6 +2829,18 @@ class AnyHost(SharedQueue):
         git(tree, "merge", "-q", "--no-ff", "-m", "Merge reviewed", lost)
         self.assertNotEqual(amended, queued)
         self.assertFalse(sd_lane.catch_up_of(tree, git(tree, "rev-parse", "HEAD"), queued))
+        # Codex round 1: a merged-back merge of a side commit is no catch-up, though the head holds that commit.
+        git(tree, "reset", "-q", "--hard", start)
+        git(tree, "commit", "-q", "--allow-empty", "-m", "a side commit")
+        side = git(tree, "rev-parse", "HEAD")
+        git(tree, "reset", "-q", "--hard", start)
+        git(tree, "merge", "-q", "--no-ff", "-m", "Merge side", side)
+        side_merge = git(tree, "rev-parse", "HEAD")
+        git(tree, "reset", "-q", "--hard", queued)
+        git(tree, "merge", "-q", "--no-ff", "-m", "Merge side again", side)
+        keeps_side = git(tree, "rev-parse", "HEAD")
+        git(tree, "merge", "-q", "--no-ff", "-m", "Merge reviewed", side_merge)
+        self.assertFalse(sd_lane.catch_up_of(tree, git(tree, "rev-parse", "HEAD"), keeps_side))
 
     def test_a_foreign_merge_on_origin_skips_head_moved(self) -> None:
         """Review round 1, remote validation: origin/<branch> holds a merge the lane did not make."""

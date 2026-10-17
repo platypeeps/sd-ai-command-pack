@@ -1103,6 +1103,39 @@ roles:
         self.fix_and_clear(program, payload)
         self.assert_still_orphaned(reviewed)
 
+    def test_an_amended_reviewed_catch_up_merge_still_refuses(self):
+        # Codex round 1: the amend keeps the merge's parents, so they still
+        # reach the branch. Merging the old merge back would publish what the
+        # amend removed (sd:2600); a replacement with its parents refuses.
+        program, payload = self.blocking_review()
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare("--catch-up")
+        reviewed = self.operation().state["passes"][0]["head"]
+        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), reviewed)
+        _git(self.root, "commit", "-q", "--amend", "-m", "Merge origin/main, message amended\n\nAuthored-with: human")
+        self.fix_and_clear(program, payload)
+        self.assert_still_orphaned(reviewed)
+
+    def test_a_reviewed_side_merge_whose_side_commit_the_branch_kept_still_refuses(self):
+        # Codex round 1: the side commit reaches the branch through a new merge
+        # of it, but it is not on the default branch and not a catch-up merge.
+        program, payload = self.blocking_review()
+        before = _git(self.root, "rev-parse", "HEAD")
+        _git(self.root, "checkout", "-q", "-b", "side")
+        (self.root / "side.txt").write_text("side\n")
+        _git(self.root, "add", "side.txt")
+        _git(self.root, "commit", "-qm", "side work\n\nAuthored-with: human")
+        _git(self.root, "checkout", "-q", "topic")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge side into topic\n\nAuthored-with: human", "side")
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare("--catch-up")
+        reviewed = self.operation().state["passes"][0]["head"]
+        _git(self.root, "reset", "-q", "--hard", before)
+        self.fix_and_clear(program, payload)
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge side into topic again\n\nAuthored-with: human", "side")
+        self.assert_still_orphaned(reviewed)
+
     def test_a_reviewed_lane_catch_up_that_conflicts_with_the_fix_leaves_the_branch_as_it_was(self):
         reviewed, _program, _payload = self.blocked_lane_catch_up()
         (self.root / "lib").mkdir(exist_ok=True)
