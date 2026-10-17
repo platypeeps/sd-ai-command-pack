@@ -99,11 +99,15 @@ that cannot run has not passed.
 | `90-scratch/` | Throwaway and superseded. Never cited. |
 | `assets/` | Images the docs reference |
 | `docs/dashboard/` | Rendered HTML, served by the dashboard. Generated — never hand-edit. Gitignored. |
-| `vendor/` | Third-party clones. Gitignored. |
+| `vendor/` | Third-party clones you only read. Gitignored. |
 
 Use only the directories the repo needs; do not invent new ones. The numbers are
 reading order, not a workflow — `00` is where a newcomer starts, `90` is where
 nothing is cited from.
+
+An official repo you change is not vendored. Clone it into the official tree
+(`~/repos/<org>/<name>`), register it, and file its code work there.
+This repo keeps the research, with a private remote of your own.
 
 Type prefixes carry meaning:
 

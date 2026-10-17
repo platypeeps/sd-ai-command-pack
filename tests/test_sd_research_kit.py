@@ -609,18 +609,20 @@ class TemplateDriftTests(unittest.TestCase):
     def test_a_repo_carrying_the_long_template_drifts_only_where_the_template_changed(self) -> None:
         """The five research repos copied the 193-line template, and still carry it.
 
-        The shrink must not report the text it removed. Two sections do drift.
+        The shrink must not report the text it removed. Three sections do drift.
         `## Parallel work` has new wording; no research repo carried the old
         one either. `## Adversarial review before publishing` names the second
         reader as `sd-review --lens research-brief` since #1194, and the long
         copy still describes a named CLI with `-s read-only`, so that drift is
-        the signal the repos need.
+        the signal the repos need. `## Layout` says an official repo you
+        change is not vendored, which the long copy predates; that drift is a
+        signal too.
         """
 
         found = self.findings(LONG_TEMPLATE.read_text(encoding="utf-8"))
         self.assertTrue(found)
         self.assertEqual({where for where, _, _ in found},
-                         {"`## Parallel work`", "`## Adversarial review before publishing`"}, found)
+                         {"`## Layout`", "`## Parallel work`", "`## Adversarial review before publishing`"}, found)
         review = [text for where, kind, text in found if "Adversarial" in where]
         self.assertEqual(len(review), 1, review)
         self.assertIn("sd-review --lens research-brief", review[0])

@@ -19,9 +19,13 @@ shared template`, with the reason.
 | `40-docs/` | `PRD-` `DESIGN-` `PLAN-` `SPIKE-` `DISCOVERY-` `BENCHMARK-` `DECK-` `OUTREACH-` |
 | `90-scratch/` | Throwaway and superseded. Never cited. |
 | `docs/dashboard/` | Rendered HTML, served by the dashboard. Generated — never hand-edit. Gitignored. |
-| `vendor/` | Third-party clones. Gitignored. |
+| `vendor/` | Third-party clones you only read. Gitignored. |
 
 Use only the directories this repo needs; do not invent new ones.
+
+An official repo you change is not vendored. Clone it into the official tree
+(`~/repos/<org>/<name>`), register it, and file its code work there.
+This repo keeps the research, with a private remote of your own.
 
 ## Main document — START HERE
 
