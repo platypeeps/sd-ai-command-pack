@@ -68,12 +68,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prune-only", action="store_true",
                         help="take no snapshot; delete copies under --destination, such as a mirror "
                              "on a share, whose checkpoint is more than --keep-days days old")
+    parser.add_argument("--prune-unmanifested", action="store_true",
+                        help="with --prune-only: also delete a dated folder with no manifest, such as a copy "
+                             "stopped partway, named for a day more than twice --keep-days back; refused on "
+                             "a root backups are written in")
     parser.add_argument("--dry-run", action="store_true",
                         help="with --prune-only: list what would be deleted and delete nothing")
     arguments = parser.parse_args(argv)
     home = Path(os.environ.get("HOME", "~")).expanduser()
     if arguments.dry_run and not arguments.prune_only:
         print("sd-db backup: --dry-run needs --prune-only", file=sys.stderr)
+        return 1
+    if arguments.prune_unmanifested and not arguments.prune_only:
+        print("sd-db backup: --prune-unmanifested needs --prune-only", file=sys.stderr)
         return 1
     if arguments.prune_only:
         # The hourly job's NAS prune (sd:4011). The copies were written in
@@ -86,11 +93,14 @@ def main(argv: list[str] | None = None) -> int:
             if arguments.require_mount is not None:
                 require_mount(arguments.require_mount, arguments.destination)
             removed = prune_older(arguments.destination, arguments.keep_days, now=datetime.now(UTC), moved=True,
-                                  dry_run=arguments.dry_run, report=lambda line: print(f"sd-db backup: {line}"))
+                                  dry_run=arguments.dry_run, unmanifested=arguments.prune_unmanifested,
+                                  report=lambda line: print(f"sd-db backup: {line}"))
         except (BackupError, OSError) as failure:
             print(f"sd-db backup: {failure}", file=sys.stderr)
             return 1
         copies = f"{len(removed)} {'copy' if len(removed) == 1 else 'copies'} older than {arguments.keep_days} days"
+        if arguments.prune_unmanifested:
+            copies += f", or with no manifest older than {2 * arguments.keep_days} days,"
         if arguments.dry_run:
             for path in removed:
                 print(f"sd-db backup: would remove {path}")

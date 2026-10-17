@@ -98,6 +98,13 @@ class Case(unittest.TestCase):
         (copy / BACKUP_MANIFEST).unlink()
         return copy
 
+    def leftover(self, name):
+        """A dated folder no manifest describes, such as a copy stopped partway (sd:4917)."""
+        folder = self.nas / name
+        (folder / "executions").mkdir(parents=True)
+        (folder / "sd.db").write_bytes(b"half a copy")
+        return folder
+
     def fresh_home(self, name="promoted"):
         home = self.base / name
         (home / ".local/share/sd").mkdir(parents=True)
@@ -130,6 +137,26 @@ class Refusals(Case):
         self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
         self.assertIn("--dry-run needs --prune-only", completed.stderr)
         self.assertEqual(list(self.nas.iterdir()), [])
+
+    def test_the_unmanifested_prune_needs_the_prune_only_mode(self):
+        folder = self.leftover("2026-09-01")
+        completed = self.job("--prune-unmanifested", "--destination", str(self.nas), "--keep-days", "7")
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        self.assertIn("--prune-unmanifested needs --prune-only", completed.stderr)
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_the_unmanifested_prune_needs_an_age(self):
+        folder = self.leftover("2026-09-01")
+        completed = self.job("--prune-only", "--prune-unmanifested", "--destination", str(self.nas))
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        self.assertIn("--prune-only needs --destination and --keep-days", completed.stderr)
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_the_unmanifested_prune_needs_a_moved_root(self):
+        folder = self.leftover("2026-09-01")
+        with self.assertRaisesRegex(BackupError, "only a moved root"):
+            prune_older(self.nas, 7, now=NOW, unmanifested=True)
+        self.assertTrue((folder / "sd.db").exists())
 
     def test_a_leftover_that_is_itself_a_mount_point_is_kept(self):
         leftover = self.nas / ".2026-10-01.removing"
@@ -167,9 +194,129 @@ class Refusals(Case):
         self.assertIn(f"kept {leftover}: it could not be read", lines[0])
 
 
+class Unmanifested(Case):
+    """`--prune-unmanifested` (sd:4917): a folder with no manifest goes once its name is past twice the window."""
+
+    def test_only_a_dated_folder_named_past_twice_the_window_goes(self):
+        # NOW less 14 days is 2026-09-29: that day stays, the day before goes.
+        gone = [self.leftover("2026-09-28"), self.leftover("2026-09-28.2")]
+        boundary = self.leftover("2026-09-29")
+        inside = self.leftover("2026-10-01")
+        foreign = [self.leftover("2026-09-01-by-hand"), self.leftover("old")]
+        outside = self.base / "outside" / "2026-09-01"
+        outside.mkdir(parents=True)
+        (outside / "sd.db").write_bytes(b"not under the root")
+        link = self.nas / "2026-09-20"
+        link.symlink_to(outside, target_is_directory=True)
+        lines: list[str] = []
+
+        removed = prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True, report=lines.append)
+
+        self.assertEqual(removed, gone)
+        self.assertEqual(sorted(self.nas.iterdir()), sorted([link, boundary, inside, *foreign]))
+        for folder in (boundary, inside, *foreign):
+            self.assertTrue((folder / "sd.db").exists())
+        self.assertTrue(link.is_symlink())
+        self.assertTrue((outside / "sd.db").exists())
+        self.assertEqual(lines, [f"kept {link}: it is a link or not a directory",
+                                 f"kept {boundary}: no manifest (stopped run?)",
+                                 f"kept {inside}: no manifest (stopped run?)",
+                                 f"removed {gone[0]}", f"removed {gone[1]}"])
+
+    def test_without_the_flag_the_same_folder_stays(self):
+        folder = self.leftover("2026-09-01")
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [])
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_a_window_whose_double_reaches_before_year_one_removes_no_folder(self):
+        # 400000 days back is the year 931; twice that is before the calendar starts.
+        folder = self.leftover("0001-01-01")
+
+        self.assertEqual(prune_older(self.nas, 400000, now=NOW, moved=True, unmanifested=True), [])
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_an_unreadable_newest_manifest_refuses_the_root(self):
+        # It cannot say where it was written, so the root may be one `run` writes in.
+        folder = self.leftover("2026-09-01")
+        (self.leftover("2026-10-12") / BACKUP_MANIFEST).write_text("{")
+
+        with self.assertRaisesRegex(BackupError, "could not tell whether"):
+            prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True)
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_a_folder_holding_a_link_is_kept(self):
+        folder = self.leftover("2026-09-01")
+        target = self.base / "elsewhere.db"
+        target.write_bytes(b"keep me")
+        (folder / "executions" / "link").symlink_to(target)
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True, report=lines.append), [])
+
+        self.assertEqual(target.read_bytes(), b"keep me")
+        self.assertTrue((folder / "sd.db").exists())
+        self.assertEqual(lines, [f"kept {folder}: it holds a linked, mounted or special entry"])
+
+    def test_a_manifest_written_before_the_removal_keeps_the_folder(self):
+        folder = self.leftover("2026-09-01")
+        real = backup._contained
+
+        def copy_finishes(path):
+            real(path)
+            (path / BACKUP_MANIFEST).write_text("{}")  # between the scan and the removal
+
+        with (mock.patch.object(backup, "_contained", copy_finishes),
+              self.assertRaisesRegex(BackupError, "changed before retention")):
+            prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True)
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_the_dry_run_lists_what_would_go_and_deletes_nothing(self):
+        folder = self.leftover("2026-09-01")
+
+        completed = self.job("--prune-only", "--prune-unmanifested", "--dry-run", "--destination", str(self.nas),
+                             "--keep-days", "7")
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn(f"would remove {folder}\n", completed.stdout)
+        self.assertIn("dry run: 1 copy older than 7 days, or with no manifest older than 14 days, would be removed",
+                      completed.stdout)
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_the_job_removes_and_names_each_folder(self):
+        folder = self.leftover("2026-09-01")
+
+        completed = self.job("--prune-only", "--prune-unmanifested", "--destination", str(self.nas),
+                             "--keep-days", "7")
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn(f"sd-db backup: removed {folder}\n", completed.stdout)
+        self.assertIn(f"1 copy older than 7 days, or with no manifest older than 14 days, removed under {self.nas}",
+                      completed.stdout)
+        self.assertEqual(list(self.nas.iterdir()), [])
+
+
 # Each test takes a snapshot, which `run` refuses off the hub.
 @hub_only
 class MovedCopies(Case):
+    def test_the_unmanifested_prune_still_judges_a_copy_by_its_manifest(self):
+        old = self.mirror(self.snapshot(datetime(2026, 9, 1, 9, 0, tzinfo=UTC)))
+        partial = self.mirror(self.snapshot(datetime(2026, 9, 2, 9, 0, tzinfo=UTC)))
+        (partial / "sd.db").write_bytes((partial / "sd.db").read_bytes()[:4096])
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True), [old])
+        self.assertTrue((partial / "sd.db").exists())
+
+    def test_the_unmanifested_prune_refuses_a_root_backups_were_written_in(self):
+        self.snapshot(datetime(2026, 9, 1, 9, 0, tzinfo=UTC))
+        stopped = self.local / "2026-09-02"
+        stopped.mkdir()
+        (stopped / "sd.db").write_bytes(b"half a snapshot")
+
+        with self.assertRaisesRegex(BackupError, "written in place"):
+            prune_older(self.local, 7, now=NOW, moved=True, unmanifested=True)
+        self.assertTrue((stopped / "sd.db").exists())
+
     def test_a_copy_past_the_window_is_pruned_by_its_hashes_not_its_path(self):
         old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
         young = self.mirror(self.snapshot(NOW))

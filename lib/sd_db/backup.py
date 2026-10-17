@@ -56,7 +56,7 @@ import time
 import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from . import paths
@@ -1104,7 +1104,7 @@ def _finish_removals(root: Path, *, dry_run: bool = False, report=None) -> list[
     return finished
 
 
-def _remove_owned(directories: list[tuple[Path, tuple[int, int, str]]], identify) -> list[Path]:
+def _remove_owned(directories: list[tuple[Path, tuple[int, int, str]]], identify, report=None) -> list[Path]:
     removed = []
     for path, identity in directories:
         try:
@@ -1117,6 +1117,8 @@ def _remove_owned(directories: list[tuple[Path, tuple[int, int, str]]], identify
         path.rename(doomed)
         shutil.rmtree(doomed)
         removed.append(path)
+        if report is not None:
+            report(f"removed {path}")
     return removed
 
 
@@ -1182,7 +1184,7 @@ def _checkpoint_time(body: str) -> tuple[datetime, bool]:
 
 
 def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dry_run: bool = False,
-                report=None) -> list[Path]:
+                unmanifested: bool = False, report=None) -> list[Path]:
     """Delete owned backups taken more than `days` days before `now`.
 
     Age comes from the directory's day, which `_dated_directory` takes from
@@ -1210,12 +1212,30 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
     sd:3578 is dated and pruned like any other (sd:4694). A directory with no
     manifest always stays: a run that stopped before writing one leaves such a
     directory, but so can a hand-kept copy of the store, and nothing in it
-    tells the two apart. Every directory past the window that stays, `report`
-    hears with its reason. `dry_run` returns what would go and removes nothing.
+    tells the two apart -- unless `unmanifested` asks otherwise, below. Every
+    directory past the window that stays, `report` hears with its reason, and
+    every one removed. `dry_run` returns what would go and removes nothing.
+
+    `unmanifested` (sd:4917, an operator ruling) also removes a dated
+    directory with no manifest whose day lies more than twice `days` back, by
+    the same day rule: a copy stopped partway on a mirror is never finished
+    once its source has rotated out. It is for a moved root only, and refuses
+    one whose newest manifest names its own directory, which is a root `run`
+    writes in. Such a directory goes only if it is a real directory holding
+    no link, mount or special entry (`_contained`), so nothing outside the
+    root is reached.
     """
     _check_keep_days(days)
     _retention_root(root)
+    if unmanifested and not moved:
+        raise BackupError("the unmanifested prune takes only a moved root, such as a mirror")
+    if unmanifested:
+        _moved_root(root)
     cutoff = (now - timedelta(days=days)).date()
+    try:
+        stale = (now - timedelta(days=2 * days)).date()
+    except OverflowError:
+        stale = date.min  # twice the window starts before the calendar: no folder is that old
     window = now - timedelta(days=days)
     for path in _finish_removals(root, dry_run=dry_run, report=report):
         if report is not None:
@@ -1225,7 +1245,13 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
         """The identity checked again before removal; None for a directory inside the window."""
         manifest = path / BACKUP_MANIFEST
         if not manifest.exists() and not manifest.is_symlink():
-            raise BackupError("no manifest (stopped run?)")
+            if not unmanifested or datetime.strptime(path.name[:10], "%Y-%m-%d").date() >= stale:
+                raise BackupError("no manifest (stopped run?)")
+            if path.is_symlink() or not path.is_dir():
+                raise BackupError("it is a link or not a directory")
+            _contained(path)
+            details = path.lstat()
+            return details.st_dev, details.st_ino, ""
         if moved and _taken_at(path) >= window:
             return None
         return _check_backup(path, moved=moved)
@@ -1251,7 +1277,28 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
     directories.sort(key=lambda value: _directory_order(value[0]))
     if dry_run:
         return [path for path, _ in directories]
-    return _remove_owned(directories, identify)
+    return _remove_owned(directories, identify, report)
+
+
+def _moved_root(root: Path) -> None:
+    """Refuse `root` unless its newest manifest names another directory: copies, not where `run` writes.
+
+    A manifest that cannot be read refuses too; it cannot say where it was written.
+    """
+    dated = sorted((path for path in root.iterdir() if DATED_NAME.fullmatch(path.name)), key=_directory_order)
+    for path in reversed(dated):
+        manifest = path / BACKUP_MANIFEST
+        if path.is_symlink() or (not manifest.exists() and not manifest.is_symlink()):
+            continue
+        try:
+            written = json.loads(manifest.read_bytes()).get("directory")
+        except (OSError, ValueError, AttributeError) as error:
+            raise BackupError(f"the unmanifested prune could not tell whether {root} holds copies: "
+                              f"{manifest} could not be read: {error}") from None
+        if written == str(path.resolve()):
+            raise BackupError(f"the unmanifested prune takes only a moved root, such as a mirror; {root} holds "
+                              f"backups written in place ({path})")
+        return
 
 
 def _mount_point(path: Path) -> Path:
