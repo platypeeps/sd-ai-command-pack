@@ -2791,6 +2791,45 @@ class AnyHost(SharedQueue):
         git(tree, "reset", "-q", "--hard", merge)
         self.assertEqual((sd_lane.at_head(tree, queued), sd_lane.caught_up(tree, queued)), (True, merge))
 
+    def test_a_merged_back_reviewed_catch_up_is_a_catch_up(self) -> None:
+        """sd:4925: prepare merges back a reviewed catch-up the queued head lacks, then maybe the base again.
+
+        That merge brings only the head's own history and the base, so a put-back or a retry still finds
+        the entry's head. A merge back of a catch-up whose first parent the head lost (an amend) is not one.
+        """
+        tree = self.worktree("unit")
+        start = git(tree, "rev-parse", "HEAD")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
+        reviewed = git(tree, "rev-parse", "HEAD")
+        git(tree, "reset", "-q", "--hard", start)
+        git(tree, "commit", "-q", "--allow-empty", "-m", "the fix")
+        queued = git(tree, "rev-parse", "HEAD")
+        git(tree, "merge", "-q", "--ff", "-m", "Merge reviewed", reviewed)
+        back = git(tree, "rev-parse", "HEAD")
+        self.assertEqual((sd_lane.catch_up_of(tree, back, queued), sd_lane.caught_up(tree, queued)), (True, back))
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved again")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
+        again = git(tree, "rev-parse", "HEAD")
+        self.assertTrue(sd_lane.catch_up_of(tree, again, queued))
+        # A second round: that head reviewed and dropped, and merged back onto the next fix.
+        git(tree, "reset", "-q", "--hard", queued)
+        git(tree, "commit", "-q", "--allow-empty", "-m", "the second fix")
+        requeued = git(tree, "rev-parse", "HEAD")
+        git(tree, "merge", "-q", "--no-ff", "-m", "Merge reviewed", again)
+        self.assertTrue(sd_lane.catch_up_of(tree, git(tree, "rev-parse", "HEAD"), requeued))
+        git(tree, "reset", "-q", "--hard", start)
+        git(tree, "commit", "-q", "--allow-empty", "-m", "an amended head")
+        amended = git(tree, "rev-parse", "HEAD")
+        git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "main")
+        lost = git(tree, "rev-parse", "HEAD")
+        git(tree, "reset", "-q", "--hard", queued)
+        git(tree, "merge", "-q", "--no-ff", "-m", "Merge reviewed", lost)
+        self.assertNotEqual(amended, queued)
+        self.assertFalse(sd_lane.catch_up_of(tree, git(tree, "rev-parse", "HEAD"), queued))
+
     def test_a_foreign_merge_on_origin_skips_head_moved(self) -> None:
         """Review round 1, remote validation: origin/<branch> holds a merge the lane did not make."""
         for edited in (False, True):
