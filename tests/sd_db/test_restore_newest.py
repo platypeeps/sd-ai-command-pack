@@ -98,6 +98,13 @@ class Case(unittest.TestCase):
         (copy / BACKUP_MANIFEST).unlink()
         return copy
 
+    def leftover(self, name):
+        """A dated folder no manifest describes, such as a copy stopped partway (sd:4917)."""
+        folder = self.nas / name
+        (folder / "executions").mkdir(parents=True, exist_ok=True)
+        (folder / "sd.db").write_bytes(b"half a copy")
+        return folder
+
     def fresh_home(self, name="promoted"):
         home = self.base / name
         (home / ".local/share/sd").mkdir(parents=True)
@@ -130,6 +137,26 @@ class Refusals(Case):
         self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
         self.assertIn("--dry-run needs --prune-only", completed.stderr)
         self.assertEqual(list(self.nas.iterdir()), [])
+
+    def test_the_unmanifested_prune_needs_the_prune_only_mode(self):
+        folder = self.leftover("2026-09-01")
+        completed = self.job("--prune-unmanifested", "--destination", str(self.nas), "--keep-days", "7")
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        self.assertIn("--prune-unmanifested needs --prune-only", completed.stderr)
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_the_unmanifested_prune_needs_an_age(self):
+        folder = self.leftover("2026-09-01")
+        completed = self.job("--prune-only", "--prune-unmanifested", "--destination", str(self.nas))
+        self.assertEqual(completed.returncode, 1, completed.stdout + completed.stderr)
+        self.assertIn("--prune-only needs --destination and --keep-days", completed.stderr)
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_the_unmanifested_prune_needs_a_moved_root(self):
+        folder = self.leftover("2026-09-01")
+        with self.assertRaisesRegex(BackupError, "only a moved root"):
+            prune_older(self.nas, 7, now=NOW, unmanifested=True)
+        self.assertTrue((folder / "sd.db").exists())
 
     def test_a_leftover_that_is_itself_a_mount_point_is_kept(self):
         leftover = self.nas / ".2026-10-01.removing"
@@ -167,9 +194,220 @@ class Refusals(Case):
         self.assertIn(f"kept {leftover}: it could not be read", lines[0])
 
 
+class Unmanifested(Case):
+    """`--prune-unmanifested` (sd:4917): a folder with no manifest goes once its name is past twice the window."""
+
+    def setUp(self):
+        super().setUp()
+        # The newest copy's manifest names where `run` wrote it, outside this root: the proof the root is a mirror.
+        self.copy = self.provenance({"directory": str(self.local / "2026-10-12")})
+
+    def provenance(self, value, name="2026-10-12"):
+        """A copy inside the window whose manifest holds only `value`; the scan never opens it."""
+        folder = self.nas / name
+        folder.mkdir(exist_ok=True)
+        (folder / BACKUP_MANIFEST).write_text(value if isinstance(value, str) else json.dumps(value))
+        return folder
+
+    def refused(self, pattern):
+        folder = self.leftover("2026-09-01")
+        with self.assertRaisesRegex(BackupError, pattern):
+            prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True)
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_a_root_with_no_manifest_at_all_is_refused(self):
+        shutil.rmtree(self.copy)
+        self.refused("no folder under .* has a manifest")
+
+    def test_a_manifest_naming_no_directory_refuses_the_root(self):
+        for value in ({}, {"directory": None}, {"directory": 12}, {"directory": ""},
+                      {"directory": "sd-backups/2026-10-12"}, [1, 2]):
+            with self.subTest(value=value):
+                self.provenance(value)
+                self.refused("names no directory it was written in|could not be read")
+
+    def test_a_manifest_naming_a_folder_of_this_root_refuses_it(self):
+        # Copied or renamed inside the root: written here, so `run` may write here too.
+        self.provenance({"directory": str(self.nas / "2026-10-11")})
+        self.refused("written in place")
+
+    def test_an_older_manifest_naming_this_root_refuses_it_behind_a_newer_copy(self):
+        # A root that once took a backup in place, then got copies: the newest manifest alone looks like a mirror.
+        self.provenance({"directory": str(self.nas / "2026-10-02")}, name="2026-10-02")
+        self.refused("written in place")
+
+    def test_an_older_bad_manifest_refuses_the_root_behind_a_newer_copy(self):
+        for value in ("{", {}, {"directory": "relative/2026-10-02"}, [1]):
+            with self.subTest(value=value):
+                self.provenance(value, name="2026-10-02")
+                self.refused("names no directory it was written in|could not be read")
+
+    def test_an_older_manifest_that_cannot_be_looked_up_refuses_the_root(self):
+        older = self.provenance({"directory": str(self.local / "2026-10-02")}, name="2026-10-02")
+        older.chmod(0o644)
+        self.addCleanup(older.chmod, 0o755)
+        self.refused("could not tell whether")
+
+    def test_a_linked_manifest_refuses_the_root(self):
+        target = self.base / "elsewhere.json"
+        target.write_text(json.dumps({"directory": str(self.local / "2026-10-12")}))
+        (self.copy / BACKUP_MANIFEST).unlink()
+        (self.copy / BACKUP_MANIFEST).symlink_to(target)
+        self.refused("is a link")
+
+    def test_a_manifest_that_cannot_be_looked_up_refuses_the_root(self):
+        self.copy.chmod(0o644)  # listable, but no entry in it can be looked up
+        self.addCleanup(self.copy.chmod, 0o755)
+        self.refused("could not tell whether")
+
+    def test_a_folder_whose_entries_cannot_be_looked_up_is_kept_not_read_as_unmanifested(self):
+        # `exists()` reads EACCES as absent, which made a folder nobody can inspect look manifest-less.
+        folder = self.leftover("2026-09-01")
+        other = self.leftover("2026-09-02")
+        folder.chmod(0o644)
+        self.addCleanup(folder.chmod, 0o755)
+        lines: list[str] = []
+        # The root check looks up every folder, so it refuses first; the selection must hold on its own too.
+        with self.assertRaisesRegex(BackupError, "could not tell whether"):
+            prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True)
+        self.assertTrue(other.exists())
+
+        with mock.patch.object(backup, "_moved_root"):
+            removed = prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True, report=lines.append)
+
+        self.assertEqual(removed, [other])
+        folder.chmod(0o755)
+        self.assertTrue((folder / "sd.db").exists())
+        self.assertEqual(len([line for line in lines if line.startswith(f"kept {folder}: ")]), 1, lines)
+        self.assertIn("could not be read", lines[0])
+
+    def test_a_window_whose_cutoff_reaches_before_year_one_is_refused(self):
+        folder = self.leftover("2026-09-01")
+        for flag in (False, True):
+            with self.subTest(unmanifested=flag), self.assertRaisesRegex(BackupError, "before the calendar"):
+                prune_older(self.nas, 999999999, now=NOW, moved=True, unmanifested=flag)
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_only_a_dated_folder_named_past_twice_the_window_goes(self):
+        # NOW less 14 days is 2026-09-29: that day stays, the day before goes.
+        gone = [self.leftover("2026-09-28"), self.leftover("2026-09-28.2")]
+        boundary = self.leftover("2026-09-29")
+        inside = self.leftover("2026-10-01")
+        foreign = [self.leftover("2026-09-01-by-hand"), self.leftover("old")]
+        outside = self.base / "outside" / "2026-09-01"
+        outside.mkdir(parents=True)
+        (outside / "sd.db").write_bytes(b"not under the root")
+        link = self.nas / "2026-09-20"
+        link.symlink_to(outside, target_is_directory=True)
+        lines: list[str] = []
+
+        removed = prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True, report=lines.append)
+
+        self.assertEqual(removed, gone)
+        self.assertEqual(sorted(self.nas.iterdir()), sorted([link, boundary, inside, *foreign, self.copy]))
+        for folder in (boundary, inside, *foreign):
+            self.assertTrue((folder / "sd.db").exists())
+        self.assertTrue(link.is_symlink())
+        self.assertTrue((outside / "sd.db").exists())
+        self.assertEqual(lines, [f"kept {link}: it is a link or not a directory",
+                                 f"kept {boundary}: no manifest (stopped run?)",
+                                 f"kept {inside}: no manifest (stopped run?)",
+                                 f"removed {gone[0]}", f"removed {gone[1]}"])
+
+    def test_without_the_flag_the_same_folder_stays(self):
+        folder = self.leftover("2026-09-01")
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [])
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_a_window_whose_double_reaches_before_year_one_removes_no_folder(self):
+        # 400000 days back is the year 931; twice that is before the calendar starts.
+        folder = self.leftover("0001-01-01")
+
+        self.assertEqual(prune_older(self.nas, 400000, now=NOW, moved=True, unmanifested=True), [])
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_an_unreadable_newest_manifest_refuses_the_root(self):
+        # It cannot say where it was written, so the root may be one `run` writes in.
+        folder = self.leftover("2026-09-01")
+        (self.leftover("2026-10-12") / BACKUP_MANIFEST).write_text("{")
+
+        with self.assertRaisesRegex(BackupError, "could not tell whether"):
+            prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True)
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_a_folder_holding_a_link_is_kept(self):
+        folder = self.leftover("2026-09-01")
+        target = self.base / "elsewhere.db"
+        target.write_bytes(b"keep me")
+        (folder / "executions" / "link").symlink_to(target)
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True, report=lines.append), [])
+
+        self.assertEqual(target.read_bytes(), b"keep me")
+        self.assertTrue((folder / "sd.db").exists())
+        self.assertEqual(lines, [f"kept {folder}: it holds a linked, mounted or special entry"])
+
+    def test_a_manifest_written_before_the_removal_keeps_the_folder(self):
+        folder = self.leftover("2026-09-01")
+        real = backup._contained
+
+        def copy_finishes(path):
+            real(path)
+            (path / BACKUP_MANIFEST).write_text("{}")  # between the scan and the removal
+
+        with (mock.patch.object(backup, "_contained", copy_finishes),
+              self.assertRaisesRegex(BackupError, "changed before retention")):
+            prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True)
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_the_dry_run_lists_what_would_go_and_deletes_nothing(self):
+        folder = self.leftover("2026-09-01")
+
+        completed = self.job("--prune-only", "--prune-unmanifested", "--dry-run", "--destination", str(self.nas),
+                             "--keep-days", "7")
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn(f"would remove {folder}\n", completed.stdout)
+        self.assertIn("dry run: 1 copy older than 7 days, or with no manifest older than 14 days, would be removed",
+                      completed.stdout)
+        self.assertTrue((folder / "sd.db").exists())
+
+    def test_the_job_removes_and_names_each_folder(self):
+        folder = self.leftover("2026-09-01")
+
+        completed = self.job("--prune-only", "--prune-unmanifested", "--destination", str(self.nas),
+                             "--keep-days", "7")
+
+        self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+        self.assertIn(f"sd-db backup: removed {folder}\n", completed.stdout)
+        self.assertIn(f"1 copy older than 7 days, or with no manifest older than 14 days, removed under {self.nas}",
+                      completed.stdout)
+        self.assertEqual(list(self.nas.iterdir()), [self.copy])
+
+
 # Each test takes a snapshot, which `run` refuses off the hub.
 @hub_only
 class MovedCopies(Case):
+    def test_the_unmanifested_prune_still_judges_a_copy_by_its_manifest(self):
+        old = self.mirror(self.snapshot(datetime(2026, 9, 1, 9, 0, tzinfo=UTC)))
+        partial = self.mirror(self.snapshot(datetime(2026, 9, 2, 9, 0, tzinfo=UTC)))
+        (partial / "sd.db").write_bytes((partial / "sd.db").read_bytes()[:4096])
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True), [old])
+        self.assertTrue((partial / "sd.db").exists())
+
+    def test_the_unmanifested_prune_refuses_a_root_backups_were_written_in(self):
+        self.snapshot(datetime(2026, 9, 1, 9, 0, tzinfo=UTC))
+        stopped = self.local / "2026-09-02"
+        stopped.mkdir()
+        (stopped / "sd.db").write_bytes(b"half a snapshot")
+
+        with self.assertRaisesRegex(BackupError, "written in place"):
+            prune_older(self.local, 7, now=NOW, moved=True, unmanifested=True)
+        self.assertTrue((stopped / "sd.db").exists())
+
     def test_a_copy_past_the_window_is_pruned_by_its_hashes_not_its_path(self):
         old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
         young = self.mirror(self.snapshot(NOW))
