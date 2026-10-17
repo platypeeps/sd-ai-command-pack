@@ -848,15 +848,24 @@ class TheReason(SyncCase):
 class QueryGh(Gh):
     """A `gh` that answers each search from `answer(query)`, or fails the ones `failing(query)` names."""
 
-    def __init__(self, answer, *, failing=lambda query: False, count=None):
+    def __init__(self, answer, *, failing=lambda query: False, count=None, read=None):
         super().__init__()
         self.answer = answer
         self.failing = failing
         self.counted = count
+        self.read = read
+        self.paths: list[str] = []
 
     def __call__(self, argv):
         if argv[:2] == ["gh", "auth"]:
             return super().__call__(argv)
+        if argv[:3] == ["gh", "api", "--include"] and "/issues/" in argv[-1]:
+            # A direct issue read: `read(path)` answers `(status, payload)`, or None for a gh failure.
+            self.paths.append(argv[-1])
+            answer = self.read(argv[-1]) if self.read else None
+            if answer is None:
+                return 1, "", "gh: connection reset"
+            return 0, f"HTTP/2.0 {answer[0]} X\nContent-Type: application/json\n\n{json.dumps(answer[1])}", ""
         self.calls.append(argv)
         query = self.queries[-1]
         if self.failing(query):
@@ -871,6 +880,11 @@ class QueryGh(Gh):
 
 def sweep(query):
     return "is:open" in query and "updated:" not in query
+
+
+def issue(number, *, state="open", url=None, **extra):
+    """A direct issue read's 200 answer."""
+    return 200, {"html_url": url or node(number)["url"], "number": number, "state": state, **extra}
 
 
 class TheIntakeSearch(SyncCase):
@@ -905,8 +919,10 @@ class TheIntakeSearch(SyncCase):
 
     def test_an_issue_closed_since_the_last_sweep_closes_its_row(self):
         sync(self.connection, now=self.now, runner=QueryGh(lambda query: [node(1)] if sweep(query) else []))
-        result = sync(self.connection, now=self.now + timedelta(hours=1), runner=QueryGh(lambda query: []))
+        runner = QueryGh(lambda query: [], read=lambda path: issue(1, state="closed"))
+        result = sync(self.connection, now=self.now + timedelta(hours=1), runner=runner)
         self.assertTrue(result.ok, result.reason)
+        self.assertEqual(runner.paths, ["repos/example-org/benchmark/issues/1"])
         self.assertEqual(self.reasons(), {"1": ("closed", None)})
 
     def test_an_open_issue_a_bucket_saw_but_the_sweep_missed_stays_open(self):
@@ -959,7 +975,8 @@ class TheIntakeSearch(SyncCase):
                 (repo, f"https://github.com/{repo.lower()}/issues/{number}", number, kind))
         fresh = node(1)
         result = sync(self.connection, now=self.now,
-                      runner=QueryGh(lambda query: [node(2)] if sweep(query) else [fresh] if "mentions:@me" in query else []))
+                      runner=QueryGh(lambda query: [node(2)] if sweep(query) else [fresh] if "mentions:@me" in query else [],
+                                     read=lambda path: issue(7, state="closed", url=f"https://github.com/{path[6:]}")))
         self.assertTrue(result.ok, result.reason)
         self.assertEqual(self.reasons(), {"1": ("open", "watched"), "2": ("open", None), "7": ("closed", None),
                                           "8": ("open", None), "9": ("open", None)})
@@ -976,26 +993,93 @@ class TheIntakeSearch(SyncCase):
 
     def test_a_renamed_repository_keeps_one_open_row_per_issue(self):
         """`shadow` keys a row by its url. After a rename the sweep stores the
-        new url open, and the old spelling it no longer lists is closed rather
-        than left as a second open row of the same issue."""
+        new url open; a direct read of the old spelling answers with the new
+        url, so the old row is closed rather than left as a second open row."""
         self.connection.execute(
             "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, first_seen, last_seen) "
             "VALUES ('github', 'Example-Org/Benchmark', 'https://github.com/Example-Org/Benchmark/issues/1', 1, "
             "'issue', 'old', 'open', 't1', 't1')")
-        result = sync(self.connection, now=self.now, runner=QueryGh(lambda query: [node(1)] if sweep(query) else []))
+        runner = QueryGh(lambda query: [node(1)] if sweep(query) else [], read=lambda path: issue(1))
+        result = sync(self.connection, now=self.now, runner=runner)
         self.assertTrue(result.ok, result.reason)
+        self.assertEqual(runner.paths, ["repos/Example-Org/Benchmark/issues/1"])
         states = {row["url"]: row["state"] for row in self.shadow().values()}
         self.assertEqual(states, {"https://github.com/Example-Org/Benchmark/issues/1": "closed",
                                   node(1)["url"]: "open"})
 
-    def test_a_row_a_lagging_index_closed_reopens_on_the_next_sweep(self):
-        """Search can drop an open issue for a while. The wrong close lasts one run."""
+    def test_an_open_issue_a_lagging_index_omits_stays_open(self):
+        """Lane review of d22fba47: a complete search can omit an open issue
+        while GitHub's index lags. Absence is not a closure; the direct read
+        says open, so the row stays open."""
         sync(self.connection, now=self.now, runner=QueryGh(lambda query: [node(1)] if sweep(query) else []))
-        sync(self.connection, now=self.now + timedelta(hours=1), runner=QueryGh(lambda query: []))
-        self.assertEqual(self.reasons(), {"1": ("closed", None)})
-        sync(self.connection, now=self.now + timedelta(hours=2),
-             runner=QueryGh(lambda query: [node(1)] if sweep(query) else []))
+        runner = QueryGh(lambda query: [], read=lambda path: issue(1))
+        result = sync(self.connection, now=self.now + timedelta(hours=1), runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(runner.paths, ["repos/example-org/benchmark/issues/1"])
         self.assertEqual(self.reasons(), {"1": ("open", None)})
+        self.assertFalse(any("intake" in line for line in result.report()), result.report())
+
+    def test_an_absent_issue_the_read_cannot_settle_stays_open_and_is_named(self):
+        """A failed, refused, malformed or over-budget read is unknown, not closed."""
+        cases: tuple = (
+            ("gh failure", dict(read=None), {}),
+            ("not found", dict(read=lambda path: (404, {"message": "Not Found"})), {}),
+            ("gone", dict(read=lambda path: (410, {"message": "Gone"})), {}),
+            ("redirect not followed", dict(read=lambda path: (301, {"url": "elsewhere"})), {}),
+            ("no html_url", dict(read=lambda path: (200, {"state": "closed"})), {}),
+            ("odd state", dict(read=lambda path: issue(1, state="locked")), {}),
+            ("not an object", dict(read=lambda path: (200, ["closed"])), {}),
+            ("budget spent", dict(read=lambda path: issue(1, state="closed")), {"max_requests": 5}),
+        )
+        for name, seam, limits in cases:
+            with self.subTest(name):
+                self.connection.execute("DELETE FROM shadow")
+                self.connection.execute("DELETE FROM state")
+                self.connection.execute(
+                    "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, first_seen, last_seen) "
+                    "VALUES ('github', ?, ?, 1, 'issue', 'old', 'open', 't1', 't1')", (self.REPO, node(1)["url"]))
+                result = sync(self.connection, now=self.now, runner=QueryGh(lambda query: [], **seam), **limits)
+                self.assertEqual(self.reasons(), {"1": ("open", None)})
+                self.assertTrue(result.watermark_moved)
+                report = [line for line in result.report() if "intake sweep incomplete" in line]
+                self.assertTrue(report and node(1)["url"] in report[0], result.report())
+
+    def test_an_issue_the_read_finds_elsewhere_closes_its_old_row(self):
+        """Transferred, or converted to a discussion or a pull request: the
+        read answers from another url, so no open issue lives at this one."""
+        moved = (
+            ("transferred", issue(1, url="https://github.com/example-org/other/issues/40")),
+            ("discussion", issue(1, url="https://github.com/example-org/benchmark/discussions/1")),
+            ("pull request", issue(1, url="https://github.com/example-org/benchmark/pull/1", pull_request={})),
+        )
+        for name, answer in moved:
+            with self.subTest(name):
+                self.connection.execute("DELETE FROM shadow")
+                self.connection.execute(
+                    "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, first_seen, last_seen) "
+                    "VALUES ('github', ?, ?, 1, 'issue', 'old', 'open', 't1', 't1')", (self.REPO, node(1)["url"]))
+                result = sync(self.connection, now=self.now, runner=QueryGh(lambda query: [], read=lambda path, answer=answer: answer))
+                self.assertEqual(self.reasons(), {"1": ("closed", None)})
+                self.assertFalse(any("intake" in line for line in result.report()), result.report())
+
+    def test_an_incomplete_sweep_reads_and_closes_nothing(self):
+        """A failed, capped or short sweep is no listing: no absent issue is read or closed."""
+        for name, runner in (
+                ("failed", QueryGh(lambda query: [], failing=sweep, read=lambda path: issue(9, state="closed"))),
+                ("capped", QueryGh(lambda query: [], count=lambda query: 1001 if sweep(query) else None,
+                                   read=lambda path: issue(9, state="closed"))),
+                ("short page", QueryGh(lambda query: [node(1)] if sweep(query) else [],
+                                       count=lambda query: 2 if sweep(query) else None,
+                                       read=lambda path: issue(9, state="closed")))):
+            with self.subTest(name):
+                self.connection.execute("DELETE FROM shadow")
+                self.connection.execute(
+                    "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, first_seen, last_seen) "
+                    "VALUES ('github', ?, ?, 9, 'issue', 'old', 'open', 't1', 't1')", (self.REPO, node(9)["url"]))
+                result = sync(self.connection, now=self.now, runner=runner)
+                self.assertEqual(runner.paths, [])
+                self.assertEqual(self.reasons()["9"], ("open", None))
+                self.assertTrue(any("intake sweep incomplete" in line for line in result.report()), result.report())
 
     def test_each_intake_sweep_names_at_most_five_repositories(self):
         from sd_db.writes import upsert_repo

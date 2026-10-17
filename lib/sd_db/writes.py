@@ -822,31 +822,26 @@ def upsert_shadow(
         )
 
 
-def close_unseen_shadow(
-    connection: sqlite3.Connection,
-    *,
-    tracker: str,
-    repos: tuple[str, ...],
-    seen: set[str],
-) -> int:
-    """Close each open issue row of `repos` whose url a complete open listing did not name (sd:4880).
+def open_shadow_issues(connection: sqlite3.Connection, *, tracker: str, repos: tuple[str, ...]) -> list[sqlite3.Row]:
+    """The stored open issue rows of `repos`, matched in any case as GitHub reads them (sd:4880).
 
-    The caller passes a listing of every open issue of those repositories, so
-    a stored open row missing from it closed where no window saw it: while
-    its repository was not searched whole, or before it was. Pull requests
-    and other repositories are left alone. `repos` match in any case, as
-    GitHub reads them. Returns the count.
+    Pull requests and other repositories are left out.
     """
     lowered = [repo.lower() for repo in repos]
     if not lowered:
-        return 0
+        return []
+    return connection.execute(
+        "SELECT id, url FROM shadow WHERE tracker = ? AND kind = 'issue' AND state = 'open' "
+        f"AND lower(repo) IN ({', '.join('?' * len(lowered))}) ORDER BY id", (tracker, *lowered)).fetchall()
+
+
+def close_shadow(connection: sqlite3.Connection, *, tracker: str, urls: list[str]) -> int:
+    """Close the open rows of `urls`, each one a direct read said is no open issue (sd:4880). Returns the count."""
     with transaction(connection):
-        rows = connection.execute(
-            "SELECT id, url FROM shadow WHERE tracker = ? AND kind = 'issue' AND state = 'open' "
-            f"AND lower(repo) IN ({', '.join('?' * len(lowered))})", (tracker, *lowered)).fetchall()
-        stale = [row["id"] for row in rows if row["url"] not in seen]
-        connection.executemany("UPDATE shadow SET state = 'closed' WHERE id = ?", [(ident,) for ident in stale])
-    return len(stale)
+        cursor = connection.executemany(
+            "UPDATE shadow SET state = 'closed' WHERE tracker = ? AND url = ? AND state = 'open'",
+            [(tracker, url) for url in urls])
+    return cursor.rowcount
 
 
 # ----------------------------------------------------------- assignment

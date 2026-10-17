@@ -49,7 +49,13 @@ from pathlib import Path
 
 from .database import refuse_hub_only, transaction
 from .errors import SdDbError
-from .writes import close_unseen_shadow, record_state, resolve_state, upsert_shadow
+from .writes import (
+    close_shadow,
+    open_shadow_issues,
+    record_state,
+    resolve_state,
+    upsert_shadow,
+)
 
 TRACKER = "github"
 #: Every tracker `sync` can collect, in the order the caller reports them.
@@ -454,9 +460,9 @@ class Collected:
     window_end: str = ""
     requests: int = 0
     coverage: list[dict] = field(default_factory=list)
-    #: The intake sweeps that failed or capped, and the open listing of each
-    #: one that completed: `(owner/name, ...)` to every open URL it or the
-    #: window saw (sd:4880).
+    #: The intake sweeps that failed or capped, and the listing of each one
+    #: that completed: `(owner/name, ...)` to every URL it or the window saw
+    #: (sd:4880).
     incomplete: list[str] = field(default_factory=list)
     swept: list[tuple[tuple[str, ...], set[str]]] = field(default_factory=list)
 
@@ -477,10 +483,10 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
     repository switched on today has its old issues read on the next run.
     The sweep reads outside the window the operator's buckets covered, so a
     row only it found names no reason and keeps the stored one. A complete
-    sweep lands in `swept`, the open listing `sync` closes stored open rows
-    against; that is how a closure is seen. Every run repeats the sweep
-    whole and it reads no window, so its failure or cap holds no cursor: it
-    is named in `incomplete`, and closes nothing.
+    sweep lands in `swept`: `sync` reads each stored open issue it missed
+    directly (`confirm_absent`), which is how a closure is seen. Every run
+    repeats the sweep whole and it reads no window, so its failure or cap
+    holds no cursor: it is named in `incomplete`, and closes nothing.
     """
     _validate_limits(max_requests, max_seconds)
     end = _utc_second(now, "now")
@@ -535,8 +541,7 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
                 # Reopened after a bucket read it closed: the later answer wins.
                 found.update(state=row["state"], title=row["title"], updated_at=row["updated_at"])
         if not error and not cut:
-            listings.append((intake[at * INTAKE_GROUP:(at + 1) * INTAKE_GROUP], {
-                url for url, row in merged.items() if row["state"] == "open"}))
+            listings.append((intake[at * INTAKE_GROUP:(at + 1) * INTAKE_GROUP], set(merged)))
     rows = sorted(merged.values(), key=lambda row: row["updated_at"], reverse=True)
     for row in rows:
         row["why"].sort()
@@ -604,6 +609,44 @@ def _observe_protection(connection: sqlite3.Connection, client, observed_at: str
     except Exception:  # noqa: BLE001 - same rule: the heartbeat is reporting, not the work
         pass
     return summary
+
+
+def confirm_absent(connection: sqlite3.Connection, swept, client, *, tracker: str = TRACKER) -> tuple[list[str], list[str]]:
+    """Read each stored open issue a complete sweep missed. Returns `(close, unknown)`.
+
+    Absence from a search is no proof of a closure: GitHub's index can omit
+    an open issue for a while (sd:4880 lane review). So each one is read
+    through `client`, the contribution REST path on the collect's budget,
+    and only that read closes it: it says `closed`, or it answers from
+    another url, as for a transferred or renamed issue, or one converted to a
+    discussion or a pull request. An open answer leaves the row. A failed,
+    refused, malformed or over-budget read is unknown: the row stays open and
+    is named in `unknown`, and the next run reads it again.
+    """
+    from .contribution_github import ISSUE, Unavailable
+
+    close, unknown = [], []
+    for slugs, seen in swept:
+        for row in open_shadow_issues(connection, tracker=tracker, repos=slugs):
+            url = row["url"]
+            if url in seen:
+                continue
+            match = ISSUE.fullmatch(url)
+            if not match:
+                unknown.append(f"{url}: not an issue url")
+                continue
+            try:
+                payload = client.get(f"repos/{match[1]}/{match[2]}/issues/{match[3]}")
+            except Unavailable as error:
+                unknown.append(f"{url}: {error}")
+                continue
+            if not isinstance(payload, dict) or not isinstance(payload.get("html_url"), str):
+                unknown.append(f"{url}: the issue read has no html_url")
+            elif payload["html_url"] != url or payload.get("state") == "closed":
+                close.append(url)
+            elif payload.get("state") != "open":
+                unknown.append(f"{url}: the issue read says state {payload.get('state')!r}")
+    return close, unknown
 
 
 @dataclass
@@ -753,6 +796,10 @@ def _sync(
     intake = tuple(dict.fromkeys(repos.intake_repos(connection).values()))
     result = collect(previous, moment, runner, since=since,
                      max_requests=max_requests, max_seconds=max_seconds, budget=search_budget, intake=intake)
+    closing, unconfirmed = confirm_absent(connection, result.swept, Client(search_budget, runner=runner),
+                                          tracker=tracker)
+    if unconfirmed:
+        result.incomplete.append(f"{len(unconfirmed)} absent issue(s) left open unread, first {unconfirmed[0]}")
     budget.remaining -= search_budget.requests
     budget.requests = search_budget.requests
     search_complete = result.ok
@@ -779,8 +826,7 @@ def _sync(
     # because another collector can complete while this one waits for GitHub.
     with transaction(connection):
         written = store(connection, result.issues)
-        for slugs, seen in result.swept:
-            close_unseen_shadow(connection, tracker=tracker, repos=slugs, seen=seen)
+        close_shadow(connection, tracker=tracker, urls=closing)
         previous_time = parse_iso(read_watermark(connection, tracker))
         # A complete explicit recovery can still leave an uncovered prefix.
         moved = search_complete and detail["staged"] and (previous_time is None or (
