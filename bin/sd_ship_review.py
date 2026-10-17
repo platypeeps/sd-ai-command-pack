@@ -131,6 +131,51 @@ def clean_merges(root: pathlib.Path, reviewed: str, head: str, base_ref: str) ->
     return merges
 
 
+#: How many merges deep `built_from` reads a reviewed head: one per lane round that reviewed a merge.
+MERGE_BACK_DEPTH = 8
+
+
+def dropped_catch_up(root: pathlib.Path, reviewed: str, head: str, base_ref: str) -> bool:
+    """sd:4925. Whether `reviewed` is a reviewed catch-up merge that `head` lacks, safe to merge back.
+
+    The lane prepares with `--catch-up` in a worktree of its own and drops
+    it after a failure, so its reviewed merge survives only in the receipt.
+    The retry merged the base again into the fixed branch, the reviewed
+    merge was no ancestor of that, and `validate_dispatch` refused a branch
+    that had only added commits. Such a merge holds nothing that `head`
+    and the base do not (`catch_up_merge`). Anything else, as after an
+    amend or a rebase, or a commit the store no longer holds, stays
+    orphaned and is refused as before.
+    """
+    if commit_absent(root, reviewed) or is_ancestor(root, reviewed, head):
+        return False
+    return catch_up_merge(root, reviewed, head, base_ref, MERGE_BACK_DEPTH)
+
+
+def catch_up_merge(root: pathlib.Path, commit: str, head: str, base_ref: str, depth: int) -> bool:
+    """Whether `commit` is a clean merge of `head`'s history and the base, or of such merges.
+
+    Two parents: the first in `head`'s history or such a merge, the second
+    on the base or such a merge (an earlier merge back), never a side
+    commit. Its tree is git's own merge of them, so it adds no content. No
+    other commit `head` reaches has the same parents: that one is an amend
+    of it, and merging the old merge back would publish what the amend
+    removed (sd:2600). A failed read is no "yes": `is_ancestor` raises, and
+    an unreadable commit is not a catch-up, so it stays orphaned.
+    """
+    parents = (sd_lib.git_output(["rev-list", "--parents", "-n", "1", commit], root) or "").split()[1:]
+    if depth <= 0 or len(parents) != 2:
+        return False
+    merged = sd_lib.git_output(["merge-tree", "--write-tree", "--no-messages", *parents], root)
+    if not merged or merged != sd_lib.git_output(["rev-parse", f"{commit}^{{tree}}"], root):
+        return False
+    listed = sd_lib.git_output(["rev-list", "--parents", head, f"^{parents[0]}"], root)
+    if listed is None or any(line.split()[1:] == parents and line.split()[0] != commit for line in listed.splitlines()):
+        return False
+    first = is_ancestor(root, parents[0], head) or catch_up_merge(root, parents[0], head, base_ref, depth - 1)
+    return first and (is_ancestor(root, parents[1], base_ref) or catch_up_merge(root, parents[1], head, base_ref, depth - 1))
+
+
 def named_commits(root: pathlib.Path, have: str, lack: str, *, skip: tuple[str, ...] = (), shown: int = 3) -> str:
     """`N commits (a, b, c, +M more)`: what `have` holds and `lack` does not, oldest first, less `skip` (sd:2339)."""
     listed = [commit for commit in (sd_lib.git_output(["rev-list", "--reverse", have, f"^{lack}"], root) or "").split()

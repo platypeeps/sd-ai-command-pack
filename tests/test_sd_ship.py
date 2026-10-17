@@ -971,6 +971,239 @@ roles:
         self.assertFalse((self.root / ".git/MERGE_HEAD").exists())
         self.assertEqual(_git(self.root, "status", "--porcelain", "--untracked-files=no"), "")
 
+    def blocking_review(self):
+        """The fixture's reviewer answers one high finding from now on: (program, payload)."""
+        program = self.programs / "review-fixture"
+        payload = {"type": "result", "subtype": "success", "structured_output": {"findings": [
+            {"path": "src.py", "line": 1, "severity": "high", "family": "correctness", "summary": "value is wrong"}]}}
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        return program, payload
+
+    def blocked_lane_catch_up(self):
+        """A lane prepare's catch-up merge reviewed blocking, then the lane worktree gone: (reviewed, program, payload).
+
+        The lane prepares with `--catch-up` in a worktree of its own and drops
+        it after the failure, so the reviewed merge is on no branch, and the
+        branch is back at the merge's first parent (sd:4925).
+        """
+        program, payload = self.blocking_review()
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare("--catch-up")
+        reviewed = self.operation().state["passes"][0]["head"]
+        self.assertEqual(len(_git(self.root, "rev-list", "--parents", "-n", "1", reviewed).split()), 3, "the premise: a merge")
+        _git(self.root, "reset", "-q", "--hard", f"{reviewed}^1")
+        return reviewed, program, payload
+
+    def fix_and_clear(self, program, payload):
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "commit", "-qam", "correct value\n\nAuthored-with: human")
+        payload["structured_output"]["findings"] = []
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+
+    def test_a_fix_after_a_reviewed_lane_catch_up_verifies_only_the_fix(self):
+        # sd:4925, live on sd:4853 and sd:4920: the retry merged main again
+        # into the fixed branch, so the reviewed merge was no ancestor and
+        # prepare refused reviewed_head_orphaned on a branch that only added a
+        # commit. The catch-up now merges the reviewed merge back in first.
+        reviewed, program, payload = self.blocked_lane_catch_up()
+        self.fix_and_clear(program, payload)
+        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(_git(self.root, "merge-base", reviewed, head), reviewed)
+        state = self.operation().state
+        self.assertEqual(len(state["passes"]), 2)
+        fresh = state["passes"][-1]
+        self.assertEqual(fresh["base"], reviewed, "a fix verification of what changed since the reviewed merge")
+        self.assertEqual(fresh["report"]["subject"]["base"], reviewed)
+        self.assertNotIn("catch_up", fresh)
+        self.assertEqual(self.remote.rev_parse("topic"), head)
+
+    def test_a_fix_after_a_reviewed_lane_catch_up_with_main_moved_again_is_scoped_as_a_catch_up(self):
+        reviewed, program, payload = self.blocked_lane_catch_up()
+        self.remote.commit_on("main", "more main work\n\nAuthored-with: human", files={"lib/more.txt": "main\n"})
+        self.fix_and_clear(program, payload)
+        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(_git(self.root, "merge-base", reviewed, head), reviewed)
+        self.assertEqual(_git(self.root, "merge-base", "refs/remotes/origin/main", head),
+                         _git(self.root, "rev-parse", "refs/remotes/origin/main"))
+        state = self.operation().state
+        self.assertEqual(len(state["passes"]), 2, "no restart: the blocking pass stays in the history")
+        self.assertNotIn("superseded_reviews", state)
+        self.assertEqual(state["passes"][-1]["catch_up"]["from"], reviewed)
+
+    def test_a_clean_reviewed_lane_catch_up_carries_forward_when_main_moves(self):
+        # The same orphan follows a clean review whose lane run failed later.
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
+        with patch.object(ship.Ship, "commit_warnings", side_effect=ship.Refusal("the lane run failed later")):
+            with self.assertRaisesRegex(ship.Refusal, "failed later"):
+                self.prepare("--catch-up")
+        reviewed = self.operation().state["passes"][0]["head"]
+        _git(self.root, "reset", "-q", "--hard", f"{reviewed}^1")
+        self.remote.commit_on("main", "more main work\n\nAuthored-with: human", files={"lib/more.txt": "main\n"})
+        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
+        state = self.operation().state
+        self.assertEqual([entry["head"] for entry in state["passes"]], [reviewed], "no pass is spent")
+        self.assertEqual(state["review_carry_forward"]["from"], reviewed)
+
+    def assert_still_orphaned(self, reviewed):
+        with self.assertRaises(ship.Refusal) as caught:
+            self.prepare("--catch-up")
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "reviewed_head_orphaned")
+        self.assertIn(reviewed, str(caught.exception))
+        self.assertEqual(len(self.operation().state["passes"]), 1)
+
+    def test_an_amend_after_a_reviewed_lane_catch_up_still_refuses(self):
+        reviewed, _program, _payload = self.blocked_lane_catch_up()
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "commit", "-q", "--amend", "-a", "--no-edit")
+        self.assert_still_orphaned(reviewed)
+
+    def test_a_rebase_after_a_reviewed_lane_catch_up_still_refuses(self):
+        reviewed, program, payload = self.blocked_lane_catch_up()
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "rebase", "-q", "refs/remotes/origin/main")
+        self.fix_and_clear(program, payload)
+        self.assert_still_orphaned(reviewed)
+
+    def test_a_reviewed_merge_of_a_side_branch_still_refuses(self):
+        # The second parent must be on the default branch: a merge of anything
+        # else is not a catch-up, and its side commit is scope of its own.
+        program, payload = self.blocking_review()
+        before = _git(self.root, "rev-parse", "HEAD")
+        _git(self.root, "checkout", "-q", "-b", "side")
+        (self.root / "side.txt").write_text("side\n")
+        _git(self.root, "add", "side.txt")
+        _git(self.root, "commit", "-qm", "side work\n\nAuthored-with: human")
+        _git(self.root, "checkout", "-q", "topic")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge side into topic\n\nAuthored-with: human", "side")
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare("--catch-up")
+        reviewed = self.operation().state["passes"][0]["head"]
+        _git(self.root, "reset", "-q", "--hard", before)
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
+        self.fix_and_clear(program, payload)
+        self.assert_still_orphaned(reviewed)
+
+    def test_a_reviewed_catch_up_with_an_edit_of_its_own_still_refuses(self):
+        # Merging it back would bring in an edit no later head carries.
+        program, payload = self.blocking_review()
+        before = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
+        _git(self.root, "fetch", "-q", "origin", "main:refs/remotes/origin/main")
+        _git(self.root, "merge", "-q", "--no-ff", "--no-commit", "refs/remotes/origin/main")
+        (self.root / "extra.txt").write_text("folded into the merge\n")
+        _git(self.root, "add", "extra.txt")
+        _git(self.root, "commit", "-qm", "Merge origin/main into topic\n\nAuthored-with: human")
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare("--catch-up")
+        reviewed = self.operation().state["passes"][0]["head"]
+        _git(self.root, "reset", "-q", "--hard", before)
+        self.fix_and_clear(program, payload)
+        self.assert_still_orphaned(reviewed)
+
+    def test_an_amended_reviewed_catch_up_merge_still_refuses(self):
+        # Codex round 1: the amend keeps the merge's parents, so they still
+        # reach the branch. Merging the old merge back would publish what the
+        # amend removed (sd:2600); a replacement with its parents refuses.
+        program, payload = self.blocking_review()
+        self.remote.commit_on("main", "unrelated main work\n\nAuthored-with: human", files={"lib/other.txt": "main\n"})
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare("--catch-up")
+        reviewed = self.operation().state["passes"][0]["head"]
+        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), reviewed)
+        _git(self.root, "commit", "-q", "--amend", "-m", "Merge origin/main, message amended\n\nAuthored-with: human")
+        self.fix_and_clear(program, payload)
+        self.assert_still_orphaned(reviewed)
+
+    def test_a_reviewed_side_merge_whose_side_commit_the_branch_kept_still_refuses(self):
+        # Codex round 1: the side commit reaches the branch through a new merge
+        # of it, but it is not on the default branch and not a catch-up merge.
+        program, payload = self.blocking_review()
+        before = _git(self.root, "rev-parse", "HEAD")
+        _git(self.root, "checkout", "-q", "-b", "side")
+        (self.root / "side.txt").write_text("side\n")
+        _git(self.root, "add", "side.txt")
+        _git(self.root, "commit", "-qm", "side work\n\nAuthored-with: human")
+        _git(self.root, "checkout", "-q", "topic")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge side into topic\n\nAuthored-with: human", "side")
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare("--catch-up")
+        reviewed = self.operation().state["passes"][0]["head"]
+        _git(self.root, "reset", "-q", "--hard", before)
+        self.fix_and_clear(program, payload)
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge side into topic again\n\nAuthored-with: human", "side")
+        self.assert_still_orphaned(reviewed)
+
+    def test_a_reviewed_lane_catch_up_that_conflicts_with_the_fix_leaves_the_branch_as_it_was(self):
+        reviewed, _program, _payload = self.blocked_lane_catch_up()
+        (self.root / "lib").mkdir(exist_ok=True)
+        (self.root / "lib/other.txt").write_text("rival\n")
+        _git(self.root, "add", "lib/other.txt")
+        _git(self.root, "commit", "-qm", "rival\n\nAuthored-with: human")
+        before = _git(self.root, "rev-parse", "HEAD")
+        with patch.object(ship.Ship, "review") as review:
+            with self.assertRaisesRegex(ship.Refusal, "conflicts") as caught:
+                self.prepare("--catch-up")
+        review.assert_not_called()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "merge_conflict")
+        self.assertIn(reviewed, str(caught.exception))
+        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), before)
+        self.assertFalse((self.root / ".git/MERGE_HEAD").exists())
+        self.assertEqual(_git(self.root, "status", "--porcelain", "--untracked-files=no"), "")
+
+    def test_a_base_merge_that_conflicts_after_a_merge_back_leaves_the_branch_as_it_was(self):
+        # The merge back went in, the base merge after it did not: both go.
+        _reviewed, program, payload = self.blocked_lane_catch_up()
+        self.fix_and_clear(program, payload)
+        before = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "rival\n\nAuthored-with: human", files={"src.py": "value = 4\n"})
+        with patch.object(ship.Ship, "review") as review:
+            with self.assertRaisesRegex(ship.Refusal, "merging origin/main into topic conflicts") as caught:
+                self.prepare("--catch-up")
+        review.assert_not_called()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "merge_conflict")
+        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), before)
+        self.assertFalse((self.root / ".git/MERGE_HEAD").exists())
+        self.assertEqual(_git(self.root, "status", "--porcelain", "--untracked-files=no"), "")
+
+    def test_a_prepare_stopped_after_the_merge_back_finishes_on_the_next_run(self):
+        # Killed between the merge back and the review: the next run finds the
+        # reviewed merge in the branch and goes on as a fix verification.
+        reviewed, program, payload = self.blocked_lane_catch_up()
+        self.fix_and_clear(program, payload)
+        _git(self.root, "merge", "-q", "--ff", "-m", "Merge reviewed\n\nAuthored-with: human", reviewed)
+        stopped = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
+        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), stopped, "nothing left to merge")
+        self.assertEqual(self.operation().state["passes"][-1]["base"], reviewed)
+
+    def test_a_second_blocking_lane_round_after_a_merge_back_merges_back_again(self):
+        # The second review covers the merge back itself, whose second parent
+        # is the first reviewed merge, not the base; the lane drops it too.
+        first, program, payload = self.blocked_lane_catch_up()
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "commit", "-qam", "first fix\n\nAuthored-with: human")
+        with self.assertRaisesRegex(ship.Refusal, "local review blocking"):
+            self.prepare("--catch-up")
+        state = self.operation().state
+        second = state["passes"][1]["head"]
+        self.assertEqual(state["passes"][1]["base"], first)
+        _git(self.root, "reset", "-q", "--hard", f"{second}^1")
+        self.remote.commit_on("main", "more main work\n\nAuthored-with: human", files={"lib/more.txt": "main\n"})
+        (self.root / "src.py").write_text("value = 5\n")
+        _git(self.root, "commit", "-qam", "second fix\n\nAuthored-with: human")
+        payload["structured_output"]["findings"] = []
+        program.write_text("#!/usr/bin/env python3\nimport json\nprint(" + repr(json.dumps(payload)) + ")\n")
+        self.assertEqual(self.prepare("--catch-up")["phase"], "ready_to_send")
+        head = _git(self.root, "rev-parse", "HEAD")
+        for reviewed in (first, second):
+            self.assertEqual(_git(self.root, "merge-base", reviewed, head), reviewed)
+        state = self.operation().state
+        self.assertEqual(len(state["passes"]), 3)
+        self.assertEqual(state["passes"][-1]["catch_up"]["from"], second)
+
     def test_a_moved_binding_re_reviews_the_same_head_instead_of_bricking_it(self):
         # sd:1390, live on #1140. Reuse was decided on head equality and the
         # receipt then rejected on the binding, with nothing between them, so
