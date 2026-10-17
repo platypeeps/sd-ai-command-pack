@@ -28,9 +28,9 @@ retire with no successor was reversed by the 2026-09-12 decision on sd:361:
 Jira tickets are shadowed the way GitHub issues are. The second module is
 `shadow_jira`, which collects Jira tickets into the same `Collected` shape
 over its own JQL window. `sync`'s `tracker` chooses the collector: `github`
-runs the four buckets here with their contribution details and protection
-sweep, `jira` runs `shadow_jira` with none of that, and any other name is a
-`ValueError`. `sync` stays one tracker per call; the caller -- the pack's
+runs the four buckets here, the intake sweep of `github_issues`
+repositories, their contribution details and the protection sweep; `jira`
+runs `shadow_jira` with none of that, and any other name is a `ValueError`. `sync` stays one tracker per call; the caller -- the pack's
 `sd shadow sync` -- iterates `TRACKERS` and reports each tracker on its own.
 """
 
@@ -49,7 +49,13 @@ from pathlib import Path
 
 from .database import refuse_hub_only, transaction
 from .errors import SdDbError
-from .writes import record_state, resolve_state, upsert_shadow
+from .writes import (
+    close_shadow,
+    open_shadow_issues,
+    record_state,
+    resolve_state,
+    upsert_shadow,
+)
 
 TRACKER = "github"
 #: Every tracker `sync` can collect, in the order the caller reports them.
@@ -92,6 +98,12 @@ BUCKETS = (
     ("review-requested", "review-requested:@me"),
     ("author", "author:@me"),
 )
+
+#: The `why` of a row the intake sweep found (sd:4880): an open issue of a
+#: repository with `github_issues` on, whoever opened it.
+INTAKE = "intake"
+#: Repositories per intake sweep: GitHub refuses a long search query.
+INTAKE_GROUP = 5
 
 #: `shadow.reason` (migration 34), strongest first, with the `why` words that
 #: give each: GitHub's buckets and Jira's `normalize`. Any other word is
@@ -448,10 +460,15 @@ class Collected:
     window_end: str = ""
     requests: int = 0
     coverage: list[dict] = field(default_factory=list)
+    #: The intake sweeps that failed or capped, and the listing of each one
+    #: that completed: `(owner/name, ...)` to every URL it or the window saw
+    #: (sd:4880).
+    incomplete: list[str] = field(default_factory=list)
+    swept: list[tuple[tuple[str, ...], set[str]]] = field(default_factory=list)
 
 
 def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
-            max_requests=MAX_REQUESTS, max_seconds=MAX_SECONDS, budget=None) -> Collected:
+            max_requests=MAX_REQUESTS, max_seconds=MAX_SECONDS, budget=None, intake=()) -> Collected:
     """Every bucket, unioned by URL.
 
     A bucket that errors makes the whole collect unsuccessful, and the caller
@@ -459,6 +476,17 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
     still right -- they are real. What must not happen is treating a partial
     collect as a complete one and stepping the window past the part that
     failed.
+
+    `intake` names the `owner/name` of each repository with `github_issues`
+    on (sd:4880). After the buckets, one unwindowed search lists the open
+    issues of up to `INTAKE_GROUP` of them, whoever opened them, so a
+    repository switched on today has its old issues read on the next run.
+    The sweep reads outside the window the operator's buckets covered, so a
+    row only it found names no reason and keeps the stored one. A complete
+    sweep lands in `swept`: `sync` reads each stored open issue it missed
+    directly (`confirm_absent`), which is how a closure is seen. Every run
+    repeats the sweep whole and it reads no window, so its failure or cap
+    holds no cursor: it is named in `incomplete`, and closes nothing.
     """
     _validate_limits(max_requests, max_seconds)
     end = _utc_second(now, "now")
@@ -476,6 +504,8 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
     truncated: list[str] = []
     errors: list[str] = []
     coverage = []
+    groups = [" ".join(f"repo:{slug}" for slug in intake[at:at + INTAKE_GROUP])
+              for at in range(0, len(intake), INTAKE_GROUP)]
     for why, qualifier in BUCKETS:
         nodes, windows, error = _search_window(qualifier, start, end, runner, budget)
         coverage.extend({"bucket": why, **window} for window in windows)
@@ -492,10 +522,30 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
                 merged[row["url"]] = row
             elif why not in found["why"]:
                 found["why"].append(why)
+    swept_only: set[str] = set()
+    listings = []
+    incomplete = []
+    for at, group in enumerate(groups):
+        nodes, cut, error = search(f"is:issue is:open {group}", runner, budget=budget)
+        if error or cut:
+            incomplete.append(f"{group}: {error or 'more open issues than one search returns'}")
+        for node in nodes:
+            row = normalize(node, INTAKE)
+            if row is None:
+                continue
+            found = merged.get(row["url"])
+            if found is None:
+                merged[row["url"]] = row
+                swept_only.add(row["url"])
+            elif row["updated_at"] > found["updated_at"]:
+                # Reopened after a bucket read it closed: the later answer wins.
+                found.update(state=row["state"], title=row["title"], updated_at=row["updated_at"])
+        if not error and not cut:
+            listings.append((intake[at * INTAKE_GROUP:(at + 1) * INTAKE_GROUP], set(merged)))
     rows = sorted(merged.values(), key=lambda row: row["updated_at"], reverse=True)
     for row in rows:
         row["why"].sort()
-        row["reason"] = reason_of(row["why"], truncated)
+        row["reason"] = None if row["url"] in swept_only else reason_of(row["why"], truncated)
     return Collected(
         ok=not errors and not truncated,
         reason="; ".join(errors),
@@ -505,6 +555,8 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
         window_end=iso(end),
         requests=budget.requests,
         coverage=coverage,
+        incomplete=incomplete,
+        swept=listings,
     )
 
 
@@ -559,6 +611,51 @@ def _observe_protection(connection: sqlite3.Connection, client, observed_at: str
     return summary
 
 
+def confirm_absent(connection: sqlite3.Connection, swept, client, *, tracker: str = TRACKER) -> tuple[list[str], list[str]]:
+    """Read each stored open issue a complete sweep missed. Returns `(close, unknown)`.
+
+    Absence from a search is no proof of a closure: GitHub's index can omit
+    an open issue for a while (sd:4880 lane review). So each one is read
+    through `client`, the contribution REST path on the collect's budget,
+    and only that read's own answer closes it: state `closed`, a
+    `pull_request` key, or another issue number. Its `html_url` decides
+    nothing: REST answers a canonical spelling that a stored url in another
+    case, with a trailing slash or under an old repository name does not
+    match (round 2). An open answer leaves the row, a transferred issue that
+    keeps its number too: it is open somewhere, and Today offers it. A failed,
+    refused, malformed or over-budget read is unknown: the row stays open and
+    is named in `unknown`, and the next run reads it again.
+    """
+    from .contribution_github import ISSUE, Unavailable
+
+    close, unknown = [], []
+    for slugs, seen in swept:
+        for row in open_shadow_issues(connection, tracker=tracker, repos=slugs):
+            url = row["url"]
+            if url in seen:
+                continue
+            match = ISSUE.fullmatch(url)
+            if not match:
+                unknown.append(f"{url}: not an issue url")
+                continue
+            try:
+                payload = client.get(f"repos/{match[1]}/{match[2]}/issues/{match[3]}")
+            except Unavailable as error:
+                unknown.append(f"{url}: {error}")
+                continue
+            if not isinstance(payload, dict):
+                unknown.append(f"{url}: the issue read is not an object")
+            elif payload.get("state") == "closed" or "pull_request" in payload:
+                close.append(url)
+            elif type(payload.get("number")) is not int:
+                unknown.append(f"{url}: the issue read has no number")
+            elif payload["number"] != int(match[3]):
+                close.append(url)
+            elif payload.get("state") != "open":
+                unknown.append(f"{url}: the issue read says state {payload.get('state')!r}")
+    return close, unknown
+
+
 @dataclass
 class Synced:
     """What one sync did, in the shape the pack's verb prints."""
@@ -582,6 +679,9 @@ class Synced:
     #: can print "not collected" rather than a failure without parsing
     #: `reason`. Last, so positional construction is unaffected.
     configured: bool = True
+    #: The intake sweeps that failed or capped (sd:4880). Unknown, so named;
+    #: not a failure, since the next run repeats each sweep whole.
+    intake_incomplete: list[str] = field(default_factory=list)
 
     def report(self) -> list[str]:
         lines = [
@@ -599,6 +699,8 @@ class Synced:
             lines.append(f"shadow sync: contribution observation incomplete: {'; '.join(self.incomplete)}")
         if self.queued:
             lines.append(f"shadow sync: contribution detail backlog: {self.queued} queued")
+        if self.intake_incomplete:
+            lines.append(f"shadow sync: intake sweep incomplete: {'; '.join(self.intake_incomplete)}")
         return lines
 
 
@@ -685,7 +787,7 @@ def _sync(
     if tracker not in TRACKERS:
         raise ValueError(f"tracker must be one of {TRACKERS}, not {tracker!r}")
     moment = _utc_second(datetime.now(timezone.utc) if now is None else now, "now")
-    from . import contribution_sync, protection
+    from . import contribution_sync, protection, repos
     from .contribution_github import Client
 
     _validate_limits(max_requests, max_seconds)
@@ -698,8 +800,13 @@ def _sync(
     search_budget = _SearchBudget(max_requests - reserve,
                                  budget.deadline - (min(120, max_seconds / 2) if reserve else 0))
     previous = read_watermark(connection, tracker)
+    intake = tuple(dict.fromkeys(repos.intake_repos(connection).values()))
     result = collect(previous, moment, runner, since=since,
-                     max_requests=max_requests, max_seconds=max_seconds, budget=search_budget)
+                     max_requests=max_requests, max_seconds=max_seconds, budget=search_budget, intake=intake)
+    closing, unconfirmed = confirm_absent(connection, result.swept, Client(search_budget, runner=runner),
+                                          tracker=tracker)
+    if unconfirmed:
+        result.incomplete.append(f"{len(unconfirmed)} absent issue(s) left open unread, first {unconfirmed[0]}")
     budget.remaining -= search_budget.requests
     budget.requests = search_budget.requests
     search_complete = result.ok
@@ -726,6 +833,7 @@ def _sync(
     # because another collector can complete while this one waits for GitHub.
     with transaction(connection):
         written = store(connection, result.issues)
+        close_shadow(connection, tracker=tracker, urls=closing)
         previous_time = parse_iso(read_watermark(connection, tracker))
         # A complete explicit recovery can still leave an uncovered prefix.
         moved = search_complete and detail["staged"] and (previous_time is None or (
@@ -740,7 +848,8 @@ def _sync(
             body={"ok": result.ok, "reason": result.reason, "truncated": result.truncated,
                   "window_start": result.window_start, "window_end": result.window_end,
                   "requests": result.requests, "coverage": result.coverage,
-                  "queued": detail["queued"], "incomplete": detail["incomplete"]},
+                  "queued": detail["queued"], "incomplete": detail["incomplete"],
+                  "intake_incomplete": result.incomplete},
         )
     contribution_sync.dispatch_pending(connection, notifier=notifier, keys=detail["completed_keys"],
                                        deadline=budget.deadline)
@@ -756,6 +865,7 @@ def _sync(
         coverage=result.coverage,
         queued=detail["queued"],
         incomplete=detail["incomplete"],
+        intake_incomplete=result.incomplete,
     )
 
 

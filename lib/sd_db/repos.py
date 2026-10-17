@@ -747,6 +747,52 @@ def mine_issues(connection: sqlite3.Connection) -> dict[str, list[dict]]:
     return found
 
 
+def intake_repos(connection: sqlite3.Connection) -> dict[str, str]:
+    """Each repository with `github_issues` on, to the GitHub `owner/name` its remote names (sd:4880).
+
+    The shadow sync searches these for every issue, not only the operator's,
+    and `intake_issues` reads what it stored. A repository whose remote is not
+    on github.com has no GitHub issues to take, so it is left out.
+    """
+    found: dict[str, str] = {}
+    for row in connection.execute("SELECT path, remote FROM repo WHERE github_issues = 1 ORDER BY path"):
+        remote = parse_remote(row["remote"])
+        if remote.kind == "github":
+            found[row["path"]] = f"{remote.owner}/{remote.name}"
+    return found
+
+
+def intake_issues(connection: sqlite3.Connection) -> dict[str, list[dict]]:
+    """Each `github_issues` repository's open third-party issues that no sd item carries (sd:4880).
+
+    `{path: [row, ...]}`, newest `last_seen` first. Third-party is an author
+    who is not the operator, and the operator's login is the author of every
+    `filed` row, which only an `author:@me` search writes. The reason cannot
+    say it: `assigned` outranks `filed`, and a row only the open sweep saw has
+    none. An author GitHub no longer names is third-party. Before the first
+    `filed` row every author reads third-party, and the operator maps their
+    own issue too, as `on` asks for every open issue. An issue is carried
+    once an item holds `sd task add --ref github:<owner>/<repo>#N`, in any
+    status and any letter case. Pull requests stay out, as in `mine_issues`.
+    """
+    from .review import REF_SOURCE
+
+    found: dict[str, list[dict]] = {}
+    for path, slug in intake_repos(connection).items():
+        rows = connection.execute(
+            "SELECT tracker, repo, url, number, title, state, reason, author, last_seen FROM shadow "
+            "WHERE tracker = 'github' AND repo = ? COLLATE NOCASE AND kind = 'issue' AND state = 'open' "
+            "AND (author IS NULL OR author COLLATE NOCASE NOT IN (SELECT mine.author FROM shadow AS mine "
+            "WHERE mine.tracker = 'github' AND mine.reason = 'filed' AND mine.author IS NOT NULL)) "
+            "AND NOT EXISTS (SELECT 1 FROM item WHERE item.source = ? "
+            "AND item.external_id = 'github:' || shadow.repo || '#' || shadow.number COLLATE NOCASE) "
+            "ORDER BY last_seen DESC, id DESC",
+            (slug, REF_SOURCE)).fetchall()
+        if rows:
+            found[path] = [dict(row) for row in rows]
+    return found
+
+
 #: The words `repo managed` takes, mapped to what the column holds. Words and
 #: not `1`/`0` so the verb reads like `runner-merge`'s `manual|auto`.
 MANAGED_VALUES = {"yes": 1, "no": 0}

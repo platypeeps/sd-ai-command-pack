@@ -822,6 +822,28 @@ def upsert_shadow(
         )
 
 
+def open_shadow_issues(connection: sqlite3.Connection, *, tracker: str, repos: tuple[str, ...]) -> list[sqlite3.Row]:
+    """The stored open issue rows of `repos`, matched in any case as GitHub reads them (sd:4880).
+
+    Pull requests and other repositories are left out.
+    """
+    lowered = [repo.lower() for repo in repos]
+    if not lowered:
+        return []
+    return connection.execute(
+        "SELECT id, url FROM shadow WHERE tracker = ? AND kind = 'issue' AND state = 'open' "
+        f"AND lower(repo) IN ({', '.join('?' * len(lowered))}) ORDER BY id", (tracker, *lowered)).fetchall()
+
+
+def close_shadow(connection: sqlite3.Connection, *, tracker: str, urls: list[str]) -> int:
+    """Close the open rows of `urls`, each one a direct read said is no open issue (sd:4880). Returns the count."""
+    with transaction(connection):
+        cursor = connection.executemany(
+            "UPDATE shadow SET state = 'closed' WHERE tracker = ? AND url = ? AND state = 'open'",
+            [(tracker, url) for url in urls])
+    return cursor.rowcount
+
+
 # ----------------------------------------------------------- assignment
 
 

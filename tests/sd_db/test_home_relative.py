@@ -498,9 +498,9 @@ class TwoHomes(HomeCase):
 EQUALITY_LOOKUPS = {
     "progress.py": (5, "stored row values; `item.path` is repo-relative; `shadow.repo` is a slug"),
     "recovery.py": (1, "`_pieces` takes the row path `reimport` found with `row_for`"),
-    "repos.py": (6, "`set_channels`, `set_clones`, `set_dependabot` and `set_github_issues` write the row path "
+    "repos.py": (7, "`set_channels`, `set_clones`, `set_dependabot` and `set_github_issues` write the row path "
                  "they read through `paths.keys` in the same transaction; `seed_clones` the path `row_for` or `add` gave; "
-                 "`mine_issues` matches `shadow.repo`, a slug"),
+                 "`mine_issues` and `intake_issues` match `shadow.repo`, a slug"),
     "removal.py": (7, "`_plan_repo` rebinds `path` to the row `row_for` found; `_detach` reads it off the plan"),
     "runner.py": (6, "every argument is an item or run row's `repo`"),
     "runner_exec.py": (1, "the item row's `repo`"),
