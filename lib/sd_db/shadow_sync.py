@@ -617,9 +617,12 @@ def confirm_absent(connection: sqlite3.Connection, swept, client, *, tracker: st
     Absence from a search is no proof of a closure: GitHub's index can omit
     an open issue for a while (sd:4880 lane review). So each one is read
     through `client`, the contribution REST path on the collect's budget,
-    and only that read closes it: it says `closed`, or it answers from
-    another url, as for a transferred or renamed issue, or one converted to a
-    discussion or a pull request. An open answer leaves the row. A failed,
+    and only that read's own answer closes it: state `closed`, a
+    `pull_request` key, or another issue number. Its `html_url` decides
+    nothing: REST answers a canonical spelling that a stored url in another
+    case, with a trailing slash or under an old repository name does not
+    match (round 2). An open answer leaves the row, a transferred issue that
+    keeps its number too: it is open somewhere, and Today offers it. A failed,
     refused, malformed or over-budget read is unknown: the row stays open and
     is named in `unknown`, and the next run reads it again.
     """
@@ -640,9 +643,13 @@ def confirm_absent(connection: sqlite3.Connection, swept, client, *, tracker: st
             except Unavailable as error:
                 unknown.append(f"{url}: {error}")
                 continue
-            if not isinstance(payload, dict) or not isinstance(payload.get("html_url"), str):
-                unknown.append(f"{url}: the issue read has no html_url")
-            elif payload["html_url"] != url or payload.get("state") == "closed":
+            if not isinstance(payload, dict):
+                unknown.append(f"{url}: the issue read is not an object")
+            elif payload.get("state") == "closed" or "pull_request" in payload:
+                close.append(url)
+            elif type(payload.get("number")) is not int:
+                unknown.append(f"{url}: the issue read has no number")
+            elif payload["number"] != int(match[3]):
                 close.append(url)
             elif payload.get("state") != "open":
                 unknown.append(f"{url}: the issue read says state {payload.get('state')!r}")
