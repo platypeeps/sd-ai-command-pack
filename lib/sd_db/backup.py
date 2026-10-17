@@ -1220,7 +1220,7 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
     directory with no manifest whose day lies more than twice `days` back, by
     the same day rule: a copy stopped partway on a mirror is never finished
     once its source has rotated out. It is for a moved root only, and refuses
-    one that does not prove it holds copies (`_moved_root`). Such a directory
+    one whose manifests do not all prove it holds copies (`_moved_root`). Such a directory
     goes only if a lookup shows it holds no manifest (`_holds_manifest`; a
     lookup that fails keeps it) and it is a real directory holding no link,
     mount or special entry (`_contained`), so nothing outside the root is
@@ -1303,21 +1303,27 @@ def _holds_manifest(path: Path) -> bool:
 
 
 def _moved_root(root: Path) -> None:
-    """Refuse `root` unless its newest manifest proves it holds copies, not what `run` writes.
+    """Refuse `root` unless every manifest in it proves it holds copies, not what `run` writes.
 
-    The proof is positive: the newest dated folder with a manifest must have
-    a readable, unlinked one whose `directory` is an absolute path that is
-    neither that folder nor another folder of `root`. A root with no
-    manifest, a lookup that fails, or a manifest naming no such directory is
-    refused; an absence proves nothing.
+    The proof is positive and covers the whole root, not its newest copy: a
+    root that once took a backup in place still holds that one's manifest.
+    Every dated, unlinked folder is looked up, and each manifest must be
+    readable and unlinked, with a `directory` that is an absolute path whose
+    parent is not `root`. At least one manifest must exist. A failed lookup,
+    a manifest naming no such directory, or a root with none is refused; an
+    absence proves nothing.
     """
     def refuse(reason: str) -> BackupError:
         return BackupError(f"the unmanifested prune could not tell whether {root} holds copies: {reason}")
 
-    dated = sorted((path for path in root.iterdir() if DATED_NAME.fullmatch(path.name)), key=_directory_order)
-    for path in reversed(dated):
+    try:
+        here = root.resolve()
+    except (OSError, RuntimeError) as error:
+        raise refuse(f"it could not be resolved: {error}") from None
+    seen = 0
+    for path in sorted((path for path in root.iterdir() if DATED_NAME.fullmatch(path.name)), key=_directory_order):
         if path.is_symlink():
-            continue  # a link says nothing about this root
+            continue  # a link names a folder elsewhere; `run` writes none
         try:
             if not _holds_manifest(path):
                 continue
@@ -1334,14 +1340,14 @@ def _moved_root(root: Path) -> None:
             raise refuse(f"{manifest} names no directory it was written in")
         try:
             origin = Path(written).resolve()
-            here = root.resolve()
         except (OSError, RuntimeError) as error:
             raise refuse(f"{written} could not be resolved: {error}") from None
         if origin.parent == here:
             raise BackupError(f"the unmanifested prune takes only a moved root, such as a mirror; {root} holds "
                               f"backups written in place ({path} names {written})")
-        return
-    raise refuse(f"no folder under {root} has a manifest")
+        seen += 1
+    if not seen:
+        raise refuse(f"no folder under {root} has a manifest")
 
 
 def _mount_point(path: Path) -> Path:

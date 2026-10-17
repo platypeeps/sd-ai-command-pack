@@ -231,6 +231,23 @@ class Unmanifested(Case):
         self.provenance({"directory": str(self.nas / "2026-10-11")})
         self.refused("written in place")
 
+    def test_an_older_manifest_naming_this_root_refuses_it_behind_a_newer_copy(self):
+        # A root that once took a backup in place, then got copies: the newest manifest alone looks like a mirror.
+        self.provenance({"directory": str(self.nas / "2026-10-02")}, name="2026-10-02")
+        self.refused("written in place")
+
+    def test_an_older_bad_manifest_refuses_the_root_behind_a_newer_copy(self):
+        for value in ("{", {}, {"directory": "relative/2026-10-02"}, [1]):
+            with self.subTest(value=value):
+                self.provenance(value, name="2026-10-02")
+                self.refused("names no directory it was written in|could not be read")
+
+    def test_an_older_manifest_that_cannot_be_looked_up_refuses_the_root(self):
+        older = self.provenance({"directory": str(self.local / "2026-10-02")}, name="2026-10-02")
+        older.chmod(0o644)
+        self.addCleanup(older.chmod, 0o755)
+        self.refused("could not tell whether")
+
     def test_a_linked_manifest_refuses_the_root(self):
         target = self.base / "elsewhere.json"
         target.write_text(json.dumps({"directory": str(self.local / "2026-10-12")}))
@@ -250,8 +267,13 @@ class Unmanifested(Case):
         folder.chmod(0o644)
         self.addCleanup(folder.chmod, 0o755)
         lines: list[str] = []
+        # The root check looks up every folder, so it refuses first; the selection must hold on its own too.
+        with self.assertRaisesRegex(BackupError, "could not tell whether"):
+            prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True)
+        self.assertTrue(other.exists())
 
-        removed = prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True, report=lines.append)
+        with mock.patch.object(backup, "_moved_root"):
+            removed = prune_older(self.nas, 7, now=NOW, moved=True, unmanifested=True, report=lines.append)
 
         self.assertEqual(removed, [other])
         folder.chmod(0o755)
