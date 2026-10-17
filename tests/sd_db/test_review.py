@@ -86,6 +86,13 @@ class ReviewCase(unittest.TestCase):
     def status(self, item: int) -> str:
         return self.db.execute("SELECT status FROM item WHERE id = ?", (item,)).fetchone()[0]
 
+    def ruled_by_hand(self, item: int, index: int, option: str) -> None:
+        """The Decisions panel's two library calls, which file no item."""
+        note = review.read(self.db, item)["questions"][index]["note"]
+        ruled = workflow.add_item_note(self.db, item, kind="decision", who="dashboard",
+                                       body=f"Ruling on note #{note}: {option}")
+        workflow.resolve_item_note(self.db, note, who="dashboard", expected_revision=ruled["revision"])
+
 
 class FileABatch(ReviewCase):
     def test_the_item_carries_the_ref_the_header_and_one_question_note_each(self):
@@ -505,10 +512,11 @@ class SealedExport(ReviewCase):
 
 class Apply(ReviewCase):
     def approved(self) -> int:
+        """Rulings that filed nothing: the Decisions panel's two calls, or a build before sd:4924."""
         item = self.file(nightly("2026-10-12", ["cap-retries", "split-gate", "drop-idea"]))
-        self.rule(item, 0, "Approve")
-        self.rule(item, 1, "Approve")
-        self.rule(item, 2, "Reject")
+        self.ruled_by_hand(item, 0, "Approve")
+        self.ruled_by_hand(item, 1, "Approve")
+        self.ruled_by_hand(item, 2, "Reject")
         return item
 
     def task(self, note: int):
@@ -599,6 +607,112 @@ class Apply(ReviewCase):
         self.assertEqual(review.apply(self.db, "nightly", who="tester"),
                          {"tasks": [], "existing": [], "expired": [], "closed": []})
         self.assertEqual(self.status(other), "planning")
+
+
+class ApprovalFiles(ReviewCase):
+    """sd:4924: an Approve ruling files the task `apply` would, at once, and names it on the ruling."""
+
+    SUBJECT = "repo-sync:routine-prune"
+
+    def setUp(self):
+        super().setUp()
+        self.repo = self.root / "repos" / "system"
+        writes.upsert_repo(self.db, str(self.repo))
+
+    def note(self, item: int, index: int = 0) -> int:
+        return review.read(self.db, item)["questions"][index]["note"]
+
+    def filed(self, note: int):
+        return writes.item_by_external(self.db, "task-ref", f"review-approved:{note}")
+
+    def test_an_approval_files_one_task_and_the_ruling_names_it(self):
+        item = self.file(nightly("2026-10-17", [self.SUBJECT]))
+        note = self.note(item)
+        before = self.counts()[0]
+
+        state = self.rule(item, 0, "Approve")
+
+        filed = self.filed(note)
+        ruling = state["ruling"]["id"]
+        self.assertEqual(self.counts()[0], before + 1)
+        self.assertEqual(filed["title"], f"Suggestion: {self.SUBJECT}. Expected gain: fewer stalls.")
+        self.assertEqual(filed["body"], f"Suggestion: {self.SUBJECT}. Expected gain: fewer stalls.\n"
+                                        "Evidence: log: example.test/logs/run.log\n"
+                                        f"Approved by ruling #{ruling} on note #{note} of sd:{item} "
+                                        "(review:nightly:2026-10-17).")
+        self.assertEqual(filed["repo"], writes.upsert_repo(self.db, str(self.repo)))
+        self.assertEqual(state["ruling"]["body"], f"Ruling on note #{note}: Approve -> sd:{filed['id']}")
+        self.assertEqual(state["filed"], {"item": filed["id"], "created": True})
+        self.assertEqual(state["revision"], workflow.item_state(self.db, item)["revision"])
+        question = review.read(self.db, item)["questions"][0]
+        self.assertEqual((question["label"], question["filed"], question["open"]), ("Approve", filed["id"], False))
+
+    def test_apply_then_files_nothing_new_and_closes_the_batch(self):
+        item = self.file(nightly("2026-10-17", [self.SUBJECT]))
+        self.rule(item, 0, "Approve")
+        before = self.counts()[0]
+
+        result = review.apply(self.db, "nightly", who="tester")
+
+        self.assertEqual((result["tasks"], result["existing"], result["closed"]), ([], [self.note(item)], [item]))
+        self.assertEqual(self.counts()[0], before)
+
+    def test_a_rejection_files_nothing(self):
+        item = self.file(nightly("2026-10-17", [self.SUBJECT]))
+        before = self.counts()[0]
+
+        state = self.rule(item, 0, "Reject")
+
+        self.assertEqual(self.counts()[0], before)
+        self.assertIsNone(self.filed(self.note(item)))
+        self.assertEqual(state["ruling"]["body"], f"Ruling on note #{self.note(item)}: Reject")
+        self.assertIsNone(state["filed"])
+
+    def test_a_source_no_registered_repo_answers_files_with_no_repo(self):
+        writes.upsert_repo(self.db, str(self.root / "other" / "system"))
+        for name, source in (("2026-10-15", "elsewhere@83035dae4965"), ("2026-10-16", "system@83035dae4965")):
+            item = self.file(nightly(name, [self.SUBJECT], source=source))
+            self.rule(item, 0, "Approve")
+            # The second: two registered checkouts are named system, so neither is the one.
+            self.assertIsNone(self.filed(self.note(item))["repo"], source)
+
+    def test_a_question_with_other_options_files_nothing_on_approve(self):
+        item = self.file(batch(queue="labels", questions=[
+            {"subject": self.SUBJECT, "text": "Keep this label?", "options": ["Approve", "Hold"]}]))
+        before = self.counts()[0]
+
+        state = self.rule(item, 0, "Approve")
+
+        self.assertEqual(self.counts()[0], before)
+        self.assertIsNone(state["filed"])
+
+    def test_a_withdrawal_leaves_the_task_and_a_second_approval_names_it_again(self):
+        item = self.file(nightly("2026-10-17", [self.SUBJECT]))
+        note = self.note(item)
+        ruling = self.rule(item, 0, "Approve")["ruling"]["id"]
+        filed = self.filed(note)["id"]
+
+        state = self.withdraw(item, ruling)
+
+        self.assertEqual(state["withdrawal"]["body"], f"Withdrawn: ruling #{ruling} on note #{note}; sd:{filed} stays filed")
+        self.assertEqual(self.status(filed), "planning")
+        self.assertTrue(review.read(self.db, item)["questions"][0]["open"])
+        before = self.counts()[0]
+        again = self.rule(item, 0, "Approve")
+        self.assertEqual(again["filed"], {"item": filed, "created": False})
+        self.assertEqual(again["ruling"]["body"], f"Ruling on note #{note}: Approve -> sd:{filed}")
+        self.assertEqual(self.counts()[0], before)
+
+    def test_a_stop_before_the_ruling_lands_leaves_no_task(self):
+        item = self.file(nightly("2026-10-17", [self.SUBJECT]))
+        before = self.counts()
+
+        with (mock.patch.object(review.workflow, "resolve_item_note", side_effect=RuntimeError("stopped")),
+              self.assertRaises(RuntimeError)):
+            self.rule(item, 0, "Approve")
+
+        self.assertEqual(self.counts(), before)
+        self.assertIsNone(self.filed(self.note(item)))
 
 
 class FrozenAtClose(ReviewCase):

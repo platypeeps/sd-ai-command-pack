@@ -20,6 +20,10 @@ provenance. No table is new:
   with the question's resolution in one transaction; **undo** is a
   `Withdrawn: ruling #M on note #N` decision with the question reopened; a
   **comment** is `On note #N: <text>`.
+- An **approval** of an Approve-or-Reject question files its task under the
+  ref `review-approved:<note>` in the ruling's transaction, as `apply` would,
+  or finds the task that ref already names, and the ruling ends
+  ` -> sd:<task>` (sd:4924). A withdrawal of it ends `; sd:<task> stays filed`.
 
 Modes: `open` shows everything; `blind` asks the reader to show the text and
 options only (the dashboard's job, not this module's); `sealed` is blind plus
@@ -46,7 +50,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from . import workflow, writes
+from . import repos, workflow, writes
 from .database import transaction
 from .writes import add_note, reopen_note, resolve_note
 
@@ -73,7 +77,9 @@ QUESTION_KEYS = frozenset({"subject", "text", "evidence", "options"})
 TAGGED = re.compile(r"^[ \t]*(Option|Subject|Evidence):[ \t]*(.*?)[ \t]*$")
 HEADER = "Review batch"
 RULING = re.compile(r"Ruling on note #(\d+): (.+)")
-WITHDRAWN = re.compile(r"Withdrawn: ruling #(\d+) on note #(\d+)")
+#: The tail an approval's ruling carries: the item it filed or found (sd:4924).
+FILED = re.compile(r"(.+) -> sd:(\d+)")
+WITHDRAWN = re.compile(r"Withdrawn: ruling #(\d+) on note #(\d+)(?:; sd:\d+ stays filed)?")
 COMMENT = re.compile(r"On note #(\d+): (.+)", re.DOTALL)
 #: The `status_change` note `writes.transition` writes when an item closes.
 CLOSE = re.compile(r"\S+ -> done by ")
@@ -273,13 +279,17 @@ def _batch(row: dict, notes: list[dict]) -> dict:
         late = closed is not None and note["id"] > closed
         if note["kind"] == "decision" and (ruled := RULING.fullmatch(body)):
             question = questions.get(int(ruled[1]))
-            if question is None or ruled[2] not in question["options"]:
+            option, filed = ruled[2], None
+            if question is not None and option not in question["options"] and (tail := FILED.fullmatch(option)):
+                option, filed = tail[1], int(tail[2])
+            if question is None or option not in question["options"]:
                 continue
             if late:
                 question["late"].append({"note": note["id"], "body": body, "at": note["timestamp"]})
                 continue
-            rulings[note["id"]] = {"ruling": note["id"], "question": question["note"], "option": ruled[2],
-                                   "by": note["session"], "at": note["timestamp"], "withdrawal": None}
+            rulings[note["id"]] = {"ruling": note["id"], "question": question["note"], "option": option,
+                                   "filed": filed, "by": note["session"], "at": note["timestamp"],
+                                   "withdrawal": None}
             question["rulings"].append(rulings[note["id"]])
         elif note["kind"] == "decision" and (pulled := WITHDRAWN.fullmatch(body)):
             ruling = rulings.get(int(pulled[1]))
@@ -302,7 +312,7 @@ def _batch(row: dict, notes: list[dict]) -> dict:
         standing = [ruling for ruling in question["rulings"] if ruling["withdrawal"] is None]
         live = standing[-1] if standing else None
         question.update(label=live and live["option"], ruling=live and live["ruling"],
-                        ruled_by=live and live["by"], ruled_at=live and live["at"],
+                        ruled_by=live and live["by"], ruled_at=live and live["at"], filed=live and live["filed"],
                         position=live and question["options"].index(live["option"]) + 1,
                         open=live is None and not question["expired"])
     found = list(questions.values())
@@ -421,7 +431,14 @@ def _open_batch(connection: sqlite3.Connection, item: int, expected_revision: st
 
 def rule(connection: sqlite3.Connection, item: int, note: int, option: str, *,
          expected_revision: str, who: str) -> dict:
-    """Label question `note` of batch `item` with `option`: the Decisions ruling, under the item revision."""
+    """Label question `note` of batch `item` with `option`: the Decisions ruling, under the item revision.
+
+    Approve on an Approve-or-Reject question files the task `apply` would,
+    under the same ref, in the same transaction, and the ruling names it; a
+    task that ref already names (a withdrawn approval's) is named instead. The
+    state's `filed` is `{"item", "created"}`, or None when nothing was filed.
+    So `apply` finds the ref and files nothing more (sd:4924).
+    """
     with transaction(connection):
         _, found = _open_batch(connection, item, expected_revision)
         question = next((question for question in found["questions"] if question["note"] == note), None)
@@ -432,10 +449,22 @@ def rule(connection: sqlite3.Connection, item: int, note: int, option: str, *,
                               if question["ruling"] else f"note {note} is settled: it expired")
         if option not in question["options"]:
             raise ReviewError(f"note {note} offers no option {option!r}")
+        filed = None
+        if option == APPROVE and question["options"] == [APPROVE, REJECT]:
+            held = writes.item_by_external(connection, REF_SOURCE, f"{APPROVED}:{note}")
+            filed = ({"item": held["id"], "created": False} if held is not None
+                     else {"item": _approval_task(connection, found, question, who), "created": True})
+        tail = "" if filed is None else f" -> sd:{filed['item']}"
         ruled = workflow.add_item_note(connection, item, kind="decision", who=who,
-                                       body=f"Ruling on note #{note}: {option}", expected_revision=expected_revision)
+                                       body=f"Ruling on note #{note}: {option}{tail}",
+                                       expected_revision=expected_revision)
+        if filed is not None and filed["created"]:
+            # The ruling's id exists only now, so the body is written last.
+            writes.set_item_fields(connection, filed["item"],
+                                   body=_approval_body(found, question, ruled["note"]["id"]))
         state = workflow.resolve_item_note(connection, note, who=who, expected_revision=ruled["revision"])
         state["ruling"] = ruled["note"]
+        state["filed"] = filed
         return state
 
 
@@ -453,8 +482,10 @@ def withdraw(connection: sqlite3.Connection, item: int, ruling: int, *,
             raise ReviewError(f"ruling #{ruling} was withdrawn by note #{held['withdrawal']}")
         if question["ruling"] != ruling:
             raise ReviewError(f"ruling #{ruling} is not the standing label on note #{question['note']}")
+        # The item an approval filed stays: it may be worked or linked already.
+        kept = "" if held["filed"] is None else f"; sd:{held['filed']} stays filed"
         pulled = workflow.add_item_note(connection, item, kind="decision", who=who,
-                                        body=f"Withdrawn: ruling #{ruling} on note #{question['note']}",
+                                        body=f"Withdrawn: ruling #{ruling} on note #{question['note']}{kept}",
                                         expected_revision=expected_revision)
         reopen_note(connection, question["note"])
         state = workflow.item_state(connection, item)
@@ -682,19 +713,42 @@ def reviews(lines: list[dict]) -> list[dict]:
 # ---------------------------------------------------------------- apply
 
 
+def _source_repo(connection: sqlite3.Connection, source: str) -> str | None:
+    """The registered checkout a batch's `Source: <name>@<commit>` names, or None.
+
+    The name is matched against each registered path's last part; none, or
+    more than one, is None, and the task is filed with no repo.
+    """
+    name = source.partition("@")[0]
+    found = [row["path"] for row in repos.registered(connection) if Path(row["path"]).name == name]
+    return found[0] if len(found) == 1 else None
+
+
+def _approval_body(batch: dict, question: dict, ruling: int) -> str:
+    return "\n".join([question["text"], *(f"Evidence: {line}" for line in question["evidence"]),
+                      f"Approved by ruling #{ruling} on note #{question['note']} "
+                      f"of sd:{batch['item']['id']} ({batch['ref']})."])
+
+
+def _approval_task(connection: sqlite3.Connection, batch: dict, question: dict, who: str, body: str = "") -> int:
+    """File an approval's task under `review-approved:<note>`; the caller checked the ref is free.
+
+    Its repo is the batch's, else the one the header's Source names (`_source_repo`).
+    """
+    repo = batch["item"]["repo"] or _source_repo(connection, batch["header"]["source"])
+    task = workflow.capture_task(connection, title=question["text"].splitlines()[0], body=body,
+                                 repo=repo, who=who)["item"]["id"]
+    writes.set_item_fields(connection, task, source=REF_SOURCE, external_id=f"{APPROVED}:{question['note']}")
+    return task
+
+
 def _approved_task(connection: sqlite3.Connection, batch: dict, question: dict, who: str) -> int | None:
     """File the task an approval asks for, once: None when its ref is filed already."""
     ref = f"{APPROVED}:{question['note']}"
     with transaction(connection):
         if writes.item_by_external(connection, REF_SOURCE, ref) is not None:
             return None
-        body = "\n".join([question["text"], *(f"Evidence: {line}" for line in question["evidence"]),
-                          f"Approved by ruling #{question['ruling']} on note #{question['note']} "
-                          f"of sd:{batch['item']['id']} ({batch['ref']})."])
-        task = workflow.capture_task(connection, title=question["text"].splitlines()[0], body=body,
-                                     repo=batch["item"]["repo"], who=who)["item"]["id"]
-        writes.set_item_fields(connection, task, source=REF_SOURCE, external_id=ref)
-        return task
+        return _approval_task(connection, batch, question, who, _approval_body(batch, question, question["ruling"]))
 
 
 def _expire(connection: sqlite3.Connection, item: int, note: int, who: str) -> bool:
@@ -726,6 +780,8 @@ def apply(connection: sqlite3.Connection, queue: str, *, who: str, now: str | No
 
     Each approval files one task under `review-approved:<question note>`, in
     its own transaction; a ref already filed is skipped and never updated. A
+    ruling through `rule` files its task itself, so only an approval written
+    another way, such as the Decisions panel's two calls, files here. A
     batch with no open question closes. A batch older than 7 days resolves
     each open question as expired, one transaction each, then closes. Every
     step finds what an earlier stopped run left and finishes it.

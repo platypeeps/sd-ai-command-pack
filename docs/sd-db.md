@@ -430,6 +430,10 @@ A batch once closed refuses every ruling and withdrawal.
 Labels are read from the note history up to the first close, never from a question's resolution; a note written after the close by another path is exported as `late` and moves nothing.
 The key is CSV; its first column names the subject.
 `apply` acts only on questions that offer `Approve` and `Reject`; each approval files one task under `review-approved:<note>`.
+Its repo is the batch's, else the registered checkout whose last path part is the name in the header's `Source: <name>@<commit>`; none or two leave it unset.
+Approve through `rule`, which the dashboard's Review page calls, files that task in the ruling's transaction (sd:4924).
+The ruling then reads `Ruling on note #N: Approve -> sd:<task>`, and `apply` finds the ref and files nothing more.
+If the ref already names a task, as after a withdrawn approval, the ruling names it instead; a withdrawal leaves the task and ends `; sd:<task> stays filed`.
 It resolves a batch's open questions as `Expired, not ruled` after 7 days.
 
 `file --kev` reads the JSONL Kev's label review reads (sd:4789) and files it under queue `kev`, title `Label: <batch>`.
