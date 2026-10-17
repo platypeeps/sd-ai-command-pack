@@ -45,11 +45,12 @@ class Operations(unittest.TestCase):
                        "StartCalendarInterval": [{"Hour": 9, "Minute": 10}]}
         self.write_config()
         (self.cron / "jobs" / (self.job + ".job")).write_text('JOB_PROMPT="SECRET"\n')
-        self.state, self.pid, self.last_exit, self.runs = "not running", None, 1, 3
+        self.state, self.pid, self.runs = "not running", None, 3
+        self.last_exit: int | None = 1
         # launchd prints `last terminating signal = Terminated: 15` and no exit-code
         # line after a run that a signal ended: None on last_exit omits the line,
         # and last_signal is launchd's own string, copied from `launchctl print`.
-        self.last_signal = None
+        self.last_signal: str | None = None
         # The lifetime the counter belongs to: launchd's resource coalition id,
         # which moves when the label is bootstrapped again, and the boot it was
         # counted in. None on lifetime omits the block, as launchd does for a
@@ -114,6 +115,7 @@ class Operations(unittest.TestCase):
         self.assertEqual((job["state"], job["last_exit"], job["schedule"]),
                          ("failed", 1, [{"Hour": 9, "Minute": 10}]))
         self.assertTrue(job["capabilities"]["retry"]["allowed"])
+        self.assertEqual(job["capabilities"]["retry"]["label"], "Retry")
         self.assertFalse(job["capabilities"]["cancel"]["allowed"])
         self.assertNotIn("SECRET", json.dumps(data))
         self.assertNotIn("hide-me", json.dumps(data))
@@ -277,17 +279,80 @@ class Operations(unittest.TestCase):
         self.assertEqual(result["request"]["status"], "accepted")
 
     @hub_only
-    def test_idle_unloaded_unknown_and_missing_revision_refuse_actions(self):
-        for loaded, code in ((True, 0), (False, 1)):
-            self.loaded, self.last_exit = loaded, code
-            before = self.snapshot()
-            with self.assertRaises(WorkflowError):
-                retry_job(self.db, self.job, expected_revision=before["revision"], backend=self.backend, who="operator")
-        self.loaded, self.last_exit = True, 1
+    def test_unloaded_and_missing_revision_refuse_actions(self):
+        self.loaded = False
+        before = self.snapshot()
+        self.assertEqual(before["capabilities"]["retry"], {"allowed": False, "label": "Run now",
+                                                           "reason": "job is installed but not loaded"})
+        with self.assertRaisesRegex(WorkflowError, "not loaded"):
+            retry_job(self.db, self.job, expected_revision=before["revision"], backend=self.backend, who="operator")
+        self.loaded = True
         for revision in (None, "", 1):
             with self.assertRaises(WorkflowError):
                 retry_job(self.db, self.job, expected_revision=revision, backend=self.backend, who="operator")
         self.assertEqual(self.actions(), [])
+
+    @hub_only
+    def test_idle_job_runs_now_and_a_stale_revision_still_refuses(self):
+        """sd:4965. A job with no calendar (JOB_SCHEDULE="manual") is idle
+        until someone starts it, so the same action that retries a failed run
+        starts an idle one, labelled for what it does. Its revision check is
+        the retry's: a reading from before a run refuses."""
+        del self.config["StartCalendarInterval"]
+        self.write_config()
+        for runs, code in ((0, None), (3, 0)):  # never ran, and ran cleanly
+            with self.subTest(runs=runs):
+                self.runs, self.last_exit = runs, code
+                state = self.snapshot()
+                self.assertEqual((state["state"], state["schedule"]), ("idle", []))
+                self.assertEqual(state["capabilities"]["retry"], {"allowed": True, "reason": "", "label": "Run now"})
+        stale = self.snapshot()
+        self.runs += 1
+        with self.assertRaises(StaleItem):
+            retry_job(self.db, self.job, expected_revision=stale["revision"], backend=self.backend, who="operator")
+        self.assertEqual(self.actions(), [])
+        before = self.snapshot()
+        result = retry_job(self.db, self.job, expected_revision=before["revision"], backend=self.backend, who="operator")
+        self.assertEqual(self.actions(), [["/bin/launchctl", "kickstart", self.service]])
+        self.assertEqual((result["request"]["action"], result["request"]["status"]), ("retry", "accepted"))
+        with self.assertRaises(StaleItem):
+            retry_job(self.db, self.job, expected_revision=before["revision"], backend=self.backend, who="operator")
+        self.assertEqual(len(self.actions()), 1)
+
+    @hub_only
+    def test_a_job_gone_after_dispatch_keeps_the_label_on_its_answer(self):
+        before = self.snapshot()
+        def remove(action, service):
+            (self.cron / "jobs" / (self.job + ".job")).unlink()
+            return subprocess.CompletedProcess([], 0, "", "")
+        with patch.object(self.backend, "perform", side_effect=remove):
+            result = retry_job(self.db, self.job, expected_revision=before["revision"], backend=self.backend, who="operator")
+        self.assertEqual(result["job"]["capabilities"]["retry"],
+                         {"allowed": False, "reason": "job is no longer supported", "label": "Run now"})
+
+    @hub_only
+    def test_running_job_refuses_run_now_with_its_reason(self):
+        self.state, self.pid = "running", 333
+        state = self.snapshot()
+        self.assertEqual(state["capabilities"]["retry"],
+                         {"allowed": False, "reason": "the job is already running", "label": "Run now"})
+        with self.assertRaisesRegex(WorkflowError, "^the job is already running$"):
+            retry_job(self.db, self.job, expected_revision=state["revision"], backend=self.backend, who="operator")
+        self.assertEqual(self.actions(), [])
+
+    @hub_only
+    def test_failed_and_interrupted_jobs_keep_retry_and_its_label(self):
+        for code, signal, state in ((1, None, "failed"), (None, "Killed: 9", "interrupted")):
+            with self.subTest(state=state):
+                self.last_exit, self.last_signal = code, signal
+                self.runs += 1
+                before = self.snapshot()
+                self.assertEqual(before["state"], state)
+                self.assertEqual(before["capabilities"]["retry"], {"allowed": True, "reason": "", "label": "Retry"})
+                result = retry_job(self.db, self.job, expected_revision=before["revision"], backend=self.backend,
+                                   who="operator")
+                self.assertEqual(result["request"]["status"], "accepted")
+        self.assertEqual(self.actions(), [["/bin/launchctl", "kickstart", self.service]] * 2)
 
     def test_a_job_names_its_last_run(self):
         """`run` is launchd's run counter with the lifetime and boot it was
@@ -349,8 +414,7 @@ class Operations(unittest.TestCase):
         self.state, self.pid, self.last_exit, self.last_signal = "not running", None, None, "Terminated: 15"
         state = self.snapshot()
         self.assertEqual((state["state"], state["last_exit"], state["last_signal"]), ("idle", None, 15))
-        self.assertEqual(state["capabilities"]["retry"]["reason"],
-                         "only a currently failed or interrupted job can retry")
+        self.assertEqual(state["capabilities"]["retry"], {"allowed": True, "reason": "", "label": "Run now"})
         self.runs += 1
         self.assertEqual(self.snapshot()["state"], "interrupted")
         self.runs -= 1

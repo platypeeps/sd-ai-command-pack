@@ -314,7 +314,8 @@ for review evidence and recovery commands.
 
 `sd jobs list` and `sd assignments list` show operational state. Job retry and
 cancellation require a recognized installed job and a fresh state check;
-unsupported controls explain why they are unavailable. Cancelling a queued
+unsupported controls explain why they are unavailable. Retry also starts an idle
+job, such as one with no calendar; its `label` reads "Run now" then. Cancelling a queued
 assignment does not claim to terminate an independently running process.
 
 The current dashboard and its installation instructions live in
