@@ -70,8 +70,8 @@ def main(argv: list[str] | None = None) -> int:
                              "on a share, whose checkpoint is more than --keep-days days old")
     parser.add_argument("--prune-unmanifested", action="store_true",
                         help="with --prune-only: also delete a dated folder with no manifest, such as a copy "
-                             "stopped partway, named for a day more than twice --keep-days back; refused on "
-                             "a root backups are written in")
+                             "stopped partway, named for a day more than twice --keep-days back; refused unless "
+                             "the newest manifest shows the root holds copies written elsewhere")
     parser.add_argument("--dry-run", action="store_true",
                         help="with --prune-only: list what would be deleted and delete nothing")
     arguments = parser.parse_args(argv)
