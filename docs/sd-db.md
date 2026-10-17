@@ -264,6 +264,9 @@ The design is `docs/work/2026-10-16-repo-github-issues/design.md`.
 
 `repo list` shows it as `on` or `off`, between `ci` and `lane_host`; `runner_merge` stays the last field.
 `repos.github_issues` reads it for code: no row reads off, and a database not yet migrated raises `SchemaTooOld`.
+`sd shadow sync` stores every open issue of an `on` repository with a github.com remote, not only the operator's (sd:4880): an unwindowed `is:issue is:open` sweep lists them, five repositories per search, whatever the window.
+A complete sweep closes each stored open issue of its repositories that neither it nor this run's buckets saw open; a failed or capped one closes nothing, holds no cursor and prints `intake sweep incomplete`.
+`repos.intake_issues` reads, per `on` repository, its open issues whose author is not the operator (the author of the `filed` rows) that no item carries as `--ref github:<owner>/<repo>#N`, for Today's intake.
 Agents close an issue with `mcp__github__issue_write` `update`. `bin/sd-issue-guard` lets that through in a managed `on` repo when the call names the row's own GitHub repository; filing an issue stays denied. The global deny list still refuses the tool until the system follow-up under sd:4810 lifts it for `on` repos.
 
 ## `judgments`: what the judgment models cost, by stage

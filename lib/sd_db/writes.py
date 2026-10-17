@@ -822,6 +822,33 @@ def upsert_shadow(
         )
 
 
+def close_unseen_shadow(
+    connection: sqlite3.Connection,
+    *,
+    tracker: str,
+    repos: tuple[str, ...],
+    seen: set[str],
+) -> int:
+    """Close each open issue row of `repos` whose url a complete open listing did not name (sd:4880).
+
+    The caller passes a listing of every open issue of those repositories, so
+    a stored open row missing from it closed where no window saw it: while
+    its repository was not searched whole, or before it was. Pull requests
+    and other repositories are left alone. `repos` match in any case, as
+    GitHub reads them. Returns the count.
+    """
+    lowered = [repo.lower() for repo in repos]
+    if not lowered:
+        return 0
+    with transaction(connection):
+        rows = connection.execute(
+            "SELECT id, url FROM shadow WHERE tracker = ? AND kind = 'issue' AND state = 'open' "
+            f"AND lower(repo) IN ({', '.join('?' * len(lowered))})", (tracker, *lowered)).fetchall()
+        stale = [row["id"] for row in rows if row["url"] not in seen]
+        connection.executemany("UPDATE shadow SET state = 'closed' WHERE id = ?", [(ident,) for ident in stale])
+    return len(stale)
+
+
 # ----------------------------------------------------------- assignment
 
 

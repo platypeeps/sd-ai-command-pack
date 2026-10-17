@@ -845,6 +845,179 @@ class TheReason(SyncCase):
         self.assertEqual(self.reasons(), {"1": "filed"})
 
 
+class QueryGh(Gh):
+    """A `gh` that answers each search from `answer(query)`, or fails the ones `failing(query)` names."""
+
+    def __init__(self, answer, *, failing=lambda query: False, count=None):
+        super().__init__()
+        self.answer = answer
+        self.failing = failing
+        self.counted = count
+
+    def __call__(self, argv):
+        if argv[:2] == ["gh", "auth"]:
+            return super().__call__(argv)
+        self.calls.append(argv)
+        query = self.queries[-1]
+        if self.failing(query):
+            return 1, "", "the API said no"
+        nodes = self.answer(query)
+        count = self.counted(query) if self.counted else None
+        payload = {"data": {"search": {"issueCount": len(nodes) if count is None else count,
+                                       "pageInfo": {"hasNextPage": False, "endCursor": None},
+                                       "nodes": nodes}}}
+        return 0, json.dumps(payload), ""
+
+
+def sweep(query):
+    return "is:open" in query and "updated:" not in query
+
+
+class TheIntakeSearch(SyncCase):
+    """sd:4880. A repository with `github_issues` on has every open issue synced,
+    not only the operator's: an unwindowed sweep lists them, older than the
+    watermark too, such as a repository switched on today, and a stored open
+    issue a complete sweep did not list is closed."""
+
+    REPO = "example-org/benchmark"
+
+    def setUp(self):
+        super().setUp()
+        from sd_db.writes import upsert_repo
+
+        upsert_repo(self.connection, "/srv/example/benchmark", remote=f"git@github.com:{self.REPO}.git")
+        upsert_repo(self.connection, "/srv/example/other", remote="https://github.com/example-org/other")
+        self.connection.execute("UPDATE repo SET github_issues = 1 WHERE path = '/srv/example/benchmark'")
+
+    def reasons(self):
+        return {row["url"].rsplit("/", 1)[1]: (row["state"], row["reason"]) for row in self.shadow().values()}
+
+    def test_an_on_repository_adds_one_open_sweep(self):
+        old = {**node(2), "updatedAt": "2025-01-01T00:00:00Z"}
+        runner = QueryGh(lambda query: [old] if sweep(query) else [node(1)] if "mentions:@me" in query else [])
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(len(runner.queries), 5)
+        self.assertEqual(runner.queries[-1], f"is:issue is:open repo:{self.REPO}")
+        self.assertFalse(any("example-org/other" in query for query in runner.queries))
+        self.assertEqual(self.reasons(), {"1": ("open", "watched"), "2": ("open", None)})
+        self.assertTrue(result.watermark_moved)
+
+    def test_an_issue_closed_since_the_last_sweep_closes_its_row(self):
+        sync(self.connection, now=self.now, runner=QueryGh(lambda query: [node(1)] if sweep(query) else []))
+        result = sync(self.connection, now=self.now + timedelta(hours=1), runner=QueryGh(lambda query: []))
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.reasons(), {"1": ("closed", None)})
+
+    def test_an_open_issue_a_bucket_saw_but_the_sweep_missed_stays_open(self):
+        """The search index can lag: what the window saw open this run is open."""
+        result = sync(self.connection, now=self.now,
+                      runner=QueryGh(lambda query: [node(1)] if "mentions:@me" in query else []))
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.reasons(), {"1": ("open", "watched")})
+
+    def test_a_row_only_the_sweep_saw_keeps_its_stored_reason(self):
+        """The sweep reads outside the window the operator's buckets covered, so it
+        cannot say an old issue is not the operator's: it names no reason."""
+        sync(self.connection, now=self.now, runner=QueryGh(lambda query: [node(1)] if "author:@me" in query else []))
+        later = self.now + timedelta(hours=1)
+        result = sync(self.connection, now=later, runner=QueryGh(lambda query: [node(1)] if sweep(query) else []))
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.reasons(), {"1": ("open", "filed")})
+
+    def test_a_failed_or_capped_sweep_is_reported_and_holds_no_cursor(self):
+        """The sweep is not windowed, so the next run repeats it whole: its
+        failure or cap cannot hold the cursor, or one large repository would
+        freeze every bucket. It is unknown, so it is named, and closes nothing."""
+        for name, runner in (
+                ("failed", QueryGh(lambda query: [node(1)] if "mentions:@me" in query else [], failing=sweep)),
+                ("capped", QueryGh(lambda query: [node(1)] if "mentions:@me" in query or sweep(query) else [],
+                                   count=lambda query: 1001 if sweep(query) else None))):
+            with self.subTest(name):
+                self.connection.execute("DELETE FROM shadow")
+                self.connection.execute("DELETE FROM state")
+                self.connection.execute(
+                    "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, first_seen, last_seen) "
+                    "VALUES ('github', ?, ?, 9, 'issue', 'old', 'open', 't1', 't1')",
+                    (self.REPO, node(9)["url"]))
+                result = sync(self.connection, now=self.now, runner=runner)
+                self.assertTrue(result.ok, result.reason)
+                self.assertTrue(result.watermark_moved)
+                self.assertEqual(self.reasons(), {"1": ("open", "watched"), "9": ("open", None)})
+                self.assertTrue(any("intake sweep incomplete" in line for line in result.report()), result.report())
+
+    def test_a_complete_sweep_closes_a_stored_open_issue_it_did_not_see(self):
+        """Older state: a row stored open while the repository was off, or
+        before this change, whose closure no window saw. A complete sweep lists
+        every open issue, so a stored open one it and the window both missed
+        is not open. Another repository's rows and pull requests stay as they were."""
+        for number, repo, kind in ((7, "Example-Org/Benchmark", "issue"), (8, self.REPO, "pull"),
+                                   (9, "example-org/other", "issue")):
+            self.connection.execute(
+                "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, first_seen, last_seen) "
+                "VALUES ('github', ?, ?, ?, ?, 'old', 'open', 't1', 't1')",
+                (repo, f"https://github.com/{repo.lower()}/issues/{number}", number, kind))
+        fresh = node(1)
+        result = sync(self.connection, now=self.now,
+                      runner=QueryGh(lambda query: [node(2)] if sweep(query) else [fresh] if "mentions:@me" in query else []))
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.reasons(), {"1": ("open", "watched"), "2": ("open", None), "7": ("closed", None),
+                                          "8": ("open", None), "9": ("open", None)})
+
+    def test_an_issue_reopened_after_a_bucket_saw_it_closed_is_stored_open(self):
+        """The sweep runs after the buckets: its newer open answer wins."""
+        closed = {**node(1), "state": "CLOSED", "updatedAt": "2026-09-06T11:00:00Z"}
+        reopened = {**node(1), "updatedAt": "2026-09-06T11:30:00Z"}
+        result = sync(self.connection, now=self.now,
+                      runner=QueryGh(lambda query: [reopened] if sweep(query) else
+                                     [closed] if "mentions:@me" in query else []))
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.reasons(), {"1": ("open", "watched")})
+
+    def test_a_renamed_repository_keeps_one_open_row_per_issue(self):
+        """`shadow` keys a row by its url. After a rename the sweep stores the
+        new url open, and the old spelling it no longer lists is closed rather
+        than left as a second open row of the same issue."""
+        self.connection.execute(
+            "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, first_seen, last_seen) "
+            "VALUES ('github', 'Example-Org/Benchmark', 'https://github.com/Example-Org/Benchmark/issues/1', 1, "
+            "'issue', 'old', 'open', 't1', 't1')")
+        result = sync(self.connection, now=self.now, runner=QueryGh(lambda query: [node(1)] if sweep(query) else []))
+        self.assertTrue(result.ok, result.reason)
+        states = {row["url"]: row["state"] for row in self.shadow().values()}
+        self.assertEqual(states, {"https://github.com/Example-Org/Benchmark/issues/1": "closed",
+                                  node(1)["url"]: "open"})
+
+    def test_a_row_a_lagging_index_closed_reopens_on_the_next_sweep(self):
+        """Search can drop an open issue for a while. The wrong close lasts one run."""
+        sync(self.connection, now=self.now, runner=QueryGh(lambda query: [node(1)] if sweep(query) else []))
+        sync(self.connection, now=self.now + timedelta(hours=1), runner=QueryGh(lambda query: []))
+        self.assertEqual(self.reasons(), {"1": ("closed", None)})
+        sync(self.connection, now=self.now + timedelta(hours=2),
+             runner=QueryGh(lambda query: [node(1)] if sweep(query) else []))
+        self.assertEqual(self.reasons(), {"1": ("open", None)})
+
+    def test_each_intake_sweep_names_at_most_five_repositories(self):
+        from sd_db.writes import upsert_repo
+
+        for number in range(6):
+            upsert_repo(self.connection, f"/srv/example/r{number}", remote=f"https://github.com/example-org/r{number}")
+        self.connection.execute("UPDATE repo SET github_issues = 1")
+        runner = QueryGh(lambda query: [])
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        intake = [query for query in runner.queries if "repo:" in query]
+        self.assertEqual(sorted(query.count("repo:") for query in intake), [3, 5])
+        self.assertEqual(len({part for query in intake for part in query.split() if part.startswith("repo:")}), 8)
+
+    def test_a_repository_switched_off_is_searched_no_more(self):
+        self.connection.execute("UPDATE repo SET github_issues = 0")
+        runner = QueryGh(lambda query: [])
+        sync(self.connection, now=self.now, runner=runner)
+        self.assertEqual(len(runner.queries), 4)
+        self.assertFalse(any("repo:" in query for query in runner.queries))
+
+
 class PaginationIntegrity(unittest.TestCase):
     def pages(self, blocks):
         calls = []

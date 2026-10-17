@@ -31,6 +31,8 @@ from sd_db.repos import (
     clone_lines,
     conf_paths,
     github_issues,
+    intake_issues,
+    intake_repos,
     issue_sources,
     mail_aliases,
     mine_issues,
@@ -1196,6 +1198,91 @@ class TheGithubIssuesSetting(RepoCase):
         self.addCleanup(old.close)
         with self.assertRaises(SchemaTooOld):
             github_issues(old, self.checkouts / "one")
+
+
+class TheIntake(RepoCase):
+    """sd:4880. A repository with `github_issues` on lists its open third-party
+    issues that no sd item carries yet, for Today's intake (sd:4840)."""
+
+    def _on(self, name: str, remote: str | None, *, on: bool = True) -> str:
+        path = add(self.connection, support.repository(self.checkouts / name), home=self.home)
+        upsert_repo(self.connection, path, remote=remote)
+        set_github_issues(self.connection, path, "on" if on else "off")
+        return path
+
+    def _shadow(self, rows):
+        for number, (tracker, repo, url, kind, state, reason) in enumerate(rows, start=1):
+            self.connection.execute(
+                "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, author, reason, first_seen, "
+                "last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, 'octocat', ?, 't1', ?)",
+                (tracker, repo, url, number, kind, f"issue {number}", state, reason, f"t{number:02d}"))
+
+    def _ref(self, ref: str) -> None:
+        from sd_db.workflow import capture_task
+        from sd_db.writes import set_item_fields
+
+        item = capture_task(self.connection, title=f"mapped {ref}", who="test")["item"]["id"]
+        set_item_fields(self.connection, item, source="task-ref", external_id=ref)
+
+    def test_only_on_repositories_with_a_github_remote_are_intake_repositories(self):
+        on = self._on("one", "git@github.com:Example/Project.git")
+        self._on("two", "https://github.com/example/off", on=False)
+        self._on("three", "https://example.test/example/elsewhere.git")
+        self._on("four", None)
+        self.assertEqual(intake_repos(self.connection), {on: "Example/Project"})
+
+    def test_it_lists_open_third_party_issues_no_item_carries(self):
+        """Filed (the operator's own), closed, pull, other repository, other
+        tracker and mapped rows stay out; a watched, an assigned and an unknown
+        row are third-party or may be. A ref for the same number in another
+        repository maps nothing here; a ref matches in any letter case."""
+        path = self._on("one", "https://github.com/example/project")
+        self._on("two", "https://github.com/example/off", on=False)
+        self.assertEqual(intake_issues(self.connection), {})
+        base = "https://github.com/example/project"
+        self._shadow([("github", "Example/Project", f"{base}/issues/1", "issue", "open", "watched"),
+                      ("github", "example/project", f"{base}/issues/2", "issue", "open", "filed"),
+                      ("github", "example/project", f"{base}/issues/3", "issue", "open", "assigned"),
+                      ("github", "example/project", f"{base}/issues/4", "issue", "open", None),
+                      ("github", "example/project", f"{base}/issues/5", "issue", "closed", "watched"),
+                      ("github", "example/project", f"{base}/pull/6", "pull", "open", "watched"),
+                      ("github", "example/off", "https://github.com/example/off/issues/7", "issue", "open", "watched"),
+                      ("jira", "example/project", "https://example.test/browse/EXAMPLE-8", "issue", "open", None),
+                      ("github", "example/project", f"{base}/issues/9", "issue", "open", "watched"),
+                      ("github", "example/project", f"{base}/issues/10", "issue", "open", "watched")])
+        self.connection.execute("UPDATE shadow SET author = 'operator' WHERE reason = 'filed'")
+        self._ref("github:EXAMPLE/project#9")
+        self._ref("github:example/other#10")
+        found = intake_issues(self.connection)
+        self.assertEqual(list(found), [path])
+        self.assertEqual([row["number"] for row in found[path]], [10, 4, 3, 1])
+        self.assertEqual(set(found[path][0]),
+                         {"tracker", "repo", "url", "number", "title", "state", "reason", "author", "last_seen"})
+
+    def test_an_issue_the_operator_opened_is_not_intake_whatever_its_reason(self):
+        """`assigned` outranks `filed`, and a row only the sweep saw has no
+        reason, so the reason cannot say who opened an issue. The author can:
+        the operator's login is the author of every `filed` row."""
+        path = self._on("one", "https://github.com/example/project")
+        base = "https://github.com/example/project"
+        self._shadow([("github", "example/project", f"{base}/issues/1", "issue", "open", "assigned"),
+                      ("github", "example/project", f"{base}/issues/2", "issue", "open", None),
+                      ("github", "example/project", f"{base}/issues/3", "issue", "open", None),
+                      ("github", "example/elsewhere", "https://github.com/example/elsewhere/issues/4", "issue",
+                       "closed", "filed")])
+        self.connection.execute("UPDATE shadow SET author = 'Operator' WHERE number IN (1, 2)")
+        self.connection.execute("UPDATE shadow SET author = 'operator' WHERE number = 4")
+        self.assertEqual([row["number"] for row in intake_issues(self.connection)[path]], [3])
+        self.connection.execute("UPDATE shadow SET author = NULL WHERE number = 3")
+        self.assertEqual([row["number"] for row in intake_issues(self.connection)[path]], [3])
+
+    def test_a_repository_switched_off_drops_out(self):
+        path = self._on("one", "https://github.com/example/project")
+        self._shadow([("github", "example/project", "https://github.com/example/project/issues/1", "issue",
+                       "open", "watched")])
+        self.assertEqual(list(intake_issues(self.connection)), [path])
+        set_github_issues(self.connection, path, "off")
+        self.assertEqual(intake_issues(self.connection), {})
 
 
 class TheCloneLines(RepoCase):
