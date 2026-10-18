@@ -2010,7 +2010,7 @@ class JiraSectionTests(StatusFixture):
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertNotIn("Traceback", completed.stderr)
-        self.assertIn('  LOG-23818  open  "Benchmark harness"\n', self.section(completed.stdout))
+        self.assertRegex(self.section(completed.stdout), r'\n  LOG-23818 +open +"Benchmark harness"\n')
 
     def test_an_empty_tracker_says_never_collected_then_none(self) -> None:
         """(b) No rows and no heartbeat: two lines, both about absence."""
@@ -2034,8 +2034,8 @@ class JiraSectionTests(StatusFixture):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         block = self.section(completed.stdout)
         self.assertTrue(block.startswith("  never collected (collection time limit exhausted)\n"), block)
-        self.assertIn('  LOG-1  open  "First"\n', block)
-        self.assertIn('  LOG-2  open  "Second"\n', block)
+        self.assertRegex(block, r'\n  LOG-1 +open +"First"\n')
+        self.assertRegex(block, r'\n  LOG-2 +open +"Second"\n')
 
     def test_a_completed_collect_prints_the_external_context_pair(self) -> None:
         """The other side of the `last_success_at` key: a watermark exists, so the pair prints.
@@ -2053,7 +2053,9 @@ class JiraSectionTests(StatusFixture):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         block = self.section(completed.stdout)
         self.assertEqual(f"  external context: degraded; last successful sync {collected}\n"
-                         '  LOG-10  open  "Ten"\n', block)
+                         '  Key     State  Title\n'
+                         '  ------  -----  -----\n'
+                         '  LOG-10  open   "Ten"\n', block)
         self.assertNotIn("never collected", block)
         freshness = self.report()["jira"]["freshness"]
         self.assertEqual((freshness["state"], freshness["last_success_at"]), ("degraded", collected))
@@ -2066,13 +2068,13 @@ class JiraSectionTests(StatusFixture):
         self.assertEqual([row["url"].rpartition("/")[2] for row in result["jira"]["rows"]], ["LOG-6"])
         completed = self.run_tool(SD_STATUS)
         block = self.section(completed.stdout)
-        self.assertIn('  LOG-6  closed  "Six days gone"\n', block)
+        self.assertRegex(block, r'\n  LOG-6 +closed +"Six days gone"\n')
         self.assertNotIn("LOG-8", completed.stdout)
 
     def test_open_rows_print_before_closed_ones(self) -> None:
         self.seed([self.ticket("LOG-3", "Done", state="closed"), self.ticket("LOG-4", "Live")])
         block = self.section(self.run_tool(SD_STATUS).stdout)
-        self.assertLess(block.index("LOG-4  open"), block.index("LOG-3  closed"))
+        self.assertLess(block.index("LOG-4"), block.index("LOG-3"))
 
     def test_a_title_with_terminal_controls_is_one_quoted_line(self) -> None:
         """(e) The same rule `_render_contributions` is tested against.
@@ -2083,7 +2085,7 @@ class JiraSectionTests(StatusFixture):
         self.seed([self.ticket("LOG-5", "a\x1b[2Jb\nprotection")])
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn('  LOG-5  open  "a\\u001b[2Jb\\nprotection"\n', self.section(completed.stdout))
+        self.assertRegex(self.section(completed.stdout), r'\n  LOG-5 +open +"a\\u001b\[2Jb\\nprotection"\n')
         self.assertNotIn("\x1b", completed.stdout)
         headings = self.headings(completed.stdout)
         self.assertEqual(headings, ReportSectionTests.ORDER)
@@ -2890,7 +2892,7 @@ class LaneTests(InventoryFixture):
         self.assertNotIn("body", section["entries"][1])
         stream = io.StringIO()
         status._render_lane(section, stream.write)
-        self.assertIn("  sd:22 skipped at head_moved  task/twenty-two\n", stream.getvalue())
+        self.assertRegex(stream.getvalue(), r"\n  sd:22 +skipped +head_moved +- +task/twenty-two\n")
 
     def test_a_repository_with_no_github_origin_has_no_lane(self) -> None:
         section = status.lane_section(self.repo, {"HOME": str(self.home)})
@@ -4394,7 +4396,7 @@ class ReportSectionTests(InventoryFixture):
         text = self.report()
         pending = text.split("\npending\n")[1].split("\nnext\n")[0]
         following = text.split("\nnext\n")[1].split("\nopen threads\n")[0]
-        self.assertEqual(rows[0]["id"], pending.splitlines()[1].split()[0])
+        self.assertEqual(rows[0]["id"], pending.splitlines()[3].split()[0])
         self.assertEqual(rows[0]["id"], following.split()[0])
         self.assertIn(rows[0]["suggest"], following)
         for other in rows[1:]:
@@ -4406,7 +4408,7 @@ class ReportSectionTests(InventoryFixture):
             self.item(f"2026-08-{index + 1:02d}-item", status="in_progress")
         pending = self.report().split("\npending\n")[1].split("\nnext\n")[0]
         self.assertIn(f"{status.PENDING_LIMIT} of 13, by rank", pending)
-        self.assertEqual(status.PENDING_LIMIT, len(pending.strip().splitlines()) - 1)
+        self.assertEqual(status.PENDING_LIMIT, len(pending.strip().splitlines()) - 3)
 
     def test_open_threads_counts_every_row_the_inventory_carries(self) -> None:
         """The per-source counts are a partition, not a sample.

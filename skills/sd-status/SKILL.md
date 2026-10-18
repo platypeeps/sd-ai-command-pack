@@ -49,11 +49,14 @@ opens with seventeen top-level lines; the sixteen below are the sections.
 | `merge lane (this repo, shared database)` | each item's newest lane entry that has not merged or been cancelled, with its state; `sd-ship lane list` is the full view |
 | `detected setup` | mode, lowering reason, shared-tree paths to move, and detected check entrypoints |
 | `issues (this repo, shared database)` | open GitHub issues for this repository from the shared database, as context; no row in `pending` comes from them |
-| `jira (shared database, all repositories)` | the operator's Jira involvement from the shared database, across every repository: one line per ticket, key and state, open rows first, then rows closed within seven days. Not scoped to the checkout |
+| `jira (shared database, all repositories)` | the operator's Jira involvement from the shared database, across every repository: one table row per ticket, key and state, open rows first, then rows closed within seven days. Not scoped to the checkout |
 | `protection` | branch-protection **enforcement**, gap by gap, plus the merge-settings and fleet-baseline flags |
 | `resumable handoffs` | the pending local packet for this directory (**read, never consumed**) |
 | `backends` | the review lanes the provider registry declares, plus `copilot`, which no entry names — names and states only, enumerated at runtime |
 | `legacy residue` | legacy leftovers, each with the exact command that removes it |
+
+`pending`, `merge lane`, the needs-you rows of `issues`, and `jira` print their rows as `sd today` prints a table (sd:5098): a header row, a dash rule, aligned columns, the title cut to the terminal width.
+The other sections keep their own lines: a class grid, key and value records, counts, or one line per finding with its command.
 
 The contribution section filters the shared projection by the current checkout path and its GitHub repository name.
 Its order is newly unblocked, awaiting you, awaiting them, merged, then closed.
