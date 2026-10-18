@@ -26,7 +26,7 @@ from typing import Any
 import sd_handoff_rows
 import sd_jev_shadow
 import sd_lib
-from sd_notes import ITEM_HELP, item_id
+from sd_notes import ITEM_HELP, item_id, note_id
 
 
 class WorkRefusal(Exception):
@@ -636,7 +636,8 @@ def _print_today(sd_db: Any, connection: Any, work: list[dict[str, Any]]) -> Non
     for title, rows, line in (
         ("Reports needing attention", reports,
          lambda row: f"#{row['id']}  {row['status']}  {row['title']}" + (f" · {row['why']}" if row["why"] else "")),
-        ("Decisions waiting", decisions, lambda note: f"#{note['item']}  {_first_line(note['body'])}"),
+        ("Decisions waiting", decisions,
+         lambda note: f"#{note['item']}  note #{note['id']}  {_first_line(note['body'])}"),
         ("Open followups", followups, lambda note: f"#{note['item']}  {_first_line(note['body'])}"),
     ):
         if rows:
@@ -1130,6 +1131,50 @@ def _note_text(args: argparse.Namespace) -> str:
     return args.text if args.text is not None else args.body
 
 
+def _note(workflow: Any, connection: Any, args: argparse.Namespace, who: str, revision: str | None) -> dict:
+    body = _note_text(args)
+    _done_advisory(workflow, connection, args.item)
+    if args.answers is not None:
+        return _answer(workflow, connection, args, body, who, revision)
+    return workflow.add_item_note(connection, args.item, body=body, kind=args.kind, who=who,
+                                  expected_revision=revision)
+
+
+def _answer(workflow: Any, connection: Any, args: argparse.Namespace, body: str, who: str,
+            revision: str | None) -> dict:
+    """`note --answers Q` (sd:5014): the ruling and its question resolved in one transaction.
+
+    The same two writes, and the same `Ruling on note #Q: ` body, as the
+    dashboard's Decisions answer; every refusal comes before the first write.
+    """
+    if args.kind != "decision":
+        raise WorkRefusal("--answers records a decision: add --kind decision")
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+    from sd_db.review import REF_SOURCE  # noqa: PLC0415 - after the helper
+
+    with workflow.transaction(connection):
+        asked = connection.execute("SELECT item, kind, resolved_at FROM note WHERE id = ?",
+                                   (args.answers,)).fetchone()
+        if asked is None:
+            raise WorkRefusal(f"no note {args.answers}")
+        if asked["item"] != args.item:
+            raise WorkRefusal(f"note {args.answers} belongs to sd:{asked['item']}, not sd:{args.item}")
+        if asked["kind"] != "question":
+            raise WorkRefusal(f"note {args.answers} is a {asked['kind']}, not a question")
+        if asked["resolved_at"] is not None:
+            raise WorkRefusal(f"note {args.answers} is already resolved, at {asked['resolved_at']}")
+        item = workflow.item_state(connection, args.item)["item"]
+        if item["source"] == REF_SOURCE and (item["external_id"] or "").startswith("review:"):
+            raise WorkRefusal(f"sd:{args.item} is a review batch: rule its questions on the dashboard's Review page")
+        ruled = workflow.add_item_note(connection, args.item, kind="decision", who=who,
+                                       body=f"Ruling on note #{args.answers}: {body}",
+                                       expected_revision=revision)
+        state = workflow.resolve_item_note(connection, args.answers, who=who,
+                                           expected_revision=ruled["revision"])
+        state["note"] = ruled["note"]
+        return state
+
+
 def run_today(args: argparse.Namespace) -> int:
     """`sd today`: `today_items` as rows for `--json`, and the dashboard's Today sections for a person (sd:3501)."""
     sd_db, _ = _library()
@@ -1181,11 +1226,7 @@ def run(args: argparse.Namespace) -> int:
         elif action == "status":
             result, following = _change_status(workflow, connection, args, who)
         elif action == "note":
-            body = _note_text(args)
-            _done_advisory(workflow, connection, args.item)
-            result = workflow.add_item_note(
-                connection, args.item, body=body, kind=args.kind, who=who,
-                expected_revision=revision)
+            result = _note(workflow, connection, args, who, revision)
         elif action == "register":
             result = _register(sd_db, connection, args, who)
         elif action in {"relink", "cancel", "cancel-task", "deliver"}:
@@ -1592,6 +1633,8 @@ def register(groups: Any, store: Any) -> None:
     note.add_argument("--kind", default="comment",
                       choices=("comment", "followup", "question", "decision", "proposal"),
                       help="note kind (default: comment)")
+    note.add_argument("--answers", type=note_id, metavar="NOTE",
+                      help="with --kind decision: the question note this rules on, resolved in the same write")
     _output(note, "note", revision=True)
     # A read alias (sd:1112): the same operation as `sd store item`, which
     # stays the canonical read for every kind, so both print the same thing.
