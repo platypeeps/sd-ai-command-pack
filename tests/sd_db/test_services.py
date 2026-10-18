@@ -5,6 +5,7 @@ import os
 import plistlib
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -197,6 +198,32 @@ class Services(unittest.TestCase):
         for row in result:
             if row["label"] != self.label:
                 self.assertTrue(all(not value["allowed"] for value in row["capabilities"].values()))
+
+    def test_inventory_inspects_services_in_parallel_in_order_and_isolates_failures(self):
+        # sd:5005. Every print waits on one barrier, so a serial inventory breaks it
+        # at its timeout rather than hanging. `broken` fails its read and `gone`
+        # vanishes; neither may change another service's row or the order.
+        labels = ["com.example.alpha", "com.example.broken", "com.example.gone", self.label, "com.example.zulu"]
+        for label in labels:
+            config = dict(self.config, Label=label)
+            (self.agents / (label + ".plist")).write_bytes(plistlib.dumps(config))
+            self.configs[self.domain + "/" + label] = config
+            self.runtime[self.domain + "/" + label] = ["running", 111, 0, 2]
+        barrier = threading.Barrier(len(labels), timeout=2)
+
+        def overlapping(argv):
+            if argv[1] != "print":
+                return
+            barrier.wait()
+            if argv[2].endswith("/com.example.broken"):
+                raise OSError("launchctl could not run")
+            if argv[2].endswith("/com.example.gone"):
+                raise WorkflowError("installed plist is unavailable")
+        self.hook = overlapping
+        rows = inventory(self.db, backend=self.backend)["services"]
+        self.assertEqual([(row["label"], row["state"]) for row in rows],
+                         [("com.example.alpha", "running"), ("com.example.broken", "unknown"),
+                          ("com.example.server", "running"), ("com.example.zulu", "running")])
 
     @hub_only
     def test_system_ids_arbitrary_paths_and_missing_revisions_never_dispatch(self):

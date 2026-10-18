@@ -26,6 +26,7 @@ from .operations import (
     LABEL_PREFIX,
     PREFIX,
     _digest,
+    _inspect_all,
     _restoring,
     _revision,
     _run,
@@ -310,11 +311,10 @@ def service_state(connection: sqlite3.Connection, identifier: str, *, backend=No
 def inventory(connection: sqlite3.Connection, *, backend=None) -> dict:
     backend = backend or ServiceBackend()
     rows = []
-    for identifier in backend.names():
-        try:
-            rows.append(service_state(connection, identifier, backend=backend))
-        except WorkflowError:
-            continue  # A plist can disappear between enumeration and inspection.
+    names = backend.names()
+    for identifier, observed in zip(names, _inspect_all(backend, names), strict=True):
+        if observed is not None:  # A plist can disappear between enumeration and inspection.
+            rows.append(_service_state(connection, identifier, backend, observed=observed)[0])
     return {"services": rows, "revision": _digest(rows)}
 
 

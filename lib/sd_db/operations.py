@@ -16,7 +16,9 @@ import re
 import signal
 import sqlite3
 import subprocess
+import threading
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from pathlib import Path
 from xml.parsers.expat import ExpatError
@@ -115,23 +117,43 @@ def _run(argv):
 
 
 _BOOT = []
+_BOOT_LOCK = threading.Lock()
 
 
 def _boot_token():
     """The boot launchd's coalition ids were counted in: `kern.boottime` seconds,
     or None when it cannot be read. Read once per process -- a reboot ends the
-    process -- and a failed read is not kept, so a later call may still answer."""
-    if not _BOOT:
+    process -- and a failed read is not kept, so a later call may still answer.
+    `inventory` inspects from several threads; the lock keeps the read to one."""
+    with _BOOT_LOCK:
+        if not _BOOT:
+            try:
+                result = _run(["/usr/sbin/sysctl", "-n", "kern.boottime"])
+            except (OSError, subprocess.SubprocessError, UnicodeError):
+                return None
+            # `\bsec`: the line carries `usec` too, and `sec = ` alone reads the microseconds.
+            match = re.search(r"\bsec = (\d+)", result.stdout) if result.returncode == 0 else None
+            if not match:
+                return None
+            _BOOT.append(int(match[1]))
+        return _BOOT[0]
+
+
+def _inspect_all(backend, names: list[str]) -> list:
+    """`backend.inspect` for each name, in order, run in parallel: launchctl is
+    the wall time of an inventory (sd:5005). Only inspects run in threads; the
+    caller reads the connection afterwards, on its own thread. A name that is no
+    longer supported, such as one that vanished after enumeration, gives None;
+    any other error propagates as the serial loop let it."""
+    def inspect(name):
         try:
-            result = _run(["/usr/sbin/sysctl", "-n", "kern.boottime"])
-        except (OSError, subprocess.SubprocessError, UnicodeError):
+            return backend.inspect(name)
+        except WorkflowError:
             return None
-        # `\bsec`: the line carries `usec` too, and `sec = ` alone reads the microseconds.
-        match = re.search(r"\bsec = (\d+)", result.stdout) if result.returncode == 0 else None
-        if not match:
-            return None
-        _BOOT.append(int(match[1]))
-    return _BOOT[0]
+    # ponytail: at most 8 launchctl processes at once per inventory read; enough to
+    # halve the wall time, bounded so a page read cannot start one per job.
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        return list(pool.map(inspect, names))
 
 
 def job_dirs(environ=None) -> list[Path]:
@@ -411,11 +433,10 @@ def job_state(connection: sqlite3.Connection, job: str, *, backend=None) -> dict
 def inventory(connection: sqlite3.Connection, *, backend=None) -> dict:
     backend = backend or LaunchdBackend()
     jobs = []
-    for name in backend.names():
-        try:
-            jobs.append(job_state(connection, name, backend=backend))
-        except WorkflowError:
-            continue  # An installed job can disappear between enumeration and read.
+    names = backend.names()
+    for name, observed in zip(names, _inspect_all(backend, names), strict=True):
+        if observed is not None:  # An installed job can disappear between enumeration and read.
+            jobs.append(_job_state(connection, name, backend, observed=observed)[0])
     assignments = [assignment_state(connection, row[0]) for row in connection.execute(
         "SELECT id FROM assignment ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 ELSE 2 END, id DESC")]
     return {"jobs": jobs, "assignments": assignments,
