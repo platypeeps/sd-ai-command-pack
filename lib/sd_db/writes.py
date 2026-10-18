@@ -463,6 +463,17 @@ def reopen_note(connection: sqlite3.Connection, note: int) -> None:
         connection.execute("UPDATE note SET resolved_at = NULL WHERE id = ?", (note,))
 
 
+def set_note_body(connection: sqlite3.Connection, note: int, body: str) -> None:
+    """Rewrite a note's body: an `exec` record names its own id, known only after `add_note` (sd:TBD)."""
+    with transaction(connection):
+        row = connection.execute("SELECT kind FROM note WHERE id = ?", (note,)).fetchone()
+        if row is None:
+            raise SdDbError(f"no note {note} to rewrite; add it with add_note first")
+        if row[0] == STATUS_CHANGE:
+            raise TransitionRefused("a status_change note is history that only `transition` writes")
+        connection.execute("UPDATE note SET body = ? WHERE id = ?", (body, note))
+
+
 # ---------------------------------------------------------------- state
 
 

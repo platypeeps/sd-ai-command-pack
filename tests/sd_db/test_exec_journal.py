@@ -10,8 +10,9 @@ import json
 import unittest
 
 from sd_db import runner, runner_exec
+from sd_db.errors import SdDbError
 from sd_db.testing.wire import hub_only
-from sd_db.writes import add_note
+from sd_db.writes import TransitionRefused, add_note, set_note_body
 
 from .test_runner_exec import PaletteFixture
 
@@ -102,6 +103,26 @@ class Journal(PaletteFixture):
         self.assertFalse(unknown & {row["id"] for row in journal["executions"]})
         self.assertEqual(journal["skipped"], {"unknown version": 2, "palette record for another note": 1,
                                               "unknown writer": 1, "runner outcome without an end": 1})
+
+
+    def test_an_outside_writer_lists_through_add_note_then_set_note_body(self):
+        value = {"version": 1, "item": self.item, "command": ["home-assistant", "light.turn_on", "light.desk"], "scope": "home-assistant"}
+        note = add_note(self.db, self.item, "exec", "{}", session="operator", started="2026-10-17T00:00:00Z",
+                        ended="2026-10-17T00:00:01Z", exit_code=0, output_path=str(self.root / "call.log"))
+        set_note_body(self.db, note, json.dumps({**value, "note": note}, sort_keys=True))
+        journal = runner_exec.execution_journal(self.db)
+        self.assertEqual(journal["skipped"], {})
+        [row] = journal["executions"]
+        self.assertEqual((row["id"], row["command"], row["scope"], row["exit_code"]), (note, value["command"], "home-assistant", 0))
+
+    def test_set_note_body_refuses_a_missing_note_and_a_status_change(self):
+        before = self.snapshot()
+        with self.assertRaisesRegex(SdDbError, "^no note 999 to rewrite"):
+            set_note_body(self.db, 999, "{}")
+        status = self.db.execute("SELECT id FROM note WHERE item=? AND kind='status_change'", (self.item,)).fetchone()
+        with self.assertRaises(TransitionRefused):
+            set_note_body(self.db, status["id"], "forged")
+        self.assertEqual(self.snapshot(), before)
 
 
 if __name__ == "__main__":

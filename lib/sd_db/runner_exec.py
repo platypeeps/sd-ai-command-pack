@@ -16,7 +16,7 @@ from pathlib import Path
 from . import paths, registry, runner, workflow
 from .database import refuse_hub_only, transaction
 from .errors import SdDbError
-from .writes import add_note, now
+from .writes import add_note, now, set_note_body
 from .yaml_lite import load
 
 MAX_CATALOG = 65536
@@ -398,7 +398,7 @@ def prepare(connection, item, command, values, *, expected_revision, expected_ca
                  "output_path": output_path, "target": target, "repo": state["item"]["repo"]}
         note = add_note(connection, item, "exec", "{}", session=who, started=now(), output_path=output_path)
         value["note"] = note
-        connection.execute("UPDATE note SET body=? WHERE id=?", (json.dumps(value, sort_keys=True), note))
+        set_note_body(connection, note, json.dumps(value, sort_keys=True))
         queued = None
         if _queues(entry):
             revision = workflow.item_state(connection, item)["revision"]
