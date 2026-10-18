@@ -41,7 +41,7 @@ for the controls a run passes through.
 >
 > ### Your item
 >
-> **sd:<N>** — `<title>`. Read it in full from the store; it is the authority,
+> **<repo> sd:<N>** — `<title>`. Read it in full from the store; it is the authority,
 > not this brief:
 >
 > ```
