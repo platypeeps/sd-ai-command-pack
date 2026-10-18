@@ -1696,7 +1696,7 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
 
         lines = self.call("today", env={**self.environment, "COLUMNS": "120"}).stdout.splitlines()
         # sd:5098: every section prints, in one order, as a table; the closed item is delivered.
-        heads = [line for line in lines if line.endswith(")") and line.split(" (")[0] in HEADINGS]
+        heads = [line for line in lines if line.endswith(")") and line.split(" (")[0] in HEADINGS.values()]
         self.assertEqual(heads, ["Attention (1)", "Decisions (1)", "Landing now (0)", "Delivered (1)", "Planned (0)",
                                  "Blocked (0)", "Unscheduled (1)", "Followups (1)", "Work (2)"])
         text = "\n".join(lines)
