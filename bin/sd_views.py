@@ -5,7 +5,8 @@ in each. Every section prints in `sd_db.today.ORDER`, empty or not: a heading
 `<Section> (<count>)`, then a plain ASCII table (a header row, a rule of
 dashes, aligned columns) of at most `ROWS` rows, then `… N more`. Work is the
 exception to the cap: it is the list, and it prints whole. An empty section
-is its heading alone. The one-line summary and the gate line are plain lines.
+is its heading alone. The one-line summary, the gate line and Delivered's
+`+N closed by hand` line are plain lines.
 
 Each table is ID, Repo, State, the section's own columns, Title and When.
 Title takes the width the other columns leave, out of `width` (the terminal's,
@@ -143,7 +144,7 @@ def _lane_state(row: dict[str, Any]) -> str:
 
 
 def _delivered_state(row: dict[str, Any]) -> str:
-    return "merged" if row.get("pr") else "done"
+    return "merged" if row.get("pr") else "delivered"
 
 
 #: The State cell where it is not the row's `status`.
@@ -218,4 +219,6 @@ def render_sections(found: dict[str, Any], *, now: datetime.datetime, width: int
         lines += ["", *section_table(key, rows, now, width)]
         if key == "landing":
             lines += gate_line(found["landing"]["gate"], now)
+        if key == "delivered" and found.get("closed_by_hand"):
+            lines.append(f"+{len(found['closed_by_hand'])} closed by hand")
     return "\n".join(lines) + "\n"

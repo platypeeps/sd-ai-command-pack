@@ -68,6 +68,7 @@ def fill(connection) -> dict[str, int]:
     transition(connection, stuck, "blocked", who="operator", reason="Waits on the vendor's API key")
     item("planned", "Renew the certificate", repo=LIB, due="2026-09-09")
     item("late", "Rotate the token", repo=APP, due="2026-09-01", status="in_progress")
+    transition(connection, item("swept", "Close a stale row", repo=APP), "done", who="operator", reason="bulk close")
     connection.execute("UPDATE item SET created_at = '2026-09-01T09:00:00Z', updated_at = '2026-09-01T09:00:00Z'")
     connection.execute("UPDATE note SET timestamp = '2026-09-06T15:00:00+00:00'")
     connection.commit()
@@ -106,6 +107,7 @@ Delivered (1)
 ID   Repo  State   PR   Commit     Title             When
 ---  ----  ------  ---  ---------  ----------------  ---------
 #10  app   merged  #42  c0ffee000  Ship the parser   09:00 MDT
++1 closed by hand
 
 Planned (1)
 ID   Repo  State     Due             Title                  When
@@ -159,6 +161,7 @@ work across the shared database
   ID   Repo  State   PR   Commit     Title             When
   ---  ----  ------  ---  ---------  ----------------  ---------
   #10  app   merged  #42  c0ffee000  Ship the parser   09:00 MDT
+  +1 closed by hand
 
   Planned (1)
   ID   Repo  State     Due             Title                  When

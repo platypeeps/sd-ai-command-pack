@@ -101,13 +101,9 @@ def followups(connection: sqlite3.Connection, *, repos: Iterable[str] | None = N
     return [row for row in _notes(connection, "followup", _keep(repos)) if row["id"] not in reports]
 
 
-def delivered(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None,
-              now: str | None = None, hours: int = 24) -> list[dict]:
-    """Items done and PRs merged in the last `hours`, newest first: `pr`, `commit`, `at` (when it landed).
-
-    The commit comes from `sd-ship`'s `delivered at` transition or its
-    `Code delivery` note; an item closed by hand has neither, so both are None.
-    """
+def _closed(connection: sqlite3.Connection, repos: Iterable[str] | None, now: str | None,
+            hours: int) -> list[dict]:
+    """Every item closed or merged in the last `hours`, newest first, with its `pr` and `commit` or None."""
     cutoff = (_parse(_now(now)) or datetime.now(timezone.utc)) - timedelta(hours=hours)
     where, values = _in("item.repo", _keep(repos))
     rows = connection.execute(
@@ -132,6 +128,24 @@ def delivered(connection: sqlite3.Connection, *, repos: Iterable[str] | None = N
         elif done := _DELIVERED_AT.search(row["body"]):
             entry["commit"] = entry["commit"] or done.group(1)
     return list(found.values())
+
+
+def delivered(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None,
+              now: str | None = None, hours: int = 24) -> list[dict]:
+    """Items a merged PR or a verified delivery landed in the last `hours`, newest first:
+    `pr`, `commit`, `at` (when it landed).
+
+    The commit comes from `sd-ship`'s `delivered at` transition or its
+    `Code delivery` note. An item closed by hand has neither and is
+    `closed_by_hand`'s, so a bulk close is not a screen of rows.
+    """
+    return [row for row in _closed(connection, repos, now, hours) if row["commit"]]
+
+
+def closed_by_hand(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None,
+                   now: str | None = None, hours: int = 24) -> list[dict]:
+    """Items closed in the last `hours` with no PR or delivered commit, newest first: `delivered`'s fields."""
+    return [row for row in _closed(connection, repos, now, hours) if not row["commit"]]
 
 
 def _repo_keys(connection: sqlite3.Connection) -> dict[str, str]:
@@ -321,7 +335,7 @@ def work(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None,
 
 def sections(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None,
              now: str | None = None, gate: Any = None) -> dict[str, Any]:
-    """Every section in `ORDER`, read once, with `summary` counts first."""
+    """Every section in `ORDER`, read once, with `summary` counts first and `closed_by_hand` last."""
     keep = None if repos is None else sorted(set(repos))
     found: dict[str, Any] = {
         "attention": attention(connection, repos=keep),
@@ -334,8 +348,10 @@ def sections(connection: sqlite3.Connection, *, repos: Iterable[str] | None = No
         "followups": followups(connection, repos=keep),
         "work": work(connection, repos=keep, now=now),
     }
+    by_hand = closed_by_hand(connection, repos=keep, now=now)
     week = ((_parse(_now(now)) or datetime.now(timezone.utc)) + timedelta(days=7)).strftime("%Y-%m-%d")
     summary = {key: len(found[key]) for key in ORDER if key != "landing"}
     summary["landing"] = len(found["landing"]["entries"])
     summary["planned_this_week"] = sum(1 for row in found["planned"] if row["due"] <= week)
-    return {"summary": summary, **{key: found[key] for key in ORDER}}
+    summary["closed_by_hand"] = len(by_hand)
+    return {"summary": summary, **{key: found[key] for key in ORDER}, "closed_by_hand": by_hand}

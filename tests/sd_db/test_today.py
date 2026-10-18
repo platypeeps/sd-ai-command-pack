@@ -54,7 +54,11 @@ class TheSections(TodayCase):
         by_hand = self.item("Closed by hand", status="in_progress")
         transition(self.connection, by_hand, "done", who="operator", reason="test")
         self.assertEqual([(row["id"], row["pr"], row["commit"]) for row in today.delivered(self.connection)],
-                         [(by_hand, None, None), (merged, 9, self.OTHER), (shipped, 7, self.SHA)])
+                         [(merged, 9, self.OTHER), (shipped, 7, self.SHA)])
+        # A hand close is a count, not a row: a bulk close would fill the table.
+        self.assertEqual([row["id"] for row in today.closed_by_hand(self.connection)], [by_hand])
+        found = today.sections(self.connection)
+        self.assertEqual((found["summary"]["delivered"], found["summary"]["closed_by_hand"]), (2, 1))
 
     def test_landing_is_each_items_newest_live_entry_with_its_place(self):
         first, second, third, finished, failed, delivered = (

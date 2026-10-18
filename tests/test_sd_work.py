@@ -1695,10 +1695,11 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
             "--ended", "2026-09-08T00:01:00Z", "--exit-code", "0", "--log", log, "--json").stdout)["item"]["id"]
 
         lines = self.call("today", env={**self.environment, "COLUMNS": "120"}).stdout.splitlines()
-        # sd:5098: every section prints, in one order, as a table; the closed item is delivered.
+        # sd:5098: every section prints, in one order, as a table; a hand close is one line, not a row.
         heads = [line for line in lines if line.endswith(")") and line.split(" (")[0] in HEADINGS.values()]
-        self.assertEqual(heads, ["Attention (1)", "Decisions (1)", "Landing now (0)", "Delivered (1)", "Planned (0)",
+        self.assertEqual(heads, ["Attention (1)", "Decisions (1)", "Landing now (0)", "Delivered (0)", "Planned (0)",
                                  "Blocked (0)", "Unscheduled (1)", "Followups (1)", "Work (2)"])
+        self.assertEqual(lines[lines.index("Delivered (0)") + 1], "+1 closed by hand")
         text = "\n".join(lines)
         self.assertRegex(text, rf"#{report} +- +planning ")
         # sd:5014: the note id is what `sd task note --answers` takes.
