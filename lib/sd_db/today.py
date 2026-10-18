@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-import statistics
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
@@ -27,8 +26,6 @@ ACTIVE_ASSIGNMENTS = ("queued", "running", "ending")
 LANE_ORDER = ("running", "pending", "prepared", "handed_back", "failed", "skipped")
 #: The section keys of `sections`, in the order every renderer prints them.
 ORDER = ("attention", "decisions", "landing", "delivered", "planned", "blocked", "unscheduled", "followups", "work")
-#: How many merged entries of a repository give the run time an ETA adds per place.
-ETA_SAMPLE = 10
 #: A choice line of a decision, as the dashboard's Decisions reads one (sd:3012).
 OPTION_LINE = re.compile(r"^[ \t]*Option:[ \t]*\S", re.MULTILINE)
 #: Kinds that are not work to schedule: ideas wait for promotion, reports for acknowledgement.
@@ -160,16 +157,6 @@ def _repo_keys(connection: sqlite3.Connection) -> dict[str, str]:
     return keys
 
 
-def _run_time(entries: list[dict]) -> timedelta | None:
-    """The median start-to-finish time of a repository's last `ETA_SAMPLE` merges, or None."""
-    spans = []
-    for entry in sorted(entries, key=lambda entry: entry.get("finished_at") or "")[-ETA_SAMPLE:]:
-        start, end = _parse(entry.get("started_at")), _parse(entry.get("finished_at"))
-        if start is not None and end is not None and end >= start:
-            spans.append((end - start).total_seconds())
-    return timedelta(seconds=statistics.median(spans)) if spans else None
-
-
 def _gate(gate: Any) -> dict | None:
     """`sd gate status --json`'s holders and waiters, or the reason they could not be read."""
     if gate is None:
@@ -181,18 +168,17 @@ def _gate(gate: Any) -> dict | None:
             "error": None}
 
 
-def landing(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None,
-            now: str | None = None, gate: Any = None) -> dict:
+def landing(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None, gate: Any = None) -> dict:
     """The lane: `entries`, each item's newest entry that neither merged nor was cancelled, running first,
     and `gate`, the machine's gate slots.
 
     An entry carries `entry` (its lane id), `repository` (GitHub `owner/name`),
-    `status`, `step`, `place` and `eta`. Newest is by the order the hub took
+    `status`, `step`, `place` and `since`. Newest is by the order the hub took
     the entries in, as `sd_lane.newest_entry` reads it; an entry of a done
     item shows only while it is still queued. `place` counts the
-    repository's running and pending entries by position. The lane records
-    no ETA, so `eta` is an estimate: the running entry's start, then one
-    median run time (`ETA_SAMPLE` merges) per place; None with no history.
+    repository's running and pending entries by position. `since` is when
+    the entry started running, else when the hub queued it. The lane records
+    no ETA, so none is given.
 
     `gate` is what the caller read from `sd gate status --json` (the slots
     are files on this machine, not rows), or the text of why that read
@@ -200,26 +186,24 @@ def landing(connection: sqlite3.Connection, *, repos: Iterable[str] | None = Non
     """
     rows = connection.execute(
         """
-        SELECT state.key, state.body, first
+        SELECT state.key, state.body, first, queued.timestamp AS queued_at
           FROM state JOIN (SELECT MAX(id) AS last, MIN(id) AS first FROM state
                             WHERE kind = 'checkpoint' AND substr(key, 1, ?) = ? GROUP BY key)
             ON state.id = last
+          JOIN state AS queued ON queued.id = first
         """,
         (len(LANE_KEY_PREFIX), LANE_KEY_PREFIX),
     ).fetchall()
     keys, keep = _repo_keys(connection), _keep(repos)
     newest: dict[tuple[str, Any], tuple[int, dict]] = {}
-    merged: dict[str, list[dict]] = {}
     for row in rows:
         entry = json.loads(row["body"])
         repository = row["key"][len(LANE_KEY_PREFIX):].rpartition(":")[0]
         if keep is not None and keys.get(repository.lower()) not in keep:
             continue
-        if entry.get("status") == "merged":
-            merged.setdefault(repository, []).append(entry)
         key = (repository, entry.get("item"))
         if entry.get("status") != "cancelled" and row["first"] > newest.get(key, (0, {}))[0]:
-            newest[key] = (row["first"], {**entry, "repository": repository})
+            newest[key] = (row["first"], {**entry, "repository": repository, "queued_at": row["queued_at"]})
     live = [entry for _, entry in newest.values() if entry.get("status") != "merged"]
     items = {row["id"]: row for row in connection.execute(
         f"SELECT id, title, status FROM item WHERE id IN ({', '.join('?' for _ in live)})",
@@ -228,23 +212,16 @@ def landing(connection: sqlite3.Connection, *, repos: Iterable[str] | None = Non
     live = [entry for entry in live
             if entry.get("status") in queued or items.get(entry.get("item"), {"status": ""})["status"] != "done"]
     live.sort(key=lambda entry: (entry.get("position") or 0, entry["id"]))
-    stamp = _parse(_now(now)) or datetime.now(timezone.utc)
-    clocks: dict[str, tuple[int, datetime | None]] = {}
+    places: dict[str, int] = {}
     found = []
     for entry in live:
         row, repository = items.get(entry.get("item")), entry["repository"]
-        place, eta = None, None
+        place = None
         if entry.get("status") in queued:
-            place, ahead = clocks.get(repository, (0, None))
-            place += 1
-            run = _run_time(merged.get(repository, []))
-            if run is not None:
-                start = ahead or max(_parse(entry.get("started_at")) or stamp, stamp - run)
-                eta = max(start + run, stamp)
-            clocks[repository] = (place, eta)
+            place = places[repository] = places.get(repository, 0) + 1
         found.append({"id": entry.get("item"), "repo": keys.get(repository.lower()), "entry": entry["id"],
                       "repository": repository, "status": entry.get("status"), "step": entry.get("step"),
-                      "place": place, "eta": eta.strftime("%Y-%m-%dT%H:%M:%SZ") if eta else None,
+                      "place": place, "since": entry.get("started_at") or entry["queued_at"],
                       "title": row["title"] if row is not None else entry.get("title", "")})
     rank = {status: index for index, status in enumerate(LANE_ORDER)}
     found.sort(key=lambda entry: rank.get(str(entry["status"]), len(rank)))
@@ -340,7 +317,7 @@ def sections(connection: sqlite3.Connection, *, repos: Iterable[str] | None = No
     found: dict[str, Any] = {
         "attention": attention(connection, repos=keep),
         "decisions": decisions(connection, repos=keep),
-        "landing": landing(connection, repos=keep, now=now, gate=gate),
+        "landing": landing(connection, repos=keep, gate=gate),
         "delivered": delivered(connection, repos=keep, now=now),
         "planned": planned(connection, repos=keep, now=now),
         "blocked": blocked(connection, repos=keep),

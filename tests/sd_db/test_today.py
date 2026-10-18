@@ -78,18 +78,16 @@ class TheSections(TodayCase):
                           (failed, "o/s", "failed", None)])
         self.assertIsNone(found["gate"])
 
-    def test_landing_estimates_each_place_from_the_median_run_time(self):
-        """The lane records no ETA; one median run per place after the running entry's start."""
-        for number, minutes in enumerate((10, 20, 30)):
-            self.lane("example-owner/app", f"m{number}", item=900 + number, status="merged", position=number,
-                      started_at="2026-09-06T08:00:00Z", finished_at=f"2026-09-06T08:{minutes:02d}:00Z")
+    def test_landing_gives_exact_times_and_no_estimate(self):
+        """The lane records no ETA: `since` is when the entry started, else when the hub queued it."""
         running, waiting = self.item("Running", repo=APP), self.item("Waiting", repo=APP)
         self.lane("example-owner/app", "r", item=running, status="running", position=10,
                   started_at="2026-09-06T11:55:00Z")
         self.lane("example-owner/app", "w", item=waiting, status="pending", position=11)
-        entries = today.landing(self.connection, now=NOW)["entries"]
-        self.assertEqual([(row["place"], row["eta"], row["repo"]) for row in entries],
-                         [(1, "2026-09-06T12:15:00Z", APP), (2, "2026-09-06T12:35:00Z", APP)])
+        entries = today.landing(self.connection)["entries"]
+        self.assertEqual([(row["place"], row["since"], row["repo"]) for row in entries],
+                         [(1, "2026-09-06T11:55:00Z", APP), (2, WHEN, APP)])
+        self.assertNotIn("eta", entries[0])
 
     def test_landing_carries_the_gate_or_why_it_is_unknown(self):
         snapshot = {"holders": [{"slot": 1, "pid": 7, "label": "tests", "since": WHEN, "cwd": "/tmp"}],

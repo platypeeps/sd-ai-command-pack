@@ -97,10 +97,10 @@ ID  Repo  State     Note  Title                        When
 #2  app   planning  #3    Which store holds the rows?  3 h ago
 
 Landing now (2)
-ID   Repo  State    Position  ETA         Title             When
----  ----  -------  --------  ----------  ----------------  -------
-#11  app   running  1         ~12:20 MDT  Land the cache    in 20 m
-#12  app   pending  2         ~12:50 MDT  Land the index    in 50 m
+ID   Repo  State    Position  Title             When
+---  ----  -------  --------  ----------------  ---------
+#11  app   running  1         Land the cache    11:50 MDT
+#12  app   pending  2         Land the index    12:00 MDT
 Gate slots: 1 holding (app tests since 11:55 MDT) · 1 waiting (lib tests)
 
 Delivered (1)
@@ -152,10 +152,10 @@ work across the shared database
   2 landing · 1 delivered · 1 planned this week · 1 blocked · 8 unscheduled
 
   Landing now (2)
-  ID   Repo  State    Position  ETA         Title             When
-  ---  ----  -------  --------  ----------  ----------------  -------
-  #11  app   running  1         ~12:20 MDT  Land the cache    in 20 m
-  #12  app   pending  2         ~12:50 MDT  Land the index    in 50 m
+  ID   Repo  State    Position  Title             When
+  ---  ----  -------  --------  ----------------  ---------
+  #11  app   running  1         Land the cache    11:50 MDT
+  #12  app   pending  2         Land the index    12:00 MDT
 
   Delivered (1)
   ID   Repo  State   PR   Commit     Title             When
@@ -222,17 +222,15 @@ class SdToday(Zone):
         self.assertEqual(text.splitlines()[2::2], [f"{heading} (0)" for heading in sd_views.HEADINGS.values()])
 
     def test_two_runs_of_the_command_print_the_same_bytes(self):
-        """The real clock runs here, so the lane goes: an ETA is a minute that two runs can straddle."""
+        """The real clock runs here; every time printed is a stored one, so only a run across midnight moves."""
         fill(self.connection)
-        self.connection.execute("DELETE FROM state WHERE key LIKE ?", (f"{today.LANE_KEY_PREFIX}%",))
-        self.connection.commit()
         runs = [subprocess.run([sys.executable, str(ROOT / "bin" / "sd"), "today"], capture_output=True, text=True,
                                env=clean_environment(HOME=str(self.home), COLUMNS="100",
                                                      SD_GATE_SLOTS_DIR=str(self.home)),
                                check=True).stdout for _ in range(2)]
         self.assertEqual(runs[0], runs[1])
         self.assertEqual([line for line in runs[0].splitlines() if line.endswith(")") and "(" in line][:3],
-                         ["Attention (1)", "Decisions (1)", "Landing now (0)"])
+                         ["Attention (1)", "Decisions (1)", "Landing now (2)"])
 
 
 class SdStatus(Zone):

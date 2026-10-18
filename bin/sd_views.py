@@ -11,8 +11,8 @@ is its heading alone. The one-line summary, the gate line and Delivered's
 Each table is ID, Repo, State, the section's own columns, Title and When.
 Title takes the width the other columns leave, out of `width` (the terminal's,
 else `DEFAULT_WIDTH`), and is cut to fit. When is a relative time ("3 d ago",
-"in 2 h") or, where the moment matters (a landing, an ETA), a local time with
-its zone label. Nothing reads a clock here: `now` comes from the caller, so
+"in 2 h") or, where the moment matters (a landing, a lane start), a local time
+with its zone label. Nothing reads a clock here: `now` comes from the caller, so
 two runs on the same data and the same `now` print the same bytes.
 """
 
@@ -108,8 +108,7 @@ def columns(section: str, now: datetime.datetime) -> list[tuple[str, Cell]]:
     own: dict[str, list[tuple[str, Cell]]] = {
         "attention": [("Why", lambda row: row.get("why") or "-")],
         "decisions": [("Note", lambda row: f"#{row['note']}")],
-        "landing": [("Position", lambda row: str(row["place"]) if row.get("place") else "-"),
-                    ("ETA", lambda row: f"~{local(row['eta'], now)}" if row.get("eta") else "-")],
+        "landing": [("Position", lambda row: str(row["place"]) if row.get("place") else "-")],
         "delivered": [("PR", lambda row: f"#{row['pr']}" if row.get("pr") else "-"),
                       ("Commit", lambda row: (row.get("commit") or "-")[:9])],
         "planned": [("Due", lambda row: day(row["due"], now))],
@@ -119,7 +118,7 @@ def columns(section: str, now: datetime.datetime) -> list[tuple[str, Cell]]:
         "work": [("Due", lambda row: day(row["due"], now, zone=False) if row.get("due") else "-"),
                  ("Priority", lambda row: f"P{row['priority']}" if row.get("priority") is not None else "-")],
     }
-    moment = {"attention": when("at"), "decisions": when("at"), "landing": when("eta"),
+    moment = {"attention": when("at"), "decisions": when("at"), "landing": when("since", local),
               "delivered": when("at", local), "planned": when("due", days), "blocked": when("since"),
               "unscheduled": when("created_at"), "followups": when("at"), "work": when("status_since")}[section]
     return [("ID", _id), ("Repo", _repo), ("State", STATES.get(section, _state)), *own[section],

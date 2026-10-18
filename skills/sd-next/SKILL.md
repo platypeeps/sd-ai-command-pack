@@ -23,8 +23,8 @@ It is the one home of the operator's status format; other skills and docs point 
 Use the tables `sd today` prints: a heading `<Section> (<count>)`, a header row, a rule, aligned columns, at most five rows, then `… N more`.
 Copy rows from `sd today`; do not rewrite them as prose. Give five sections, in this order:
 
-1. **Done recently**: the `Delivered` table. Its When column is the local time each change landed.
-2. **Landing soon**: the `Landing now` table and the gate line, with the running builders added as rows. Position and ETA come from the table; an ETA starts with `~` because the lane records none and `sd today` estimates it.
+1. **Done recently**: the `Delivered` table and its `+N closed by hand` line. Its When column is the local time each change landed.
+2. **Landing soon**: the `Landing now` table and the gate line, with the running builders added as rows. Position and the time each entry started or was queued come from the table. The lane records no ETA; do not invent one.
 3. **Open items and followups**: the `Attention`, `Decisions`, `Blocked` and `Followups` tables.
 4. **This session**: one table of the threads from step 2, with the columns ID (the item, or `-`), Repo, State (`unfiled`, `filed`, `unlanded` or `running`), Title and When.
 5. **Next steps**: a numbered list the operator picks from by number. Put the recommended step first and mark it. Each step names its item and one action, and a duration ("about 20 minutes") or a delivery time ("by 15:00 MDT"). Draw the steps from decisions waiting, failed lane entries, `Planned` (soonest first), `Unscheduled` (highest priority first) and this session's threads.
