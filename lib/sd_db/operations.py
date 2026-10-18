@@ -370,23 +370,31 @@ def _cancelled(request, observed):
     return None not in identity and identity == tuple(request.get(key) for key in _RUN_IDENTITY)
 
 
+def _retry_label(state):
+    return "Retry" if state in {"failed", "interrupted"} else "Run now"
+
+
 def _job_state(connection, name, backend, *, observed=None):
     observed = backend.inspect(name) if observed is None else observed
     request = _last_request(connection, name)
     restoring = _restoring(connection)
     state = "idle" if observed["state"] == "interrupted" and _cancelled(request, observed) else observed["state"]
     capabilities = {}
-    for action, needed in (("retry", ("failed", "interrupted")), ("cancel", ("running",))):
+    # Retry kickstarts any stopped job: a failed or interrupted run again, or
+    # an idle job now, which is how a job with no calendar starts (sd:4965).
+    for action, needed in (("retry", ("failed", "interrupted", "idle")), ("cancel", ("running",))):
         # The observed reason refuses an action only when the observation itself
         # does, unknown or unloaded. A failed or interrupted job's reason names
         # the signal that ended its last run: a description, not a refusal.
         blocked = observed["reason"] if state in {"unknown", "unloaded"} else ""
-        reason = "" if state in needed else blocked or f"only a currently {' or '.join(needed)} job can {action}"
+        refused = "the job is already running" if state == "running" else f"only a currently {' or '.join(needed)} job can {action}"
+        reason = "" if state in needed else blocked or refused
         if request and request.get("status") in {"requested", "accepted", "unknown"} and request.get("before") == observed["_observation"]:
             reason = "previous request has no observed state change yet; refresh to observe its outcome"
         if action == "retry" and restoring:
             reason = "an unresolved restore prevents starting jobs"
         capabilities[action] = {"allowed": not reason, "reason": reason}
+    capabilities["retry"]["label"] = _retry_label(state)
     public = {key: observed[key] for key in ("name", "label", "service", "schedule", "state", "pid", "last_exit", "last_signal")}
     # Which run launchd last recorded, by the identity a cancel is matched on;
     # `revision` moves on a request or a restore too (sd:2904).
@@ -464,6 +472,7 @@ def _act(connection, job, action, *, expected_revision, who, backend):
     except WorkflowError:
         after = dict(current, state="unknown", pid=None, revision=_digest(request), last_request=_request_public(request),
                      capabilities={key: {"allowed": False, "reason": "job is no longer supported"} for key in ("retry", "cancel")})
+        after["capabilities"]["retry"]["label"] = _retry_label("unknown")
     return {"request": _request_public(request), "job": after}
 
 
