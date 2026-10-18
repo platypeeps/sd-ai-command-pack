@@ -359,6 +359,37 @@ class Admission(unittest.TestCase):
         self.assertEqual([(gate["state"], gate["label"]) for gate in sd_gate_slots.lane_gates(self.where, [])],
                          [("holding", "sd-check lane-a")])
 
+    def test_a_ticket_that_cannot_be_opened_refuses_a_builder_and_stays_out_of_the_order(self):
+        """Second review finding: a ticket the probe could not open was skipped, so a lane waiter vanished."""
+        other = self.queue.enter("sd-check lane-a", "/", lane=True)
+        other.path.unlink()
+        os.symlink(other.path.name, other.path)
+        self.assertEqual(self.refused(self.queue.enter("wk tests", "/", yields=True))["state"], "unknown")
+        plain = self.queue.enter("plain", "/")
+        self.assertEqual(self.admit(plain, self.slots()), (0, ""), "an unprobed ticket holds nobody back")
+
+    def test_a_lane_gate_takes_no_slot_while_its_marker_is_held(self):
+        """Second review finding: a lane gate that lost its marker to a probe held a slot no builder could see."""
+        probe = self.open_pair(".lane")
+        fcntl.flock(probe[0], fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fds, markers = self.slots(), self.open_pair(".lane")
+        lane = self.queue.enter("sd-check lane-a", "/", lane=True)
+        self.assertEqual(self.admit(lane, fds, markers), (None, "the lane marker of slot 1 is held"))
+        self.assertEqual(sd_gate_slots.take_free(fds, markers, "sd-check lane-a", 0.0),
+                         (None, "the lane marker of slot 1 is held"))
+        self.assertTrue(sd_gate_slots.try_lock(self.slots()[0]), "the slot must be free again")
+
+    def test_a_lane_marker_that_cannot_be_opened_keeps_the_cap_and_says_so(self):
+        """Second review finding: a marker open error ran the lane gate with no cap at all."""
+        os.symlink("slot.1.lane", self.where / "slot.1.lane")
+        stream = io.StringIO()
+        slot = sd_gate_slots.acquire(1, {"SD_GATE_SLOTS_DIR": str(self.where), "SD_GATE_SLOT_POLL": "0.01"},
+                                     stream=stream, rule=self.rule, label="sd-check lane-a", lane=True)
+        self.addCleanup(slot.release)
+        self.assertIsNotNone(slot.handle, "the lane gate keeps its slot")
+        self.assertIsNone(slot.marker)
+        self.assertIn("cannot open a lane marker", stream.getvalue())
+
     def test_lane_tickets_go_first_and_keep_their_own_order(self):
         plain = self.queue.enter("plain", "/")
         first = self.queue.enter("lane one", "/", lane=True)

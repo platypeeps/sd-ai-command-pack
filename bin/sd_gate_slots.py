@@ -340,7 +340,12 @@ class Queue:
         for path in paths:
             try:
                 fd = os.open(path, os.O_RDWR)
+            except FileNotFoundError:
+                continue
             except OSError:
+                # Not probed, so outside the order as before, but a lane check cannot rule it out (sd:5078).
+                live.append({"seq": int(path.stem) if path.stem.isdigit() else 0, "unreadable": True,
+                             "unprobed": True})
                 continue
             try:
                 if try_lock(fd):
@@ -378,9 +383,10 @@ class Queue:
                     lanes = lane_gates(self.where, live)
                     if lanes:
                         raise LaneBusy(lanes[0])
-                listed = any(entry["seq"] == ticket.seq for entry in live)
+                ordered = admission_order(live)
+                listed = any(entry["seq"] == ticket.seq for entry in ordered)
                 mine = [] if listed else [{"seq": ticket.seq, "lane": ticket.lane}]
-                order = [entry["seq"] for entry in admission_order([*live, *mine])]
+                order = [entry["seq"] for entry in admission_order([*ordered, *mine])]
                 ticket.place = (order.index(ticket.seq) + 1, len(order))
                 if order[0] != ticket.seq:
                     return None, f"place {order.index(ticket.seq) + 1} of {len(order)} in the queue"
@@ -392,34 +398,54 @@ class Queue:
                 if held:
                     return None, held
                 for index, fd in enumerate(fds):
-                    if try_lock(fd):
-                        state["last_admitted"] = now
-                        if ticket.lane and markers:
-                            mark_lane(markers[index], ticket.label, ticket.cwd, now)
-                        ticket.path.unlink(missing_ok=True)
-                        ticket.drop()
-                        return index, ""
+                    if not try_lock(fd):
+                        continue
+                    if ticket.lane and markers and not mark_lane(markers[index], ticket.label, ticket.cwd, now):
+                        fcntl.flock(fd, fcntl.LOCK_UN)
+                        return None, f"the lane marker of slot {index + 1} is held"
+                    state["last_admitted"] = now
+                    ticket.path.unlink(missing_ok=True)
+                    ticket.drop()
+                    return index, ""
                 return None, f"{len(fds)} of {len(fds)} in use"
             finally:
                 self.write_state(state)
 
 
 def admission_order(entries: list[dict]) -> list[dict]:
-    """Lane tickets first, then the rest, each first in, first out (sd:5078). A ticket with no `lane` key is not one."""
-    return sorted(entries, key=lambda entry: (entry.get("lane") is not True, entry["seq"]))
+    """Lane tickets first, then the rest, each first in, first out (sd:5078). A ticket with no `lane` key is not one.
+
+    A ticket that could not be opened is left out, as before sd:5078: nobody can say whether its waiter lives.
+    """
+    probed = [entry for entry in entries if not entry.get("unprobed")]
+    return sorted(probed, key=lambda entry: (entry.get("lane") is not True, entry["seq"]))
 
 
-def mark_lane(fd: int, label: str, cwd: str, now: float) -> None:
+def mark_lane(fd: int, label: str, cwd: str, now: float) -> bool:
     """Lock a slot's `slot.N.lane` for the lane gate that took the slot, and write who it is (sd:5078).
 
-    The holder released the marker before its slot, so the lock is free. The
-    label is a hint for the refusal and `status`; the lock is the evidence.
+    False when the lock is held: a reader's probe holds it for an instant, and
+    the caller frees the slot and tries again at its next poll, so a lane gate
+    never holds a slot it cannot show. The label is a hint; the lock is the evidence.
     """
     if not try_lock(fd):
-        return
+        return False
     with contextlib.suppress(OSError):
         os.ftruncate(fd, 0)
         os.write(fd, json.dumps({"pid": os.getpid(), "label": label, "cwd": cwd, "since": now}).encode())
+    return True
+
+
+def take_free(fds: Sequence[int], markers: Sequence[int], label: str, now: float) -> tuple[int | None, str]:
+    """Any free slot, for a waiter that could not queue; a lane gate takes the slot only with its marker (sd:5078)."""
+    for index, fd in enumerate(fds):
+        if not try_lock(fd):
+            continue
+        if markers and not mark_lane(markers[index], label, os.getcwd(), now):
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            return None, f"the lane marker of slot {index + 1} is held"
+        return index, ""
+    return None, f"{len(fds)} of {len(fds)} in use"
 
 
 def lane_gates(where: pathlib.Path, live: list[dict]) -> list[dict]:
@@ -459,10 +485,10 @@ def lane_gates(where: pathlib.Path, live: list[dict]) -> list[dict]:
         found.append({"state": "holding", "slot": int(name.split(".")[1]), "pid": record.get("pid"),
                       "label": record.get("label", ""), "cwd": record.get("cwd", ""),
                       "since": utc_stamp(since) if isinstance(since, (int, float)) else ""})
+    found.extend({"state": "unknown", "reason": f"cannot read queue ticket {entry['seq']}"}
+                 for entry in live if entry.get("unreadable"))
     for place, entry in enumerate(admission_order(live), start=1):
-        if entry.get("unreadable"):
-            found.append({"state": "unknown", "reason": f"cannot read the ticket in place {place} of the queue"})
-        elif entry.get("lane") is True:
+        if entry.get("lane") is True:
             since = entry.get("since")
             found.append({"state": "waiting", "place": place, "pid": entry.get("pid"),
                           "label": entry.get("label", ""), "cwd": entry.get("cwd", ""),
@@ -606,10 +632,7 @@ def wait_for_slot(fds: Sequence[int], where: pathlib.Path, *, poll: float, strea
             if stop():
                 raise LauncherExited()
             if ticket is None:
-                taken = next((index for index, fd in enumerate(fds) if try_lock(fd)), None)
-                if taken is not None and markers:
-                    mark_lane(markers[taken], label, os.getcwd(), wall())
-                reason = f"{len(fds)} of {len(fds)} in use"
+                taken, reason = take_free(fds, markers, label, wall())
             else:
                 taken, reason = queue.admit(ticket, fds, rule, markers=markers, loadavg=loadavg, wall=wall)
             if taken is not None:
@@ -669,16 +692,23 @@ def write_info(lock: pathlib.Path, pid: int, label: str, cwd: str) -> None:
         pass
 
 
-def open_markers(where: pathlib.Path, slots: int) -> list[TextIO]:
-    """A lane gate's `slot.N.lane` for each slot (sd:5078); none left open when one cannot be opened."""
+def open_markers(where: pathlib.Path, slots: int, stream: TextIO) -> list[TextIO]:
+    """A lane gate's `slot.N.lane` for each slot (sd:5078).
+
+    None, with a warning, when one cannot be opened: the gate still queues
+    first and keeps the cap, since no gate fails for want of load control,
+    but builders cannot see it hold a slot.
+    """
     markers: list[TextIO] = []
     try:
         for index in range(1, slots + 1):
             markers.append(open(where / f"slot.{index}.lane", "a"))
-    except OSError:
+    except OSError as error:
         for marker in markers:
             marker.close()
-        raise
+        stream.write(f"warning: cannot open a lane marker under {where} ({error}); "
+                     "builders will not see this gate hold a slot\n")
+        return []
     return markers
 
 
@@ -709,12 +739,12 @@ def acquire(slots: int, environ: Mapping[str, str], *, stream: TextIO, timeout: 
     try:
         where.mkdir(parents=True, exist_ok=True)
         handles = [open(where / f"slot.{index}.lock", "a") for index in range(1, slots + 1)]
-        markers = open_markers(where, slots) if lane else []
     except OSError as error:
         if yields:
             raise LaneBusy({"state": "unknown", "reason": f"cannot use {where}: {error}"}) from None
         stream.write(f"warning: cannot use {where} ({error}); running without the gate cap\n")
         return Slot(None, None, 0.0)
+    markers = open_markers(where, slots, stream) if lane else []
     started = time.monotonic()
     try:
         taken = wait_for_slot([handle.fileno() for handle in handles], where, poll=poll_seconds(environ),
