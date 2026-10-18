@@ -14,7 +14,7 @@ reader can check:
 - `bin/sd_install.py`: the installer writes the absolute link targets that
   make the bare names resolve.
 - `CHANGELOG.md` and `docs/work/archive/`: they record earlier statements,
-  and AGENTS.md § What a Document Owns forbids rewriting them.
+  and `.claude/rules/document-scope.md` forbids rewriting them.
 """
 
 from __future__ import annotations

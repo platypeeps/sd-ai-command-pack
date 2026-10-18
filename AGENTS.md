@@ -76,93 +76,21 @@ Codex exposes these procedures as skills: invoke `$sd-review`, `$sd-ship`, or `$
 Do not expect `/sd-*` entries in its slash-command menu.
 Shell commands remain separate; not every skill has an executable.
 
-## What a Document Owns
-
-A document owns the scope it describes, never the argv that reached it. A page
-about this pack's rules describes this pack's rules whichever command opened
-it, and a path written for the reader's own checkout stays unqualified.
-
-It applies to **live text only.** Preserved reviews and archived work items record earlier statements.
-Do not rewrite their prose to match current behavior.
-Archive moves can add lifecycle metadata without changing the recorded discussion.
-
-Two consequences, both enforced rather than remembered:
-
-- **A provenance citation needs no qualifying.** Naming where a fact came from
-  is not an instruction to go and open it, so no prose beside it has to say
-  whose checkout holds the file.
-- **The qualifying guard stays scoped to `.claude/rules/`.** That is the one
-  surface this pack authors, tells the reader to go and read for authoritative
-  content, and cannot install into the reader's checkout. Per-repository
-  configuration that the reader's checkout is supposed to carry -- the files
-  `bin/sd_setup_github.py` writes under `.github/` -- is correct unqualified,
-  and naming the pack beside one would be the worse bug. The reasoning, and
-  both ends of the scan enumerated from the filesystem, are in
-  `tests/test_doc_citations.py`.
-
-## Where a Finished Document Goes
-
-`skills/_shared/references/publication-contract.md` is the policy, and it binds
-this pack and everything installed from it. Read it before deciding where a
-document goes; the short form is here so that nobody has to guess whether one
-exists.
-
-**Publication is the default, not a request.** A finished document is written
-into the Obsidian vault as Markdown, under `Briefs/<repo>/`, and published to
-the local dashboard's **Documents** tab as HTML from `docs/dashboard/`. A
-document nobody can find was not delivered, and a skill that ends by naming a
-path in a build directory has not finished. Working state -- ledgers, receipts,
-handoff packets, monitor state -- is not a finished document and does not
-publish.
-
-**The document lives in Obsidian; the rest are duplicates.** Each copy is in the
-format its destination reads natively: Markdown in the vault, HTML on the
-dashboard, Notion blocks in Notion, a native Google Doc in Drive. A copy in the
-wrong format is a copy nobody can use where it landed.
-
-**An outward destination is opt-in, per document.** Notion and Google Drive are
-mirrors, not defaults. The user designates a document; it is recorded in that
-document's `notion=` or `drive=` key in `research.conf.py`. Nothing infers a
-target, and both keys on one entry are two mirrors rather than a choice. A
-render enqueues each sync under `~/.claude/pending-mirror-syncs/` and an agent
-session drains it, because rendering runs in a git hook and in CI, and neither
-can reach an MCP server.
-
-**A Notion mirror is private unless it asks for the team.** `notion=dict()` goes
-to the folder `$SD_NOTION_PRIVATE_FOLDER` names; `notion=dict(team=True)` goes
-to the one `$SD_NOTION_TEAM_FOLDER` names. Private is the default because a
-brief the team cannot see is repaired by draining again, and a private brief in
-a shared space has already been read. Both hold a Notion page id, so renaming
-either folder moves no document, and an unset one refuses the mirror rather than
-guessing a page. The document lands in the repo's own page under that folder,
-the shape the vault uses.
-
-**A published page carries its own resources.** The Documents tab serves under
-`default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:`.
-A `<link>`, a `<script>` or a remote image does not load, and the page renders
-degraded rather than failing visibly -- which is why the renderer embeds its
-fonts (`bin/sd_research_fonts.py`) instead of linking them. Its one script, the
-foundation's theme control, is inline; blocked, the page follows the OS scheme
-and hides the control. A skill that emits its own HTML meets the same rule by
-itself.
-
-The contract is a shared reference, so it reaches an installed skill only if
-that skill's `SKILL.md` cites `references/publication-contract.md`. A new
-document-producing skill cites it; the installer warns about a citation it
-cannot resolve, not about one nobody wrote.
-
 ## When the Git Wrapper Is Refused
 
-In a worktree-isolated session the hook rewrites `git ...` into a wrapped form,
-and the isolation guard refuses it: the guard cannot verify that a wrapped
-command stays inside the worktree. That guard lives in the Claude Code binary,
-not in this pack, so nothing here can teach it the wrapped form.
+- In a worktree-isolated session the guard refuses the hook's wrapped `git`; call `/usr/bin/git` and say so in the report.
+- Never edit the wrapper's exclusion list to pass that refusal: the list is machine-global, the refusal per-session.
 
-Call `/usr/bin/git` instead, which the guard reads directly, and say in the
-report that you fell back to it. Do not edit the wrapper's configuration to get
-past the refusal. Its exclusion list is machine-global while the refusal is
-per-session, so switching it off for one worktree switches it off for every
-repository on the machine.
+## Area Rules
+
+Claude loads each file for its `paths:`, or always when it has none; Codex reads them by link.
+
+| Topic | File |
+| --- | --- |
+| Reviewer selection and report content | [.claude/rules/sd-operator-defaults.md](.claude/rules/sd-operator-defaults.md) |
+| Planning adversarial review and its caps | [.claude/rules/sd-planning-adversarial-review.md](.claude/rules/sd-planning-adversarial-review.md) |
+| What a document owns: live text, archives, qualified paths | [.claude/rules/document-scope.md](.claude/rules/document-scope.md) |
+| Where a finished document goes: vault, dashboard, mirrors | [.claude/rules/publication.md](.claude/rules/publication.md) |
 
 <!-- SD-AI-COMMAND-PACK:ROUTING:START -->
 ## Canonical Entry Points
