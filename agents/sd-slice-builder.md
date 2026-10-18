@@ -42,6 +42,7 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
    Follow the repository's `CLAUDE.md` for any trailer it requires.
 5. Run the focused tests for the files you touched in the machine gate queue, in turn with lane gates:
    `sd gate run --label '<branch> tests' -- <test command>`. It waits only while every gate slot is held.
+   It exits 69 at once, the tests not run, while a lane gate holds or waits: run it again after the time it prints.
    Do not run `make check` or `sd gate check`: the lead's `sd-ship prepare` runs the one full gate.
 6. Write the pull-request body to the path your brief names. It holds `## Summary`, one bullet group per item
    naming `sd:N`, and `## Test plan`, with the fail-first tests and focused test lines.

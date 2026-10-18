@@ -272,6 +272,7 @@ class SliceBuilderTestPause(unittest.TestCase):
         _, body = (AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8").split("\n---\n", 1)
         self.assertIn("sd gate run --label", body)
         self.assertIn("every gate slot is held", body)
+        self.assertIn("exits 69 at once", body)
 
 
 class RenderTests(unittest.TestCase):

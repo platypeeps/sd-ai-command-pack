@@ -37,6 +37,8 @@ with `SD_GATE_SLOTS=0`, so a gate inside them never waits on this one's slot.
 With `--slot-timeout`, the wait has its own bound and each check gets the whole
 `--timeout` (sd:2607): a gate in a long queue then fails as unadmitted, never
 as a check cut short by the time it spent queued.
+Its wait is the lane gate's (sd:5078): it goes ahead of every other waiter,
+and a builder's `sd gate run` refuses while it holds or waits for a slot.
 
 A Makefile that defines `precheck` has it run first, before the slot wait
 (sd:2604). It is the minute of checks that catches most failed full runs; a
@@ -482,7 +484,9 @@ def take_slot(environ: Mapping[str, str], timeout: int) -> tuple[sd_gate_slots.S
 
     The cap is `SD_GATE_SLOTS`, then the machine's `sd.gate_slots`, then a
     quarter of the cores; CI and a holder's children (`SD_GATE_SLOTS=0`) take
-    none. The wait is a place in the sd:2262 queue, under its load rule.
+    none. The wait is a place in the sd:2262 queue, under its load rule, as
+    the lane gate: ahead of every other waiter, and a builder's `sd gate run`
+    refuses beside it (sd:5078).
     """
     try:
         slots, source = sd_gate_slots.configured(environ, sd_lib.core_setting("gate_slots", dict(environ)))
@@ -492,7 +496,7 @@ def take_slot(environ: Mapping[str, str], timeout: int) -> tuple[sd_gate_slots.S
         raise UsageError(str(error)) from None
     try:
         slot = sd_gate_slots.acquire(slots, environ, stream=sys.stderr, timeout=timeout, rule=rule,
-                                     label=f"sd-check {pathlib.Path.cwd().name}")
+                                     label=f"sd-check {pathlib.Path.cwd().name}", lane=True)
     except sd_gate_slots.LauncherExited:
         raise UsageError("the process that started this gate exited while it waited for a slot") from None
     report: dict[str, object] = {"slots": slots, "source": source, "waited_seconds": float(timeout),
