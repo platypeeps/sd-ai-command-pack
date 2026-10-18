@@ -41,7 +41,7 @@ opens with seventeen top-level lines; the sixteen below are the sections.
 | `abnormalities` | every abnormal class in the ranking table, whether or not it fired: `clear`, `n findings`, or `unchecked: <reason>`. At most three findings print per class, and the elision says how many were held back |
 | `pending` | at most ten actionable rows by rank, with the line above them stating the denominator — `10 of 123, by rank`. A class with a cap shows at most that many rows, and a line under the list says how many of its rows the list does not show |
 | `next` | one row: the top-ranked id and its `suggest`. Not a menu, not three options |
-| `work across the shared database` | `sd today`'s Landing now, Delivered, Planned, Blocked and Unscheduled tables, for this repository, in `sd today`'s layout, indented two spaces. A database that does not read is a `!` reason, never empty tables |
+| `work across the shared database` | `sd today`'s Landing now, Delivered, Planned, Blocked and Unscheduled tables, for this repository and the companions the `sd.status_companions` setting row lists for it, in `sd today`'s layout, indented two spaces. A database that does not read is a `!` reason, never empty tables |
 | `open threads` | a count per `source`, then the exclusions named in full, so the counts are never read as a total of everything that exists |
 | `work items` | item status from each item's row, counted, archived ones counted and not listed |
 | `contributions (this repo, shared database order)` | upstream activity, local evidence, and dependency readiness from the shared contribution projection |

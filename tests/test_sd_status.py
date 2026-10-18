@@ -2930,6 +2930,42 @@ class ViewsTests(InventoryFixture):
         self.assertIn("\n  Landing now (0)\n", text)
         self.assertNotIn("Free in ~/repos/example.test/lib", text)
 
+    def test_a_companion_the_setting_row_lists_joins_the_views_labelled(self) -> None:
+        """The system repository lists the pack too: one `sd.status_companions` row, no path in the code."""
+        import sd_db
+
+        key, made = self.fill()
+        connection = sd_db.connect(home=self.home)
+        try:
+            sd_db.writes.set_setting(connection, "sd.status_companions",
+                                     f"~/repos/example.test/other=~/repos/example.test/app;{key}=~/repos/example.test/lib")
+        finally:
+            connection.close()
+        section = status.views_section(self.repo, {"HOME": str(self.home)})
+        self.assertEqual(section["repos"], [key, "~/repos/example.test/lib"])
+        self.assertEqual({row["id"] for row in section["sections"]["unscheduled"]},
+                         {made[key], made["~/repos/example.test/lib"]})
+        stream = io.StringIO()
+        status._render_views(section, stream.write, width=100)
+        self.assertRegex(stream.getvalue(), rf"\n  #{made['~/repos/example.test/lib']} +lib +planning ")
+        self.assertEqual(status.companions(key, None), [])
+
+    def test_a_companion_setting_that_does_not_read_is_named_not_dropped(self) -> None:
+        import sd_db
+
+        key, _ = self.fill()
+        connection = sd_db.connect(home=self.home)
+        try:
+            sd_db.writes.set_setting(connection, "sd.status_companions", "not a repository list")
+        finally:
+            connection.close()
+        section = status.views_section(self.repo, {"HOME": str(self.home)})
+        self.assertEqual(section["repos"], [key])
+        self.assertTrue(section["companions_error"].startswith("companions unknown: "), section)
+        stream = io.StringIO()
+        status._render_views(section, stream.write, width=100)
+        self.assertIn("\n  ! companions unknown: ", stream.getvalue())
+
     def test_an_unreadable_database_is_a_reason_not_empty_views(self) -> None:
         section = status.views_section(self.repo, {"HOME": str(self.home)})
         self.assertFalse(section["available"])
