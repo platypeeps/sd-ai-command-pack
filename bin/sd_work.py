@@ -1538,7 +1538,9 @@ def register(groups: Any, store: Any) -> None:
     items.add_argument("--open", action="store_true", help="exclude done items")
     items.add_argument("--here", action="store_true",
                        help="only this checkout's items; refuse unless it is registered in the sd database")
-    items.add_argument("--kind", help="filter by item kind")
+    items.add_argument("--kind", help="filter by item kind, such as task or followup; `report`, a scheduled "
+                                      "job's run, closes with `sd reports acknowledge N`; `skill-review`, "
+                                      "a skill catalogue review the runner works, closes when the run ends")
     items.add_argument("--status", help="filter by workflow status")
     _output(items, "items")
     item = store.add_parser("item", help="one workspace item, notes, and revision")
@@ -1583,7 +1585,7 @@ def register(groups: Any, store: Any) -> None:
     priority.add_argument("--priority", type=int, choices=range(1, 5))
     priority.add_argument("--clear-priority", action="store_true")
     due = edit.add_mutually_exclusive_group()
-    due.add_argument("--due", help="YYYY-MM-DD")
+    due.add_argument("--due", help="YYYY-MM-DD; to defer the item, set a later date; there is no park verb")
     due.add_argument("--clear-due", action="store_true")
     edit.add_argument("--clear-branch", action="store_true",
                       help="clear a stale branch name; `sd work register` records one")
@@ -1613,7 +1615,8 @@ def register(groups: Any, store: Any) -> None:
 
     status = verbs.add_parser("status", help="change status with an atomic history entry")
     status.add_argument("item", type=item_id, help=ITEM_HELP)
-    status.add_argument("status")
+    status.add_argument("status", help="the status to move to; a report closes "
+                                       "with `sd reports acknowledge N` instead")
     reason = status.add_mutually_exclusive_group()
     reason.add_argument("--reason", help="recorded on the transition; on a row worked on "
                                            "its own branch, why no pull request is needed")
@@ -1645,7 +1648,10 @@ def register(groups: Any, store: Any) -> None:
     note.add_argument("--body", help="the note text, the old spelling of TEXT")
     note.add_argument("--kind", default="comment",
                       choices=("comment", "followup", "question", "decision", "proposal"),
-                      help="note kind (default: comment)")
+                      help="note kind (default: comment): comment (a remark), followup (work still owed; "
+                           "`sd note resolve` closes it), question (an operator decision the dashboard "
+                           "shows), decision (a ruling; --answers resolves its question), proposal (a "
+                           "suggested change)")
     note.add_argument("--answers", type=note_id, metavar="NOTE",
                       help="with --kind decision: the question note this rules on, resolved in the same write")
     _output(note, "note", revision=True)

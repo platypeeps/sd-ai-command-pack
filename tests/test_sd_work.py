@@ -862,6 +862,21 @@ class TaskCLI(unittest.TestCase):
         self.assertIn("requires a field",
                       self.call("task", "edit", state["item"]["id"], code=1).stderr)
 
+    def test_help_says_how_to_defer_close_a_report_and_what_each_note_kind_is(self):
+        """sd:5065: no park verb exists, a report is closed elsewhere, and a note kind needs a meaning."""
+        def said(*verb):
+            return " ".join(self.call(*verb, "--help").stdout.split()).replace("- ", "-")
+
+        self.assertIn("to defer the item, set a later date; there is no park verb", said("task", "edit"))
+        self.assertIn("`report`, a scheduled job's run, closes with `sd reports acknowledge N`",
+                      said("store", "items"))
+        self.assertIn("`skill-review`, a skill catalogue review the runner works", said("store", "items"))
+        self.assertIn("a report closes with `sd reports acknowledge N`", said("task", "status"))
+        note = said("task", "note")
+        for kind in NOTE_KINDS:
+            with self.subTest(kind=kind):
+                self.assertRegex(note, rf"\b{kind} \(")
+
     def test_kind_help_says_the_kinds_come_from_the_installed_library(self):
         """sd:1000 (0f93e3b2bf82): a followup takes a checkout only on an sd_db from sd:809 on."""
         said = " ".join(self.call("task", "add", "--help").stdout.split())
