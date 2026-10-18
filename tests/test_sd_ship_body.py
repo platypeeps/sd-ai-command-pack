@@ -134,6 +134,23 @@ class ClosingTests(unittest.TestCase):
     def test_a_title_names_each_whole_token_once(self) -> None:
         self.assertEqual((3, 4), sd_ship_body.title_ids("Fix sd:3 and sd:4 (sd:3, xsd:5, sd:6x)"))
 
+    def test_a_repo_less_item_refusal_says_it_has_no_repository_and_how_to_close_it(self) -> None:
+        """sd:5065: a report belongs to no repository, so "another repository" misled."""
+        import tempfile
+
+        from sd_db import connect, create_item, initialise
+
+        with tempfile.TemporaryDirectory() as scratch:
+            path = pathlib.Path(scratch) / "sd.db"
+            initialise(path)
+            with connect(path) as connection:
+                report = create_item(connection, kind="report", title="A report item")
+                with self.assertRaises(ship.Refusal) as caught:
+                    sd_ship_body.refuse_unclosable(connection, report + 1, "~/repos/example", [report], True)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "closes_item_foreign")
+        self.assertIn(f"sd:{report}, which belongs to no repository", str(caught.exception))
+        self.assertIn(f"`sd reports acknowledge {report}`", caught.exception.workflow["next_action"])
+
 
 class TemplateTests(unittest.TestCase):
     def test_the_template_writes_no_owned_trailer_outside_a_comment(self) -> None:

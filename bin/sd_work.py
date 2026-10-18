@@ -277,7 +277,8 @@ def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
     if args.unpark:
         changes["parked_at"] = None
     if not changes and not getattr(args, "experiment", None):
-        raise WorkRefusal("edit requires a field to change")
+        raise WorkRefusal(f"edit requires a field to change; name one, such as "
+                          f"`sd task edit {args.item} --due YYYY-MM-DD`; `sd task edit --help` lists them")
     return changes
 
 
@@ -449,7 +450,8 @@ def _register(sd_db, connection, args, who: str) -> Any:
     workflow, repos, docs_work = _register_library(sd_db)
     root = sd_lib.repo_root()
     if root is None:
-        raise WorkRefusal("register requires a Git checkout")
+        raise WorkRefusal("register requires a Git checkout; run `sd work register PATH` "
+                          "from inside the checkout that holds PATH")
     prd = (root / args.path).resolve()
     try:
         relative = prd.relative_to(root).as_posix()
@@ -599,54 +601,30 @@ def _print_notes(value: dict[str, Any], audited: Any) -> None:
               f"sd task show {value['item']['id']} --audit shows them")
 
 
-#: A choice line of a decision, as the dashboard's Decisions reads one (sd:3012).
-OPTION_LINE = re.compile(r"^[ \t]*Option:[ \t]*\S", re.MULTILINE)
+def _today_gate() -> Any:
+    """`sd gate status --json`'s snapshot, or why it could not be read: a failed read is unknown, not idle."""
+    import sd_gate_slots
+
+    environ = dict(os.environ)
+    try:
+        return sd_gate_slots.snapshot(sd_gate_slots.directory(environ), 0, sd_gate_slots.load_rule(environ))
+    except (OSError, ValueError) as error:
+        return str(error)
 
 
-def _first_line(text: Any, width: int = 100) -> str:
-    line = str(text or "").strip().partition("\n")[0]
-    return line if len(line) <= width else line[:width - 1] + "…"
+def _print_today(connection: Any) -> None:
+    """`sd today` as text: `sd_db.today.sections` in the one layout `sd_views` gives it and `sd-status` (sd:5098)."""
+    import shutil
 
+    import sd_views
 
-def _attention_reports(sd_db: Any, connection: Any) -> list[dict[str, Any]]:
-    """Open reports whose fields say they need attention; unreadable fields count, as an unknown is no pass."""
-    from sd_db import reporting
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+    from sd_db import today
 
-    found = []
-    for row in reporting.reports(connection):
-        if row["status"] == "done":
-            continue
-        try:
-            attention = json.loads(row["fields"] or "{}").get("attention")
-        except (ValueError, AttributeError):
-            attention = "fields unreadable"
-        if attention:
-            found.append({**row, "why": attention if isinstance(attention, str) else ""})
-    return found
-
-
-def _print_today(sd_db: Any, connection: Any, work: list[dict[str, Any]]) -> None:
-    """`sd today` as the dashboard's Today reads (sd:3501): the short sections first, so `head -40` shows them."""
-    reports = _attention_reports(sd_db, connection)
-    decisions = [note for note in sd_db.reads.open_notes(connection, "question")
-                 if len(OPTION_LINE.findall(note["body"])) >= 2]
-    # A report's own followup is the report's line already.
-    listed = {row["id"] for row in reports}
-    followups = [note for note in sd_db.reads.open_notes(connection, "followup") if note["item"] not in listed]
-    for title, rows, line in (
-        ("Reports needing attention", reports,
-         lambda row: f"#{row['id']}  {row['status']}  {row['title']}" + (f" · {row['why']}" if row["why"] else "")),
-        ("Decisions waiting", decisions,
-         lambda note: f"#{note['item']}  note #{note['id']}  {_first_line(note['body'])}"),
-        ("Open followups", followups, lambda note: f"#{note['item']}  {_first_line(note['body'])}"),
-    ):
-        if rows:
-            print(f"{title} ({len(rows)})")
-            for row in rows:
-                print(line(row))
-    print(f"Work ({len(work)})")
-    _name_refs(work)
-    _print_rows(work, today=datetime.date.today().isoformat())
+    now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    found = today.sections(connection, now=now.strftime("%Y-%m-%dT%H:%M:%SZ"), gate=_today_gate())
+    width = shutil.get_terminal_size((sd_views.DEFAULT_WIDTH, 24)).columns
+    print(sd_views.render_sections(found, now=now, width=width), end="")
 
 
 def _occurrence_line(value: dict[str, Any], following: Any) -> None:
@@ -700,7 +678,8 @@ def _verified_tip(root: pathlib.Path) -> tuple[str, str]:
     if not remote:
         head = sd_lib.git_output(["symbolic-ref", "--quiet", "HEAD"], root)
         if head not in ("refs/heads/main", "refs/heads/master"):
-            raise WorkRefusal("a local-only delivery must be verified on main or master")
+            raise WorkRefusal("a local-only delivery must be verified on main or master; land the commit there, "
+                              f"run `git -C {root} switch main`, then run this command again")
         tip = sd_lib.git_output(["rev-parse", "--verify", "HEAD^{commit}"], root)
         if not tip:
             raise WorkRefusal(f"{root} has no commit on {head} to verify against")
@@ -738,7 +717,8 @@ def _delivery_reason(row: Any, commit: str, checkout: str | None = None,
     delivers nothing, and the operator's reason says it was the whole item.
     """
     if not _is_commit(commit):
-        raise WorkRefusal("--delivered-by takes the full lowercase commit ID")
+        raise WorkRefusal(f"--delivered-by takes the full lowercase commit ID; "
+                          f"`git rev-parse {commit}` in the checkout prints it")
     if not row["repo"] and not checkout:
         raise WorkRefusal(
             f"item {row['id']} belongs to no checkout, so no commit can be verified "
@@ -880,11 +860,19 @@ def _change_status(workflow: Any, connection: Any, args: argparse.Namespace,
 
     The second value is for the human line only; `--json` already carries
     its id as `next_occurrence`. None when nothing was created.
+
+    A report's `done` is refused here with the command that closes one
+    (sd:5065), after `--delivered-by` is refused with its own reason; the
+    library's refusal names the action, never a verb (sd:3503).
     """
+    reason = _status_reason(workflow, connection, args)
+    if args.status == "done" and workflow.item_state(connection, args.item)["item"]["kind"] == "report":
+        raise WorkRefusal(
+            f"item {args.item} is a report, and a report closes by acknowledgement: "
+            f"`sd reports acknowledge {args.item} --resolve-followups` also resolves its open followups")
     result = workflow.change_status(
         connection, args.item, args.status, who=who,
-        expected_revision=getattr(args, "if_revision", None),
-        reason=_status_reason(workflow, connection, args))
+        expected_revision=getattr(args, "if_revision", None), reason=reason)
     spawned = result.get("next_occurrence")
     following = None if spawned is None else workflow.item_state(connection, spawned)["item"]
     return result, following
@@ -976,7 +964,8 @@ def _deliver(progress: Any, workflow: Any, connection: Any, args: argparse.Names
         return progress.deliver_work(
             connection, args.item, args.commit, who=who, expected_revision=args.if_revision)
     if not (args.reason or "").strip():
-        raise WorkRefusal("--associated needs --reason: say why the merge carried Item: and not Delivers:")
+        raise WorkRefusal("--associated needs --reason: say why the merge carried Item: and not Delivers:, as "
+                          f"`sd work deliver {args.item} {args.commit} --associated --reason TEXT`")
     state = workflow.item_state(connection, args.item)
     row = state["item"]
     if row["kind"] in ASSOCIATED_STATUS_KINDS:
@@ -1110,6 +1099,44 @@ def _ref_checked(args: argparse.Namespace) -> None:
         raise WorkRefusal("--ref names one occurrence, so it does not take --recur")
 
 
+#: `--since` durations: a count and a unit (sd:5065).
+SINCE_UNITS = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
+
+
+def since(value: str) -> datetime.datetime:
+    """`store items --since`: `YYYY-MM-DD` as 00:00 UTC, or a positive duration back from now."""
+    duration = re.fullmatch(r"([1-9][0-9]*)([mhdw])", value)
+    if duration:
+        try:
+            return (datetime.datetime.now(datetime.timezone.utc)
+                    - datetime.timedelta(**{SINCE_UNITS[duration[2]]: int(duration[1])}))
+        except OverflowError:
+            pass
+    if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+        try:
+            return datetime.datetime.fromisoformat(value).replace(tzinfo=datetime.timezone.utc)
+        except ValueError:
+            pass
+    raise argparse.ArgumentTypeError(
+        f"{value!r}: give YYYY-MM-DD (00:00 UTC) or a duration such as 90m, 6h, 2d or 1w")
+
+
+def _touched_since(row: dict[str, Any], cutoff: datetime.datetime) -> bool:
+    """Whether the row was created or updated at or after `cutoff`; a stamp without a zone reads as UTC.
+
+    An unreadable stamp keeps the row: unknown is not "older".
+    """
+    for stamp in (row.get("created_at"), row.get("updated_at")):
+        if stamp:
+            try:
+                moment = datetime.datetime.fromisoformat(stamp)
+            except (TypeError, ValueError):
+                return True
+            if (moment if moment.tzinfo else moment.replace(tzinfo=datetime.timezone.utc)) >= cutoff:
+                return True
+    return False
+
+
 def _items(sd_db: Any, workflow: Any, args: argparse.Namespace, connection: Any) -> list[dict[str, Any]]:
     """`sd store items`, filtered as its flags ask.
 
@@ -1120,7 +1147,8 @@ def _items(sd_db: Any, workflow: Any, args: argparse.Namespace, connection: Any)
     return [row for row in (dict(found) for found in sd_db.reads.backlog_items(connection, repo=here))
             if (not args.open or row["status"] != "done")
             and (not args.kind or row["kind"] == args.kind)
-            and (not args.status or row["status"] == args.status)]
+            and (not args.status or row["status"] == args.status)
+            and (getattr(args, "since", None) is None or _touched_since(row, args.since))]
 
 
 def _note_text(args: argparse.Namespace) -> str:
@@ -1133,6 +1161,8 @@ def _note_text(args: argparse.Namespace) -> str:
 
 def _note(workflow: Any, connection: Any, args: argparse.Namespace, who: str, revision: str | None) -> dict:
     body = _note_text(args)
+    if getattr(args, "option", None) is not None and args.answers is None:
+        raise WorkRefusal("--option needs --answers NOTE: it rules that review batch question")
     _done_advisory(workflow, connection, args.item)
     if args.answers is not None:
         return _answer(workflow, connection, args, body, who, revision)
@@ -1146,10 +1176,12 @@ def _answer(workflow: Any, connection: Any, args: argparse.Namespace, body: str,
 
     The same two writes, and the same `Ruling on note #Q: ` body, as the
     dashboard's Decisions answer; every refusal comes before the first write.
+    A review batch question is ruled with `--option` instead (sd:5065).
     """
     if args.kind != "decision":
         raise WorkRefusal("--answers records a decision: add --kind decision")
     sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+    import sd_db.review as review  # noqa: PLC0415 - after the helper
     from sd_db.review import REF_SOURCE  # noqa: PLC0415 - after the helper
 
     with workflow.transaction(connection):
@@ -1165,7 +1197,9 @@ def _answer(workflow: Any, connection: Any, args: argparse.Namespace, body: str,
             raise WorkRefusal(f"note {args.answers} is already resolved, at {asked['resolved_at']}")
         item = workflow.item_state(connection, args.item)["item"]
         if item["source"] == REF_SOURCE and (item["external_id"] or "").startswith("review:"):
-            raise WorkRefusal(f"sd:{args.item} is a review batch: rule its questions on the dashboard's Review page")
+            return _rule_batch(review, workflow, connection, args, body, who, revision)
+        if getattr(args, "option", None) is not None:
+            raise WorkRefusal(f"sd:{args.item} is not a review batch, so --option rules nothing: drop it")
         ruled = workflow.add_item_note(connection, args.item, kind="decision", who=who,
                                        body=f"Ruling on note #{args.answers}: {body}",
                                        expected_revision=revision)
@@ -1175,16 +1209,47 @@ def _answer(workflow: Any, connection: Any, args: argparse.Namespace, body: str,
         return state
 
 
+def _rule_batch(review: Any, workflow: Any, connection: Any, args: argparse.Namespace, body: str, who: str,
+                revision: str | None) -> dict:
+    """`note --answers Q --option LABEL` on a review batch: `review.rule`, which may file a task (sd:5065).
+
+    LABEL matches one of the question's options, case aside. TEXT other than
+    the label is kept as the question's comment, written first in the same
+    transaction, so a refused ruling leaves neither.
+    """
+    try:
+        question = next((held for held in review.read(connection, args.item)["questions"]
+                         if held["note"] == args.answers), None)
+    except review.ReviewError:
+        question = None
+    options = [] if question is None else question["options"]
+    named = f", one of {', '.join(options)}" if options else ""
+    if args.option is None:
+        raise WorkRefusal(f"sd:{args.item} is a review batch: name the ruling with --option LABEL{named}")
+    option = next((held for held in options if held.casefold() == args.option.casefold()), None)
+    if option is None:
+        raise WorkRefusal(f"--option {args.option!r} is not an option of note {args.answers}"
+                          + (f"; its options are {', '.join(options)}" if options else ""))
+    if body.strip().casefold() != option.casefold():
+        revision = workflow.add_item_note(connection, args.item, kind="comment", who=who,
+                                          body=f"On note #{args.answers}: {body}",
+                                          expected_revision=revision)["revision"]
+    if revision is None:
+        revision = workflow.item_state(connection, args.item)["revision"]
+    state = review.rule(connection, args.item, args.answers, option, expected_revision=revision, who=who)
+    state["note"] = state["ruling"]
+    return state
+
+
 def run_today(args: argparse.Namespace) -> int:
     """`sd today`: `today_items` as rows for `--json`, and the dashboard's Today sections for a person (sd:3501)."""
     sd_db, _ = _library()
     connection = sd_handoff_rows.connect(sd_db, write=False)
     try:
-        rows = [dict(row) for row in sd_db.reads.today_items(connection)]
         if args.json:
-            _emit(rows, machine=True)
+            _emit([dict(row) for row in sd_db.reads.today_items(connection)], machine=True)
         else:
-            _print_today(sd_db, connection, rows)
+            _print_today(connection)
         return 0
     except sd_db.SdDbError as error:
         raise WorkRefusal(str(error)) from error
@@ -1525,8 +1590,13 @@ def register(groups: Any, store: Any) -> None:
     items.add_argument("--open", action="store_true", help="exclude done items")
     items.add_argument("--here", action="store_true",
                        help="only this checkout's items; refuse unless it is registered in the sd database")
-    items.add_argument("--kind", help="filter by item kind")
+    items.add_argument("--kind", help="filter by item kind, such as task or followup; `report`, a scheduled "
+                                      "job's run, closes with `sd reports acknowledge N`; `skill-review`, "
+                                      "a skill catalogue review the runner works, closes when the run ends")
     items.add_argument("--status", help="filter by workflow status")
+    items.add_argument("--since", type=since, metavar="DATE|DURATION",
+                       help="only items created or updated since then: YYYY-MM-DD (00:00 UTC) "
+                            "or a duration back from now, such as 90m, 6h, 2d or 1w")
     _output(items, "items")
     item = store.add_parser("item", help="one workspace item, notes, and revision")
     item.add_argument("item", type=item_id, help=ITEM_HELP)
@@ -1570,7 +1640,7 @@ def register(groups: Any, store: Any) -> None:
     priority.add_argument("--priority", type=int, choices=range(1, 5))
     priority.add_argument("--clear-priority", action="store_true")
     due = edit.add_mutually_exclusive_group()
-    due.add_argument("--due", help="YYYY-MM-DD")
+    due.add_argument("--due", help="YYYY-MM-DD; to defer the item, set a later date; there is no park verb")
     due.add_argument("--clear-due", action="store_true")
     edit.add_argument("--clear-branch", action="store_true",
                       help="clear a stale branch name; `sd work register` records one")
@@ -1600,7 +1670,8 @@ def register(groups: Any, store: Any) -> None:
 
     status = verbs.add_parser("status", help="change status with an atomic history entry")
     status.add_argument("item", type=item_id, help=ITEM_HELP)
-    status.add_argument("status")
+    status.add_argument("status", help="the status to move to; a report closes "
+                                       "with `sd reports acknowledge N` instead")
     reason = status.add_mutually_exclusive_group()
     reason.add_argument("--reason", help="recorded on the transition; on a row worked on "
                                            "its own branch, why no pull request is needed")
@@ -1632,9 +1703,16 @@ def register(groups: Any, store: Any) -> None:
     note.add_argument("--body", help="the note text, the old spelling of TEXT")
     note.add_argument("--kind", default="comment",
                       choices=("comment", "followup", "question", "decision", "proposal"),
-                      help="note kind (default: comment)")
+                      help="note kind (default: comment): comment (a remark), followup (work still owed; "
+                           "`sd note resolve` closes it), question (an operator decision the dashboard "
+                           "shows), decision (a ruling; --answers resolves its question), proposal (a "
+                           "suggested change)")
     note.add_argument("--answers", type=note_id, metavar="NOTE",
                       help="with --kind decision: the question note this rules on, resolved in the same write")
+    note.add_argument("--option", metavar="LABEL",
+                      help="with --answers on a review batch question: the option it rules, such as Approve or "
+                           "Reject; Approve on an Approve-or-Reject question files a task, and TEXT other than "
+                           "the label is kept as the question's comment")
     _output(note, "note", revision=True)
     # A read alias (sd:1112): the same operation as `sd store item`, which
     # stays the canonical read for every kind, so both print the same thing.

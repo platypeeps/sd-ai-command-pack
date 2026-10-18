@@ -7,6 +7,7 @@ import importlib.machinery
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -18,10 +19,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 
 import sd_db  # noqa: E402
 import sd_db.repos  # noqa: E402
+import sd_db.today  # noqa: E402
 import sd_db.workflow as workflow  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_work  # noqa: E402
 from sd_db.workflow import NOTE_KINDS  # noqa: E402
+from sd_views import HEADINGS  # noqa: E402
 
 from tests.clean_env import clean_environment  # noqa: E402
 
@@ -100,6 +103,47 @@ class TaskCLI(unittest.TestCase):
         self.assertIn("topic row from the vault", refused.stderr)
         self.assertIn("by stage only", refused.stderr)
         self.assertEqual(json.loads(self.call("task", "show", item, "--json").stdout), before)
+
+    def test_task_status_done_on_a_report_names_the_acknowledge_command(self):
+        """sd:5065: a report closes by acknowledgement, so the refusal names that command."""
+        with sd_db.connect(home=self.home) as connection:
+            item = sd_db.create_item(connection, kind="report", title="Example report")
+        refused = self.call("task", "status", item, "done", code=1)
+        self.assertIn(f"`sd reports acknowledge {item} --resolve-followups`", refused.stderr)
+
+    def test_an_edit_with_no_field_names_the_edit_command(self):
+        """sd:5065: the refusal names the command that fixes it."""
+        item = json.loads(self.call("task", "add", "A task", "--json").stdout)["item"]["id"]
+        refused = self.call("task", "edit", item, code=1)
+        self.assertIn(f"`sd task edit {item} --due YYYY-MM-DD`", refused.stderr)
+
+    def test_register_outside_a_checkout_names_where_to_run_it(self):
+        """sd:5065: the refusal names the command that fixes it."""
+        refused = self.call("work", "register", "docs/work/x/prd.md", code=1)
+        self.assertIn("register requires a Git checkout", refused.stderr)
+        self.assertIn("run `sd work register PATH` from inside", refused.stderr)
+
+    def test_store_items_since_lists_only_rows_created_or_updated_since(self):
+        """sd:5065: `--since` takes a date (00:00 UTC) or a duration; a bad value names both forms."""
+        old = json.loads(self.call("task", "add", "Old", "--json").stdout)["item"]["id"]
+        new = json.loads(self.call("task", "add", "New", "--json").stdout)["item"]["id"]
+        touched = json.loads(self.call("task", "add", "Touched", "--json").stdout)["item"]["id"]
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            connection.execute("UPDATE item SET created_at = '2026-01-01T00:00:00+00:00', "
+                               "updated_at = '2026-01-02T00:00:00+00:00' WHERE id = ?", (old,))
+            connection.execute("UPDATE item SET created_at = '2026-01-01T00:00:00+00:00' WHERE id = ?", (touched,))
+            connection.commit()
+        for value in ("2d", "36h", "90m", "1w", "2026-01-03"):
+            with self.subTest(value=value):
+                listed = json.loads(self.call("store", "items", "--since", value, "--json").stdout)
+                self.assertEqual(sorted(row["id"] for row in listed), sorted([new, touched]))
+        listed = json.loads(self.call("store", "items", "--since", "2026-01-02", "--json").stdout)
+        self.assertEqual(sorted(row["id"] for row in listed), sorted([old, new, touched]))
+        for value in ("yesterday", "2026-02-30", "5", "-2d", "0d", "99999999999w"):
+            with self.subTest(value=value):
+                refused = self.call("store", "items", "--since", value, code=2)
+                self.assertIn("give YYYY-MM-DD (00:00 UTC) or a duration such as 90m, 6h, 2d or 1w",
+                              " ".join(refused.stderr.split()))
 
     def test_task_show_reads_what_store_item_reads(self):
         """sd:1112. `sd task show` is a read alias; `sd store item` stays canonical.
@@ -312,6 +356,64 @@ class TaskCLI(unittest.TestCase):
             with self.assertRaises(workflow.WorkflowError):
                 sd_work._answer(workflow, connection, args, "Pack store", "tester", None)
         self.assertEqual(json.loads(self.call("task", "show", item, "--json").stdout), before)
+
+    def batch_question(self):
+        """A filed review batch with one Approve-or-Reject question: the batch and the question's note."""
+        import sd_db.review as review
+
+        with sd_db.connect(home=self.home) as connection:
+            item = review.file(connection, {
+                "schema": 1, "queue": "nightly", "batch": "2026-10-18", "title": "Nightly review 2026-10-18",
+                "source": "system@6c4317b", "mode": "open",
+                "questions": [{"subject": "cap-retries", "text": "Suggestion: cap retries.",
+                               "options": ["Approve", "Reject"]}]}, who="fixture")["item"]
+            connection.commit()
+            return item, review.read(connection, item)["questions"][0]["note"]
+
+    def test_option_rules_a_review_batch_question_and_approve_files_a_task(self):
+        """sd:5065: `--option` rules a batch question from the CLI, as `review.rule` does."""
+        item, asked = self.batch_question()
+        state = json.loads(self.call("task", "note", item, "Worth a try", "--kind", "decision",
+                                     "--answers", asked, "--option", "approve", "--json").stdout)
+        self.assertRegex(state["note"]["body"], rf"^Ruling on note #{asked}: Approve -> sd:\d+$")
+        self.assertTrue(next(note for note in state["notes"] if note["id"] == asked)["resolved_at"])
+        self.assertIn(f"On note #{asked}: Worth a try", [note["body"] for note in state["notes"]])
+        filed = int(state["note"]["body"].rsplit("sd:", 1)[1])
+        self.assertEqual(json.loads(self.call("task", "show", filed, "--json").stdout)["item"]["kind"], "task")
+
+    def test_option_refuses_an_unknown_label_or_a_plain_question_and_writes_nothing(self):
+        """sd:5065: an unknown label names the valid ones; `--option` needs `--answers` on a batch question."""
+        item, asked = self.batch_question()
+        plain = json.loads(self.call("task", "add", "Asks", "--json").stdout)["item"]["id"]
+        question = self.question(plain)
+        for name, row, flags, said in (
+                ("unknown label", item, ("--answers", asked, "--option", "Maybe"), "its options are Approve, Reject"),
+                ("no --answers", item, ("--option", "Approve"), "--option needs --answers"),
+                ("not a batch", plain, ("--answers", question, "--option", "Approve"), "not a review batch")):
+            with self.subTest(name):
+                before = json.loads(self.call("task", "show", row, "--json").stdout)
+                refused = self.call("task", "note", row, "Answer", "--kind", "decision", *flags, code=1)
+                self.assertIn(said, refused.stderr)
+                self.assertEqual(json.loads(self.call("task", "show", row, "--json").stdout), before)
+
+    def test_option_writes_the_comment_and_the_ruling_or_neither(self):
+        """sd:5065: a ruling refused after the comment is written leaves no comment behind."""
+        import sd_db.review as review
+
+        item, asked = self.batch_question()
+        before = json.loads(self.call("task", "show", item, "--json").stdout)
+        args = argparse.Namespace(item=item, kind="decision", answers=asked, option="Reject")
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection, \
+                unittest.mock.patch.object(review, "rule", side_effect=review.ReviewError("cut")):
+            with self.assertRaises(review.ReviewError):
+                sd_work._answer(workflow, connection, args, "Not now", "tester", None)
+        self.assertEqual(json.loads(self.call("task", "show", item, "--json").stdout), before)
+
+    def test_answers_on_a_batch_question_without_option_names_the_option_to_give(self):
+        """sd:5065: the refusal on sd:5038 was a dead end; it now names `--option` and the labels."""
+        item, asked = self.batch_question()
+        refused = self.call("task", "note", item, "Approve", "--kind", "decision", "--answers", asked, code=1)
+        self.assertIn("--option LABEL, one of Approve, Reject", refused.stderr)
 
     def test_answers_refuses_a_review_batch_question(self):
         """A batch question is Review's: its ruling may file a task, which `review.rule` writes and a note does not."""
@@ -842,6 +944,21 @@ class TaskCLI(unittest.TestCase):
                   "--no-repo", code=2)
         self.assertIn("requires a field",
                       self.call("task", "edit", state["item"]["id"], code=1).stderr)
+
+    def test_help_says_how_to_defer_close_a_report_and_what_each_note_kind_is(self):
+        """sd:5065: no park verb exists, a report is closed elsewhere, and a note kind needs a meaning."""
+        def said(*verb):
+            return " ".join(self.call(*verb, "--help").stdout.split()).replace("- ", "-")
+
+        self.assertIn("to defer the item, set a later date; there is no park verb", said("task", "edit"))
+        self.assertIn("`report`, a scheduled job's run, closes with `sd reports acknowledge N`",
+                      said("store", "items"))
+        self.assertIn("`skill-review`, a skill catalogue review the runner works", said("store", "items"))
+        self.assertIn("a report closes with `sd reports acknowledge N`", said("task", "status"))
+        note = said("task", "note")
+        for kind in NOTE_KINDS:
+            with self.subTest(kind=kind):
+                self.assertRegex(note, rf"\b{kind} \(")
 
     def test_kind_help_says_the_kinds_come_from_the_installed_library(self):
         """sd:1000 (0f93e3b2bf82): a followup takes a checkout only on an sd_db from sd:809 on."""
@@ -1577,19 +1694,46 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
             "reports", "ingest", "fixture", "--run-id", "r1", "--started", "2026-09-08T00:00:00Z",
             "--ended", "2026-09-08T00:01:00Z", "--exit-code", "0", "--log", log, "--json").stdout)["item"]["id"]
 
-        lines = self.call("today").stdout.splitlines()
-        heads = [line for line in lines if not line.startswith(("#", " "))]
-        self.assertEqual(heads, ["Reports needing attention (1)", "Decisions waiting (1)",
-                                 "Open followups (1)", "Work (2)"])
+        lines = self.call("today", env={**self.environment, "COLUMNS": "120"}).stdout.splitlines()
+        # sd:5098: every section prints, in one order, as a table; a hand close is one line, not a row.
+        heads = [line for line in lines if line.endswith(")") and line.split(" (")[0] in HEADINGS.values()]
+        self.assertEqual(heads, ["Attention (1)", "Decisions (1)", "Landing now (0)", "Delivered (0)", "Planned (0)",
+                                 "Blocked (0)", "Unscheduled (1)", "Followups (1)", "Work (2)"])
+        self.assertEqual(lines[lines.index("Delivered (0)") + 1], "+1 closed by hand")
         text = "\n".join(lines)
-        self.assertIn(f"#{report}  planning  ", text)
+        self.assertRegex(text, rf"#{report} +- +planning ")
         # sd:5014: the note id is what `sd task note --answers` takes.
-        self.assertIn(f"#{open_item}  note #{asked['note']['id']}  Which store?", text)
-        self.assertIn(f"#{open_item}  Chase the vendor", text)
+        self.assertRegex(text, rf"#{open_item} +- +planning +#{asked['note']['id']} +Which store\?")
+        self.assertRegex(text, rf"#{open_item} +- +planning +#[0-9]+ +Chase the vendor")
         self.assertNotIn("Owed on a done item", text)
-        work = lines[lines.index("Work (2)") + 1:]
-        self.assertEqual([line.split()[0] for line in work if line.startswith("#")], [f"#{later}", f"#{late}"])
-        self.assertTrue(all(line.endswith(" · overdue") for line in work if line.startswith("#")), work)
+        work = lines[lines.index("Work (2)") + 3:]
+        self.assertEqual([line.split()[0] for line in work], [f"#{later}", f"#{late}"])
+        self.assertTrue(all(" late " in line for line in work), work)
+
+    def test_today_shows_gate_holders_and_an_unknown_gate(self):
+        """sd:5098: the holders `sd gate status --json` reads; a failed read is unknown, not an idle gate."""
+        import fcntl
+        slots = self.home / "slots"
+        slots.mkdir()
+        lock = slots / "slot.1.lock"
+        lock.write_text(f"{os.getpid()}\n")
+        (slots / "slot.1.info").write_text(json.dumps({"pid": os.getpid(), "label": "fixture tests", "since": 0}))
+        held = os.open(lock, os.O_RDWR)
+        self.addCleanup(os.close, held)
+        fcntl.flock(held, fcntl.LOCK_EX)
+        lines = self.call("today", env={**self.environment, "SD_GATE_SLOTS_DIR": str(slots)}).stdout.splitlines()
+        self.assertTrue(any(re.fullmatch(r"Gate slots: 1 holding \(fixture tests since .*\) · 0 waiting", line)
+                            for line in lines), lines)
+        # A folder the queue lock cannot be made in: the read fails.
+        unreadable = self.home / "unreadable"
+        unreadable.mkdir(mode=0o500)
+        self.addCleanup(unreadable.chmod, 0o700)
+        lines = self.call("today", env={**self.environment, "SD_GATE_SLOTS_DIR": str(unreadable)}).stdout.splitlines()
+        self.assertTrue(any(line.startswith("Gate slots: unknown (") for line in lines), lines)
+
+    def test_today_reads_the_lanes_own_key_prefix(self):
+        import sd_lane
+        self.assertEqual(sd_db.today.LANE_KEY_PREFIX, sd_lane.KEY_PREFIX)
 
     def test_today_json_stays_the_work_rows(self):
         self.call("task", "status", self.task("Busy"), "in_progress")

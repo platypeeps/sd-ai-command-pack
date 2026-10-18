@@ -310,8 +310,8 @@ class Unmanifested(Case):
         self.assertTrue(link.is_symlink())
         self.assertTrue((outside / "sd.db").exists())
         self.assertEqual(lines, [f"kept {link}: it is a link or not a directory",
-                                 f"kept {boundary}: no manifest (stopped run?)",
-                                 f"kept {inside}: no manifest (stopped run?)",
+                                 f"kept 2 backups under {self.nas}, named {boundary.name} to {inside.name}: "
+                                 "no manifest (stopped run?)",
                                  f"removed {gone[0]}", f"removed {gone[1]}"])
 
     def test_without_the_flag_the_same_folder_stays(self):
@@ -457,7 +457,7 @@ class MovedCopies(Case):
         self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
 
         self.assertTrue((old / "sd.db").exists())
-        self.assertEqual(lines, [f"kept {old}: no manifest (stopped run?)"])
+        self.assertEqual(lines, [f"kept 1 backup under {self.nas}, named {old.name}: no manifest (stopped run?)"])
 
     def test_a_dated_folder_holding_a_copied_store_is_kept(self):
         # A hand-kept copy of the live store holds earlier backup checkpoints too (sd:4694 lane review).
@@ -470,7 +470,7 @@ class MovedCopies(Case):
         self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
 
         self.assertTrue((kept / "sd.db").exists())
-        self.assertEqual(lines, [f"kept {kept}: no manifest (stopped run?)"])
+        self.assertEqual(lines, [f"kept 1 backup under {self.nas}, named {kept.name}: no manifest (stopped run?)"])
 
     def test_a_copy_taken_before_migrate_is_kept_with_its_reason(self):
         # sd:4700: four NAS copies read `'NoneType' object is not subscriptable` here.
@@ -484,8 +484,27 @@ class MovedCopies(Case):
         self.assertTrue((read_only / "sd.db").exists())
         self.assertTrue((missing / "sd.db").exists())
         self.assertEqual(lines, [
-            f"kept {read_only}: it was taken read-only before `migrate`, so no checkpoint row dates it",
-            f"kept {missing}: its database holds no checkpoint row for its run"])
+            f"kept {missing}: its database holds no checkpoint row for its run",
+            f"kept 1 backup under {self.nas}, named {read_only.name}: "
+            "it was taken read-only before `migrate`, so no checkpoint row dates it"])
+
+    def test_copies_kept_by_design_are_one_line_per_reason_and_faults_stay_per_copy(self):
+        # sd:5065: the hourly log held 961 `kept` lines, nearly all stopped runs and pre-migrate copies.
+        stopped = [self.stopped(self.mirror(self.snapshot(datetime(2026, 10, day, 9, 0, tzinfo=UTC))))
+                   for day in (1, 2, 3)]
+        read_only = self.uncheckpointed(self.mirror(self.snapshot(datetime(2026, 10, 4, 9, 0, tzinfo=UTC))))
+        missing = self.uncheckpointed(self.mirror(self.snapshot(datetime(2026, 10, 5, 9, 0, tzinfo=UTC))),
+                                      read_only=False)
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertEqual(lines, [
+            f"kept {missing}: its database holds no checkpoint row for its run",
+            f"kept 3 backups under {self.nas}, named {stopped[0].name} to {stopped[-1].name}: "
+            "no manifest (stopped run?)",
+            f"kept 1 backup under {self.nas}, named {read_only.name}: "
+            "it was taken read-only before `migrate`, so no checkpoint row dates it"])
 
     def test_a_pre_json_copy_inside_the_window_stays(self):
         young = self.pre_json(self.mirror(self.snapshot(datetime(2026, 10, 10, 9, 0, tzinfo=UTC))))
@@ -503,7 +522,8 @@ class MovedCopies(Case):
 
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertIn(f"would remove {pre}\n", completed.stdout)
-        self.assertIn(f"kept {halted}: no manifest (stopped run?)\n", completed.stdout)
+        self.assertIn(f"kept 1 backup under {self.nas}, named {halted.name}: no manifest (stopped run?)\n",
+                      completed.stdout)
         self.assertIn("dry run: 1 copy older than 7 days would be removed", completed.stdout)
         self.assertTrue(pre.exists())
         self.assertTrue(halted.exists())
