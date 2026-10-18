@@ -32,6 +32,8 @@ from ..repos import (
     ConfMissing,
     absolute_under_home,
     clone_lines,
+    item_ref,
+    item_refs,
     registered,
     registered_for,
     repo_channels,
@@ -429,16 +431,17 @@ def command_review(argv: list[str]) -> int:
         connection = _open_for_write()
         try:
             result = review.apply(connection, rest[0], who=getpass.getuser())
+            refs = item_refs(connection, [task["item"] for task in result["tasks"]] + list(result["closed"]))
         finally:
             connection.close()
         for task in result["tasks"]:
-            print(f"sd-db: approved note #{task['note']} filed sd:{task['item']} ({task['subject']})")
+            print(f"sd-db: approved note #{task['note']} filed {refs[task['item']]} ({task['subject']})")
         for note in result["existing"]:
             print(f"sd-db: approved note #{note} has its task already")
         for note in result["expired"]:
             print(f"sd-db: note #{note} expired, not ruled")
         for item in result["closed"]:
-            print(f"sd-db: closed sd:{item}")
+            print(f"sd-db: closed {refs[item]}")
         if not any(result.values()):
             print(f"sd-db: nothing to apply in queue {rest[0]}")
         return 0
@@ -467,6 +470,7 @@ def _review_file(path: Path, *, kev: str | None = None, blind: bool = False) -> 
     connection = _open_for_write()
     try:
         result = review.file(connection, batch, who=getpass.getuser(), suppress=kev is None)
+        refs = item_refs(connection, [result["item"]] if result["item"] is not None else [])
     finally:
         connection.close()
     for dropped in result["dropped"]:
@@ -474,9 +478,9 @@ def _review_file(path: Path, *, kev: str | None = None, blind: bool = False) -> 
     if result["item"] is None:
         print(f"sd-db: nothing to file for {result['ref']}")
     elif result["created"]:
-        print(f"sd-db: filed sd:{result['item']} {result['ref']}, {result['filed']} questions")
+        print(f"sd-db: filed {refs[result['item']]} {result['ref']}, {result['filed']} questions")
     else:
-        print(f"sd-db: sd:{result['item']} {result['ref']} is filed already; unchanged")
+        print(f"sd-db: {refs[result['item']]} {result['ref']} is filed already; unchanged")
     return 0
 
 
@@ -489,6 +493,7 @@ def _review_export(item: int, key_path: str | None, out: Path, *, as_reviews: bo
     connection = _open_for_write()
     try:
         lines = review.export(connection, item, key=key, who=getpass.getuser())
+        ref = item_refs(connection, [item])[item]
     finally:
         connection.close()
     manifest = lines[0]
@@ -498,7 +503,7 @@ def _review_export(item: int, key_path: str | None, out: Path, *, as_reviews: bo
         print(f"sd-db review export: cannot write {out}: {failure.strerror}; sd:{item} is {'closed' if manifest['closed'] else 'open'}, "
               f"and the same command writes it again", file=sys.stderr)
         return 1
-    print(f"sd-db: exported sd:{item}: {manifest['questions']} questions, {manifest['labels']} labels, "
+    print(f"sd-db: exported {ref}: {manifest['questions']} questions, {manifest['labels']} labels, "
           f"{manifest['open']} open, to {out}")
     return 0
 
@@ -841,9 +846,9 @@ def command_work(argv: list[str]) -> int:
         connection.close()
     row = state["item"]
     if not state["created"]:
-        print(f"sd-db: already registered as #{row['id']} ({row['status']})")
+        print(f"sd-db: already registered as {item_ref(row['id'], row['repo'])} ({row['status']})")
         return 0
-    print(f"sd-db: registered #{row['id']} {row['title']!r} as {row['status']}")
+    print(f"sd-db: registered {item_ref(row['id'], row['repo'])} {row['title']!r} as {row['status']}")
     if commit is None:
         print("sd-db: the file is not committed yet, so the row records no source commit")
     return 0

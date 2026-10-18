@@ -65,17 +65,21 @@ def bulk_cutoff(args: argparse.Namespace, reporting: Any) -> str | None:
     return reporting.cutoff(args.before)
 
 
-def bulk_preview(result: dict[str, Any]) -> str:
+def bulk_preview(result: dict[str, Any], connection: Any) -> str:
     """The dry run for a person: the rows, then the apply command to paste.
 
     The last line is the exact apply, with the stamped `before` and the plan
     filled in and `--who NAME` left for the caller. With no plan there is no
-    apply that could succeed, and the last line says so instead.
+    apply that could succeed, and the last line says so instead. Each row is
+    named with its repository, read over `connection` (sd:5124).
     """
+    from sd_db.repos import item_refs
+
+    refs = item_refs(connection, [row["id"] for row in result["selected"] + result["declined"]])
     lines = [f"clean reports before {result['before']}: {result['count']} selected, "
              f"{result['declined_count']} declined"]
-    lines += [f"  selected #{row['id']}  {row['created_at']}  {row['title']}" for row in result["selected"]]
-    lines += [f"  declined #{row['id']}: {row['why']}" for row in result["declined"]]
+    lines += [f"  selected {refs[row['id']]}  {row['created_at']}  {row['title']}" for row in result["selected"]]
+    lines += [f"  declined {refs[row['id']]}: {row['why']}" for row in result["declined"]]
     if result["plan"] is None:
         lines.append(f"no apply: a bulk acknowledge moves between 1 and {result['max_batch']} reports")
     else:
@@ -141,7 +145,7 @@ def run(args: argparse.Namespace) -> int:
         elif args.control_action == "acknowledge":
             result = acknowledge_reports(args, connection, reporting, workflow)
             if before is not None and not args.apply and not args.json:
-                print(bulk_preview(result))
+                print(bulk_preview(result, connection))
                 return 0
         elif args.control_action == "reopen":
             # The dashboard's Undo (sd:3504): `done` back to the status it was acknowledged from.

@@ -92,8 +92,11 @@ def days(due: Any, now: datetime.datetime) -> str:
 
 
 def repo_short(repo: Any) -> str:
-    """A repository key's last part: `~/repos/system` is `system`, `owner/name` is `name`."""
-    return str(repo).rstrip("/").rpartition("/")[2] if repo else "-"
+    """A Repo cell: `~/repos/system` is `system`, `owner/name` is `name`, and none is `fleet`, as each item
+    reference reads (`sd_db.repos.item_ref`, sd:5124)."""
+    from sd_db.repos import NO_REPO, short
+
+    return short(repo) or NO_REPO
 
 
 def _state(row: dict[str, Any]) -> str:

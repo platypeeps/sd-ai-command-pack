@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import paths, reads
+from .repos import item_ref
 
 __all__ = ["BRIEF_BYTES", "Brief", "checked_out_branch", "note_brief"]
 
@@ -100,11 +101,11 @@ def checked_out_branch(path: str | Path) -> str | None:
     return git("symbolic-ref", "--short", "-q", "HEAD") or None
 
 
-def _line(note: sqlite3.Row, *, with_item: bool) -> str:
-    """One note as text. A multi-line body is indented under its first line."""
+def _line(note: sqlite3.Row, *, with_item: bool, repo: str) -> str:
+    """One note as text, its item named with `repo` (sd:5124). A multi-line body is indented under its first line."""
     head = f"- [{note['kind']} #{note['id']} {note['timestamp'][:10]}]"
     if with_item:
-        head += f" ({note['item_title']}, sd:{note['item']})"
+        head += f" ({note['item_title']}, {item_ref(note['item'], repo)})"
     first, _, rest = str(note["body"]).strip().partition("\n")
     text = f"{head} {first}"
     if rest:
@@ -115,7 +116,7 @@ def _line(note: sqlite3.Row, *, with_item: bool) -> str:
 def _header(items: list[sqlite3.Row], scope: str, branch: str | None, repo: str) -> str:
     if scope == "branch" and len(items) == 1:
         item = items[0]
-        return f"Open followups and questions on {item['title']} (sd:{item['id']}, branch {branch}):"
+        return f"Open followups and questions on {item['title']} ({item_ref(item['id'], repo)}, branch {branch}):"
     if scope == "branch":
         return f"Open followups and questions on the {len(items)} items on branch {branch}:"
     return (
@@ -178,7 +179,7 @@ def note_brief(
 
     header = _header(items, scope, branch, repo)
     with_item = len(items) > 1
-    lines = [_line(note, with_item=with_item) for note in notes]
+    lines = [_line(note, with_item=with_item, repo=repo) for note in notes]
 
     # The size of each candidate is counted, not rendered: every part of
     # `_render`'s text is followed by one newline, so a candidate is the

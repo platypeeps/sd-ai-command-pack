@@ -2835,6 +2835,13 @@ def _lane_branches(lane: dict[str, Any]) -> set[str]:
     return {str(entry["branch"]) for entry in lane.get("entries") or [] if entry.get("branch")}
 
 
+def _lane_ref(lane: dict[str, Any], item: Any) -> str:
+    """`system sd:5103` for an item in this lane: the lane's repository is the item's, as `sd-ship` refuses others."""
+    from sd_db.repos import item_ref  # noqa: PLC0415 - a lane section read sd_db
+
+    return item_ref(item, lane.get("repository"))
+
+
 def _lane_rows(lane: dict[str, Any]) -> list[dict[str, Any]]:
     """Each item whose newest lane entry stopped short of a merge (sd:3495)."""
     rows: list[dict[str, Any]] = []
@@ -2844,7 +2851,7 @@ def _lane_rows(lane: dict[str, Any]) -> list[dict[str, Any]]:
         item = entry.get("item")
         why = entry.get("code") or entry.get("step") or ""
         rows.append(_row(
-            "lane-entry-failed", f"sd:{item}", f"sd:{item} {entry.get('branch') or ''}".rstrip(),
+            "lane-entry-failed", f"sd:{item}", f"{_lane_ref(lane, item)} {entry.get('branch') or ''}".rstrip(),
             str(entry.get("status")) + (f" at {why}" if why else "")
             + (f": {entry['reason']}" if entry.get("reason") else ""),
             f"fix it, then `sd-ship lane retry {item}`; `sd-ship lane list` shows the entry",
@@ -3624,12 +3631,15 @@ def _render_lane(section: dict[str, Any] | None, write: Any) -> None:
     if not section["entries"]:
         write("  nothing queued\n")
         return
-    _table(write, ["ID", "State", "At", "Held", "Branch"],
-           [[f"sd:{entry['item']}", entry["status"], entry.get("code") or entry.get("step") or "-",
+    import sd_views  # noqa: PLC0415 - only the table sections need it
+
+    repo = sd_views.repo_short(section.get("repository"))
+    _table(write, ["ID", "Repo", "State", "At", "Held", "Branch"],
+           [[f"#{entry['item']}", repo, entry["status"], entry.get("code") or entry.get("step") or "-",
              "held" if entry.get("held") else "-", entry.get("branch") or "-"] for entry in section["entries"]])
     for entry in section["entries"]:
         if entry.get("reason") and entry["status"] in LANE_FAILED:
-            write(f"  sd:{entry['item']}: {entry['reason']}\n")
+            write(f"  {_lane_ref(section, entry['item'])}: {entry['reason']}\n")
 
 
 def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:

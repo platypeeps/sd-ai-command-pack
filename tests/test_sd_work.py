@@ -287,14 +287,13 @@ class TaskCLI(unittest.TestCase):
         since = json.loads(self.call("store", "item", item, "--json").stdout)["item"]["status_since"]
         result = self.call("task", "note", item, "--kind", "decision",
                            "--body", "Late decision", "--json")
-        self.assertIn(f"sd:{item} is done since {since[:10]}, delivered by #336",
-                      result.stderr)
+        self.assertRegex(result.stderr, rf"sd: advisory: \S+ sd:{item} is done since {since[:10]}, delivered by #336")
         self.assertEqual("Late decision", json.loads(result.stdout)["note"]["body"])
 
     def test_a_done_item_without_a_merge_comment_says_none_is_recorded(self):
         item = self.done_item()
         result = self.call("task", "note", item, "--body", "Late note")
-        self.assertIn(f"sd:{item} is done since", result.stderr)
+        self.assertRegex(result.stderr, rf"sd: advisory: \S+ sd:{item} is done since")
         self.assertIn("no delivery is recorded", result.stderr)
         notes = json.loads(self.call("store", "item", item, "--json").stdout)["notes"]
         self.assertEqual("Late note", notes[-1]["body"])
@@ -1112,7 +1111,7 @@ class TaskRef(unittest.TestCase):
     def test_add_prints_the_new_id_first(self):
         """sd:3703. sd:3161 was a second add made to read the first one's id back."""
         shown = self.call("task", "add", "one row").stdout
-        self.assertRegex(shown.splitlines()[0], r"^#\d+  planning  one row$")
+        self.assertRegex(shown.splitlines()[0], r"^\S+ sd:\d+  planning  one row$")
 
     def test_today_carries_the_ref(self):
         state = self.add("HOA alarm follow-up", "--ref", "hoa:a2-vsd")
@@ -1210,7 +1209,7 @@ class Recurrence(unittest.TestCase):
         following = json.loads(self.call("store", "item", spawned, "--json").stdout)["item"]
         self.assertEqual((following["due"], following["recurrence"]), ("2026-01-08", "FREQ=WEEKLY"))
         shown = self.call("task", "status", spawned, "done").stdout
-        self.assertIn(f"next occurrence: #{spawned + 1} · due 2026-01-15", shown)
+        self.assertRegex(shown, rf"next occurrence: \S+ sd:{spawned + 1} · due 2026-01-15")
 
     def test_a_completion_that_ends_the_series_says_so(self):
         """The runtime case the write-time checks cannot see: no `due` left."""
@@ -1221,7 +1220,7 @@ class Recurrence(unittest.TestCase):
         shown = self.call("task", "status", item, "done").stdout
         self.assertIn("recurrence ended: ", shown)
         self.assertIn("no due date", shown)
-        self.assertNotIn("next occurrence: #", shown)
+        self.assertNotIn("next occurrence: ", shown)
 
     def test_a_completion_that_ends_the_series_carries_its_reason_in_json(self):
         item = self.add("Ends", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY")["item"]["id"]
@@ -1701,10 +1700,10 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
                                  "Blocked (0)", "Unscheduled (1)", "Followups (1)", "Work (2)"])
         self.assertEqual(lines[lines.index("Delivered (0)") + 1], "+1 closed by hand")
         text = "\n".join(lines)
-        self.assertRegex(text, rf"#{report} +- +planning ")
+        self.assertRegex(text, rf"#{report} +fleet +planning ")
         # sd:5014: the note id is what `sd task note --answers` takes.
-        self.assertRegex(text, rf"#{open_item} +- +planning +#{asked['note']['id']} +Which store\?")
-        self.assertRegex(text, rf"#{open_item} +- +planning +#[0-9]+ +Chase the vendor")
+        self.assertRegex(text, rf"#{open_item} +fleet +planning +#{asked['note']['id']} +Which store\?")
+        self.assertRegex(text, rf"#{open_item} +fleet +planning +#[0-9]+ +Chase the vendor")
         self.assertNotIn("Owed on a done item", text)
         work = lines[lines.index("Work (2)") + 3:]
         self.assertEqual([line.split()[0] for line in work], [f"#{later}", f"#{late}"])

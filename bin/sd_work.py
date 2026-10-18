@@ -544,6 +544,13 @@ def _name_refs(value: Any) -> None:
             row["ref"] = row["external_id"]
 
 
+def _ref(item: Any, repo: Any) -> str:
+    """`system sd:5103`, as a person reads an item (sd:5124); the rows came through `sd_db`, so it imports."""
+    from sd_db.repos import item_ref
+
+    return item_ref(item, repo)
+
+
 def _print_rows(rows: list[dict[str, Any]], *, moved: bool = False, today: str | None = None) -> None:
     """One line per row, and its checkout, reference and rule; `today` marks a past due date `overdue` (sd:3501)."""
     here = _standing_in(rows)
@@ -551,7 +558,7 @@ def _print_rows(rows: list[dict[str, Any]], *, moved: bool = False, today: str |
         priority = f" · P{row['priority']}" if row.get("priority") else ""
         due = f" · due {row['due']}" if row.get("due") else ""
         overdue = " · overdue" if today and row.get("due") and row["due"] < today else ""
-        print(f"#{row['id']}  {row['status']}  {row['title']}{priority}{due}{overdue}")
+        print(f"{_ref(row['id'], row.get('repo'))}  {row['status']}  {row['title']}{priority}{due}{overdue}")
         line = _repo_line(row, here=here, moved=moved)
         if line:
             print(line)
@@ -643,7 +650,7 @@ def _occurrence_line(value: dict[str, Any], following: Any) -> None:
     if following is None:
         print(f"  recurrence ended: {value.get('next_occurrence_reason')}")
         return
-    print(f"  next occurrence: #{following['id']} · due {following['due']}")
+    print(f"  next occurrence: {_ref(following['id'], following.get('repo'))} · due {following['due']}")
 
 
 #: A delivery commit as `sd_db.progress` requires it to be spelled: the full
@@ -930,7 +937,7 @@ def _done_advisory(workflow: Any, connection: Any, item: int) -> None:
     if row.get("status") != "done":
         return
     since = (row.get("status_since") or "")[:10]
-    head = f"sd:{item} is done" + (f" since {since}" if since else "")
+    head = f"{_ref(item, row.get('repo'))} is done" + (f" since {since}" if since else "")
     delivered = _delivered_by(state)
     tail = f", delivered by {delivered}" if delivered else "; no delivery is recorded"
     print(f"sd: advisory: {head}{tail}; the note is recorded anyway", file=sys.stderr)

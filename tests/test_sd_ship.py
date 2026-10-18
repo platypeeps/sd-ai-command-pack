@@ -2778,6 +2778,24 @@ roles:
         self.held_merge()
         self.assertNotEqual(ship.sd_lib.delivered(self.root, f"sd:{self.item}"), ship.sd_lib.YES)
 
+    def test_a_held_merge_names_each_co_delivered_item_with_its_repository(self):
+        """sd:5124: the next step a person reads names each item it asks them to close as `operator sd:N`."""
+        closes = self.closes_items()
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [{"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))
+        self.prepare("--deliver", "--acceptance-file", str(acceptance), *self.also(*closes))
+        saved = self.double._route
+
+        def route(method, path, body):
+            if method == "PUT" and path.endswith("/merge"):
+                self.remote.commit_on("main", "raced\n\nAuthored-with: human", files={"raced.py": "x = 1\n"})
+            return saved(method, path, body)
+        self.double._route = route
+        result = self.merge()
+        self.assertEqual(result["workflow"]["blocker"]["code"], "base_advanced_at_merge")
+        named = ", ".join(f"{self.operator.name} sd:{number}" for number in closes)
+        self.assertIn(f"close the co-delivered items {named} the same way", result["workflow"]["next_action"])
+
     def test_an_unheld_squash_still_reads_as_delivered_in_git(self):
         acceptance = self.directory / "acceptance.json"
         acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [{"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))

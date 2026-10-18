@@ -2892,7 +2892,7 @@ class LaneTests(InventoryFixture):
         self.assertNotIn("body", section["entries"][1])
         stream = io.StringIO()
         status._render_lane(section, stream.write)
-        self.assertRegex(stream.getvalue(), r"\n  sd:22 +skipped +head_moved +- +task/twenty-two\n")
+        self.assertRegex(stream.getvalue(), r"\n  #22 +widget +skipped +head_moved +- +task/twenty-two\n")
 
     def test_a_repository_with_no_github_origin_has_no_lane(self) -> None:
         section = status.lane_section(self.repo, {"HOME": str(self.home)})

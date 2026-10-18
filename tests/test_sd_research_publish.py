@@ -1364,7 +1364,7 @@ class ObsidianItemTests(Fixture):
         said = self.publish()
         self.assertEqual(self.published(self.item), {"%s::a" % self.repo: {"title": "A", "obsidian": self.link}})
         self.assertEqual(self.comments(self.item), ["Published obsidian a: %s" % self.link])
-        self.assertTrue(any("item: obsidian link for sd:%d recorded" % self.item in line for line in said), said)
+        self.assertTrue(any("item: obsidian link for %s sd:%d recorded" % (self.repo.name, self.item) in line for line in said), said)
         self.publish()
         self.assertEqual(len(self.comments(self.item)), 1)
 
@@ -1375,7 +1375,7 @@ class ObsidianItemTests(Fixture):
         later = self.item + 1
         said = self.publish([dict(src="10-x/a.md", out="a", title="A", item=later)])
         self.assertTrue((self.briefs() / "a.md").is_file())
-        self.assertTrue(any("item: obsidian link for sd:%d not recorded (" % later in line
+        self.assertTrue(any("item: obsidian link for %s sd:%d not recorded (" % (self.repo.name, later) in line
                             for line in said), said)
         self.assertEqual(create_item(self.connection, kind="task", title="Later"), later)
         self.publish([dict(src="10-x/a.md", out="a", title="A", item=later)])
