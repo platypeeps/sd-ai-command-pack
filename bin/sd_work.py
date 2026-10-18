@@ -277,7 +277,8 @@ def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
     if args.unpark:
         changes["parked_at"] = None
     if not changes and not getattr(args, "experiment", None):
-        raise WorkRefusal("edit requires a field to change")
+        raise WorkRefusal(f"edit requires a field to change; name one, such as "
+                          f"`sd task edit {args.item} --due YYYY-MM-DD`; `sd task edit --help` lists them")
     return changes
 
 
@@ -449,7 +450,8 @@ def _register(sd_db, connection, args, who: str) -> Any:
     workflow, repos, docs_work = _register_library(sd_db)
     root = sd_lib.repo_root()
     if root is None:
-        raise WorkRefusal("register requires a Git checkout")
+        raise WorkRefusal("register requires a Git checkout; run `sd work register PATH` "
+                          "from inside the checkout that holds PATH")
     prd = (root / args.path).resolve()
     try:
         relative = prd.relative_to(root).as_posix()
@@ -700,7 +702,8 @@ def _verified_tip(root: pathlib.Path) -> tuple[str, str]:
     if not remote:
         head = sd_lib.git_output(["symbolic-ref", "--quiet", "HEAD"], root)
         if head not in ("refs/heads/main", "refs/heads/master"):
-            raise WorkRefusal("a local-only delivery must be verified on main or master")
+            raise WorkRefusal("a local-only delivery must be verified on main or master; land the commit there, "
+                              f"run `git -C {root} switch main`, then run this command again")
         tip = sd_lib.git_output(["rev-parse", "--verify", "HEAD^{commit}"], root)
         if not tip:
             raise WorkRefusal(f"{root} has no commit on {head} to verify against")
@@ -738,7 +741,8 @@ def _delivery_reason(row: Any, commit: str, checkout: str | None = None,
     delivers nothing, and the operator's reason says it was the whole item.
     """
     if not _is_commit(commit):
-        raise WorkRefusal("--delivered-by takes the full lowercase commit ID")
+        raise WorkRefusal(f"--delivered-by takes the full lowercase commit ID; "
+                          f"`git rev-parse {commit}` in the checkout prints it")
     if not row["repo"] and not checkout:
         raise WorkRefusal(
             f"item {row['id']} belongs to no checkout, so no commit can be verified "
@@ -984,7 +988,8 @@ def _deliver(progress: Any, workflow: Any, connection: Any, args: argparse.Names
         return progress.deliver_work(
             connection, args.item, args.commit, who=who, expected_revision=args.if_revision)
     if not (args.reason or "").strip():
-        raise WorkRefusal("--associated needs --reason: say why the merge carried Item: and not Delivers:")
+        raise WorkRefusal("--associated needs --reason: say why the merge carried Item: and not Delivers:, as "
+                          f"`sd work deliver {args.item} {args.commit} --associated --reason TEXT`")
     state = workflow.item_state(connection, args.item)
     row = state["item"]
     if row["kind"] in ASSOCIATED_STATUS_KINDS:

@@ -108,6 +108,18 @@ class TaskCLI(unittest.TestCase):
         refused = self.call("task", "status", item, "done", code=1)
         self.assertIn(f"`sd reports acknowledge {item} --resolve-followups`", refused.stderr)
 
+    def test_an_edit_with_no_field_names_the_edit_command(self):
+        """sd:5065: the refusal names the command that fixes it."""
+        item = json.loads(self.call("task", "add", "A task", "--json").stdout)["item"]["id"]
+        refused = self.call("task", "edit", item, code=1)
+        self.assertIn(f"`sd task edit {item} --due YYYY-MM-DD`", refused.stderr)
+
+    def test_register_outside_a_checkout_names_where_to_run_it(self):
+        """sd:5065: the refusal names the command that fixes it."""
+        refused = self.call("work", "register", "docs/work/x/prd.md", code=1)
+        self.assertIn("register requires a Git checkout", refused.stderr)
+        self.assertIn("run `sd work register PATH` from inside", refused.stderr)
+
     def test_task_show_reads_what_store_item_reads(self):
         """sd:1112. `sd task show` is a read alias; `sd store item` stays canonical.
 

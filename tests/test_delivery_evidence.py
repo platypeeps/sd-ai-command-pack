@@ -331,6 +331,15 @@ class DeliveryReasonTests(unittest.TestCase):
     def test_an_abbreviated_commit_is_refused(self) -> None:
         with self.assertRaisesRegex(sd_work.WorkRefusal, "full lowercase commit ID"):
             sd_work._delivery_reason(self.row, self.delivered[:12])
+        # sd:5065: the refusal names the command that prints the full ID.
+        with self.assertRaisesRegex(sd_work.WorkRefusal, f"`git rev-parse {self.delivered[:12]}`"):
+            sd_work._delivery_reason(self.row, self.delivered[:12])
+
+    def test_a_local_only_delivery_off_main_names_the_switch(self) -> None:
+        """sd:5065: the refusal names the command that fixes it."""
+        self.git("checkout", "-q", "-b", "side")
+        with self.assertRaisesRegex(sd_work.WorkRefusal, r"`git -C \S+ switch main`"):
+            sd_work._delivery_reason(self.row, self.delivered)
 
     def test_a_task_belonging_to_no_checkout_has_nothing_to_verify(self) -> None:
         with self.assertRaisesRegex(sd_work.WorkRefusal, "belongs to no checkout"):
@@ -851,6 +860,7 @@ class AssociatedDeliveryCLITests(unittest.TestCase):
                 refused = case.call("work", "deliver", item, sha, "--associated", *extra,
                                     code=1, cwd=root)
                 self.assertIn("--associated needs --reason", refused.stderr)
+                self.assertIn(f"`sd work deliver {item} {sha} --associated --reason TEXT`", refused.stderr)
         self.assertEqual("planning", self.status(case, root, item))
 
     def test_a_reason_without_associated_is_refused(self) -> None:
