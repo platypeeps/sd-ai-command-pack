@@ -2680,5 +2680,90 @@ class ChannelsTests(Fixture):
         self.assertFalse(any(line.startswith(PUBLISH.HELD) for line in said), said)
 
 
+class BriefTests(Fixture):
+    """sd:5102: a routine brief is designated on its item, `fields.publish`, and queued like a document.
+
+    A brief is a database row with no `research.conf.py`, so its item holds the designation, with the keys a conf
+    entry takes. The request is the same file, fingerprint and receipt; its `content` is the row's text and its
+    `source` names the item, since no file holds the brief.
+    """
+
+    STEM = "2026-10-18 - Daily Intel Brief"
+    TEXT = "---\ntags:\n  - brief\n---\n\n# Daily Intel Brief\n\nThree things.\n"
+    URL = "https://www.notion.so/example-page-0123456789abcdef0123456789abcdef"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.database()
+        from sd_db import routine_briefs  # noqa: PLC0415 - after the path is set
+        from sd_db.writes import upsert_repo  # noqa: PLC0415
+        sd_db = sd_lib.import_sd_db().module
+        self.key = sd_db.paths.key(str(self.repo.resolve()))
+        upsert_repo(self.connection, self.key)
+        self.brief = routine_briefs.add(self.connection, self.STEM, self.TEXT, repo=str(self.repo.resolve()),
+                                        who="test")["item"]
+
+    def fields(self, value: object) -> None:
+        self.connection.execute("UPDATE item SET fields = ? WHERE id = ?", (json.dumps(value), self.brief))
+        self.connection.commit()
+
+    def request(self, destination: str = "notion") -> dict:
+        return json.loads((PUBLISH.QUEUE / ("my-research.%s.%s.json" % (self.STEM, destination))).read_text())
+
+    def test_an_undesignated_brief_queues_nothing(self) -> None:
+        self.assertEqual(PUBLISH.enqueue_briefs(self.connection), [])
+        self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_a_designated_brief_queues_its_row_text_naming_its_item(self) -> None:
+        self.fields({"publish": {"notion": {}}})
+        reports = PUBLISH.enqueue_briefs(self.connection)
+        self.assertTrue(any(line.startswith("mirror: queued %s " % self.STEM) for line in reports), reports)
+        request = self.request()
+        self.assertEqual((request["content"], request["item"], request["source"], request["rendered"]),
+                         (self.TEXT, self.brief, "sd:%d" % self.brief, ""))
+        self.assertEqual((request["document"], request["title"], request["space_id"]), (self.STEM, self.STEM, PRIVATE_FOLDER))
+
+    def test_the_same_text_again_is_already_queued(self) -> None:
+        self.fields({"publish": {"drive": {}}})
+        PUBLISH.enqueue_briefs(self.connection)
+        again = PUBLISH.enqueue_briefs(self.connection)
+        self.assertTrue(any("%s: already queued" % self.STEM in line for line in again), again)
+
+    def test_a_url_the_item_records_is_pinned_so_the_next_drain_updates_it(self) -> None:
+        # Drain step 6 records the URL, so the key the pin reads is the key step 6 writes.
+        self.fields({"publish": {"notion": {}}})
+        PUBLISH.enqueue_briefs(self.connection)
+        name = "my-research.%s.notion.json" % self.STEM
+        self.assertEqual(PUBLISH.delivered_main([name, self.request()["fingerprint"], "--url", self.URL]), 0)
+        PUBLISH.enqueue_briefs(self.connection)
+        self.assertEqual(self.request()["page"], self.URL)
+
+    def test_a_page_the_designation_names_wins_over_the_recorded_url(self) -> None:
+        self.fields({"publish": {"notion": {"page": "https://notion.so/mine"}},
+                     "published": {"%s::%s" % (self.key, self.STEM): {"notion": self.URL}}})
+        PUBLISH.enqueue_briefs(self.connection)
+        self.assertEqual(self.request()["page"], "https://notion.so/mine")
+
+    def test_fields_that_are_not_an_object_are_reported_not_queued(self) -> None:
+        for value in ([1], {"publish": ["notion"]}):
+            with self.subTest(value=value):
+                self.fields(value)
+                reports = PUBLISH.enqueue_briefs(self.connection)
+                self.assertTrue(any("sd:%d" % self.brief in line and "not queued" in line for line in reports), reports)
+                self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_only_the_named_items_are_queued(self) -> None:
+        self.fields({"publish": {"notion": {}}})
+        self.assertEqual(PUBLISH.enqueue_briefs(self.connection, items={self.brief + 1}), [])
+        self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_a_channel_the_repo_leaves_out_is_refused(self) -> None:
+        self.connection.execute("UPDATE repo SET channels = ? WHERE path = ?", (json.dumps({"obsidian": {}}), self.key))
+        self.connection.commit()
+        self.fields({"publish": {"notion": {}}})
+        PUBLISH.enqueue_briefs(self.connection)
+        self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")) if PUBLISH.QUEUE.exists() else [], [])
+
+
 if __name__ == "__main__":
     unittest.main()

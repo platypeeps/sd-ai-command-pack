@@ -122,7 +122,8 @@ wrong format is a copy nobody can use where it landed.
 
 **An outward destination is opt-in, per document.** Notion and Google Drive are
 mirrors, not defaults. The user designates a document; it is recorded in that
-document's `notion=` or `drive=` key in `research.conf.py`. Nothing infers a
+document's `notion=` or `drive=` key in `research.conf.py`, or for a routine
+brief, in its item's `fields.publish`. Nothing infers a
 target, and both keys on one entry are two mirrors rather than a choice. A
 render enqueues each sync under `~/.claude/pending-mirror-syncs/` and an agent
 session drains it, because rendering runs in a git hook and in CI, and neither
