@@ -1026,6 +1026,27 @@ def recorded(path: Path, wanted: dict[str, Any], what: str) -> str:
     return str(pending.get(what, "")).strip()
 
 
+def delivered_url(receipt: Path, wanted: dict[str, Any], cfg: dict[str, Any]) -> str:
+    """The URL drain step 6 left on `receipt`, for a routine brief's entry
+    `cfg` (one carrying its `content`), or "".
+
+    A brief has no step 5 (sd:5102): no designation records the copy, so the
+    receipt is what lets the next generation update it. Like `recorded`, it
+    is reused only in the container it went to -- the receipt's
+    `delivered_to` equal to `wanted` -- and only for the same item. A
+    receipt that names no container, from before it was recorded or for an
+    older generation, reuses nothing, and the drain adopts by title in the
+    named container (contract step 3).
+    """
+    if not isinstance(cfg.get("content"), str):
+        return ""
+    record = load_record(receipt)
+    if record.get("delivered_to") != wanted or record.get("item") != cfg.get("item"):
+        return ""
+    url = record.get("url")
+    return url.strip() if isinstance(url, str) else ""
+
+
 def receipts() -> Path:
     """Where the last-queued fingerprint of every request is kept.
 
@@ -1325,6 +1346,13 @@ def acknowledge_request(name: str, fingerprint: str, url: str = "") -> tuple[int
     record.update(delivered=fingerprint)
     if url:
         record.update(url=url)
+    # Where this URL went (sd:5122): the container `enqueue` recorded for this
+    # generation, so `delivered_url` reuses it there only. A newer generation
+    # queued since names its own container, not this URL's: none is recorded.
+    if url and record.get("queued") == fingerprint and isinstance(record.get("identity"), dict):
+        record.update(delivered_to=record["identity"])
+    else:
+        record.pop("delivered_to", None)
     # The item of the generation delivered, or none: a newer request's item
     # is not where this URL went.
     if item is not None:
@@ -1647,7 +1675,8 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
                 continue
             # The designation is the answer where it gives one; the queue records
             # what a drain did, and never overrides what the document says.
-            carried = "" if request[what] else recorded(path, identity, what)
+            carried = "" if request[what] else (recorded(path, identity, what)
+                                                or delivered_url(receipts() / name, identity, cfg))
             request[what] = request[what] or carried
             reverted = not force and reverts_to_delivered(path, name, digest)
             if dry:
@@ -1659,7 +1688,7 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
             path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
             reports += record_queued(name, dict(
                 queued=digest, revision=rev, repo=str(home), document=out,
-                destination=target["destination"]))
+                destination=target["destination"], identity=identity if isinstance(cfg.get("content"), str) else None))
             reports.append(queued_report(out, target["target"], what, carried, reverted))
     return reports
 
@@ -1746,15 +1775,11 @@ def brief_docs(
     research.conf.py entry takes. The entry carries the row's text as
     `content` and its item; `mirror_request` names the item as the source.
 
-    Where the designation names no page or file and the item's
-    `fields.published` records this document's URL there, that URL is pinned
-    as `page=` or `file=`. It is the record drain step 6 leaves, so the next
-    generation updates that copy, as step 5's id does for a document. Fields
-    that are not an object, or a `publish` that is not one, are reported and
-    not queued.
+    Nothing here pins a copy: `enqueue` carries the URL drain step 6 left
+    on the receipt, and only into the container it went to (`delivered_url`).
+    Fields that are not an object, or a `publish` that is not one, are
+    reported and not queued.
     """
-    from sd_db import paths  # noqa: PLC0415 - the checkout's `lib/`
-
     docs: dict[str, list[dict[str, Any]]] = {}
     problems: list[str] = []
     rows = connection.execute(
@@ -1782,20 +1807,10 @@ def brief_docs(
             problems.append("mirror: sd:%s: the brief stores no text; not queued"
                             % row["id"])
             continue
-        published = fields.get("published")
-        published = published if isinstance(published, dict) else {}
-        home = repo_home(paths.expand(row["repo"]))
-        urls = published.get("%s::%s" % (paths.key(str(home)), row["title"]))
-        urls = urls if isinstance(urls, dict) else {}
         entry: dict[str, Any] = {"out": row["title"], "title": row["title"],
                                  "item": row["id"], "content": text}
-        for destination in ("notion", "drive"):
-            raw = designation.get(destination)
-            if isinstance(raw, dict):
-                pin = BY_NAME[destination].what
-                url = urls.get(destination)
-                recorded_url = url if isinstance(url, str) else ""
-                entry[destination] = {**raw, pin: raw.get(pin) or recorded_url}
+        entry.update({destination: dict(designation[destination]) for destination in ("notion", "drive")
+                      if isinstance(designation.get(destination), dict)})
         docs.setdefault(row["repo"], []).append(entry)
     return docs, problems
 
@@ -1838,7 +1853,7 @@ def reverts_to_delivered(path: Path, name: str, digest: str) -> bool:
     return path.exists() and load_record(receipts() / name).get("delivered") == digest
 
 
-def record_queued(name: str, fields: dict[str, str]) -> list[str]:
+def record_queued(name: str, fields: dict[str, Any]) -> list[str]:
     """Record on the receipt what was just queued, or say why it could not.
 
     The request is written by then; only the memory of it is not, and the cost
@@ -1849,6 +1864,10 @@ def record_queued(name: str, fields: dict[str, str]) -> list[str]:
         record = load_record(receipts() / name)
         record.update(fields)
         record.pop("fingerprint", None)
+        # Only a routine brief records its container (sd:5122, `delivered_url`):
+        # a document's receipt keeps the shape it had.
+        if record.get("identity") is None:
+            record.pop("identity", None)
         (receipts() / name).write_text(
             json.dumps(record, indent=2) + "\n", encoding="utf-8")
     except OSError as problem:

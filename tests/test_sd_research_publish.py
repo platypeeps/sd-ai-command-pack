@@ -2710,6 +2710,22 @@ class BriefTests(Fixture):
     def request(self, destination: str = "notion") -> dict:
         return json.loads((PUBLISH.QUEUE / ("my-research.%s.%s.json" % (self.STEM, destination))).read_text())
 
+    def designate(self, publish: dict) -> None:
+        """Set `fields.publish` alone, keeping what step 6 recorded in `fields.published`."""
+        self.connection.execute("UPDATE item SET fields = json_set(fields, '$.publish', json(?)) WHERE id = ?",
+                                (json.dumps(publish), self.brief))
+        self.connection.commit()
+
+    def deliver(self, destination: str = "notion") -> None:
+        """Drain step 6 for the pending request, as `sd-research-kit delivered` runs it."""
+        name = "my-research.%s.%s.json" % (self.STEM, destination)
+        self.assertEqual(PUBLISH.delivered_main([name, self.request(destination)["fingerprint"], "--url", self.URL]), 0)
+
+    def extend(self, more: str) -> None:
+        self.connection.execute("UPDATE item SET body = ? WHERE id = ?", (json.dumps({"text": self.TEXT + more}),
+                                                                           self.brief))
+        self.connection.commit()
+
     def test_an_undesignated_brief_queues_nothing(self) -> None:
         self.assertEqual(PUBLISH.enqueue_briefs(self.connection), [])
         self.assertFalse(PUBLISH.QUEUE.exists())
@@ -2729,18 +2745,65 @@ class BriefTests(Fixture):
         again = PUBLISH.enqueue_briefs(self.connection)
         self.assertTrue(any("%s: already queued" % self.STEM in line for line in again), again)
 
-    def test_a_url_the_item_records_is_pinned_so_the_next_drain_updates_it(self) -> None:
-        # Drain step 6 records the URL, so the key the pin reads is the key step 6 writes.
-        self.fields({"publish": {"notion": {}}})
+    def test_a_delivered_copy_is_updated_by_the_next_generation_in_its_container(self) -> None:
+        # Drain step 6 records the URL and the container it went to; the next generation there updates that copy.
+        self.designate({"notion": {}})
         PUBLISH.enqueue_briefs(self.connection)
-        name = "my-research.%s.notion.json" % self.STEM
-        self.assertEqual(PUBLISH.delivered_main([name, self.request()["fingerprint"], "--url", self.URL]), 0)
+        self.deliver()
+        again = PUBLISH.enqueue_briefs(self.connection)
+        self.assertTrue(any("unchanged since it was last mirrored" in line for line in again), again)
+        self.extend("Four things.\n")
         PUBLISH.enqueue_briefs(self.connection)
         self.assertEqual(self.request()["page"], self.URL)
 
-    def test_a_page_the_designation_names_wins_over_the_recorded_url(self) -> None:
-        self.fields({"publish": {"notion": {"page": "https://notion.so/mine"}},
-                     "published": {"%s::%s" % (self.key, self.STEM): {"notion": self.URL}}})
+    def test_a_delivered_copy_is_not_reused_in_another_container(self) -> None:
+        # sd:5122 round 1: a URL belongs to the container it was created under, as a carried id does (contract
+        # step 4), so another scope, space or folder publishes afresh there.
+        for before, after, destination, what in (
+                ({"notion": {}}, {"notion": {"team": True}}, "notion", "page"),
+                ({"notion": {}}, {"notion": {"space": "Archive"}}, "notion", "page"),
+                ({"drive": {}}, {"drive": {"folder": "Elsewhere"}}, "drive", "file")):
+            with self.subTest(after=after):
+                self.designate(before)
+                PUBLISH.enqueue_briefs(self.connection)
+                self.deliver(destination)
+                self.designate(after)
+                PUBLISH.enqueue_briefs(self.connection)
+                self.assertEqual(self.request(destination).get(what, ""), "")
+
+    def test_a_delivery_of_an_older_generation_records_no_container(self) -> None:
+        # A newer request was queued after the drain read the older one: the receipt's container is the newer
+        # request's, not where this URL went, so nothing is carried from it.
+        self.designate({"notion": {}})
+        PUBLISH.enqueue_briefs(self.connection)
+        drained = self.request()["fingerprint"]
+        self.designate({"notion": {"team": True}})
+        PUBLISH.enqueue_briefs(self.connection)
+        name = "my-research.%s.notion.json" % self.STEM
+        self.assertEqual(PUBLISH.delivered_main([name, drained, "--url", self.URL]), 0)
+        self.assertNotIn("delivered_to", json.loads((PUBLISH.receipts() / name).read_text()))
+        self.extend("Four things.\n")
+        PUBLISH.enqueue_briefs(self.connection)
+        self.assertEqual(self.request().get("page", ""), "")
+
+    def test_a_receipt_from_before_containers_were_recorded_carries_nothing(self) -> None:
+        # Older state: a receipt the previous version wrote names no container, so the drain adopts by title.
+        self.designate({"drive": {}})
+        PUBLISH.enqueue_briefs(self.connection)
+        self.deliver("drive")
+        receipt = PUBLISH.receipts() / ("my-research.%s.drive.json" % self.STEM)
+        record = json.loads(receipt.read_text())
+        record.pop("delivered_to", None)
+        receipt.write_text(json.dumps(record))
+        self.extend("Four things.\n")
+        PUBLISH.enqueue_briefs(self.connection)
+        self.assertEqual(self.request("drive").get("file", ""), "")
+
+    def test_a_page_the_designation_names_wins_over_the_delivered_url(self) -> None:
+        self.designate({"notion": {}})
+        PUBLISH.enqueue_briefs(self.connection)
+        self.deliver()
+        self.designate({"notion": {"page": "https://notion.so/mine"}})
         PUBLISH.enqueue_briefs(self.connection)
         self.assertEqual(self.request()["page"], "https://notion.so/mine")
 

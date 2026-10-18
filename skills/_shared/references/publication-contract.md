@@ -196,8 +196,11 @@ entry, so its item holds the designation: `fields.publish`, with the same
 same queue, with the same request, fingerprint and receipt. The request carries
 the row's text as `content`, the brief's item as `item`, and `sd:<item>` as its
 `source`, which the pointer line names. Step 5 writes nothing for a brief: step
-6 records the URL on its item, and the next render pins that URL as `page=` or
-`file=` unless the designation names one.
+6 records the URL on its item and, with the container it went to, on the
+receipt. The next render carries that URL as `page=` or `file=` only while the
+request names the same container, as step 4's carried id; another scope, space
+or folder publishes afresh there, and a page or file the designation names
+wins.
 
 ### A repo's channels setting
 
@@ -577,7 +580,7 @@ Draining is six steps per request, and the order matters:
    document's `research.conf.py` entry, and it is what the *next render* reads
    — step 4 only carries the id as far as the current request. A routine
    brief's request (`source` `sd:<item>`) skips this step: step 6 records the
-   URL on its item, and the next render pins it.
+   URL and its container, and the next render carries it into that container.
 
    A designation written as the bare `True` shorthand is amended into the dict
    that records the id: `notion=True` becomes `notion=dict(page="<id>")`, which
