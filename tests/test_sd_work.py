@@ -120,6 +120,28 @@ class TaskCLI(unittest.TestCase):
         self.assertIn("register requires a Git checkout", refused.stderr)
         self.assertIn("run `sd work register PATH` from inside", refused.stderr)
 
+    def test_store_items_since_lists_only_rows_created_or_updated_since(self):
+        """sd:5065: `--since` takes a date (00:00 UTC) or a duration; a bad value names both forms."""
+        old = json.loads(self.call("task", "add", "Old", "--json").stdout)["item"]["id"]
+        new = json.loads(self.call("task", "add", "New", "--json").stdout)["item"]["id"]
+        touched = json.loads(self.call("task", "add", "Touched", "--json").stdout)["item"]["id"]
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            connection.execute("UPDATE item SET created_at = '2026-01-01T00:00:00+00:00', "
+                               "updated_at = '2026-01-02T00:00:00+00:00' WHERE id = ?", (old,))
+            connection.execute("UPDATE item SET created_at = '2026-01-01T00:00:00+00:00' WHERE id = ?", (touched,))
+            connection.commit()
+        for value in ("2d", "36h", "90m", "1w", "2026-01-03"):
+            with self.subTest(value=value):
+                listed = json.loads(self.call("store", "items", "--since", value, "--json").stdout)
+                self.assertEqual(sorted(row["id"] for row in listed), sorted([new, touched]))
+        listed = json.loads(self.call("store", "items", "--since", "2026-01-02", "--json").stdout)
+        self.assertEqual(sorted(row["id"] for row in listed), sorted([old, new, touched]))
+        for value in ("yesterday", "2026-02-30", "5", "-2d", "0d", "99999999999w"):
+            with self.subTest(value=value):
+                refused = self.call("store", "items", "--since", value, code=2)
+                self.assertIn("give YYYY-MM-DD (00:00 UTC) or a duration such as 90m, 6h, 2d or 1w",
+                              " ".join(refused.stderr.split()))
+
     def test_task_show_reads_what_store_item_reads(self):
         """sd:1112. `sd task show` is a read alias; `sd store item` stays canonical.
 

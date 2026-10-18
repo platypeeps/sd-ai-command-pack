@@ -1123,6 +1123,44 @@ def _ref_checked(args: argparse.Namespace) -> None:
         raise WorkRefusal("--ref names one occurrence, so it does not take --recur")
 
 
+#: `--since` durations: a count and a unit (sd:5065).
+SINCE_UNITS = {"m": "minutes", "h": "hours", "d": "days", "w": "weeks"}
+
+
+def since(value: str) -> datetime.datetime:
+    """`store items --since`: `YYYY-MM-DD` as 00:00 UTC, or a positive duration back from now."""
+    duration = re.fullmatch(r"([1-9][0-9]*)([mhdw])", value)
+    if duration:
+        try:
+            return (datetime.datetime.now(datetime.timezone.utc)
+                    - datetime.timedelta(**{SINCE_UNITS[duration[2]]: int(duration[1])}))
+        except OverflowError:
+            pass
+    if re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+        try:
+            return datetime.datetime.fromisoformat(value).replace(tzinfo=datetime.timezone.utc)
+        except ValueError:
+            pass
+    raise argparse.ArgumentTypeError(
+        f"{value!r}: give YYYY-MM-DD (00:00 UTC) or a duration such as 90m, 6h, 2d or 1w")
+
+
+def _touched_since(row: dict[str, Any], cutoff: datetime.datetime) -> bool:
+    """Whether the row was created or updated at or after `cutoff`; a stamp without a zone reads as UTC.
+
+    An unreadable stamp keeps the row: unknown is not "older".
+    """
+    for stamp in (row.get("created_at"), row.get("updated_at")):
+        if stamp:
+            try:
+                moment = datetime.datetime.fromisoformat(stamp)
+            except (TypeError, ValueError):
+                return True
+            if (moment if moment.tzinfo else moment.replace(tzinfo=datetime.timezone.utc)) >= cutoff:
+                return True
+    return False
+
+
 def _items(sd_db: Any, workflow: Any, args: argparse.Namespace, connection: Any) -> list[dict[str, Any]]:
     """`sd store items`, filtered as its flags ask.
 
@@ -1133,7 +1171,8 @@ def _items(sd_db: Any, workflow: Any, args: argparse.Namespace, connection: Any)
     return [row for row in (dict(found) for found in sd_db.reads.backlog_items(connection, repo=here))
             if (not args.open or row["status"] != "done")
             and (not args.kind or row["kind"] == args.kind)
-            and (not args.status or row["status"] == args.status)]
+            and (not args.status or row["status"] == args.status)
+            and (getattr(args, "since", None) is None or _touched_since(row, args.since))]
 
 
 def _note_text(args: argparse.Namespace) -> str:
@@ -1580,6 +1619,9 @@ def register(groups: Any, store: Any) -> None:
                                       "job's run, closes with `sd reports acknowledge N`; `skill-review`, "
                                       "a skill catalogue review the runner works, closes when the run ends")
     items.add_argument("--status", help="filter by workflow status")
+    items.add_argument("--since", type=since, metavar="DATE|DURATION",
+                       help="only items created or updated since then: YYYY-MM-DD (00:00 UTC) "
+                            "or a duration back from now, such as 90m, 6h, 2d or 1w")
     _output(items, "items")
     item = store.add_parser("item", help="one workspace item, notes, and revision")
     item.add_argument("item", type=item_id, help=ITEM_HELP)
