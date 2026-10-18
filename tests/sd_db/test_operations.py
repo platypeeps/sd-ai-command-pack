@@ -4,6 +4,7 @@ import json
 import plistlib
 import subprocess
 import tempfile
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -173,6 +174,34 @@ class Operations(unittest.TestCase):
         self.assertFalse(before["capabilities"]["cancel"]["allowed"])
         self.assertFalse(before["capabilities"]["retry"]["allowed"])
         self.assertEqual(self.actions(), [])
+
+    def test_inventory_inspects_jobs_in_parallel_in_order_and_isolates_failures(self):
+        # sd:5005. Every print waits on one barrier, so a serial inventory breaks it
+        # at its timeout rather than hanging. `broken` fails its read and `gone`
+        # vanishes; neither may change another job's row or the order.
+        names = ["alpha", "broken", "gone", "safe-job", "zulu"]
+        for name in names:
+            config = dict(self.config, Label=PREFIX + name,
+                          ProgramArguments=["/bin/bash", str(self.cron / "cron-jobs.sh"), "exec", name])
+            (self.agents / (PREFIX + name + ".plist")).write_bytes(plistlib.dumps(config))
+            (self.cron / "jobs" / (name + ".job")).write_text("safe")
+        barrier = threading.Barrier(len(names), timeout=2)
+        original = self.run_launchctl
+
+        def overlapping(argv):
+            name = argv[2].removeprefix("gui/501/" + PREFIX)
+            barrier.wait()
+            if name == "broken":
+                raise OSError("launchctl could not run")
+            if name == "gone":
+                raise WorkflowError("job is not supported: installed configuration is unavailable or invalid")
+            result = original(argv)
+            result.stdout = result.stdout.replace(self.job, name)
+            return result
+        self.backend.runner = overlapping
+        jobs = inventory(self.db, backend=self.backend)["jobs"]
+        self.assertEqual([(job["name"], job["state"]) for job in jobs],
+                         [("alpha", "failed"), ("broken", "unknown"), ("safe-job", "failed"), ("zulu", "failed")])
 
     def test_malformed_xml_plist_is_not_an_inventory_failure(self):
         self.plist.write_bytes(b'<?xml version="1.0"?><plist><dict><key>broken')
