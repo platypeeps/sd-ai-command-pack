@@ -28,19 +28,20 @@ vault and the dashboard's Documents tab by default, and reaches an
 outward destination — Notion, Google Drive — only where the user designated that
 document for it.
 
-## The fifteen sections, in output order
+## The sixteen sections, in output order
 
 Above them all sits the banner — two lines, `sd-status: <repo path>` and the
 `pack:` line naming the checkout these tools came from with its branch and
 head. It is a header rather than a section: it names where the report ran and
 what ran it, and nothing under it is a finding. Count it and the report
-opens with sixteen top-level lines; the fifteen below are the sections.
+opens with seventeen top-level lines; the sixteen below are the sections.
 
 | Section | What it shows |
 |---|---|
 | `abnormalities` | every abnormal class in the ranking table, whether or not it fired: `clear`, `n findings`, or `unchecked: <reason>`. At most three findings print per class, and the elision says how many were held back |
 | `pending` | at most ten actionable rows by rank, with the line above them stating the denominator — `10 of 123, by rank`. A class with a cap shows at most that many rows, and a line under the list says how many of its rows the list does not show |
 | `next` | one row: the top-ranked id and its `suggest`. Not a menu, not three options |
+| `work across the shared database` | `sd today`'s Landing now, Delivered, Planned, Blocked and Unscheduled tables, for this repository, in `sd today`'s layout, indented two spaces. A database that does not read is a `!` reason, never empty tables |
 | `open threads` | a count per `source`, then the exclusions named in full, so the counts are never read as a total of everything that exists |
 | `work items` | item status from each item's row, counted, archived ones counted and not listed |
 | `contributions (this repo, shared database order)` | upstream activity, local evidence, and dependency readiness from the shared contribution projection |

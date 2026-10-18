@@ -2898,6 +2898,44 @@ class LaneTests(InventoryFixture):
         self.assertIn("has no lane", section["reason"])
 
 
+class ViewsTests(InventoryFixture):
+    """sd:5098: `sd today`'s sections, for the repository `sd-status` stands in and no other."""
+
+    def fill(self) -> tuple[str, dict[str, int]]:
+        import sd_db
+
+        sd_db.initialise(home=self.home)
+        connection = sd_db.connect(home=self.home)
+        try:
+            key = status.sd_lib.registered_base(self.repo, sd_db, connection)
+            made = {repo: sd_db.create_item(connection, kind="task", title=f"Free in {repo}", repo=repo)
+                    for repo in (key, "~/repos/example.test/lib", None)}
+            connection.commit()
+        finally:
+            connection.close()
+        return key, made
+
+    def test_the_views_keep_this_repositorys_rows(self) -> None:
+        key, made = self.fill()
+        section = status.views_section(self.repo, {"HOME": str(self.home)})
+        self.assertTrue(section["available"], section)
+        self.assertEqual(section["repos"], [key])
+        self.assertEqual([row["id"] for row in section["sections"]["unscheduled"]], [made[key]])
+        stream = io.StringIO()
+        status._render_views(section, stream.write, width=100)
+        text = stream.getvalue()
+        self.assertIn("\n  Unscheduled (1)\n", text)
+        self.assertIn("\n  Landing now (0)\n", text)
+        self.assertNotIn("Free in ~/repos/example.test/lib", text)
+
+    def test_an_unreadable_database_is_a_reason_not_empty_views(self) -> None:
+        section = status.views_section(self.repo, {"HOME": str(self.home)})
+        self.assertFalse(section["available"])
+        stream = io.StringIO()
+        status._render_views(section, stream.write)
+        self.assertIn("  ! ", stream.getvalue())
+
+
 class LowYieldProducerTests(InventoryFixture):
     def test_a_marker_in_tracked_source_is_found_and_one_in_docs_is_not(self) -> None:
         # Spelled in halves so this repository's own scan stays at zero, which
@@ -4209,7 +4247,7 @@ class ReportSectionTests(InventoryFixture):
     #: the report is read top-down and the judgement is what the reader came
     #: for; the eight below keep the order they already had.
     ORDER = [
-        "abnormalities", "pending", "next", "open threads", "work items",
+        "abnormalities", "pending", "next", "work across the shared database", "open threads", "work items",
         "contributions (this repo, shared database order)",
         "open pull requests", "merge lane (this repo, shared database)", "detected setup",
         "issues (this repo, shared database)",

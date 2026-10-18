@@ -7,6 +7,9 @@ the golden text cannot drift: a changed column, order, cap or cell fails here.
 from __future__ import annotations
 
 import datetime
+import importlib.machinery
+import importlib.util
+import io
 import json
 import os
 import subprocess
@@ -140,6 +143,55 @@ ID   Repo  State        Due              Priority  Title             When
 #15  app   in_progress  2026-09-01 late  -         Rotate the token  3 h ago
 """
 
+STATUS = """\
+
+work across the shared database
+  repositories: app, lib
+  2 landing · 1 delivered · 1 planned this week · 1 blocked · 8 unscheduled
+
+  Landing now (2)
+  ID   Repo  State    Position  ETA         Title             When
+  ---  ----  -------  --------  ----------  ----------------  -------
+  #11  app   running  1         ~12:20 MDT  Land the cache    in 20 m
+  #12  app   pending  2         ~12:50 MDT  Land the index    in 50 m
+
+  Delivered (1)
+  ID   Repo  State   PR   Commit     Title             When
+  ---  ----  ------  ---  ---------  ----------------  ---------
+  #10  app   merged  #42  c0ffee000  Ship the parser   09:00 MDT
+
+  Planned (1)
+  ID   Repo  State     Due             Title                  When
+  ---  ----  --------  --------------  ---------------------  ------
+  #14  lib   planning  2026-09-09 MDT  Renew the certificate  in 3 d
+
+  Blocked (1)
+  ID   Repo  State    Waiting on                     Title             When
+  ---  ----  -------  -----------------------------  ----------------  -------
+  #13  lib   blocked  Waits on the vendor's API key  Wire the webhook  3 h ago
+
+  Unscheduled (8)
+  ID  Repo  State     Priority  Title               When
+  --  ----  --------  --------  ------------------  -------
+  #5  lib   planning  P0        Owed work number 3  5 d ago
+  #8  lib   planning  P0        Owed work number 6  5 d ago
+  #3  lib   planning  P1        Owed work number 1  5 d ago
+  #6  lib   planning  P1        Owed work number 4  5 d ago
+  #9  lib   planning  P1        Owed work number 7  5 d ago
+  … 3 more
+"""
+
+
+def load_status():
+    path = ROOT / "bin" / "sd-status"
+    loader = importlib.machinery.SourceFileLoader("sd_status_views", str(path))
+    spec = importlib.util.spec_from_file_location("sd_status_views", str(path), loader=loader)
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    loader.exec_module(module)
+    return module
+
+
 class Zone(unittest.TestCase):
     def setUp(self):
         zone = unittest.mock.patch.dict(os.environ, {"TZ": "America/Denver"})
@@ -178,6 +230,31 @@ class SdToday(Zone):
         self.assertEqual(runs[0], runs[1])
         self.assertEqual([line for line in runs[0].splitlines() if line.endswith(")") and "(" in line][:3],
                          ["Attention (1)", "Decisions (1)", "Landing now (2)"])
+
+
+class SdStatus(Zone):
+    """`sd-status` prints the same tables for its repositories, indented under its one heading."""
+
+    def test_the_views_block_is_this_text_exactly(self):
+        fill(self.connection)
+        section = {"available": True, "reason": "", "repos": [APP, LIB],
+                   "sections": today.sections(self.connection, repos=[APP, LIB], now=NOW)}
+        stream = io.StringIO()
+        load_status()._render_views(section, stream.write, now=MOMENT, width=100)
+        self.maxDiff = None
+        self.assertEqual(stream.getvalue(), STATUS)
+
+    def test_two_renders_print_the_same_bytes(self):
+        fill(self.connection)
+        status = load_status()
+        runs = []
+        for _ in range(2):
+            section = {"available": True, "reason": "", "repos": [APP],
+                       "sections": today.sections(self.connection, repos=[APP], now=NOW)}
+            stream = io.StringIO()
+            status._render_views(section, stream.write, now=MOMENT, width=100)
+            runs.append(stream.getvalue())
+        self.assertEqual(runs[0], runs[1])
 
 
 if __name__ == "__main__":

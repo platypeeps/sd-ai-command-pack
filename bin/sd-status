@@ -1376,6 +1376,36 @@ def lane_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
     return {"available": True, "reason": "", "repository": repository, "entries": entries}
 
 
+#: The sections `sd today` shows that `sd-status` shows for its repository, in `sd_db.today.ORDER` (sd:5098).
+VIEW_KEYS = ("landing", "delivered", "planned", "blocked", "unscheduled")
+
+
+def views_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
+    """`sd today`'s sections for this repository, read by the same `sd_db.today` functions (sd:5098).
+
+    `repos` is the registered repository the checkout is, as the `repo`
+    table spells it; each row names its repository. A failed read is a
+    reason, never an empty section.
+    """
+    connection, reason = _shared_connection("workflow database library", "today")
+    if connection is None:
+        return {"available": False, "reason": reason, "repos": [], "sections": None}
+    try:
+        try:
+            import sd_db
+            from sd_db import today
+
+            repos = [sd_lib.registered_base(root, sd_db, connection)]
+            stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            found = today.sections(connection, repos=repos, now=stamp)
+        finally:
+            connection.close()
+    except Exception as error:  # noqa: BLE001 - a failed read is unknown, named
+        return {"available": False, "reason": f"shared database unreadable: {error}", "repos": [], "sections": None}
+    return {"available": True, "reason": "", "repos": repos, "now": stamp,
+            "sections": found}
+
+
 def _database_issues(slug: str) -> dict[str, Any]:
     """The shared database, and every absence a reported reason in one shape.
 
@@ -3234,6 +3264,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "jira": jira_section(),
         "contributions": contributions_section(root),
         "lane": lane_section(root, environ),
+        "views": views_section(root, environ),
     }
     inventory = actionable_inventory(root, result, environ=environ)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
@@ -3452,6 +3483,26 @@ def _render_next(rows: list[dict[str, Any]], write: Any) -> None:
     write(f"  {top['id']}  {top['suggest']}\n")
 
 
+def _render_views(section: dict[str, Any] | None, write: Any, *, now: datetime.datetime | None = None,
+                  width: int | None = None) -> None:
+    """`sd today`'s sections for this repository, in the layout `sd today` prints them (sd:5098).
+
+    The block is indented two spaces like every other section's body, so its
+    one heading stays the only column-0 line and the skeleton stays fixed.
+    """
+    import sd_views  # noqa: PLC0415 - only this section renders tables
+
+    write("\nwork across the shared database\n")
+    if not section or not section["available"]:
+        write(f"  ! {section['reason'] if section else 'not collected'}\n")
+        return
+    write(f"  repositories: {', '.join(sd_views.repo_short(repo) for repo in section['repos'])}\n")
+    moment = now or datetime.datetime.fromisoformat(section["now"].replace("Z", "+00:00"))
+    columns = (width or shutil.get_terminal_size((sd_views.DEFAULT_WIDTH, 24)).columns) - 2
+    text = sd_views.render_sections(section["sections"], now=moment, width=columns, keys=VIEW_KEYS)
+    write("".join(f"  {line}" if line.strip() else line for line in text.splitlines(keepends=True)))
+
+
 def _render_threads(rows: list[dict[str, Any]], write: Any) -> None:
     """Per-source counts over the same list, and what was not swept.
 
@@ -3480,6 +3531,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     _render_banner(result["abnormalities"], write)
     _render_pending(rows, write)
     _render_next(rows, write)
+    _render_views(result.get("views"), write)
     _render_threads(rows, write)
     _render_work(result["work"], write)
     _render_contributions(result.get("contributions"), write)
