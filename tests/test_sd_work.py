@@ -1569,8 +1569,8 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
         closed = self.task("Done with a followup")
         self.call("task", "note", closed, "--body", "Owed on a done item", "--kind", "followup")
         self.call("task", "status", closed, "done", "--reason", "test")
-        self.call("task", "note", open_item, "--kind", "question",
-                  "--body", "Which store?\nOption: Pack store\nOption: Database rows")
+        asked = json.loads(self.call("task", "note", open_item, "--kind", "question", "--json",
+                                     "--body", "Which store?\nOption: Pack store\nOption: Database rows").stdout)
         log = self.home / "run.log"
         log.write_text("Observed drift.\nSD_REPORT_ATTENTION: two stale rows\n")
         report = json.loads(self.call(
@@ -1583,7 +1583,8 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
                                  "Open followups (1)", "Work (2)"])
         text = "\n".join(lines)
         self.assertIn(f"#{report}  planning  ", text)
-        self.assertIn(f"#{open_item}  Which store?", text)
+        # sd:5014: the note id is what `sd task note --answers` takes.
+        self.assertIn(f"#{open_item}  note #{asked['note']['id']}  Which store?", text)
         self.assertIn(f"#{open_item}  Chase the vendor", text)
         self.assertNotIn("Owed on a done item", text)
         work = lines[lines.index("Work (2)") + 1:]

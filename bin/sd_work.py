@@ -636,7 +636,8 @@ def _print_today(sd_db: Any, connection: Any, work: list[dict[str, Any]]) -> Non
     for title, rows, line in (
         ("Reports needing attention", reports,
          lambda row: f"#{row['id']}  {row['status']}  {row['title']}" + (f" · {row['why']}" if row["why"] else "")),
-        ("Decisions waiting", decisions, lambda note: f"#{note['item']}  {_first_line(note['body'])}"),
+        ("Decisions waiting", decisions,
+         lambda note: f"#{note['item']}  note #{note['id']}  {_first_line(note['body'])}"),
         ("Open followups", followups, lambda note: f"#{note['item']}  {_first_line(note['body'])}"),
     ):
         if rows:
