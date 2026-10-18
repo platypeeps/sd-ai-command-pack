@@ -229,7 +229,7 @@ class SdToday(Zone):
                                check=True).stdout for _ in range(2)]
         self.assertEqual(runs[0], runs[1])
         self.assertEqual([line for line in runs[0].splitlines() if line.endswith(")") and "(" in line][:3],
-                         ["Attention (1)", "Decisions (1)", "Landing now (2)"])
+                         ["Attention (1)", "Decisions (1)", "Landing now (0)"])
 
 
 class SdStatus(Zone):

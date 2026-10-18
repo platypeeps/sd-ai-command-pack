@@ -2908,6 +2908,8 @@ class ViewsTests(InventoryFixture):
         connection = sd_db.connect(home=self.home)
         try:
             key = status.sd_lib.registered_base(self.repo, sd_db, connection)
+            for repo in (key, "~/repos/example.test/lib"):
+                sd_db.upsert_repo(connection, repo)
             made = {repo: sd_db.create_item(connection, kind="task", title=f"Free in {repo}", repo=repo)
                     for repo in (key, "~/repos/example.test/lib", None)}
             connection.commit()
