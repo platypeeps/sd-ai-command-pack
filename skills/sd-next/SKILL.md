@@ -1,6 +1,6 @@
 ---
 name: sd-next
-description: Use when the operator asks for status, "what next", recommendations, followups or "what do you need from me" across all their work: done recently, landing soon, open items, numbered next steps, then the waiting questions one at a time.
+description: 'Use when the operator asks for status, "what next", recommendations, followups or "what do you need from me" across all their work: done recently, landing soon, open items, numbered next steps, then the waiting questions one at a time.'
 ---
 
 # sd-next

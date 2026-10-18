@@ -617,6 +617,8 @@ def _print_today(connection: Any) -> None:
     import shutil
 
     import sd_views
+
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
     from sd_db import today
 
     now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
