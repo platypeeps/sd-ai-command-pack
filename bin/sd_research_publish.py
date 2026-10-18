@@ -1823,6 +1823,7 @@ def enqueue_briefs(connection: Any, items: set[int] | None = None) -> list[str]:
     unchanged brief is not queued again. A setting that cannot be read holds
     that repository's briefs, as it holds a render's queue.
     """
+    import_sd_db()  # the caller holds a connection, so this is the one it has
     from sd_db import channels, paths, repos  # noqa: PLC0415 - the checkout's `lib/`
 
     docs, reports = brief_docs(connection, items)
