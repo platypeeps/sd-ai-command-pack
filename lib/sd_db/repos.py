@@ -1003,6 +1003,60 @@ def github_issues(connection: sqlite3.Connection, path: Path | str) -> bool:
     return row is not None and row["github_issues"] == 1
 
 
+#: A Jira project key as `repo.jira_project` holds it: the spelling `channels`
+#: takes for an issue source, up to Jira's 255 characters (sd:5103).
+JIRA_PROJECT = re.compile(r"[A-Z][A-Z0-9_]{1,254}")
+#: The word `repo jira-project` takes for no project; the column holds NULL.
+JIRA_OFF = "off"
+
+
+def set_jira_project(connection: sqlite3.Connection, path: Path | str, value: str) -> tuple[str, str]:
+    """Set the Jira project one repository files issues in. Returns `(path, before)`.
+
+    `value` is a key such as `EXAMPLE`, or `off` for none. `before` is the key
+    replaced, or `off`. Same refusals as `set_github_issues`: a value that is
+    neither, exactly, and a path no row holds.
+    """
+    if value != JIRA_OFF and not JIRA_PROJECT.fullmatch(value):
+        raise RepoRefusal(f"{value!r} is not a jira-project setting; expected a Jira project key "
+                          f"such as EXAMPLE (A-Z, then A-Z, 0-9 or _), or {JIRA_OFF}")
+    given = str(Path(path).expanduser().resolve())
+    probe = paths.keys(given)
+    with transaction(connection):
+        row = connection.execute(
+            f"SELECT path, jira_project FROM repo WHERE path IN ({paths.placeholders(probe)})",
+            probe).fetchone()
+        if row is None:
+            raise RepoRefusal(
+                f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
+        connection.execute("UPDATE repo SET jira_project = ?, updated_at = ? WHERE path = ?",
+                           (None if value == JIRA_OFF else value, now(), row["path"]))
+    return row["path"], row["jira_project"] or JIRA_OFF
+
+
+def jira_project(connection: sqlite3.Connection, path: Path | str) -> str | None:
+    """The Jira project key one repository files issues in, or None for off (sd:5103).
+
+    No row reads None, the column default. A store not yet at 36 raises
+    `SchemaTooOld` rather than reading as off, so a caller decides what an
+    unread setting means.
+    """
+    from .database import schema_version
+    from .errors import SchemaTooOld
+    from .schema import SCHEMA_VERSION
+
+    probe = paths.keys(str(Path(path).expanduser().resolve()))
+    try:
+        row = connection.execute(
+            f"SELECT jira_project FROM repo WHERE path IN ({paths.placeholders(probe)}) ORDER BY path",
+            probe).fetchone()
+    except sqlite3.OperationalError as error:
+        if "no such column" in str(error):
+            raise SchemaTooOld(schema_version(connection), SCHEMA_VERSION) from error
+        raise
+    return None if row is None else row["jira_project"]
+
+
 #: What `repo.ci` accepts, in the order the CHECK constraint lists them:
 #: `github` runs checks in GitHub Actions, `local` runs `sd-check` on this
 #: machine and posts an `sd/local-gate` status instead (sd:1843).

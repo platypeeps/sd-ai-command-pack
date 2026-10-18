@@ -8,6 +8,7 @@ it fills and the one path it refuses.
 
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -34,6 +35,7 @@ from sd_db.repos import (
     intake_issues,
     intake_repos,
     issue_sources,
+    jira_project,
     mail_aliases,
     mine_issues,
     read_conf,
@@ -47,6 +49,7 @@ from sd_db.repos import (
     set_clones,
     set_dependabot,
     set_github_issues,
+    set_jira_project,
     set_lane_host,
     set_managed,
     set_runner_merge,
@@ -1198,6 +1201,81 @@ class TheGithubIssuesSetting(RepoCase):
         self.addCleanup(old.close)
         with self.assertRaises(SchemaTooOld):
             github_issues(old, self.checkouts / "one")
+
+
+class TheJiraProjectSetting(RepoCase):
+    """sd:5103. `repo.jira_project`: the Jira project a repository files issues in, or NULL for off.
+
+    The writer mirrors `set_github_issues`: a key or `off`, and a path no row
+    holds is refused. The reader answers None for no row and for off, and
+    raises on a store without the column rather than reading it as off.
+    """
+
+    def _registered(self) -> str:
+        return add(self.connection, support.repository(self.checkouts / "one"), home=self.home)
+
+    def _value(self, path: str):
+        return self.connection.execute("SELECT jira_project FROM repo WHERE path = ?", (path,)).fetchone()[0]
+
+    def test_it_sets_the_key_names_what_it_replaced_and_off_clears_it(self):
+        path = self._registered()
+        self.assertIsNone(self._value(path))
+        self.assertIsNone(jira_project(self.connection, path))
+        self.assertEqual(set_jira_project(self.connection, path, "EXAMPLE"), (path, "off"))
+        self.assertEqual(self._value(path), "EXAMPLE")
+        self.assertEqual(jira_project(self.connection, path), "EXAMPLE")
+        self.assertEqual(jira_project(self.connection, paths.expand(path)), "EXAMPLE")
+        self.assertEqual(set_jira_project(self.connection, path, "OPS_2"), (path, "EXAMPLE"))
+        self.assertEqual(set_jira_project(self.connection, path, "off"), (path, "OPS_2"))
+        self.assertIsNone(self._value(path))
+        self.assertIsNone(jira_project(self.connection, path))
+
+    def test_it_changes_no_other_field_on_the_row(self):
+        path = self._registered()
+        before = dict(self.connection.execute("SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
+        set_jira_project(self.connection, path, "EXAMPLE")
+        after = dict(self.connection.execute("SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
+        self.assertEqual({key for key in before if before[key] != after[key]} - {"updated_at"}, {"jira_project"})
+
+    def test_every_value_but_a_key_or_off_is_refused_and_writes_nothing(self):
+        """Property over edge inputs: case, padding, a leading digit, punctuation,
+        control and non-ASCII text, an over-long key, and a seeded random spread."""
+        import random
+
+        path = self._registered()
+        set_jira_project(self.connection, path, "EXAMPLE")
+        values = ["example", "Example", " EXAMPLE", "EXAMPLE ", "EXAMPLE\n", "E", "1ABC", "_ABC", "AB-1", "AB C",
+                  "OFF", "Off", "none", "", " ", "\x00", "ÉTÉ", "ＡＢＣ", "A" * 256, "AB/CD", "AB.CD"]
+        draw = random.Random(5103)
+        alphabet = "ABz9_ -\t\n\x00é"
+        values += ["".join(draw.choice(alphabet) for _ in range(draw.randrange(0, 6))) for _ in range(300)]
+        accepted = re.compile(r"[A-Z][A-Z0-9_]{1,254}")
+        for value in (value for value in values if value != "off" and not accepted.fullmatch(value)):
+            with self.subTest(value=value), self.assertRaises(RepoRefusal) as caught:
+                set_jira_project(self.connection, path, value)
+            self.assertIn("a Jira project key", str(caught.exception))
+        self.assertEqual(self._value(path), "EXAMPLE")
+
+    def test_an_unregistered_path_is_refused_on_write_and_reads_off(self):
+        self._registered()
+        stranger = support.repository(self.checkouts / "two")
+        for where in (stranger, self.checkouts / "absent", self.root):
+            with self.subTest(where=where):
+                with self.assertRaises(RepoRefusal) as caught:
+                    set_jira_project(self.connection, where, "EXAMPLE")
+                self.assertIn("not a registered repository", str(caught.exception))
+                self.assertIsNone(jira_project(self.connection, where))
+        self.assertEqual(len(registered(self.connection)), 1)
+
+    def test_a_store_before_36_raises_and_never_reads_as_off(self):
+        """Older state: the new library over a store not yet migrated."""
+        database = self.root / "old.db"
+        with mock.patch("sd_db.migrate.migrations", return_value=[m for m in migrations() if m[0] < 36]):
+            migrate(database)
+        old = connect(database, write=False)
+        self.addCleanup(old.close)
+        with self.assertRaises(SchemaTooOld):
+            jira_project(old, self.checkouts / "one")
 
 
 class TheIntake(RepoCase):

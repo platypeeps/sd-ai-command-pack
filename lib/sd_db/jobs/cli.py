@@ -42,6 +42,7 @@ from ..repos import (
     set_clones,
     set_dependabot,
     set_github_issues,
+    set_jira_project,
     set_lane_host,
     set_managed,
     set_runner_merge,
@@ -537,7 +538,8 @@ def command_repo(argv: list[str]) -> int:
     `repo ci <path> <github|local>`, `repo lane-host <path> <host|hub>`,
     `repo channels <path> [obsidian=.. notion=.. drive=.. feed=URL jira=KEY github=OWNER/NAME email=LABEL,.. | none]`,
     `repo clones <path> <P,Q | none | +P | -P>`, `repo dependabot <path> <yes|no>`,
-    `repo github-issues <path> <on|off>`, `repo remove <path> ...`.
+    `repo github-issues <path> <on|off>`, `repo jira-project <path> <KEY|off>`,
+    `repo remove <path> ...`.
 
     The `repo` table is what criterion 6 enumerates from, so an empty one
     makes that criterion pass over nothing. `add` and `seed` are the two ways
@@ -561,6 +563,9 @@ def command_repo(argv: list[str]) -> int:
     PROFILE` prints those lines back, `<subdir> <owner/repo>`, for repo-sync.
     `github-issues` sets `repo.github_issues` (sd:4827): whether the
     repository takes third-party GitHub issues.
+    `jira-project` sets `repo.jira_project` (sd:5103): the Jira project the
+    dashboard files a sanitized issue in, or `off`. `list` does not show it,
+    so no reader that counts fields moves.
 
     `list` prints `managed`, `ci`, `github_issues`, `lane_host`, then
     `runner_merge`, so the merge setting stays the last field of each row,
@@ -568,7 +573,7 @@ def command_repo(argv: list[str]) -> int:
     `lane_host` so the first four fields and the last two stay put.
     """
     verbs = ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "clones",
-             "dependabot", "github-issues", "remove")
+             "dependabot", "github-issues", "jira-project", "remove")
     if not argv or argv[0] not in verbs:
         print(f"sd-db repo: expected {', '.join(verbs[:-1])} or {verbs[-1]}",
               file=sys.stderr)
@@ -657,6 +662,13 @@ def command_repo(argv: list[str]) -> int:
                 return 1
             path, before = set_github_issues(connection, rest[0], rest[1])
             print(f"sd-db: {path} github_issues {before} -> {rest[1]}")
+            return 0
+        if verb == "jira-project":
+            if len(rest) != 2:
+                print("sd-db repo jira-project: needs a path and a Jira project key or off", file=sys.stderr)
+                return 1
+            path, before = set_jira_project(connection, rest[0], rest[1])
+            print(f"sd-db: {path} jira_project {before} -> {rest[1]}")
             return 0
         if rest[:1] == ["--clones"] and len(rest) == 2:
             # The conf grammar, bare: `repo-sync` reads these lines as its list.
