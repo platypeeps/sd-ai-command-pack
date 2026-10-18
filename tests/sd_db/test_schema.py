@@ -2499,5 +2499,97 @@ class TheGithubIssuesColumn(SchemaCase):
         self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
 
 
+
+class TheJiraProjectColumn(SchemaCase):
+    """Migration 36 (sd:5103). `repo.jira_project` names the Jira project a
+    repository files issues in; NULL is off. Added, not rebuilt: every existing
+    row reads NULL and keeps its other values; the CHECK holds a key's spelling;
+    a failed file leaves 35; the reverse returns 35's shape."""
+
+    VERSION = 36
+    COLUMNS = ("path, remote, mode, runner_merge, pieces_source, created_at, updated_at, managed, ci, lane_host, "
+               "channels, clone_profiles, dependabot, github_issues")
+    ROWS = [("/one", "git@github.com:platypeeps/one.git", "full", "auto", "file", "t1", "t2", 1, "local", "build-2",
+             '{"jira": {"project": "EXAMPLE"}}', "personal,work", 1, 1),
+            ("/two", None, None, "manual", "row", "t3", "t4", 0, "github", None, None, None, 0, 0)]
+
+    def _before(self):
+        self.migrate_through(self.VERSION - 1)
+        raw = sqlite3.connect(self.path)
+        raw.executemany(f"INSERT INTO repo ({self.COLUMNS}) VALUES ({', '.join('?' * 14)})", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(f"SELECT {self.COLUMNS} FROM repo ORDER BY path")]
+
+    def _reference(self, upto):
+        reference = sqlite3.connect(":memory:")
+        self.addCleanup(reference.close)
+        paths.install(reference)
+        for version, path in schema_module.migrations():
+            if version <= upto:
+                reference.executescript(path.read_text(encoding="utf-8"))
+        return reference
+
+    def test_every_existing_row_arrives_off_and_keeps_its_values(self):
+        self._before()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied),
+                         (self.VERSION - 1, list(range(self.VERSION, SCHEMA_VERSION + 1))))
+        self.assertEqual(migrate(self.path).applied, [])
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.ROWS)
+        self.assertEqual([row[0] for row in connection.execute("SELECT jira_project FROM repo ORDER BY path")],
+                         [None, None])
+
+    def test_the_check_holds_a_key_spelling_or_null(self):
+        self._before()
+        migrate(self.path)
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        connection.execute("UPDATE repo SET jira_project = 'OPS_2' WHERE path = '/two'")
+        for key in ("", "a", "A", "ops", "1AB", "_AB", "AB-1", "AB C", "ÉTÉ", "A" * 256, 7):
+            with self.subTest(key=key), self.assertRaises(sqlite3.IntegrityError):
+                connection.execute("UPDATE repo SET jira_project = ? WHERE path = '/two'", (key,))
+        connection.execute("UPDATE repo SET jira_project = NULL WHERE path = '/one'")
+        self.assertEqual([row[0] for row in connection.execute("SELECT jira_project FROM repo ORDER BY path")],
+                         [None, "OPS_2"])
+
+    def test_a_failed_file_leaves_the_store_at_35_and_a_rerun_finishes_it(self):
+        """Failure table, row "`migrate` runs 036"."""
+        self._before()
+        raw = sqlite3.connect(self.path)
+        raw.execute("ALTER TABLE repo ADD COLUMN jira_project TEXT")
+        raw.commit()
+        raw.close()
+        with self.assertRaises(sqlite3.OperationalError):
+            self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        raw.execute("ALTER TABLE repo DROP COLUMN jira_project")
+        raw.commit()
+        raw.close()
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+    def test_the_reverse_returns_the_file_to_the_prior_version(self):
+        self._before()
+        self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        raw.execute("UPDATE repo SET jira_project = 'EXAMPLE' WHERE path = '/one'")
+        raw.commit()
+        raw.close()
+        text = dict(schema_module.migrations())[self.VERSION].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        self.assertEqual(raw.execute("PRAGMA table_info(repo)").fetchall(),
+                         self._reference(self.VERSION - 1).execute("PRAGMA table_info(repo)").fetchall())
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
 if __name__ == "__main__":
     unittest.main()

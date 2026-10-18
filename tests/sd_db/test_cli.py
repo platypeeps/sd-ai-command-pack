@@ -402,6 +402,31 @@ class TheMigrationVerbs(MigrationVerbCase):
             self.assertIn("needs a path and on or off", completed.stderr)
         self.assertEqual(self._list_row()[-3], "off")
 
+    def test_repo_jira_project_sets_and_clears_the_key_and_leaves_list_alone(self):
+        """sd:5103. `repo jira-project PATH KEY|off` prints `before -> after`;
+        `repo list` keeps its fields, so no reader counting from either end moves."""
+        self.sd_db("repo", "add", str(self.checkout))
+        listed = self._list_row()
+        completed = self.sd_db("repo", "jira-project", str(self.checkout), "EXAMPLE")
+        self.assertIn("jira_project off -> EXAMPLE", completed.stdout)
+        self.assertEqual(self._list_row(), listed)
+        completed = self.sd_db("repo", "jira-project", str(self.checkout), "off")
+        self.assertIn("jira_project EXAMPLE -> off", completed.stdout)
+
+    def test_repo_jira_project_refuses_a_bad_key_an_unknown_path_and_a_wrong_count(self):
+        self.sd_db("repo", "add", str(self.checkout))
+        self.sd_db("repo", "jira-project", str(self.checkout), "EXAMPLE")
+        for word in ("example", "Off", "1AB", "", " AB", "AB-1"):
+            completed = self.sd_db("repo", "jira-project", str(self.checkout), word, expect=1)
+            self.assertIn("a Jira project key", completed.stdout + completed.stderr)
+        completed = self.sd_db("repo", "jira-project", str(self.home / "absent"), "EXAMPLE", expect=1)
+        self.assertIn("not a registered repository", completed.stdout + completed.stderr)
+        for extra in ([], ["EXAMPLE", "off"]):
+            completed = self.sd_db("repo", "jira-project", str(self.checkout), *extra, expect=1)
+            self.assertIn("needs a path and a Jira project key or off", completed.stderr)
+        completed = self.sd_db("repo", "jira-project", str(self.checkout), "off")
+        self.assertIn("jira_project EXAMPLE -> off", completed.stdout)
+
     def test_repo_list_managed_prints_only_the_managed_rows(self):
         other = self.home / "other"
         subprocess.run(["git", "init", "-q", str(other)], check=True, capture_output=True)
