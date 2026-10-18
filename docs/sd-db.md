@@ -271,6 +271,18 @@ A failed or capped sweep reads and closes nothing, holds no cursor and prints th
 `repos.intake_issues` reads, per `on` repository, its open issues whose author is not the operator (the author of the `filed` rows) that no item carries as `--ref github:<owner>/<repo>#N`, for Today's intake.
 Agents close an issue with `mcp__github__issue_write` `update`. `bin/sd-issue-guard` lets that through in a managed `on` repo when the call names the row's own GitHub repository; filing an issue stays denied. The global deny list still refuses the tool until the system follow-up under sd:4810 lifts it for `on` repos.
 
+## Jira project
+
+`repo.jira_project` names the Jira project a repository files issues in, or NULL for none (sd:5103).
+Every row starts NULL, off. It is a filing target: the system dashboard's File Jira issue action files a sanitized issue there after the operator confirms its preview.
+It is not the inbound issue source `repo channels PATH jira=KEY` names, and setting one leaves the other alone.
+
+    bin/sd-db repo jira-project PATH EXAMPLE    # or off; prints before -> after
+
+A key is `A-Z`, then 1 to 254 of `A-Z`, `0-9` or `_`; the column's CHECK holds the same spelling.
+`repo list` does not show it, so no reader that counts its fields moves.
+`repos.jira_project` reads it for code: no row reads None, and a database not yet migrated raises `SchemaTooOld`.
+
 ## `judgments`: what the judgment models cost, by stage
 
 `bin/sd-db judgments` compares the stages that route a decision through a judgment model.
