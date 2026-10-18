@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import sd_handoff_rows
+import sd_lib
 from sd_notes import ITEM_HELP, item_id
 from sd_work import WorkRefusal, _belongs_to
 
@@ -73,6 +74,7 @@ def bulk_preview(result: dict[str, Any], connection: Any) -> str:
     apply that could succeed, and the last line says so instead. Each row is
     named with its repository, read over `connection` (sd:5124).
     """
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
     from sd_db.repos import item_refs
 
     refs = item_refs(connection, [row["id"] for row in result["selected"] + result["declined"]])

@@ -2389,7 +2389,8 @@ class Ship(SharedReview):
             return None
         steps = [self.by_hand(commit)] if hand else []
         if held:
-            # main() resolved sd_db; each item names its repository (sd:5124).
+            # Each item names its repository (sd:5124).
+            sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
             from sd_db.repos import item_refs  # noqa: PLC0415
 
             named = item_refs(self.connection, held)

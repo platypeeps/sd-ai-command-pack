@@ -94,6 +94,9 @@ def days(due: Any, now: datetime.datetime) -> str:
 def repo_short(repo: Any) -> str:
     """A Repo cell: `~/repos/system` is `system`, `owner/name` is `name`, and none is `fleet`, as each item
     reference reads (`sd_db.repos.item_ref`, sd:5124)."""
+    import sd_lib
+
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
     from sd_db.repos import NO_REPO, short
 
     return short(repo) or NO_REPO

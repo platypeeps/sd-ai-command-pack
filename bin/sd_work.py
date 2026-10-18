@@ -546,6 +546,7 @@ def _name_refs(value: Any) -> None:
 
 def _ref(item: Any, repo: Any) -> str:
     """`system sd:5103`, as a person reads an item (sd:5124); the rows came through `sd_db`, so it imports."""
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
     from sd_db.repos import item_ref
 
     return item_ref(item, repo)

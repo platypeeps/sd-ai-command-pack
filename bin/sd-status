@@ -2837,7 +2837,8 @@ def _lane_branches(lane: dict[str, Any]) -> set[str]:
 
 def _lane_ref(lane: dict[str, Any], item: Any) -> str:
     """`system sd:5103` for an item in this lane: the lane's repository is the item's, as `sd-ship` refuses others."""
-    from sd_db.repos import item_ref  # noqa: PLC0415 - a lane section read sd_db
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+    from sd_db.repos import item_ref  # noqa: PLC0415
 
     return item_ref(item, lane.get("repository"))
 
