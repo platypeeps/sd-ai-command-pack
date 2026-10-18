@@ -198,6 +198,9 @@ These values live in `~/.config/sd-ai-command-pack/config.json`; `XDG_CONFIG_HOM
 `sd-ship lane enqueue|list|retry|cancel|move|hold|release|run|watch` keeps a serial prepare-and-merge queue per repository in the hub database, with its logs under `sd.lane_root` (unset: `$XDG_STATE_HOME/sd/lanes`), so a queued chain outlives the session that filled it. `sd-ship lane --help` and each verb's `--help` hold the options and refusals; [Parallel work](WORKFLOW.md#parallel-work) holds the rules.
 `sd gate run -- make check` queues any command the same way; `sd gate status` shows the queue.
 `sd gate run --max-wait SECONDS -- <cmd>` gives up after that long in the queue and exits 75, the command not run, naming its place in the queue, the holders and how long it waited; it does not bound the command itself.
+A lane gate, which is any `sd-check` run, goes ahead of every other waiter.
+While a lane gate holds or waits for a slot, `sd gate run` exits 69 at once, the command not run, naming the lane gate, its start time and a retry time; a run that already holds a slot keeps it.
+`sd gate status --json` lists the lane gates in `lane_gates`.
 Wrap a plain `make check` in any repository that way, and drop a per-repository `lockf` from lane scripts: the pool orders gates across every repository.
 A waiting gate names who holds each slot and since when.
 `sd.review_slots` is load control too: how many reviews may run their reviewers at once on the machine (unset: 2).
