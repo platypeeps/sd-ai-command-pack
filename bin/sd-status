@@ -1376,6 +1376,51 @@ def lane_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
     return {"available": True, "reason": "", "repository": repository, "entries": entries}
 
 
+#: The sections `sd today` shows that `sd-status` shows for its repository, in `sd_db.today.ORDER` (sd:5098).
+VIEW_KEYS = ("landing", "delivered", "planned", "blocked", "unscheduled")
+
+
+def companions(repo: str, value: str | None) -> list[str]:
+    """The repositories `sd.status_companions` lists beside `repo`: `<repo>=<other>[,<other>]`, `;` between."""
+    for entry in (value or "").split(";"):
+        name, _, others = entry.partition("=")
+        if name == repo:
+            return [other for other in others.split(",") if other and other != repo]
+    return []
+
+
+def views_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
+    """`sd today`'s sections for this repository, read by the same `sd_db.today` functions (sd:5098).
+
+    `repos` is the registered repository the checkout is, as the `repo`
+    table spells it, then the companions the `sd.status_companions` setting
+    row lists for it; each row names its repository. A failed read is a
+    reason, never an empty section; a setting that does not read leaves the
+    companions out and says so in `companions_error`.
+    """
+    connection, reason = _shared_connection("workflow database library", "today")
+    if connection is None:
+        return {"available": False, "reason": reason, "repos": [], "sections": None}
+    try:
+        try:
+            import sd_db
+            from sd_db import today
+
+            repos, unread = [sd_lib.registered_base(root, sd_db, connection)], ""
+            try:
+                repos += companions(repos[0], sd_lib.core_setting("status_companions", environ))
+            except sd_lib.ConfigError as error:
+                unread = f"companions unknown: {error}"
+            stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            found = today.sections(connection, repos=repos, now=stamp)
+        finally:
+            connection.close()
+    except Exception as error:  # noqa: BLE001 - a failed read is unknown, named
+        return {"available": False, "reason": f"shared database unreadable: {error}", "repos": [], "sections": None}
+    return {"available": True, "reason": "", "repos": repos, "companions_error": unread, "now": stamp,
+            "sections": found}
+
+
 def _database_issues(slug: str) -> dict[str, Any]:
     """The shared database, and every absence a reported reason in one shape.
 
@@ -3234,6 +3279,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "jira": jira_section(),
         "contributions": contributions_section(root),
         "lane": lane_section(root, environ),
+        "views": views_section(root, environ),
     }
     inventory = actionable_inventory(root, result, environ=environ)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
@@ -3424,6 +3470,15 @@ def _widened_note(rows: list[dict[str, Any]], write: Any) -> None:
           f"{', '.join(widened)}\n")
 
 
+def _table(write: Any, heads: list[str], rows: list[list[str]]) -> None:
+    """Rows as `sd today`'s tables print them (sd:5098), indented under the section heading."""
+    import sd_views  # noqa: PLC0415 - only the table sections need it
+
+    width = shutil.get_terminal_size((sd_views.DEFAULT_WIDTH, 24)).columns - 2
+    for line in sd_views.table(heads, rows, width):
+        write(f"  {line}\n")
+
+
 def _render_pending(rows: list[dict[str, Any]], write: Any) -> None:
     """The whole inventory by rank, capped, with the cap's denominator."""
     write("\npending\n")
@@ -3432,8 +3487,7 @@ def _render_pending(rows: list[dict[str, Any]], write: Any) -> None:
         return
     shown = rows[:PENDING_LIMIT]
     write(f"  {len(shown)} of {len(rows)}, by rank\n")
-    for row in shown:
-        write(f"  {row['id']}  {row['check']:<{CHECK_WIDTH}} {row['title']}\n")
+    _table(write, ["ID", "Check", "Title"], [[row["id"], row["check"], row["title"]] for row in shown])
     _widened_note(rows, write)
 
 
@@ -3450,6 +3504,28 @@ def _render_next(rows: list[dict[str, Any]], write: Any) -> None:
         return
     top = rows[0]
     write(f"  {top['id']}  {top['suggest']}\n")
+
+
+def _render_views(section: dict[str, Any] | None, write: Any, *, now: datetime.datetime | None = None,
+                  width: int | None = None) -> None:
+    """`sd today`'s sections for this repository, in the layout `sd today` prints them (sd:5098).
+
+    The block is indented two spaces like every other section's body, so its
+    one heading stays the only column-0 line and the skeleton stays fixed.
+    """
+    import sd_views  # noqa: PLC0415 - only this section renders tables
+
+    write("\nwork across the shared database\n")
+    if not section or not section["available"]:
+        write(f"  ! {section['reason'] if section else 'not collected'}\n")
+        return
+    write(f"  repositories: {', '.join(sd_views.repo_short(repo) for repo in section['repos'])}\n")
+    if section.get("companions_error"):
+        write(f"  ! {section['companions_error']}\n")
+    moment = now or datetime.datetime.fromisoformat(section["now"].replace("Z", "+00:00"))
+    columns = (width or shutil.get_terminal_size((sd_views.DEFAULT_WIDTH, 24)).columns) - 2
+    text = sd_views.render_sections(section["sections"], now=moment, width=columns, keys=VIEW_KEYS)
+    write("".join(f"  {line}" if line.strip() else line for line in text.splitlines(keepends=True)))
 
 
 def _render_threads(rows: list[dict[str, Any]], write: Any) -> None:
@@ -3480,6 +3556,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     _render_banner(result["abnormalities"], write)
     _render_pending(rows, write)
     _render_next(rows, write)
+    _render_views(result.get("views"), write)
     _render_threads(rows, write)
     _render_work(result["work"], write)
     _render_contributions(result.get("contributions"), write)
@@ -3546,12 +3623,13 @@ def _render_lane(section: dict[str, Any] | None, write: Any) -> None:
         return
     if not section["entries"]:
         write("  nothing queued\n")
+        return
+    _table(write, ["ID", "State", "At", "Held", "Branch"],
+           [[f"sd:{entry['item']}", entry["status"], entry.get("code") or entry.get("step") or "-",
+             "held" if entry.get("held") else "-", entry.get("branch") or "-"] for entry in section["entries"]])
     for entry in section["entries"]:
-        why = entry.get("code") or entry.get("step") or ""
-        write(f"  sd:{entry['item']} {entry['status']}" + (f" at {why}" if why else "")
-              + (" (held)" if entry.get("held") else "") + (f"  {entry['branch']}" if entry.get("branch") else "") + "\n")
         if entry.get("reason") and entry["status"] in LANE_FAILED:
-            write(f"    {entry['reason']}\n")
+            write(f"  sd:{entry['item']}: {entry['reason']}\n")
 
 
 def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
@@ -3590,8 +3668,9 @@ def _render_issues(issues: dict[str, Any], write: Any) -> None:
         write("  none open\n")
         return
     write(f"  needs you: {len(needs)}\n")
-    for row in needs:
-        write(f"    #{row['number']:<6} {', '.join(row['why']):<20} {row['title'][:60]}\n")
+    if needs:
+        _table(write, ["Number", "Why", "Title"],
+               [[f"#{row['number']}", ", ".join(row["why"]), row["title"]] for row in needs])
     write(f"  other open: {len(other)}\n")
 
 
@@ -3618,14 +3697,13 @@ def _render_jira(section: dict[str, Any], write: Any) -> None:
     # run stored what it saw and the verb reported writing it. Open rows
     # first; the producer has already limited the closed ones to seven days.
     ordered = sorted(rows, key=lambda row: (row.get("state") or "").lower() != "open")
-    for row in ordered:
-        # The key is the URL tail and nothing formats `number`, which a Jira
-        # row does not have. The title is external text, quoted for the same
-        # reason `_render_contributions` quotes its rows: a newline or an
-        # escape in a Jira summary would otherwise print as a second heading.
-        key = str(row.get("url") or "").rpartition("/")[2]
-        state = (row.get("state") or "").lower()
-        write(f"  {key}  {state}  " + json.dumps(row.get("title"), ensure_ascii=False) + "\n")
+    # The key is the URL tail and nothing formats `number`, which a Jira row
+    # does not have. The title is external text, quoted for the same reason
+    # `_render_contributions` quotes its rows: a newline or an escape in a
+    # Jira summary would otherwise print as a second heading.
+    _table(write, ["Key", "State", "Title"],
+           [[str(row.get("url") or "").rpartition("/")[2], (row.get("state") or "").lower(),
+             json.dumps(row.get("title"), ensure_ascii=False)] for row in ordered])
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -240,7 +240,7 @@ def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200) -
     return list(
         connection.execute(
             f"""
-            SELECT note.*, item.title AS item_title, item.repo AS item_repo
+            SELECT note.*, item.title AS item_title, item.repo AS item_repo, item.status AS item_status
               FROM note JOIN item ON item.id = note.item
              WHERE note.kind = ? AND note.resolved_at IS NULL AND item.status != 'done'
                AND {_unparked_clause(connection)}

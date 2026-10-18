@@ -128,6 +128,11 @@ CORE_CONFIG = {
                  "description": "The hub's tailnet name, the MagicDNS name or the bare machine name. A machine "
                                 "with its own database serves it, runs its lanes and pushes hub-pin only while its "
                                 "tailnet name matches (`sd-db fence`). Unset is no fence. It grants nothing."},
+    "status_companions": {"pattern": r"[~/][^=;,\x00]*=[~/][^=;,\x00]*(,[~/][^=;,\x00]*)*(;[~/][^=;,\x00]*=[~/][^=;,\x00]*(,[~/][^=;,\x00]*)*)*",
+                          "description": "Repositories `sd-status` lists beside the one it runs in, as "
+                                         "<repo>=<other>[,<other>], one entry per repository, `;` between them; "
+                                         "each repository as `sd-db repo list` names it. Unset lists none. It "
+                                         "grants nothing."},
     "privacy_patterns": {"pattern": r"[~/][^\x00]*",
                          "description": "The privacy-pattern file a pull request body is checked against, one "
                                         "extended regular expression per line. It grants nothing."},
@@ -628,7 +633,7 @@ def review_slot(result: dict[str, Any], environ: Mapping[str, str], root: pathli
 #: workflow database, not `config.json` (sd:3989). `external_reviews` stays per
 #: machine until each machine's value is known to match: it is the consent to
 #: send private code out, and the work satellite holds the work repositories.
-FLEET_KEYS = ("fleet_owners", "copilot_review", "hub_name")
+FLEET_KEYS = ("fleet_owners", "copilot_review", "hub_name", "status_companions")
 
 
 def fleet_connection(environ: Mapping[str, str] | None = None, *, write: bool = False) -> Any:

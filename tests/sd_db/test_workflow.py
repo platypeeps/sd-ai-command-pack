@@ -279,6 +279,12 @@ class StatusGuards(WorkflowCase):
             self.assertEqual(allowed_statuses(self.db, item), [])
             self.assertEqual(item_state(self.db, item), before)
 
+    def test_a_report_refusal_names_acknowledgement_as_the_way_out(self):
+        """sd:5065: the library names the action; the CLI and dashboard render it."""
+        item = create_item(self.db, kind="report", title="A report item")
+        with self.assertRaisesRegex(TransitionRefused, f"acknowledge report {item}"):
+            change_status(self.db, item, "done", who="operator")
+
     def test_followup_with_active_assignment_refuses_until_it_ends(self):
         item = create_item(self.db, kind="followup", title="Come back to this")
         for status in ("queued", "running"):

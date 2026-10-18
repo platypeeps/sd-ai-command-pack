@@ -191,12 +191,20 @@ def refuse_unclosable(connection, item: int, repo: str, named, deliver: bool) ->
                       code="closes_need_delivery", boundary="input", state="operator_decision",
                       next_action="Drop the extra --item, or name it on the item's --deliver pull request.")
     for number in items_closed(named, item, deliver):
-        row = connection.execute("SELECT repo FROM item WHERE id = ?", (number,)).fetchone()
+        row = connection.execute("SELECT repo, kind FROM item WHERE id = ?", (number,)).fetchone()
         if row is None:
             raise Refusal(f"--item names sd:{number}, which is no item; "
                           "the merge closes every item it names",
                           code="closes_item_unknown", boundary="input", state="operator_decision",
                           next_action="Correct the --item, or name a related item in a Refs: line.")
+        if not row["repo"]:
+            # sd:5065: a report has no repository to close it from; it closes by hand.
+            close = (f"sd reports acknowledge {number}" if row["kind"] == "report"
+                     else f"sd task status {number} done")
+            raise Refusal(f"--item names sd:{number}, which belongs to no repository; "
+                          "a merge closes only this repository's items",
+                          code="closes_item_foreign", boundary="input", state="operator_decision",
+                          next_action=f"Drop sd:{number} from --item, and close it after the merge with `{close}`.")
         if row["repo"] != repo:
             raise Refusal(f"--item names sd:{number}, which belongs to another "
                           "repository; a merge closes only this repository's items",
