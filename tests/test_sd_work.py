@@ -332,6 +332,64 @@ class TaskCLI(unittest.TestCase):
                 sd_work._answer(workflow, connection, args, "Pack store", "tester", None)
         self.assertEqual(json.loads(self.call("task", "show", item, "--json").stdout), before)
 
+    def batch_question(self):
+        """A filed review batch with one Approve-or-Reject question: the batch and the question's note."""
+        import sd_db.review as review
+
+        with sd_db.connect(home=self.home) as connection:
+            item = review.file(connection, {
+                "schema": 1, "queue": "nightly", "batch": "2026-10-18", "title": "Nightly review 2026-10-18",
+                "source": "system@6c4317b", "mode": "open",
+                "questions": [{"subject": "cap-retries", "text": "Suggestion: cap retries.",
+                               "options": ["Approve", "Reject"]}]}, who="fixture")["item"]
+            connection.commit()
+            return item, review.read(connection, item)["questions"][0]["note"]
+
+    def test_option_rules_a_review_batch_question_and_approve_files_a_task(self):
+        """sd:5065: `--option` rules a batch question from the CLI, as `review.rule` does."""
+        item, asked = self.batch_question()
+        state = json.loads(self.call("task", "note", item, "Worth a try", "--kind", "decision",
+                                     "--answers", asked, "--option", "approve", "--json").stdout)
+        self.assertRegex(state["note"]["body"], rf"^Ruling on note #{asked}: Approve -> sd:\d+$")
+        self.assertTrue(next(note for note in state["notes"] if note["id"] == asked)["resolved_at"])
+        self.assertIn(f"On note #{asked}: Worth a try", [note["body"] for note in state["notes"]])
+        filed = int(state["note"]["body"].rsplit("sd:", 1)[1])
+        self.assertEqual(json.loads(self.call("task", "show", filed, "--json").stdout)["item"]["kind"], "task")
+
+    def test_option_refuses_an_unknown_label_or_a_plain_question_and_writes_nothing(self):
+        """sd:5065: an unknown label names the valid ones; `--option` needs `--answers` on a batch question."""
+        item, asked = self.batch_question()
+        plain = json.loads(self.call("task", "add", "Asks", "--json").stdout)["item"]["id"]
+        question = self.question(plain)
+        for name, row, flags, said in (
+                ("unknown label", item, ("--answers", asked, "--option", "Maybe"), "its options are Approve, Reject"),
+                ("no --answers", item, ("--option", "Approve"), "--option needs --answers"),
+                ("not a batch", plain, ("--answers", question, "--option", "Approve"), "not a review batch")):
+            with self.subTest(name):
+                before = json.loads(self.call("task", "show", row, "--json").stdout)
+                refused = self.call("task", "note", row, "Answer", "--kind", "decision", *flags, code=1)
+                self.assertIn(said, refused.stderr)
+                self.assertEqual(json.loads(self.call("task", "show", row, "--json").stdout), before)
+
+    def test_option_writes_the_comment_and_the_ruling_or_neither(self):
+        """sd:5065: a ruling refused after the comment is written leaves no comment behind."""
+        import sd_db.review as review
+
+        item, asked = self.batch_question()
+        before = json.loads(self.call("task", "show", item, "--json").stdout)
+        args = argparse.Namespace(item=item, kind="decision", answers=asked, option="Reject")
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection, \
+                unittest.mock.patch.object(review, "rule", side_effect=review.ReviewError("cut")):
+            with self.assertRaises(review.ReviewError):
+                sd_work._answer(workflow, connection, args, "Not now", "tester", None)
+        self.assertEqual(json.loads(self.call("task", "show", item, "--json").stdout), before)
+
+    def test_answers_on_a_batch_question_without_option_names_the_option_to_give(self):
+        """sd:5065: the refusal on sd:5038 was a dead end; it now names `--option` and the labels."""
+        item, asked = self.batch_question()
+        refused = self.call("task", "note", item, "Approve", "--kind", "decision", "--answers", asked, code=1)
+        self.assertIn("--option LABEL, one of Approve, Reject", refused.stderr)
+
     def test_answers_refuses_a_review_batch_question(self):
         """A batch question is Review's: its ruling may file a task, which `review.rule` writes and a note does not."""
         with sd_db.connect(home=self.home) as connection:

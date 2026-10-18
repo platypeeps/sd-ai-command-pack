@@ -1146,6 +1146,8 @@ def _note_text(args: argparse.Namespace) -> str:
 
 def _note(workflow: Any, connection: Any, args: argparse.Namespace, who: str, revision: str | None) -> dict:
     body = _note_text(args)
+    if getattr(args, "option", None) is not None and args.answers is None:
+        raise WorkRefusal("--option needs --answers NOTE: it rules that review batch question")
     _done_advisory(workflow, connection, args.item)
     if args.answers is not None:
         return _answer(workflow, connection, args, body, who, revision)
@@ -1159,10 +1161,12 @@ def _answer(workflow: Any, connection: Any, args: argparse.Namespace, body: str,
 
     The same two writes, and the same `Ruling on note #Q: ` body, as the
     dashboard's Decisions answer; every refusal comes before the first write.
+    A review batch question is ruled with `--option` instead (sd:5065).
     """
     if args.kind != "decision":
         raise WorkRefusal("--answers records a decision: add --kind decision")
     sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+    import sd_db.review as review  # noqa: PLC0415 - after the helper
     from sd_db.review import REF_SOURCE  # noqa: PLC0415 - after the helper
 
     with workflow.transaction(connection):
@@ -1178,7 +1182,9 @@ def _answer(workflow: Any, connection: Any, args: argparse.Namespace, body: str,
             raise WorkRefusal(f"note {args.answers} is already resolved, at {asked['resolved_at']}")
         item = workflow.item_state(connection, args.item)["item"]
         if item["source"] == REF_SOURCE and (item["external_id"] or "").startswith("review:"):
-            raise WorkRefusal(f"sd:{args.item} is a review batch: rule its questions on the dashboard's Review page")
+            return _rule_batch(review, workflow, connection, args, body, who, revision)
+        if getattr(args, "option", None) is not None:
+            raise WorkRefusal(f"sd:{args.item} is not a review batch, so --option rules nothing: drop it")
         ruled = workflow.add_item_note(connection, args.item, kind="decision", who=who,
                                        body=f"Ruling on note #{args.answers}: {body}",
                                        expected_revision=revision)
@@ -1186,6 +1192,38 @@ def _answer(workflow: Any, connection: Any, args: argparse.Namespace, body: str,
                                            expected_revision=ruled["revision"])
         state["note"] = ruled["note"]
         return state
+
+
+def _rule_batch(review: Any, workflow: Any, connection: Any, args: argparse.Namespace, body: str, who: str,
+                revision: str | None) -> dict:
+    """`note --answers Q --option LABEL` on a review batch: `review.rule`, which may file a task (sd:5065).
+
+    LABEL matches one of the question's options, case aside. TEXT other than
+    the label is kept as the question's comment, written first in the same
+    transaction, so a refused ruling leaves neither.
+    """
+    try:
+        question = next((held for held in review.read(connection, args.item)["questions"]
+                         if held["note"] == args.answers), None)
+    except review.ReviewError:
+        question = None
+    options = [] if question is None else question["options"]
+    named = f", one of {', '.join(options)}" if options else ""
+    if args.option is None:
+        raise WorkRefusal(f"sd:{args.item} is a review batch: name the ruling with --option LABEL{named}")
+    option = next((held for held in options if held.casefold() == args.option.casefold()), None)
+    if option is None:
+        raise WorkRefusal(f"--option {args.option!r} is not an option of note {args.answers}"
+                          + (f"; its options are {', '.join(options)}" if options else ""))
+    if body.strip().casefold() != option.casefold():
+        revision = workflow.add_item_note(connection, args.item, kind="comment", who=who,
+                                          body=f"On note #{args.answers}: {body}",
+                                          expected_revision=revision)["revision"]
+    if revision is None:
+        revision = workflow.item_state(connection, args.item)["revision"]
+    state = review.rule(connection, args.item, args.answers, option, expected_revision=revision, who=who)
+    state["note"] = state["ruling"]
+    return state
 
 
 def run_today(args: argparse.Namespace) -> int:
@@ -1654,6 +1692,10 @@ def register(groups: Any, store: Any) -> None:
                            "suggested change)")
     note.add_argument("--answers", type=note_id, metavar="NOTE",
                       help="with --kind decision: the question note this rules on, resolved in the same write")
+    note.add_argument("--option", metavar="LABEL",
+                      help="with --answers on a review batch question: the option it rules, such as Approve or "
+                           "Reject; Approve on an Approve-or-Reject question files a task, and TEXT other than "
+                           "the label is kept as the question's comment")
     _output(note, "note", revision=True)
     # A read alias (sd:1112): the same operation as `sd store item`, which
     # stays the canonical read for every kind, so both print the same thing.
