@@ -1693,8 +1693,9 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
 
         lines = self.call("today").stdout.splitlines()
         heads = [line for line in lines if not line.startswith(("#", " "))]
-        self.assertEqual(heads, ["Reports needing attention (1)", "Decisions waiting (1)",
-                                 "Open followups (1)", "Work (2)"])
+        # sd:5098: the closed item is delivered, and the open one is unscheduled work.
+        self.assertEqual(heads, ["Delivered (1)", "Reports needing attention (1)", "Decisions waiting (1)",
+                                 "Open followups (1)", "Unscheduled (1)", "Work (2)"])
         text = "\n".join(lines)
         self.assertIn(f"#{report}  planning  ", text)
         # sd:5014: the note id is what `sd task note --answers` takes.
@@ -1704,6 +1705,67 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
         work = lines[lines.index("Work (2)") + 1:]
         self.assertEqual([line.split()[0] for line in work if line.startswith("#")], [f"#{later}", f"#{late}"])
         self.assertTrue(all(line.endswith(" · overdue") for line in work if line.startswith("#")), work)
+
+    def test_today_adds_the_status_sections_and_caps_each_at_five(self):
+        """sd:5098: delivered, landing, blocked, planned and unscheduled work, from the shared store."""
+        connection = sd_db.connect(home=self.home)
+        self.addCleanup(connection.close)
+        commit = "a" * 40
+        shipped = sd_db.create_item(connection, kind="task", title="Shipped", status="in_progress")
+        sd_db.writes.transition(connection, shipped, "done", who="sd-ship", reason=f"delivered at {commit} on origin/main")
+        sd_db.writes.add_note(connection, shipped, "comment", f"Code delivery https://github.com/o/r/pull/7 at {commit}")
+        laned = sd_db.create_item(connection, kind="task", title="In the lane")
+        connection.execute("INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
+                           ("lane:v1:o/r:e1", "2026-10-18T12:00:00Z",
+                            json.dumps({"id": "e1", "item": laned, "status": "pending", "position": 3})))
+        waiting = sd_db.create_item(connection, kind="task", title="Stuck")
+        sd_db.writes.transition(connection, waiting, "blocked", who="operator", reason="Waits on the vendor")
+        dated = sd_db.create_item(connection, kind="task", title="Dated", due="2099-01-01")
+        owed = [sd_db.create_item(connection, kind="task", title=f"Owed {number}", priority=number)
+                for number in range(1, 8)]
+        for item in owed:
+            sd_db.writes.add_note(connection, item, "followup", f"Chase {item}")
+        connection.commit()
+
+        lines = self.call("today", env={**self.environment, "TZ": "America/Denver"}).stdout.splitlines()
+        heads = [line for line in lines if not line.startswith(("#", " "))]
+        self.assertEqual(heads, ["Delivered (1)", "Landing now (1)", "Open followups (7)", "Blocked (1)",
+                                 "Planned (1)", "Unscheduled (7)", "Work (0)"])
+        text = "\n".join(lines)
+        self.assertRegex(text, rf"#{shipped}  [0-9-]* ?[0-9]{{2}}:[0-9]{{2}} M[DS]T  PR #7 at aaaaaaaaa  Shipped")
+        self.assertIn(f"#{laned}  o/r  pending  position 1  In the lane", text)
+        self.assertIn(f"#{waiting}  Stuck · Waits on the vendor", text)
+        self.assertIn(f"#{dated}  2099-01-01 MST  Dated", text)
+        unscheduled = lines[lines.index("Unscheduled (7)") + 1:lines.index("Work (0)")]
+        self.assertEqual(unscheduled, [f"#{item}  p{number}  Owed {number}" for number, item in
+                                       enumerate(owed[:5], start=1)] + ["  2 more"])
+        followups = lines[lines.index("Open followups (7)") + 1:lines.index("Blocked (1)")]
+        self.assertEqual(followups[5:], ["  2 more"])
+
+    def test_today_shows_gate_holders_and_an_unknown_gate(self):
+        """sd:5098: the holders `sd gate status --json` reads; a failed read is unknown, not an idle gate."""
+        import fcntl
+        slots = self.home / "slots"
+        slots.mkdir()
+        lock = slots / "slot.1.lock"
+        lock.write_text(f"{os.getpid()}\n")
+        (slots / "slot.1.info").write_text(json.dumps({"pid": os.getpid(), "label": "fixture tests", "since": 0}))
+        held = os.open(lock, os.O_RDWR)
+        self.addCleanup(os.close, held)
+        fcntl.flock(held, fcntl.LOCK_EX)
+        lines = self.call("today", env={**self.environment, "SD_GATE_SLOTS_DIR": str(slots)}).stdout.splitlines()
+        start = lines.index("Gate slots (1 holding, 0 waiting)")
+        self.assertRegex(lines[start + 1], r"^  holding slot 1  since .* fixture tests$")
+        # A folder the queue lock cannot be made in: the read fails.
+        unreadable = self.home / "unreadable"
+        unreadable.mkdir(mode=0o500)
+        self.addCleanup(unreadable.chmod, 0o700)
+        lines = self.call("today", env={**self.environment, "SD_GATE_SLOTS_DIR": str(unreadable)}).stdout.splitlines()
+        self.assertTrue(any(line.startswith("Gate slots: unknown (") for line in lines), lines)
+
+    def test_today_reads_the_lanes_own_key_prefix(self):
+        import sd_lane
+        self.assertEqual(sd_db.reads.LANE_KEY_PREFIX, sd_lane.KEY_PREFIX)
 
     def test_today_json_stays_the_work_rows(self):
         self.call("task", "status", self.task("Busy"), "in_progress")

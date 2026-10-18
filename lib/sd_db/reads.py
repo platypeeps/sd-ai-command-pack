@@ -20,6 +20,7 @@ assertion was written against.
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import subprocess
 from dataclasses import asdict, dataclass
@@ -250,6 +251,163 @@ def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200) -
             (kind, limit),
         ).fetchall()
     )
+
+
+# --------------------------------------------------------------------------
+# Today's status sections (sd:5098)
+# --------------------------------------------------------------------------
+
+#: `sd_lane.KEY_PREFIX`: a lane entry is the newest `checkpoint` row of its key.
+LANE_KEY_PREFIX = "lane:v1:"
+#: `workflow.ACTIVE_ASSIGNMENTS`, copied because `workflow` imports this module.
+ACTIVE_ASSIGNMENTS = ("queued", "running", "ending")
+#: Lane states in the order `landing` lists them; the queue holds the first two.
+_LANE_ORDER = ("running", "pending", "prepared", "handed_back", "failed", "skipped")
+#: Kinds that are not work to schedule: ideas wait for promotion, reports for acknowledgement.
+_UNSCHEDULED_SKIPS = ("idea", "work-idea", "personal-idea", "report")
+_DELIVERED_AT = re.compile(r"\bdelivered at ([0-9a-f]{40,64})\b")
+_CODE_DELIVERY = re.compile(r"Code delivery (\S+) at ([0-9a-f]{40,64})\b")
+_PULL = re.compile(r"/pull/([0-9]+)\b")
+_BLOCKED_BECAUSE = re.compile(r"-> blocked by [^:\n]*: *(.*)")
+_WAITING = re.compile(r"\s*(?:waiting|waits)\s+(?:on|for)\b", re.IGNORECASE)
+
+
+def delivered(connection: sqlite3.Connection, *, now: str | None = None, hours: int = 24) -> list[dict]:
+    """Items done and PRs merged in the last `hours`, newest first, with the PR number and merge commit.
+
+    The commit comes from `sd-ship`'s `delivered at` transition or its
+    `Code delivery` note; an item closed by hand has neither, so both are None.
+    """
+    cutoff = (_parse(_now(now)) or datetime.now(timezone.utc)) - timedelta(hours=hours)
+    rows = connection.execute(
+        """
+        SELECT note.item, note.body, note.timestamp, item.title
+          FROM note JOIN item ON item.id = note.item
+         WHERE substr(note.timestamp, 1, 19) >= ?
+           AND ((note.kind = 'status_change' AND note.body LIKE '%-> done%')
+             OR (note.kind = 'comment' AND note.body LIKE 'Code delivery %'))
+         ORDER BY note.id DESC
+        """,
+        (cutoff.strftime("%Y-%m-%dT%H:%M:%S"),),
+    ).fetchall()
+    found: dict[int, dict] = {}
+    for row in rows:
+        entry = found.setdefault(row["item"], {"item": row["item"], "title": row["title"],
+                                               "at": row["timestamp"], "pr": None, "commit": None})
+        if merge := _CODE_DELIVERY.match(row["body"]):
+            pull = _PULL.search(merge.group(1))
+            entry["pr"] = entry["pr"] or (int(pull.group(1)) if pull else None)
+            entry["commit"] = entry["commit"] or merge.group(2)
+        elif done := _DELIVERED_AT.search(row["body"]):
+            entry["commit"] = entry["commit"] or done.group(1)
+    return list(found.values())
+
+
+def landing(connection: sqlite3.Connection) -> list[dict]:
+    """Each item's newest lane entry that neither merged nor was cancelled, running first.
+
+    Newest is by the order the hub took the entries in, as `sd_lane.newest_entry`
+    reads it. An entry of a done item shows only while it is still queued.
+    `place` counts the repository's running and pending entries by position:
+    the lane records no ETA.
+    """
+    rows = connection.execute(
+        """
+        SELECT state.key, state.body, first
+          FROM state JOIN (SELECT MAX(id) AS last, MIN(id) AS first FROM state
+                            WHERE kind = 'checkpoint' AND substr(key, 1, ?) = ? GROUP BY key)
+            ON state.id = last
+        """,
+        (len(LANE_KEY_PREFIX), LANE_KEY_PREFIX),
+    ).fetchall()
+    newest: dict[tuple[str, int], tuple[int, dict]] = {}
+    for row in rows:
+        entry = json.loads(row["body"])
+        repository = row["key"][len(LANE_KEY_PREFIX):].rpartition(":")[0]
+        key = (repository, entry.get("item"))
+        if entry.get("status") != "cancelled" and row["first"] > newest.get(key, (0, {}))[0]:
+            newest[key] = (row["first"], {**entry, "repository": repository})
+    entries = [entry for _, entry in newest.values() if entry.get("status") != "merged"]
+    items = {row["id"]: row for row in connection.execute(
+        f"SELECT id, title, status FROM item WHERE id IN ({', '.join('?' for _ in entries)})",
+        [entry.get("item") for entry in entries]).fetchall()}
+    queued = _LANE_ORDER[:2]
+    entries = [entry for entry in entries
+               if entry.get("status") in queued or items.get(entry.get("item"), {"status": ""})["status"] != "done"]
+    entries.sort(key=lambda entry: (entry.get("position") or 0, entry["id"]))
+    places: dict[str, int] = {}
+    for entry in entries:
+        row = items.get(entry.get("item"))
+        entry["title"] = row["title"] if row is not None else entry.get("title", "")
+        entry["place"] = None
+        if entry.get("status") in queued:
+            entry["place"] = places[entry["repository"]] = places.get(entry["repository"], 0) + 1
+    rank = {status: index for index, status in enumerate(_LANE_ORDER)}
+    return sorted(entries, key=lambda entry: rank.get(entry.get("status"), len(rank)))
+
+
+def planned(connection: sqlite3.Connection, *, now: str | None = None) -> list[sqlite3.Row]:
+    """Open unparked items due after today, soonest first; today's and overdue ones are `today_items`."""
+    today = _now(now)[:10]
+    return list(connection.execute(
+        f"""
+        SELECT item.* FROM item
+         WHERE item.status != 'done' AND item.due > ? AND {_unparked_clause(connection)}
+         ORDER BY item.due ASC, item.priority IS NULL, item.priority ASC, item.id ASC
+        """,
+        (today,),
+    ).fetchall())
+
+
+def unscheduled(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    """Open work with no due date, lane entry or active assignment, highest priority first.
+
+    Blocked items are `blocked`'s, and in-progress ones are `today_items`'.
+    """
+    laned = {entry.get("item") for entry in landing(connection)}
+    rows = connection.execute(
+        f"""
+        SELECT item.* FROM item
+         WHERE item.status IN ('planning', 'ready') AND item.due IS NULL
+           AND item.kind NOT IN ({', '.join('?' for _ in _UNSCHEDULED_SKIPS)})
+           AND {_unparked_clause(connection)}
+           AND NOT EXISTS (SELECT 1 FROM assignment WHERE assignment.item = item.id
+                            AND assignment.status IN ({', '.join('?' for _ in ACTIVE_ASSIGNMENTS)}))
+         ORDER BY item.priority IS NULL, item.priority ASC, item.id ASC
+        """,
+        (*_UNSCHEDULED_SKIPS, *ACTIVE_ASSIGNMENTS),
+    ).fetchall()
+    return [row for row in rows if row["id"] not in laned]
+
+
+def blocked(connection: sqlite3.Connection) -> list[dict]:
+    """Open items that are blocked or whose newest comment says they wait on someone, with why.
+
+    Why is the reason on the newest move to blocked, else that waiting
+    comment; a blocked item with neither has an empty why.
+    """
+    rows = connection.execute(
+        f"""
+        SELECT item.id, item.title, item.status,
+               (SELECT body FROM note WHERE note.item = item.id AND note.kind = 'status_change'
+                  AND note.body LIKE '%-> blocked%' ORDER BY note.id DESC LIMIT 1) AS moved,
+               (SELECT body FROM note WHERE note.item = item.id AND note.kind = 'comment'
+                 ORDER BY note.id DESC LIMIT 1) AS comment
+          FROM item
+         WHERE item.status != 'done' AND {_unparked_clause(connection)}
+         ORDER BY item.id ASC
+        """
+    ).fetchall()
+    found = []
+    for row in rows:
+        waiting = row["comment"] if row["comment"] and _WAITING.match(row["comment"]) else ""
+        if row["status"] != "blocked" and not waiting:
+            continue
+        because = _BLOCKED_BECAUSE.search(row["moved"] or "") if row["status"] == "blocked" else None
+        why = because.group(1) if because and because.group(1).strip() else waiting
+        found.append({"id": row["id"], "title": row["title"], "status": row["status"],
+                      "why": why.strip().partition("\n")[0]})
+    return found
 
 
 def on_branch(stored: str | None, branch: str | None) -> bool:
