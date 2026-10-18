@@ -265,6 +265,65 @@ class TaskCLI(unittest.TestCase):
         result = self.call("task", "note", item, "--body", "Late note")
         self.assertIn(f"delivered by commit {sha[:12]}", result.stderr)
 
+    def question(self, item, body="Which store?\nOption: Pack store\nOption: Database rows"):
+        return json.loads(self.call("task", "note", item, body, "--kind", "question", "--json").stdout)["note"]["id"]
+
+    def test_answers_records_the_decision_and_resolves_the_question_in_one_write(self):
+        """sd:5014: a decision note left its question in Decisions waiting until a second verb resolved it."""
+        item = json.loads(self.call("task", "add", "Asks", "--json").stdout)["item"]["id"]
+        asked = self.question(item)
+        state = json.loads(self.call("task", "note", item, "Database rows", "--kind", "decision",
+                                     "--answers", asked, "--json").stdout)
+        self.assertEqual((state["note"]["kind"], state["note"]["body"]),
+                         ("decision", f"Ruling on note #{asked}: Database rows"))
+        self.assertTrue(next(note for note in state["notes"] if note["id"] == asked)["resolved_at"])
+        with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
+            self.assertEqual([row["id"] for row in sd_db.reads.open_notes(connection, "question")], [])
+        self.assertNotIn("Decisions waiting", self.call("today").stdout)
+
+    def test_answers_refuses_and_writes_nothing(self):
+        item = json.loads(self.call("task", "add", "Asks", "--json").stdout)["item"]["id"]
+        other = json.loads(self.call("task", "add", "Asks too", "--json").stdout)["item"]["id"]
+        asked, theirs = self.question(item), self.question(other)
+        comment = json.loads(self.call("task", "note", item, "Plain", "--json").stdout)["note"]["id"]
+        settled = self.question(item, "Settled?")
+        self.call("note", "resolve", settled)
+        for name, flags, said in (
+                ("no decision kind", ("--answers", asked), "--kind decision"),
+                ("not a question", ("--kind", "decision", "--answers", comment), "is a comment, not a question"),
+                ("another item", ("--kind", "decision", "--answers", theirs), f"belongs to sd:{other}"),
+                ("resolved", ("--kind", "decision", "--answers", settled), "already resolved"),
+                ("missing", ("--kind", "decision", "--answers", 999999), "no note 999999")):
+            with self.subTest(name):
+                before = [json.loads(self.call("task", "show", row, "--json").stdout) for row in (item, other)]
+                refused = self.call("task", "note", item, "Answer", *flags, code=1)
+                self.assertIn(said, refused.stderr)
+                self.assertEqual([json.loads(self.call("task", "show", row, "--json").stdout)
+                                  for row in (item, other)], before)
+
+    def test_answers_writes_both_or_neither(self):
+        """A resolve that fails after the ruling is written leaves no ruling behind."""
+        item = json.loads(self.call("task", "add", "Asks", "--json").stdout)["item"]["id"]
+        asked = self.question(item)
+        before = json.loads(self.call("task", "show", item, "--json").stdout)
+        args = argparse.Namespace(item=item, kind="decision", answers=asked)
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection, \
+                unittest.mock.patch.object(workflow, "resolve_item_note", side_effect=workflow.WorkflowError("cut")):
+            with self.assertRaises(workflow.WorkflowError):
+                sd_work._answer(workflow, connection, args, "Pack store", "tester", None)
+        self.assertEqual(json.loads(self.call("task", "show", item, "--json").stdout), before)
+
+    def test_answers_refuses_a_review_batch_question(self):
+        """A batch question is Review's: its ruling may file a task, which `review.rule` writes and a note does not."""
+        with sd_db.connect(home=self.home) as connection:
+            item = sd_db.create_item(connection, kind="task", title="Batch", source="task-ref",
+                                     external_id="review:example:1")
+        asked = self.question(item)
+        before = json.loads(self.call("task", "show", item, "--json").stdout)
+        refused = self.call("task", "note", item, "Pack store", "--kind", "decision", "--answers", asked, code=1)
+        self.assertIn("review batch", refused.stderr)
+        self.assertEqual(json.loads(self.call("task", "show", item, "--json").stdout), before)
+
     def test_all_public_note_kinds_parse_and_persist_without_internal_kinds(self):
         self.assertEqual(set(NOTE_KINDS), {"comment", "followup", "question", "decision", "proposal"})
         state = json.loads(self.call("task", "add", "Parent task", "--json").stdout)
