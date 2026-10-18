@@ -101,6 +101,13 @@ class TaskCLI(unittest.TestCase):
         self.assertIn("by stage only", refused.stderr)
         self.assertEqual(json.loads(self.call("task", "show", item, "--json").stdout), before)
 
+    def test_task_status_done_on_a_report_names_the_acknowledge_command(self):
+        """sd:5065: a report closes by acknowledgement, so the refusal names that command."""
+        with sd_db.connect(home=self.home) as connection:
+            item = sd_db.create_item(connection, kind="report", title="Example report")
+        refused = self.call("task", "status", item, "done", code=1)
+        self.assertIn(f"`sd reports acknowledge {item} --resolve-followups`", refused.stderr)
+
     def test_task_show_reads_what_store_item_reads(self):
         """sd:1112. `sd task show` is a read alias; `sd store item` stays canonical.
 

@@ -698,7 +698,10 @@ def change_status(
         if row["kind"] == "work" and target == "done":
             raise TransitionRefused("work completion requires verified delivery or cancellation evidence")
         if target not in allowed_statuses(connection, item):
-            raise TransitionRefused(f"{row['kind']} item {item} cannot move to {target} through task controls")
+            # sd:5065: a report closes by acknowledgement; name that way out.
+            way_out = (f"; acknowledge report {item} instead, which can resolve its open followups too"
+                       if row["kind"] == "report" and target == "done" else "")
+            raise TransitionRefused(f"{row['kind']} item {item} cannot move to {target} through task controls{way_out}")
         if target == "done" and reason is None:
             _refuse_unlanded_branch(state, item)
         if row["status"] == "done":

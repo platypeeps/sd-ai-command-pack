@@ -880,11 +880,19 @@ def _change_status(workflow: Any, connection: Any, args: argparse.Namespace,
 
     The second value is for the human line only; `--json` already carries
     its id as `next_occurrence`. None when nothing was created.
+
+    A report's `done` is refused here with the command that closes one
+    (sd:5065), after `--delivered-by` is refused with its own reason; the
+    library's refusal names the action, never a verb (sd:3503).
     """
+    reason = _status_reason(workflow, connection, args)
+    if args.status == "done" and workflow.item_state(connection, args.item)["item"]["kind"] == "report":
+        raise WorkRefusal(
+            f"item {args.item} is a report, and a report closes by acknowledgement: "
+            f"`sd reports acknowledge {args.item} --resolve-followups` also resolves its open followups")
     result = workflow.change_status(
         connection, args.item, args.status, who=who,
-        expected_revision=getattr(args, "if_revision", None),
-        reason=_status_reason(workflow, connection, args))
+        expected_revision=getattr(args, "if_revision", None), reason=reason)
     spawned = result.get("next_occurrence")
     following = None if spawned is None else workflow.item_state(connection, spawned)["item"]
     return result, following
