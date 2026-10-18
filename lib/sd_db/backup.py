@@ -75,6 +75,15 @@ from .schema import SCHEMA_VERSION, TABLES, migrations
 from .writes import add_note, record_state
 from .writes import now as stamp_now
 
+
+class Retained(BackupError):
+    """A backup a prune keeps by design, not by a fault: a stopped run or a copy no checkpoint dates.
+
+    `prune_older` reports these as one line per reason (sd:5065); every other
+    reason to keep a backup is a fault and keeps its own line.
+    """
+
+
 #: Where a run writes when no destination is named: the `Backup` folder on the
 #: USB disk attached to this Mac. Snapshots taken before 2026-09-25 went to
 #: `~/Documents/sd-backups/` and stay there.
@@ -1163,7 +1172,7 @@ def _checkpoint(directory: Path) -> tuple[datetime, bool]:
             # A snapshot taken read-only before `migrate` never had a row (sd:4700); it is
             # never owned, so it is never dated or pruned either.
             if value.get("checkpoint") is False:
-                raise BackupError("it was taken read-only before `migrate`, so no checkpoint row dates it")
+                raise Retained("it was taken read-only before `migrate`, so no checkpoint row dates it")
             raise BackupError("its database holds no checkpoint row for its run")
         taken, current = _checkpoint_time(row[0])
     except BackupError:
@@ -1214,7 +1223,8 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
     directory, but so can a hand-kept copy of the store, and nothing in it
     tells the two apart -- unless `unmanifested` asks otherwise, below. Every
     directory past the window that stays, `report` hears with its reason, and
-    every one removed. `dry_run` returns what would go and removes nothing.
+    every one removed; one kept by design (`Retained`) is counted on one line
+    per reason (sd:5065). `dry_run` returns what would go and removes nothing.
 
     `unmanifested` (sd:4917, an operator ruling) also removes a dated
     directory with no manifest whose day lies more than twice `days` back, by
@@ -1249,7 +1259,7 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
         """The identity checked again before removal; None for a directory inside the window."""
         if not _holds_manifest(path):
             if not unmanifested or datetime.strptime(path.name[:10], "%Y-%m-%d").date() >= stale:
-                raise BackupError("no manifest (stopped run?)")
+                raise Retained("no manifest (stopped run?)")
             if path.is_symlink() or not path.is_dir():
                 raise BackupError("it is a link or not a directory")
             try:
@@ -1263,6 +1273,7 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
         return _check_backup(path, moved=moved)
 
     directories = []
+    retained: dict[str, list[Path]] = {}
     for path in sorted(root.iterdir()):
         if not DATED_NAME.fullmatch(path.name):
             continue
@@ -1274,12 +1285,20 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
             continue
         try:
             identity = identify(path)
+        except Retained as error:
+            retained.setdefault(str(error), []).append(path)
+            continue
         except BackupError as error:
             if report is not None:
                 report(f"kept {path}: {error}")
             continue
         if identity is not None:
             directories.append((path, identity))
+    for reason, kept in retained.items():
+        if report is not None:
+            names = sorted((path.name for path in kept), key=lambda name: _directory_order(Path(name)))
+            named = names[0] if len(names) == 1 else f"{names[0]} to {names[-1]}"
+            report(f"kept {len(names)} backup{'' if len(names) == 1 else 's'} under {root}, named {named}: {reason}")
     directories.sort(key=lambda value: _directory_order(value[0]))
     if dry_run:
         return [path for path, _ in directories]
