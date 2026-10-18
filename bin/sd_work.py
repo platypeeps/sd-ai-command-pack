@@ -1149,7 +1149,8 @@ def _answer(workflow: Any, connection: Any, args: argparse.Namespace, body: str,
     """
     if args.kind != "decision":
         raise WorkRefusal("--answers records a decision: add --kind decision")
-    from sd_db.review import REF_SOURCE
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+    from sd_db.review import REF_SOURCE  # noqa: PLC0415 - after the helper
 
     with workflow.transaction(connection):
         asked = connection.execute("SELECT item, kind, resolved_at FROM note WHERE id = ?",
