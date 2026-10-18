@@ -2054,7 +2054,7 @@ class JiraSectionTests(StatusFixture):
         block = self.section(completed.stdout)
         self.assertEqual(f"  external context: degraded; last successful sync {collected}\n"
                          '  Key     State  Title\n'
-                         '  ------  -----  -----\n'
+                         '  ------  -----  ----------------\n'
                          '  LOG-10  open   "Ten"\n', block)
         self.assertNotIn("never collected", block)
         freshness = self.report()["jira"]["freshness"]

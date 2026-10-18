@@ -150,7 +150,7 @@ class TheSections(TodayCase):
         self.item("Soon", due="2026-09-08")
         self.item("Later", due="2026-10-30")
         found = today.sections(self.connection, now=NOW)
-        self.assertEqual(list(found), ["summary", *today.ORDER])
+        self.assertEqual(list(found), ["summary", *today.ORDER, "closed_by_hand"])
         self.assertEqual((found["summary"]["planned"], found["summary"]["planned_this_week"]), (2, 1))
 
     def test_the_active_assignment_states_match_the_workflow(self):
