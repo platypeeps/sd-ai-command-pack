@@ -601,128 +601,28 @@ def _print_notes(value: dict[str, Any], audited: Any) -> None:
               f"sd task show {value['item']['id']} --audit shows them")
 
 
-#: A choice line of a decision, as the dashboard's Decisions reads one (sd:3012).
-OPTION_LINE = re.compile(r"^[ \t]*Option:[ \t]*\S", re.MULTILINE)
-
-
-def _first_line(text: Any, width: int = 100) -> str:
-    line = str(text or "").strip().partition("\n")[0]
-    return line if len(line) <= width else line[:width - 1] + "…"
-
-
-def _attention_reports(sd_db: Any, connection: Any) -> list[dict[str, Any]]:
-    """Open reports whose fields say they need attention; unreadable fields count, as an unknown is no pass."""
-    from sd_db import reporting
-
-    found = []
-    for row in reporting.reports(connection):
-        if row["status"] == "done":
-            continue
-        try:
-            attention = json.loads(row["fields"] or "{}").get("attention")
-        except (ValueError, AttributeError):
-            attention = "fields unreadable"
-        if attention:
-            found.append({**row, "why": attention if isinstance(attention, str) else ""})
-    return found
-
-
-#: Rows each short `sd today` section shows before its `N more` line (sd:5098).
-SECTION_ROWS = 5
-
-
-def _local(stamp: str) -> str:
-    """A stored UTC stamp in this machine's zone with its label: `HH:MM MDT` today, the date before it otherwise."""
-    try:
-        moment = datetime.datetime.fromisoformat(stamp.replace("Z", "+00:00")).astimezone()
-    except (AttributeError, ValueError):
-        return str(stamp)
-    return moment.strftime("%H:%M %Z" if moment.date() == datetime.date.today() else "%Y-%m-%d %H:%M %Z")
-
-
-def _local_day(day: str) -> str:
-    """A due date with the zone label this machine has on that day, as a due date names no time."""
-    try:
-        noon = datetime.datetime.combine(datetime.date.fromisoformat(day), datetime.time(12)).astimezone()
-    except ValueError:
-        return day
-    return f"{day} {noon.tzname()}"
-
-
-def _delivered_line(row: dict[str, Any]) -> str:
-    merge = f"PR #{row['pr']} at {row['commit'][:9]}" if row["pr"] else (
-        f"at {row['commit'][:9]}" if row["commit"] else "closed")
-    return f"#{row['item']}  {_local(row['at'])}  {merge}  {row['title']}"
-
-
-def _landing_line(entry: dict[str, Any]) -> str:
-    state = entry.get("status") or "unknown"
-    where = f"position {entry['place']}" if entry["place"] else (f"at {entry['step']}" if entry.get("step") else "")
-    return "  ".join(part for part in (f"#{entry.get('item')}", entry["repository"], state, where, entry["title"]) if part)
-
-
-def _print_gate() -> None:
-    """The holders and waiters `sd gate status --json` reads; a failed read prints unknown, never an idle gate."""
+def _today_gate() -> Any:
+    """`sd gate status --json`'s snapshot, or why it could not be read: a failed read is unknown, not idle."""
     import sd_gate_slots
 
     environ = dict(os.environ)
     try:
-        report = sd_gate_slots.snapshot(sd_gate_slots.directory(environ), 0, sd_gate_slots.load_rule(environ))
+        return sd_gate_slots.snapshot(sd_gate_slots.directory(environ), 0, sd_gate_slots.load_rule(environ))
     except (OSError, ValueError) as error:
-        print(f"Gate slots: unknown ({error})")
-        return
-    holders, waiters = report["holders"], report["waiters"]
-    if not holders and not waiters:
-        return
-    print(f"Gate slots ({len(holders)} holding, {len(waiters)} waiting)")
-    lines = [f"  holding slot {entry['slot']}  since {_local(entry['since'])}  {entry['label'] or 'unlabelled'}"
-             for entry in holders]
-    lines += [f"  waiting {entry['place']}  since {_local(entry['since'])}  {entry['label'] or 'unlabelled'}"
-              for entry in waiters]
-    for line in lines[:SECTION_ROWS]:
-        print(line)
-    if len(lines) > SECTION_ROWS:
-        print(f"  {len(lines) - SECTION_ROWS} more")
+        return str(error)
 
 
-def _print_today(sd_db: Any, connection: Any, work: list[dict[str, Any]]) -> None:
-    """`sd today` as the dashboard's Today reads (sd:3501), with the operator's status around it (sd:5098).
+def _print_today(connection: Any) -> None:
+    """`sd today` as text: `sd_db.today.sections` in the one layout `sd_views` gives it and `sd-status` (sd:5098)."""
+    import shutil
 
-    The short sections come first, each capped at `SECTION_ROWS`, so `head -40`
-    shows them; Work comes last and whole.
-    """
-    reads = sd_db.reads
-    reports = _attention_reports(sd_db, connection)
-    decisions = [note for note in reads.open_notes(connection, "question")
-                 if len(OPTION_LINE.findall(note["body"])) >= 2]
-    # A report's own followup is the report's line already.
-    listed = {row["id"] for row in reports}
-    followups = [note for note in reads.open_notes(connection, "followup") if note["item"] not in listed]
+    import sd_views
+    from sd_db import today
 
-    def section(title: str, rows: list[Any], line: Any) -> None:
-        if rows:
-            print(f"{title} ({len(rows)})")
-            for row in rows[:SECTION_ROWS]:
-                print(line(row))
-            if len(rows) > SECTION_ROWS:
-                print(f"  {len(rows) - SECTION_ROWS} more")
-
-    section("Delivered", reads.delivered(connection), _delivered_line)
-    section("Landing now", reads.landing(connection), _landing_line)
-    _print_gate()
-    section("Reports needing attention", reports,
-            lambda row: f"#{row['id']}  {row['status']}  {row['title']}" + (f" · {row['why']}" if row["why"] else ""))
-    section("Decisions waiting", decisions,
-            lambda note: f"#{note['item']}  note #{note['id']}  {_first_line(note['body'])}")
-    section("Open followups", followups, lambda note: f"#{note['item']}  {_first_line(note['body'])}")
-    section("Blocked", reads.blocked(connection),
-            lambda row: f"#{row['id']}  {row['title']}" + (f" · {_first_line(row['why'], 80)}" if row["why"] else ""))
-    section("Planned", reads.planned(connection), lambda row: f"#{row['id']}  {_local_day(row['due'])}  {row['title']}")
-    section("Unscheduled", reads.unscheduled(connection),
-            lambda row: f"#{row['id']}  " + (f"p{row['priority']}  " if row["priority"] is not None else "") + row["title"])
-    print(f"Work ({len(work)})")
-    _name_refs(work)
-    _print_rows(work, today=datetime.date.today().isoformat())
+    now = datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0)
+    found = today.sections(connection, now=now.strftime("%Y-%m-%dT%H:%M:%SZ"), gate=_today_gate())
+    width = shutil.get_terminal_size((sd_views.DEFAULT_WIDTH, 24)).columns
+    print(sd_views.render_sections(found, now=now, width=width), end="")
 
 
 def _occurrence_line(value: dict[str, Any], following: Any) -> None:
@@ -1344,11 +1244,10 @@ def run_today(args: argparse.Namespace) -> int:
     sd_db, _ = _library()
     connection = sd_handoff_rows.connect(sd_db, write=False)
     try:
-        rows = [dict(row) for row in sd_db.reads.today_items(connection)]
         if args.json:
-            _emit(rows, machine=True)
+            _emit([dict(row) for row in sd_db.reads.today_items(connection)], machine=True)
         else:
-            _print_today(sd_db, connection, rows)
+            _print_today(connection)
         return 0
     except sd_db.SdDbError as error:
         raise WorkRefusal(str(error)) from error

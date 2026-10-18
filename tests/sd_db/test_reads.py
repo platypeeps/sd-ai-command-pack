@@ -8,15 +8,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sd_db import (
-    connect,
-    create_assignment,
-    create_item,
-    reads,
-    reporting,
-    upsert_repo,
-    workflow,
-)
+from sd_db import connect, create_item, reads, reporting, upsert_repo, workflow
 from sd_db.errors import SdDbError
 from sd_db.migrate import initialise
 from sd_db.schema import migrations
@@ -94,99 +86,6 @@ class OpenFollowups(unittest.TestCase):
             owed = add_note(connection, live, "followup", "Still owed")
             add_note(connection, done, "followup", "Left behind")
             self.assertEqual([row["id"] for row in reads.open_followups(connection)], [owed])
-
-
-class TodaySections(unittest.TestCase):
-    """sd:5098: the sections `sd today` adds, read from a fixture store."""
-
-    SHA = "a" * 40
-    OTHER = "b" * 40
-
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        path = Path(self.tmp.name) / "sd.db"
-        initialise(path)
-        self.connection = connect(path)
-        self.addCleanup(self.connection.close)
-
-    def item(self, title, **fields):
-        return create_item(self.connection, kind=fields.pop("kind", "task"), title=title, **fields)
-
-    def lane(self, repository, entry, **body):
-        self.connection.execute(
-            "INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', ?, ?, ?)",
-            (f"{reads.LANE_KEY_PREFIX}{repository}:{entry}", WHEN, json.dumps({"id": entry, **body})))
-
-    def test_delivered_names_the_pr_and_merge_commit_of_the_last_day(self):
-        shipped = self.item("Shipped", status="in_progress")
-        transition(self.connection, shipped, "done", who="sd-ship", reason=f"delivered at {self.SHA} on origin/main")
-        add_note(self.connection, shipped, "comment", f"Code delivery https://github.com/o/r/pull/7 at {self.SHA}")
-        old = self.item("Old", status="in_progress")
-        transition(self.connection, old, "done", who="sd-ship", reason=f"delivered at {self.OTHER} on origin/main")
-        self.connection.execute("UPDATE note SET timestamp = '2020-01-01T00:00:00+00:00' WHERE item = ?", (old,))
-        merged = self.item("Merged, still open")
-        add_note(self.connection, merged, "comment", f"Code delivery https://github.com/o/r/pull/9 at {self.OTHER}")
-        by_hand = self.item("Closed by hand", status="in_progress")
-        transition(self.connection, by_hand, "done", who="operator", reason="test")
-        self.assertEqual([(row["item"], row["pr"], row["commit"]) for row in reads.delivered(self.connection)],
-                         [(by_hand, None, None), (merged, 9, self.OTHER), (shipped, 7, self.SHA)])
-
-    def test_landing_now_is_each_items_newest_live_entry_with_its_place(self):
-        first, second, third, finished, failed, delivered = (
-            self.item(title) for title in ("First", "Second", "Third", "Finished", "Failed", "Delivered"))
-        transition(self.connection, delivered, "done", who="operator", reason="test")
-        self.lane("o/r", "e0", item=first, status="failed", position=1)
-        self.lane("o/r", "e1", item=first, status="running", position=5, step="prepare")
-        self.lane("o/r", "e2", item=third, status="pending", position=7)
-        self.lane("o/r", "e3", item=second, status="pending", position=6)
-        self.lane("o/r", "e4", item=finished, status="merged", position=2)
-        self.lane("o/s", "e5", item=failed, status="failed", position=3, step="prepare")
-        self.lane("o/s", "e6", item=delivered, status="failed", position=4)
-        self.lane("o/s", "e7", item=second, status="cancelled", position=8)
-        self.assertEqual(
-            [(row["item"], row["repository"], row["status"], row["place"]) for row in reads.landing(self.connection)],
-            [(first, "o/r", "running", 1), (second, "o/r", "pending", 2), (third, "o/r", "pending", 3),
-             (failed, "o/s", "failed", None)])
-
-    def test_planned_is_open_items_due_after_today_soonest_first(self):
-        later = self.item("Later", due="2026-09-30")
-        sooner = self.item("Sooner", due="2026-09-07")
-        self.item("Due today, so in Work", due="2026-09-06")
-        self.item("Done", due="2026-09-08", status="done")
-        self.item("Undated")
-        self.assertEqual([row["id"] for row in reads.planned(self.connection, now=NOW)], [sooner, later])
-
-    def test_unscheduled_leaves_out_dated_laned_assigned_blocked_and_idea_items(self):
-        low = self.item("Low", priority=3)
-        high = self.item("High", priority=1)
-        unranked = self.item("Unranked")
-        self.item("Dated", due="2026-12-01")
-        laned = self.item("Laned")
-        self.lane("o/r", "e1", item=laned, status="pending", position=1)
-        assigned = self.item("Assigned")
-        create_assignment(self.connection, role="builder", status="running", item=assigned)
-        finished = self.item("Assignment ended")
-        create_assignment(self.connection, role="builder", status="done", item=finished)
-        self.item("Blocked", status="blocked")
-        self.item("An idea", kind="idea")
-        self.item("Done", status="done")
-        self.assertEqual([row["id"] for row in reads.unscheduled(self.connection)], [high, low, unranked, finished])
-
-    def test_blocked_says_why_from_the_status_change_or_a_waiting_note(self):
-        vendor = self.item("Vendor")
-        transition(self.connection, vendor, "blocked", who="operator", reason="Waits on the vendor\nmore detail")
-        bare = self.item("Bare", status="blocked")
-        waiting = self.item("Waiting")
-        add_note(self.connection, waiting, "comment", "Waiting on Alex for the keys")
-        chatty = self.item("Chatty")
-        add_note(self.connection, chatty, "comment", "Waiting on Alex was yesterday")
-        add_note(self.connection, chatty, "comment", "Alex answered")
-        self.assertEqual([(row["id"], row["why"]) for row in reads.blocked(self.connection)],
-                         [(vendor, "Waits on the vendor"), (bare, ""), (waiting, "Waiting on Alex for the keys")])
-
-    def test_the_active_assignment_states_match_the_workflow(self):
-        self.assertEqual(reads.ACTIVE_ASSIGNMENTS, workflow.ACTIVE_ASSIGNMENTS)
 
 
 class ParkedWritingReads(unittest.TestCase):
