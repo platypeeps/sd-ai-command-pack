@@ -374,7 +374,7 @@ Workers:
 - **Batch a repository's small items into one pull request**, one commit per row; rows that change the same files always group.
   Keep a group near 300 changed lines. Name every grouped row in the pull request.
 - **Large uncommitted data goes under `sd.bulk_storage_root`**, as `<root>/<repository>/`. Build output and owner-sensitive data stay on the system disk.
-- **Test one version per language, the latest stable (Python 3.14, Node 26); no version matrices.**
+- **Test one version per language, the latest stable (Python 3.15, Node 26); no version matrices.**
 
 Gates and reviews:
 
