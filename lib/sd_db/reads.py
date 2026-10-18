@@ -343,7 +343,7 @@ def landing(connection: sqlite3.Connection) -> list[dict]:
         if entry.get("status") in queued:
             entry["place"] = places[entry["repository"]] = places.get(entry["repository"], 0) + 1
     rank = {status: index for index, status in enumerate(_LANE_ORDER)}
-    return sorted(entries, key=lambda entry: rank.get(entry.get("status"), len(rank)))
+    return sorted(entries, key=lambda entry: rank.get(str(entry.get("status")), len(rank)))
 
 
 def planned(connection: sqlite3.Connection, *, now: str | None = None) -> list[sqlite3.Row]:
