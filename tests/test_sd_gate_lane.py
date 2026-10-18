@@ -12,6 +12,7 @@ A lane gate is `sd-check`'s own slot wait. These tests run the real
 from __future__ import annotations
 
 import fcntl
+import io
 import json
 import os
 import pathlib
@@ -186,7 +187,7 @@ class BuilderRefusal(LaneFixture):
         self.assertEqual(code, LANE_BUSY, err)
         self.assertLess(took, 10, "a refusal must not wait")
         self.assertIn("lane gate sd-check lane-a", err)
-        self.assertIn("waits at place 1 in the queue since", err)
+        self.assertIn("waits at place 1 since", err)
         self.assertFalse((self.tmp / "ran").exists())
         self.assertEqual(len(self.tickets()), 1, "only the lane gate's ticket may stay")
         holder.kill()
@@ -231,12 +232,11 @@ class BuilderRefusal(LaneFixture):
         lane.send_signal(signal.SIGKILL)
         lane.wait()
         self.assertTrue(wait_for(lambda: slot_free(self.slots / "slot.1.lock")))
+        self.assertTrue(slot_free(self.slots / "slot.1.lane"), "the kernel drops the lane marker with the gate")
         self.assertEqual(self.status("1")["lane_gates"], [])
         code, err, _ = self.finish(self.builder("1"))
         self.assertEqual(code, 0, err)
         self.assertEqual((self.tmp / "ran").read_text(), "ran,")
-        state = json.loads((self.slots / sd_gate_slots.QUEUE_STATE).read_text(encoding="utf-8"))
-        self.assertEqual(state.get("lane_holders"), {}, "the builder's admission to slot 1 clears the stale entry")
 
     def test_a_dead_lane_waiter_does_not_hold_back_a_builder(self):
         holder = self.hold()
@@ -272,7 +272,8 @@ class LaneStatus(LaneFixture):
             self.assertRegex(entry["since"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
         text = subprocess.run([sys.executable, str(SLOTS), "status"], env=self.env(SD_GATE_SLOTS="1"),
                               capture_output=True, text=True, timeout=60)
-        self.assertIn("lane: sd-check lane-a holds slot 1 since", text.stdout)
+        self.assertIn(f"lane: sd-check lane-a (pid {first.pid}) holds slot 1 since", text.stdout)
+        self.assertIn(f"sd-check lane-b (pid {second.pid}) waits at place 1 since", text.stdout)
         self.release.touch()
         for gate in (first, second):
             code, err, _ = self.finish(gate)
@@ -289,31 +290,74 @@ class Admission(unittest.TestCase):
         self.queue = sd_gate_slots.Queue(self.where)
         self.rule = sd_gate_slots.LoadRule(0.0, 0.0, "test")
 
-    def slots(self) -> list[int]:
-        """A fresh pair of descriptors on slot 1 and slot 2, as another process would open them."""
-        handles = [open(self.where / f"slot.{index}.lock", "a") for index in (1, 2)]
+    def open_pair(self, suffix: str) -> list[int]:
+        """Fresh descriptors on `slot.1<suffix>` and `slot.2<suffix>`, as another process would open them."""
+        handles = [open(self.where / f"slot.{index}{suffix}", "a") for index in (1, 2)]
         for handle in handles:
             self.addCleanup(handle.close)
         return [handle.fileno() for handle in handles]
 
-    def admit(self, ticket, fds):
-        return self.queue.admit(ticket, fds, self.rule, loadavg=lambda: (1.0, 1.0, 1.0))
+    def slots(self) -> list[int]:
+        return self.open_pair(".lock")
 
-    def test_a_lane_admission_refuses_a_builder_in_the_same_step(self):
-        """No step between the lane gate's `flock` and its record: nothing else is written before the builder looks."""
-        lane_fds = self.slots()
+    def admit(self, ticket, fds, markers=()):
+        return self.queue.admit(ticket, fds, self.rule, markers=markers, loadavg=lambda: (1.0, 1.0, 1.0))
+
+    def admitted_lane(self) -> tuple[list[int], list[int]]:
+        """A lane gate admitted to slot 1, holding its slot and its marker."""
+        fds, markers = self.slots(), self.open_pair(".lane")
         lane = self.queue.enter("sd-check lane-a", "/", lane=True)
-        self.assertEqual(self.admit(lane, lane_fds), (0, ""))
-        builder = self.queue.enter("wk tests", "/", yields=True)
+        self.assertEqual(self.admit(lane, fds, markers), (0, ""))
+        return fds, markers
+
+    def refused(self, builder) -> dict:
         with self.assertRaises(sd_gate_slots.LaneBusy) as raised:
             self.admit(builder, self.slots())
-        self.assertEqual((raised.exception.gate["state"], raised.exception.gate["slot"], raised.exception.gate["label"]),
-                         ("holding", 1, "sd-check lane-a"))
         self.queue.leave(builder)
-        fcntl.flock(lane_fds[0], fcntl.LOCK_UN)
+        return raised.exception.gate
+
+    def test_a_lane_admission_refuses_a_builder_in_the_same_step(self):
+        """The marker is locked in the admission step: nothing else runs before the builder looks."""
+        fds, markers = self.admitted_lane()
+        gate = self.refused(self.queue.enter("wk tests", "/", yields=True))
+        self.assertEqual((gate["state"], gate["slot"], gate["label"]), ("holding", 1, "sd-check lane-a"))
+        fcntl.flock(markers[0], fcntl.LOCK_UN)
+        fcntl.flock(fds[0], fcntl.LOCK_UN)
         again = self.queue.enter("wk tests", "/", yields=True)
-        self.assertEqual(self.admit(again, self.slots()), (0, ""), "a free slot's lane record counts for nothing")
-        self.assertEqual(self.queue.state()["lane_holders"], {})
+        self.assertEqual(self.admit(again, self.slots()), (0, ""), "a released marker counts for nothing")
+
+    def test_a_damaged_state_file_does_not_hide_a_lane_holder(self):
+        """Review finding: an unreadable `queue.state` read as no lane holder, and the builder took slot 2."""
+        self.admitted_lane()
+        (self.where / sd_gate_slots.QUEUE_STATE).write_text("not json", encoding="utf-8")
+        builder = self.queue.enter("wk tests", "/", yields=True)
+        self.assertEqual(self.refused(builder)["state"], "holding")
+
+    def test_a_marker_that_cannot_be_read_refuses_a_builder(self):
+        """Review finding: a probe that failed read as a free slot. A loop stands for any open error."""
+        os.symlink("slot.1.lane", self.where / "slot.1.lane")
+        gate = self.refused(self.queue.enter("wk tests", "/", yields=True))
+        self.assertEqual(gate["state"], "unknown")
+        self.assertIn("slot.1.lane", gate["reason"])
+        self.assertIn("cannot tell whether a lane gate holds or waits", sd_gate_slots.lane_refusal(gate, 0.0))
+
+    def test_a_ticket_that_cannot_be_read_refuses_a_builder(self):
+        other = self.queue.enter("other", "/")
+        other.path.write_text("not json", encoding="utf-8")
+        self.assertEqual(self.refused(self.queue.enter("wk tests", "/", yields=True))["state"], "unknown")
+
+    def test_a_builder_that_cannot_queue_refuses_and_a_lane_gate_still_marks_its_slot(self):
+        """Review finding: a run that could not queue took any free slot without asking about the lane."""
+        (self.where / sd_gate_slots.QUEUE_DIR).write_text("not a directory", encoding="utf-8")
+        stream = io.StringIO()
+        with self.assertRaises(sd_gate_slots.LaneBusy) as raised:
+            sd_gate_slots.wait_for_slot(self.slots(), self.where, poll=0.01, stream=stream, yields=True)
+        self.assertEqual(raised.exception.gate["state"], "unknown")
+        taken = sd_gate_slots.wait_for_slot(self.slots(), self.where, poll=0.01, stream=stream, lane=True,
+                                            label="sd-check lane-a", markers=self.open_pair(".lane"))
+        self.assertEqual(taken, 0)
+        self.assertEqual([(gate["state"], gate["label"]) for gate in sd_gate_slots.lane_gates(self.where, [])],
+                         [("holding", "sd-check lane-a")])
 
     def test_lane_tickets_go_first_and_keep_their_own_order(self):
         plain = self.queue.enter("plain", "/")
@@ -329,9 +373,6 @@ class Admission(unittest.TestCase):
         old = self.queue.enter("old gate", "/")
         old.path.write_text(json.dumps({"seq": old.seq, "pid": os.getpid(), "label": "old gate", "cwd": "/",
                                         "since": time.time()}), encoding="utf-8")
-        held = self.slots()
-        fcntl.flock(held[0], fcntl.LOCK_EX | fcntl.LOCK_NB)
-        self.queue.write_state({**self.queue.state(), "lane_holders": {"1": "not a record", "x": {}}})
         builder = self.queue.enter("wk tests", "/", yields=True)
         self.assertIn("place 2 of 2", self.admit(builder, self.slots())[1])
 
