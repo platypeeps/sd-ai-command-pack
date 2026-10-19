@@ -1242,8 +1242,13 @@ def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
 
 
 #: The kinds a repository row declares (sd:5109), the library's `repos.DECLARATION_KINDS`:
-#: each is the object a `.github/sd-<kind>.json` file held before migration 37.
-DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status")
+#: the first four each the object a `.github/sd-<kind>.json` file held before migration 37.
+DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status", "experiment")
+#: The `experiment` declaration's required fields and their spelling (sd:5302): the Notion
+#: experiment page a research repository belongs to, and the data source that page is a row of.
+EXPERIMENT_FIELDS = {"page": NOTION_PAGE, "data_source": NOTION_DATA_SOURCE}
+#: The longest `page`, `data_source` or `title`: a bound before any pattern runs.
+EXPERIMENT_TEXT = 2000
 
 
 def repo_declaration(root: pathlib.Path | str, kind: str, environ: Mapping[str, str] | None = None) -> Any:
@@ -1311,7 +1316,32 @@ def declaration_problems(kind: str, value: Any) -> list[str]:
         return []
     if kind == "status":
         return parse_acknowledgements(value)[1]
+    if kind == "experiment":
+        return experiment_problems(value)
     return [f"{kind!r} is not a declaration kind; expected {', '.join(DECLARATION_KINDS)}"]
+
+
+def experiment_problems(value: Any) -> list[str]:
+    """Why `value` is not an `experiment` declaration; empty when it is one (sd:5302).
+
+    `page` is the Notion page id or URL, `data_source` the id of the
+    experiments database it is a row of, `title` an optional name for display.
+    """
+    where = "the experiment declaration"
+    if not isinstance(value, dict):
+        return [f"{where} is a JSON object, not {type(value).__name__}"]
+    extra = sorted(set(value) - set(EXPERIMENT_FIELDS) - {"title"})
+    missing = sorted(set(EXPERIMENT_FIELDS) - set(value))
+    problems = [f"{where}: unknown key(s) {', '.join(extra)}"] if extra else []
+    problems += [f"{where}: missing {', '.join(missing)}"] if missing else []
+    for key, pattern in EXPERIMENT_FIELDS.items():
+        text = value.get(key)
+        if key in value and not (isinstance(text, str) and len(text) <= EXPERIMENT_TEXT and re.fullmatch(pattern, text)):
+            problems.append(f"{where}: {key} must be a Notion {'page id or URL' if key == 'page' else 'data source id'}")
+    title = value.get("title")
+    if "title" in value and not (isinstance(title, str) and title.strip() and len(title) <= EXPERIMENT_TEXT):
+        problems.append(f"{where}: title, when given, must be text of 1 to {EXPERIMENT_TEXT} characters")
+    return problems
 
 
 def hosts_lane(connection: Any, database: Any, repository: str) -> bool:

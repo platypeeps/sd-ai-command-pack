@@ -27,6 +27,7 @@ from sd_db.migrate import initialise, migrate
 from sd_db.repos import (
     CI_MODES,
     DECLARATION_BYTES,
+    DECLARATION_KINDS,
     ConfMissing,
     RepoRefusal,
     add,
@@ -1311,6 +1312,13 @@ class TheDeclarationsSetting(RepoCase):
         set_declaration(self.connection, path, "status", None)
         self.assertIsNone(self._value(path))
 
+    def test_an_experiment_is_a_kind(self):
+        """sd:5302. A research repository's Notion experiment; `bin/sd-db` checks the object's fields."""
+        path = self._registered()
+        value = {"page": "0123456789abcdef0123456789abcdef", "data_source": "0123456789abcdef0123456789abcdef"}
+        self.assertEqual(set_declaration(self.connection, path, "experiment", value), (path, None))
+        self.assertEqual(declarations(self.connection, path), {"experiment": value})
+
     def test_writing_the_same_value_again_changes_nothing_but_the_time(self):
         """The lead's move is re-runnable: a second identical write is a no-op."""
         path = self._registered()
@@ -1345,7 +1353,7 @@ class TheDeclarationsSetting(RepoCase):
         draw = random.Random(5109)
         for _ in range(200):
             kind = "".join(draw.choice("reviwgat_suc") for _ in range(draw.randrange(0, 12)))
-            if kind not in ("review", "gate_reuse", "check_scope", "status"):
+            if kind not in DECLARATION_KINDS:
                 cases.append((kind, {"k": draw.random()}))
         for kind, value in cases:
             with self.subTest(kind=kind, value=type(value).__name__), self.assertRaises(RepoRefusal):

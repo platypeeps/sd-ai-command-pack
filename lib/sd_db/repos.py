@@ -1087,9 +1087,10 @@ def jira_project(connection: sqlite3.Connection, path: Path | str) -> str | None
     return None if row is None else row["jira_project"]
 
 
-#: The kinds `repo.declarations` holds, each the object a `.github/sd-<kind>.json`
-#: file held before migration 37 (sd:5109). The pack's readers validate each value.
-DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status")
+#: The kinds `repo.declarations` holds: the first four each the object a `.github/sd-<kind>.json`
+#: file held before migration 37 (sd:5109), and `experiment` a research repository's Notion
+#: experiment page (sd:5302). The pack's readers validate each value.
+DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status", "experiment")
 #: The longest declarations object, as compact JSON: the largest file moved was under 1 KiB.
 DECLARATION_BYTES = 16384
 #: The word `repo declare` takes to remove a kind; the kind leaves the object.

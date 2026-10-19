@@ -286,7 +286,7 @@ A key is `A-Z`, then 1 to 254 of `A-Z`, `0-9` or `_`; the column's CHECK holds t
 ## Declarations
 
 `repo.declarations` holds a repository's pack declarations as one JSON object, or NULL for none (sd:5109).
-Each key is a kind; each value is the object the old `.github/` file held.
+Each key is a kind; each value is the object the old `.github/` file held, or for `experiment` the research link.
 
 | Kind | Reader | Old file |
 | --- | --- | --- |
@@ -294,6 +294,7 @@ Each key is a kind; each value is the object the old `.github/` file held.
 | `gate_reuse` | the gate's receipt key (`sd_gate_receipts`) | `.github/sd-gate-reuse.json` |
 | `check_scope` | `sd-check --base` docs-only scope | `.github/sd-check-scope.json` |
 | `status` | `sd-status` accepted gaps, `sd-ship merge` declared gap | `.github/sd-status.json` |
+| `experiment` | the system dashboard's research project link: `page` and `data_source`, Notion ids (sd:5302) | none |
 
     bin/sd-db repo declare PATH                     # every kind, as JSON
     bin/sd-db repo declare PATH review              # one kind

@@ -2247,6 +2247,56 @@ class RepoDeclarationTests(Fixture):
         with self.assertRaises(ValueError):
             sd_lib.repo_declaration(self.tmp, "reviews", self.env)
 
+    def test_the_kinds_are_the_librarys_kinds(self) -> None:
+        """bin/ keeps its own copy, as it imports the library only on demand; the two must not drift."""
+        self.assertEqual(sd_lib.DECLARATION_KINDS, sd_db.repos.DECLARATION_KINDS)
+
+    def test_an_experiment_declaration_reads_back_from_the_row(self) -> None:
+        """sd:5302. A research repository names its Notion experiment page and that page's data source."""
+        root = self.make_repo()
+        value = {"page": "https://www.notion.so/example/Experiment-0123456789abcdef0123456789abcdef",
+                 "data_source": "collection://01234567-89ab-cdef-0123-456789abcdef", "title": "An experiment"}
+        self.assertEqual(sd_lib.declaration_problems("experiment", value), [])
+        self.declare(root, "experiment", value)
+        self.assertEqual(sd_lib.repo_declaration(self.add_worktree(root), "experiment", self.env), value)
+
+
+class ExperimentDeclarationTests(unittest.TestCase):
+    """sd:5302. What `sd-db repo declare PATH experiment` accepts: a Notion page and its data source, a title."""
+
+    PAGE = "0123456789abcdef0123456789abcdef"
+    SOURCE = "01234567-89ab-cdef-0123-456789abcdef"
+
+    def test_each_accepted_shape_reads(self) -> None:
+        for value in ({"page": self.PAGE, "data_source": self.SOURCE},
+                      {"page": "01234567-89AB-CDEF-0123-456789ABCDEF", "data_source": "collection://" + self.PAGE},
+                      {"page": f"https://www.notion.so/Title-{self.PAGE}?pvs=4", "data_source": self.SOURCE,
+                       "title": "t"}):
+            with self.subTest(value=value):
+                self.assertEqual(sd_lib.declaration_problems("experiment", value), [])
+
+    def test_every_value_outside_the_shape_is_refused(self) -> None:
+        """Property over extreme inputs: wrong types, empty and huge strings, ids one digit short, unknown keys."""
+        import random
+
+        good = {"page": self.PAGE, "data_source": self.SOURCE}
+        cases: list = [{}, {"page": self.PAGE}, {"data_source": self.SOURCE}, {**good, "url": "x"},
+                       {**good, "title": ""}, {**good, "title": " "}, {**good, "title": 7},
+                       {**good, "title": "t" * 2001}, {**good, "page": self.PAGE[:-1]},
+                       {**good, "page": "https://example.test/" + "a/" * 10000 + self.PAGE},
+                       {**good, "data_source": "https://www.notion.so/" + self.PAGE},
+                       {**good, "data_source": self.SOURCE + "0"}, {**good, "page": "z" * 32}]
+        for wrong in (None, 0, 1.5, float("nan"), float("inf"), True, [], {}, [self.PAGE], "", " " + self.PAGE):
+            cases += [{**good, "page": wrong}, {**good, "data_source": wrong}]
+        draw = random.Random(5302)
+        for _ in range(200):
+            # A `g` in every draw keeps it from spelling a valid id by chance.
+            text = "".join(draw.choice("0123456789abcdef-/:") for _ in range(draw.randrange(0, 40)))
+            cases.append({**good, draw.choice(["page", "data_source"]): text + "g"})
+        for value in cases:
+            with self.subTest(value=str(value)[:80]):
+                self.assertTrue(sd_lib.declaration_problems("experiment", value))
+
 
 if __name__ == "__main__":
     unittest.main()
