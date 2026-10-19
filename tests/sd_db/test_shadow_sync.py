@@ -834,6 +834,33 @@ class TheReason(SyncCase):
         self.assertTrue(result.ok, result.reason)
         self.assertEqual(self.reasons(), {"ABC-1": "assigned", "ABC-2": "filed", "ABC-3": "watched"})
 
+    def test_jira_rows_store_when_jira_last_updated_them_in_utc(self):
+        """pack sd:5357: `updated` is stored as `iso` writes it; one that does not read keeps the stored time."""
+        dated = jira_issue("ABC-1", updated="2026-10-05T10:12:33.123-0600")
+        transport = jira_transport([{"issues": [dated], "isLast": True}])
+        with self.environment():
+            self.assertTrue(sync(self.connection, tracker="jira", now=self.now, runner=transport).ok)
+        [row] = self.shadow().values()
+        self.assertEqual(row["updated_at"], "2026-10-05T16:12:33Z")
+        transport = jira_transport([{"issues": [jira_issue("ABC-1", updated="not a time")], "isLast": True}])
+        with self.environment():
+            self.assertTrue(sync(self.connection, tracker="jira", now=self.now + timedelta(hours=1),
+                                 runner=transport).ok)
+        [row] = self.shadow().values()
+        self.assertEqual(row["updated_at"], "2026-10-05T16:12:33Z")
+
+    def test_the_backfill_walk_is_the_custom_jql_and_dates_the_rows_it_reads(self):
+        """pack sd:5357 backfill: `JIRA_JQL` replaces the window, so one run re-reads older rows."""
+        jql = ("(assignee = currentUser() OR watcher = currentUser() OR reporter = currentUser()) "
+               "AND updated >= -90d ORDER BY updated DESC")
+        transport = jira_transport([{"issues": [jira_issue("ABC-9", updated="2026-08-28T09:00:00.000+0000")],
+                                     "isLast": True}])
+        with self.environment(), patch.dict(os.environ, {"JIRA_JQL": jql}):
+            self.assertTrue(sync(self.connection, tracker="jira", now=self.now, runner=transport).ok)
+        self.assertEqual(transport.seen["jql"], [jql])
+        [row] = self.shadow().values()
+        self.assertEqual(row["updated_at"], "2026-08-28T09:00:00Z")
+
     def test_a_writer_that_names_no_reason_keeps_the_stored_one(self):
         """The importers (`sources.issues`, `sources.index_cache`) call
         `upsert_shadow` without a reason; a refresh from them is not a

@@ -1,0 +1,25 @@
+-- `shadow.updated_at`: when the tracker last updated a row (pack sd:5357), as
+-- UTC ISO text, so `sd-status` lists the Jira rows updated in the last
+-- `sd.jira_recent_days` days. `last_seen` cannot answer that: it is when the
+-- collector last saw the row, and a closed row is seen again on every sync
+-- whose window still holds it.
+--
+-- 001's header kept this column out because nothing read it after the collect
+-- ordered its results; `sd-status` now reads it. Both collectors already read
+-- the stamp (`updated` from Jira, `updatedAt` from GitHub search), so storing
+-- it costs no request. NULL is unknown: a row synced before 39, or a stamp
+-- that does not parse, which keeps the stored one.
+--
+-- `ADD COLUMN`, as 038: SQLite adds a nullable column in place, touches no
+-- other table and moves no row. Every existing row reads NULL until a collect
+-- sees it again: the nightly window for recently updated rows, and one run
+-- with a custom `JIRA_JQL` for older Jira rows.
+-- The reverse, run by hand with the runner, the dashboard and the serve agent
+-- stopped. It drops every stored update time; take `bin/sd-db backup` first:
+--
+--   BEGIN;
+--   ALTER TABLE shadow DROP COLUMN updated_at;
+--   PRAGMA user_version = 38;
+--   COMMIT;
+
+ALTER TABLE shadow ADD COLUMN updated_at TEXT;

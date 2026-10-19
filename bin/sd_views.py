@@ -162,21 +162,30 @@ def _cut(text: str, width: int) -> str:
     return text if len(text) <= width else text[:max(1, width - 1)] + "…"
 
 
-def table(heads: list[str], rows: list[list[str]], width: int) -> list[str]:
-    """Aligned columns under a header row and a rule; the `Title` column takes the width the others leave."""
-    title = heads.index("Title") if "Title" in heads else None
-    rows = [[cell if index == title else _cut(cell, CELL_MAX) for index, cell in enumerate(row)] for row in rows]
-    sizes = [max([len(head)] + [len(row[index]) for row in rows]) for index, head in enumerate(heads)]
+def widths(heads: list[str], rows: list[list[str]], width: int, flex: str = "Title") -> list[int]:
+    """The column sizes `table` prints at; a cell longer than its column's size is cut.
+
+    `flex` names the column that takes the width the others leave (`Title`
+    unless a caller names another); every other column grows to `CELL_MAX`.
+    """
+    title = heads.index(flex) if flex in heads else None
+    sizes = [max([len(head)] + [len(" ".join(row[index].split())) for row in rows]) for index, head in enumerate(heads)]
+    sizes = [size if index == title else min(size, max(len(heads[index]), CELL_MAX)) for index, size in enumerate(sizes)]
     if title is not None:
         rest = sum(size for index, size in enumerate(sizes) if index != title) + 2 * (len(heads) - 1)
         sizes[title] = max(TITLE_MIN, min(sizes[title], width - rest))
-        rows = [[_cut(cell, sizes[title]) if index == title else cell for index, cell in enumerate(row)]
-                for row in rows]
+    return sizes
+
+
+def table(heads: list[str], rows: list[list[str]], width: int, flex: str = "Title") -> list[str]:
+    """Aligned columns under a header row and a rule; the `flex` column takes the width the others leave."""
+    sizes = widths(heads, rows, width, flex)
 
     def line(cells: Iterable[str]) -> str:
         return "  ".join(cell.ljust(size) for cell, size in zip(cells, sizes, strict=True)).rstrip()
 
-    return [line(heads), line("-" * size for size in sizes), *(line(row) for row in rows)]
+    cut = [[_cut(cell, size) for cell, size in zip(row, sizes, strict=True)] for row in rows]
+    return [line(heads), line("-" * size for size in sizes), *(line(row) for row in cut)]
 
 
 def section_table(section: str, rows: list[dict[str, Any]], now: datetime.datetime, width: int) -> list[str]:

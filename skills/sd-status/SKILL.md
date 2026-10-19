@@ -16,7 +16,7 @@ dropped; the dashboard provides the cross-repo view of repositories. The one
 line here that is not scoped to the checkout is the `jira` section: a Jira
 ticket belongs to no repository, so it is read from the shared database whole.
 
-The report leads with the judgement. `abnormalities`, `pending` and `next`
+The report leads with the judgement. `Abnormalities`, `Pending` and `Next`
 answer "is anything wrong", "what is waiting" and "what do I do now" before a
 single inventory section appears, because those are the questions a reader
 came with; the eight older sections keep their order underneath them so
@@ -38,26 +38,28 @@ opens with seventeen top-level lines; the sixteen below are the sections.
 
 | Section | What it shows |
 |---|---|
-| `abnormalities` | every abnormal class in the ranking table, whether or not it fired: `clear`, `n findings`, or `unchecked: <reason>`. At most three findings print per class, and the elision says how many were held back |
-| `pending` | at most ten actionable rows by rank, with the line above them stating the denominator — `10 of 123, by rank`. A class with a cap shows at most that many rows, and a line under the list says how many of its rows the list does not show |
-| `next` | one row: the top-ranked id and its `suggest`. Not a menu, not three options |
-| `work across the shared database` | `sd today`'s Landing now, Delivered, Planned, Blocked and Unscheduled tables, for this repository and the companions the `sd.status_companions` setting row lists for it, in `sd today`'s layout, indented two spaces. A database that does not read is a `!` reason, never empty tables |
-| `open threads` | a count per `source`, then the exclusions named in full, so the counts are never read as a total of everything that exists |
-| `work items` | item status from each item's row, counted, archived ones counted and not listed |
-| `contributions (this repo, shared database order)` | upstream activity, local evidence, and dependency readiness from the shared contribution projection |
-| `open pull requests` | open pull requests, via the same code path as `sd-pr-state` |
-| `merge lane (this repo, shared database)` | each item's newest lane entry that has not merged or been cancelled, with its state; `sd-ship lane list` is the full view |
-| `detected setup` | mode, lowering reason, shared-tree paths to move, and detected check entrypoints |
-| `issues (this repo, shared database)` | open GitHub issues for this repository from the shared database, as context; no row in `pending` comes from them |
-| `jira (shared database, all repositories)` | the operator's Jira involvement from the shared database, across every repository: one table row per ticket, key and state, open rows first, then rows closed within seven days. Not scoped to the checkout |
-| `protection` | branch-protection **enforcement**, gap by gap, plus the merge-settings and fleet-baseline flags |
-| `resumable handoffs` | the pending local packet for this directory (**read, never consumed**) |
-| `backends` | the review lanes the provider registry declares, plus `copilot`, which no entry names — names and states only, enumerated at runtime |
-| `legacy residue` | legacy leftovers, each with the exact command that removes it |
+| `Abnormalities` | every abnormal class in the ranking table, one row each, whether or not it fired: `clear` with 0, `findings` with its count, or `unchecked` with `-` and its reason on a line under the table. A second table lists at most three findings per class, and a line names how many each class held back |
+| `Pending` | at most ten actionable rows by rank, with the line under them stating the denominator — `10 of 123, by rank`. A class with a cap shows at most that many rows, and a line under the list says how many of its rows the list does not show |
+| `Next` | one row: the top-ranked id, its check and its `suggest`. Not a menu, not three options |
+| `Work across the shared database` | a Repo row for this repository and one for each companion the `sd.status_companions` setting row lists for it, then `sd today`'s Landing now, Delivered, Planned, Blocked and Unscheduled tables for them, in `sd today`'s layout, indented two spaces. A database that does not read is a `!` reason, never empty tables |
+| `Open threads` | a row per `source` with its count, then the exclusions named in full, so the counts are never read as a total of everything that exists |
+| `Work items` | a row per live item with its status from the item's row; findings and the counts line under the table, archived ones counted and not listed |
+| `Contributions, this repo, shared database order` | a row per contribution: state (its lane), reference, item, when it merged or closed in local time, title. Each lane shows its first five rows, then `… N more <lane>`; a line points at the dashboard's Contributions page for every row. Every other field is `sd task contribution show KEY --json`'s and `--json`'s |
+| `Open pull requests` | open pull requests, via the same code path as `sd-pr-state` |
+| `Merge lane, this repo, shared database` | each item's newest lane entry that has not merged or been cancelled, with its state; `sd-ship lane list` is the full view |
+| `Detected setup` | a Field and Value table: mode, lowering reason, shared-tree paths to move, and detected check entrypoints |
+| `Issues, this repo, shared database` | open GitHub issues for this repository from the shared database, one row each with the needs-you rows first, as context; no row in `pending` comes from them |
+| `Jira, shared database, all repositories` | the operator's Jira involvement from the shared database, across every repository: one row per ticket assigned to or filed by the operator that Jira updated in the last `sd.jira_recent_days` days (unset reads 30), open or closed, open rows first: key, state, that reason and title; at most `JIRA_ROWS` rows, then `… N more`, then one line counting the older or undated rows it hides. `--json` keeps every row, a watched one too, with its `reason` and `updated_at`. Not scoped to the checkout |
+| `Protection` | branch-protection **enforcement**, a row per gap, acceptance, merge-settings flag and fleet-baseline flag |
+| `Resumable handoffs` | the pending local packet for this directory as a row (**read, never consumed**) |
+| `Backends` | the review lanes the provider registry declares, plus `copilot`, which no entry names — names and states only, enumerated at runtime |
+| `Legacy residue` | a row per legacy leftover, each with the exact command that removes it on a line under the table |
 
-`pending`, `merge lane`, the needs-you rows of `issues`, and `jira` print their rows as `sd today` prints a table (sd:5098): a header row, a dash rule, aligned columns, the title cut to the terminal width.
-The other sections keep their own lines: a class grid, key and value records, counts, or one line per finding with its command.
-The `merge lane` table carries a Repo column, and a failed lane row's title names its item as `<repo> sd:<n>`; relay an item the same way (sd:5124).
+Every section prints as `sd today` prints one (sd:5098, sd:5357): a heading `<Section> (<count>)`, a header row, a dash rule, aligned columns, the title cut to the terminal width.
+The count is the rows the section holds; a section whose read failed counts `unknown`, never 0.
+An empty section is its heading alone; plain lines (notes, cap lines, reasons, `until` lines) follow the table.
+A finding, reason, path or suggestion the table cuts prints whole on a line under it, as `<first cell> <column>: <text>`.
+The `Merge lane` table carries a Repo column, and a failed lane row's title names its item as `<repo> sd:<n>`; relay an item the same way (sd:5124).
 
 The contribution section filters the shared projection by the current checkout path and its GitHub repository name.
 Its order is newly unblocked, awaiting you, awaiting them, merged, then closed.
@@ -65,8 +67,8 @@ Its order is newly unblocked, awaiting you, awaiting them, merged, then closed.
 It also holds a row with no item that the operator dismissed, until a lifecycle change.
 The dashboard uses the same projection and order across repositories.
 A row is a pull request, an upstream issue, or local work that is neither filed yet.
-An issue row carries `issue_url`; an issue you have written up but not filed carries `target_repo`, `draft_title`, `draft_path` and `draft_verified` instead, and filing it keeps the item ID.
-Read event IDs and their revision with `sd task contribution show KEY --json`.
+An issue row carries its issue URL; an issue you have written up but not filed carries its target repository and draft instead, and filing it keeps the item ID.
+Read every field, event IDs and their revision included, with `sd task contribution show KEY --json`.
 Use `sd task contribution ack KEY --event EVENT --if-revision REVISION` to acknowledge an event explicitly.
 Use `sd task contribution dismiss KEY --if-revision REVISION` to close a row with no item that will not settle; only the operator dismisses.
 Acknowledgement records attention separately from notification delivery and local task completion.
@@ -212,8 +214,8 @@ configuration fault, printed as a sentence, never a traceback.
 
 A repository can record, in its repo row's `status` declaration
 (`sd-db repo declare PATH status`), a protection state it has looked at and decided to keep. Those findings print as
-`ok  [id] accepted <date>: <reason>` with the ending condition on the line
-below, and move from `protection.gaps` to `protection.accepted` in `--json` —
+an `accepted` row, `<date>: <reason>`, with `<id> until: <condition>` on a line
+under the table, and move from `protection.gaps` to `protection.accepted` in `--json` —
 so a consumer counting gaps counts open ones only, and never mistakes an
 accepted finding for an absent one.
 
@@ -280,8 +282,8 @@ same breath.
   protection, the honest statement is that nothing enforces merge authority
   there.
 - **Never read `pending` as the whole list.** It is capped at ten and says so;
-  the total is on its own heading line, and `--actions` and `--json` carry the
-  rest.
+  the total is in its heading and on the line under the rows, and `--actions`
+  and `--json` carry the rest.
 - **Never invent an id, and never renumber one.** Ids come from the run you are
   looking at; an id you composed names nothing.
 - **Never consume the handoff packet from here.** The `resumable handoffs`

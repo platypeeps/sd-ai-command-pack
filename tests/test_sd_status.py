@@ -1085,14 +1085,20 @@ class StatusFixture(ToolFixture):
 
     @staticmethod
     def headings(text: str) -> list[str]:
-        """Section headings, which are the only lines starting at column 0.
+        """Section headings, which are the only lines starting at column 0, without their counts.
 
         Derived from the output rather than declared, so a section added to
         `render()` is picked up by whoever compares two of these instead of
-        being missed by both.
+        being missed by both. The count is the data, so two runs over
+        different data compare by name.
         """
-        return [line for line in text.splitlines()
+        return [re.sub(r" \(([0-9]+|unknown)\)$", "", line) for line in text.splitlines()
                 if line and not line[0].isspace() and not line.startswith("sd-status:")]
+
+    @staticmethod
+    def cells(*cells: str) -> str:
+        """A pattern for a table row whose leading cells are `cells`, aligned as `sd_views.table` aligns them."""
+        return r"\n  " + r" {2,}".join(re.escape(cell) for cell in cells)
 
 
 class ReportShapeTests(StatusFixture):
@@ -1136,7 +1142,7 @@ class ReportShapeTests(StatusFixture):
         """
         self.with_github(pulls=[])
         empty = self.headings(self.run_tool(SD_STATUS).stdout)
-        self.assertIn("work items", empty)
+        self.assertIn("Work items", empty)
 
         self.item("2026-08-01-alpha", status="in_progress")
         self.item("2026-08-02-beta", status="planning")
@@ -1238,7 +1244,7 @@ class ProtectionSectionTests(StatusFixture):
             },
         )
         completed = self.run_tool(SD_STATUS)
-        self.assertIn("GAP [enforce_admins]", completed.stdout)
+        self.assertRegex(completed.stdout, self.cells("enforce_admins", "gap"))
         self.assertIn("prose, not authority", completed.stdout)
 
     def acknowledge(self, *entries: Any, body: Any = None) -> None:
@@ -1264,8 +1270,8 @@ class ProtectionSectionTests(StatusFixture):
         self.assertEqual([entry["id"] for entry in section["accepted"]], ["reviews"])
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn("ok  [reviews] accepted 2026-09-01: one maintainer", completed.stdout)
-        self.assertIn("until a second account with merge rights exists", completed.stdout)
+        self.assertRegex(completed.stdout, self.cells("reviews", "accepted", "2026-09-01: one maintainer"))
+        self.assertIn("reviews until: a second account with merge rights exists", completed.stdout)
         # An accepted finding is not an absent one: the all-clear must not
         # print over the top of a state the repository wrote down.
         self.assertNotIn("fully enforcing", completed.stdout)
@@ -1285,7 +1291,7 @@ class ProtectionSectionTests(StatusFixture):
         self.assertEqual(section["accepted"], [])
         self.assertEqual([gap["id"] for gap in section["gaps"]], ["reviews"])
         completed = self.run_tool(SD_STATUS)
-        self.assertIn("GAP [reviews] no pull-request review is required", completed.stdout)
+        self.assertRegex(completed.stdout, self.cells("reviews", "gap", "no pull-request review is required"))
         self.assertIn("no longer matches the live protection state", completed.stdout)
 
     UNPROTECTED = {
@@ -1316,10 +1322,8 @@ class ProtectionSectionTests(StatusFixture):
         self.assertFalse(section["protected"])
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertIn(
-            "ok  [unprotected] accepted 2026-09-11: sole operator", completed.stdout
-        )
-        self.assertIn("until a second account with push rights exists", completed.stdout)
+        self.assertRegex(completed.stdout, self.cells("unprotected", "accepted", "2026-09-11: sole operator"))
+        self.assertIn("unprotected until: a second account with push rights exists", completed.stdout)
 
     def test_an_accepted_unprotected_branch_whose_rules_failed_prints_as_unknown(self) -> None:
         """sd:1000. The same acknowledgement, but the rules endpoint did not
@@ -1352,7 +1356,7 @@ class ProtectionSectionTests(StatusFixture):
         self.assertEqual(section["accepted"], [])
         self.assertEqual([gap["id"] for gap in section["gaps"]], ["unprotected"])
         completed = self.run_tool(SD_STATUS)
-        self.assertIn("GAP [unprotected]", completed.stdout)
+        self.assertRegex(completed.stdout, self.cells("unprotected", "gap"))
         self.assertIn("no longer matches the live protection state", completed.stdout)
 
     def test_a_broken_acknowledgement_file_still_fails_closed_when_unprotected(self) -> None:
@@ -1405,7 +1409,8 @@ class ProtectionSectionTests(StatusFixture):
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("unavailable:", completed.stdout)
-        self.assertIn("GAP [acknowledgements]", completed.stdout)
+        self.assertIn("\nProtection (unknown)\n", completed.stdout)
+        self.assertRegex(completed.stdout, self.cells("acknowledgements", "gap"))
         self.assertIn("accepted_gaps must be a list", completed.stdout)
 
 
@@ -1524,11 +1529,11 @@ class ResidueTests(StatusFixture):
         found = {entry["id"]: entry for entry in result["residue"]}
         self.assertIn("trellis", found)
         self.assertIn("rm -rf .trellis", found["trellis"]["remove"])
-        self.assertIn("remove: ", self.run_tool(SD_STATUS).stdout)
+        self.assertIn(f"\n  trellis remove: {found['trellis']['remove']}\n", self.run_tool(SD_STATUS).stdout)
 
     def test_a_clean_repository_reports_none(self) -> None:
         completed = self.run_tool(SD_STATUS)
-        self.assertIn("none found", completed.stdout)
+        self.assertTrue(completed.stdout.endswith("\nLegacy residue (0)\n"), completed.stdout)
 
     def test_a_configured_hooks_path_is_residue(self) -> None:
         self.git("config", "core.hooksPath", ".githooks")
@@ -1711,6 +1716,7 @@ class IssueSectionTests(StatusFixture):
             "kind": "issue",
             "title": key,
             "state": "open",
+            "reason": "assigned",
         }
 
     @staticmethod
@@ -1919,7 +1925,7 @@ class JiraSectionTests(StatusFixture):
     subprocess resolves, so no test here reads or writes the live store.
     """
 
-    HEADING = "jira (shared database, all repositories)"
+    HEADING = "Jira, shared database, all repositories"
 
     def seed(self, rows: list[dict[str, Any]], *, heartbeat: dict[str, Any] | None = None,
              collected_at: str | None = None) -> None:
@@ -1953,15 +1959,37 @@ class JiraSectionTests(StatusFixture):
             connection.close()
 
     @staticmethod
-    def ticket(key: str, title: str, *, state: str = "open", **extra: Any) -> dict[str, Any]:
+    def updated(days: float) -> str:
+        """An `updated_at` `days` before now, as `shadow_sync.iso` writes it."""
+        return (datetime.datetime.now(datetime.timezone.utc)
+                - datetime.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    @classmethod
+    def ticket(cls, key: str, title: str, *, state: str = "open", **extra: Any) -> dict[str, Any]:
         """A row as `sd_db.shadow_jira` writes it: no number, a browse URL, a project key for repo."""
         return {"url": f"https://example.atlassian.net/browse/{key}", "repo": key.partition("-")[0],
-                "number": None, "kind": "issue", "title": title, "state": state, "author": "someone", **extra}
+                "number": None, "kind": "issue", "title": title, "state": state, "author": "someone",
+                "reason": "assigned", "updated_at": cls.updated(1), **extra}
 
-    def section(self, text: str) -> str:
-        """The lines under the `jira` heading, up to the blank line before the next one."""
-        self.assertIn(f"\n{self.HEADING}\n", text)
-        return text.split(f"\n{self.HEADING}\n", 1)[1].split("\n\n", 1)[0] + "\n"
+    def setUp(self) -> None:
+        super().setUp()
+        # The machine config `sd.jira_recent_days` is read from, under the temp HOME, never the operator's.
+        patched = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.home / ".config")})
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def configure(self, days: str) -> None:
+        path = self.home / ".config" / "sd-ai-command-pack" / "config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"config": {"sd": {"jira_recent_days": days}}}), encoding="utf-8")
+
+    def section(self, text: str, count: str | None = None) -> str:
+        """The lines under the `jira` heading, up to the blank line before the next one; `count` pins the heading's."""
+        found = re.search(rf"\n{re.escape(self.HEADING)} \(([0-9]+|unknown)\)\n", text)
+        self.assertIsNotNone(found, text)
+        if count is not None:
+            self.assertEqual(count, found[1])
+        return text[found.end():].split("\n\n", 1)[0] + "\n"
 
     def test_a_row_with_no_number_prints_its_key_in_a_checkout_with_no_remote(self) -> None:
         """(a) The regression for `#{row['number']:<6}` and for the slug gate.
@@ -1975,14 +2003,14 @@ class JiraSectionTests(StatusFixture):
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertNotIn("Traceback", completed.stderr)
-        self.assertRegex(self.section(completed.stdout), r'\n  LOG-23818 +open +"Benchmark harness"\n')
+        self.assertRegex(self.section(completed.stdout), r'\n  LOG-23818 +open +assigned +"Benchmark harness"\n')
 
     def test_an_empty_tracker_says_never_collected_then_none(self) -> None:
         """(b) No rows and no heartbeat: two lines, both about absence."""
         self.seed([])
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertEqual("  never collected\n  none\n", self.section(completed.stdout))
+        self.assertEqual("  never collected\n", self.section(completed.stdout, "0"))
 
     def test_a_partial_collect_shows_its_reason_and_the_rows_it_stored(self) -> None:
         """(c) A truncated first run stores what it saw, and the reader says so.
@@ -1997,10 +2025,10 @@ class JiraSectionTests(StatusFixture):
                   heartbeat={"ok": False, "reason": "collection time limit exhausted", "truncated": True})
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        block = self.section(completed.stdout)
-        self.assertTrue(block.startswith("  never collected (collection time limit exhausted)\n"), block)
-        self.assertRegex(block, r'\n  LOG-1 +open +"First"\n')
-        self.assertRegex(block, r'\n  LOG-2 +open +"Second"\n')
+        block = self.section(completed.stdout, "2")
+        self.assertTrue(block.endswith("\n  never collected (collection time limit exhausted)\n"), block)
+        self.assertRegex(block, r'\n  LOG-1 +open +assigned +"First"\n')
+        self.assertRegex(block, r'\n  LOG-2 +open +assigned +"Second"\n')
 
     def test_a_completed_collect_prints_the_external_context_pair(self) -> None:
         """The other side of the `last_success_at` key: a watermark exists, so the pair prints.
@@ -2017,29 +2045,78 @@ class JiraSectionTests(StatusFixture):
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         block = self.section(completed.stdout)
-        self.assertEqual(f"  external context: degraded; last successful sync {collected}\n"
-                         '  Key     State  Title\n'
-                         '  ------  -----  ----------------\n'
-                         '  LOG-10  open   "Ten"\n', block)
+        self.assertEqual('  Key     State  Reason    Title\n'
+                         '  ------  -----  --------  ----------------\n'
+                         '  LOG-10  open   assigned  "Ten"\n'
+                         f"  external context: degraded; last successful sync {collected}\n", block)
         self.assertNotIn("never collected", block)
         freshness = self.report()["jira"]["freshness"]
         self.assertEqual((freshness["state"], freshness["last_success_at"]), ("degraded", collected))
 
-    def test_a_closed_row_leaves_the_producer_after_seven_days(self) -> None:
-        """(d) The cutoff is the producer's, so `--json` cannot carry what the text hides."""
-        self.seed([self.ticket("LOG-8", "Eight days gone", state="closed", age_days=8),
-                   self.ticket("LOG-6", "Six days gone", state="closed", age_days=6)])
-        result = self.report()
-        self.assertEqual([row["url"].rpartition("/")[2] for row in result["jira"]["rows"]], ["LOG-6"])
-        completed = self.run_tool(SD_STATUS)
-        block = self.section(completed.stdout)
-        self.assertRegex(block, r'\n  LOG-6 +closed +"Six days gone"\n')
-        self.assertNotIn("LOG-8", completed.stdout)
+    def test_json_keeps_every_row_with_when_jira_updated_it(self) -> None:
+        """(d) pack sd:5357: the window is the text's; `--json` drops no row, however long unseen."""
+        self.seed([self.ticket("LOG-8", "Eight days unseen", state="closed", age_days=8,
+                               updated_at="2026-07-01T00:00:00Z"),
+                   self.ticket("LOG-6", "Never dated", state="closed", updated_at=None)])
+        rows = {row["url"].rpartition("/")[2]: row for row in self.report()["jira"]["rows"]}
+        self.assertEqual(sorted(rows), ["LOG-6", "LOG-8"])
+        self.assertEqual(rows["LOG-8"]["updated_at"], "2026-07-01T00:00:00Z")
+        self.assertIsNone(rows["LOG-6"]["updated_at"])
 
-    def test_open_rows_print_before_closed_ones(self) -> None:
-        self.seed([self.ticket("LOG-3", "Done", state="closed"), self.ticket("LOG-4", "Live")])
-        block = self.section(self.run_tool(SD_STATUS).stdout)
-        self.assertLess(block.index("LOG-4"), block.index("LOG-3"))
+    def test_only_an_assigned_or_filed_row_is_listed_and_json_keeps_every_row(self) -> None:
+        """Ruling on sd:5357: a watched row, or one with no reason yet, is not the operator's worklist."""
+        self.seed([self.ticket("LOG-11", "Mine"), self.ticket("LOG-12", "Filed", reason="filed"),
+                   self.ticket("LOG-13", "Watched", reason="watched"), self.ticket("LOG-14", "Unknown", reason=None)])
+        result = self.report()
+        self.assertEqual(sorted((row["url"].rpartition("/")[2], row["reason"]) for row in result["jira"]["rows"]),
+                         [("LOG-11", "assigned"), ("LOG-12", "filed"), ("LOG-13", "watched"), ("LOG-14", None)])
+        block = self.section(self.run_tool(SD_STATUS).stdout, "2")
+        self.assertRegex(block, r'\n  LOG-11 +open +assigned +"Mine"\n')
+        self.assertRegex(block, r'\n  LOG-12 +open +filed +"Filed"\n')
+        self.assertNotIn("LOG-13", block)
+        self.assertNotIn("LOG-14", block)
+
+    def test_past_ten_rows_the_rest_is_a_count(self) -> None:
+        """Ruling on sd:5357: ten rows, then `… N more`; the heading keeps the whole count."""
+        self.seed([self.ticket(f"LOG-{number}", f"Ticket {number}") for number in range(100, 112)])
+        block = self.section(self.run_tool(SD_STATUS).stdout, "12")
+        self.assertEqual(10, len(re.findall(r"\n  LOG-1[0-9]{2} ", block)), block)
+        self.assertIn("\n  … 2 more\n", block)
+
+    def test_the_text_lists_rows_jira_updated_in_the_last_thirty_days_open_first(self) -> None:
+        """pack sd:5357: open or closed, a row Jira updated inside the window is listed, open rows first;
+        one updated before it, or never dated, is hidden and counted on one line naming the key."""
+        self.seed([self.ticket("LOG-3", "Done lately", state="closed", updated_at=self.updated(2)),
+                   self.ticket("LOG-4", "Live"),
+                   self.ticket("LOG-5", "Bulk touched", updated_at=self.updated(52)),
+                   self.ticket("LOG-6", "Never dated", updated_at=None)])
+        block = self.section(self.run_tool(SD_STATUS).stdout, "2")
+        self.assertRegex(block, r'\n  LOG-4 +open +assigned +"Live"\n  LOG-3 +closed +assigned +"Done lately"\n')
+        self.assertNotIn("LOG-5", block)
+        self.assertNotIn("LOG-6", block)
+        self.assertIn("\n  2 hidden: not updated in the last 30 days, or never dated; `sd.jira_recent_days` sets 30\n",
+                      block)
+
+    def test_sd_jira_recent_days_sets_the_window(self) -> None:
+        self.configure("60")
+        self.seed([self.ticket("LOG-5", "Bulk touched", updated_at=self.updated(52)),
+                   self.ticket("LOG-7", "Older", updated_at=self.updated(61))])
+        block = self.section(self.run_tool(SD_STATUS).stdout, "1")
+        self.assertIn("LOG-5", block)
+        self.assertIn("\n  1 hidden: not updated in the last 60 days, or never dated; `sd.jira_recent_days` sets 60\n",
+                      block)
+
+    def test_a_bad_sd_jira_recent_days_is_refused_by_name(self) -> None:
+        for days in ("0", "-3", "thirty"):
+            with self.subTest(days=days):
+                self.configure(days)
+                self.seed([self.ticket("LOG-4", "Live")])
+                completed = self.run_tool(SD_STATUS)
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                block = self.section(completed.stdout, "unknown")
+                self.assertIn("sd.jira_recent_days", block)
+                self.assertIn("a whole number of days, 1 or more", block)
+                self.assertNotIn("LOG-4", block)
 
     def test_a_title_with_terminal_controls_is_one_quoted_line(self) -> None:
         """(e) The same rule `_render_contributions` is tested against.
@@ -2050,11 +2127,11 @@ class JiraSectionTests(StatusFixture):
         self.seed([self.ticket("LOG-5", "a\x1b[2Jb\nprotection")])
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertRegex(self.section(completed.stdout), r'\n  LOG-5 +open +"a\\u001b\[2Jb\\nprotection"\n')
+        self.assertRegex(self.section(completed.stdout), r'\n  LOG-5 +open +assigned +"a\\u001b\[2Jb\\nprotection"\n')
         self.assertNotIn("\x1b", completed.stdout)
         headings = self.headings(completed.stdout)
         self.assertEqual(headings, ReportSectionTests.ORDER)
-        self.assertEqual(headings.count("protection"), 1)
+        self.assertEqual(headings.count("Protection"), 1)
 
     def test_the_json_report_carries_the_section_and_its_rows(self) -> None:
         """(f) Asserted on the parsed object, not on the text."""
@@ -2077,7 +2154,7 @@ class JiraSectionTests(StatusFixture):
         self.assertEqual(result["issues"], {"available": False, "reason": "no GitHub remote",
                                             "needs_you": [], "other": []})
         completed = self.run_tool(SD_STATUS)
-        self.assertIn("\nissues (this repo, shared database)\n  ! no GitHub remote\n", completed.stdout)
+        self.assertIn("\nIssues, this repo, shared database (unknown)\n  ! no GitHub remote\n", completed.stdout)
         self.assertIn("LOG-9", self.section(completed.stdout))
 
     def test_no_shared_database_is_a_reported_gap(self) -> None:
@@ -2085,7 +2162,7 @@ class JiraSectionTests(StatusFixture):
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         reason = f"no shared sd_db database yet; {status.NO_DATABASE_REMEDY}"
-        self.assertEqual(f"  ! {reason}\n", self.section(completed.stdout))
+        self.assertEqual(f"  ! {reason}\n", self.section(completed.stdout, "unknown"))
         section = self.report()["jira"]
         self.assertEqual(section, {"available": False, "reason": reason, "freshness": None, "rows": []})
 
@@ -2371,8 +2448,9 @@ class InventoryShapeTests(InventoryFixture):
         self.item("2026-08-01-alpha", status="in_progress")
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        for present in ("abnormalities", "pending", "next", "open threads"):
-            self.assertIn(f"\n{present}\n", completed.stdout)
+        for present in ("Abnormalities", "Pending", "Next", "Open threads"):
+            self.assertIn(present, self.headings(completed.stdout))
+        self.assertIn("\nNext (1)\n", completed.stdout)
 
 
 class WorkItemInventoryTests(InventoryFixture):
@@ -4269,7 +4347,7 @@ class ReportSectionTests(InventoryFixture):
                       "detected": 0, "entrypoints": {}},
             "protection": {"available": False, "reason": "no remote",
                            "gaps": [], "accepted": [], "detail": {}},
-            "handoff": {"packet": {"pending": False, "detail": "none written"}},
+            "handoff": {"packet": {"pending": False, "detail": status.NO_PACKET}},
             "backends": [],
             "residue": [],
             "issues": {"available": False, "reason": "no index",
@@ -4283,9 +4361,88 @@ class ReportSectionTests(InventoryFixture):
         status.render(result, stream)
         return stream.getvalue()
 
-    def headings(self, text: str) -> list[str]:
-        return [line for line in text.splitlines()
-                if line and not line[0].isspace() and not line.startswith("sd-status:")]
+    def filled(self) -> dict[str, Any]:
+        """A row in every section the inventory does not feed, for `report(shown=...)`."""
+        found = {"summary": {"landing": 0, "delivered": 0, "planned_this_week": 0, "blocked": 0, "unscheduled": 0},
+                 "landing": {"entries": [], "gate": None}, "delivered": [], "planned": [], "blocked": [],
+                 "unscheduled": []}
+        url = "https://github.com/example/widget/pull/2"
+        return {
+            "views": {"available": True, "reason": "", "repos": [str(self.repo)], "companions_error": "",
+                      "now": "2026-09-01T12:00:00Z", "sections": found},
+            "contributions": {"available": True, "reason": "", "rows": [
+                {"key": f"github:{url}", "url": url, "lane": "awaiting_you", "item_id": 14,
+                 "local_status": "planning", "external_state": "open", "title": "Fold the widget",
+                 "reasons": ["review requested"]}]},
+            "pull_requests": {"repo": "example/widget", "available": True, "reason": "", "pull_requests": [{
+                "number": 7, "title": "Teach the widget to fold", "head": "task/fold", "base": "main",
+                "draft": False, "mergeable": "MERGEABLE", "merge_state": "CLEAN", "review_decision": "APPROVED",
+                "behind_by": 0, "checks": {"success": 1}, "failing": []}]},
+            "lane": {"available": True, "reason": "", "repository": "example/widget",
+                     "entries": [{"item": 14, "status": "queued", "branch": "task/fold"}]},
+            "issues": {"available": True, "reason": "", "freshness": None, "needs_you": [],
+                       "other": [{"number": 3, "title": "Widget folds twice", "why": []}]},
+            "jira": {"available": True, "reason": "", "rows": [
+                {"url": "https://example.atlassian.net/browse/LOG-1", "state": "Open", "title": "Fold",
+                 "reason": "assigned", "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}],
+                     "freshness": {"state": "fresh", "last_success_at": "2026-09-01T11:00:00Z"}},
+            "protection": {"available": True, "reason": "", "default_branch": "main", "protected": True,
+                           "gaps": [{"id": "strict", "gap": "strict is off"}],
+                           "accepted": [{"id": "reviews", "since": "2026-09-01", "because": "one maintainer",
+                                         "until": "a second account exists"}],
+                           "merge_settings": [{"id": "rebase_merge", "flagged": False, "value": "disallowed",
+                                               "gap": ""}],
+                           "detail": {}},
+            "handoff": {"packet": {"pending": True, "age": "2 h", "item": "sd:14", "summary": "mid-fold",
+                                   "directory": "/example.test/widget", "detail": "pending; load it"}},
+            "backends": [{"backend": "codex", "command": "codex", "state": "present"}],
+            "residue": [{"id": "hooks-path", "paths": [".githooks"], "why": "core.hooksPath names a hooks folder",
+                         "remove": "git config --unset core.hooksPath"}],
+        }
+
+    @staticmethod
+    def blocks(text: str) -> list[tuple[str, list[str]]]:
+        """Each section's heading and the lines under it, the banner left out."""
+        found: list[tuple[str, list[str]]] = []
+        for line in text.splitlines():
+            if line and not line[0].isspace() and not line.startswith("sd-status:"):
+                found.append((line, []))
+            elif found:
+                found[-1][1].append(line)
+        return found
+
+    #: `<Section> (<count>)`; `unknown` is a count no read could establish.
+    HEADING = re.compile(r"^[A-Z][^\n]* \((?P<count>[0-9]+|unknown)\)$")
+
+    def test_every_section_is_a_table_under_a_counted_heading(self) -> None:
+        """sd:5357: every section takes `sd today`'s layout, a counted heading, a header and a dash rule.
+
+        Walked from the text, so a section added later is checked without an edit here.
+        """
+        self.item("2026-08-01-alpha", status="in_progress")
+        found = self.blocks(self.report(shown=self.filled()))
+        for heading, body in found:
+            with self.subTest(heading=heading):
+                match = self.HEADING.match(heading)
+                self.assertIsNotNone(match, heading)
+                self.assertGreater(int(match["count"]), 0)
+                self.assertRegex(body[0], r"^  [A-Z]\S*( {2,}[A-Z]\S*)*$")
+                self.assertRegex(body[1], r"^  -+( {2}-+)*$")
+        self.assertEqual(self.ORDER, [re.sub(r" \([^)]*\)$", "", heading) for heading, _ in found])
+
+    def test_a_section_nobody_could_read_counts_unknown_not_zero(self) -> None:
+        """A failed read is an unknown, never an empty section."""
+        found = dict(self.blocks(self.report()))
+        for heading in ("Contributions, this repo, shared database order (unknown)", "Open pull requests (unknown)",
+                        "Issues, this repo, shared database (unknown)",
+                        "Jira, shared database, all repositories (unknown)", "Protection (unknown)",
+                        "Work across the shared database (unknown)", "Merge lane, this repo, shared database (unknown)"):
+            self.assertIn(heading, found)
+        for heading in found:
+            self.assertRegex(heading, self.HEADING)
+        self.assertIn("Resumable handoffs (0)", found)
+        unread = {"handoff": {"packet": {"pending": False, "detail": "packet is unreadable: boom"}}}
+        self.assertIn("\nResumable handoffs (unknown)\n  packet: packet is unreadable: boom\n", self.report(shown=unread))
 
     def test_open_pull_requests_and_backends_print_as_tables(self) -> None:
         """sd:5116: the two sections whose rows share one shape take `sd today`'s layout.
@@ -4301,21 +4458,21 @@ class ReportSectionTests(InventoryFixture):
         backends = [{"backend": "codex", "command": "codex", "state": "present"},
                     {"backend": "registry", "command": "", "state": reason}]
         text = self.report(shown={"pull_requests": pulls, "backends": backends})
-        self.assertRegex(text, r"\nopen pull requests\n  PR +State +Review +Checks +Head +Base +Title\n  -+")
+        self.assertRegex(text, r"\nOpen pull requests \(1\)\n  PR +State +Review +Checks +Head +Base +Title\n  -+")
         self.assertRegex(text, r"\n  #7 +CLEAN +APPROVED +success:1 +task/fold +main +Teach the widget to fold\n")
-        self.assertRegex(text, r"\nbackends\n  Backend +State\n  -+  -+\n  codex +present\n")
-        self.assertIn(f"\n  registry: {reason}\n", text)
+        self.assertRegex(text, r"\nBackends \(2\)\n  Backend +State\n  -+  -+\n  codex +present\n")
+        self.assertIn(f"\n  registry state: {reason}\n", text)
 
     #: `design.md`'s skeleton, verbatim. The three new sections lead because
     #: the report is read top-down and the judgement is what the reader came
     #: for; the eight below keep the order they already had.
     ORDER = [
-        "abnormalities", "pending", "next", "work across the shared database", "open threads", "work items",
-        "contributions (this repo, shared database order)",
-        "open pull requests", "merge lane (this repo, shared database)", "detected setup",
-        "issues (this repo, shared database)",
-        "jira (shared database, all repositories)", "protection",
-        "resumable handoffs", "backends", "legacy residue",
+        "Abnormalities", "Pending", "Next", "Work across the shared database", "Open threads", "Work items",
+        "Contributions, this repo, shared database order",
+        "Open pull requests", "Merge lane, this repo, shared database", "Detected setup",
+        "Issues, this repo, shared database",
+        "Jira, shared database, all repositories", "Protection",
+        "Resumable handoffs", "Backends", "Legacy residue",
     ]
 
     # -- the skeleton -------------------------------------------------------
@@ -4373,28 +4530,35 @@ class ReportSectionTests(InventoryFixture):
 
     # -- the banner is the judgement, not the list --------------------------
 
+    def body(self, text: str, name: str) -> list[str]:
+        """The lines under the section headed `name`, whatever its count."""
+        return next(lines for heading, lines in self.blocks(text) if re.sub(r" \([^)]*\)$", "", heading) == name)
+
     def test_a_class_over_the_cap_elides_and_says_how_many(self) -> None:
         """Four findings in one class print three rows and a count.
 
-        The class line already carries the true total, so the elision is not
+        The class row already carries the true total, so the elision is not
         a loss of information -- it is the difference between a banner and a
         listing, and `pending` is the listing.
         """
         for name in ("alpha", "beta", "gamma", "delta"):
             self.item(f"2026-08-01-{name}", status="in_progress")
-        banner = self.report().split("\npending\n")[0].splitlines()
-        start = next(i for i, line in enumerate(banner)
-                     if line.startswith("  in-progress-without-branch"))
-        under = list(itertools.takewhile(
-            lambda line: line.startswith("    "), banner[start + 1:]))
-        self.assertEqual("4 findings", banner[start].split()[-2] + " findings")
-        self.assertEqual(status.BANNER_LIMIT + 1, len(under))
-        self.assertEqual("... 1 more, ranked in `pending`", under[-1].strip())
+        banner = self.body(self.report(), "Abnormalities")
+        self.assertRegex("\n" + "\n".join(banner), self.cells("in-progress-without-branch", "findings", "4"))
+        listed = [line for line in banner if re.match(r"^  w[0-9a-f]{4,} +in-progress-without-branch ", line)]
+        self.assertEqual(status.BANNER_LIMIT, len(listed))
+        self.assertIn("  in-progress-without-branch: ... 1 more, ranked in `pending`", banner)
 
     def test_a_class_at_the_cap_elides_nothing(self) -> None:
         for name in ("alpha", "beta", "gamma"):
             self.item(f"2026-08-01-{name}", status="in_progress")
-        self.assertNotIn("more, ranked in", self.report().split("\npending\n")[0])
+        self.assertNotIn("more, ranked in", "\n".join(self.body(self.report(), "Abnormalities")))
+
+    def test_an_unchecked_class_counts_no_findings_and_names_its_reason(self) -> None:
+        """A blind class is `unchecked` with `-`, never `clear` or 0, and its reason prints whole."""
+        banner = self.body(self.report(**{"protection": self.BLIND}), "Abnormalities")
+        self.assertRegex("\n" + "\n".join(banner), self.cells("protection-gap", "unchecked", "-"))
+        self.assertTrue(any(line.startswith("  protection-gap: unchecked: ") for line in banner), banner)
 
     # -- one row, three renderings ------------------------------------------
 
@@ -4417,11 +4581,11 @@ class ReportSectionTests(InventoryFixture):
         rows = self.inventory().rows
         self.assertGreater(len(rows), 1)
         text = self.report()
-        pending = text.split("\npending\n")[1].split("\nnext\n")[0]
-        following = text.split("\nnext\n")[1].split("\nopen threads\n")[0]
-        self.assertEqual(rows[0]["id"], pending.splitlines()[3].split()[0])
-        self.assertEqual(rows[0]["id"], following.split()[0])
-        self.assertIn(rows[0]["suggest"], following)
+        pending = self.body(text, "Pending")
+        following = "\n".join(self.body(text, "Next"))
+        self.assertEqual(rows[0]["id"], pending[2].split()[0])
+        self.assertEqual(rows[0]["id"], following.splitlines()[2].split()[0])
+        self.assertIn(" ".join(rows[0]["suggest"].split()), following)
         for other in rows[1:]:
             self.assertNotIn(other["id"], following)
 
@@ -4429,9 +4593,11 @@ class ReportSectionTests(InventoryFixture):
         """A list that elides in silence is worse than no list."""
         for index in range(status.PENDING_LIMIT + 3):
             self.item(f"2026-08-{index + 1:02d}-item", status="in_progress")
-        pending = self.report().split("\npending\n")[1].split("\nnext\n")[0]
-        self.assertIn(f"{status.PENDING_LIMIT} of 13, by rank", pending)
-        self.assertEqual(status.PENDING_LIMIT, len(pending.strip().splitlines()) - 3)
+        text = self.report()
+        self.assertIn("\nPending (13)\n", text)
+        pending = self.body(text, "Pending")
+        self.assertIn(f"  {status.PENDING_LIMIT} of 13, by rank", pending)
+        self.assertEqual(status.PENDING_LIMIT, len([line for line in pending if re.match(r"^  w[0-9a-f]{4,} ", line)]))
 
     def test_open_threads_counts_every_row_the_inventory_carries(self) -> None:
         """The per-source counts are a partition, not a sample.
@@ -4442,10 +4608,10 @@ class ReportSectionTests(InventoryFixture):
         self.item("2026-08-01-alpha", status="in_progress")
         self.item("2026-08-02-beta", status="planning")
         rows = self.inventory().rows
-        threads = self.report().split("\nopen threads\n")[1].split("\nwork items\n")[0]
+        threads = self.body(self.report(), "Open threads")
         counted = sum(
             int(line.rsplit(" ", 1)[1])
-            for line in threads.splitlines()
+            for line in threads
             if line.startswith("  ") and line.rsplit(" ", 1)[-1].isdigit()
         )
         self.assertEqual(len(rows), counted)
@@ -4462,12 +4628,9 @@ class ReportSectionTests(InventoryFixture):
         self.assertEqual(
             max(len(kind.check) for kind in status.CLASSES), status.CHECK_WIDTH
         )
-        banner = self.report().split("\npending\n")[0].splitlines()
-        # The class rows start two lines below the heading: the summary
-        # sentence sits between them and also ends in the word.
-        start = banner.index("abnormalities") + 2
-        labels = [line.index("clear") for line in banner[start:]
-                  if line.startswith("  ") and line.rstrip().endswith("clear")]
+        banner = self.body(self.report(), "Abnormalities")
+        labels = [line.index("clear") for line in banner
+                  if line.startswith("  ") and line.rstrip().endswith("clear  0")]
         abnormal = sum(1 for kind in status.CLASSES if kind.abnormal)
         self.assertEqual(abnormal, len(labels))
         self.assertEqual(1, len(set(labels)))
@@ -4921,14 +5084,14 @@ class SkillPageClaimTests(StatusFixture):
 
         The sentence sat on the page with nothing reading it, and "and says
         so" inverted to "but never says so" was green and false. It claims
-        three things at once -- the list stops at `PENDING_LIMIT`, the line
-        above it carries the total, and the flags carry what the list drops
+        three things at once -- the list stops at `PENDING_LIMIT`, its heading
+        and the line under it carry the total, and the flags carry what the list drops
         -- so a pin alone would prove only that the page says them. Each is
         read here off a report with more rows than the list holds.
         """
         limit = status.PENDING_LIMIT
-        rule = (f"It is capped at {_word(limit)} and says so; the total is on its own "
-                "heading line, and `--actions` and `--json` carry the rest.")
+        rule = (f"It is capped at {_word(limit)} and says so; the total is in its heading "
+                "and on the line under the rows, and `--actions` and `--json` carry the rest.")
         _skill_says(rule)
 
         for index in range(limit + 3):
@@ -4943,8 +5106,9 @@ class SkillPageClaimTests(StatusFixture):
         dropped = [row for row in rows if row not in shown]
         self.assertTrue(dropped, "the list has to drop rows for the rest to be carried")
 
-        # "and says so; the total is on its own heading line".
+        # "and says so; the total is in its heading and on the line under the rows".
         text = self.run_tool(SD_STATUS).stdout
+        self.assertIn(f"\nPending ({len(rows)})\n", text)
         self.assertIn(f"\n  {limit} of {len(rows)}, by rank\n", text)
 
         # "`--actions` and `--json` carry the rest": both hold the held rows.

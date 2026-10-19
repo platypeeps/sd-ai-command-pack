@@ -81,7 +81,7 @@ COLUMNS = {
                            "provider vendor base_head authored_head reviewed_head cancel_requested "
                            "created_at updated_at released_at"},
     "shadow": {"none": "id tracker repo url number kind title state author first_seen last_seen reason "
-                       "merged_at closed_at branch linked_issues"},
+                       "merged_at closed_at branch linked_issues updated_at"},
     "skill_use": {"key": "cwd", "none": "id timestamp skill surface mode"},
     "state": {"key": "key", "history": "body", "none": "id kind timestamp resolved_at"},
     "trial": {"none": "id skill started expires"},

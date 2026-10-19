@@ -22,6 +22,7 @@ import importlib.machinery
 import importlib.util
 import io
 import pathlib
+import re
 import subprocess
 import sys
 import tempfile
@@ -239,11 +240,12 @@ class SharedTree(unittest.TestCase):
         self.publish()
         section = self.setup_with("guest", LOWERED)
         text = self.rendered(section)
-        self.assertIn(f"lowered to guest: {LOWERED.reason}", text)
-        block = text.split("detected setup", 1)[1]
+        block = text.split("\nDetected setup (", 1)[1]
+        self.assertRegex(block, rf"\n  lowered to guest +{re.escape(LOWERED.reason)}\n")
         for path in self.carried():
-            self.assertIn(f"\n    {path}\n", block, path)
-        self.assertNotIn("more\n", block)
+            self.assertRegex(block, rf"\n  shared tree +{re.escape(path)}\n", path)
+        self.assertIn("\n  already in the shared tree (3), yours to move\n", block)
+        self.assertNotIn("more", block.split("\n\n", 1)[0])
 
     def test_a_long_list_shows_ten_and_says_how_many_it_did_not(self) -> None:
         self.commit(*[f"docs/work/2026-01-{day:02d}-a-thing/prd.md" for day in range(1, 15)])
@@ -251,9 +253,9 @@ class SharedTree(unittest.TestCase):
         carried = self.carried()
         self.assertEqual(len(carried), 14)
         text = self.rendered(self.setup_with("guest", LOWERED))
-        block = text.split("detected setup", 1)[1]
+        block = text.split("\nDetected setup (", 1)[1]
         for path in carried[:10]:
-            self.assertIn(f"\n    {path}\n", block, path)
+            self.assertRegex(block, rf"\n  shared tree +{re.escape(path)}\n", path)
         for path in carried[10:]:
             self.assertNotIn(path, block, path)
         self.assertIn("... and 4 more", block)
@@ -262,7 +264,7 @@ class SharedTree(unittest.TestCase):
         self.commit("README.md")
         self.publish()
         text = self.rendered(self.setup_with("full", None))
-        self.assertIn("detected setup", text)
+        self.assertIn("\nDetected setup (2)\n", text)
         self.assertNotIn("shared tree", text)
         self.assertNotIn("lowered to guest", text)
 

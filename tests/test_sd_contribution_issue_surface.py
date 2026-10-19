@@ -87,15 +87,16 @@ class IssueRowsAreShownInBothTextReports(unittest.TestCase):
     """Not `--json`: neither JSON path reaches a display-order tuple.
 
     `sd_work._emit_contributions` returns before its tuple when `machine` is
-    set, and `bin/sd-status` serialises the whole result object while the tuple
-    lives in `_render_contributions`. A check written against `--json` passes
-    before and after any change here and establishes nothing.
+    set. A check written against `--json` passes before and after any change
+    here and establishes nothing. Since sd:5357 `sd-status` prints a table row
+    per contribution and points at `sd task contribution show` for the fields,
+    so the field assertions are the contribution list's alone.
     """
 
-    def test_status_shows_every_issue_key(self) -> None:
+    def test_status_shows_the_issue_as_one_row_and_names_where_its_fields_are(self) -> None:
         text = _status_text(FILED)
-        for key in ISSUE_KEYS:
-            self.assertIn(f"    {key}: ", text)
+        self.assertRegex(text, r'\n  awaiting_you +project#7 +- +- +"Upstream bug"\n')
+        self.assertIn("`sd task contribution show <key> --json`", text)
 
     def test_contribution_list_shows_every_issue_key(self) -> None:
         text = _work_text(FILED)
@@ -112,8 +113,7 @@ class IssueRowsAreShownInBothTextReports(unittest.TestCase):
         nothing at all about it, while `sd-status` printed `false`.
         """
         unverified = {**FILED, "draft_verified": False}
-        for text in (_status_text(unverified), _work_text(unverified)):
-            self.assertIn("draft_verified: false", text)
+        self.assertIn("draft_verified: false", _work_text(unverified))
 
     def test_the_issue_keys_are_named_rather_than_left_in_the_sorted_tail(self) -> None:
         """The control. Membership already came from the row; order did not.
@@ -123,12 +123,12 @@ class IssueRowsAreShownInBothTextReports(unittest.TestCase):
         else the library ever adds. A reader would meet `draft_path` between
         `blocking_labels` and `event_ids`.
         """
-        for text in (_status_text(FILED), _work_text(FILED)):
-            tail = text.index("aaa_key_no_display_order_names")
-            for key in ISSUE_KEYS:
-                if f"{key}: " not in text:
-                    continue
-                self.assertLess(text.index(f"{key}: "), tail, key)
+        text = _work_text(FILED)
+        tail = text.index("aaa_key_no_display_order_names")
+        for key in ISSUE_KEYS:
+            if f"{key}: " not in text:
+                continue
+            self.assertLess(text.index(f"{key}: "), tail, key)
 
     def test_a_draft_that_was_never_filed_still_reads_as_a_row(self) -> None:
         """An unfiled draft has no URL and no branch, so `url` is absent."""
@@ -136,11 +136,12 @@ class IssueRowsAreShownInBothTextReports(unittest.TestCase):
                  "target_repo": "example/project", "draft_title": "Crash on empty input",
                  "draft_path": {"path": "/drafts/crash.md", "sha256": "e" * 64},
                  "reasons": ["Issue draft has not been filed"]}
-        for text in (_status_text(draft), _work_text(draft)):
-            self.assertIn("target_repo: ", text)
-            self.assertIn("draft_title: ", text)
-            self.assertIn("draft_path: ", text)
-            self.assertNotIn("url: ", text)
+        self.assertRegex(_status_text(draft), r'\n  awaiting_you +item:244 +- +- +"Report the crash"\n')
+        text = _work_text(draft)
+        self.assertIn("target_repo: ", text)
+        self.assertIn("draft_title: ", text)
+        self.assertIn("draft_path: ", text)
+        self.assertNotIn("url: ", text)
 
 
 class BothReportsAgreeWhatEmptyMeans(unittest.TestCase):
@@ -148,7 +149,9 @@ class BothReportsAgreeWhatEmptyMeans(unittest.TestCase):
 
     `False` and `0` are values. `needs_you: false` and a count of zero are
     what the row says, and a report that hides them reads the same as one
-    whose producer never set the key.
+    whose producer never set the key. The contribution list is the report
+    that prints fields; `sd-status` prints a table row since sd:5357 and
+    prints none of them, whatever their value.
     """
 
     #: Invented tail keys as well as named ones: the sorted tail is where a
@@ -162,12 +165,12 @@ class BothReportsAgreeWhatEmptyMeans(unittest.TestCase):
 
     def test_false_and_zero_are_shown_in_both_reports(self) -> None:
         row = self._row(self.SHOWN)
-        for text in (_status_text(row), _work_text(row)):
-            self.assertIn("needs_you: false", text)
-            self.assertIn("draft_verified: false", text)
-            self.assertIn("aaa_count: 0", text)
-            self.assertIn("aaa_ratio: 0.0", text)
-            self.assertIn("aaa_mapping: {}", text)
+        text = _work_text(row)
+        self.assertIn("needs_you: false", text)
+        self.assertIn("draft_verified: false", text)
+        self.assertIn("aaa_count: 0", text)
+        self.assertIn("aaa_ratio: 0.0", text)
+        self.assertIn("aaa_mapping: {}", text)
 
     def test_none_an_empty_list_and_an_empty_string_are_still_skipped(self) -> None:
         """The control. Without it, printing every key passes the test above."""
@@ -176,12 +179,11 @@ class BothReportsAgreeWhatEmptyMeans(unittest.TestCase):
             for key in self.SKIPPED:
                 self.assertNotIn(f"{key}:", text)
 
-    def test_the_two_reports_give_one_answer_for_every_value(self) -> None:
+    def test_the_status_table_prints_no_field_whatever_its_value(self) -> None:
         for value in (*self.SHOWN.values(), *self.SKIPPED.values()):
             row = self._row({"aaa_probe": value})
             with self.subTest(value=value):
-                self.assertEqual(
-                    "aaa_probe:" in _status_text(row), "aaa_probe:" in _work_text(row))
+                self.assertNotIn("aaa_probe", _status_text(row))
 
 
 class TheClosedLaneNeedsNoRendererChange(unittest.TestCase):
@@ -196,7 +198,7 @@ class TheClosedLaneNeedsNoRendererChange(unittest.TestCase):
     def test_both_reports_render_a_lane_they_have_never_seen(self) -> None:
         row = {"key": "issue:https://github.com/example/project/issues/7",
                "lane": "closed", "title": "Upstream bug", "external_state": "closed"}
-        self.assertIn("[closed]", _status_text(row))
+        self.assertRegex(_status_text(row), r"\n  closed +project#7 +")
         self.assertIn("closed", _work_text(row))
 
 

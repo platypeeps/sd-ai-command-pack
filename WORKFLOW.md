@@ -625,6 +625,8 @@ The reserved `sd` namespace declares these settings:
 - `sd.status_companions`: the repositories `sd-status` lists beside the one it runs in, labelled by repository,
   as `<repo>=<other>[,<other>]` with `;` between repositories, each spelled as `bin/sd-db repo list` names it.
   Absence lists none. A machine with no database refuses `set` (sd:5109). It grants nothing.
+- `sd.jira_recent_days`: the days `sd-status` looks back for Jira rows; it lists the assigned or filed rows Jira
+  updated inside them and counts the rest. A whole number from 1; absence reads 30. It grants nothing.
 - `sd.gate_cache_gb`: the most gigabytes the local gate's warm Rust build folders may hold; `0` is no bound.
   Absence reads 40. `SD_GATE_CACHE_GB` overrides it for one run. It grants nothing.
 - `sd.lane_root`: the folder that holds each repository's `sd-ship lane` logs and runner lock, as `<root>/<repository>/lane/`.
