@@ -339,8 +339,16 @@ def check_summary(record: dict[str, Any]) -> str:
     return " ".join(f"{name}:{counts[name]}" for name in BUCKET_ORDER if counts.get(name))
 
 
+#: The pull-request table's columns, in `sd today`'s order: ID, State, its own, Title (sd:5116).
+PULL_HEADS = ["PR", "State", "Review", "Checks", "Head", "Base", "Title"]
+
+
 def render_pulls(result: dict[str, Any], stream: TextIO, indent: str = "  ") -> None:
-    """The pull-request block. sd-status prints this same function's output."""
+    """The pull-request block, one table row each. sd-status prints this same function's output.
+
+    A cell the table would cut prints whole under it, as do the failing
+    checks' names, so the table hides nothing the record holds.
+    """
     write = stream.write
     if not result["available"]:
         write(f"{indent}unavailable: {result['reason']}\n")
@@ -349,6 +357,10 @@ def render_pulls(result: dict[str, Any], stream: TextIO, indent: str = "  ") -> 
     if not pulls:
         write(f"{indent}no open pull requests\n")
         return
+    import sd_views  # noqa: PLC0415 - only the human output needs it
+
+    rows: list[list[str]] = []
+    notes: list[str] = []
     for record in pulls:
         flags = []
         if record["draft"]:
@@ -358,16 +370,17 @@ def render_pulls(result: dict[str, Any], stream: TextIO, indent: str = "  ") -> 
         behind = record["behind_by"]
         if isinstance(behind, int) and behind > 0:
             flags.append(f"behind base by {behind}")
-        suffix = f"  [{', '.join(flags)}]" if flags else ""
-        write(f"{indent}#{record['number']} {record['title']}{suffix}\n")
-        write(
-            f"{indent}  head {record['head']} -> {record['base']}"
-            f"  merge-state {record['merge_state']}"
-            f"  review {record['review_decision']}\n"
-        )
-        write(f"{indent}  checks: {check_summary(record)}\n")
+        number = f"#{record['number']}"
+        row = [number, " ".join([str(record["merge_state"] or "-"), *flags]), str(record["review_decision"] or "-"),
+               check_summary(record), str(record["head"]), str(record["base"]), str(record["title"])]
+        rows.append(row)
+        notes += [f"{number} {head.lower()}: {cell}" for head, cell in zip(PULL_HEADS, row, strict=True)
+                  if head != "Title" and len(cell) > sd_views.CELL_MAX]
         if record["failing"]:
-            write(f"{indent}  failing: {', '.join(record['failing'])}\n")
+            notes.append(f"{number} failing: {', '.join(record['failing'])}")
+    width = shutil.get_terminal_size((sd_views.DEFAULT_WIDTH, 24)).columns - len(indent)
+    for line in [*sd_views.table(PULL_HEADS, rows, width), *notes]:
+        write(f"{indent}{line}\n")
 
 
 def render(result: dict[str, Any], stream: TextIO) -> None:

@@ -392,8 +392,27 @@ class PullRequestTests(ToolFixture):
 
     def test_an_empty_rollup_on_a_clean_head_keeps_its_wording(self) -> None:
         self.with_github(pulls=[self.pull(statusCheckRollup=[])])
-        line = next(text for text in self.run_tool(SD_PR_STATE).stdout.splitlines() if "checks:" in text)
-        self.assertEqual(line.split("checks:", 1)[1].strip(), "no checks")
+        stdout = self.run_tool(SD_PR_STATE).stdout
+        self.assertRegex(stdout, r"\n  #7 +CLEAN +APPROVED +no checks +task/fold +main +Teach the widget to fold\n")
+        self.assertNotIn("checks:", stdout)
+
+    def test_pull_requests_print_as_a_table(self) -> None:
+        """sd:5116: one row per pull request, in `sd today`'s layout.
+
+        A cell the table would cut prints whole under it, as the failing
+        checks' names do, so the layout hides nothing the old lines said.
+        """
+        two = self.pull(number=8, title="Second", headRefName="task/two", isDraft=True,
+                        statusCheckRollup=[{"name": "build", "conclusion": "SUCCESS"}])
+        self.with_github(pulls=[self.pull(), two], behind_by=2)
+        completed = self.run_tool(SD_PR_STATE)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        lines = completed.stdout.splitlines()
+        self.assertRegex(lines[1], r"^  PR +State +Review +Checks +Head +Base +Title$")
+        self.assertRegex(lines[2], r"^  -+  -+  -+  -+  -+  -+  -+$")
+        self.assertRegex(lines[4], r"^  #8 +CLEAN draft behind base by 2 +APPROVED +success:1 +task/two +main +Second$")
+        self.assertIn("  #7 checks: success:1 failure:1 pending:2 skipped:1 other:1", lines)
+        self.assertIn("  #7 failing: lint", lines)
 
     def test_no_open_pull_requests(self) -> None:
         self.with_github(pulls=[])
