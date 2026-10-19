@@ -1340,14 +1340,21 @@ LANE_FIELDS = ("item", "branch", "status", "step", "code", "reason", "held", "ex
 ITEM_FINISHED = ("done", "cancelled")
 
 
+def _lane_history(entry: dict[str, Any], item_status: str | None) -> bool:
+    """An entry `sd-ship lane list` keeps as history: settled, or failed for an item that is finished."""
+    return entry.get("status") in LANE_SETTLED or (entry.get("status") in LANE_FAILED and item_status in ITEM_FINISHED)
+
+
 def lane_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
-    """This repository's merge-lane queue: each item's newest entry that has not merged or been cancelled.
+    """This repository's merge-lane queue: each item's newest entry that is not history (`_lane_history`).
 
     The lane is the one merge path (WORKFLOW.md), and this report knew
     nothing of it (sd:3495). Read-only, over the connection the database
     sections share, with the queue's own readers, `sd_lane.stored` and
     `sd_lane.enqueue_order`; `sd-ship lane list` is the full view. An entry
     retried later is superseded by the newer one, as `newest_entry` decides.
+    The table and the `lane-entry-failed` rows both read this one list, so
+    they cannot disagree about a done item's failed entry (sd:5275).
     """
     import sd_lane  # noqa: PLC0415 - only this section reads the lane
 
@@ -1374,7 +1381,7 @@ def lane_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
             newest[row.get("item")] = row
     entries = [{**{key: row.get(key) for key in LANE_FIELDS}, "item_status": item_status.get(row.get("item"))}
                for row in rows
-               if newest.get(row.get("item")) is row and row.get("status") not in LANE_SETTLED]
+               if newest.get(row.get("item")) is row and not _lane_history(row, item_status.get(row.get("item")))]
     return {"available": True, "reason": "", "repository": repository, "entries": entries}
 
 
@@ -2860,7 +2867,7 @@ def _lane_rows(lane: dict[str, Any]) -> list[dict[str, Any]]:
     """Each item whose newest lane entry stopped short of a merge (sd:3495)."""
     rows: list[dict[str, Any]] = []
     for entry in lane.get("entries") or []:
-        if entry.get("status") not in LANE_FAILED or entry.get("item_status") in ITEM_FINISHED:
+        if entry.get("status") not in LANE_FAILED:
             continue
         item = entry.get("item")
         why = entry.get("code") or entry.get("step") or ""
