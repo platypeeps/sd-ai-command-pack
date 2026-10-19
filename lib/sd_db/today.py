@@ -16,7 +16,7 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
-from .reads import _now, _parse, _unparked_clause, open_notes, today_items
+from .reads import REVIEW_BATCH, _now, _parse, _unparked_clause, open_notes, today_items
 
 #: `sd_lane.KEY_PREFIX`: a lane entry is the newest `checkpoint` row of its key.
 LANE_KEY_PREFIX = "lane:v1:"
@@ -75,20 +75,34 @@ def attention(connection: sqlite3.Connection, *, repos: Iterable[str] | None = N
     return found
 
 
-def _notes(connection: sqlite3.Connection, kind: str, keep: set[str | None] | None) -> list[dict]:
+def _notes(connection: sqlite3.Connection, kind: str, keep: set[str | None] | None, *,
+           batches: bool = True) -> list[dict]:
     return [{"id": note["item"], "note": note["id"], "repo": note["item_repo"], "status": note["item_status"],
              "title": _first_line(note["body"]),
              "item_title": note["item_title"], "at": note["timestamp"]}
-            for note in open_notes(connection, kind) if keep is None or note["item_repo"] in keep]
+            for note in open_notes(connection, kind, batches=batches) if keep is None or note["item_repo"] in keep]
 
 
 def decisions(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None) -> list[dict]:
     """Open questions with two or more `Option:` lines, oldest first: `note` (what `--answers` takes),
-    `title` (the question's first line), `item_title`, `at`."""
+    `title` (the question's first line), `item_title`, `at`.
+
+    A review batch's questions are `review_questions`' count, not rows: the
+    dashboard's Review page labels them, and `sd-next` walks these rows (sd:5130).
+    """
     keep = _keep(repos)
-    bodies = {note["id"]: note["body"] for note in open_notes(connection, "question")}
-    return [row for row in _notes(connection, "question", keep)
+    bodies = {note["id"]: note["body"] for note in open_notes(connection, "question", batches=False)}
+    return [row for row in _notes(connection, "question", keep, batches=False)
             if len(OPTION_LINE.findall(bodies.get(row["note"], ""))) >= 2]
+
+
+def review_questions(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None) -> int:
+    """How many open questions review batches hold, on items neither done nor parked (sd:5130)."""
+    where, values = _in("item.repo", _keep(repos))
+    return connection.execute(
+        f"SELECT COUNT(*) FROM note JOIN item ON item.id = note.item"
+        f" WHERE note.kind = 'question' AND note.resolved_at IS NULL AND item.status != 'done'"
+        f" AND {_unparked_clause(connection)} AND {REVIEW_BATCH} AND {where}", values).fetchone()[0]
 
 
 def followups(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None) -> list[dict]:
@@ -312,7 +326,10 @@ def work(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None,
 
 def sections(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None,
              now: str | None = None, gate: Any = None) -> dict[str, Any]:
-    """Every section in `ORDER`, read once, with `summary` counts first and `closed_by_hand` last."""
+    """Every section in `ORDER`, read once, with `summary` counts first and `closed_by_hand` last.
+
+    `summary["review_questions"]` counts what `decisions` leaves out.
+    """
     keep = None if repos is None else sorted(set(repos))
     found: dict[str, Any] = {
         "attention": attention(connection, repos=keep),
@@ -331,4 +348,5 @@ def sections(connection: sqlite3.Connection, *, repos: Iterable[str] | None = No
     summary["landing"] = len(found["landing"]["entries"])
     summary["planned_this_week"] = sum(1 for row in found["planned"] if row["due"] <= week)
     summary["closed_by_hand"] = len(by_hand)
+    summary["review_questions"] = review_questions(connection, repos=keep)
     return {"summary": summary, **{key: found[key] for key in ORDER}, "closed_by_hand": by_hand}

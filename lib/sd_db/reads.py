@@ -235,15 +235,26 @@ def open_followups(connection: sqlite3.Connection, *, limit: int = 200) -> list[
     return open_notes(connection, "followup", limit=limit)
 
 
-def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200) -> list[sqlite3.Row]:
-    """Unresolved `kind` notes on items that are neither done nor parked, oldest first (sd:3501)."""
+#: An item that is a review batch, filed under `review.REF_SOURCE` and the ref `review:<queue>:<batch>`. Copied,
+#: as `review` imports `workflow`, which imports this; a test holds the two equal. `IS` keeps a NULL a no (sd:5130).
+REVIEW_BATCH = "(item.source IS 'task-ref' AND substr(item.external_id, 1, 7) IS 'review:')"
+
+
+def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200,
+               batches: bool = True) -> list[sqlite3.Row]:
+    """Unresolved `kind` notes on items that are neither done nor parked, oldest first (sd:3501).
+
+    `batches=False` leaves out the notes of review batches, in the query, so
+    a batch of hundreds does not fill `limit`: the dashboard's Review page
+    labels those questions, one click each (sd:5130).
+    """
     return list(
         connection.execute(
             f"""
             SELECT note.*, item.title AS item_title, item.repo AS item_repo, item.status AS item_status
               FROM note JOIN item ON item.id = note.item
              WHERE note.kind = ? AND note.resolved_at IS NULL AND item.status != 'done'
-               AND {_unparked_clause(connection)}
+               AND {_unparked_clause(connection)} AND {"1" if batches else "NOT " + REVIEW_BATCH}
              ORDER BY note.timestamp ASC, note.id ASC
              LIMIT ?
             """,

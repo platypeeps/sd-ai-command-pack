@@ -7,7 +7,16 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from sd_db import connect, create_assignment, create_item, today, upsert_repo, workflow
+from sd_db import (
+    connect,
+    create_assignment,
+    create_item,
+    reads,
+    review,
+    today,
+    upsert_repo,
+    workflow,
+)
 from sd_db.migrate import initialise
 from sd_db.writes import add_note, transition
 
@@ -145,6 +154,47 @@ class TheSections(TodayCase):
         self.assertEqual([(row["id"], row["note"]) for row in today.followups(self.connection)], [(asked, chase)])
         self.assertEqual([(row["id"], row["why"]) for row in today.attention(self.connection)],
                          [(report, "two stale rows")])
+
+    def batch(self, name, questions=1, repo=APP):
+        """A review batch filed by the review store itself, so the marker is the one it writes."""
+        return review.file(self.connection, {
+            "schema": 1, "queue": "labels", "batch": name, "title": f"Label {name}", "repo": repo,
+            "source": "example.test@1a2b3c4", "mode": "open",
+            "questions": [{"subject": f"example.test/{name}/{number}", "text": "Which tier fits?",
+                           "options": ["cheap", "deep"]} for number in range(questions)]}, who="tester")["item"]
+
+    def test_decisions_leave_review_batch_questions_to_the_review_page_as_a_count(self):
+        """sd:5130: `sd-next` walks the Decisions rows; a batch's questions wait on the Review page."""
+        batch = self.batch("B1", questions=2)
+        asked = self.item("Asked")
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack\nOption: Rows")
+        # Older state: a ref task that is no batch, and an approval's task, keep their questions as rows.
+        bare = self.item("Bare ref", source="task-ref")
+        unbatched = add_note(self.connection, bare, "question", "Keep it?\nOption: Yes\nOption: No")
+        approved = self.item("Approved", source="task-ref", external_id="review-approved:1")
+        followed = add_note(self.connection, approved, "question", "Ship it?\nOption: Yes\nOption: No")
+        self.assertEqual([row["note"] for row in today.decisions(self.connection)], [decision, unbatched, followed])
+        self.assertEqual(today.review_questions(self.connection), 2)
+        self.assertEqual(today.sections(self.connection, now=NOW)["summary"]["review_questions"], 2)
+        self.assertEqual(today.review_questions(self.connection, repos=[LIB]), 0)
+        # A label resolves the question, so the count falls; the batch never becomes a row.
+        state = review.read(self.connection, batch)
+        review.rule(self.connection, batch, state["questions"][0]["note"], "deep",
+                    expected_revision=workflow.item_state(self.connection, batch)["revision"], who="tester")
+        self.assertEqual(today.review_questions(self.connection), 1)
+        self.assertNotIn(batch, [row["id"] for row in today.decisions(self.connection)])
+
+    def test_a_batch_larger_than_the_note_limit_leaves_the_decisions_whole(self):
+        """The batch is left out in the query: 250 older batch questions do not fill `open_notes`' 200."""
+        self.batch("Big", questions=250)
+        asked = self.item("Asked")
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack\nOption: Rows")
+        self.assertEqual([row["note"] for row in today.decisions(self.connection)], [decision])
+        self.assertEqual(today.review_questions(self.connection), 250)
+
+    def test_the_batch_marker_is_the_one_the_review_store_files(self):
+        self.assertIn(f"item.source IS '{review.REF_SOURCE}'", reads.REVIEW_BATCH)
+        self.assertIn("substr(item.external_id, 1, 7) IS 'review:'", reads.REVIEW_BATCH)
 
     def test_sections_come_in_one_order_with_their_counts(self):
         self.item("Soon", due="2026-09-08")
