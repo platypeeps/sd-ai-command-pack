@@ -2036,15 +2036,12 @@ class JiraSectionTests(StatusFixture):
         self.assertEqual((freshness["state"], freshness["last_success_at"]), ("degraded", collected))
 
     def test_a_closed_row_leaves_the_producer_after_seven_days(self) -> None:
-        """(d) The cutoff is the producer's, so `--json` cannot carry what the text hides."""
+        """(d) The cutoff is the producer's: `--json` drops a closed row the collector stopped seeing."""
         self.seed([self.ticket("LOG-8", "Eight days gone", state="closed", age_days=8),
                    self.ticket("LOG-6", "Six days gone", state="closed", age_days=6)])
         result = self.report()
         self.assertEqual([row["url"].rpartition("/")[2] for row in result["jira"]["rows"]], ["LOG-6"])
-        completed = self.run_tool(SD_STATUS)
-        block = self.section(completed.stdout)
-        self.assertRegex(block, r'\n  LOG-6 +closed +assigned +"Six days gone"\n')
-        self.assertNotIn("LOG-8", completed.stdout)
+        self.assertNotIn("LOG-8", self.run_tool(SD_STATUS).stdout)
 
     def test_only_an_assigned_or_filed_row_is_listed_and_json_keeps_every_row(self) -> None:
         """Ruling on sd:5357: a watched row, or one with no reason yet, is not the operator's worklist."""
@@ -2066,10 +2063,15 @@ class JiraSectionTests(StatusFixture):
         self.assertEqual(10, len(re.findall(r"\n  LOG-1[0-9]{2} ", block)), block)
         self.assertIn("\n  … 2 more\n", block)
 
-    def test_open_rows_print_before_closed_ones(self) -> None:
+    def test_the_text_lists_open_rows_only_however_recently_a_closed_one_was_seen(self) -> None:
+        """sd:5357: a Jira row carries no close time, and `last_seen` moves on every sync, so the
+        seven-day rule kept 430 closed rows in the worklist; the text lists open rows, `--json` both."""
         self.seed([self.ticket("LOG-3", "Done", state="closed"), self.ticket("LOG-4", "Live")])
-        block = self.section(self.run_tool(SD_STATUS).stdout)
-        self.assertLess(block.index("LOG-4"), block.index("LOG-3"))
+        self.assertEqual(sorted(row["url"].rpartition("/")[2] for row in self.report()["jira"]["rows"]),
+                         ["LOG-3", "LOG-4"])
+        block = self.section(self.run_tool(SD_STATUS).stdout, "1")
+        self.assertRegex(block, r'\n  LOG-4 +open +assigned +"Live"\n')
+        self.assertNotIn("LOG-3", block)
 
     def test_a_title_with_terminal_controls_is_one_quoted_line(self) -> None:
         """(e) The same rule `_render_contributions` is tested against.
