@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import io
 import json
 import os
@@ -82,13 +83,40 @@ class ContributionStatusTests(unittest.TestCase):
         self.assertIn("Local\\n\\u001b[31mwork", text)
         lines = text.splitlines()
         self.assertEqual("Contributions, this repo, shared database order (4)", lines[1])
-        self.assertRegex(lines[2], r"^  Lane +Ref +Item +Local +External +Title$")
+        self.assertRegex(lines[2], r"^  State +Ref +Item +Settled +Title$")
         self.assertRegex(lines[3], r"^  -+(  -+)*$")
-        self.assertRegex(lines[4], r'^  newly_unblocked +item:14 +sd:14 +planning +- +"Local')
-        self.assertRegex(lines[5], r'^  awaiting_you +github:closed +- +- +CLOSED +"Closed without merge"$')
+        self.assertRegex(lines[4], r'^  newly_unblocked +item:14 +sd:14 +- +"Local')
+        self.assertRegex(lines[5], r'^  awaiting_you +github:closed +- +- +"Closed without merge"$')
         self.assertIn('  item:14 reasons: ["Dependency \\u001b[2J merged"]', lines)
         self.assertIn("  every field: `sd task contribution show <key> --json`, or `sd-status --json`", lines)
         self.assertNotIn("fix/library", text)
+
+    def test_each_lane_shows_five_rows_then_counts_the_rest_for_the_dashboard(self) -> None:
+        """sd:5357: 572 rows printed whole buried every other section; each lane keeps its first five."""
+        rows = [{"key": f"github:m{number}", "lane": "merged", "title": f"Merged {number}"} for number in range(7)]
+        rows.append({"key": "github:c0", "lane": "closed", "title": "Closed 0"})
+        output = io.StringIO()
+        status._render_contributions({"available": True, "rows": rows}, output.write)
+        text = output.getvalue()
+        self.assertIn("\nContributions, this repo, shared database order (8)\n", text)
+        self.assertEqual([f"Merged {number}" in text for number in range(7)], [True] * 5 + [False] * 2)
+        self.assertIn('"Closed 0"', text)
+        self.assertIn("\n  … 2 more merged\n  every row: the dashboard's Contributions page, or"
+                      " `sd task contribution list`\n", text)
+        self.assertNotIn("more closed", text)
+
+    def test_a_settled_row_prints_when_it_merged_or_closed_in_local_time(self) -> None:
+        merged, closed = "2026-09-27T23:20:06Z", "2026-09-28T11:40:51Z"
+        output = io.StringIO()
+        status._render_contributions({"available": True, "rows": [
+            {"key": "github:a", "lane": "merged", "title": "A", "merged_at": merged, "closed_at": merged},
+            {"key": "github:b", "lane": "closed", "title": "B", "closed_at": closed}]}, output.write)
+        import sd_views  # noqa: PLC0415 - bin/ is on the path once tests.test_sd_status has loaded
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        for stamp in (merged, closed):
+            self.assertIn(f"  {sd_views.local(stamp, now)}  ", output.getvalue())
+        self.assertNotIn("2026-09-27T23:20:06Z", output.getvalue())
 
     def test_a_github_url_reads_as_its_short_reference(self) -> None:
         """A URL key is wider than a cell; the row names `<repo>#<number>` instead."""

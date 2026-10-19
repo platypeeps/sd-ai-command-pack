@@ -3715,7 +3715,7 @@ def _contribution_ref(row: dict[str, Any]) -> str:
 
 
 def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
-    """One table row per contribution, in the library's order; every field is `--json`'s and `show`'s.
+    """One table row per contribution, capped per lane, in the library's order; every field is `--json`'s and `show`'s.
 
     JSON string encoding of the title and the reasons keeps external text from
     injecting terminal controls or a second status heading.
@@ -3725,15 +3725,32 @@ def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
         _heading(write, heading, None)
         write("  ! " + json.dumps(section["reason"] if section else "not collected", ensure_ascii=False) + "\n")
         return
+    import sd_views  # noqa: PLC0415 - only the table sections need it
+
     rows = section["rows"]
     _heading(write, heading, len(rows))
-    if rows:
-        _table(write, ["Lane", "Ref", "Item", "Local", "External", "Title"],
-               [[str(row.get("lane") or "-"), _contribution_ref(row),
-                 f"sd:{row['item_id']}" if row.get("item_id") else "-", str(row.get("local_status") or "-"),
-                 str(row.get("external_state") or "-"), json.dumps(row.get("title"), ensure_ascii=False)]
-                for row in rows])
+    # The first `sd_views.ROWS` of each lane, in the library's order; the rest
+    # are counted per lane and live on the dashboard's Contributions page.
+    seen: dict[str, int] = {}
+    shown = []
     for row in rows:
+        lane = str(row.get("lane") or "-")
+        seen[lane] = seen.get(lane, 0) + 1
+        if seen[lane] <= sd_views.ROWS:
+            shown.append(row)
+    now = datetime.datetime.now(datetime.timezone.utc)
+    if rows:
+        _table(write, ["State", "Ref", "Item", "Settled", "Title"],
+               [[str(row.get("lane") or "-"), _contribution_ref(row),
+                 f"sd:{row['item_id']}" if row.get("item_id") else "-",
+                 sd_views.local(row.get("merged_at") or row.get("closed_at"), now),
+                 json.dumps(row.get("title"), ensure_ascii=False)] for row in shown])
+    for lane, count in seen.items():
+        if count > sd_views.ROWS:
+            write(f"  … {count - sd_views.ROWS} more {lane}\n")
+    if len(shown) < len(rows):
+        write("  every row: the dashboard's Contributions page, or `sd task contribution list`\n")
+    for row in shown:
         if row.get("reasons"):
             write(f"  {_contribution_ref(row)} reasons: {json.dumps(row['reasons'], ensure_ascii=False)}\n")
     write("  external activity and dependency readiness do not complete local tasks\n")

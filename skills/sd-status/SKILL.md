@@ -44,7 +44,7 @@ opens with seventeen top-level lines; the sixteen below are the sections.
 | `Work across the shared database` | a Repo row for this repository and one for each companion the `sd.status_companions` setting row lists for it, then `sd today`'s Landing now, Delivered, Planned, Blocked and Unscheduled tables for them, in `sd today`'s layout, indented two spaces. A database that does not read is a `!` reason, never empty tables |
 | `Open threads` | a row per `source` with its count, then the exclusions named in full, so the counts are never read as a total of everything that exists |
 | `Work items` | a row per live item with its status from the item's row; findings and the counts line under the table, archived ones counted and not listed |
-| `Contributions, this repo, shared database order` | a row per contribution: lane, reference, item, local and external state, title. Every other field is `sd task contribution show KEY --json`'s and `--json`'s |
+| `Contributions, this repo, shared database order` | a row per contribution: state (its lane), reference, item, when it merged or closed in local time, title. Each lane shows its first five rows, then `… N more <lane>`; a line points at the dashboard's Contributions page for every row. Every other field is `sd task contribution show KEY --json`'s and `--json`'s |
 | `Open pull requests` | open pull requests, via the same code path as `sd-pr-state` |
 | `Merge lane, this repo, shared database` | each item's newest lane entry that has not merged or been cancelled, with its state; `sd-ship lane list` is the full view |
 | `Detected setup` | a Field and Value table: mode, lowering reason, shared-tree paths to move, and detected check entrypoints |

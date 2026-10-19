@@ -95,7 +95,7 @@ class IssueRowsAreShownInBothTextReports(unittest.TestCase):
 
     def test_status_shows_the_issue_as_one_row_and_names_where_its_fields_are(self) -> None:
         text = _status_text(FILED)
-        self.assertRegex(text, r'\n  awaiting_you +project#7 +- +planning +open +"Upstream bug"\n')
+        self.assertRegex(text, r'\n  awaiting_you +project#7 +- +- +"Upstream bug"\n')
         self.assertIn("`sd task contribution show <key> --json`", text)
 
     def test_contribution_list_shows_every_issue_key(self) -> None:
@@ -136,7 +136,7 @@ class IssueRowsAreShownInBothTextReports(unittest.TestCase):
                  "target_repo": "example/project", "draft_title": "Crash on empty input",
                  "draft_path": {"path": "/drafts/crash.md", "sha256": "e" * 64},
                  "reasons": ["Issue draft has not been filed"]}
-        self.assertRegex(_status_text(draft), r'\n  awaiting_you +item:244 +- +- +- +"Report the crash"\n')
+        self.assertRegex(_status_text(draft), r'\n  awaiting_you +item:244 +- +- +"Report the crash"\n')
         text = _work_text(draft)
         self.assertIn("target_repo: ", text)
         self.assertIn("draft_title: ", text)
