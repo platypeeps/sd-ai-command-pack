@@ -36,3 +36,21 @@ def seed_row(home: pathlib.Path, repo: pathlib.Path, item: pathlib.Path, status:
     finally:
         connection.close()
 
+
+
+def seed_declaration(home: pathlib.Path, repo: pathlib.Path, kind: str, value: dict | None) -> None:
+    """`repo`'s `kind` declaration (sd:5109), in the database at `home`; registers `repo` first."""
+    repo = repo.resolve()
+    if not sd_db.default_path(home).exists():
+        sd_db.initialise(home=home)
+    connection = sd_db.connect(home=home)
+    try:
+        from sd_db import (  # noqa: PLC0415 - `sd_db` above put the library on the path
+            paths,
+            repos,
+        )
+        # Stored as its `~/` key when under this process's HOME, as every writer stores it.
+        sd_db.upsert_repo(connection, paths.key(str(repo)), managed=1)
+        repos.set_declaration(connection, str(repo), kind, value)
+    finally:
+        connection.close()

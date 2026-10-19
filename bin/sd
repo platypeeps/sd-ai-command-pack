@@ -1324,24 +1324,46 @@ def settings(config: dict[str, object], prefix: str) -> dict[str, object]:
 
 
 def is_fleet(prefix: str, key: str) -> bool:
-    """Whether `prefix.key` is a fleet key, held as a workflow database row (sd:3989)."""
-    return prefix == "sd" and key in sd_lib.FLEET_KEYS
+    """Whether `prefix.key` is a fleet key, held as a workflow database row (sd:3989).
+
+    Every plugin key is one (sd:5109): non-secret configuration lives in the
+    database. The `sd.*` keys outside `FLEET_KEYS` describe one machine -- its
+    cores, its disks, its consent to send code out -- and stay in `config.json`.
+    """
+    return prefix != "sd" or key in sd_lib.FLEET_KEYS
 
 
-def sourced_value(prefix: str, key: str) -> tuple[object, str]:
+def sourced_value(prefix: str, key: str, pattern: str | None = None) -> tuple[object, str]:
     """`prefix.key`'s value and its source: `database`, `file` or `default`.
 
-    A fleet key reads its row first; one whose row hides a `config.json`
-    value names that file value on stderr, so a stale line is seen, not read.
+    With a database a fleet key reads its row alone; a `config.json` line it
+    leaves unread is named on stderr, so a stale line is seen, not read. A
+    machine with no database reads the file.
     """
     if not is_fleet(prefix, key):
         value = settings(sd_lib.machine_config(), prefix).get(key)
         return value, "default" if value in (None, "") else "file"
-    value, source = sd_lib.fleet_setting(key)
+    if prefix == "sd":
+        value, source = sd_lib.fleet_setting(key)
+    else:
+        answered, value = sd_lib.database_setting(f"{prefix}.{key}")
+        if not answered:
+            value = settings(sd_lib.machine_config(), prefix).get(key)
+            return value, "default" if value in (None, "") else "file"
+        if value is not None and pattern is not None and not re.fullmatch(pattern, value):
+            raise Refusal(f"{prefix}.{key} in the workflow database does not match {pattern!r}; set it again")
+        source = "database"
     if source == "database" and key in settings(sd_lib.machine_config(), prefix):
-        print(f"sd config: sd.{key} in {sd_lib.machine_config_path()} is not read: the workflow database "
-              f"holds it; delete that line", file=sys.stderr)
+        print(f"sd config: {prefix}.{key} in {sd_lib.machine_config_path()} is not read: the workflow database "
+              f"answers for it; delete that line", file=sys.stderr)
     return value, source
+
+
+def write_row(prefix: str, key: str, value: str | None) -> tuple[bool, str | None]:
+    """Write a fleet key's row (`None` unsets): whether one was written, and the value it replaced."""
+    if prefix == "sd":
+        return sd_lib.set_fleet_setting(key, value)
+    return sd_lib.set_database_setting(f"{prefix}.{key}", value)
 
 
 def config_get(args: argparse.Namespace) -> int:
@@ -1351,7 +1373,7 @@ def config_get(args: argparse.Namespace) -> int:
         raise Refusal(
             f"{prefix} declares no config key {key!r}"
             f" -- declared: {', '.join(sorted(declared))}")
-    value = sourced_value(prefix, key)[0]
+    value = sourced_value(prefix, key, declared[key].get("pattern"))[0]
     if value in (None, ""):
         # The remedy matters more than the diagnosis, and this is inherited
         # rather than invented: the skills calling this are told to stop and
@@ -1384,7 +1406,7 @@ def config_set(args: argparse.Namespace) -> int:
 
     if is_fleet(prefix, key):
         # The row, never the file; a machine with no database keeps the file (sd:3989).
-        written, replaced = sd_lib.set_fleet_setting(key, value)
+        written, replaced = write_row(prefix, key, value)
         if written:
             print(f"{args.key}: {replaced or '(unset)'} -> {value} (workflow database)")
             return 0
@@ -1414,9 +1436,9 @@ def config_unset(args: argparse.Namespace) -> int:
     declared_config(prefix)
     if is_fleet(prefix, key):
         # A cleared row, so a file value the row hid cannot come back (sd:3989).
-        if sd_lib.fleet_setting(key)[0] is None:
+        if sourced_value(prefix, key)[0] in (None, ""):
             raise Refusal(f"{args.key} is not set")
-        written, _was = sd_lib.set_fleet_setting(key, None)
+        written, _was = write_row(prefix, key, None)
         if written:
             print(f"unset {args.key} (workflow database)")
             return 0
@@ -1455,7 +1477,7 @@ def config_list(args: argparse.Namespace) -> int:
     declared, _ = declared_config(args.prefix)
     stored = settings(sd_lib.machine_config(), args.prefix)
     # Each key with its source, so a fleet key's row and an ignored file line are told apart (sd:3989).
-    found = {key: sourced_value(args.prefix, key) for key in sorted(declared)}
+    found = {key: sourced_value(args.prefix, key, declared[key].get("pattern")) for key in sorted(declared)}
     if args.json:
         json.dump(
             {key: {**spec, "value": found[key][0], "source": found[key][1]} for key, spec in sorted(declared.items())},

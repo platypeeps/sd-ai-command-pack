@@ -78,8 +78,7 @@ sys.stdout.write({answer!r} + "\\n")
 class JevTierTests(ReviewFixture):
     def prepare(self) -> pathlib.Path:
         root = self.make_repo("privatename")
-        (root / ".github").mkdir()
-        (root / ".github/sd-review.json").write_text(json.dumps({"default_tier": "standard"}))
+        self.declare_policy(root, {"default_tier": "standard"})
         self.commit(root)
         subprocess.run(["git", "checkout", "-qb", "work"], cwd=str(root), check=True)
         (root / "src.py").write_text("value = 1\n" * 20)

@@ -283,6 +283,29 @@ A key is `A-Z`, then 1 to 254 of `A-Z`, `0-9` or `_`; the column's CHECK holds t
 `repo list` does not show it, so no reader that counts its fields moves.
 `repos.jira_project` reads it for code: no row reads None, and a database not yet migrated raises `SchemaTooOld`.
 
+## Declarations
+
+`repo.declarations` holds a repository's pack declarations as one JSON object, or NULL for none (sd:5109).
+Each key is a kind; each value is the object the old `.github/` file held.
+
+| Kind | Reader | Old file |
+| --- | --- | --- |
+| `review` | `sd-review` routing policy, its binding in `sd-ship` | `.github/sd-review.json` |
+| `gate_reuse` | the gate's receipt key (`sd_gate_receipts`) | `.github/sd-gate-reuse.json` |
+| `check_scope` | `sd-check --base` docs-only scope | `.github/sd-check-scope.json` |
+| `status` | `sd-status` accepted gaps, `sd-ship merge` declared gap | `.github/sd-status.json` |
+
+    bin/sd-db repo declare PATH                     # every kind, as JSON
+    bin/sd-db repo declare PATH review              # one kind
+    bin/sd-db repo declare PATH review '<json>'     # set; prints before -> after
+    bin/sd-db repo declare PATH review off          # remove
+
+The verb checks a value with its reader's own validator first and drops `$schema`, so the row holds only what a reader accepts.
+The library refuses an unknown kind, a value that is not an object, more than 16384 bytes and an unregistered path.
+`sd_lib.repo_declaration` reads it through `registered_base`, so a linked worktree, a runner clone and a gate's worktree read their repository's row.
+No database on the machine, or a store before 37, reads as nothing declared; a failed read is unknown and each reader refuses or runs in full.
+The `.github/` files are no longer read.
+
 ## `judgments`: what the judgment models cost, by stage
 
 `bin/sd-db judgments` compares the stages that route a decision through a judgment model.

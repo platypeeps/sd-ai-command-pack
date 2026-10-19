@@ -427,6 +427,48 @@ class TheMigrationVerbs(MigrationVerbCase):
         completed = self.sd_db("repo", "jira-project", str(self.checkout), "off")
         self.assertIn("jira_project EXAMPLE -> off", completed.stdout)
 
+    def test_repo_declare_sets_prints_and_removes_one_kind(self):
+        """sd:5109. `repo declare PATH KIND JSON|off` writes the row; `PATH [KIND]` prints it; `$schema` is dropped."""
+        self.sd_db("repo", "add", str(self.checkout))
+        listed = self._list_row()
+        self.assertEqual(self.sd_db("repo", "declare", str(self.checkout)).stdout.strip(), "none")
+        policy = '{"$schema": "./sd-review.schema.json", "severity_floor": "high"}'
+        completed = self.sd_db("repo", "declare", str(self.checkout), "review", policy)
+        self.assertIn("review none -> declared", completed.stdout)
+        self.assertEqual(json.loads(self.sd_db("repo", "declare", str(self.checkout), "review").stdout),
+                         {"severity_floor": "high"})
+        self.assertEqual(json.loads(self.sd_db("repo", "declare", str(self.checkout)).stdout),
+                         {"review": {"severity_floor": "high"}})
+        self.assertEqual(self._list_row(), listed)
+        completed = self.sd_db("repo", "declare", str(self.checkout), "review", "off")
+        self.assertIn("review declared -> none", completed.stdout)
+        self.assertEqual(self.sd_db("repo", "declare", str(self.checkout), "review").stdout.strip(), "none")
+
+    def test_repo_declare_refuses_what_the_reader_refuses_and_writes_nothing(self):
+        """Property over extreme inputs through the verb: empty, not JSON, every non-object type, deep
+        nesting, a huge value, an unknown kind, and each reader's own refusal."""
+        self.sd_db("repo", "add", str(self.checkout))
+        self.sd_db("repo", "declare", str(self.checkout), "review", '{"severity_floor": "high"}')
+        words = [("review", ""), ("review", "not json"), ("review", "[]"), ("review", '"x"'), ("review", "1"),
+                 ("review", "null"), ("review", "true"), ("review", "[" * 100000 + "]" * 100000),
+                 ("review", '{"a": ' * 2000 + "1" + "}" * 2000),
+                 ("status", '{"accepted_gaps": ["' + "y" * 20000 + '"]}'), ("reviews", "{}"), ("", "{}"),
+                 ("review", '{"unknown_key": 1}'), ("review", '{"severity_floor": 3}'),
+                 ("gate_reuse", '{"schema_version": 1, "key": "head", "reason": "r"}'),
+                 ("gate_reuse", '{"schema_version": true, "key": "tree", "reason": "r"}'),
+                 ("check_scope", '{"schema_version": 1}'), ("status", '{"accepted_gaps": [{"id": "nope"}]}'),
+                 ("status", '{"accepted_gaps": {}}')]
+        for kind, word in words:
+            with self.subTest(kind=kind, word=word[:40]):
+                self.sd_db("repo", "declare", str(self.checkout), kind, word, expect=1)
+        self.assertEqual(json.loads(self.sd_db("repo", "declare", str(self.checkout)).stdout),
+                         {"review": {"severity_floor": "high"}})
+        completed = self.sd_db("repo", "declare", str(self.home / "absent"), "review", "{}", expect=1)
+        self.assertIn("not a registered repository", completed.stdout + completed.stderr)
+        for extra in ([], ["review", "{}", "more"]):
+            completed = self.sd_db("repo", "declare", *([str(self.checkout)] if extra else []), *extra, expect=1)
+            self.assertIn("needs a path", completed.stderr)
+
     def test_repo_list_managed_prints_only_the_managed_rows(self):
         other = self.home / "other"
         subprocess.run(["git", "init", "-q", str(other)], check=True, capture_output=True)

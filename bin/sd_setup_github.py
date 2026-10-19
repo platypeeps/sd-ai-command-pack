@@ -127,8 +127,9 @@ def workflow_text(action_ref: str) -> str:
 # deleting it removes the lane.
 #
 # What it does: resolves this pull request's diff, runs `route()` over this
-# repository's review policy -- `.github/sd-review.json` when that file exists,
-# the built-in default when it does not -- and prints the resulting plan.
+# repository's review policy -- the repo row's review declaration where a workflow
+# database answers, the built-in default where none does, as on a GitHub runner --
+# and prints the resulting plan.
 #
 # What it does not do: it requests no reviewer, posts no comment, sets no label,
 # and holds `contents: read` and nothing else, so it cannot affect this pull

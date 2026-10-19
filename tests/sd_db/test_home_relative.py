@@ -69,7 +69,7 @@ COLUMNS = {
     "publication_claim": {"history": "payload",
                           "none": "id item active_item state created_at updated_at"},
     "repo": {"key": "path", "none": "remote mode runner_merge managed ci lane_host pieces_source created_at updated_at "
-                      "channels clone_profiles dependabot github_issues jira_project"},
+                      "channels clone_profiles dependabot github_issues jira_project declarations"},
     "repo_protection": {"key": "repo", "history": "body reason",
                         "none": "observed_at status default_branch"},
     "request_outcome": {"none": "id committed_at"},
@@ -498,7 +498,8 @@ class TwoHomes(HomeCase):
 EQUALITY_LOOKUPS = {
     "progress.py": (5, "stored row values; `item.path` is repo-relative; `shadow.repo` is a slug"),
     "recovery.py": (1, "`_pieces` takes the row path `reimport` found with `row_for`"),
-    "repos.py": (8, "`set_channels`, `set_clones`, `set_dependabot`, `set_github_issues` and `set_jira_project` "
+    "repos.py": (9, "`set_channels`, `set_clones`, `set_dependabot`, `set_github_issues`, `set_jira_project` and "
+                 "`set_declaration` "
                  "write the row path "
                  "they read through `paths.keys` in the same transaction; `seed_clones` the path `row_for` or `add` gave; "
                  "`mine_issues` and `intake_issues` match `shadow.repo`, a slug"),

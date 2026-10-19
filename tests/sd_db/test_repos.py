@@ -17,6 +17,7 @@ import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 from unittest import mock
 
 from sd_db import connect, paths, ship
@@ -25,12 +26,14 @@ from sd_db.errors import SchemaTooOld, SdDbError
 from sd_db.migrate import initialise, migrate
 from sd_db.repos import (
     CI_MODES,
+    DECLARATION_BYTES,
     ConfMissing,
     RepoRefusal,
     add,
     checkouts,
     clone_lines,
     conf_paths,
+    declarations,
     github_issues,
     intake_issues,
     intake_repos,
@@ -47,6 +50,7 @@ from sd_db.repos import (
     set_channels,
     set_ci,
     set_clones,
+    set_declaration,
     set_dependabot,
     set_github_issues,
     set_jira_project,
@@ -65,6 +69,7 @@ from . import support
 HOLDER = """
 import sys, time
 from pathlib import Path
+from typing import Any
 from sd_db import ship
 with ship.repository_lock(Path(sys.argv[1]), sys.argv[2], holder={"command": "sd-ship merge --item 41", "item": 41}):
     print("held", flush=True)
@@ -1276,6 +1281,115 @@ class TheJiraProjectSetting(RepoCase):
         self.addCleanup(old.close)
         with self.assertRaises(SchemaTooOld):
             jira_project(old, self.checkouts / "one")
+
+
+class TheDeclarationsSetting(RepoCase):
+    """sd:5109. `repo.declarations`: the objects `.github/sd-<kind>.json` held, keyed by kind.
+
+    The writer checks the kind and the shape, keeps the other kinds, and
+    refuses a path no row holds. The reader answers `{}` for none, None for no
+    row, and raises on a store before 37 or a column that does not read.
+    """
+
+    def _registered(self) -> str:
+        return add(self.connection, support.repository(self.checkouts / "one"), home=self.home)
+
+    def _value(self, path: str):
+        return self.connection.execute("SELECT declarations FROM repo WHERE path = ?", (path,)).fetchone()[0]
+
+    def test_it_sets_one_kind_keeps_the_others_and_none_removes_it(self):
+        path = self._registered()
+        self.assertEqual(declarations(self.connection, path), {})
+        review = {"severity_floor": "high"}
+        status: dict[str, list[str]] = {"accepted_gaps": []}
+        self.assertEqual(set_declaration(self.connection, path, "review", review), (path, None))
+        self.assertEqual(set_declaration(self.connection, path, "status", status), (path, None))
+        self.assertEqual(declarations(self.connection, paths.expand(path)), {"review": review, "status": status})
+        self.assertEqual(set_declaration(self.connection, path, "review", {"large_change_lines": 5}), (path, review))
+        self.assertEqual(set_declaration(self.connection, path, "review", None), (path, {"large_change_lines": 5}))
+        self.assertEqual(declarations(self.connection, path), {"status": status})
+        set_declaration(self.connection, path, "status", None)
+        self.assertIsNone(self._value(path))
+
+    def test_writing_the_same_value_again_changes_nothing_but_the_time(self):
+        """The lead's move is re-runnable: a second identical write is a no-op."""
+        path = self._registered()
+        set_declaration(self.connection, path, "gate_reuse", {"key": "tree"})
+        first = self._value(path)
+        set_declaration(self.connection, path, "gate_reuse", {"key": "tree"})
+        self.assertEqual(self._value(path), first)
+
+    def test_it_changes_no_other_field_on_the_row(self):
+        path = self._registered()
+        before = dict(self.connection.execute("SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
+        set_declaration(self.connection, path, "review", {})
+        after = dict(self.connection.execute("SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
+        self.assertEqual({key for key in before if before[key] != after[key]} - {"updated_at"}, {"declarations"})
+
+    def test_every_kind_or_value_outside_the_shape_is_refused_and_writes_nothing(self):
+        """Property over extreme inputs: unknown and empty kinds, every non-object type,
+        deep nesting, NaN, an oversized object and a seeded random spread of values."""
+        import random
+
+        path = self._registered()
+        set_declaration(self.connection, path, "review", {"kept": True})
+        held = self._value(path)
+        nested: object = {}
+        for _ in range(100000):
+            nested = {"a": nested}
+        cases: list[tuple[str, Any]] = [("", {}), ("Review", {}), ("reviews", {}), ("review ", {}), ("\x00", {}), ("é", {})]
+        wrong: tuple[object, ...] = ([], "", "{}", 0, 1.5, True, False, [{}], ("t",))
+        cases += [("review", value) for value in wrong]
+        cases += [("check_scope", {"x": float("nan")}), ("status", nested),
+                  ("status", {"x": "y" * (DECLARATION_BYTES + 1)}), ("status", {"x": object()})]
+        draw = random.Random(5109)
+        for _ in range(200):
+            kind = "".join(draw.choice("reviwgat_suc") for _ in range(draw.randrange(0, 12)))
+            if kind not in ("review", "gate_reuse", "check_scope", "status"):
+                cases.append((kind, {"k": draw.random()}))
+        for kind, value in cases:
+            with self.subTest(kind=kind, value=type(value).__name__), self.assertRaises(RepoRefusal):
+                set_declaration(self.connection, path, kind, value)
+        self.assertEqual(self._value(path), held)
+
+    def test_an_unregistered_path_is_refused_on_write_and_reads_none(self):
+        self._registered()
+        stranger = support.repository(self.checkouts / "two")
+        for where in (stranger, self.checkouts / "absent", self.root):
+            with self.subTest(where=where):
+                with self.assertRaises(RepoRefusal) as caught:
+                    set_declaration(self.connection, where, "review", {})
+                self.assertIn("not a registered repository", str(caught.exception))
+                self.assertIsNone(declarations(self.connection, where))
+
+    def test_a_column_that_does_not_read_raises_and_never_reads_as_none(self):
+        path = self._registered()
+        self.connection.execute("UPDATE repo SET declarations = '{\"a\": 1}' WHERE path = ?", (path,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.connection.execute("UPDATE repo SET declarations = '[1]' WHERE path = ?", (path,))
+        self.connection.execute("PRAGMA ignore_check_constraints = 1")
+        self.connection.execute("UPDATE repo SET declarations = '[1]' WHERE path = ?", (path,))
+        with self.assertRaises(SdDbError):
+            declarations(self.connection, path)
+
+    def test_a_store_before_37_holds_no_declaration(self):
+        """Older state: the new library over a store not yet migrated reads what it holds, nothing."""
+        database = self.root / "old.db"
+        with mock.patch("sd_db.migrate.migrations", return_value=[m for m in migrations() if m[0] < 37]):
+            migrate(database)
+        raw = sqlite3.connect(database, isolation_level=None)
+        raw.row_factory = sqlite3.Row
+        path = add(raw, support.repository(self.checkouts / "one"), home=self.home)
+        raw.close()
+        old = connect(database, write=False)
+        self.addCleanup(old.close)
+        self.assertEqual(declarations(old, path), {})
+        self.assertIsNone(declarations(old, self.checkouts / "two"))
+        writer = sqlite3.connect(database, isolation_level=None)
+        writer.row_factory = sqlite3.Row
+        self.addCleanup(writer.close)
+        with self.assertRaises(sqlite3.OperationalError):
+            set_declaration(writer, path, "review", {"default_tier": "cheap"})
 
 
 class TheIntake(RepoCase):

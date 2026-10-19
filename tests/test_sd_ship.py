@@ -30,9 +30,10 @@ from urllib.parse import parse_qs, urlsplit
 import sd_db
 from sd_db import connect, create_assignment, create_item, initialise, upsert_repo
 from sd_db import ship as receipts
-from sd_db.repos import set_runner_merge
+from sd_db.repos import set_declaration, set_runner_merge
 from sd_db.testing.github import GitHubDouble
 from sd_db.testing.remote import FixtureRemote, RemoteRefusal, _git
+from sd_db.writes import set_setting
 
 from tests.clean_env import clean_environment
 
@@ -498,31 +499,21 @@ roles:
     def merge(self, *extra):
         return self.operation("merge", "--manual", "--expected-head", _git(self.root, "rev-parse", "HEAD"), *extra).merge()
 
+    def declare_review(self, policy):
+        """`policy` as the fixture repository's review declaration, on its row (sd:5109)."""
+        set_declaration(self.connection, str(self.operator), "review", policy)
+
     def enable_automatic_copilot(self):
-        policy = self.root / ".github/sd-review.json"
-        policy.parent.mkdir(parents=True, exist_ok=True)
-        policy.write_text(json.dumps({
-            "sensitive": ["src.py"],
-            "copilot_review": {"automatic_deep": True},
-        }))
-        _git(self.root, "add", str(policy.relative_to(self.root)))
-        _git(self.root, "commit", "-m", "select deep remote review\n\nAuthored-with: human")
+        self.declare_review({"sensitive": ["src.py"], "copilot_review": {"automatic_deep": True}})
 
     def disable_automatic_copilot(self):
-        """The same file, opting the repository out of paid Copilot review.
+        """The same declaration, opting the repository out of paid Copilot review.
 
         `sensitive` still escalates `src.py` to the deep tier, so the tier is
         never what stops the request in the test below -- the repository's own
         word is.
         """
-        policy = self.root / ".github/sd-review.json"
-        policy.parent.mkdir(parents=True, exist_ok=True)
-        policy.write_text(json.dumps({
-            "sensitive": ["src.py"],
-            "copilot_review": {"automatic_deep": False},
-        }))
-        _git(self.root, "add", str(policy.relative_to(self.root)))
-        _git(self.root, "commit", "-m", "opt out of paid remote review\n\nAuthored-with: human")
+        self.declare_review({"sensitive": ["src.py"], "copilot_review": {"automatic_deep": False}})
 
     def cli(self, command, *extra):
         return subprocess.run([sys.executable, str(ROOT / "bin/sd-ship"), command, "--item", str(self.item), "--json", *extra],
@@ -1365,21 +1356,12 @@ roles:
     # the next review was paid for.
 
     def machine_copilot(self, value: str | None) -> None:
-        """The fixture machine's `sd.copilot_review`, or no machine config at all."""
-        config = self.home / ".config/sd-ai-command-pack/config.json"
-        if value is None:
-            config.unlink(missing_ok=True)
-            return
-        config.parent.mkdir(parents=True, exist_ok=True)
-        config.write_text(json.dumps({"config": {"sd": {"copilot_review": value}}}))
+        """The fleet's `sd.copilot_review` row (sd:5109), or no row at all."""
+        set_setting(self.connection, "sd.copilot_review", value)
 
     def route_deep_saying_nothing_about_copilot(self) -> None:
-        """A policy file that escalates `src.py` and leaves Copilot to the machine."""
-        policy = self.root / ".github/sd-review.json"
-        policy.parent.mkdir(parents=True, exist_ok=True)
-        policy.write_text(json.dumps({"sensitive": ["src.py"]}))
-        _git(self.root, "add", str(policy.relative_to(self.root)))
-        _git(self.root, "commit", "-m", "route deep, say nothing about Copilot\n\nAuthored-with: human")
+        """A review declaration that escalates `src.py` and leaves Copilot to the machine."""
+        self.declare_review({"sensitive": ["src.py"]})
 
     def test_never_set_after_a_deep_review_stops_the_automatic_request(self):
         """The reviewer's scenario: a deep review is retained under the default,
@@ -1592,7 +1574,7 @@ roles:
         operation = self.operation()
         recorded = operation.state["passes"][-1]["report"]["remote_reviews"]["copilot"]
         self.assertIs(recorded["repository"], True)
-        (self.root / ".github/sd-review.json").write_text(json.dumps({"sensitive": ["src.py"]}))
+        self.declare_review({"sensitive": ["src.py"]})
         self.machine_copilot("never")
         self.assertFalse(operation.automatic_copilot_review())
 
@@ -1951,12 +1933,11 @@ roles:
         head = _git(self.root, "rev-parse", "HEAD")
         self.assertEqual(operation.unreviewed_shipped_surface(base, head),
                          ["docs/spec/contract.md"])
-        policy = self.root / ".github/sd-review.json"
-        policy.write_text(json.dumps({
+        self.declare_review({
             "sensitive": ["src.py"],
             "never_skip": ["docs/handbook/**"],
             "copilot_review": {"automatic_deep": True},
-        }))
+        })
         self.assertEqual(operation.unreviewed_shipped_surface(base, head),
                          ["docs/handbook/how.md"])
 
@@ -1981,18 +1962,17 @@ roles:
         _git(self.root, "add", "-A")
         _git(self.root, "commit", "-m", "prose\n\nAuthored-with: human")
         head = _git(self.root, "rev-parse", "HEAD")
-        policy = self.root / ".github/sd-review.json"
-        policy.write_text(json.dumps({
+        self.declare_review({
             "sensitive": ["src.py"],
             "docs_skip": ["docs/handbook/**"],
             "copilot_review": {"automatic_deep": True},
-        }))
+        })
         self.assertEqual(operation.unreviewed_shipped_surface(base, head), ["docs/note.md"])
-        policy.write_text(json.dumps({
+        self.declare_review({
             "sensitive": ["src.py"],
             "docs_skip": [],
             "copilot_review": {"automatic_deep": True},
-        }))
+        })
         self.assertEqual(operation.unreviewed_shipped_surface(base, head),
                          ["docs/handbook/how.md", "docs/note.md"])
 
@@ -2012,7 +1992,7 @@ roles:
         _git(self.root, "add", "-A")
         _git(self.root, "commit", "-m", "prose\n\nAuthored-with: human")
         head = _git(self.root, "rev-parse", "HEAD")
-        (self.root / ".github/sd-review.json").write_text("{ not json")
+        self.declare_review({"default_tier": "gold"})
         with self.assertRaisesRegex(ship.Refusal, "review policy does not parse") as raised:
             operation.unreviewed_shipped_surface(base, head)
         self.assertEqual(raised.exception.workflow["blocker"]["code"], "review_policy_malformed")
@@ -4509,15 +4489,16 @@ roles:
     def tiered_branch(self, files: dict[str, str], *, check: str = "true", policy: str | None = None) -> pathlib.Path:
         """sd:2998. A branch off main changing only `files`, a counting reader, and main's Makefile `check`.
 
-        `policy` is main's `.github/sd-review.json`, so it is not in the branch's diff.
+        `policy` is the repository's review declaration, which no diff carries (sd:5109).
         """
         calls = self.directory / "provider-calls"
         (self.programs / "review-fixture").write_text(
             "#!/usr/bin/env python3\nimport json, pathlib\n"
             f"pathlib.Path({str(calls)!r}).open('a').write('call\\n')\n"
             "print(json.dumps({'type':'result','subtype':'success','structured_output':{'findings':[]}}))\n")
-        main = {"Makefile": f"check:\n\t@{check}\n"} | ({".github/sd-review.json": policy} if policy else {})
-        self.remote.commit_on("main", "gate\n\nAuthored-with: human", files=main)
+        if policy:
+            self.declare_review(json.loads(policy))
+        self.remote.commit_on("main", "gate\n\nAuthored-with: human", files={"Makefile": f"check:\n\t@{check}\n"})
         _git(self.root, "fetch", "-q", "origin")
         _git(self.root, "checkout", "-q", "-b", "tiered", "origin/main")
         for name, text in files.items():
@@ -4565,7 +4546,8 @@ roles:
         self.assertIsNone(reviewed["base"], "the first review after a skip must cover the whole branch")
 
     def test_a_malformed_review_policy_refuses_the_classification(self):
-        calls = self.tiered_branch({"README.md": "words\n"}, policy="{")
+        # A row holds only JSON (sd:5109); the reader refuses this one's tier.
+        calls = self.tiered_branch({"README.md": "words\n"}, policy='{"default_tier": "gold"}')
         with self.assertRaisesRegex(ship.Refusal, "review policy does not parse"):
             self.prepare()
         self.assertFalse(calls.exists())
@@ -6246,7 +6228,7 @@ class CaptureDepthTests(unittest.TestCase):
 
 
 class DeclaredGapCase(unittest.TestCase):
-    """`sd-ship merge` under `.github/sd-status.json`'s `unprotected` entry (sd:1110).
+    """`sd-ship merge` under the repo row's `status` declaration's `unprotected` entry (sd:1110, sd:5109).
 
     The rig is `ShipCase`'s with the protection object removed -- borrowed
     method by method rather than inherited, so `ShipCase`'s own tests do not
@@ -6279,9 +6261,7 @@ class DeclaredGapCase(unittest.TestCase):
         # and the double never completes a Copilot review, so the fixture's
         # machine says `never` rather than letting the default turn every
         # merge below into a wait for a review nobody answers.
-        config = self.home / ".config" / ship.sd_lib.CONFIG_RELATIVE_PATH
-        config.parent.mkdir(parents=True, exist_ok=True)
-        config.write_text('{"config":{"sd":{"copilot_review":"never"}}}')
+        set_setting(self.connection, "sd.copilot_review", "never")
 
     def commit(self, files: dict[str, str], message: str = "declare\n\nAuthored-with: human") -> str:
         """Commit `files` on `topic` at the remote and pull them into the clone.
@@ -6294,9 +6274,10 @@ class DeclaredGapCase(unittest.TestCase):
         _git(self.root, "reset", "-q", "--hard", "FETCH_HEAD")
         return sha
 
-    def declare(self, entries=None, *, workflows=None, raw: str | None = None) -> str:
-        declaration = raw if raw is not None else json.dumps(entries if entries is not None else self.DECLARATION, indent=2) + "\n"
-        files = {".github/sd-status.json": declaration}
+    def declare(self, entries=None, *, workflows=None) -> str:
+        """`entries` as the row's `status` declaration (sd:5109), and the workflows committed on `topic`."""
+        set_declaration(self.connection, str(self.operator), "status", entries if entries is not None else self.DECLARATION)
+        files = {}
         for name, text in (workflows if workflows is not None else {"tests.yml": self.TESTS, "sd-review-route.yml": self.ROUTE}).items():
             files[f".github/workflows/{name}"] = text
         return self.commit(files)
@@ -7070,28 +7051,37 @@ class DeclaredGapCase(unittest.TestCase):
                                   "required_status_checks": {"strict": True, "contexts": ["check"], "checks": [{"context": "check", "app_id": 7}]}}
         self.refuse("does not match the observed state")
 
-    def test_an_invalid_declaration_file_names_its_fault(self):
-        for label, raw, fault in (
-            ("unknown key", json.dumps({"accepted_gaps": [], "extra": 1}), "unknown key"),
-            ("bad JSON", "{not json", "not valid JSON"),
-            ("wrong state shape", json.dumps({"accepted_gaps": [dict(self.DECLARATION["accepted_gaps"][0], state=[])]}), "state must be a non-empty object"),
+    def test_an_invalid_declaration_names_its_fault(self):
+        # Not JSON no longer reaches the reader: the row holds an object or nothing (sd:5109).
+        for label, entries, fault in (
+            ("unknown key", {"accepted_gaps": [], "extra": 1}, "unknown key"),
+            ("wrong state shape", {"accepted_gaps": [dict(self.DECLARATION["accepted_gaps"][0], state=[])]}, "state must be a non-empty object"),
         ):
             with self.subTest(label=label):
                 self.restart()
-                self.declare(raw=raw)
+                self.declare(entries)
                 self.green()
                 self.refuse(fault, "protection_required")
 
-    def test_the_declaration_is_read_at_the_head_not_the_working_tree(self):
-        """Same reason as the workflow set: the reader, asked over a dirty tree."""
-        head = self.commit({".github/workflows/tests.yml": self.TESTS, ".github/workflows/sd-review-route.yml": self.ROUTE})
-        (self.root / ".github/sd-status.json").write_text(json.dumps(self.DECLARATION))
+    def test_the_declaration_is_read_from_the_row_not_the_tree(self):
+        """sd:5109: a `.github/sd-status.json` at the head accepts nothing; the row accepts at merge time."""
+        files = {".github/sd-status.json": json.dumps(self.DECLARATION), ".github/workflows/tests.yml": self.TESTS,
+                 ".github/workflows/sd-review-route.yml": self.ROUTE}
+        head = self.commit(files)
         api = self.adapter()
         self.assertIsNone(api.declared_gap(head))
-        self.assertEqual(api.declaration_faults, [f".github/sd-status.json is not in the tree at {head[:12]}"])
-        head = self.declare()
-        (self.root / ".github/sd-status.json").unlink()
+        self.assertEqual(api.declaration_faults, [f"{ship.sd_lib.ACKNOWLEDGEMENT_SOURCE} carries no `unprotected` entry "
+                                                  "pinning branch_protection: false"])
+        set_declaration(self.connection, str(self.operator), "status", self.DECLARATION)
         self.assertEqual(self.adapter().declared_gap(head), {"declared_gap": "unprotected", "until": "a second account with push or merge rights exists"})
+
+    def test_an_unread_declaration_accepts_nothing(self):
+        self.declare()
+        unread = ship.sd_lib.DatabaseUnreadable("the workflow database did not open")
+        api = self.adapter()
+        with patch.object(ship.sd_lib, "repo_declaration", side_effect=unread):
+            self.assertIsNone(api.declared_gap(self.head()))
+        self.assertTrue(any("did not open" in fault for fault in api.declaration_faults), api.declaration_faults)
 
     def test_a_403_from_the_protection_endpoint_is_not_absence(self):
         self.declare()

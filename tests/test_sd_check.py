@@ -36,6 +36,10 @@ class CheckFixture(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.tmp = pathlib.Path(self._tmp.name).resolve()
+        # A home of the fixture's own: `sd-check --base` reads the repository row (sd:5109),
+        # and the operator's database is no place for a fixture to read or write.
+        self.home = self.tmp / "home"
+        self.home.mkdir()
 
     def make_repo(self, name: str = "repo") -> pathlib.Path:
         root = self.tmp / name
@@ -72,6 +76,7 @@ class CheckFixture(unittest.TestCase):
             cwd=str(root),
             capture_output=True,
             text=True,
+            env={**os.environ, "HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config")},
         )
 
     def run_json(self, root: pathlib.Path, *args: str) -> dict[str, Any]:

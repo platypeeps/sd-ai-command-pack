@@ -32,6 +32,7 @@ sys.path.insert(0, str(REPO_ROOT / "bin"))
 import sd_lane  # noqa: E402
 
 from tests.clean_env import clean_environment  # noqa: E402
+from tests.row_seed import seed_declaration  # noqa: E402
 
 
 def git(root: pathlib.Path, *args: str) -> str:
@@ -1111,8 +1112,13 @@ class Speculation(Lane):
 
     def setUp(self) -> None:
         super().setUp()
-        self.commit_files(self.repo, {".github/sd-gate-reuse.json": json.dumps(
-            {"schema_version": 1, "key": "tree", "reason": "the check reads no history"})}, "declare")
+        # The tree key is the repo row's `gate_reuse` declaration (sd:5109), read in this process too.
+        seed_declaration(self.tmp, self.repo, "gate_reuse",
+                         {"schema_version": 1, "key": "tree", "reason": "the check reads no history"})
+        home = mock.patch.dict(os.environ, {"HOME": str(self.tmp), "XDG_CONFIG_HOME": str(self.tmp / ".config")})
+        home.start()
+        self.addCleanup(home.stop)
+        self.commit_files(self.repo, {"declared.txt": "d\n"}, "declare")
         git(self.repo, "push", "-q", "origin", "main")
         git(self.repo, "remote", "set-head", "origin", "main")
         self.first = self.branch("first", {"one.txt": "1\n"})
@@ -1209,14 +1215,22 @@ class Speculation(Lane):
         self.assertNotIn("speculation", self.entries()[1])
 
     def test_without_the_tree_key_nothing_is_gated(self) -> None:
-        for tree in (self.first, self.second):
-            git(tree, "rm", "-q", ".github/sd-gate-reuse.json")
-            git(tree, "commit", "-q", "-m", "no tree key")
+        seed_declaration(self.tmp, self.repo, "gate_reuse", None)
         self.queue_both()
         sd_lane.run_lane(self.repo, self.environ, super().ship, self.gate)
         self.assertEqual(self.gates, [])
         self.assertEqual(self.entries()[1]["speculation"]["status"], "skipped")
         self.assertIn("no tree key", self.entries()[1]["speculation"]["reason"])
+
+    def test_a_database_that_does_not_answer_gates_nothing(self) -> None:
+        """sd:5109: an unread gate_reuse row is unknown, so the prediction names no key and gates nothing."""
+        self.queue_both()
+        unread = sd_lane.sd_lib.DatabaseUnreadable("down")
+        with mock.patch.object(sd_lane.sd_lib, "repo_declaration", side_effect=unread):
+            sd_lane.run_lane(self.repo, self.environ, super().ship, self.gate)
+        self.assertEqual(self.gates, [])
+        self.assertEqual(self.entries()[1]["speculation"]["status"], "skipped")
+        self.assertIn("the gate_reuse declaration cannot be read: down", self.entries()[1]["speculation"]["reason"])
 
     def test_a_conflict_with_the_predicted_landing_gates_nothing_and_both_entries_still_run(self) -> None:
         self.commit_files(self.second, {"one.txt": "not 1\n"}, "conflicts with first")

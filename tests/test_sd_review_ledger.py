@@ -73,8 +73,7 @@ class LedgerFixture(ReviewFixture):
         self.database = self.registry_path.with_name("sd.db")
         self.root = self.make_repo()
         (self.root / "src.py").write_text("the_review_subject = 123\n")
-        (self.root / ".github").mkdir()
-        (self.root / ".github/sd-review.json").write_text(json.dumps({"default_tier": "cheap"}))
+        self.stub_policy({"default_tier": "cheap"})
         (self.root / "CLAUDE.local.md").write_text(
             "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\n"
             "reviewers: paid@paid.example.test, free@free.example.test\n"

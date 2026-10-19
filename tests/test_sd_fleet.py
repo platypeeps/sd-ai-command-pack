@@ -2,8 +2,9 @@
 
 Every repository here is a temporary git checkout with a github.com origin
 URL that is never contacted: `origin/HEAD` is a local ref the fixture sets,
-and nothing fetches. The repository rows are handed in, so no test reads the
-workflow database.
+and nothing fetches. The repository rows are handed in; the one row the stamp
+reads, the `status` declaration (sd:5109), lives in a database under the
+fixture's scratch `HOME`.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import io
 import json
 import os
 import pathlib
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -29,6 +31,8 @@ import sd_install  # noqa: E402
 import sd_lib  # noqa: E402
 import sd_setup_github  # noqa: E402
 import sd_setup_guard  # noqa: E402
+
+from tests.row_seed import seed_declaration  # noqa: E402
 
 PIN = "1" * 40
 CI = "name: ci\non:\n  pull_request:\njobs:\n  t:\n    runs-on: ubuntu-latest\n    steps:\n      - run: true\n"
@@ -83,7 +87,8 @@ class Fleet(unittest.TestCase):
         self.tmp = pathlib.Path(tmp.name).resolve()
         # `sd.fleet_owners` is a workflow database row (sd:3989), found under
         # `HOME`: an empty home here, or the operator's row decides the owners.
-        patcher = mock.patch.dict(os.environ, {"HOME": str(self.tmp / "home")})
+        self.home = self.tmp / "home"
+        patcher = mock.patch.dict(os.environ, {"HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config")})
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -108,6 +113,15 @@ class Fleet(unittest.TestCase):
             (root / "CLAUDE.local.md").write_text(local, encoding="utf-8")
         return root, remote
 
+    def declare(self, root: pathlib.Path, value: dict) -> None:
+        """`root`'s `status` declaration, on its row in the scratch database (sd:5109)."""
+        seed_declaration(self.home, root, "status", value)
+
+    @staticmethod
+    def declare_lines(plan: dict) -> list[str]:
+        """The adapted lines that hand the operator an `sd-db repo declare` command."""
+        return [line for line in plan["adapted"] if "run: sd-db repo declare" in line]
+
     def run_stamp(self, rows, cwd=None, ask=None, ci="github", **overrides) -> tuple[int, str]:
         out = io.StringIO()
         code = sd_fleet.fleet_stamp(args(**overrides), rows=lambda: rows, stream=out, cwd=cwd,
@@ -125,10 +139,12 @@ class DryRun(Fleet):
         [plan] = self.plan([(root, remote)])
         paths = [change["path"] for change in plan["changes"]]
         self.assertEqual(paths, [".github/workflows/sd-review-route.yml", ".github/dependabot.yml",
-                                 ".github/workflows/sd-check.yml", ".github/sd-status.json", ".gitignore",
+                                 ".github/workflows/sd-check.yml", ".gitignore",
                                  ".claude/settings.json", "CLAUDE.local.md", "docs/dashboard"])
         self.assertIn(f"review-route@{PIN}", plan["changes"][0]["diff"])
         self.assertEqual(plan["refused"], [])
+        [line] = self.declare_lines(plan)
+        self.assertIn(f"sd-db repo declare {root} status", line)
 
     def test_ci_local_lays_no_workflow_and_says_why(self) -> None:
         """sd:1843: `repo.ci = local` gets no route, guard or check workflow;
@@ -136,8 +152,7 @@ class DryRun(Fleet):
         root, remote = self.repo("local-ci")
         [plan] = self.plan([(root, remote)], ci="local")
         paths = [change["path"] for change in plan["changes"]]
-        self.assertEqual(paths, [".github/sd-status.json", ".gitignore", ".claude/settings.json", "CLAUDE.local.md",
-                                 "docs/dashboard"])
+        self.assertEqual(paths, [".gitignore", ".claude/settings.json", "CLAUDE.local.md", "docs/dashboard"])
         [line] = [line for line in plan["adapted"] if line.startswith("workflows: none laid")]
         self.assertIn("repo.ci is local", line)
         self.assertIn("sd/local-gate", line)
@@ -231,7 +246,7 @@ class DryRun(Fleet):
     def test_employer_repository_gets_no_unprotected_declaration(self) -> None:
         root, remote = self.repo("work", owner="example-org")
         [plan] = self.plan([(root, remote)])
-        self.assertNotIn(sd_fleet.STATUS_PATH, [change["path"] for change in plan["changes"]])
+        self.assertEqual(self.declare_lines(plan), [])
         self.assertTrue(any("protection stands" in line for line in plan["adapted"]))
 
     def test_co_owned_repository_gets_files_but_no_declaration(self) -> None:
@@ -239,7 +254,7 @@ class DryRun(Fleet):
         [plan] = self.plan([(root, remote_url)], ask=remote(others=("colleague",)))
         paths = [change["path"] for change in plan["changes"]]
         self.assertIn(sd_fleet.ROUTE_PATH, paths)
-        self.assertNotIn(sd_fleet.STATUS_PATH, paths)
+        self.assertEqual(self.declare_lines(plan), [])
 
     def test_fork_or_unadministered_remote_gets_no_tracked_file(self) -> None:
         for name, ask in (("fork", remote(fork=True)), ("visitor", remote(admin=False))):
@@ -248,31 +263,47 @@ class DryRun(Fleet):
             self.assertEqual({change["where"] for change in plan["changes"]}, {"local"}, name)
             self.assertTrue(plan["refused"][0].startswith("tracked files:"), name)
 
-    def test_status_with_any_declared_gap_is_left_as_written(self) -> None:
-        gaps = [{"id": gap, "state": {}, "because": f"ruleset gap {gap} (#566)", "since": "2026-09-24", "until": "u"}
-                for gap in ("reviews", "bypass", "strict")]
-        current = json.dumps({"$schema": "./s.json", "accepted_gaps": gaps}, indent=4) + "\n"
-        root, remote = self.repo("system", {".github/sd-status.json": current})
+    def test_declared_gaps_are_kept_in_the_command_that_adds_the_unprotected_one(self) -> None:
+        gaps = [{"id": gap, "state": state, "because": f"ruleset gap {gap} (#566)", "since": "2026-09-24", "until": "u"}
+                for gap, state in (("reviews", {"required_approving_review_count": 0}),
+                                   ("bypass", {"bypass": ["main (#42): DeployKey (always)"]}), ("strict", {"strict": False}))]
+        root, remote = self.repo("system")
+        self.declare(root, {"accepted_gaps": gaps})
         [plan] = self.plan([(root, remote)])
-        self.assertNotIn(sd_fleet.STATUS_PATH, [change["path"] for change in plan["changes"]])
-        self.assertTrue(any("kept as written" in line for line in plan["adapted"]))
-        self.assertEqual(sd_fleet.status_text(current), current)
+        [line] = self.declare_lines(plan)
+        words = shlex.split(line.split("run: ", 1)[1])
+        self.assertEqual(words[:5], ["sd-db", "repo", "declare", str(root), "status"])
+        self.assertEqual(json.loads(words[5]), {"accepted_gaps": [*gaps, sd_fleet.UNPROTECTED_ENTRY]})
+        self.assertEqual(sd_lib.parse_acknowledgements(json.loads(words[5]))[1], [])
 
-    def test_status_without_gaps_gets_the_plain_entry_added(self) -> None:
-        current = json.dumps({"$schema": "./s.json"}) + "\n"
-        written = json.loads(sd_fleet.status_text(current))
-        self.assertEqual(written, {"$schema": "./s.json", "accepted_gaps": [sd_fleet.UNPROTECTED_ENTRY]})
-        self.assertEqual(sd_fleet.status_text(sd_fleet.status_text(current)), sd_fleet.status_text(current))
+    def test_a_row_that_already_accepts_the_gap_is_kept(self) -> None:
+        root, remote = self.repo("declared")
+        self.declare(root, {"accepted_gaps": [sd_fleet.UNPROTECTED_ENTRY]})
+        [plan] = self.plan([(root, remote)])
+        self.assertEqual(self.declare_lines(plan), [])
+        self.assertTrue(any(line.startswith(f"{sd_fleet.STATUS_DECLARATION}: kept as declared")
+                            for line in plan["adapted"]), plan["adapted"])
+
+    def test_a_status_file_in_the_tree_is_not_read(self) -> None:
+        """sd:5109: `.github/sd-status.json` is retired; only the row declares a gap."""
+        current = json.dumps({"accepted_gaps": [sd_fleet.UNPROTECTED_ENTRY]}) + "\n"
+        root, remote = self.repo("old-file", {".github/sd-status.json": current})
+        [plan] = self.plan([(root, remote)])
+        self.assertEqual(len(self.declare_lines(plan)), 1)
+        self.assertNotIn(".github/sd-status.json", [change["path"] for change in plan["changes"]])
 
     def test_repository_that_forbids_ci_gets_no_workflow(self) -> None:
-        declared = json.dumps({"accepted_gaps": [{
+        declared = {"accepted_gaps": [{
             "id": "unprotected", "state": {"branch_protection": False},
             "because": "One account pushes, and CLAUDE.md forbids adding CI to it.",
-            "since": "2026-09-21", "until": "u"}]}, indent=2) + "\n"
-        shapes = {"hoa": {".github/sd-status.json": declared},
-                  "rule-only": {"CLAUDE.md": "# rules\n\n- No CI, no Copilot on this repo. Don't add workflows.\n"}}
-        for name, files in shapes.items():
+            "since": "2026-09-21", "until": "u"}]}
+        shapes = {"hoa": ({}, declared),
+                  "rule-only": ({"CLAUDE.md": "# rules\n\n- No CI, no Copilot on this repo. Don't add workflows.\n"},
+                                None)}
+        for name, (files, status) in shapes.items():
             root, remote = self.repo(name, files)
+            if status is not None:
+                self.declare(root, status)
             [plan] = self.plan([(root, remote)])
             paths = [change["path"] for change in plan["changes"]]
             for workflow in (sd_fleet.ROUTE_PATH, sd_fleet.DEPENDABOT_PATH, sd_fleet.CHECK_PATH):
@@ -280,11 +311,22 @@ class DryRun(Fleet):
             self.assertTrue(any(line.startswith("workflows: none laid") for line in plan["adapted"]), name)
 
     def test_malformed_status_is_refused(self) -> None:
-        root, remote = self.repo("broken", {".github/sd-status.json": "{nope"})
+        root, remote = self.repo("broken")
+        self.declare(root, {"accepted_gaps": "nope"})
         code, _ = self.run_stamp([(root, remote)])
         [plan] = self.plan([(root, remote)])
         self.assertEqual(code, sd_fleet.EXIT_REFUSED)
-        self.assertTrue(plan["refused"][0].startswith(sd_fleet.STATUS_PATH))
+        self.assertTrue(plan["refused"][0].startswith(f"tracked files: the {sd_fleet.STATUS_DECLARATION} does not read"))
+        self.assertNotIn(sd_fleet.ROUTE_PATH, [change["path"] for change in plan["changes"]])
+
+    def test_a_database_that_does_not_answer_refuses_the_tracked_half(self) -> None:
+        """An unread declaration neither forbids CI nor permits proposing it (sd:5109)."""
+        root, remote = self.repo("dark-row")
+        unread = sd_lib.DatabaseUnreadable("the workflow database did not open")
+        with mock.patch.object(sd_lib, "repo_declaration", side_effect=unread):
+            [plan] = self.plan([(root, remote)])
+        self.assertTrue(plan["refused"][0].startswith(f"tracked files: the {sd_fleet.STATUS_DECLARATION} does not read"))
+        self.assertEqual({change["where"] for change in plan["changes"]}, {"local"})
 
     def test_settled_modes_get_no_tracked_file(self) -> None:
         for mode in ("guest", "minimal"):
@@ -578,32 +620,32 @@ class LiveProtection(Fleet):
 
     def test_unprotected_remote_gets_the_declaration(self) -> None:
         plan, paths = self.declared(remote())
-        self.assertIn(sd_fleet.STATUS_PATH, paths)
+        self.assertEqual(len(self.declare_lines(plan)), 1)
         self.assertEqual(plan["protection"], "unprotected")
 
     def test_a_ruleset_that_gates_no_merge_is_still_unprotected(self) -> None:
         deletion = {"type": "deletion", "ruleset_id": 7}
         plan, paths = self.declared(remote(rules=([deletion], ""), rulesets=GATING_RULESET))
-        self.assertIn(sd_fleet.STATUS_PATH, paths)
+        self.assertEqual(len(self.declare_lines(plan)), 1)
         self.assertEqual(plan["protection"], "unprotected")
 
     def test_classic_protection_gets_no_declaration(self) -> None:
         plan, paths = self.declared(remote(classic=({"enforce_admins": {"enabled": True}}, "")))
-        self.assertNotIn(sd_fleet.STATUS_PATH, paths)
+        self.assertEqual(self.declare_lines(plan), [])
         self.assertEqual(plan["protection"], "protected")
-        self.assertTrue(any(line.startswith(f"{sd_fleet.STATUS_PATH}: not declared; GitHub reports main protected")
+        self.assertTrue(any(line.startswith(f"{sd_fleet.STATUS_DECLARATION}: not declared; GitHub reports main protected")
                             for line in plan["adapted"]), plan["adapted"])
 
     def test_ruleset_protection_gets_no_declaration(self) -> None:
         plan, paths = self.declared(remote(rules=([PULL_REQUEST_RULE], ""), rulesets=GATING_RULESET))
-        self.assertNotIn(sd_fleet.STATUS_PATH, paths)
+        self.assertEqual(self.declare_lines(plan), [])
         self.assertEqual(plan["protection"], "protected")
         self.assertTrue(any("ruleset main (#7)" in line for line in plan["adapted"]), plan["adapted"])
 
     def test_classic_and_ruleset_together_get_no_declaration(self) -> None:
         plan, paths = self.declared(remote(classic=({"enforce_admins": {"enabled": True}}, ""),
                                            rules=([PULL_REQUEST_RULE], ""), rulesets=GATING_RULESET))
-        self.assertNotIn(sd_fleet.STATUS_PATH, paths)
+        self.assertEqual(self.declare_lines(plan), [])
         self.assertEqual(plan["protection"], "protected")
 
     def test_unknown_state_gets_no_declaration(self) -> None:
@@ -621,9 +663,9 @@ class LiveProtection(Fleet):
         for name, ask in cases.items():
             with self.subTest(name):
                 plan, paths = self.declared(ask)
-                self.assertNotIn(sd_fleet.STATUS_PATH, paths)
+                self.assertEqual(self.declare_lines(plan), [])
                 self.assertEqual(plan["protection"], "unknown")
-                self.assertTrue(any(line.startswith(f"{sd_fleet.STATUS_PATH}: not declared; protection is unknown")
+                self.assertTrue(any(line.startswith(f"{sd_fleet.STATUS_DECLARATION}: not declared; protection is unknown")
                                     for line in plan["adapted"]), plan["adapted"])
 
     def test_the_summary_names_a_repository_whose_protection_is_unknown(self) -> None:
@@ -689,8 +731,8 @@ class Owners(Fleet):
         mine, mine_url = self.repo("mine", owner="example-org")
         theirs, theirs_url = self.repo("theirs", owner="platypeeps")
         first, second = self.plan([(mine, mine_url), (theirs, theirs_url)])
-        self.assertIn(sd_fleet.STATUS_PATH, [change["path"] for change in first["changes"]])
-        self.assertNotIn(sd_fleet.STATUS_PATH, [change["path"] for change in second["changes"]])
+        self.assertEqual(len(self.declare_lines(first)), 1)
+        self.assertEqual(self.declare_lines(second), [])
         self.assertTrue(any("protection stands" in line for line in second["adapted"]))
 
     def test_no_setting_reads_the_default(self) -> None:

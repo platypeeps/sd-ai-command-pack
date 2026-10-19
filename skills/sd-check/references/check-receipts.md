@@ -63,7 +63,7 @@ This declaration is an operator assertion, not enforced hermeticity or OS read c
 Never enable reuse when the command reads undeclared ignored files, environment, or external dependencies, or requires network access.
 Unknown dependency completeness disables reuse.
 This pack declares no reuse here: nobody audited its full gate's dependencies against this contract.
-Its merge gate reuses gate receipts instead (`sd gate check`, `.github/sd-gate-reuse.json`, R15-D1).
+Its merge gate reuses gate receipts instead (`sd gate check`, the repo row's `gate_reuse` declaration, R15-D1).
 
 ## Record and reuse
 

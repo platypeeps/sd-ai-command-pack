@@ -228,7 +228,9 @@ class WorkflowContentTests(SetupFixture):
         # Without this the split silently returns the whole file and the two
         # assertions below pass against the body instead of the header.
         self.assertTrue(delimiter, "the workflow no longer carries the name this splits on")
-        self.assertIn(".github/sd-review.json", header)
+        # sd:5109: the policy is the repo row's review declaration; a runner has no database.
+        self.assertIn("review declaration", header)
+        self.assertNotIn(".github/sd-review.json", header)
         self.assertIn("built-in default", header)
 
     def test_the_lane_cannot_pile_up_or_hang(self) -> None:
