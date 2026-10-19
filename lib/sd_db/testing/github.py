@@ -326,13 +326,11 @@ def issue(argv):
     title, body, index = "", "", 1
     while index < len(argv):
         token = argv[index]
-        if token in ("-t", "--title"):
+        if token == "--title":
             title = argv[index + 1]
-        elif token in ("-b", "--body"):
-            body = argv[index + 1]
-        elif token in ("-F", "--body-file"):
-            body = sys.stdin.read() if argv[index + 1] == "-" else open(argv[index + 1], encoding="utf-8").read()
-        elif token not in ("-R", "--repo"):
+        elif token == "--body-file" and argv[index + 1] == "-":
+            body = sys.stdin.read()
+        elif token != "--repo":
             fail(2, {"message": f"gh issue create: unsupported flag {token}"})
         index += 2
     status, payload = call("POST", f"/repos/{SLUG}/issues", {"title": title, "body": body})

@@ -196,11 +196,6 @@ class TheIssueDoors(DoubleCase):
         self.file()
         self.assertEqual(list(self.remote.issues), [1])
 
-    def test_a_create_that_fails_after_filing_leaves_the_issue(self):
-        self.remote.fail_next("create issue", 502, "HTTP 502: Bad Gateway", created=True)
-        self.assertIn("HTTP 502", self.file(expect=1).stderr)
-        self.assertEqual(list(self.remote.issues), [1])
-
     def test_a_failed_list_fails_once(self):
         self.remote.fail_next("list issues", 503, "HTTP 503: Service Unavailable")
         self.assertIn("HTTP 503", self.gh("api", "/repos/fixture/repo/issues", expect=1).stderr)

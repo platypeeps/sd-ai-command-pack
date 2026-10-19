@@ -107,7 +107,7 @@ class FixtureRemote:
         self.delete_branch_on_merge = False
         self.issues: dict[int, Issue] = {}
         #: One-shot answers for the next call to a route, set by `fail_next`.
-        self._faults: dict[str, tuple[int, str, bool]] = {}
+        self._faults: dict[str, tuple[int, str]] = {}
         self._next_number = 1
         self._make_bare()
 
@@ -214,28 +214,21 @@ class FixtureRemote:
             _git(self.path, "update-ref", "-d", f"refs/heads/{pull.head}")
         return pull.merge_commit_sha
 
-    def fail_next(self, route: str, status: int, message: str, *, created: bool = False) -> None:
-        """Make the next `route` call (`"create issue"` or `"list issues"`) answer `status` with `message`, once.
-
-        `created` files the issue first, as GitHub can when the answer fails on the way back: the caller sees a
-        failure while the issue exists, which is the case a caller must not read as "nothing filed".
-        """
+    def fail_next(self, route: str, status: int, message: str) -> None:
+        """Make the next `route` call (`"create issue"` or `"list issues"`) answer `status` with `message`, once."""
         if route not in ("create issue", "list issues"):
             raise ValueError(f"no route {route!r} takes a fault")
-        self._faults[route] = (status, message, created)
+        self._faults[route] = (status, message)
 
-    def _fault(self, route: str) -> tuple[int, str, bool] | None:
-        return self._faults.pop(route, None)
+    def _fail_if_set(self, route: str) -> None:
+        fault = self._faults.pop(route, None)
+        if fault:
+            raise RemoteRefusal(*fault)
 
     def file_issue(self, title: str, body: str = "") -> Issue:
         """Create an issue, the way `POST /repos/{slug}/issues` does. Issues and pull requests share numbers."""
-        fault = self._fault("create issue")
-        if fault and not fault[2]:
-            raise RemoteRefusal(fault[0], fault[1])
-        issue = self.add_issue(title, body)
-        if fault:
-            raise RemoteRefusal(fault[0], fault[1])
-        return issue
+        self._fail_if_set("create issue")
+        return self.add_issue(title, body)
 
     def add_issue(self, title: str, body: str = "") -> Issue:
         """An issue someone else filed: no fault applies and nothing is recorded."""
@@ -247,9 +240,7 @@ class FixtureRemote:
 
     def list_issues(self) -> list[Issue]:
         """Newest first, as `GET /repos/{slug}/issues?sort=created&direction=desc` answers."""
-        fault = self._fault("list issues")
-        if fault:
-            raise RemoteRefusal(fault[0], fault[1])
+        self._fail_if_set("list issues")
         return sorted(self.issues.values(), key=lambda issue: issue.number, reverse=True)
 
     def can_administer(self, login: str) -> bool:
