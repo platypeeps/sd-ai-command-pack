@@ -191,10 +191,21 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 # before anything moves. `bin/` goes last, so a run stopped mid-wipe leaves
 # the old interpreter there for the next run to find and finish. Three
 # refusals come before any mutation: a PYTHON inside the environment, which
-# the wipe would delete before `venv` ran it, asked of the logical and the
-# physical path; and a non-empty directory with neither `pyvenv.cfg` nor the
+# the wipe would delete before `venv` ran it, or inside the target of a link
+# the detach would cut it off from, both compared as physical paths; and a
+# non-empty directory with neither `pyvenv.cfg` nor the
 # marker, such as `/usr/local`, which is not ours to empty. The marker counts
 # because a stopped wipe may already have taken `pyvenv.cfg`.
+#
+# Every guard and the wipe act on one resolved path, never on VENV as typed:
+# `[ -L env/. ]` is false while `env` is a link, so a lexical check let the
+# wipe reach another checkout's environment (sd:5254, second round). The leaf
+# must be a name, not `.` or `..`; the directory holding it is resolved once
+# with `cd -P`, so a symlinked parent, `..`, `//` and a relative or outside
+# path all land on the directory the kernel would open, and `[ -L ]` then sees
+# the leaf itself. A parent that does not exist holds nothing to delete. The
+# recipe lines after this one open `$(SETUP_VENV)` through the same kernel
+# walk, and by then the leaf is a real directory, so they reach the same one.
 #
 # No `sd_db` goes into the environment: `bin/` reads this checkout's `lib/`
 # (sd:3280). The uninstall takes out a copy an older `make setup` or a
@@ -208,39 +219,43 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 # `SERVE=no` skips the serving step. README "A dedicated serving tree" has
 # the rest.
 setup:
-	@venv="$(SETUP_VENV)"; \
+	@venv="$(SETUP_VENV)"; name="$$venv"; \
 	  [ -n "$$venv" ] || { printf '%s\n' "error: VENV is empty; there is no path to provision" >&2; exit 1; }; \
+	  case "$${venv##*/}" in .|..) printf '%s\n' "error: VENV=$$name ends in '$${venv##*/}'; name the environment's own directory; nothing was changed" >&2; exit 1;; esac; \
+	  parent=$$(dirname "$$venv"); \
+	  if [ -e "$$parent" ] || [ -L "$$parent" ]; then \
+	    parent=$$(cd -P "$$parent" && pwd -P) \
+	      || { printf '%s\n' "error: cannot resolve the directory that holds $$name; nothing was changed" >&2; exit 1; }; \
+	    venv="$${parent%/}/$${venv##*/}"; \
+	  fi; \
 	  probe='import sys; print("%d.%d" % sys.version_info[:2])'; \
 	  want=$$("$(PYTHON)" -c "$$probe") && [ -n "$$want" ] \
 	    || { printf '%s\n' "error: $(PYTHON) did not report its version; nothing was changed" >&2; exit 1; }; \
 	  python="$(PYTHON)"; case "$$python" in */*) ;; *) python=$$(command -v "$$python") \
 	    || { printf '%s\n' "error: $(PYTHON) is not on PATH; nothing was changed" >&2; exit 1; };; esac; \
 	  if [ -d "$$venv" ]; then \
-	    for how in -L -P; do \
-	      [ "$$how" = -P ] && [ -L "$$venv" ] && continue; \
-	      dir=$$(cd $$how "$$(dirname "$$python")" && pwd $$how) && root=$$(cd $$how "$$venv" && pwd $$how) \
-	        || { printf '%s\n' "error: cannot tell whether $(PYTHON) lives in $$venv; nothing was changed" >&2; exit 1; }; \
-	      case "$$dir/" in "$$root"/*) printf '%s\n' "error: $(PYTHON) lives in $$venv, which setup may rebuild; pass a PYTHON from outside it" >&2; exit 1;; esac; \
-	    done; \
+	    dir=$$(cd -P "$$(dirname "$$python")" && pwd -P) && root=$$(cd -P "$$venv" && pwd -P) \
+	      || { printf '%s\n' "error: cannot tell whether $(PYTHON) lives in $$name; nothing was changed" >&2; exit 1; }; \
+	    case "$$dir/" in "$$root"/*) printf '%s\n' "error: $(PYTHON) lives in $$name, which setup may rebuild or detach; pass a PYTHON from outside it" >&2; exit 1;; esac; \
 	  fi; \
 	  have=; if [ ! -L "$$venv" ] && { [ -e "$$venv/bin/python" ] || [ -L "$$venv/bin/python" ]; }; then \
 	    have=$$("$$venv/bin/python" -c "$$probe" 2>/dev/null) || have=; [ -n "$$have" ] || have="unknown (it does not run)"; \
 	  fi; \
 	  if [ ! -L "$$venv" ] && [ -d "$$venv" ] && [ ! -f "$$venv/pyvenv.cfg" ] && [ ! -f "$$venv/sd-provisioning" ]; then \
-	    entries=$$(ls -A "$$venv") || { printf '%s\n' "error: cannot list $$venv; nothing was changed" >&2; exit 1; }; \
-	    [ -z "$$entries" ] || { printf '%s\n' "error: $$venv is not a virtualenv (no pyvenv.cfg) and is not empty; nothing was changed. Pick another VENV" >&2; exit 1; }; \
+	    entries=$$(ls -A "$$venv") || { printf '%s\n' "error: cannot list $$name; nothing was changed" >&2; exit 1; }; \
+	    [ -z "$$entries" ] || { printf '%s\n' "error: $$name is not a virtualenv (no pyvenv.cfg) and is not empty; nothing was changed. Pick another VENV" >&2; exit 1; }; \
 	  fi; \
 	  if [ -L "$$venv" ]; then \
 	    target=$$(readlink "$$venv") || exit 1; \
-	    printf '%s\n' "detaching $$venv, a link to $$target; the environment it points at is left alone" >&2 || exit 1; \
+	    printf '%s\n' "detaching $$name, a link to $$target; the environment it points at is left alone" >&2 || exit 1; \
 	    rm "$$venv" || exit 1; \
-	    [ ! -L "$$venv" ] || { printf '%s\n' "error: $$venv is still a link; refusing to provision through it" >&2; exit 1; }; \
+	    [ ! -L "$$venv" ] || { printf '%s\n' "error: $$name is still a link; refusing to provision through it" >&2; exit 1; }; \
 	  fi; \
 	  mkdir -p "$$venv" || exit 1; \
 	  printf '%s\n' "make setup is building this environment; nothing may be taken out of it until this file is gone" > "$$venv/sd-provisioning" || exit 1; \
 	  rm -rf "$$venv/sd-requirements" "$$venv/.sd-requirements.new"; \
 	  if [ -n "$$have" ] && [ "$$have" != "$$want" ]; then \
-	    printf '%s\n' "recreating $$venv: its bin/python is Python $$have and $(PYTHON) is $$want" >&2 || exit 1; \
+	    printf '%s\n' "recreating $$name: its bin/python is Python $$have and $(PYTHON) is $$want" >&2 || exit 1; \
 	    find "$$venv" -mindepth 1 -maxdepth 1 ! -name sd-provisioning ! -name bin -exec rm -rf {} + || exit 1; \
 	    rm -rf "$$venv/bin" || exit 1; \
 	  fi

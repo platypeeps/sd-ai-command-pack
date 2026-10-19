@@ -1816,22 +1816,106 @@ exit 0
         self.assertFalse((venv / "sd-provisioning").exists())
         self.assertEqual(self.dry_run("docs-lint").returncode, 0)
 
-    def test_a_trailing_slash_still_names_the_link(self) -> None:
-        """`env/` is no link to `[ -L ]`, so the wipe used to run through it into the target."""
+    def other_venv(self) -> pathlib.Path:
+        """Another checkout's older environment, holding data that must survive."""
 
         other = self.tmp / "other"
         self.assertEqual(self.setup(venv=str(other), python=self.interpreter("3.14")).returncode, 0)
-        (other / "lib").mkdir()
+        (other / "lib").mkdir(exist_ok=True)
         (other / "lib" / "data").write_text("theirs\n", encoding="utf-8")
-        (self.linked / "env").symlink_to(other)
+        return other
 
-        done = self.setup(venv="env/")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("detaching env", done.stderr)
+    def assert_untouched(self, other: pathlib.Path) -> None:
         self.assertTrue((other / "lib" / "data").is_file(), "the wipe reached through the link")
         self.assertEqual(self.version_in(other), "3.14")
-        self.assertFalse((self.linked / "env").is_symlink())
-        self.assertEqual(self.version_in(self.linked / "env"), "3.15")
+        self.assertTrue((other / "sd-requirements").is_dir(), "the other environment lost its record")
+        self.assertFalse((other / "sd-provisioning").exists(), "a marker was written into the target")
+
+    def test_a_trailing_slash_still_names_the_link(self) -> None:
+        """`env/` is no link to `[ -L ]`, so the wipe used to run through it into the target."""
+
+        other = self.other_venv()
+        for typed in ("env/", "env//"):
+            with self.subTest(venv=typed):
+                shutil.rmtree(self.linked / "env", ignore_errors=True)
+                (self.linked / "env").symlink_to(other)
+                done = self.setup(venv=typed)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertIn("detaching env", done.stderr)
+                self.assert_untouched(other)
+                self.assertFalse((self.linked / "env").is_symlink())
+                self.assertEqual(self.version_in(self.linked / "env"), "3.15")
+
+    def test_a_dot_leaf_is_refused(self) -> None:
+        """sd:5254 round 2: `env/.` is no link to `[ -L ]` either, and `env/..` names the target's parent.
+
+        Stripping slashes left both; the leaf must be a name, so neither is
+        read as a path at all.
+        """
+
+        other = self.other_venv()
+        (self.linked / "env").symlink_to(other)
+        for typed in ("env/.", "env/./", "env/..", "."):
+            with self.subTest(venv=typed):
+                done = self.setup(venv=typed)
+                self.assertNotEqual(done.returncode, 0, done.stdout)
+                self.assertIn("name the environment's own directory", done.stderr)
+                self.assert_untouched(other)
+                self.assertFalse((self.tmp / "sd-provisioning").exists(), "a marker was written into the parent")
+                self.assertTrue((self.linked / "env").is_symlink())
+
+    def test_a_symlinked_parent_still_sees_the_leaf_link(self) -> None:
+        """`lnk/env`: the parent resolves, and the leaf is still asked whether it is a link."""
+
+        other = self.other_venv()
+        holder = self.tmp / "holder"
+        holder.mkdir()
+        (holder / "env").symlink_to(other)
+        (self.linked / "lnk").symlink_to(holder)
+        done = self.setup(venv="lnk/env")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("detaching lnk/env", done.stderr)
+        self.assert_untouched(other)
+        self.assertFalse((holder / "env").is_symlink())
+        self.assertEqual(self.version_in(holder / "env"), "3.15")
+
+    def test_an_interior_dotdot_resolves_where_the_kernel_does(self) -> None:
+        """`sub/../.venv` with `sub` a link: the guards and the later lines reach one directory."""
+
+        deep = self.tmp / "deep"
+        (deep / "dir").mkdir(parents=True)
+        (self.linked / "sub").symlink_to(deep / "dir")
+        self.assertEqual(self.setup(venv="sub/../.venv", python=self.interpreter("3.14")).returncode, 0)
+        self.assertEqual(self.version_in(deep / ".venv"), "3.14")
+        done = self.setup(venv="sub/../.venv")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("recreating sub/../.venv", done.stderr)
+        self.assertEqual(self.version_in(deep / ".venv"), "3.15")
+        self.assertTrue((deep / ".venv" / "sd-requirements").is_dir())
+        self.assertFalse((self.linked / ".venv").exists(), "the lexical path was built instead")
+
+    def test_a_python_behind_the_link_is_refused_before_the_detach(self) -> None:
+        """The detach would cut `.venv/bin/...` off from the PYTHON it names; refuse first."""
+
+        other = self.other_venv()
+        shutil.copy(self.stub, other / "bin" / "sd-test-python3.15")
+        (self.linked / ".venv").symlink_to(other)
+        done = self.setup(python=pathlib.Path(".venv/bin/sd-test-python3.15"))
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn("from outside it", done.stderr)
+        self.assertTrue((self.linked / ".venv").is_symlink(), "the link was detached before the refusal")
+        self.assert_untouched(other)
+
+    def test_an_unresolvable_parent_is_refused(self) -> None:
+        """A parent that exists and will not resolve is unknown, never a pass."""
+
+        shut = self.linked / "shut"
+        shut.mkdir()
+        shut.chmod(0o600)
+        self.addCleanup(shut.chmod, 0o755)
+        done = self.setup(venv="shut/.venv")
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn("cannot resolve the directory that holds shut/.venv", done.stderr)
 
     def test_a_directory_that_is_not_a_virtualenv_is_refused(self) -> None:
         """A prefix such as /usr/local has a bin/python too; with no pyvenv.cfg setup touches nothing."""
