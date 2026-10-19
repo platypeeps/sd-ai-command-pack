@@ -1026,6 +1026,27 @@ def recorded(path: Path, wanted: dict[str, Any], what: str) -> str:
     return str(pending.get(what, "")).strip()
 
 
+def delivered_url(receipt: Path, wanted: dict[str, Any], cfg: dict[str, Any]) -> str:
+    """The URL drain step 6 left on `receipt`, for a routine brief's entry
+    `cfg` (one carrying its `content`), or "".
+
+    A brief has no step 5 (sd:5102): no designation records the copy, so the
+    receipt is what lets the next generation update it. Like `recorded`, it
+    is reused only in the container it went to -- the receipt's
+    `delivered_to` equal to `wanted` -- and only for the same item. A
+    receipt that names no container, from before it was recorded or for an
+    older generation, reuses nothing, and the drain adopts by title in the
+    named container (contract step 3).
+    """
+    if not isinstance(cfg.get("content"), str):
+        return ""
+    record = load_record(receipt)
+    if record.get("delivered_to") != wanted or record.get("item") != cfg.get("item"):
+        return ""
+    url = record.get("url")
+    return url.strip() if isinstance(url, str) else ""
+
+
 def receipts() -> Path:
     """Where the last-queued fingerprint of every request is kept.
 
@@ -1325,6 +1346,13 @@ def acknowledge_request(name: str, fingerprint: str, url: str = "") -> tuple[int
     record.update(delivered=fingerprint)
     if url:
         record.update(url=url)
+    # Where this URL went (sd:5122): the container `enqueue` recorded for this
+    # generation, so `delivered_url` reuses it there only. A newer generation
+    # queued since names its own container, not this URL's: none is recorded.
+    if url and record.get("queued") == fingerprint and isinstance(record.get("identity"), dict):
+        record.update(delivered_to=record["identity"])
+    else:
+        record.pop("delivered_to", None)
     # The item of the generation delivered, or none: a newer request's item
     # is not where this URL went.
     if item is not None:
@@ -1647,7 +1675,8 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
                 continue
             # The designation is the answer where it gives one; the queue records
             # what a drain did, and never overrides what the document says.
-            carried = "" if request[what] else recorded(path, identity, what)
+            carried = "" if request[what] else (recorded(path, identity, what)
+                                                or delivered_url(receipts() / name, identity, cfg))
             request[what] = request[what] or carried
             reverted = not force and reverts_to_delivered(path, name, digest)
             if dry:
@@ -1659,7 +1688,7 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
             path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
             reports += record_queued(name, dict(
                 queued=digest, revision=rev, repo=str(home), document=out,
-                destination=target["destination"]))
+                destination=target["destination"], identity=identity if isinstance(cfg.get("content"), str) else None))
             reports.append(queued_report(out, target["target"], what, carried, reverted))
     return reports
 
@@ -1691,6 +1720,9 @@ def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, An
     before its fingerprint and any carried id."""
     out = str(cfg.get("out", "")).strip()
     src = str(cfg.get("src", "")).strip()
+    # A routine brief (sd:5102, `brief_docs`) is a row, not a file: it carries
+    # its text, and its source is the item.
+    brief = isinstance(cfg.get("content"), str)
     request = {
         # The repository, not the checkout: this is what `sd-status`
         # resolves a row against and what a carried id is compared on.
@@ -1700,16 +1732,16 @@ def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, An
         "revision": rev,
         "document": out,
         "title": cfg.get("title", out),
-        "source": str(repo / src) if src else "",
+        "source": "sd:%s" % cfg.get("item") if brief else str(repo / src) if src else "",
         # The pointer line's link, read from `origin` and never
         # composed by the drain; None where origin names no GitHub repo.
         "source_url": source_url(repo, src),
-        "rendered": str(repo / DASHBOARD_DIR / (out + ".html")),
+        "rendered": "" if brief else str(repo / DASHBOARD_DIR / (out + ".html")),
         "markdown": str(vault / (out + ".md")) if vault else "",
         # What the drain mirrors, read once here. The three paths
         # above say where it came from and where the copies sit;
         # none of them is what gets published.
-        "content": source_text(repo / src) if src else "",
+        "content": cfg["content"] if brief else source_text(repo / src) if src else "",
     }
     request.update(target)
     request.update(designated_item(cfg)[0])
@@ -1732,6 +1764,80 @@ def designated_item(cfg: dict[str, Any]) -> tuple[dict[str, int], list[str]]:
     return {"item": item}, []
 
 
+def brief_docs(
+    connection: Any, items: set[int] | None = None
+) -> tuple[dict[str, list[dict[str, Any]]], list[str]]:
+    """Each repository's DOCS entries for the routine briefs their items
+    designate, and what was wrong (sd:5102).
+
+    A brief is a row (`sd_db.routine_briefs`), so its item's `fields.publish`
+    holds the designation, with the `notion` and `drive` keys a
+    research.conf.py entry takes. The entry carries the row's text as
+    `content` and its item; `mirror_request` names the item as the source.
+
+    Nothing here pins a copy: `enqueue` carries the URL drain step 6 left
+    on the receipt, and only into the container it went to (`delivered_url`).
+    Fields that are not an object, or a `publish` that is not one, are
+    reported and not queued.
+    """
+    docs: dict[str, list[dict[str, Any]]] = {}
+    problems: list[str] = []
+    rows = connection.execute(
+        "SELECT id, repo, title, body, fields FROM item "
+        "WHERE source = 'brief' AND kind = 'report' ORDER BY id")
+    for row in rows:
+        if items is not None and row["id"] not in items:
+            continue
+        try:
+            fields = json.loads(row["fields"] or "{}")
+        except ValueError:
+            fields = None
+        designation = fields.get("publish") if isinstance(fields, dict) else None
+        if designation is None and isinstance(fields, dict):
+            continue
+        if not isinstance(designation, dict) or not row["repo"]:
+            problems.append("mirror: sd:%s: its fields.publish is not an object on "
+                            "a brief with a repository; not queued" % row["id"])
+            continue
+        try:
+            text = json.loads(row["body"] or "{}").get("text")
+        except (ValueError, AttributeError):
+            text = None
+        if not isinstance(text, str):
+            problems.append("mirror: sd:%s: the brief stores no text; not queued"
+                            % row["id"])
+            continue
+        entry: dict[str, Any] = {"out": row["title"], "title": row["title"],
+                                 "item": row["id"], "content": text}
+        entry.update({destination: dict(designation[destination]) for destination in ("notion", "drive")
+                      if isinstance(designation.get(destination), dict)})
+        docs.setdefault(row["repo"], []).append(entry)
+    return docs, problems
+
+
+def enqueue_briefs(connection: Any, items: set[int] | None = None) -> list[str]:
+    """Queue every designated routine brief (`brief_docs`) through `enqueue`,
+    with its repository's channels setting.
+
+    The same request, fingerprint and receipt as a document's, so an
+    unchanged brief is not queued again. A setting that cannot be read holds
+    that repository's briefs, as it holds a render's queue.
+    """
+    import_sd_db()  # the caller holds a connection, so this is the one it has
+    from sd_db import channels, paths, repos  # noqa: PLC0415 - the checkout's `lib/`
+
+    docs, reports = brief_docs(connection, items)
+    for repo, entries in docs.items():
+        try:
+            setting = channels.outbound(repos.repo_channels(connection, repo))
+        except Exception as problem:  # unknown is not "no setting": none queued
+            reports.append("%s: %s: %s; no brief of it queued"
+                           % (HELD, repo, problem or type(problem).__name__))
+            continue
+        reports += enqueue(paths.expand(repo), entries, setting)
+    return reports
+
+
 def reverts_to_delivered(path: Path, name: str, digest: str) -> bool:
     """Whether writing `digest` over the request at `path` returns it to the
     generation a drain last delivered.
@@ -1748,7 +1854,7 @@ def reverts_to_delivered(path: Path, name: str, digest: str) -> bool:
     return path.exists() and load_record(receipts() / name).get("delivered") == digest
 
 
-def record_queued(name: str, fields: dict[str, str]) -> list[str]:
+def record_queued(name: str, fields: dict[str, Any]) -> list[str]:
     """Record on the receipt what was just queued, or say why it could not.
 
     The request is written by then; only the memory of it is not, and the cost
@@ -1759,6 +1865,10 @@ def record_queued(name: str, fields: dict[str, str]) -> list[str]:
         record = load_record(receipts() / name)
         record.update(fields)
         record.pop("fingerprint", None)
+        # Only a routine brief records its container (sd:5122, `delivered_url`):
+        # a document's receipt keeps the shape it had.
+        if record.get("identity") is None:
+            record.pop("identity", None)
         (receipts() / name).write_text(
             json.dumps(record, indent=2) + "\n", encoding="utf-8")
     except OSError as problem:

@@ -187,6 +187,21 @@ the render, and the next render records it. The item is part of the
 fingerprint: adding or changing it queues the document once, so the next
 drain records the URL on the new item.
 
+### A routine brief is designated on its item
+
+A routine brief (`sd reports brief`) is a database row with no `research.conf.py`
+entry, so its item holds the designation: `fields.publish`, with the same
+`notion` and `drive` keys and values, as `{"notion": {}, "drive": {"folder":
+"<name>"}}` (sd:5102). Each brief render queues every designated brief into the
+same queue, with the same request, fingerprint and receipt. The request carries
+the row's text as `content`, the brief's item as `item`, and `sd:<item>` as its
+`source`, which the pointer line names. Step 5 writes nothing for a brief: step
+6 records the URL on its item and, with the container it went to, on the
+receipt. The next render carries that URL as `page=` or `file=` only while the
+request names the same container, as step 4's carried id; another scope, space
+or folder publishes afresh there, and a page or file the designation names
+wins.
+
 ### A repo's channels setting
 
 A repo may name the channels it uses, and a folder for each, on its `repo` row
@@ -563,7 +578,9 @@ Draining is six steps per request, and the order matters:
 5. Write the id into the document's designation, as `page=` for Notion and
    `file=` for Drive. In a research repo that designation is a key on the
    document's `research.conf.py` entry, and it is what the *next render* reads
-   — step 4 only carries the id as far as the current request.
+   — step 4 only carries the id as far as the current request. A routine
+   brief's request (`source` `sd:<item>`) skips this step: step 6 records the
+   URL and its container, and the next render carries it into that container.
 
    A designation written as the bare `True` shorthand is amended into the dict
    that records the id: `notion=True` becomes `notion=dict(page="<id>")`, which

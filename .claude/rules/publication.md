@@ -11,7 +11,7 @@ paths:
 - A skill that ends by naming a path in a build directory has not finished: a document nobody can find was not delivered.
 - Working state (ledgers, receipts, handoff packets, monitor state) is not a finished document and does not publish.
 - The vault copy is the document; each other copy is a duplicate in its destination's native format: HTML, Notion blocks or a native Google Doc.
-- Notion and Google Drive are opt-in mirrors, per document, in its `notion=` or `drive=` key in `research.conf.py`; nothing infers a target, and both keys mean two mirrors.
+- Notion and Google Drive are opt-in mirrors, per document, in its `notion=` or `drive=` key in `research.conf.py`, or for a routine brief in its item's `fields.publish`; nothing infers a target, and both keys mean two mirrors.
 - A render enqueues each sync under `~/.claude/pending-mirror-syncs/` and an agent session drains it: git hooks and CI cannot reach an MCP server.
 - A Notion mirror goes to `$SD_NOTION_PRIVATE_FOLDER` unless `notion=dict(team=True)` sends it to `$SD_NOTION_TEAM_FOLDER`: a private brief is fixed by draining again, a leaked one is already read.
 - Both folder variables hold a Notion page id, so a rename moves nothing; an unset one refuses the mirror; the document lands in the repo's own page there.
