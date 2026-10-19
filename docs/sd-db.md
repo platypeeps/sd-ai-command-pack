@@ -268,6 +268,9 @@ The design is `docs/work/2026-10-16-repo-github-issues/design.md`.
 Absence from a search does not close a row, since GitHub's index can omit an open issue: after a complete sweep, each stored open issue of its repositories that neither it nor this run's buckets saw is read directly (`GET repos/{owner}/{repo}/issues/{n}`, on the sync's budget).
 Only the read's own answer closes it: state `closed`, a `pull_request` key, or another issue number; its url spelling decides nothing, so an issue that still answers open under its number stays open, renamed or transferred. A failed, refused or over-budget read leaves it open and prints `intake sweep incomplete`.
 A failed or capped sweep reads and closes nothing, holds no cursor and prints the same line.
+Each GitHub row also keeps `merged_at` and `closed_at` (migration 38, sd:5303), read from the same search page and the direct read: no extra request.
+A reopened row loses both; a date that does not parse keeps the stored one. Rows older than the nightly window get theirs from one `sd shadow sync --since <date>`.
+`contributions.projection`, the dashboard's `/api/contributions` read, gives each row the two times by url, or None.
 `repos.intake_issues` reads, per `on` repository, its open issues whose author is not the operator (the author of the `filed` rows) that no item carries as `--ref github:<owner>/<repo>#N`, for Today's intake.
 Agents close an issue with `mcp__github__issue_write` `update`. `bin/sd-issue-guard` lets that through in a managed `on` repo when the call names the row's own GitHub repository; filing an issue stays denied. The global deny list still refuses the tool until the system follow-up under sd:4810 lifts it for `on` repos.
 

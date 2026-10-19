@@ -134,12 +134,12 @@ query($q: String!, $n: Int!, $after: String) {
     nodes {
       __typename
       ... on Issue {
-        number title url state updatedAt
+        number title url state updatedAt closedAt
         author { login }
         repository { nameWithOwner }
       }
       ... on PullRequest {
-        number title url state updatedAt
+        number title url state updatedAt closedAt mergedAt
         author { login }
         repository { nameWithOwner }
       }
@@ -167,6 +167,15 @@ def parse_iso(text: str | None) -> datetime | None:
         return value.astimezone(timezone.utc) if value.tzinfo is not None else None
     except (TypeError, ValueError, OverflowError):
         return None
+
+
+def settled_at(value) -> str | None:
+    """A tracker's merge or close time as `iso` writes it, or None when it does not read (sd:5303).
+
+    None is unknown, and `upsert_shadow` keeps the stored time for it.
+    """
+    moment = parse_iso(value) if isinstance(value, str) else None
+    return iso(moment) if moment is not None else None
 
 
 def window_start(watermark: str | None, now: datetime) -> datetime:
@@ -443,6 +452,8 @@ def normalize(node: dict, why: str) -> dict | None:
         "title": node.get("title") or "",
         "state": (node.get("state") or "").lower(),
         "author": (node.get("author") or {}).get("login") or "",
+        "merged_at": settled_at(node.get("mergedAt")),
+        "closed_at": settled_at(node.get("closedAt")),
         "updated_at": node.get("updatedAt") or "",
         "why": [why],
     }
@@ -539,7 +550,8 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
                 swept_only.add(row["url"])
             elif row["updated_at"] > found["updated_at"]:
                 # Reopened after a bucket read it closed: the later answer wins.
-                found.update(state=row["state"], title=row["title"], updated_at=row["updated_at"])
+                found.update(state=row["state"], title=row["title"], updated_at=row["updated_at"],
+                             merged_at=row["merged_at"], closed_at=row["closed_at"])
         if not error and not cut:
             listings.append((intake[at * INTAKE_GROUP:(at + 1) * INTAKE_GROUP], set(merged)))
     rows = sorted(merged.values(), key=lambda row: row["updated_at"], reverse=True)
@@ -563,7 +575,7 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
 def store(connection: sqlite3.Connection, issues: list[dict]) -> int:
     """Write collected issues as `shadow` rows, keyed by `(tracker, url)`.
 
-    `normalize` returns ten keys and this writes eight, plus the `reason`
+    `normalize` returns twelve keys and this writes ten, plus the `reason`
     `collect` derives from `why` (migration 34). The two it does not write --
     `why` and `updated_at` -- are not an oversight; the `shadow` table has no
     column for either, and the comment above that table says why and where
@@ -582,6 +594,8 @@ def store(connection: sqlite3.Connection, issues: list[dict]) -> int:
             state=issue.get("state") or None,
             author=issue.get("author") or None,
             reason=issue.get("reason"),
+            merged_at=issue.get("merged_at"),
+            closed_at=issue.get("closed_at"),
         )
     return len(issues)
 
@@ -611,8 +625,12 @@ def _observe_protection(connection: sqlite3.Connection, client, observed_at: str
     return summary
 
 
-def confirm_absent(connection: sqlite3.Connection, swept, client, *, tracker: str = TRACKER) -> tuple[list[str], list[str]]:
+def confirm_absent(connection: sqlite3.Connection, swept, client, *,
+                   tracker: str = TRACKER) -> tuple[dict[str, str | None], list[str]]:
     """Read each stored open issue a complete sweep missed. Returns `(close, unknown)`.
+
+    `close` maps each url to close to the `closed_at` its read gave, or None
+    when that read gave none it could parse or read another issue (sd:5303).
 
     Absence from a search is no proof of a closure: GitHub's index can omit
     an open issue for a while (sd:4880 lane review). So each one is read
@@ -628,7 +646,8 @@ def confirm_absent(connection: sqlite3.Connection, swept, client, *, tracker: st
     """
     from .contribution_github import ISSUE, Unavailable
 
-    close, unknown = [], []
+    close: dict[str, str | None] = {}
+    unknown: list[str] = []
     for slugs, seen in swept:
         for row in open_shadow_issues(connection, tracker=tracker, repos=slugs):
             url = row["url"]
@@ -646,11 +665,11 @@ def confirm_absent(connection: sqlite3.Connection, swept, client, *, tracker: st
             if not isinstance(payload, dict):
                 unknown.append(f"{url}: the issue read is not an object")
             elif payload.get("state") == "closed" or "pull_request" in payload:
-                close.append(url)
+                close[url] = settled_at(payload.get("closed_at"))
             elif type(payload.get("number")) is not int:
                 unknown.append(f"{url}: the issue read has no number")
             elif payload["number"] != int(match[3]):
-                close.append(url)
+                close[url] = None  # another issue's read says nothing of when this one closed
             elif payload.get("state") != "open":
                 unknown.append(f"{url}: the issue read says state {payload.get('state')!r}")
     return close, unknown
@@ -833,7 +852,7 @@ def _sync(
     # because another collector can complete while this one waits for GitHub.
     with transaction(connection):
         written = store(connection, result.issues)
-        close_shadow(connection, tracker=tracker, urls=closing)
+        close_shadow(connection, tracker=tracker, closed=closing)
         previous_time = parse_iso(read_watermark(connection, tracker))
         # A complete explicit recovery can still leave an uncovered prefix.
         moved = search_complete and detail["staged"] and (previous_time is None or (

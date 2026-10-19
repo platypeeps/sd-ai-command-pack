@@ -10,6 +10,7 @@ import copy
 import hashlib
 import json
 import re
+import sqlite3
 import stat
 import subprocess
 import uuid
@@ -850,8 +851,37 @@ def _projection_row(heartbeats, row, metadata, sources) -> dict:
             "notification_state": {s["key"]: s["notifications"] for s in sources}}
 
 
+def _settled(connection) -> dict[str, tuple[str | None, str | None]]:
+    """`(merged_at, closed_at)` of each GitHub `shadow` row holding either, by canonical url (sd:5303).
+
+    The shadow collector writes both. A store before 38 has neither column
+    and so holds no time: `{}`, a known answer and not a failed read.
+    """
+    try:
+        rows = connection.execute(
+            "SELECT url, merged_at, closed_at FROM shadow WHERE tracker = 'github' "
+            "AND (merged_at IS NOT NULL OR closed_at IS NOT NULL) ORDER BY last_seen, id").fetchall()
+    except sqlite3.OperationalError as error:
+        if "no such column" not in str(error):
+            raise
+        return {}
+    found = {}
+    for row in rows:
+        for canonical in (_url, _issue_url):
+            try:
+                found[canonical(row["url"])] = (row["merged_at"], row["closed_at"])
+                break
+            except WorkflowError:
+                continue
+    return found
+
+
 def projection(connection, *, repo=None) -> list[dict]:
-    """One ordered answer, including unfiled tasks and closed-unmerged PRs."""
+    """One ordered answer, including unfiled tasks and closed-unmerged PRs.
+
+    Each row's `merged_at` and `closed_at` are when GitHub merged or closed
+    it, as the shadow collector last read them, or None (sd:5303).
+    """
     if repo is not None and not isinstance(repo, (str, list, tuple)):
         raise WorkflowError("repo filter must be an identity or list of identities")
     filters = None if repo is None else {repo} if isinstance(repo, str) else set(_strings(list(repo), "repo filters"))
@@ -865,6 +895,7 @@ def projection(connection, *, repo=None) -> list[dict]:
         registered_urls = set()
         checkpoints = _latest(connection, "checkpoint", "contribution:")
         heartbeats = _latest(connection, "heartbeat", "contribution-observe:")
+        settled = _settled(connection)
         for row, metadata in _registered(connection):
             sources = [snapshot(connection, f"item:{row['id']}", checkpoints)]
             for prefix, name in OBSERVED.items():
@@ -872,6 +903,7 @@ def projection(connection, *, repo=None) -> list[dict]:
                     registered_urls.add(metadata[name])
                     sources.append(snapshot(connection, prefix + metadata[name], checkpoints))
             value = _projection_row(heartbeats, row, metadata, sources)
+            value["merged_at"], value["closed_at"] = settled.get(value["url"], (None, None))
             if filters is None or filters.intersection({value["repo"], row.get("repo"), metadata.get("local_clone")}):
                 result.append(value)
         keys = connection.execute("SELECT DISTINCT key FROM state WHERE kind='checkpoint' AND ("
@@ -882,6 +914,7 @@ def projection(connection, *, repo=None) -> list[dict]:
             if _observed_url(key) in registered_urls:
                 continue
             value = _projection_row(heartbeats, {}, {}, [snapshot(connection, key, checkpoints)])
+            value["merged_at"], value["closed_at"] = settled.get(value["url"], (None, None))
             if filters is None or value["repo"] in filters:
                 result.append(value)
         return sorted(result, key=lambda value: (LANES[value["lane"]], value["key"]))

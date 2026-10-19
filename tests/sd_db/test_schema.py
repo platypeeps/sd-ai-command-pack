@@ -2408,6 +2408,73 @@ class TheShadowReasonColumn(SchemaCase):
         self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
 
 
+class TheShadowSettledColumns(SchemaCase):
+    """Migration 38 (sd:5303). `shadow.merged_at` and `shadow.closed_at`: when the
+    tracker merged or closed a row. Added, not rebuilt: every existing row reads
+    NULL, which is unknown until a collect sees it again, keeps its other values,
+    and the reverse returns the table to 37's shape."""
+
+    VERSION = 38
+    COLUMNS = TheShadowReasonColumn.COLUMNS + ", reason"
+    ROWS = [(*row, reason) for row, reason in zip(TheShadowReasonColumn.ROWS, ("filed", None), strict=True)]
+
+    def _before(self):
+        self.migrate_through(self.VERSION - 1)
+        raw = sqlite3.connect(self.path)
+        raw.executemany(f"INSERT INTO shadow ({self.COLUMNS}) VALUES ({', '.join('?' * 12)})", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(f"SELECT {self.COLUMNS} FROM shadow ORDER BY id")]
+
+    def test_every_existing_row_arrives_unknown_and_keeps_its_values(self):
+        self._before()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied),
+                         (self.VERSION - 1, list(range(self.VERSION, SCHEMA_VERSION + 1))))
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.ROWS)
+        self.assertEqual([tuple(row) for row in connection.execute("SELECT merged_at, closed_at FROM shadow ORDER BY id")],
+                         [(None, None), (None, None)])
+
+    def test_a_failed_file_leaves_the_store_at_37_and_a_rerun_finishes_it(self):
+        """Steps: the file's second statement fails after its first; the transaction leaves neither."""
+        self._before()
+        raw = sqlite3.connect(self.path)
+        raw.execute("ALTER TABLE shadow ADD COLUMN closed_at TEXT")
+        raw.commit()
+        raw.close()
+        with self.assertRaises(sqlite3.OperationalError):
+            self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertNotIn("merged_at", [row[1] for row in raw.execute("PRAGMA table_info(shadow)")])
+        raw.execute("ALTER TABLE shadow DROP COLUMN closed_at")
+        raw.commit()
+        raw.close()
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+    def test_the_reverse_returns_the_file_to_the_prior_version(self):
+        self._before()
+        self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        raw.execute("UPDATE shadow SET merged_at = 'x', closed_at = 'y' WHERE id = 1")
+        raw.commit()
+        raw.close()
+        text = dict(schema_module.migrations())[self.VERSION].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        columns = [row[1] for row in raw.execute("PRAGMA table_info(shadow)")]
+        self.assertNotIn("merged_at", columns)
+        self.assertNotIn("closed_at", columns)
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+
 class TheGithubIssuesColumn(SchemaCase):
     """Migration 35 (sd:4827, system sd:4810). `repo.github_issues` turns on
     third-party GitHub issue intake for one repository. Added, not rebuilt:

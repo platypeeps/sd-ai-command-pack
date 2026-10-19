@@ -845,6 +845,55 @@ class TheReason(SyncCase):
         self.assertEqual(self.reasons(), {"1": "filed"})
 
 
+class TheSettleDates(SyncCase):
+    """sd:5303. Each row keeps when GitHub merged or closed it, read from the same search page."""
+
+    def dates(self):
+        return {row["url"].rsplit("/", 1)[1]: (row["state"], row["merged_at"], row["closed_at"])
+                for row in self.shadow().values()}
+
+    def test_a_merged_pull_and_a_closed_issue_keep_their_dates_at_no_extra_request(self):
+        pull = {**node(2, kind="PullRequest", state="MERGED",
+                       url="https://github.com/example-org/benchmark/pull/2"),
+                "mergedAt": "2026-09-05T09:00:00Z", "closedAt": "2026-09-05T09:00:00Z"}
+        closed = {**node(3, state="CLOSED"), "closedAt": "2026-09-05T08:00:00+00:00"}
+        # Not the author bucket: an authored pull would also start a contribution detail read.
+        runner = QueryGh(lambda query: [{**node(1), "closedAt": None}, pull, closed] if "mentions:@me" in query else [])
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.dates(), {"1": ("open", None, None),
+                                        "2": ("merged", "2026-09-05T09:00:00Z", "2026-09-05T09:00:00Z"),
+                                        "3": ("closed", None, "2026-09-05T08:00:00Z")})
+        self.assertEqual(len(runner.queries), 4)
+        query = next(value for argv in runner.calls for value in argv if value.startswith("query="))
+        self.assertIn("closedAt", query)
+        self.assertIn("mergedAt", query)
+
+    def test_a_reopened_issue_loses_its_close_date(self):
+        sync(self.connection, now=self.now, runner=Gh(nodes=[{**node(1, state="CLOSED"), "closedAt": "2026-09-05T08:00:00Z"}]))
+        later = self.now + timedelta(hours=1)
+        result = sync(self.connection, now=later,
+                      runner=Gh(nodes=[{**node(1), "closedAt": None, "updatedAt": iso(later)}]))
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.dates(), {"1": ("open", None, None)})
+
+    def test_an_unreadable_or_absent_date_is_unknown_and_keeps_the_stored_one(self):
+        """A date that does not parse is not "never closed"; nor is a writer that names none."""
+        from sd_db.writes import upsert_shadow
+
+        sync(self.connection, now=self.now, runner=Gh(nodes=[{**node(1, state="CLOSED"), "closedAt": "2026-09-05T08:00:00Z"}]))
+        unreadable: tuple[object, ...] = ("yesterday", "", 7, None, [], "2026-09-05T08:00:00", "9999-99-99T00:00:00Z")
+        for value in unreadable:
+            with self.subTest(value=value):
+                again = {**node(1, state="CLOSED"), "closedAt": value, "updatedAt": iso(self.now)}
+                result = sync(self.connection, now=self.now, runner=Gh(nodes=[again]))
+                self.assertTrue(result.ok, result.reason)
+                self.assertEqual(self.dates(), {"1": ("closed", None, "2026-09-05T08:00:00Z")})
+        # An importer names no state either, and the row takes that as it always has; the date stays.
+        upsert_shadow(self.connection, tracker=TRACKER, url=node(1)["url"], title="imported")
+        self.assertEqual(self.dates(), {"1": (None, None, "2026-09-05T08:00:00Z")})
+
+
 class QueryGh(Gh):
     """A `gh` that answers each search from `answer(query)`, or fails the ones `failing(query)` names."""
 
@@ -924,6 +973,15 @@ class TheIntakeSearch(SyncCase):
         self.assertTrue(result.ok, result.reason)
         self.assertEqual(runner.paths, ["repos/example-org/benchmark/issues/1"])
         self.assertEqual(self.reasons(), {"1": ("closed", None)})
+
+    def test_a_closure_the_direct_read_finds_keeps_its_close_date(self):
+        """sd:5303. The read that closes the row already carries GitHub's `closed_at`."""
+        sync(self.connection, now=self.now, runner=QueryGh(lambda query: [node(1)] if sweep(query) else []))
+        runner = QueryGh(lambda query: [], read=lambda path: issue(1, state="closed", closed_at="2026-09-06T12:30:00Z"))
+        result = sync(self.connection, now=self.now + timedelta(hours=1), runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        [row] = self.shadow().values()
+        self.assertEqual((row["state"], row["closed_at"]), ("closed", "2026-09-06T12:30:00Z"))
 
     def test_an_open_issue_a_bucket_saw_but_the_sweep_missed_stays_open(self):
         """The search index can lag: what the window saw open this run is open."""
