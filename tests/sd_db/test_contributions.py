@@ -633,6 +633,38 @@ class ProjectionTests(ContributionCase):
         self.assertEqual(by_url, {URL: ("2026-09-10T00:01:00Z", "2026-09-10T00:01:00Z"),
                                   ISSUE: (None, "2026-09-10T00:02:00Z"), URL.replace("12", "14"): (None, None)})
 
+    def test_shadow_facts_read_only_the_projected_urls_in_one_statement(self):
+        """sd:5339. Thousands of github shadow rows the projection does not show stay unread, and thousands
+        of projected urls stay under SQLite's expression depth (1000)."""
+        other = [f"https://github.com/Other/Lib/pull/{n}" for n in range(1, 3001)]
+        wanted = [f"https://github.com/upstream/project/pull/{n}" for n in range(1, 3001)]
+        stored = [url.replace("upstream/project", "Upstream/Project") + "/" for url in wanted]
+        self.db.executemany("INSERT INTO shadow (tracker, url, kind, state, merged_at, first_seen, last_seen) "
+                            "VALUES ('github', ?, 'pull', 'merged', ?, ?, ?)",
+                            [(url, T1, T0, T0) for url in other + stored])
+        statements: list[str] = []
+        self.db.set_trace_callback(statements.append)
+        try:
+            facts = c._shadow_facts(self.db, wanted + [None])
+        finally:
+            self.db.set_trace_callback(None)
+        self.assertEqual(set(facts), set(wanted))
+        self.assertEqual(facts[wanted[0]]["merged_at"], T1)
+        self.assertEqual(len(statements), 1)
+        self.assertEqual(c._shadow_facts(self.db, [None]), {})
+
+    def test_projection_reads_no_shadow_row_it_does_not_show(self):
+        """sd:5339. The projection canonicalises only the shadow rows of its own urls, not lifetime history."""
+        self.observe(state="merged")
+        self.db.executemany("INSERT INTO shadow (tracker, url, kind, state, first_seen, last_seen) "
+                            "VALUES ('github', ?, 'pull', 'merged', ?, ?)",
+                            [(f"https://github.com/Other/Lib/pull/{n}", T0, T0) for n in range(1, 3001)])
+        upsert_shadow(self.db, tracker="github", url=URL, kind="pull", state="merged", merged_at=T1)
+        with mock.patch.object(c, "_url", wraps=c._url) as canonical:
+            [row] = c.projection(self.db)
+        self.assertEqual(row["merged_at"], T1)
+        self.assertEqual([call for call in canonical.call_args_list if "Other/Lib" in str(call)], [])
+
     def test_each_row_carries_its_branch_its_closing_issues_and_its_jira_links(self):
         """sd:5315. One statement for the Jira keys of every row: a known key links, an unknown key does not."""
         self.observe(title="Retry on LOG-12")
