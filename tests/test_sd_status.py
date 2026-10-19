@@ -2817,6 +2817,18 @@ class LaneTests(InventoryFixture):
         pending = self.lane({"item": 13, "branch": "task/thirteen", "status": "pending"})
         self.assertEqual([], self.by_check(self.rows(lane=pending), "lane-entry-failed"))
 
+    def test_a_failed_entry_of_a_finished_item_is_not_a_row(self) -> None:
+        """sd:5062: lane verbs cannot clear a failed entry, so a done item's one is history."""
+        entries = [
+            {"item": 30, "branch": "task/done", "status": "failed", "item_status": "done"},
+            {"item": 31, "branch": "task/cancelled", "status": "skipped", "item_status": "cancelled"},
+            {"item": 32, "branch": "task/open", "status": "failed", "item_status": "in_progress"},
+            {"item": 33, "branch": "task/unknown", "status": "failed", "item_status": None},
+            {"item": 34, "branch": "task/unread", "status": "failed"},
+        ]
+        found = self.by_check(self.rows(lane=self.lane(*entries)), "lane-entry-failed")
+        self.assertEqual(sorted(row["key"] for row in found), ["sd:32", "sd:33", "sd:34"])
+
     def test_an_unreadable_lane_is_unchecked_not_clear(self) -> None:
         inventory = self.inventory(lane={"available": False, "reason": "the hub is down", "entries": []})
         self.assertEqual(inventory.unchecked["lane-entry-failed"], "the hub is down")
@@ -2893,6 +2905,27 @@ class LaneTests(InventoryFixture):
         stream = io.StringIO()
         status._render_lane(section, stream.write)
         self.assertRegex(stream.getvalue(), r"\n  #22 +widget +skipped +head_moved +- +task/twenty-two\n")
+
+    def test_the_section_carries_each_entrys_item_status(self) -> None:
+        import sd_db
+        import sd_lane
+
+        self.set_origin("https://github.com/acme/widget.git")
+        sd_db.initialise(home=self.home)
+        connection = sd_db.connect(home=self.home)
+        try:
+            with connection:
+                made = sd_db.create_item(connection, kind="task", title="Shipped", repo=None)
+                connection.execute("UPDATE item SET status = 'done' WHERE id = ?", (made,))
+                sd_lane.store(connection, "acme/widget",
+                              {"id": "d1", "item": made, "branch": "task/shipped", "status": "failed"})
+                sd_lane.store(connection, "acme/widget",
+                              {"id": "d2", "item": 9999, "branch": "task/ghost", "status": "failed"})
+        finally:
+            connection.close()
+        section = status.lane_section(self.repo, {"HOME": str(self.home)})
+        self.assertEqual({entry["item"]: entry["item_status"] for entry in section["entries"]},
+                         {made: "done", 9999: None})
 
     def test_a_repository_with_no_github_origin_has_no_lane(self) -> None:
         section = status.lane_section(self.repo, {"HOME": str(self.home)})
