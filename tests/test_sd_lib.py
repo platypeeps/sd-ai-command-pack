@@ -2267,11 +2267,16 @@ class ExperimentDeclarationTests(unittest.TestCase):
     PAGE = "0123456789abcdef0123456789abcdef"
     SOURCE = "01234567-89ab-cdef-0123-456789abcdef"
 
+    def test_the_library_spells_the_ids_as_the_settings_do(self) -> None:
+        """The check lives in the library, which the dashboard calls; its patterns are bin's Notion settings'."""
+        self.assertEqual(sd_db.repos.EXPERIMENT_FIELDS,
+                         {"page": sd_lib.NOTION_PAGE, "data_source": sd_lib.NOTION_DATA_SOURCE})
+
     def test_each_accepted_shape_reads(self) -> None:
         for value in ({"page": self.PAGE, "data_source": self.SOURCE},
                       {"page": "01234567-89AB-CDEF-0123-456789ABCDEF", "data_source": "collection://" + self.PAGE},
                       {"page": f"https://www.notion.so/Title-{self.PAGE}?pvs=4", "data_source": self.SOURCE,
-                       "title": "t"}):
+                       "title": "t", "url": f"https://www.notion.so/Title-{self.PAGE}"}):
             with self.subTest(value=value):
                 self.assertEqual(sd_lib.declaration_problems("experiment", value), [])
 
@@ -2281,6 +2286,8 @@ class ExperimentDeclarationTests(unittest.TestCase):
 
         good = {"page": self.PAGE, "data_source": self.SOURCE}
         cases: list = [{}, {"page": self.PAGE}, {"data_source": self.SOURCE}, {**good, "url": "x"},
+                       {**good, "url": "https://"}, {**good, "url": "https://example.test/" + "a" * 2001},
+                       {**good, "decks": []},
                        {**good, "title": ""}, {**good, "title": " "}, {**good, "title": 7},
                        {**good, "title": "t" * 2001}, {**good, "page": self.PAGE[:-1]},
                        {**good, "page": "https://example.test/" + "a/" * 10000 + self.PAGE},

@@ -297,7 +297,7 @@ Each key is a kind; each value is the object the old `.github/` file held, or fo
 | `gate_reuse` | the gate's receipt key (`sd_gate_receipts`) | `.github/sd-gate-reuse.json` |
 | `check_scope` | `sd-check --base` docs-only scope | `.github/sd-check-scope.json` |
 | `status` | `sd-status` accepted gaps, `sd-ship merge` declared gap | `.github/sd-status.json` |
-| `experiment` | the system dashboard's research project link: `page` and `data_source`, Notion ids (sd:5302) | none |
+| `experiment` | the system dashboard's research project link: `page` and `data_source`, Notion ids, and optional `url` and `title` (sd:5302) | none |
 
     bin/sd-db repo declare PATH                     # every kind, as JSON
     bin/sd-db repo declare PATH review              # one kind
@@ -306,6 +306,7 @@ Each key is a kind; each value is the object the old `.github/` file held, or fo
 
 The verb checks a value with its reader's own validator first and drops `$schema`, so the row holds only what a reader accepts.
 The library refuses an unknown kind, a value that is not an object, more than 16384 bytes and an unregistered path.
+It also checks `experiment` itself (`repos.experiment_problems`), since the dashboard writes that kind directly.
 `sd_lib.repo_declaration` reads it through `registered_base`, so a linked worktree, a runner clone and a gate's worktree read their repository's row.
 No database on the machine, or a store before 37, reads as nothing declared; a failed read is unknown and each reader refuses or runs in full.
 The `.github/` files are no longer read.

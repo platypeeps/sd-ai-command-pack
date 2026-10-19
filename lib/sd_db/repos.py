@@ -1095,6 +1095,39 @@ DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status", "experimen
 DECLARATION_BYTES = 16384
 #: The word `repo declare` takes to remove a kind; the kind leaves the object.
 DECLARATION_OFF = "off"
+#: A Notion id, dashed or not, spelled as `bin/sd_lib.NOTION_ID` spells it for the publish settings.
+_NOTION_ID = r"[0-9a-fA-F]{8}-?(?:[0-9a-fA-F]{4}-?){3}[0-9a-fA-F]{12}"
+#: The `experiment` declaration's required fields and their spelling (sd:5302): the Notion page,
+#: by id or URL, and the data source that page is a row of, bare or as `collection://<id>`.
+EXPERIMENT_FIELDS = {"page": rf"(?:https://[^\s/]+/(?:[^\s?#]*[/-])?)?{_NOTION_ID}/?(?:[?#]\S*)?",
+                     "data_source": rf"(?:collection://)?{_NOTION_ID}"}
+#: The optional fields, each text: `url` an https link to the page, `title` its name for display.
+EXPERIMENT_OPTIONAL = {"url": r"https://[^\s/]+(?:/\S*)?", "title": r"(?s).*\S.*"}
+#: The longest text any field may hold: a bound before any pattern runs.
+EXPERIMENT_TEXT = 2000
+
+
+def experiment_problems(value: Any) -> list[str]:
+    """Why `value` is not an `experiment` declaration; empty when it is one (sd:5302).
+
+    `set_declaration` refuses a value with any problem, so a row holds only
+    this shape whoever writes it: `bin/sd-db repo declare` or the dashboard.
+    """
+    where = "the experiment declaration"
+    if not isinstance(value, dict):
+        return [f"{where} is a JSON object, not {type(value).__name__}"]
+    extra = sorted(set(value) - set(EXPERIMENT_FIELDS) - set(EXPERIMENT_OPTIONAL))
+    missing = sorted(set(EXPERIMENT_FIELDS) - set(value))
+    problems = [f"{where}: unknown key(s) {', '.join(extra)}"] if extra else []
+    problems += [f"{where}: missing {', '.join(missing)}"] if missing else []
+    spelled = {"page": "a Notion page id or URL", "data_source": "a Notion data source id",
+               "url": "an https URL", "title": "text"}
+    for key, pattern in {**EXPERIMENT_FIELDS, **EXPERIMENT_OPTIONAL}.items():
+        text = value.get(key)
+        if key in value and not (isinstance(text, str) and len(text) <= EXPERIMENT_TEXT
+                                 and re.fullmatch(pattern, text)):
+            problems.append(f"{where}: {key} must be {spelled[key]} of at most {EXPERIMENT_TEXT} characters")
+    return problems
 
 
 def _declarations_text(value: dict[str, Any]) -> str:
@@ -1109,13 +1142,16 @@ def set_declaration(connection: sqlite3.Connection, path: Path | str, kind: str,
     The one writer of `repo.declarations` (sd:5109). It checks the shape only:
     a known kind, a JSON object, the whole column within `DECLARATION_BYTES`.
     What a kind's object may say is its reader's rule, which `bin/sd-db` runs
-    before calling this. Same path refusal as `set_runner_merge`. Writing the
+    before calling this; `experiment`, which the dashboard writes directly,
+    is checked here too (`experiment_problems`). Same path refusal as `set_runner_merge`. Writing the
     value a kind already holds changes nothing but `updated_at`.
     """
     if kind not in DECLARATION_KINDS:
         raise RepoRefusal(f"{kind!r} is not a declaration kind; expected {', '.join(DECLARATION_KINDS)}")
     if value is not None and not isinstance(value, dict):
         raise RepoRefusal(f"a {kind} declaration is a JSON object, not {type(value).__name__}")
+    if kind == "experiment" and value is not None and (problems := experiment_problems(value)):
+        raise RepoRefusal("; ".join(problems))
     given = str(Path(path).expanduser().resolve())
     probe = paths.keys(given)
     with transaction(connection):
