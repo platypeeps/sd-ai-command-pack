@@ -638,12 +638,14 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
 def store(connection: sqlite3.Connection, issues: list[dict]) -> int:
     """Write collected issues as `shadow` rows, keyed by `(tracker, url)`.
 
-    `normalize` returns fourteen keys and this writes twelve, plus the `reason`
-    `collect` derives from `why` (migration 34). The two it does not write --
-    `why` and `updated_at` -- are not an oversight; the `shadow` table has no
-    column for either, and the comment above that table says why and where
-    `why` goes instead. It goes there *before* this runs: `sync` passes the
-    same `result.issues` to `contribution_sync.refresh` first. Returns the count.
+    `normalize` returns fourteen keys and this writes thirteen, plus the `reason`
+    `collect` derives from `why` (migration 34). `updated_at` (migration 39)
+    is written as `iso` spells it, or None when it does not read, which keeps
+    the stored one. The one it does not write, `why`, is not an oversight;
+    the `shadow` table has no column for it, and the comment above that table
+    says why and where it goes instead. It goes there *before* this runs:
+    `sync` passes the same `result.issues` to `contribution_sync.refresh`
+    first. Returns the count.
     """
     for issue in issues:
         upsert_shadow(
@@ -661,6 +663,7 @@ def store(connection: sqlite3.Connection, issues: list[dict]) -> int:
             closed_at=issue.get("closed_at"),
             branch=issue.get("branch"),
             linked_issues=issue.get("linked_issues"),
+            updated_at=settled_at(issue.get("updated_at")),
         )
     return len(issues)
 

@@ -809,6 +809,7 @@ def upsert_shadow(
     closed_at: str | None = None,
     branch: str | None = None,
     linked_issues: list[str] | None = None,
+    updated_at: str | None = None,
 ) -> None:
     """A tracker's row, keyed by `(tracker, url)`. Seen once, then kept current.
 
@@ -823,6 +824,9 @@ def upsert_shadow(
     head branch and the urls of the issues it closes; None keeps the stored
     value, and `[]` says it closes none.
 
+    `updated_at` (migration 39, pack sd:5357) is when the tracker last updated
+    the row; None keeps the stored value.
+
     The conflict target is both columns, so this updates only the row this
     tracker already owns. Until sd:603 it was `url` alone and the update set
     `tracker = excluded.tracker`, which meant the last collector to see a url
@@ -834,8 +838,8 @@ def upsert_shadow(
     with transaction(connection):
         connection.execute(
             "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, "
-            "author, reason, merged_at, closed_at, branch, linked_issues, first_seen, last_seen) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "author, reason, merged_at, closed_at, branch, linked_issues, updated_at, first_seen, last_seen) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(tracker, url) DO UPDATE SET "
             "repo = excluded.repo, number = excluded.number, kind = excluded.kind, "
             "title = excluded.title, state = excluded.state, "
@@ -846,9 +850,10 @@ def upsert_shadow(
             "ELSE COALESCE(excluded.closed_at, shadow.closed_at) END, "
             "branch = COALESCE(excluded.branch, shadow.branch), "
             "linked_issues = COALESCE(excluded.linked_issues, shadow.linked_issues), "
+            "updated_at = COALESCE(excluded.updated_at, shadow.updated_at), "
             "last_seen = excluded.last_seen",
             (tracker, repo, url, number, kind, title, state, author, reason, merged_at, closed_at, branch,
-             None if linked_issues is None else json.dumps(list(linked_issues)), stamp, stamp),
+             None if linked_issues is None else json.dumps(list(linked_issues)), updated_at, stamp, stamp),
         )
 
 
