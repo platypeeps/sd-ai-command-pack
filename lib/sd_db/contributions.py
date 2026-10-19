@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import paths
+from . import paths, shadow_sync
 from .database import transaction
 from .workflow import (
     StaleItem,
@@ -851,36 +851,60 @@ def _projection_row(heartbeats, row, metadata, sources) -> dict:
             "notification_state": {s["key"]: s["notifications"] for s in sources}}
 
 
-def _settled(connection) -> dict[str, tuple[str | None, str | None]]:
-    """`(merged_at, closed_at)` of each GitHub `shadow` row holding either, by canonical url (sd:5303).
+def _shadow_facts(connection) -> dict[str, dict]:
+    """What the shadow collector read of each GitHub row, by canonical url (sd:5303, sd:5315).
 
-    The shadow collector writes both. A store before 38 has neither column
-    and so holds no time: `{}`, a known answer and not a failed read.
+    `merged_at`, `closed_at`, `branch`, `linked_issues` (a list or None) and
+    `title`. A store before 39 lacks these columns and so holds none of them:
+    `{}`, a known answer and not a failed read.
     """
     try:
         rows = connection.execute(
-            "SELECT url, merged_at, closed_at FROM shadow WHERE tracker = 'github' "
-            "AND (merged_at IS NOT NULL OR closed_at IS NOT NULL) ORDER BY last_seen, id").fetchall()
+            "SELECT url, title, merged_at, closed_at, branch, linked_issues FROM shadow WHERE tracker = 'github' "
+            "ORDER BY last_seen, id").fetchall()
     except sqlite3.OperationalError as error:
         if "no such column" not in str(error):
             raise
         return {}
     found = {}
     for row in rows:
+        try:
+            linked = json.loads(row["linked_issues"]) if row["linked_issues"] is not None else None
+        except (TypeError, ValueError):
+            linked = None
         for canonical in (_url, _issue_url):
             try:
-                found[canonical(row["url"])] = (row["merged_at"], row["closed_at"])
+                found[canonical(row["url"])] = {"merged_at": row["merged_at"], "closed_at": row["closed_at"],
+                                                "branch": row["branch"], "title": row["title"],
+                                                "linked_issues": linked if isinstance(linked, list) else None}
                 break
             except WorkflowError:
                 continue
     return found
 
 
+def _with_shadow(rows: list[dict], facts: dict[str, dict], connection) -> None:
+    """Give each projected row the shadow's dates, branch and links, and the Jira rows its title or branches name."""
+    named = []
+    for value in rows:
+        fact = facts.get(value["url"], {})
+        value.update(merged_at=fact.get("merged_at"), closed_at=fact.get("closed_at"),
+                     branch=fact.get("branch"), linked_issues=fact.get("linked_issues"))
+        named.append(shadow_sync.jira_keys(value["title"], fact.get("title"), value["branch"], value.get("local_branch")))
+    # One statement for every row's keys, so the projection's statement count stays fixed (sd:2678).
+    jira = shadow_sync.jira_rows(connection, [key for keys in named for key in keys])
+    for value, keys in zip(rows, named, strict=True):
+        value["jira_links"] = [jira[key] for key in keys if key in jira]
+
+
 def projection(connection, *, repo=None) -> list[dict]:
     """One ordered answer, including unfiled tasks and closed-unmerged PRs.
 
     Each row's `merged_at` and `closed_at` are when GitHub merged or closed
-    it, as the shadow collector last read them, or None (sd:5303).
+    it, as the shadow collector last read them, or None (sd:5303). `branch`
+    and `linked_issues` are a pull request's head branch and the urls of the
+    issues it closes, or None; `jira_links` the Jira shadow rows its title or
+    branches name, `[]` for none (sd:5315).
     """
     if repo is not None and not isinstance(repo, (str, list, tuple)):
         raise WorkflowError("repo filter must be an identity or list of identities")
@@ -895,7 +919,7 @@ def projection(connection, *, repo=None) -> list[dict]:
         registered_urls = set()
         checkpoints = _latest(connection, "checkpoint", "contribution:")
         heartbeats = _latest(connection, "heartbeat", "contribution-observe:")
-        settled = _settled(connection)
+        facts = _shadow_facts(connection)
         for row, metadata in _registered(connection):
             sources = [snapshot(connection, f"item:{row['id']}", checkpoints)]
             for prefix, name in OBSERVED.items():
@@ -903,7 +927,6 @@ def projection(connection, *, repo=None) -> list[dict]:
                     registered_urls.add(metadata[name])
                     sources.append(snapshot(connection, prefix + metadata[name], checkpoints))
             value = _projection_row(heartbeats, row, metadata, sources)
-            value["merged_at"], value["closed_at"] = settled.get(value["url"], (None, None))
             if filters is None or filters.intersection({value["repo"], row.get("repo"), metadata.get("local_clone")}):
                 result.append(value)
         keys = connection.execute("SELECT DISTINCT key FROM state WHERE kind='checkpoint' AND ("
@@ -914,9 +937,9 @@ def projection(connection, *, repo=None) -> list[dict]:
             if _observed_url(key) in registered_urls:
                 continue
             value = _projection_row(heartbeats, {}, {}, [snapshot(connection, key, checkpoints)])
-            value["merged_at"], value["closed_at"] = settled.get(value["url"], (None, None))
             if filters is None or value["repo"] in filters:
                 result.append(value)
+        _with_shadow(result, facts, connection)
         return sorted(result, key=lambda value: (LANES[value["lane"]], value["key"]))
     finally:
         connection.execute("RELEASE contribution_projection")

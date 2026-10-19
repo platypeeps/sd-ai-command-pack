@@ -633,6 +633,23 @@ class ProjectionTests(ContributionCase):
         self.assertEqual(by_url, {URL: ("2026-09-10T00:01:00Z", "2026-09-10T00:01:00Z"),
                                   ISSUE: (None, "2026-09-10T00:02:00Z"), URL.replace("12", "14"): (None, None)})
 
+    def test_each_row_carries_its_branch_its_closing_issues_and_its_jira_links(self):
+        """sd:5315. One statement for the Jira keys of every row: a known key links, an unknown key does not."""
+        self.observe(title="Retry on LOG-12")
+        c.capture(self.db, title="Local", changes={"pull_url": URL.replace("12", "14")}, who="operator")
+        upsert_shadow(self.db, tracker="github", url=URL, kind="pull", state="open", title="Retry on LOG-12",
+                      branch="feature/OPS-7-retry", linked_issues=[ISSUE])
+        upsert_shadow(self.db, tracker="github", url=URL.replace("12", "14"), kind="pull", state="open",
+                      title="Local", branch="ABC-9", linked_issues=[])
+        for key in ("LOG-12", "OPS-7"):
+            upsert_shadow(self.db, tracker="jira", url=f"https://jira.example.test/browse/{key}", state="open",
+                          title=f"ticket {key}")
+        rows = {row["url"]: row for row in c.projection(self.db)}
+        self.assertEqual((rows[URL]["branch"], rows[URL]["linked_issues"]), ("feature/OPS-7-retry", [ISSUE]))
+        self.assertEqual([link["key"] for link in rows[URL]["jira_links"]], ["LOG-12", "OPS-7"])
+        local = rows[URL.replace("12", "14")]
+        self.assertEqual((local["branch"], local["linked_issues"], local["jira_links"]), ("ABC-9", [], []))
+
     def test_a_store_before_38_reads_no_settle_date(self):
         """Older state: the new library over a store not yet migrated reads its rows, each with no date."""
         old = self.root / "old.db"
@@ -646,6 +663,7 @@ class ProjectionTests(ContributionCase):
         self.addCleanup(db.close)
         [row] = c.projection(db)
         self.assertEqual((row["lane"], row["merged_at"], row["closed_at"]), ("merged", None, None))
+        self.assertEqual((row["branch"], row["linked_issues"], row["jira_links"]), (None, None, []))
 
     def test_tracker_context_preserves_observed_match_reasons_without_task_changes(self):
         from sd_db.progress import tracker_items

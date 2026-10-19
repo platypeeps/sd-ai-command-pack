@@ -894,6 +894,74 @@ class TheSettleDates(SyncCase):
         self.assertEqual(self.dates(), {"1": (None, None, "2026-09-05T08:00:00Z")})
 
 
+class TheLinks(SyncCase):
+    """sd:5315. A pull request's closing issues and branch, from the same search page; Jira keys joined, not fetched."""
+
+    BASE = "https://github.com/example-org/benchmark"
+
+    def pull(self, number, *, branch, title="a title", closes=()):
+        return {**node(number, kind="PullRequest", url=f"{self.BASE}/pull/{number}", title=title),
+                "headRefName": branch, "closingIssuesReferences": {"nodes": [{"url": url} for url in closes]}}
+
+    def links(self):
+        return {row["url"].rsplit("/", 1)[1]: (row["branch"], row["linked_issues"]) for row in self.shadow().values()}
+
+    def test_three_pull_requests_and_their_links(self):
+        from sd_db.shadow_sync import jira_links
+        from sd_db.writes import upsert_shadow
+
+        for key in ("LOG-12", "LOG-120", "OPS-7"):
+            upsert_shadow(self.connection, tracker="jira", url=f"https://jira.example.test/browse/{key}",
+                          kind="issue", title=f"ticket {key}", state="open")
+        closes = (f"{self.BASE}/issues/1", "https://github.com/example-org/other/issues/2")
+        pulls = [self.pull(10, branch="fix/two-issues", closes=closes),
+                 self.pull(11, branch="feature/LOG-12-retry"),
+                 self.pull(12, branch="ABC-9-nothing", title="Handle UTF-8 names")]
+        # Not the author bucket: an authored pull would also start a contribution detail read.
+        runner = QueryGh(lambda query: pulls if "mentions:@me" in query else [])
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(len(runner.queries), 4)
+        query = next(value for argv in runner.calls for value in argv if value.startswith("query="))
+        self.assertIn("closingIssuesReferences(first: 10) { nodes { url } }", query)
+        self.assertIn("headRefName", query)
+        rows = {key: value for key, value in self.links().items() if key.isdigit()}
+        self.assertEqual(rows, {"10": ("fix/two-issues", json.dumps(list(closes))),
+                                "11": ("feature/LOG-12-retry", "[]"), "12": ("ABC-9-nothing", "[]")})
+        self.assertEqual(jira_links(self.connection, "a title", "fix/two-issues"), [])
+        self.assertEqual(jira_links(self.connection, "a title", "feature/LOG-12-retry"),
+                         [{"key": "LOG-12", "url": "https://jira.example.test/browse/LOG-12",
+                           "title": "ticket LOG-12", "state": "open"}])
+        self.assertEqual(jira_links(self.connection, "Handle UTF-8 names", "ABC-9-nothing"), [])
+
+    def test_a_key_is_a_whole_key(self):
+        """`LOG-1` is not `LOG-12`; a key inside a longer word or number is no key; each key once, in order."""
+        from sd_db.shadow_sync import jira_keys
+
+        self.assertEqual(jira_keys("LOG-12 and LOG-1", "x/LOG-12-y", None, 7), ["LOG-12", "LOG-1"])
+        for text in ("log-12", "LOG-", "-12", "L-12", "LOG_12", "aLOG-12", "1LOG-12", "", "-" * 10000):
+            with self.subTest(text=text[:20]):
+                self.assertEqual(jira_keys(text), [])
+        self.assertEqual(jira_keys("LOG-123"), ["LOG-123"])
+
+    def test_an_unreadable_field_is_unknown_and_keeps_the_stored_value(self):
+        later = self.now + timedelta(hours=1)
+        first = self.pull(10, branch="fix/one", closes=(f"{self.BASE}/issues/1",))
+        sync(self.connection, now=self.now, runner=QueryGh(lambda query: [first] if "mentions:@me" in query else []))
+        broken: tuple[object, ...] = (None, [], {"nodes": None}, {"nodes": [{"url": ""}]}, {"nodes": [7]}, "x")
+        for value in broken:
+            with self.subTest(value=value):
+                again = {**first, "closingIssuesReferences": value, "headRefName": None, "updatedAt": iso(later)}
+                result = sync(self.connection, now=later,
+                              runner=QueryGh(lambda query, again=again: [again] if "mentions:@me" in query else []))
+                self.assertTrue(result.ok, result.reason)
+                self.assertEqual(self.links()["10"], ("fix/one", json.dumps([f"{self.BASE}/issues/1"])))
+
+    def test_an_issue_row_has_no_branch_and_no_links(self):
+        sync(self.connection, now=self.now, runner=QueryGh(lambda query: [node(1)] if "mentions:@me" in query else []))
+        self.assertEqual(self.links(), {"1": (None, None)})
+
+
 class QueryGh(Gh):
     """A `gh` that answers each search from `answer(query)`, or fails the ones `failing(query)` names."""
 

@@ -270,7 +270,9 @@ Only the read's own answer closes it: state `closed`, a `pull_request` key, or a
 A failed or capped sweep reads and closes nothing, holds no cursor and prints the same line.
 Each GitHub row also keeps `merged_at` and `closed_at` (migration 38, sd:5303), read from the same search page and the direct read: no extra request.
 A reopened row loses both; a date that does not parse keeps the stored one. Rows older than the nightly window get theirs from one `sd shadow sync --since <date>`.
-`contributions.projection`, the dashboard's `/api/contributions` read, gives each row the two times by url, or None.
+A pull request's row also keeps `branch` and `linked_issues`, the urls of the issues it closes, at most ten (migration 39, sd:5315), from the same page.
+`shadow_sync.jira_links(connection, title, branch)` finds Jira keys in the texts and joins them to the `jira` rows; a key no row holds links nothing, and no Jira call is made.
+`contributions.projection`, the dashboard's `/api/contributions` read, gives each row `merged_at`, `closed_at`, `branch`, `linked_issues` and `jira_links`.
 `repos.intake_issues` reads, per `on` repository, its open issues whose author is not the operator (the author of the `filed` rows) that no item carries as `--ref github:<owner>/<repo>#N`, for Today's intake.
 Agents close an issue with `mcp__github__issue_write` `update`. `bin/sd-issue-guard` lets that through in a managed `on` repo when the call names the row's own GitHub repository; filing an issue stays denied. The global deny list still refuses the tool until the system follow-up under sd:4810 lifts it for `on` repos.
 

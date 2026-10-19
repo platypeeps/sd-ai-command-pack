@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -139,7 +140,8 @@ query($q: String!, $n: Int!, $after: String) {
         repository { nameWithOwner }
       }
       ... on PullRequest {
-        number title url state updatedAt closedAt mergedAt
+        number title url state updatedAt closedAt mergedAt headRefName
+        closingIssuesReferences(first: 10) { nodes { url } }
         author { login }
         repository { nameWithOwner }
       }
@@ -176,6 +178,66 @@ def settled_at(value) -> str | None:
     """
     moment = parse_iso(value) if isinstance(value, str) else None
     return iso(moment) if moment is not None else None
+
+
+def closing_issues(node: dict) -> list[str] | None:
+    """The urls of the issues a pull request node closes, or None when the field does not read (sd:5315).
+
+    None is unknown, and `upsert_shadow` keeps the stored list for it.
+    """
+    block = node.get("closingIssuesReferences")
+    found = block.get("nodes") if isinstance(block, dict) else None
+    if not isinstance(found, list):
+        return None
+    urls: list[str] = []
+    for entry in found:
+        url = entry.get("url") if isinstance(entry, dict) else None
+        if not isinstance(url, str) or not url.strip():
+            return None
+        urls.append(url)
+    return list(dict.fromkeys(urls))
+
+
+#: A Jira issue key: a project key, a dash and a number, not inside a longer word or number (sd:5315).
+JIRA_KEY = re.compile(r"(?<![A-Za-z0-9])[A-Z][A-Z0-9]+-[0-9]+(?![0-9])")
+
+
+def jira_keys(*texts) -> list[str]:
+    """Each Jira key the texts name, in order, once. A text that is not a string names none."""
+    return list(dict.fromkeys(key for text in texts if isinstance(text, str) for key in JIRA_KEY.findall(text)))
+
+
+def jira_rows(connection: sqlite3.Connection, keys) -> dict[str, dict]:
+    """The `tracker = 'jira'` shadow rows of `keys`, by key: `{key, url, title, state}`. One statement.
+
+    The key is the last path segment of the row's url (`.../browse/KEY`), as
+    `shadow_jira.normalize` writes it; a key no row holds is absent.
+    """
+    keys = list(dict.fromkeys(keys))
+    if not keys:
+        return {}
+    rows = connection.execute(
+        "SELECT url, title, state FROM shadow WHERE tracker = 'jira' AND ("
+        + " OR ".join("url LIKE ?" for _ in keys) + ") ORDER BY last_seen, id",
+        [f"%/browse/{key}" for key in keys]).fetchall()
+    wanted = set(keys)
+    found = {}
+    for row in rows:
+        key = row["url"].rsplit("/browse/", 1)[-1]
+        if key in wanted:
+            found[key] = {"key": key, "url": row["url"], "title": row["title"], "state": row["state"]}
+    return found
+
+
+def jira_links(connection: sqlite3.Connection, *texts) -> list[dict]:
+    """The Jira issues a pull request names in its title or branch, as shadow rows (sd:5315).
+
+    Keys are found by `JIRA_KEY` and joined to the `tracker = 'jira'` rows;
+    no Jira call is made. A key no row holds, such as `UTF-8`, links nothing.
+    """
+    keys = jira_keys(*texts)
+    found = jira_rows(connection, keys)
+    return [found[key] for key in keys if key in found]
 
 
 def window_start(watermark: str | None, now: datetime) -> datetime:
@@ -454,6 +516,8 @@ def normalize(node: dict, why: str) -> dict | None:
         "author": (node.get("author") or {}).get("login") or "",
         "merged_at": settled_at(node.get("mergedAt")),
         "closed_at": settled_at(node.get("closedAt")),
+        "branch": (node.get("headRefName") or None) if isinstance(node.get("headRefName"), str) else None,
+        "linked_issues": closing_issues(node) if node.get("__typename") == "PullRequest" else None,
         "updated_at": node.get("updatedAt") or "",
         "why": [why],
     }
@@ -575,7 +639,7 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
 def store(connection: sqlite3.Connection, issues: list[dict]) -> int:
     """Write collected issues as `shadow` rows, keyed by `(tracker, url)`.
 
-    `normalize` returns twelve keys and this writes ten, plus the `reason`
+    `normalize` returns fourteen keys and this writes twelve, plus the `reason`
     `collect` derives from `why` (migration 34). The two it does not write --
     `why` and `updated_at` -- are not an oversight; the `shadow` table has no
     column for either, and the comment above that table says why and where
@@ -596,6 +660,8 @@ def store(connection: sqlite3.Connection, issues: list[dict]) -> int:
             reason=issue.get("reason"),
             merged_at=issue.get("merged_at"),
             closed_at=issue.get("closed_at"),
+            branch=issue.get("branch"),
+            linked_issues=issue.get("linked_issues"),
         )
     return len(issues)
 
