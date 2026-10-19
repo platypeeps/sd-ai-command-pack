@@ -1959,11 +1959,29 @@ class JiraSectionTests(StatusFixture):
             connection.close()
 
     @staticmethod
-    def ticket(key: str, title: str, *, state: str = "open", **extra: Any) -> dict[str, Any]:
+    def updated(days: float) -> str:
+        """An `updated_at` `days` before now, as `shadow_sync.iso` writes it."""
+        return (datetime.datetime.now(datetime.timezone.utc)
+                - datetime.timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    @classmethod
+    def ticket(cls, key: str, title: str, *, state: str = "open", **extra: Any) -> dict[str, Any]:
         """A row as `sd_db.shadow_jira` writes it: no number, a browse URL, a project key for repo."""
         return {"url": f"https://example.atlassian.net/browse/{key}", "repo": key.partition("-")[0],
                 "number": None, "kind": "issue", "title": title, "state": state, "author": "someone",
-                "reason": "assigned", **extra}
+                "reason": "assigned", "updated_at": cls.updated(1), **extra}
+
+    def setUp(self) -> None:
+        super().setUp()
+        # The machine config `sd.jira_recent_days` is read from, under the temp HOME, never the operator's.
+        patched = mock.patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.home / ".config")})
+        patched.start()
+        self.addCleanup(patched.stop)
+
+    def configure(self, days: str) -> None:
+        path = self.home / ".config" / "sd-ai-command-pack" / "config.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"config": {"sd": {"jira_recent_days": days}}}), encoding="utf-8")
 
     def section(self, text: str, count: str | None = None) -> str:
         """The lines under the `jira` heading, up to the blank line before the next one; `count` pins the heading's."""
@@ -2035,13 +2053,15 @@ class JiraSectionTests(StatusFixture):
         freshness = self.report()["jira"]["freshness"]
         self.assertEqual((freshness["state"], freshness["last_success_at"]), ("degraded", collected))
 
-    def test_a_closed_row_leaves_the_producer_after_seven_days(self) -> None:
-        """(d) The cutoff is the producer's: `--json` drops a closed row the collector stopped seeing."""
-        self.seed([self.ticket("LOG-8", "Eight days gone", state="closed", age_days=8),
-                   self.ticket("LOG-6", "Six days gone", state="closed", age_days=6)])
-        result = self.report()
-        self.assertEqual([row["url"].rpartition("/")[2] for row in result["jira"]["rows"]], ["LOG-6"])
-        self.assertNotIn("LOG-8", self.run_tool(SD_STATUS).stdout)
+    def test_json_keeps_every_row_with_when_jira_updated_it(self) -> None:
+        """(d) pack sd:5357: the window is the text's; `--json` drops no row, however long unseen."""
+        self.seed([self.ticket("LOG-8", "Eight days unseen", state="closed", age_days=8,
+                               updated_at="2026-07-01T00:00:00Z"),
+                   self.ticket("LOG-6", "Never dated", state="closed", updated_at=None)])
+        rows = {row["url"].rpartition("/")[2]: row for row in self.report()["jira"]["rows"]}
+        self.assertEqual(sorted(rows), ["LOG-6", "LOG-8"])
+        self.assertEqual(rows["LOG-8"]["updated_at"], "2026-07-01T00:00:00Z")
+        self.assertIsNone(rows["LOG-6"]["updated_at"])
 
     def test_only_an_assigned_or_filed_row_is_listed_and_json_keeps_every_row(self) -> None:
         """Ruling on sd:5357: a watched row, or one with no reason yet, is not the operator's worklist."""
@@ -2063,15 +2083,40 @@ class JiraSectionTests(StatusFixture):
         self.assertEqual(10, len(re.findall(r"\n  LOG-1[0-9]{2} ", block)), block)
         self.assertIn("\n  … 2 more\n", block)
 
-    def test_the_text_lists_open_rows_only_however_recently_a_closed_one_was_seen(self) -> None:
-        """sd:5357: a Jira row carries no close time, and `last_seen` moves on every sync, so the
-        seven-day rule kept 430 closed rows in the worklist; the text lists open rows, `--json` both."""
-        self.seed([self.ticket("LOG-3", "Done", state="closed"), self.ticket("LOG-4", "Live")])
-        self.assertEqual(sorted(row["url"].rpartition("/")[2] for row in self.report()["jira"]["rows"]),
-                         ["LOG-3", "LOG-4"])
+    def test_the_text_lists_rows_jira_updated_in_the_last_thirty_days_open_first(self) -> None:
+        """pack sd:5357: open or closed, a row Jira updated inside the window is listed, open rows first;
+        one updated before it, or never dated, is hidden and counted on one line naming the key."""
+        self.seed([self.ticket("LOG-3", "Done lately", state="closed", updated_at=self.updated(2)),
+                   self.ticket("LOG-4", "Live"),
+                   self.ticket("LOG-5", "Bulk touched", updated_at=self.updated(52)),
+                   self.ticket("LOG-6", "Never dated", updated_at=None)])
+        block = self.section(self.run_tool(SD_STATUS).stdout, "2")
+        self.assertRegex(block, r'\n  LOG-4 +open +assigned +"Live"\n  LOG-3 +closed +assigned +"Done lately"\n')
+        self.assertNotIn("LOG-5", block)
+        self.assertNotIn("LOG-6", block)
+        self.assertIn("\n  2 hidden: not updated in the last 30 days, or never dated; `sd.jira_recent_days` sets 30\n",
+                      block)
+
+    def test_sd_jira_recent_days_sets_the_window(self) -> None:
+        self.configure("60")
+        self.seed([self.ticket("LOG-5", "Bulk touched", updated_at=self.updated(52)),
+                   self.ticket("LOG-7", "Older", updated_at=self.updated(61))])
         block = self.section(self.run_tool(SD_STATUS).stdout, "1")
-        self.assertRegex(block, r'\n  LOG-4 +open +assigned +"Live"\n')
-        self.assertNotIn("LOG-3", block)
+        self.assertIn("LOG-5", block)
+        self.assertIn("\n  1 hidden: not updated in the last 60 days, or never dated; `sd.jira_recent_days` sets 60\n",
+                      block)
+
+    def test_a_bad_sd_jira_recent_days_is_refused_by_name(self) -> None:
+        for days in ("0", "-3", "thirty"):
+            with self.subTest(days=days):
+                self.configure(days)
+                self.seed([self.ticket("LOG-4", "Live")])
+                completed = self.run_tool(SD_STATUS)
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                block = self.section(completed.stdout, "unknown")
+                self.assertIn("sd.jira_recent_days", block)
+                self.assertIn("a whole number of days, 1 or more", block)
+                self.assertNotIn("LOG-4", block)
 
     def test_a_title_with_terminal_controls_is_one_quoted_line(self) -> None:
         """(e) The same rule `_render_contributions` is tested against.
@@ -4339,7 +4384,7 @@ class ReportSectionTests(InventoryFixture):
                        "other": [{"number": 3, "title": "Widget folds twice", "why": []}]},
             "jira": {"available": True, "reason": "", "rows": [
                 {"url": "https://example.atlassian.net/browse/LOG-1", "state": "Open", "title": "Fold",
-                 "reason": "assigned"}],
+                 "reason": "assigned", "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat()}],
                      "freshness": {"state": "fresh", "last_success_at": "2026-09-01T11:00:00Z"}},
             "protection": {"available": True, "reason": "", "default_branch": "main", "protected": True,
                            "gaps": [{"id": "strict", "gap": "strict is off"}],

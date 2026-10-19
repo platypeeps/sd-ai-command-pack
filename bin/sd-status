@@ -1470,13 +1470,12 @@ def _database_issues(slug: str) -> dict[str, Any]:
             "freshness": freshness, "needs_you": [], "other": rows}
 
 
-#: A closed Jira row stops being re-seen once it leaves the collector's JQL
-#: window, so `last_seen` stops moving; past this many days the producer drops
-#: it, because a permanent list of every ticket ever closed is not a worklist
-#: (sd:361, design "Readers"). Open rows are never dropped.
-JIRA_CLOSED_DAYS = 7
 #: Jira rows the text prints before `… N more` (ruling on sd:5357).
 JIRA_ROWS = 10
+#: The days `sd.jira_recent_days` reads when unset: the text lists the rows Jira updated inside them.
+JIRA_RECENT_DAYS = 30
+#: The refusal for a bad `sd.jira_recent_days`; the key's pattern admits a whole number from 1.
+JIRA_RECENT_REMEDY = "sd.jira_recent_days must be a whole number of days, 1 or more (unset reads 30)"
 
 
 def jira_section() -> dict[str, Any]:
@@ -1490,11 +1489,16 @@ def jira_section() -> dict[str, Any]:
     `_database_issues`'s: the library, then `default_path()`, then a
     read-only connection; each absence is a reported reason in the same shape.
 
-    `state=None` because a close must be recorded, not hidden. The seven-day
-    rule on closed rows is applied here. The assigned-or-filed rule and the
-    open-only rule are the renderer's: `--json` keeps every row with its
-    `reason` and `state`.
+    `state=None` because a close must be recorded, not hidden, and every row
+    is kept: the assigned-or-filed rule and the `recent_days` window on
+    `updated_at` (pack sd:5357) are the renderer's, so `--json` keeps every
+    row with its `reason`, `state` and `updated_at`. A bad
+    `sd.jira_recent_days` is a reported reason before the database is read.
     """
+    try:
+        days = int(sd_lib.core_setting("jira_recent_days") or JIRA_RECENT_DAYS)
+    except sd_lib.ConfigError as error:
+        return {"available": False, "reason": f"{error}: {JIRA_RECENT_REMEDY}", "freshness": None, "rows": []}
     connection, reason = _shared_connection("shared tracker library", "progress")
     if connection is None:
         return {"available": False, "reason": reason, "freshness": None, "rows": []}
@@ -1507,28 +1511,17 @@ def jira_section() -> dict[str, Any]:
             connection.close()
     except Exception as error:
         return {"available": False, "reason": f"shared database unreadable: {error}", "freshness": None, "rows": []}
-    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=JIRA_CLOSED_DAYS)
-    return {"available": True, "reason": "", "source": "database", "freshness": freshness,
-            "rows": [row for row in rows if _jira_row_is_current(row, cutoff)]}
+    return {"available": True, "reason": "", "source": "database", "freshness": freshness, "recent_days": days,
+            "rows": rows}
 
 
-def _jira_row_is_current(row: dict[str, Any], cutoff: datetime.datetime) -> bool:
-    """Open rows always; a closed row only while the collector saw it after `cutoff`.
-
-    A `last_seen` this cannot parse keeps the row: the column is the
-    library's own stamp, and hiding a row over a stamp this reader does not
-    understand would be a silent drop in the one place the cutoff is meant to
-    be visible.
-    """
-    if (row.get("state") or "").lower() != "closed":
-        return True
+def _jira_updated(row: dict[str, Any]) -> datetime.datetime | None:
+    """When Jira last updated the row, or None when `updated_at` is absent or does not read."""
     try:
-        seen = datetime.datetime.fromisoformat(str(row.get("last_seen") or ""))
+        moment = datetime.datetime.fromisoformat(str(row.get("updated_at") or ""))
     except ValueError:
-        return True
-    if seen.tzinfo is None:
-        seen = seen.replace(tzinfo=datetime.timezone.utc)
-    return seen >= cutoff
+        return None
+    return moment if moment.tzinfo else moment.replace(tzinfo=datetime.timezone.utc)
 
 
 def contributions_section(root: pathlib.Path) -> dict[str, Any]:
@@ -3786,14 +3779,18 @@ def _render_jira(section: dict[str, Any], write: Any) -> None:
     sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
     from sd_db.repos import MINE
 
-    # Only the operator's own open rows (ruling on sd:5357): a watched or
-    # unknown row stays in `--json`, not in the worklist. A closed row does
-    # too: a Jira row carries no close time, and `last_seen` moves on every
-    # sync, so "closed within seven days" kept 430 closed rows here. Every
-    # stored row of those, whatever the freshness line says: a truncated first
-    # run stored what it saw and the verb reported writing it.
-    rows = [row for row in section["rows"]
-            if row.get("reason") in MINE and (row.get("state") or "").lower() == "open"]
+    # Only the operator's own rows (ruling on sd:5357), open or closed, that
+    # Jira updated in the last `recent_days`: a watched or unknown row stays
+    # in `--json`, not in the worklist. `last_seen` cannot date a row, since
+    # it moves on every sync; a row with no `updated_at` is hidden and
+    # counted, never listed as recent. Every stored row of those, whatever the
+    # freshness line says: a truncated first run stored what it saw and the
+    # verb reported writing it.
+    days = section.get("recent_days") or JIRA_RECENT_DAYS
+    cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days)
+    mine = [row for row in section["rows"] if row.get("reason") in MINE]
+    rows = [row for row in mine if (moment := _jira_updated(row)) is not None and moment >= cutoff]
+    rows.sort(key=lambda row: (row.get("state") or "").lower() != "open")
     _heading(write, heading, len(rows))
     # The key is the URL tail and nothing formats `number`, which a Jira row
     # does not have. The title is external text, quoted for the same reason
@@ -3806,6 +3803,9 @@ def _render_jira(section: dict[str, Any], write: Any) -> None:
                 for row in rows[:JIRA_ROWS]])
     if len(rows) > JIRA_ROWS:
         write(f"  … {len(rows) - JIRA_ROWS} more\n")
+    if hidden := len(mine) - len(rows):
+        write(f"  {hidden} hidden: not updated in the last {days} days, or never dated; "
+              f"`sd.jira_recent_days` sets {days}\n")
     # Keyed on `last_success_at`, not on the state word: `tracker_freshness`
     # says `degraded`, not `never`, once one failed heartbeat exists, and an
     # unconfigured Jira writes one every night.

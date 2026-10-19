@@ -134,6 +134,10 @@ CORE_CONFIG = {
                  "description": "The hub's tailnet name, the MagicDNS name or the bare machine name. A machine "
                                 "with its own database serves it, runs its lanes and pushes hub-pin only while its "
                                 "tailnet name matches (`sd-db fence`). Unset is no fence. It grants nothing."},
+    "jira_recent_days": {"pattern": "[1-9][0-9]{0,4}",
+                         "description": "The days `sd-status` looks back for Jira rows: it lists the assigned or "
+                                        "filed rows Jira updated inside them and counts the rest. Unset reads 30. "
+                                        "It grants nothing."},
     "status_companions": {"pattern": r"[~/][^=;,\x00]*=[~/][^=;,\x00]*(,[~/][^=;,\x00]*)*(;[~/][^=;,\x00]*=[~/][^=;,\x00]*(,[~/][^=;,\x00]*)*)*",
                           "description": "Repositories `sd-status` lists beside the one it runs in, as "
                                          "<repo>=<other>[,<other>], one entry per repository, `;` between them; "
