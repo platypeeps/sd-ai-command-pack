@@ -1106,8 +1106,8 @@ def anchored_citations() -> list[tuple[pathlib.Path, str, pathlib.Path, int, int
 #: and read as a cleanup, but the citation was as stale as before. That
 #: citation now names `handoff_section`, which is why prd.md stands at 80.
 SYMBOL_ANCHORED_CITATIONS = {
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 47,
-    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 77,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/implement.md": 46,
+    "docs/work/2026-09-05-the-pack-runs-a-team-process-for-one-person/prd.md": 76,
 }
 
 

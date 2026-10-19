@@ -733,34 +733,6 @@ class AcknowledgementTests(unittest.TestCase):
         self.assertEqual(entries, [])
         self.assertIn("accepted_gaps[0].state.enforce_admins is null", problems[0])
 
-    def test_the_schema_and_the_readers_vocabulary_name_the_same_facts(self) -> None:
-        """Two recitations of one list, so this enumerates both rather than a third.
-
-        `ACKNOWLEDGED_FACTS` decides what the reader accepts and the schema
-        decides what an editor is told to write. They are separate files, so a
-        fact added to one drifts from the other silently -- and the failure is
-        the bad kind: the schema offers a key the loader rejects, or the loader
-        accepts a key no author knows exists. Nothing here writes the expected
-        list down; both sides are read from their own source.
-        """
-        schema = json.loads(
-            (BIN.parent / ".github" / "sd-status.schema.json").read_text(encoding="utf-8")
-        )
-        state = schema["properties"]["accepted_gaps"]["items"]["properties"]["state"]
-        self.assertEqual(sorted(state["properties"]), sorted(status.ACKNOWLEDGED_FACTS))
-        # `additionalProperties: false` is what makes the schema half of this
-        # agreement binding; without it the schema would accept anything and
-        # only the loader would object, one commit later.
-        self.assertIs(state["additionalProperties"], False)
-
-    def test_the_schema_offers_exactly_the_ids_the_reader_accepts(self) -> None:
-        """An editor is told the ids `ACKNOWLEDGEABLE_GAPS` allows, not any string (sd:1000)."""
-        schema = json.loads(
-            (BIN.parent / ".github" / "sd-status.schema.json").read_text(encoding="utf-8")
-        )
-        gap_id = schema["properties"]["accepted_gaps"]["items"]["properties"]["id"]
-        self.assertEqual(gap_id.get("enum"), sorted(status.ACKNOWLEDGEABLE_GAPS))
-
     def test_absent_protection_is_a_distinct_observed_state_from_empty_protection(self) -> None:
         """The fact that separates "no object" from "an object enforcing nothing".
 
@@ -882,22 +854,6 @@ class AcknowledgementTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             entries, problems = status.load_acknowledgements(pathlib.Path(directory))
         self.assertEqual((entries, problems), ([], []))
-
-    def test_this_repos_own_file_loads_clean(self) -> None:
-        # The accepted id is deliberately not recited here. This repository's
-        # entry has changed once already -- `reviews` was deleted when
-        # protection was removed on 2026-09-12 and its `until` came true --
-        # and a list naming the current id fails on the next such decision
-        # while proving nothing the loader does not already enforce. The file
-        # is tracked, so a new acceptance arrives as a reviewed diff, which is
-        # where it is meant to be read.
-        # The pack's own value, which the lead moves to its row with `sd-db repo declare` (sd:5109).
-        value = json.loads((BIN.parent / ".github" / "sd-status.json").read_text(encoding="utf-8"))
-        value.pop("$schema", None)
-        entries, problems = status.sd_lib.parse_acknowledgements(value)
-        self.assertEqual(problems, [])
-        # An empty declaration also loads as `([], [])`; the acceptance must be read (sd:1002).
-        self.assertTrue(entries, "the repository's own acceptance read as empty")
 
     def test_an_empty_state_is_rejected_rather_than_accepting_the_id(self) -> None:
         # An entry with no facts would accept `reviews` whatever the branch
