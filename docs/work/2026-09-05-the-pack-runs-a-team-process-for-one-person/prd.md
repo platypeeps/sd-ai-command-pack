@@ -1642,7 +1642,7 @@ confirmed by the next `sd-ship` run alone.
     assignment and that git is unchanged. The `sd` help text for both verbs
     says they queue the task, and does not say the verbs open a pull
     request. (Rewritten 2026-09-14 by owner decision note 1942, accepting
-    #802's design, `505431b8`. The help text at `bin/sd:3031-3046` landed in
+    #802's design, `505431b8`. The help text at `bin/sd` [absent: those lines moved as bin/sd changed] landed in
     #939, `0feecae9`. The original text is quoted in the log.)
 28. `sd-suggest` writes a row in every mode and files nothing, asserted by a
     test per mode against a recording GitHub fixture that saw no call; `sd
@@ -5341,7 +5341,7 @@ from a number the operator types.
   > dashboard directly. A test asserts the branch content.
 
   `tests/test_sd_skill_promotion.py:78` already asserts one queued
-  assignment and no git change. The help text at `bin/sd:3031-3046` still
+  assignment and no git change. The help text at `bin/sd` [absent: those lines moved as bin/sd changed] still
   says both verbs open a pull request. The note says it is fixed, and until
   it is, criterion 27 stays open.
 
@@ -5446,7 +5446,7 @@ from a number the operator types.
   runs a review names its point in the table and reads the cap from it,
   unasserted and outside that pull request's scope. Criterion 5 is
   part-closed and that clause is open. #936 (`c3604594`) closed criterion
-  22. #939 (`0feecae9`) fixed the help text at `bin/sd:3031-3046` and closed
+  22. #939 (`0feecae9`) fixed the help text at `bin/sd` [absent: those lines moved as bin/sd changed] and closed
   criterion 27, whose other clauses #802 had already met. #940 (`075eecf2`)
   is sd:787's and touches no criterion of this item. Criterion 16 is still
   open, in #938. Open after those merges: 5 (the table-reads clause), 13

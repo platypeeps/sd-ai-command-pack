@@ -15,9 +15,7 @@ import struct
 from pathlib import Path
 
 from . import paths as sdpaths
-from .sources.frontmatter import read as read_frontmatter
-from .sources.vault import vault_root
-from .workflow import WorkflowError
+from .workflow import MissingItem, WorkflowError
 
 DOC_MAX_W = 624
 DOC_MAX_H = 800
@@ -258,7 +256,8 @@ def draft_word_count(draft: str) -> int:
     body = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", body)
     return len(re.sub(r"[#*`|~]", " ", body).split())
 
-def build(snapshot, metadata, repo):
+def build(snapshot, metadata, repo, connection=None):
+    """The publication payload. An attached tip is read from its `tip` row through `connection` (sd:5133)."""
     title = metadata.get("title")
     if not isinstance(title, str) or not title.strip():
         die("publication needs a title")
@@ -272,23 +271,25 @@ def build(snapshot, metadata, repo):
         if not isinstance(tip, str) or Path(tip).name != tip:
             die("attached tip must be one note title")
         manifest = json.loads((sdpaths.disk(repo) / "sd-plugin.json").read_text())
-        store = manifest.get("store") or {}
-        relative = (store.get("bases") or {}).get("tip")
-        raw_root = store.get("root")
-        if not isinstance(relative, str) or not isinstance(raw_root, str):
+        relative = ((manifest.get("store") or {}).get("bases") or {}).get("tip")
+        if not isinstance(relative, str):
             die("writing manifest has no tip store")
-        root = vault_root() if raw_root == "$OBSIDIAN_VAULT" else Path(os.path.expandvars(os.path.expanduser(raw_root)))
-        path = root / relative / (tip + ".md")
-        if not path.resolve().is_relative_to(root.resolve()) or not path.is_file():
-            die("attached tip is missing or outside its declared vault")
-        data = path.read_bytes()
-        fields, prose = read_frontmatter(data.decode("utf-8"))
-        if fields.get("status") != "approved" or fields.get("used-by"):
+        if connection is None:
+            die("an attached tip is read from the database, and no connection was given")
+        from . import records  # records imports this module's renderer
+        try:
+            row = records.get_row(connection, kind="tip", title=tip)
+        except (MissingItem, records.RecordRefused) as error:
+            die(f"attached tip is missing: {error}")
+        if not str(row["path"] or "").startswith(relative.rstrip("/") + "/"):
+            die("attached tip is not in the writing manifest's tip base")
+        if row["stage"] != "approved" or row["fields"].get("used-by"):
             die("attached tip must still be approved and unused")
-        found = re.search(r"(?ms)^## Tip\s*\n(.*?)(?=^## |\Z)", prose)
+        found = re.search(r"(?ms)^## Tip\s*\n(.*?)(?=^## |\Z)", row["body"])
         if not found or not found.group(1).strip():
             die("attached tip has no usable Tip section")
-        tip_source = {"path": str(path.resolve()), "sha256": hashlib.sha256(data).hexdigest()}
+        content = json.dumps({"stage": row["stage"], "fields": row["fields"], "body": row["body"]}, sort_keys=True)
+        tip_source = {"item": row["id"], "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest()}
         markdown += "\n\n---\n\n**Tip — " + tip + "**\n\n" + found.group(1).strip()
     directory = snapshot["path"].parent
     assets = {}

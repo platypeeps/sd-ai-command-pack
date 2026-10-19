@@ -176,11 +176,12 @@ With `file=vault`, run from the root of a content repository (it holds
 
   The note starts at `inbox`; acceptance is the user's. Link the article a
   newsletter pointed at, never the mail.
-- **Check.** Run `python3 "System/Scripts/vault-normalize.py"` from the
-  vault root (`$OBSIDIAN_VAULT`) without `--fix`, and fix what it flags in
-  the new notes. Then run the step 13 review as
-  `python3 "$OBSIDIAN_VAULT/System/Scripts/adversarial.py" --profile idea --target "<base>/<file>.md"`
-  on at most three notes, highest score first. Exit 3 means it did not run.
+- **Check.** The rows live in the database and the vault holds no note to
+  normalize (sd:5133). Run the step 13 review on at most three new rows,
+  highest score first: write each to a temporary file with
+  `sd store get sdw.blog-idea "<title>" > "$TMPDIR/<title>.md"`, then run
+  `python3 "$OBSIDIAN_VAULT/System/Scripts/adversarial.py" --profile idea --target "$TMPDIR/<title>.md"`.
+  Exit 3 means it did not run.
 - **Report** what was filed, what the floor dropped, duplicates, the newsletter
   sweep (labels, window, issues, ideas it prompted, or the error), and that
   filed ideas wait for the user's `inbox → accepted` triage.

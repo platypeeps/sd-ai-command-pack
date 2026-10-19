@@ -78,14 +78,16 @@ sd store add sdw.tip "<short imperative title>" \
 
 ## 5. Adversarial review of what you filed
 
-Run a different model family over at most three filed notes, highest score first:
+Run a different model family over at most three filed tips, highest score first.
+The rows live in the database and the vault holds no note (sd:5133), so review a copy of each row:
 
 ```bash
+sd store get sdw.tip "<title>" > "$TMPDIR/<title>.md"
 python3 "$OBSIDIAN_VAULT/System/Scripts/adversarial.py" \
-  --profile tip --target "<the tip base>/<title>.md"
+  --profile tip --target "$TMPDIR/<title>.md"
 ```
 
-`sd plugin list --json` shows the tip base. Skip when nothing was filed.
+Skip when nothing was filed.
 Act on a finding only after you verify its "what would have to be true" line at the primary source. Tags run hot; read `CERTAIN` as emphasis.
 If a verified finding shows a tip is weaker, lower its score and report the move, from what, and why. Never raise a score from a challenge.
 Exit 3 means `SKIPPED`: report that the gate did not run.

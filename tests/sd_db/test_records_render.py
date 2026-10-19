@@ -1,4 +1,4 @@
-"""The vault mirror of base rows: `records.render` and the render after each write (sd:3976).
+"""The HTML page of each base: `records.render` and the render after each write (sd:3976, sd:5133).
 
 Rows come from the real vault import over a fixture vault, as the sitting
 lands them; the rules come from a fixture `sd plugin list --json` entry with
@@ -6,16 +6,16 @@ the driver flipped to `db`, as in `test_records`. Every vault is a temp dir.
 """
 
 import contextlib
-import datetime
 import io
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import connect, record_state, records
+from sd_db import connect, records
 from sd_db.jobs import cli
 from sd_db.migrate import initialise
 from sd_db.records import (
@@ -28,30 +28,15 @@ from sd_db.records import (
     rules_for,
 )
 from sd_db.remote import HubOnly
-from sd_db.sources.frontmatter import read as read_frontmatter
 from sd_db.testing.wire import hub_only
-from sd_db.writes import set_item_fields
 
 from . import support
-
-try:
-    import yaml  # type: ignore[import-untyped]
-except ImportError:  # the gate's venv has it; a bare interpreter checks the importer's reader alone
-    yaml = None
 from .test_records import flipped
 
 IDEAS = "System/Databases/Blog Ideas"
-TOPICS = "System/Databases/Topics"
 
 STATUS_CONTROL = "**Status:** `INPUT[inlineSelect(option(inbox), option(accepted), option(declined)):status]`"
 RATING_CONTROL = "**My rating:** `INPUT[inlineSelect(option(1), option(2), option(3)):my-rating]`"
-
-#: Text YAML reads as something else when bare: a comment, a mapping, a flow
-#: collection, an anchor, a tag, a bool, a null, a number in another form.
-TRICKY = ["#hashtag first", "a: b", "ends:", " padded ", "it's", 'say "hi"', "- dash", "? q", "[x]", "{x}",
-          "&anchor", "*alias", "!tag", "|pipe", ">gt", "%pct", "@at", "`tick", ",comma", "yes", "No", "null",
-          "~", "true", "off", "08", "1e3", "0x1F", ".inf", "1:20", "1_000", "+1", "a #b", "2026-06-15 noon",
-          '"it\'s" both', '"x" y', "a \\ b: c", '\\"x\\" y']
 
 #: A note body with every shape the HTML mirror redraws, and one code fence it must leave alone.
 RICH = f"""---
@@ -99,8 +84,9 @@ class MirrorCase(support.TempRootCase):
     def render(self, **extra):
         return render(self.db, home=self.home, environ=self.env, entries=[flipped()], **extra)
 
-    def note(self, title, base=IDEAS):
-        return (self.vault / base / f"{title}.md").read_text(encoding="utf-8")
+    def shown(self, title, stage):
+        """Whether the blog-idea page's table shows the row at `stage`."""
+        return f">{title}</a></td><td>{stage}</td>" in self.page()
 
     def page(self, kind="blog-idea"):
         return (self.vault / "docs" / "dashboard" / f"base-{kind}.html").read_text(encoding="utf-8")
@@ -118,174 +104,11 @@ class MirrorCase(support.TempRootCase):
                             **changes)
 
 
-class TheMarkdownMirror(MirrorCase):
-    def test_the_first_render_takes_over_imported_notes_and_a_second_writes_nothing(self):
-        mirror = self.render()
-        self.assertTrue(mirror.ok, mirror.refused)
-        self.assertEqual(sorted(mirror.kinds), ["blog-idea", "topic"])
-        self.assertIn(f"{IDEAS}/first idea.md", mirror.written)
-        self.assertIn("docs/dashboard/base-topic.html", mirror.written)
-        self.assertRegex(self.note("first idea"), r"\nmirror-hash: [0-9a-f]{64}\n---\n")
-        self.assertEqual(self.beat()["ok"], True)
-        again = self.render()
-        self.assertEqual((again.ok, again.written), (True, []))
-
-    def test_the_body_stays_verbatim_and_status_comes_from_the_stage(self):
-        self.render()
-        self.move("rich idea", "accepted")
-        text = self.note("rich idea")
-        self.assertIn("\nstatus: accepted\n", text)
-        self.assertTrue(text.endswith(RICH.split("---\n", 2)[2]), text)
-
-    def test_render_then_freeze_round_trips_every_kind(self):
-        self.render()
-        self.move("first idea", "accepted", fields={"description": "  padded: and \"quoted\"  ", "my-rating": None})
-        self.move("a topic", "parked", kind="topic", body="new body\n\nwith  spaces \n")
-        self.assertTrue(self.render().ok)
-        if yaml is not None:  # every mirror note is YAML too, and says what the importer reads
-            for path in self.vault.rglob("*.md"):
-                text = path.read_text(encoding="utf-8")
-                loaded, (found, _) = yaml.safe_load(text.split("---\n")[1]), read_frontmatter(text)
-                self.assertEqual({key: str(value) if isinstance(value, (int, datetime.date)) else value
-                                  for key, value in loaded.items()}, found, path)
-
-    def test_every_value_reads_back_as_the_same_text_in_the_importer_and_in_yaml(self):
-        self.render()
-        self.move("first idea", None, fields={"description": "a: b", "score": "8", "tags": TRICKY})
-        self.assertTrue(self.beat()["ok"], self.beat())
-        text = self.note("first idea")
-        found, _ = read_frontmatter(text)
-        self.assertEqual((found["description"], found["score"], found["tags"]), ("a: b", "8", TRICKY))
-        if yaml is not None:  # the pack venv has PyYAML; Obsidian reads the block as YAML
-            loaded = yaml.safe_load(text.split("---\n")[1])
-            self.assertEqual((loaded["description"], loaded["tags"]), ("a: b", TRICKY))
-            # Numbers and dates stay bare, so Obsidian keeps them number and date properties.
-            self.assertEqual((loaded["score"], loaded["dateCreated"]), (8, datetime.date(2026, 6, 15)))
-
-    def test_a_value_with_both_quote_kinds_and_a_backslash_reads_back(self):
-        """sd:4626: double quotes with escapes carry what no single-quoted form can."""
-        self.render()
-        self.move("first idea", None, fields={"description": '"it\'s" a \\ path'})
-        self.assertTrue(self.render().ok)
-        text = self.note("first idea")
-        self.assertIn('\ndescription: "\\"it\'s\\" a \\\\ path"\n', text)
-        self.assertEqual(read_frontmatter(text)[0]["description"], '"it\'s" a \\ path')
-        if yaml is not None:
-            self.assertEqual(yaml.safe_load(text.split("---\n")[1])["description"], '"it\'s" a \\ path')
-
-    def test_a_value_no_quoting_can_carry_is_refused_and_its_file_kept(self):
-        """A control character an import unescaped has no one-line form; the note stays as it was."""
-        self.render()
-        before = self.note("first idea")
-        row = get_row(self.db, kind="blog-idea", title="first idea")
-        set_item_fields(self.db, row["id"], fields={**row["fields"], "description": "a\tb"})
-        mirror = self.render()
-        self.assertIn("control character", dict(mirror.refused)[f"{IDEAS}/first idea.md"])
-        self.assertEqual(self.note("first idea"), before)
-
-    def test_an_added_row_carries_its_date_so_its_note_reads_back(self):
-        self.render()
-        rules = rules_for("blog-idea", home=self.home, environ=self.env, entries=[flipped()])
-        add_row(self.db, rules, title="added idea", who="operator", fields={"score": "7"}, body="# added\n")
-        self.assertTrue(self.beat()["ok"], self.beat())
-
-    def test_a_row_whose_created_date_its_fields_do_not_give_is_refused(self):
-        self.render()
-        before = self.note("first idea")
-        with contextlib.redirect_stderr(io.StringIO()):
-            self.move("first idea", None, fields={"dateCreated": None})
-        mirror = self.render()
-        self.assertEqual([path for path, _ in mirror.refused], [f"{IDEAS}/first idea.md"])
-        self.assertIn("title, created date or due date", mirror.refused[0][1])
-        self.assertEqual(self.note("first idea"), before)
-
-    def test_a_row_that_would_not_read_back_is_refused_and_its_file_kept(self):
-        self.render()
-        before = self.note("first idea")
-        with contextlib.redirect_stderr(io.StringIO()):
-            self.move("first idea", None, fields={"tags": []})
-        mirror = self.render()
-        self.assertEqual([path for path, _ in mirror.refused], [f"{IDEAS}/first idea.md"])
-        self.assertIn("would not read back", mirror.refused[0][1])
-        self.assertEqual(self.note("first idea"), before)
-
-
-class TheOverwriteRule(MirrorCase):
-    def test_a_changed_note_with_no_mirror_hash_is_refused_and_kept(self):
-        path = self.vault / IDEAS / "first idea.md"
-        edited = path.read_text(encoding="utf-8").replace("status: inbox", "status: accepted")
-        path.write_text(edited, encoding="utf-8")
-        mirror = self.render()
-        self.assertEqual([path for path, _ in mirror.refused], [f"{IDEAS}/first idea.md"])
-        self.assertIn("no mirror-hash", mirror.refused[0][1])
-        self.assertEqual(self.note("first idea"), edited)
-        self.assertIn(f"{IDEAS}/rich idea.md", mirror.written)
-        self.assertEqual((mirror.ok, self.beat()["ok"], self.beat()["refused"][0]["path"]),
-                         (False, False, f"{IDEAS}/first idea.md"))
-
-    def test_a_hand_edit_to_a_mirror_file_is_refused_and_kept(self):
-        self.render()
-        path = self.vault / IDEAS / "first idea.md"
-        edited = path.read_text(encoding="utf-8").replace("the blog-idea body", "a phone edit of the body")
-        path.write_text(edited, encoding="utf-8")
-        with contextlib.redirect_stderr(io.StringIO()):
-            self.move("first idea", "accepted")
-        mirror = self.render()
-        self.assertEqual([path for path, _ in mirror.refused], [f"{IDEAS}/first idea.md"])
-        self.assertIn("differs from its mirror-hash", mirror.refused[0][1])
-        self.assertEqual(self.note("first idea"), edited)
-
-    def test_an_edit_that_lands_while_the_render_runs_is_kept(self):
-        self.render()
-        path = self.vault / IDEAS / "first idea.md"
-        real = os.chmod
-
-        def phone_edit(target, mode):
-            real(target, mode)
-            if Path(target).name.startswith(".first idea.md."):
-                path.write_text("a phone edit\n", encoding="utf-8")
-
-        # A row change the next render writes out, with no render of its own.
-        row = get_row(self.db, kind="blog-idea", title="first idea")
-        self.db.execute("UPDATE item SET stage = 'declined' WHERE id = ?", (row["id"],))
-        with patch("sd_db.records.os.chmod", side_effect=phone_edit):
-            mirror = self.render()
-        self.assertEqual(mirror.refused, [(f"{IDEAS}/first idea.md",
-                                           "it changed while the render ran: a hand edit, kept")])
-        self.assertEqual(path.read_text(encoding="utf-8"), "a phone edit\n")
-        self.assertEqual([found.name for found in self.vault.rglob(".*.tmp")], [])
-
-    def test_a_file_with_no_row_is_reported_and_kept(self):
-        stray = self.vault / IDEAS / "nested" / "Stray.md"
-        stray.parent.mkdir()
-        stray.write_text("---\nstatus: inbox\n---\nwritten by a satellite\n", encoding="utf-8")
-        mirror = self.render()
-        self.assertEqual(mirror.refused, [(f"{IDEAS}/nested/Stray.md",
-                                           "no row holds this file; kept: add it as a row or delete it")])
-        self.assertEqual(stray.read_text(encoding="utf-8"), "---\nstatus: inbox\n---\nwritten by a satellite\n")
-
-
 class TheRefusals(MirrorCase):
     def files(self):
         return sorted(str(path.relative_to(self.vault)) for path in self.vault.rglob("*") if path.is_file())
 
-    def test_a_row_path_outside_its_base_is_refused_and_nothing_written_there(self):
-        self.render()
-        row = get_row(self.db, kind="blog-idea", title="first idea")
-        self.db.execute("UPDATE item SET path = ? WHERE id = ?", (f"{IDEAS}/../../escaped.md", row["id"]))
-        self.db.commit()
-        mirror = self.render()
-        self.assertIn("is not a note under", dict(mirror.refused)[f"{IDEAS}/../../escaped.md"])
-        self.assertFalse((self.vault / "escaped.md").exists())
-
-    def test_an_open_restore_refuses_before_any_file(self):
-        before = self.files()
-        record_state(self.db, "restore", key="2026-10-13")
-        mirror = self.render()
-        self.assertIn("restore", str(mirror.reason))
-        self.assertEqual((mirror.written, self.files(), self.beat()["ok"]), ([], before, False))
-
-    def test_a_vault_root_with_no_base_folder_refuses_and_creates_nothing(self):
+    def test_a_vault_root_that_is_not_a_directory_refuses_and_creates_nothing(self):
         missing = Path(self.tmp.name) / "not the vault"
         mirror = render(self.db, home=self.home, environ={"OBSIDIAN_VAULT": str(missing)}, entries=[flipped()])
         self.assertIn("is not a directory", str(mirror.reason))
@@ -301,7 +124,6 @@ class TheRefusals(MirrorCase):
                      revision=row["revision"], who="operator", stage="accepted")
         self.assertIn("is not a directory", said.getvalue())
         self.assertFalse(Path(os.environ["OBSIDIAN_VAULT"]).exists())
-        self.assertIn("\nstatus: inbox\n", self.note("first idea"))
 
     def test_an_unreadable_plugin_is_an_unknown_not_an_empty_render(self):
         broken = {"root": "/plugins/other", "readable": False, "why": "no manifest"}
@@ -358,7 +180,7 @@ class TheRenderAfterAWrite(MirrorCase):
     def test_a_write_renders_its_kind(self):
         self.render()
         self.move("first idea", "accepted")
-        self.assertIn("\nstatus: accepted\n", self.note("first idea"))
+        self.assertTrue(self.shown("first idea", "accepted"))
         self.assertTrue(self.beat()["ok"])
         self.assertEqual(self.beat()["kinds"], ["blog-idea"])
 
@@ -370,9 +192,9 @@ class TheRenderAfterAWrite(MirrorCase):
         self.assertEqual(moved["stage"], "accepted")
         self.assertIn("mirror not updated: disk full", said.getvalue())
         self.assertEqual((self.beat()["ok"], self.beat()["reason"]), (False, "disk full"))
-        self.assertIn("\nstatus: inbox\n", self.note("first idea"))
+        self.assertTrue(self.shown("first idea", "inbox"))
         self.move("a topic", "parked", kind="topic")
-        self.assertIn("\nstatus: accepted\n", self.note("first idea"))
+        self.assertTrue(self.shown("first idea", "accepted"))
         self.assertEqual((self.beat()["ok"], sorted(self.beat()["kinds"])), (True, ["blog-idea", "topic"]))
 
     def test_a_process_stopped_after_the_commit_leaves_a_failed_heartbeat_the_next_write_catches_up(self):
@@ -382,7 +204,7 @@ class TheRenderAfterAWrite(MirrorCase):
         self.assertEqual((self.beat()["ok"], self.beat()["reason"]),
                          (False, "a blog-idea write is committed and not yet rendered"))
         self.move("a topic", "parked", kind="topic")
-        self.assertIn("\nstatus: accepted\n", self.note("first idea"))
+        self.assertTrue(self.shown("first idea", "accepted"))
         self.assertTrue(self.beat()["ok"])
 
     def test_a_write_renders_the_vault_its_rules_name_not_the_one_in_the_environment(self):
@@ -393,7 +215,7 @@ class TheRenderAfterAWrite(MirrorCase):
             self.move("first idea", "accepted")
             self.move("a topic", "parked", kind="topic")
         self.assertEqual({path: path.read_bytes() for path in elsewhere.rglob("*") if path.is_file()}, before)
-        self.assertIn("\nstatus: accepted\n", self.note("first idea"))
+        self.assertTrue(self.shown("first idea", "accepted"))
         self.assertTrue(self.beat()["ok"], self.beat())
 
     def test_a_write_from_a_satellite_commits_and_leaves_the_render_to_the_hub(self):
@@ -405,7 +227,28 @@ class TheRenderAfterAWrite(MirrorCase):
         self.assertEqual(moved["stage"], "accepted")
         self.assertIn("mirror not updated", said.getvalue())
         self.assertEqual(self.beat()["ok"], False)
-        self.assertIn("\nstatus: inbox\n", self.note("first idea"))
+        self.assertTrue(self.shown("first idea", "inbox"))
+
+
+class NoNotes(MirrorCase):
+    """pack sd:5133: the vault holds no base notes; only the HTML page is written."""
+
+    def test_a_write_and_a_render_leave_no_note_and_write_the_page(self):
+        for note in self.vault.rglob("*.md"):
+            note.unlink()
+        rules = rules_for("blog-idea", home=self.home, environ=self.env, entries=[flipped()])
+        add_row(self.db, rules, title="added idea", who="operator", fields={"score": "7"}, body="# added\n")
+        mirror = self.render()
+        self.assertEqual(sorted(path.relative_to(self.vault).as_posix() for path in self.vault.rglob("*.md")), [])
+        self.assertTrue(mirror.ok, mirror.why() if not mirror.ok else "")
+        self.assertIn(">added idea</a></td>", self.page())
+
+    def test_a_vault_with_no_base_folders_still_gets_its_pages(self):
+        shutil.rmtree(self.vault / "System")
+        mirror = self.render()
+        self.assertTrue(mirror.ok, mirror.reason)
+        self.assertIn(">first idea</a></td>", self.page())
+        self.assertFalse((self.vault / "System").exists())
 
 
 class TheHtmlMirror(MirrorCase):
@@ -425,7 +268,6 @@ class TheHtmlMirror(MirrorCase):
         self.assertIn("Seen in 2026-10-07 - Daily Intel Brief and the agents note.", section)
         self.assertIn('<a href="https://example.test/chart.png">chart</a>', section)
         self.assertIn("[[not a link inside code]]", section)
-        self.assertIn(STATUS_CONTROL, self.note("rich idea"))
 
     def test_the_page_obeys_the_documents_policy(self):
         self.render()
@@ -458,15 +300,15 @@ class TheVerb(MirrorCase):
             code = cli.main(["records", *argv])
         return code, out.getvalue(), err.getvalue()
 
-    def test_records_render_exits_zero_then_one_on_a_refusal(self):
+    def test_records_render_exits_zero_then_one_on_a_render_that_stopped(self):
         code, out, err = self.sd_db("render")
         self.assertEqual(code, 0, err)
-        self.assertIn("refused 0", out)
-        (self.vault / IDEAS / "stray.md").write_text("---\nstatus: inbox\n---\n", encoding="utf-8")
+        self.assertIn("sd-db:   wrote docs/dashboard/base-blog-idea.html", out)
+        shutil.rmtree(self.vault)
         code, out, err = self.sd_db("render", "blog-idea")
         self.assertEqual(code, 1)
-        self.assertIn("blog-idea: wrote 0 file(s), refused 1", out)
-        self.assertIn(f"refused {IDEAS}/stray.md", err)
+        self.assertIn("blog-idea: wrote 0 file(s)", out)
+        self.assertIn("records render stopped:", err)
 
 
 

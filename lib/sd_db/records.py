@@ -2,8 +2,8 @@
 
 Five Obsidian bases landed in `item` through the vault import, since removed
 (sd:4627): kind `idea`, `source` `vault`, the plugin kind in `fields.kind`, the
-ladder word in `stage`. These functions are how a row changes; the vault holds
-only a rendered mirror.
+ladder word in `stage`. These functions are how a row changes; the vault
+holds no base notes (sd:5133), only one HTML page per base.
 
 **The plugin owns the rules.** `rules_for(kind)` reads them from the pack's
 plugin list, which validated them: the kind's fields, its stage graph, its
@@ -25,12 +25,11 @@ line: every write here stores the body as given.
 **Each write is one transaction.** The row, its notes and its status change
 commit together or not at all, so a stopped write leaves nothing to finish.
 
-**The vault gets a read-only mirror (sd:3976).** `render` writes each row
-back to its note's path, with `status` from `stage` and a `mirror-hash` of
-the rest of the file, and one HTML page per base under `docs/dashboard/`.
-A file it did not write, or one changed since, is a hand edit: it stays, and
-the render reports it. It runs after each committed write, for that kind,
-and on demand (`sd-db records render`); a write never fails for its render.
+**Each base gets a read-only HTML page (sd:3976).** `render` writes one page
+per base under `<vault>/docs/dashboard/`. It wrote each row's note back into
+the vault too, until the notes were retired (sd:5133). It runs after each
+committed write, for that kind, and on demand (`sd-db records render`); a
+write never fails for its render.
 
 **Only the `db` driver writes.** A plugin list that still reports the removed
 `vault` driver (an older installed pack) makes both writers refuse.
@@ -41,7 +40,6 @@ from __future__ import annotations
 import contextlib
 import datetime
 import functools
-import hashlib
 import html
 import importlib.util
 import json
@@ -59,8 +57,6 @@ from typing import Any
 from .database import refuse_hub_only, transaction
 from .publication_render import _fence_closer, md_to_html
 from .sources import MigrationRefused
-from .sources.frontmatter import FrontmatterError
-from .sources.frontmatter import read as read_frontmatter
 from .sources.vault import DUE, NOT_FIELDS, SOURCE, plugin_entries, store_root
 from .workflow import MissingItem, WorkflowError, _checked_state, _text, item_state
 from .writes import (
@@ -70,11 +66,10 @@ from .writes import (
     now,
     record_state,
     set_item_fields,
-    unresolved_state,
 )
 
 #: Keys a caller may not set in `fields`: `status` is `stage`, `mirror-hash`
-#: is the mirror file's, `kind` is the declared kind.
+#: was the retired note mirror's, `kind` is the declared kind.
 RESERVED_FIELDS = NOT_FIELDS | {"kind"}
 
 
@@ -106,7 +101,7 @@ class Rules:
     #: The field the `workflow` block names as the due date, or None.
     due: str | None = None
     #: The folder `root` names under the environment the rules were read with,
-    #: or None when it names none. The mirror writes only here.
+    #: or None when it names none. The pages are written only here.
     vault: Path | None = None
 
 
@@ -229,7 +224,7 @@ def add_row(connection: sqlite3.Connection, rules: Rules, *, title: str, who: st
     _refuse_removed_driver(rules)
     values = _checked_fields(rules, fields or {})
     if "dateCreated" in rules.fields and not values.get("dateCreated"):
-        # Every vault note carries it; without it the mirror note would import with no date.
+        # Every imported row carries it, and the page shows it.
         values["dateCreated"] = datetime.date.today().isoformat()
     for name in rules.floor:
         _refuse_below_floor(rules, name, values.get(name))
@@ -415,9 +410,9 @@ def _refuse_duplicate(connection: sqlite3.Connection, rules: Rules, values: dict
                                     f"already holds {value!r}")
 
 
-# ---------------------------------------------------------------- mirror
+# ---------------------------------------------------------------- the render
 
-#: The `heartbeat` state row each render records: `{at, ok, kinds, written, refused, reason}`.
+#: The `heartbeat` state row each render records: `{at, ok, kinds, written, reason}`.
 MIRROR_KEY = "records-mirror"
 
 #: Stages whose rows are table lines only on the HTML page (D3).
@@ -433,29 +428,26 @@ REMOTE_IMAGE = re.compile(r"!\[([^\]]*)\]\((https?://[^)\s]+)\)")
 
 @dataclass
 class Mirror:
-    """What one render did: the kinds, the files written, the files refused, and why it stopped."""
+    """What one render did: the kinds, the pages written, and why it stopped."""
 
     kinds: list[str]
     written: list[str] = field(default_factory=list)
-    #: `(path under the root, reason)`: a hand edit, a file with no row, a row that would not read back.
+    #: Empty since the notes were retired (sd:5133); the dashboard's render route still reads it.
     refused: list[tuple[str, str]] = field(default_factory=list)
     #: Why the render stopped or never started; `None` when it ran to the end.
     reason: str | None = None
 
     @property
     def ok(self) -> bool:
-        return self.reason is None and not self.refused
+        return self.reason is None
 
     def why(self) -> str:
-        if self.reason is not None:
-            return self.reason
-        path, reason = self.refused[0]
-        return f"{len(self.refused)} file(s) refused, first {path}: {reason}"
+        return self.reason or ""
 
 
 def render(connection: sqlite3.Connection, *, home: Path | str, environ: dict[str, str] | None = None,
            kinds: list[str] | None = None, entries: list[dict[str, Any]] | None = None) -> Mirror:
-    """Write the mirror of `kinds`, by default every kind a plugin on the `db` driver declares.
+    """Write the pages of `kinds`, by default every kind a plugin on the `db` driver declares.
 
     Refuses with `HubOnly` off the hub, before it reads or records anything:
     a satellite's render would write a vault the hub's rows never see. Every
@@ -477,7 +469,7 @@ def render(connection: sqlite3.Connection, *, home: Path | str, environ: dict[st
 
 
 def _pending(connection: sqlite3.Connection, rules: Rules) -> bool:
-    """In the write's transaction: whether the mirror was caught up, then a heartbeat saying it is not.
+    """In the write's transaction: whether the pages were caught up, then a heartbeat saying they are not.
 
     A process stopped between the commit and the render leaves that failed
     heartbeat, so the next write renders every kind and Health shows the gap.
@@ -490,13 +482,13 @@ def _pending(connection: sqlite3.Connection, rules: Rules) -> bool:
 def _mirror_after(connection: sqlite3.Connection, rules: Rules, caught_up: bool) -> None:
     """The render after a committed write. It prints and records a failure and never raises.
 
-    When the mirror was not caught up before the write, it renders every kind,
+    When the pages were not caught up before the write, it renders every kind,
     so the next write catches up whichever kind a failure left behind.
     """
     try:
         if connection.in_transaction:
             raise RecordRefused("the write is inside the caller's open transaction, so it is not committed yet")
-        refuse_hub_only(connection, "the records mirror")
+        refuse_hub_only(connection, "the records render")
         if caught_up:
             mirror = _mirrored(connection, [rules])
         elif rules.vault is None:
@@ -536,200 +528,31 @@ def _mirrored(connection: sqlite3.Connection, rules: list[Rules]) -> Mirror:
 def _beat(connection: sqlite3.Connection, mirror: Mirror) -> Mirror:
     record_state(connection, "heartbeat", key=MIRROR_KEY, body={
         "at": now(), "ok": mirror.ok, "kinds": mirror.kinds, "written": len(mirror.written),
-        "refused": [{"path": path, "reason": reason} for path, reason in mirror.refused],
         "reason": mirror.reason})
     return mirror
 
 
 def _render(connection: sqlite3.Connection, rules: list[Rules], mirror: Mirror) -> None:
-    """Every refusal of the whole render first, then each kind's notes, strays and page.
+    """Every refusal of the whole render first, then each kind's page.
 
-    The base folder must exist: under a missing `$OBSIDIAN_VAULT` the root is
+    The vault root must exist: under a missing `$OBSIDIAN_VAULT` the root is
     a default path, and a render there would build a second vault nobody reads.
     """
-    if unresolved_state(connection, "restore"):
-        raise RecordRefused("a restore is unresolved, so the rows may be older than the mirror; "
-                            "re-apply edits from the mirror, then resume the restore")
     roots = []
     for one in rules:
         _refuse_removed_driver(one)
         root = one.vault
         if root is None:
-            raise RecordRefused(f"plugin {one.prefix} keeps its notes under {one.root}, which is not set")
-        if not (root / one.base).is_dir():
+            raise RecordRefused(f"plugin {one.prefix} keeps its pages under {one.root}, which is not set")
+        if not root.is_dir():
             # An unset or wrong root names a folder that is not the vault; creating it hides that.
-            raise RecordRefused(f"{root / one.base} is not a directory; the {one.kind} base is where plugin "
-                                f"{one.prefix}'s `store.bases` says it is, and the mirror creates no vault")
+            raise RecordRefused(f"{root} is not a directory; plugin {one.prefix}'s `store.root` names the vault, "
+                                f"and the render creates no vault")
         roots.append(root)
     for one, root in zip(rules, roots, strict=True):
-        rows = list_rows(connection, one.kind)
-        for row in rows:
-            try:
-                _mirror_note(root, one, row, mirror)
-            except RecordRefused as refusal:
-                mirror.refused.append((row["path"] or f"item {row['id']}", str(refusal)))
-        _strays(root, one, rows, mirror)
         page = f"docs/dashboard/base-{one.kind}.html"
-        if _replace(root / page, _page(root, one, rows).encode("utf-8")):
+        if _replace(root / page, _page(root, one, list_rows(connection, one.kind)).encode("utf-8")):
             mirror.written.append(page)
-
-
-def _mirror_note(root: Path, rules: Rules, row: dict[str, Any], mirror: Mirror) -> None:
-    """Write one row's note, unless the file there is a hand edit."""
-    relative = row["path"] or ""
-    path = PurePosixPath(relative)
-    if path.is_absolute() or ".." in path.parts or path.suffix != ".md" or \
-            path.parts[:len(PurePosixPath(rules.base).parts)] != PurePosixPath(rules.base).parts:
-        raise RecordRefused(f"item {row['id']}'s path {relative!r} is not a note under {rules.base}")
-    target = root / relative
-    try:
-        held: bytes | None = target.read_bytes()
-    except FileNotFoundError:
-        held = None
-    if held is not None:
-        problem = _hand_edit(row, held)
-        if problem:
-            raise RecordRefused(problem)
-    if _replace(target, _note(rules, row).encode("utf-8"), held=held):
-        mirror.written.append(relative)
-
-
-def _note(rules: Rules, row: dict[str, Any]) -> str:
-    """The row as a note: its fields and `status` as frontmatter, the body verbatim, the hash last.
-
-    The note must read back as the row, as the import reads it, or a
-    rollback's import would land another row from it: anything else refuses.
-    """
-    fields = {name: value for name, value in row["fields"].items() if name != "kind"}
-    matter = "\n".join(_frontmatter_line(name, value) for name, value in {**fields, "status": row["stage"]}.items())
-    content = f"---\n{matter}\n---\n{row['body']}\n"
-    try:
-        found, body = read_frontmatter(content)
-    except FrontmatterError as error:
-        found, body = {"unreadable": str(error)}, None
-    if found != {**fields, "status": row["stage"]} or body != row["body"]:
-        raise RecordRefused(f"item {row['id']} would not read back from its note, since the frontmatter "
-                            f"reader has no form for one of its values; kept as it is")
-    # The payload beyond the fields that a rollback to a pack with the vault import would read: title, created and due.
-    due = str(fields.get(rules.due) or "").strip() or None if rules.due else None
-    payload = (str(fields.get("title") or PurePosixPath(row["path"] or "").stem).strip(),
-               str(fields.get("dateCreated") or "").strip(), due)
-    if payload != (row["title"], row["created_at"], row["due"]):
-        raise RecordRefused(f"item {row['id']} would not read back from its note: its title, created date "
-                            f"or due date is not the one its fields give; kept as it is")
-    return hashed(content)
-
-
-#: What starts the line the mirror adds as the last frontmatter line.
-HASH_LINE = "mirror-hash:"
-
-
-def hashed(content: str) -> str:
-    """`content` with `mirror-hash: <sha256 of content>` as its last frontmatter line: the mirror's mark.
-
-    The one mirror rule's writer, for base notes and brief copies alike
-    (sd:3976, sd:4041): `unhashed` of the result is `content` again.
-    """
-    lines = content.split("\n")
-    end = _closing(lines)
-    if end is None:
-        raise RecordRefused("it opens no frontmatter, so there is no place for its mirror-hash")
-    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
-    return "\n".join([*lines[:end], f"{HASH_LINE} {digest}", *lines[end:]])
-
-
-def unhashed(text: str) -> tuple[str, str | None]:
-    """`text` without its frontmatter's `mirror-hash` line, and that line's value; `(text, None)` with none."""
-    lines = text.split("\n")
-    for index in range(1, _closing(lines) or 1):
-        if lines[index].startswith(HASH_LINE):
-            return "\n".join(lines[:index] + lines[index + 1:]), lines[index][len(HASH_LINE):].strip()
-    return text, None
-
-
-def hash_holds(text: str) -> bool | None:
-    """Whether a file's `mirror-hash` is its own content's: True for a copy the mirror wrote, None with no hash.
-
-    False is a file changed since it was written: a hand edit, which no render overwrites.
-    """
-    rest, value = unhashed(text)
-    return None if value is None else hashlib.sha256(rest.encode("utf-8")).hexdigest() == value
-
-
-def _closing(lines: list[str]) -> int | None:
-    """The index of the line that closes the frontmatter, or None when the text opens none."""
-    if not lines or lines[0] != "---":
-        return None
-    return next((index for index in range(1, len(lines)) if lines[index] == "---"), None)
-
-
-def _frontmatter_line(name: str, value: Any) -> str:
-    if value is None:
-        return f"{name}:"
-    if isinstance(value, list):
-        return "\n".join([f"{name}:", *(f"  - {_frontmatter_value(item)}" for item in value)])
-    return f"{name}: {_frontmatter_value(value)}"
-
-
-#: Words a YAML 1.1 or 1.2 reader turns into a bool, a null or a float when bare.
-YAML_WORDS = {"y", "n", "yes", "no", "true", "false", "on", "off", "null", "~", ".inf", "-.inf", "+.inf", ".nan"}
-#: Bare text a YAML reader may read as a number, a date or a time: digits, signs, dots, colons, `_`, `e`, `x`.
-NUMBER_LIKE = re.compile(r"[-+.]?[0-9][0-9a-zA-Z_.:+-]*")
-#: Bare numbers and dates that stay bare, so Obsidian keeps them number and date properties.
-TYPED = re.compile(r"-?(0|[1-9][0-9]*)(\.[0-9]+)?|[0-9]{4}-[0-9]{2}-[0-9]{2}")
-
-
-def _frontmatter_value(value: Any) -> str:
-    """The text as a YAML scalar that the importer's reader and a YAML reader both read back as it is.
-
-    Bare when YAML reads it as the same string, or as the number or date it
-    is. Else in double quotes, or single when it holds `"` or `\\`. A text
-    that holds both kinds goes in double quotes with `\\` and `"` escaped,
-    which the importer's reader undoes as YAML does (sd:4626).
-    """
-    text = str(value)
-    if any(ord(char) < 32 or char == "\x7f" for char in text):
-        raise RecordRefused(f"{text!r} holds a control character, so it would not read back from a note")
-    if TYPED.fullmatch(text) or not (
-            text != text.strip() or text[:1] in "-?:,[]{}#&*!|>'\"%@`" or ": " in text or " #" in text
-            or text.endswith(":") or text.lower() in YAML_WORDS or NUMBER_LIKE.fullmatch(text)):
-        return text
-    if '"' not in text and "\\" not in text:
-        return f'"{text}"'
-    if "'" not in text:
-        return f"'{text}'"
-    return '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-def _hand_edit(row: dict[str, Any], held: bytes) -> str | None:
-    """Why the file at a row's path may not be overwritten, or None.
-
-    A file with a `mirror-hash` may be when the hash is its own content's. A
-    file without one may be when it reads as the row: the import payload of
-    the note equals the row's, so nothing in it is newer.
-    """
-    try:
-        text = held.decode("utf-8")
-        matter, body = read_frontmatter(text)
-    except (UnicodeDecodeError, FrontmatterError):
-        return "it is not a note the renderer can read: a hand edit, kept"
-    holds = hash_holds(text)
-    if holds is not None:
-        return None if holds else "it differs from its mirror-hash: a hand edit, kept"
-    fields = {name: value for name, value in matter.items() if name != "status"}
-    if fields == {name: value for name, value in row["fields"].items() if name != "kind"} \
-            and str(matter.get("status") or "").strip() == row["stage"] and body == row["body"]:
-        return None
-    return "it has no mirror-hash and differs from its row: a hand edit or a note changed since the import, kept"
-
-
-def _strays(root: Path, rules: Rules, rows: list[dict[str, Any]], mirror: Mirror) -> None:
-    """Report every note in the base folder no row holds, compared as macOS compares names."""
-    held = {_file_key(row["path"] or "") for row in rows}
-    for path in sorted((root / rules.base).rglob("*.md")):
-        relative = path.relative_to(root).as_posix()
-        if _file_key(relative) not in held:
-            mirror.refused.append((relative, "no row holds this file; kept: add it as a row or delete it"))
 
 
 #: `_replace` without a check of what the file held: the HTML pages, which nobody edits.

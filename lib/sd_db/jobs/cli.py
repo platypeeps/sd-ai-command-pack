@@ -227,11 +227,10 @@ def command_credentials(argv: list[str]) -> int:
 
 
 def command_records(argv: list[str]) -> int:
-    """`records render [KIND ...]`: write the vault mirror of base rows (sd:3976).
+    """`records render [KIND ...]`: write the HTML page of each base (sd:3976, sd:5133).
 
     Every kind a plugin on the `db` driver declares, or the kinds named.
-    Exit 1 on any refused file or a render that stopped; the heartbeat says
-    the same to the dashboard.
+    Exit 1 on a render that stopped; the heartbeat says the same to the dashboard.
     """
     if not argv or argv[0] != "render" or any(word.startswith("-") for word in argv[1:]):
         print("sd-db records: expected render [KIND ...]", file=sys.stderr)
@@ -242,11 +241,9 @@ def command_records(argv: list[str]) -> int:
     finally:
         connection.close()
     print(f"sd-db: records render: {', '.join(mirror.kinds) or 'no kind on the db driver'}: "
-          f"wrote {len(mirror.written)} file(s), refused {len(mirror.refused)}")
+          f"wrote {len(mirror.written)} file(s)")
     for path in mirror.written:
         print(f"sd-db:   wrote {path}")
-    for path, reason in mirror.refused:
-        print(f"sd-db:   refused {path}: {reason}", file=sys.stderr)
     if mirror.reason is not None:
         print(f"sd-db: records render stopped: {mirror.reason}", file=sys.stderr)
     return 0 if mirror.ok else 1

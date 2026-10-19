@@ -97,10 +97,9 @@ LEGACY_QUEUE = Path(
 
 
 #: The vault the Obsidian copy is written into, and the folder inside it that
-#: holds briefs. `$OBSIDIAN_VAULT` is the same variable `bin/sd`'s `store_root`
-#: reads, and it is deliberately not defaulted here: `store_root` refuses an
-#: unset one rather than guessing, and a second spelling of that path is how a
-#: write lands in somebody else's vault layout.
+#: holds briefs. `$OBSIDIAN_VAULT` is deliberately not defaulted here: an unset
+#: one is refused rather than guessed, and a second spelling of that path is how
+#: a write lands in somebody else's vault layout.
 VAULT = os.environ.get("OBSIDIAN_VAULT", "")
 BRIEFS = "Briefs"
 
