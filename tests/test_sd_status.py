@@ -1985,7 +1985,7 @@ class JiraSectionTests(StatusFixture):
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertNotIn("Traceback", completed.stderr)
-        self.assertRegex(self.section(completed.stdout), r'\n  LOG-23818 +open +"Benchmark harness"\n')
+        self.assertRegex(self.section(completed.stdout), r'\n  LOG-23818 +open +assigned +"Benchmark harness"\n')
 
     def test_an_empty_tracker_says_never_collected_then_none(self) -> None:
         """(b) No rows and no heartbeat: two lines, both about absence."""
@@ -2009,8 +2009,8 @@ class JiraSectionTests(StatusFixture):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         block = self.section(completed.stdout, "2")
         self.assertTrue(block.endswith("\n  never collected (collection time limit exhausted)\n"), block)
-        self.assertRegex(block, r'\n  LOG-1 +open +"First"\n')
-        self.assertRegex(block, r'\n  LOG-2 +open +"Second"\n')
+        self.assertRegex(block, r'\n  LOG-1 +open +assigned +"First"\n')
+        self.assertRegex(block, r'\n  LOG-2 +open +assigned +"Second"\n')
 
     def test_a_completed_collect_prints_the_external_context_pair(self) -> None:
         """The other side of the `last_success_at` key: a watermark exists, so the pair prints.
@@ -2027,9 +2027,9 @@ class JiraSectionTests(StatusFixture):
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         block = self.section(completed.stdout)
-        self.assertEqual('  Key     State  Title\n'
-                         '  ------  -----  ----------------\n'
-                         '  LOG-10  open   "Ten"\n'
+        self.assertEqual('  Key     State  Reason    Title\n'
+                         '  ------  -----  --------  ----------------\n'
+                         '  LOG-10  open   assigned  "Ten"\n'
                          f"  external context: degraded; last successful sync {collected}\n", block)
         self.assertNotIn("never collected", block)
         freshness = self.report()["jira"]["freshness"]
@@ -2043,18 +2043,19 @@ class JiraSectionTests(StatusFixture):
         self.assertEqual([row["url"].rpartition("/")[2] for row in result["jira"]["rows"]], ["LOG-6"])
         completed = self.run_tool(SD_STATUS)
         block = self.section(completed.stdout)
-        self.assertRegex(block, r'\n  LOG-6 +closed +"Six days gone"\n')
+        self.assertRegex(block, r'\n  LOG-6 +closed +assigned +"Six days gone"\n')
         self.assertNotIn("LOG-8", completed.stdout)
 
-    def test_only_an_assigned_or_filed_row_is_listed(self) -> None:
+    def test_only_an_assigned_or_filed_row_is_listed_and_json_keeps_every_row(self) -> None:
         """Ruling on sd:5357: a watched row, or one with no reason yet, is not the operator's worklist."""
         self.seed([self.ticket("LOG-11", "Mine"), self.ticket("LOG-12", "Filed", reason="filed"),
                    self.ticket("LOG-13", "Watched", reason="watched"), self.ticket("LOG-14", "Unknown", reason=None)])
         result = self.report()
-        self.assertEqual(sorted(row["url"].rpartition("/")[2] for row in result["jira"]["rows"]),
-                         ["LOG-11", "LOG-12"])
-        completed = self.run_tool(SD_STATUS)
-        block = self.section(completed.stdout, "2")
+        self.assertEqual(sorted((row["url"].rpartition("/")[2], row["reason"]) for row in result["jira"]["rows"]),
+                         [("LOG-11", "assigned"), ("LOG-12", "filed"), ("LOG-13", "watched"), ("LOG-14", None)])
+        block = self.section(self.run_tool(SD_STATUS).stdout, "2")
+        self.assertRegex(block, r'\n  LOG-11 +open +assigned +"Mine"\n')
+        self.assertRegex(block, r'\n  LOG-12 +open +filed +"Filed"\n')
         self.assertNotIn("LOG-13", block)
         self.assertNotIn("LOG-14", block)
 
@@ -2079,7 +2080,7 @@ class JiraSectionTests(StatusFixture):
         self.seed([self.ticket("LOG-5", "a\x1b[2Jb\nprotection")])
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
-        self.assertRegex(self.section(completed.stdout), r'\n  LOG-5 +open +"a\\u001b\[2Jb\\nprotection"\n')
+        self.assertRegex(self.section(completed.stdout), r'\n  LOG-5 +open +assigned +"a\\u001b\[2Jb\\nprotection"\n')
         self.assertNotIn("\x1b", completed.stdout)
         headings = self.headings(completed.stdout)
         self.assertEqual(headings, ReportSectionTests.ORDER)
@@ -4335,7 +4336,8 @@ class ReportSectionTests(InventoryFixture):
             "issues": {"available": True, "reason": "", "freshness": None, "needs_you": [],
                        "other": [{"number": 3, "title": "Widget folds twice", "why": []}]},
             "jira": {"available": True, "reason": "", "rows": [
-                {"url": "https://example.atlassian.net/browse/LOG-1", "state": "Open", "title": "Fold"}],
+                {"url": "https://example.atlassian.net/browse/LOG-1", "state": "Open", "title": "Fold",
+                 "reason": "assigned"}],
                      "freshness": {"state": "fresh", "last_success_at": "2026-09-01T11:00:00Z"}},
             "protection": {"available": True, "reason": "", "default_branch": "main", "protected": True,
                            "gaps": [{"id": "strict", "gap": "strict is off"}],
