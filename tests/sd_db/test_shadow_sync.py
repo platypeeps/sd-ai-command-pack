@@ -934,6 +934,16 @@ class TheLinks(SyncCase):
                            "title": "ticket LOG-12", "state": "open"}])
         self.assertEqual(jira_links(self.connection, "Handle UTF-8 names", "ABC-9-nothing"), [])
 
+    def test_jira_rows_reads_any_number_of_keys(self):
+        """Lifetime history names thousands of keys; SQLite's expression depth (1000) must not bound them."""
+        from sd_db.shadow_sync import jira_rows
+        from sd_db.writes import upsert_shadow
+
+        upsert_shadow(self.connection, tracker="jira", url="https://jira.example.test/browse/LOG-2500",
+                      kind="issue", title="ticket", state="open")
+        found = jira_rows(self.connection, [f"LOG-{n}" for n in range(1, 3001)])
+        self.assertEqual(list(found), ["LOG-2500"])
+
     def test_a_key_is_a_whole_key(self):
         """`LOG-1` is not `LOG-12`; a key inside a longer word or number is no key; each key once, in order."""
         from sd_db.shadow_sync import jira_keys
