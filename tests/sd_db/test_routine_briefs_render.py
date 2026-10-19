@@ -335,7 +335,8 @@ class TheVerbs(Copies):
     def sd(self, *args, vault=None):
         return subprocess.run([sys.executable, str(PACK / "bin/sd"), "reports", "brief", *args],
                               env={**os.environ, "HOME": str(self.home), "PYTHONPATH": str(PACK / "lib"),
-                                   "OBSIDIAN_VAULT": str(vault or self.vault)},
+                                   "OBSIDIAN_VAULT": str(vault or self.vault),
+                                   "SD_MIRROR_QUEUE": str(self.root / "queue")},
                               capture_output=True, text=True, check=False, timeout=60)
 
     def draft(self, text=TEXT):
@@ -366,6 +367,20 @@ class TheVerbs(Copies):
         clear = self.sd("render")
         self.assertEqual((clear.returncode, clear.stdout), (0, "ok: written 1, refused 0\n"), clear.stderr)
         self.assertEqual(self.sd("render").stdout, "ok: written 0, refused 0\n")
+
+    def test_a_render_queues_the_briefs_their_items_designate(self):
+        """sd:5102: `fields.publish` designates a brief; each render queues it, as a render queues a document."""
+        self.sd("add", self.draft(), "--belongs-to", str(self.checkout))
+        self.channels({"obsidian": {"folder": FOLDER}, "drive": {}})
+        self.db.execute("UPDATE item SET fields = json_set(COALESCE(fields, '{}'), '$.publish', json('{\"drive\": {}}')) "
+                        "WHERE source = 'brief'")
+        self.db.commit()
+        rendered = self.sd("render")
+        self.assertEqual(rendered.returncode, 0, rendered.stderr)
+        self.assertIn(f"mirror: queued {DAILY} ", rendered.stdout)
+        request = self.root / "queue" / f"system.{DAILY}.drive.json"
+        self.assertIn("Three things.", request.read_text(encoding="utf-8"))
+        self.assertIn(f"mirror: {DAILY}: already queued", self.sd("render").stdout)
 
 
 if __name__ == "__main__":

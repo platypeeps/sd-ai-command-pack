@@ -190,7 +190,9 @@ def run_brief(args: argparse.Namespace) -> int:
             print(f"{answer['result']} {answer['stem']}")
             _copies_after(routine_briefs, remote.HubOnly, connection)
         elif verb == "render":
-            return _rendered(routine_briefs.render(connection, os.environ.get("OBSIDIAN_VAULT")))
+            status = _rendered(routine_briefs.render(connection, os.environ.get("OBSIDIAN_VAULT")))
+            _mirror_briefs(connection, sys.stdout)
+            return status
         elif verb == "list":
             _list_briefs(routine_briefs.rows(connection, series=args.series, since=args.since), args.json)
         elif verb == "show":
@@ -223,6 +225,22 @@ def _copies_after(routine_briefs: Any, hub_only: type[Exception], connection: An
         why = copies["reason"] or f"{len(copies['refused'])} copy(ies) refused, first {copies['refused'][0][0]}: " \
                                   f"{copies['refused'][0][1]}"
         print(f"vault copy not written: {why}", file=sys.stderr)
+    _mirror_briefs(connection, sys.stderr)
+
+
+def _mirror_briefs(connection: Any, stream: Any) -> None:
+    """Queue the briefs their items designate (sd:5102), after the vault copies, as a document's render queues it.
+
+    It never fails the verb: a request is a mirror, and the next render queues it again.
+    """
+    try:
+        import sd_research_publish  # noqa: PLC0415 - only a hub render reaches here
+
+        lines = sd_research_publish.enqueue_briefs(connection)
+    except Exception as error:  # noqa: BLE001 - reported; the copies and the row stand
+        lines = [f"mirror: briefs not queued: {error or type(error).__name__}"]
+    for line in lines:
+        print(line, file=stream)
 
 
 def _rendered(copies: dict[str, Any]) -> int:
