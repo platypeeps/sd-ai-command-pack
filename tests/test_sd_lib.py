@@ -1906,6 +1906,14 @@ exit 0
         self.assertTrue((self.linked / ".venv").is_symlink(), "the link was detached before the refusal")
         self.assert_untouched(other)
 
+    def test_a_parent_that_does_not_exist_is_built(self) -> None:
+        """Nothing there can be deleted, so the path is used as typed and `mkdir -p` makes it."""
+
+        done = self.setup(venv="new/deep/.venv")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.version_in(self.linked / "new" / "deep" / ".venv"), "3.15")
+        self.assertTrue((self.linked / "new" / "deep" / ".venv" / "sd-requirements").is_dir())
+
     def test_an_unresolvable_parent_is_refused(self) -> None:
         """A parent that exists and will not resolve is unknown, never a pass."""
 
