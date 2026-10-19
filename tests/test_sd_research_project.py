@@ -180,8 +180,20 @@ class ProjectTests(Projection):
                 with unittest.mock.patch.object(PUBLISH, "ENVIRON", environ):
                     status, said = self.project()
                 self.assertEqual(status, 1)
-                self.assertIn(setting, said[0])
+                self.assertIn("sd config set sd." + setting.removeprefix("SD_").lower(), said[0])
                 self.assertEqual(self.queue(), {})
+
+    def test_a_setting_row_wins_over_the_variable(self) -> None:
+        """sd:5141: the database ids are setting rows; the variable answers only while no row exists."""
+        from sd_db.writes import set_setting  # noqa: PLC0415
+        set_setting(self.connection, "sd.notion_experiments", "collection://" + OTHER)
+        self.designate(self.experiment, "yes")
+        self.assertEqual(self.project()[0], 0)
+        self.assertEqual(self.request(self.experiment)["database"], OTHER)
+        set_setting(self.connection, "sd.notion_experiment_tasks", None)
+        status, said = self.project()
+        self.assertEqual(status, 1)
+        self.assertIn("sd.notion_experiment_tasks is unset", said[0])
 
     def test_each_read_failure_leaves_the_queue_byte_for_byte(self) -> None:
         self.designate(self.experiment, "yes")

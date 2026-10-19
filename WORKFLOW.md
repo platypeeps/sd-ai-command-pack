@@ -582,7 +582,7 @@ reviewer chain before vendor, transport, availability and spending gates run.
 
 Core settings use `sd config get|set|unset|list` and the existing atomic machine configuration writer.
 The file is `~/.config/sd-ai-command-pack/config.json`, honoring `XDG_CONFIG_HOME`.
-Four keys serve every machine and live in the workflow database as `setting` rows: `sd.fleet_owners`, `sd.copilot_review` (sd:3989), `sd.hub_name` (sd:4044) and `sd.status_companions` (sd:5098).
+These keys serve every machine and live in the workflow database as `setting` rows: `sd.fleet_owners`, `sd.copilot_review` (sd:3989), `sd.hub_name` (sd:4044), `sd.status_companions` (sd:5098) and the `sd.notion_*` publish ids (sd:5141).
 `sd config set` and `unset` write the row; once a row exists, the file's line for that key is not read, and `get` names it on stderr.
 A machine with no database and no `hub.json` keeps them in the file. A database that cannot be read is an error, never the file's value.
 `sd config list sd --json` gives each key's `source`: `database`, `file` or `default`.
@@ -634,6 +634,11 @@ The reserved `sd` namespace declares these settings:
 - `sd.privacy_patterns`: the privacy-pattern file `sd-docs-lint --pr-body` checks a pull request body against, one
   extended regular expression per line. Absence reads `privacy-patterns` in `$SYSTEM_TOOLS_CONFIG`, else in
   `${XDG_CONFIG_HOME:-~/.config}/system`. No file skips the check with a note. It grants nothing.
+- `sd.notion_private_folder` and `sd.notion_team_folder`: the Notion page id, or page URL, of the folder a `notion=` mirror goes to;
+  `notion=dict(team=True)` takes the team one. `sd.notion_experiments` and `sd.notion_experiment_tasks`: the data source ids
+  `sd-research-kit project` writes item rows to. While the database holds no row for one, its old variable answers
+  (`SD_NOTION_PRIVATE_FOLDER`, `SD_NOTION_TEAM_FOLDER`, `SD_NOTION_EXPERIMENTS`, `SD_NOTION_EXPERIMENT_TASKS`).
+  A machine with no database refuses `set`. They grant nothing.
 
 Installation supplies no grant. A new operator must state their own policy; never copy another user's personal permission.
 These settings start no background work, enable no runner policy, and bypass no ownership, review, CI, or protection gate.

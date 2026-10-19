@@ -181,11 +181,8 @@ class NotionScope(NamedTuple):
 
     #: `private` or `team`: which Notion space the mirror may reach.
     scope: str
-    #: The environment variable holding this operator's folder page id.
-    #: Beside `OBSIDIAN_VAULT`, `SYSTEM_TOOLS_CONFIG` and `SD_MIRROR_QUEUE`,
-    #: which is where this module's other per-machine destinations live. Not
-    #: `sd config`: that namespace holds standing authorization, and a folder
-    #: is a destination rather than a permission.
+    #: The `sd config` key holding this operator's folder page id, a
+    #: workflow database row (`publish_setting`).
     setting: str
     #: How a report and a status row name the folder, over the repo name. The
     #: configured folder's own name is not knowable here, and guessing one
@@ -201,13 +198,23 @@ class NotionScope(NamedTuple):
 #: space has already been seen by the team, and deleting it does not undo that.
 #: So the direction that is recoverable is the one that happens by accident.
 NOTION_SCOPES = {
-    False: NotionScope("private", "SD_NOTION_PRIVATE_FOLDER",
+    False: NotionScope("private", "sd.notion_private_folder",
                        "your private Notion briefs folder, under %s"),
-    True: NotionScope("team", "SD_NOTION_TEAM_FOLDER",
+    True: NotionScope("team", "sd.notion_team_folder",
                       "your team Notion briefs folder, under %s"),
 }
 
-#: The environment the folder settings, `SD_MIRROR_REQUEUE`, `SD_MIRROR_DRY_RUN`,
+#: The variable each publish setting was read from before it was a row
+#: (sd:5141). It answers only while the database holds no row for the key, so
+#: a machine publishes as before until its values are imported.
+SETTING_VARIABLES = {
+    "sd.notion_private_folder": "SD_NOTION_PRIVATE_FOLDER",
+    "sd.notion_team_folder": "SD_NOTION_TEAM_FOLDER",
+    "sd.notion_experiments": "SD_NOTION_EXPERIMENTS",
+    "sd.notion_experiment_tasks": "SD_NOTION_EXPERIMENT_TASKS",
+}
+
+#: The environment the old setting variables, `SD_MIRROR_REQUEUE`, `SD_MIRROR_DRY_RUN`,
 #: `SD_PUBLISH_FROM_WORKTREE` and `SD_SKIP_MIRROR` are read out of. A module attribute for the same
 #: reason `QUEUE` and `VAULT` are: a test points it at a fixture rather than
 #: at the machine running the test.
@@ -608,10 +615,11 @@ def notion_target(
     ask for.
 
     A default with nothing configured returns no target and says so, naming
-    the variable to set. Falling back would mirror the document into whichever
+    the setting to set. Falling back would mirror the document into whichever
     page this file happened to name, which is another account's page on every
     machine but one. A setting that is not a page id is not configured: an
     operator who pasted a folder's name has not named a folder this can reach.
+    A setting that cannot be read returns no target either, naming the cause.
     """
     scope, setting, phrase = NOTION_SCOPES[bool(raw.get("team"))]
     named = str(raw.get("space", "")).strip()
@@ -628,11 +636,14 @@ def notion_target(
             "target": "the %s folder in your %s space" % (named, scope),
         }, ""
 
-    configured = notion_id(str(ENVIRON.get(setting, "")))
+    value, unknown = publish_setting(setting)
+    if unknown:
+        return None, "notion= not queued: %s" % unknown
+    configured = notion_id(value)
     if not configured:
         return None, (
-            "notion= has no %s folder configured: set %s to the Notion page "
-            "id of that folder, or name one with space=" % (scope, setting)
+            "notion= has no %s folder configured: run `sd config set %s <page id>` "
+            "with the Notion page id of that folder, or name one with space=" % (scope, setting)
         )
     return {
         "destination": "notion",
@@ -1413,24 +1424,26 @@ def delivered_main(argv: list[str]) -> int:
 #: not a document, so a `notion-row=` key on a document stays a typo.
 ROW_DESTINATION = "notion-row"
 
-#: Where rows go: each target's data source id, a per-machine variable beside
-#: the two Notion folder ids. Never defaulted: an id belongs to one workspace.
-ROW_DATABASES = (("experiments", "SD_NOTION_EXPERIMENTS"), ("tasks", "SD_NOTION_EXPERIMENT_TASKS"))
+#: Where rows go: each target's data source id, a setting beside the two
+#: Notion folder ids. Never defaulted: an id belongs to one workspace.
+ROW_DATABASES = (("experiments", "sd.notion_experiments"), ("tasks", "sd.notion_experiment_tasks"))
 
 
 def row_databases() -> tuple[dict[str, str], str]:
-    """Each target's database id, hyphenated lowercase, or `({}, reason)` naming the variable.
+    """Each target's database id, hyphenated lowercase, or `({}, reason)` naming the setting.
 
     A bare id, a hyphenated one and `collection://<id>` are accepted; a name
     is not, for the reason `NotionScope` gives for folders.
     """
     found: dict[str, str] = {}
     for target, setting in ROW_DATABASES:
-        value = str(ENVIRON.get(setting, "")).strip()
+        value, unknown = publish_setting(setting)
+        if unknown:
+            return {}, unknown
         named = notion_id(value.removeprefix("collection://")) if value else ""
         if not named:
-            return {}, ("%s %s; set it to the %s database's data source id"
-                        % (setting, "holds no id" if value else "is unset", target))
+            return {}, ("%s %s; run `sd config set %s <data source id>` with the %s database's id"
+                        % (setting, "holds no id" if value else "is unset", setting, target))
         found[target] = str(uuid.UUID(named))
     return found, ""
 
@@ -1907,25 +1920,58 @@ def read_channels(repo: Path) -> tuple[dict[str, dict[str, str]] | None, str]:
     edit. Falling back to the defaults would publish into folders the
     operator moved away from.
     """
-    imported = import_sd_db()
-    if imported.module is None:
-        return None, imported.problem
+    connection, problem = existing_database()
+    if connection is None:
+        return None, problem
     try:
-        from sd_db import channels, hub, repos  # noqa: PLC0415 - the checkout's `lib/`
-        if not (imported.module.database.local_path(DATABASE_HOME).exists()
-                or hub.configured(DATABASE_HOME)):
-            return None, ""
-        connection = imported.module.connect(home=DATABASE_HOME, write=False,
-                                             busy_timeout=DATABASE_BOUND)
-    except Exception as problem:  # an unknown is not "no setting": every failure is the cause
-        return None, "cannot open the workflow database: %s" % (problem or type(problem).__name__)
-    try:
+        from sd_db import channels, repos  # noqa: PLC0415 - the checkout's `lib/`
         # The inbound feed is not a publish channel (sd:3980).
         return channels.outbound(repos.repo_channels(connection, repo_home(repo))), ""
     except Exception as problem:  # refused or failed: the setting is unknown
         return None, str(problem) or type(problem).__name__
     finally:
         connection.close()
+
+
+def existing_database() -> tuple[Any, str]:
+    """The workflow database at `DATABASE_HOME`, opened to read: `(connection, "")`,
+    `(None, "")` on a machine with none (no database file and no `hub.json`),
+    or `(None, cause)`. A failed import or open is a cause, never "none".
+    """
+    imported = import_sd_db()
+    if imported.module is None:
+        return None, imported.problem
+    try:
+        from sd_db import hub  # noqa: PLC0415 - the checkout's `lib/`
+        if not (imported.module.database.local_path(DATABASE_HOME).exists()
+                or hub.configured(DATABASE_HOME)):
+            return None, ""
+        return imported.module.connect(home=DATABASE_HOME, write=False, busy_timeout=DATABASE_BOUND), ""
+    except Exception as problem:  # an unknown is not "no setting": every failure is the cause
+        return None, "cannot open the workflow database: %s" % (problem or type(problem).__name__)
+
+
+def publish_setting(key: str) -> tuple[str, str]:
+    """`(value, "")` for the publish setting `key`, `""` when unset, or `("", cause)` when unknown (sd:5141).
+
+    Row wins: once the database holds a row for `key`, the variable in
+    `SETTING_VARIABLES` is not read, and a cleared row reads unset. The
+    variable answers only while no row exists, and on a machine with no
+    database. A read that fails is unknown, never the variable's value: a
+    stale variable would send a mirror where the operator no longer points.
+    """
+    variable = str(ENVIRON.get(SETTING_VARIABLES[key], "")).strip()
+    connection, problem = existing_database()
+    if connection is None:
+        return ("", "%s is unknown: %s" % (key, problem)) if problem else (variable, "")
+    try:
+        from sd_db import writes  # noqa: PLC0415 - the checkout's `lib/`
+        held = writes.read_settings(connection, [key])
+    except Exception as problem:  # a failed read is unknown, never the variable's value
+        return "", "%s is unknown: %s" % (key, str(problem) or type(problem).__name__)
+    finally:
+        connection.close()
+    return ((held[key] or "").strip(), "") if key in held else (variable, "")
 
 
 #: The first words of the line a render prints when it cannot read the

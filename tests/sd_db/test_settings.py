@@ -278,6 +278,25 @@ class TheFleetVerbs(FleetCase):
         bad = self.run_sd("config", "set", "sd.status_companions", "app=lib")
         self.assertNotEqual(bad.returncode, 0)
 
+    def test_the_publish_settings_are_rows_and_refused_on_a_machine_with_no_database(self):
+        """sd:5141: the Notion ids `sd-research-kit` publishes to are rows; the reader never reads the file."""
+        page, source = "3c9f52b1-5782-81a7-a466-fb0e2df4d928", "collection://3cff52b1-5782-806a-acb0-ca0c8f41524b"
+        values = {"sd.notion_private_folder": page, "sd.notion_team_folder": "https://example.test/p/" + page,
+                  "sd.notion_experiments": page, "sd.notion_experiment_tasks": source}
+        for key, value in values.items():
+            done = self.run_sd("config", "set", key, value)
+            self.assertNotEqual(done.returncode, 0)
+            self.assertIn(f"{key} lives in the workflow database", done.stderr)
+        self.assertFalse(self.config_path.exists())
+        path = self.database()
+        for key, value in values.items():
+            done = self.run_sd("config", "set", key, value)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertNotEqual(self.run_sd("config", "set", key, "Briefs").returncode, 0)
+        connection = connect(path)
+        self.addCleanup(connection.close)
+        self.assertEqual(read_settings(connection, list(values)), values)
+
     def test_list_names_every_moved_key_with_its_source(self):
         self.write_file(fleet_owners="example", external_reviews="deny")
         connection = connect(self.database())
@@ -288,7 +307,9 @@ class TheFleetVerbs(FleetCase):
         listed = json.loads(done.stdout)
         self.assertEqual({key: (listed[key]["value"], listed[key]["source"]) for key in sd_lib.FLEET_KEYS},
                          {"copilot_review": ("never", "database"), "fleet_owners": ("example", "file"),
-                          "hub_name": (None, "default"), "status_companions": (None, "default")})
+                          "hub_name": (None, "default"), "status_companions": (None, "default"),
+                          "notion_private_folder": (None, "default"), "notion_team_folder": (None, "default"),
+                          "notion_experiments": (None, "default"), "notion_experiment_tasks": (None, "default")})
         self.assertEqual((listed["external_reviews"]["value"], listed["external_reviews"]["source"]), ("deny", "file"))
         self.assertEqual((listed["gate_slots"]["value"], listed["gate_slots"]["source"]), (None, "default"))
         text = self.run_sd("config", "list", "sd")

@@ -248,8 +248,8 @@ the next render.
 
 ### A Notion mirror is private unless it asks for the team
 
-`notion=dict()` mirrors to the folder `$SD_NOTION_PRIVATE_FOLDER` names.
-`notion=dict(team=True)` mirrors to the one `$SD_NOTION_TEAM_FOLDER` names.
+`notion=dict()` mirrors to the folder the `sd.notion_private_folder` setting names.
+`notion=dict(team=True)` mirrors to the one `sd.notion_team_folder` names.
 
 The default is private because the two mistakes are not symmetric. A brief the
 team cannot see is repaired by adding `team=True` and draining again. A private
@@ -265,16 +265,19 @@ with `team=True` and nothing else does it.
 name lookup that finds nothing returns an empty result rather than an error, so
 a rename would move every default mirror to nowhere and tell no one. A page id
 belongs to one Notion account, so no id ships with the pack either. Each
-operator sets their own, beside `$OBSIDIAN_VAULT`:
+operator sets their own, as workflow database rows (sd:5141):
 
-    SD_NOTION_PRIVATE_FOLDER=<notion page id>
-    SD_NOTION_TEAM_FOLDER=<notion page id>
+    sd config set sd.notion_private_folder <notion page id>
+    sd config set sd.notion_team_folder <notion page id>
 
-A page URL is accepted in place of a bare id. An unset variable, or one holding
-a folder name rather than an id, refuses that mirror and names the variable to
-set. The render still writes the local copies; only the outward request is
-withheld. Nothing falls back to a folder name or to a page some other account
-owns.
+A page URL is accepted in place of a bare id. While the database holds no row
+for a setting, its old variable answers (`SD_NOTION_PRIVATE_FOLDER`,
+`SD_NOTION_TEAM_FOLDER`); a cleared row reads unset. An unset setting, or one
+holding a folder name rather than an id, refuses that mirror and names the
+setting. A setting that cannot be read refuses it too and names the cause,
+never the variable's value. The render still writes the local copies; only the
+outward request is withheld. Nothing falls back to a folder name or to a page
+some other account owns.
 
 **A default lands in the repo's own page under that folder**, the way a Drive
 default lands in `Briefs/<repo>`. The request carries the repo in `subfolder`,
@@ -319,14 +322,15 @@ An item, not a document, may project as one row in a team experiments database
 (sd:3982). The operator designates it with `sd task edit N --experiment yes`
 (an experiment) or `--experiment of:M` (a task of experiment M); nothing is
 inferred. `row:ID` pins an existing row, `new` drops the pinned one, and `off`
-stops the projection and keeps the row. Two per-machine variables, beside the
-Notion folder ids, name the databases by data source id:
+stops the projection and keeps the row. Two settings, beside the Notion folder
+ids, name the databases by data source id:
 
-    SD_NOTION_EXPERIMENTS=<data source id>
-    SD_NOTION_EXPERIMENT_TASKS=<data source id>
+    sd config set sd.notion_experiments <data source id>
+    sd config set sd.notion_experiment_tasks <data source id>
 
-Unset, or holding a name, `sd-research-kit project` refuses and names the
-variable. sd writes `Status` on both databases, and `Experiment` and `Due` on a
+They read as the folder settings do, with `SD_NOTION_EXPERIMENTS` and
+`SD_NOTION_EXPERIMENT_TASKS` while no row exists. Unset, or holding a name,
+`sd-research-kit project` refuses and names the setting. sd writes `Status` on both databases, and `Experiment` and `Due` on a
 task, under a guard: a field is written only while its live value is the one
 sd last wrote and saw confirmed. A field a person changed is refused, listed in
 `yielded`, and named in one note on the item, with the value that hands it

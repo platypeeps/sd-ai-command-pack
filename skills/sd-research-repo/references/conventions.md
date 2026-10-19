@@ -457,27 +457,30 @@ the off position: they designate nothing, enqueue nothing, and never receive a
 written-back id.
 
 **A Notion mirror is private unless it asks for the team.** `notion=dict()`
-goes to the folder `$SD_NOTION_PRIVATE_FOLDER` names;
-`notion=dict(team=True)` goes to the one `$SD_NOTION_TEAM_FOLDER` names.
+goes to the folder the `sd.notion_private_folder` setting names;
+`notion=dict(team=True)` goes to the one `sd.notion_team_folder` names.
 Private is the default because the two mistakes are not symmetric: a
 brief the team cannot see is repaired by adding `team=True` and draining again,
 and a private brief in a shared team space has already been read. `space=`
 overrides the folder, never the scope.
 
-**Each default folder is a configured page id.** Set it per operator, beside
-`$OBSIDIAN_VAULT`:
+**Each default folder is a configured page id.** Set it per operator, as a
+workflow database row:
 
 ```sh
-SD_NOTION_PRIVATE_FOLDER=<notion page id>
-SD_NOTION_TEAM_FOLDER=<notion page id>
+sd config set sd.notion_private_folder <notion page id>
+sd config set sd.notion_team_folder <notion page id>
 ```
+
+While the database holds no row for one, its old variable answers
+(`SD_NOTION_PRIVATE_FOLDER`, `SD_NOTION_TEAM_FOLDER`).
 
 A page id and not a folder name, because a name lookup that finds nothing
 returns an empty result rather than an error, so a rename would move every
 default mirror to nowhere in silence. Configured and not shipped, because a
 page id belongs to one Notion account. A page URL works in place of a bare id.
-An unset variable, or one holding a name rather than an id, refuses that mirror
-and names the variable to set; the local copies are written either way.
+An unset setting, or one holding a name rather than an id, refuses that mirror
+and names the setting; the local copies are written either way.
 
 **A default lands in the repo's own page under that folder**, the way a Drive
 default lands in `Briefs/<repo>`. The request names the repo in `subfolder`,
