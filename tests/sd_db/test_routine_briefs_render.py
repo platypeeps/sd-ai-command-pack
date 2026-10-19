@@ -1,9 +1,8 @@
 """The vault copies of routine briefs: `routine_briefs.render` and `sd reports brief render` (sd:4041).
 
-The render writes each row's text with a `mirror-hash` line, under the
-five-bases mirror rule `sd_db.records` holds (sd:3976), into the folder the
-owning repository's `channels` setting names. Every vault and database is a
-temp dir; `TempRootCase` fails a test whose copy lands outside it.
+The render writes each row's text with a `mirror-hash` line (`hashed`), into
+the folder the owning repository's `channels` setting names. Every vault and
+database is a temp dir; `TempRootCase` fails a test whose copy lands outside it.
 """
 
 import os
@@ -18,9 +17,8 @@ from unittest.mock import patch
 
 from sd_db import connect, repos, routine_briefs, runner_journal
 from sd_db.migrate import initialise
-from sd_db.records import hash_holds, hashed
 from sd_db.remote import HubOnly
-from sd_db.routine_briefs import add, copies_state, render
+from sd_db.routine_briefs import add, copies_state, hash_holds, hashed, render
 from sd_db.testing.wire import hub_only
 from sd_db.writes import record_state
 

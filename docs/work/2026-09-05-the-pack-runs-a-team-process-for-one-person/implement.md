@@ -1548,7 +1548,7 @@ found the clause at `prd.md:1235-1236`, that every skill which runs a review
 names its point in the table and reads the cap from it, unasserted and
 outside that pull request's scope, so criterion 5 is part-closed and that
 clause stays open. #936 (`c3604594`) closed criterion 22. #939 (`0feecae9`)
-fixed the help text at `bin/sd:3031-3046` and closed criterion 27. Criterion
+fixed the help text at `bin/sd` [absent: those lines moved as bin/sd changed] and closed criterion 27. Criterion
 16 is still open, in #938. #940 (`075eecf2`) is sd:787's and touches no
 criterion of this item.
 
@@ -1688,7 +1688,7 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   and sd:244 are open. The residue detectors are cut only after the gating
   fleet check passes, and until then the `.trellis` residue line is exempt.)
 - **21, open (the code-path half).** `bin/sd_sweep.py` is tracked, and
-  `bin/sd:2969` still defines `"sweep", help="report the planning items the
+  `bin/sd` [absent: the sweep verb was removed] still defines `"sweep", help="report the planning items the
   45-day rule would park"`. No test asserts a frozen set for `git rm`,
   `rmtree` and `rmdir`. The archive half holds: `tests.test_archive_untouched`
   passes (5 tests). No test was found that puts a `planning` item under the
@@ -1713,7 +1713,7 @@ add 5, 6 and 27. The verification of #931 adds 11 and 13.
   (`505431b8`, 2026-09-10) made that change, and no entry on this item
   records it. (2026-09-14: the criterion is rewritten to #802's queue design
   by decision note 1942, and `prd.md`'s log entry of that date records it.
-  The help text at `bin/sd:3031-3046` still said both verbs open a pull
+  The help text at `bin/sd` [absent: those lines moved as bin/sd changed] still said both verbs open a pull
   request, so criterion 27 stayed open for that fix. Later that day #939
   merged as `0feecae9`, and the help text now says the verbs queue a code
   review task. Criterion 27 is closed. The rewritten criterion also records
@@ -1954,7 +1954,7 @@ recounted.
 | 24, 25 — `paths.json`, the union with active trials, `sd skill try` and its row | PR 5 |
 | 2, 3, 6, 10, 11, 32 — the registry runtime, the tiered path, trailers, the modes, reviewed head | (2026-09-14: criterion 6's `minimax` meter clause and criterion 11's demotion-note clause are open, see "The closure state today"; decision note 1942 defers 6's open parts to followup sd:788 and 11's to followup sd:789) (2026-09-16: sd:789 is `done`, #957 merged as `c43747e4`: `sd-ship` writes the demotion note when the remote lowers the mode; sd:788 is still `planning`) PR 6, which also carries criterion 5's vendor clause; with criterion 11's closing sentence — all three modes in `README.md` — in PR 1, so PR 1 must land before PR 6 rather than in any order with it |
 | 13 — status from the row | PR 6 (the reader, which PR 7 lands after), PR 7 (the retire step, the `prd.md` writes, `sd-ship --deliver`, the reconciliation and the `sd_db` installer step at `prd.md:1541-1547`, whose files are in its Touches and in no other pull request's claim) (2026-09-14: the moved-default-branch clause is open, see "The closure state today"; decision note 1942 rewrites it to #802's refusal, and the test for the refusal is still to add). (2026-09-14: no step of the lane order schedules that test, and the note is silent on which pull request carries it. `Delivers: sd:10` on 31(c) is what still holds it). (2026-09-16: the test is `ReadyCase` in `tests/test_sd_ship_remote.py`, in the pull request that carries this row, under the team-lead decision recorded in "The lane order". The moved-default-branch clause is closed) |
-| 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` and writing-manifest clauses checked by reading on 2026-09-13 and recorded under "Closing the item", not tested (2026-09-14: criterion 27 fails its own words on `main`, see "The closure state today"; decision note 1942 rewrites it to #802's queue design, and its help text is the first fix after #932, which merged as `107016fc`). (2026-09-14: criterion 27 is closed. #939 merged as `0feecae9` and fixed the help text at `bin/sd:3031-3046`) |
+| 26, 27, 28, 29 — use rows, promotion, suggestions, handoff | PR 8; criterion 28's `commands.yaml` and writing-manifest clauses checked by reading on 2026-09-13 and recorded under "Closing the item", not tested (2026-09-14: criterion 27 fails its own words on `main`, see "The closure state today"; decision note 1942 rewrites it to #802's queue design, and its help text is the first fix after #932, which merged as `107016fc`). (2026-09-14: criterion 27 is closed. #939 merged as `0feecae9` and fixed the help text at `bin/sd` [absent: those lines moved as bin/sd changed]) |
 | 7 — no percentage removes the code review point | the grep, which passes (re-run 2026-09-13); the back-scoring of the seven passes is cut (operator, 2026-09-07); the forward ten-pass experiment, its report and its decision are deferred to followup sd:777 (owner decision, 2026-09-13, decision note 1920) |
 
 Criterion 7 is the one row in this table with no pull request beside it, and

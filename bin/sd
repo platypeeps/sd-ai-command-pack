@@ -6,8 +6,8 @@ operations as the dashboard. Ordinary task progress needs no repository or
 GitHub issue. Code delivery records verified commit evidence separately.
 
 `sd store items` reads workflow rows. `sd store list` reads a plugin's artifact
-rows from the database (the `db` store driver); the vault holds only their
-mirror. Where a plugin artifact kind is kept comes
+rows from the database (the `db` store driver); the vault holds only one HTML
+page per base. Where a plugin artifact kind is kept comes
 from the manifest's `store` block -- a sibling of `dashboard`, not a ninth
 `kinds.*` key, because the eight describe what a kind *is* and none of that
 changes when the same kind is kept somewhere else.
@@ -69,7 +69,6 @@ import pathlib
 import queue
 import re
 import sqlite3
-import subprocess
 import sys
 import threading
 import time
@@ -147,7 +146,7 @@ REPO_PATTERN = re.compile(r"^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$")
 STORE_KEYS = frozenset({"driver", "root", "bases"})
 # A closed set rather than an `if`. A manifest that says `"driver": "vualt"`
 # refuses by name instead of falling through to a default. Under `db` the rows
-# are the source, through `sd_db.records`, and the vault holds a mirror (sd:3975).
+# are the source, through `sd_db.records`, and the vault holds a page per base (sd:5133).
 DRIVERS = frozenset({"db"})
 #: The `vault` driver read and wrote the notes themselves. It was removed once
 #: no plugin named it (sd:4627); a manifest that still does refuses by name.
@@ -832,7 +831,7 @@ def validate_workflow(manifest: dict[str, object], kinds: dict[str, object],
     A top-level block rather than a ninth `kinds.*` key, for the reason
     `store` is one: whether a kind becomes a row is a fact about the
     backbone's database, not about the note. Each kind needs a `store.bases`
-    entry, because the mirror writes into the base, and may name the field that
+    entry, because a new row's path starts with the base, and may name the field that
     holds its due date.
     """
 
@@ -851,7 +850,7 @@ def validate_workflow(manifest: dict[str, object], kinds: dict[str, object],
         if name not in kinds:
             raise Refusal(f"`workflow` names {name!r}, which is not a declared kind")
         if name not in bases:
-            raise Refusal(f"{what} has no `store.bases` entry, so the mirror has nowhere to write")
+            raise Refusal(f"{what} has no `store.bases` entry, so a new row has no path")
         if not isinstance(entry, dict):
             raise Refusal(f"{what} is not an object")
         unknown = sorted(set(entry) - {"status", "due-field"})
@@ -1475,106 +1474,6 @@ def config_list(args: argparse.Namespace) -> int:
     return 0
 
 
-# ------------------------------------------------------------------ the vault root
-
-# Carried across from `local-project-dashboard/collectors.py:173-227`, and the
-# reason is the whole of it: macOS gates `~/Documents` behind TCC, and a
-# process with nobody to click the prompt does not get an error -- it waits.
-# On 2026-08-28 an unanswered prompt held a collector for 1605 seconds with the
-# page stuck on "collecting...". A driver that distinguishes only "path
-# missing" from "path present" inherits that hang, and an unattended caller
-# looks slow rather than blocked. Probing in a child bounds it.
-VAULT_PROBE_SECONDS = 15
-
-# The child answers which of four things is true, because the parent cannot
-# tell them apart from out here: a `stat` from this process cannot distinguish
-# a vault that was moved from one macOS is refusing to open, and both leave the
-# parent directory standing.
-VAULT_PROBE = (
-    "import os, sys\n"
-    "try:\n"
-    "    os.listdir(sys.argv[1])\n"
-    "except FileNotFoundError:\n"
-    "    print('missing')\n"
-    "except NotADirectoryError:\n"
-    "    print('notdir')\n"
-    "except OSError:\n"
-    "    print('denied')\n"
-    "else:\n"
-    "    print('ok')\n"
-)
-
-
-def vault_reason(root: pathlib.Path) -> str:
-    """'' if `root` lists within the budget, otherwise why it does not.
-
-    Each answer gets its own sentence, and the timeout is the only one that
-    mentions macOS. Folding them together was the first draft's mistake and
-    review caught it: a directory with the read bit off reported "on macOS this
-    is Documents access", sending somebody to System Settings for a `chmod`.
-    **A hang is the TCC signature and a refusal is not** -- an ungranted read
-    under launchd does not fail, it waits, which is the whole reason this
-    probes in a bounded child instead of calling `iterdir` here.
-    """
-
-    try:
-        done = subprocess.run(
-            [sys.executable, "-c", VAULT_PROBE, str(root)],
-            capture_output=True, text=True, timeout=VAULT_PROBE_SECONDS)
-    except subprocess.TimeoutExpired:
-        return (
-            f"{root} did not answer a directory listing in {VAULT_PROBE_SECONDS}s. "
-            f"On macOS that is a Documents access prompt, which nothing unattended "
-            f"can answer: allow Full Disk Access for {sys.executable} in System "
-            f"Settings > Privacy & Security, then run this again.")
-    except OSError as error:
-        return f"cannot probe {root}: {error}"
-    answer = done.stdout.strip()
-    if answer == "ok":
-        return ""
-    if answer == "missing":
-        return f"vault path does not exist: {root}"
-    if answer == "notdir":
-        return f"vault path is not a directory: {root}"
-    if answer == "denied":
-        return f"cannot read {root}: permission denied"
-    # The probe said something this function does not know. Reported as the
-    # unknown it is, with what the child actually printed, rather than folded
-    # into the nearest familiar cause -- which is the failure mode this whole
-    # function was just rewritten to stop having.
-    detail = done.stderr.strip().splitlines()[-1:] or [f"exit {done.returncode}"]
-    return f"could not determine whether {root} is readable: {detail[0]}"
-
-
-def store_root(store: dict[str, object]) -> pathlib.Path:
-    """The vault root the manifest points at, resolved through the environment.
-
-    There is no default. `pack.py` had one -- an absolute string with a
-    username in it -- and five shell callers have another, spelled
-    `${OBSIDIAN_VAULT:-$HOME/Documents/Example Vault}`. A default here
-    would make a fourth spelling of the same path, and the failure it prevents
-    is the mild one: an unset variable is a sentence naming the knob, where a
-    default is a silent read of somebody else's vault layout.
-    """
-
-    name = str(store["root"])[1:]
-    value = os.environ.get(name)
-    if not value:
-        raise Refusal(f"{name} is not set; it names the vault this plugin stores into")
-    root = pathlib.Path(value).expanduser()
-    if not root.is_absolute():
-        # A relative root makes the same command answer differently from two
-        # directories, which is the one property a system-of-record must not
-        # have. Refused rather than resolved against the cwd, because resolving
-        # it silently is how a query reads the wrong vault and reports it as
-        # empty. Found in review.
-        raise Refusal(f"{name} is {value!r}; it must be an absolute path")
-    reason = vault_reason(root)
-    if reason:
-        raise Refusal(reason)
-    return root
-
-
 def resolve_kind(
         reference: object) -> tuple[dict[str, object], dict[str, object], str, pathlib.Path]:
     """`<prefix>.<kind>` -> that kind, its store block, the kind name, its checkout.
@@ -1607,22 +1506,6 @@ def resolve_kind(
     return kind, store, name, manifest_path.parent
 
 
-def kind_base(store: dict[str, object], name: str,
-              root: pathlib.Path | None = None) -> pathlib.Path:
-    """The kind's directory under the vault root.
-
-    `root` is there for the one caller that needs the vault root itself as
-    well: `store_root` probes the vault in a bounded child process on every
-    call (see `vault_reason`), so a verb that resolves the root twice pays two
-    interpreter spawns and, on an ungranted vault, two chances to hit the
-    fifteen-second timeout. Pass the root you already have and this reuses it.
-    """
-
-    bases = store["bases"]
-    assert isinstance(bases, dict)  # validate_store builds it; narrows for the type checker
-    return (store_root(store) if root is None else root) / str(bases[name])
-
-
 def store_fields(kind: dict[str, object]) -> list[str]:
     declared = kind["fields"]
     assert isinstance(declared, list)  # validate_kind builds it; narrows for the type checker
@@ -1647,7 +1530,7 @@ def status_filter(kind: dict[str, object], wanted: str | None) -> str | None:
 
 # --- rows as notes ---------------------------------------------------------
 #
-# `get` and `list --full` print a row the way its mirror note reads: its fields
+# `get` and `list --full` print a row as a note: its fields
 # as a frontmatter block, then the body. The block is rendered by the line, never
 # round-tripped through a parser, so a value that needs quoting is quoted.
 
@@ -1675,7 +1558,7 @@ NEEDS_QUOTING = re.compile(
 
 
 def render_value(value: str) -> str:
-    """A scalar as the mirror notes spell it.
+    """A scalar as a note's frontmatter spells it.
 
     Quoting is not cosmetic here. `source-brief: [[2026-08-15 - Daily Intel
     Brief]]` and a `description:` holding a sentence colon both stop parsing
@@ -1826,76 +1709,19 @@ def refuse_human_only(kind: dict[str, object], status: str, remedy: str) -> None
                 f"`human-only` reserves {action!r} (status {status!r}) for a person; {remedy}")
 
 
-def refuse_title_taken(root: pathlib.Path, path: pathlib.Path) -> None:
-    """A note's title is taken if *any* note in the vault already has it.
+def check_title(title: str) -> str:
+    """A title names one file directly in its kind's base, and nowhere else.
 
-    Not just the kind's own base. A vault's titles share one namespace: an
-    Obsidian wikilink resolves on the filename alone, so a tip called the same
-    thing as a note in `Learning/` makes every existing link to that name
-    ambiguous, and the note that loses is the one nobody was editing. This is
-    `pack.py`'s `vault_title_taken`, which refuses in four places and which the
-    retarget would otherwise have dropped on the floor.
-
-    Dot-directories are skipped. `pack.py` names seven of them and every one
-    starts with a dot (`.obsidian`, `.trash`, `.git`, `.smart-env`, `.space`
-    and `.makemd` among them), so the rule is the generalisation rather than the
-    list: a copy Obsidian keeps in `.trash` is not a note anybody links to, and
-    a new plugin's cache directory should not need a code change here.
-
-    `path` itself never counts, so a caller that has already refused an
-    existing note does not get a second, worse-worded refusal for the same one.
+    Containment is the whole check, not a list of forbidden characters: a
+    title whose `.md` file would not sit directly in the base is refused, so
+    `a/b`, `../escaped` and the three degenerate names exit 2 before any write.
+    The library refuses them too, as a refusal rather than a usage error.
     """
 
-    # A scan that cannot read the vault must refuse, not come back empty. macOS
-    # answers an ungranted `~/Documents` read by returning nothing rather than
-    # by failing, and `os.walk` swallows per-directory errors by default, so
-    # without both of these an unreadable vault reports every title as free and
-    # the collision check passes vacuously -- the one way this guard could be
-    # worse than not having it. A vault root that is not there is already
-    # refused by the driver before this runs.
-    def unreadable(error: OSError) -> None:
-        raise Refusal(
-            f"cannot scan {error.filename} for title collisions: {error}."
-            " Refusing rather than treating the title as free") from None
-
-    want = path.name
-    for parent, dirs, files in os.walk(root, onerror=unreadable):
-        dirs[:] = [name for name in dirs if not name.startswith(".")]
-        if want in files:
-            found = pathlib.Path(parent) / want
-            if found != path:
-                raise Refusal(
-                    f"title collision: {want!r} already exists at "
-                    f"{found.relative_to(root)}; titles share one namespace across the vault")
-
-
-def note_path(base: pathlib.Path, title: str) -> pathlib.Path:
-    """A title becomes a filename in `base`, and cannot become anywhere else.
-
-    Containment is the whole check, and deliberately not a list of forbidden
-    characters. A blacklist encodes a fact about *this platform* -- `/`
-    separates here and a backslash is an ordinary filename character -- into a
-    rule about titles, so it refuses a legal title on one system while missing
-    a traversal on another. Resolving the built path and requiring it to sit
-    directly in `base` is the same check everywhere, and it is what the tests
-    exercise: with it removed, `a/b` and `../escaped` are both accepted.
-
-    The *parent* is resolved and the note itself is not. Resolving the whole
-    path follows a symlinked note out to wherever it points and refuses it;
-    the vault's owner and the manifest's author are the same person.
-
-    The three degenerate names are refused before that only because they make a
-    contained but useless path (`..` becomes `...md`) and deserve the clearer
-    message. `sd store get` calls this too, rather than repeating a weaker
-    copy of it as it did.
-    """
-
-    if title in {"", ".", ".."}:
+    base = pathlib.PurePosixPath("base")
+    if title in {"", ".", ".."} or (base / f"{title}.md").parent != base:
         raise UsageError(f"{title!r} is not a note title")
-    path = base / f"{title}.md"
-    if path.parent.resolve() != base.resolve():
-        raise UsageError(f"{title!r} is not a note title")
-    return path
+    return title
 
 
 def declared_sections(kind: dict[str, object]) -> list[str]:
@@ -2371,13 +2197,9 @@ def rendered_body(kind: dict[str, object], root: pathlib.Path, args: argparse.Na
 
 
 def store_add(args: argparse.Namespace) -> int:
-    """A new row, its body rendered from the kind's template as a note's is.
+    """A new row, its body rendered from the kind's template as a note's is. It reads no vault (sd:5133)."""
 
-    The vault is read for one thing: its other notes share the row's file-name
-    namespace, which the mirror will write into (`refuse_title_taken`).
-    """
-
-    kind, store, name, root = resolve_kind(args.kind)
+    kind, _, name, root = resolve_kind(args.kind)
     fields = store_fields(kind)
     values = parse_assignments(
         resolve_pair_files(args.field or [], "--field-file", sequences=True), fields)
@@ -2388,9 +2210,8 @@ def store_add(args: argparse.Namespace) -> int:
     assert not isinstance(stage, list)  # refuse_scalar_lists refused it
     if "status" in fields:
         refuse_human_only(kind, stage or str(kind["initial-status"]), DB_HUMAN)
+    check_title(args.title)
     body = rendered_body(kind, root, args)
-    vault = store_root(store)
-    refuse_title_taken(vault, note_path(kind_base(store, name, vault), args.title))
     # Every declared field, as `add` writes every key of a note; an empty one is `None`, as `key:` reads.
     held = {field: values.get(field) for field in fields if field != "status"}
     with db_store(name) as (records, rules, connection):
@@ -2631,9 +2452,8 @@ def store_get(args: argparse.Namespace) -> int:
 
 # --- the `db` driver (sd:3975) ---------------------------------------------
 #
-# Under `store.driver: db` the rows are the source and the vault holds a
-# mirror, so these verbs read and write rows through `sd_db.records`; only
-# `add` reads the vault, for title collisions. The library checks the stage
+# Under `store.driver: db` the rows are the source, so these verbs read and
+# write rows through `sd_db.records` and read no vault. The library checks the stage
 # graph, floors, unique fields and the revision. It leaves `human-only` and `protected-fields` to its
 # callers: the dashboard is the operator and may make those moves, and
 # `sd store` is how an agent writes, so they are checked here.

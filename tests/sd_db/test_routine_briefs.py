@@ -19,7 +19,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import connect, reads, records, reporting, repos, routine_briefs, workflow
+from sd_db import connect, reads, reporting, repos, routine_briefs, workflow
 from sd_db.migrate import initialise
 from sd_db.routine_briefs import (
     BriefConflict,
@@ -309,7 +309,7 @@ class TheImport(Briefs):
     def test_an_import_over_rendered_copies_files_nothing(self):
         self.note()
         self.imported()
-        self.note(records.hashed(TEXT))
+        self.note(routine_briefs.hashed(TEXT))
         result = self.imported()
         self.assertEqual((result["filed"], result["unchanged"], result["conflicts"], result["verified"]), ([], 1, [], 1))
 
@@ -319,14 +319,14 @@ class TheImport(Briefs):
         self.imported()
         self.db.execute("DELETE FROM note WHERE item = ?", (self.row()["id"],))
         self.db.execute("DELETE FROM item WHERE id = ?", (self.row()["id"],))  # the restore took it away
-        self.note(records.hashed(TEXT))
+        self.note(routine_briefs.hashed(TEXT))
         result = self.imported()
         self.assertEqual((result["filed"], result["verified"]), ([DAILY], 2))
 
     def test_a_copy_newer_than_its_restored_row_is_a_conflict_and_the_row_stays(self):
         self.add()
         self.add(TEXT + FINDINGS, mode="extend")
-        self.note(records.hashed(TEXT + FINDINGS))  # the render wrote the extended row
+        self.note(routine_briefs.hashed(TEXT + FINDINGS))  # the render wrote the extended row
         self.restore(TEXT)
         result = self.imported()
         self.assertEqual([(c["stem"], c["copy"]) for c in result["conflicts"]],
@@ -335,7 +335,7 @@ class TheImport(Briefs):
 
     def test_a_copy_older_than_its_replaced_row_is_a_conflict_and_the_row_stays(self):
         self.add()
-        self.note(records.hashed(TEXT))
+        self.note(routine_briefs.hashed(TEXT))
         self.add("---\na: b\n---\nthe operator's text\n", mode="replace")  # its render failed
         result = self.imported()
         self.assertEqual([c["stem"] for c in result["conflicts"]], [DAILY])
@@ -344,7 +344,7 @@ class TheImport(Briefs):
     def test_publish_restore_replace_then_import_keeps_the_replaced_row(self):
         self.add()
         self.add(TEXT + FINDINGS, mode="extend")
-        self.note(records.hashed(TEXT + FINDINGS))  # published
+        self.note(routine_briefs.hashed(TEXT + FINDINGS))  # published
         self.restore(TEXT)  # back to the older row
         self.add("---\na: b\n---\nreplaced after\n", mode="replace")
         result = self.imported()
@@ -354,7 +354,7 @@ class TheImport(Briefs):
     def test_a_rendered_copy_at_the_size_limit_imports_back_after_its_row_is_gone(self):
         text = TEXT + "x" * (reporting.MAX_REPORT - len(TEXT.encode()) - 1) + "\n"
         self.add(text)
-        self.note(records.hashed(text))
+        self.note(routine_briefs.hashed(text))
         self.db.execute("DELETE FROM note WHERE item = ?", (self.row()["id"],))
         self.db.execute("DELETE FROM item WHERE id = ?", (self.row()["id"],))  # the restore took it away
         result = self.imported()
@@ -362,7 +362,7 @@ class TheImport(Briefs):
 
     def test_a_hand_edited_copy_is_named_as_one(self):
         self.add()
-        self.note(records.hashed(TEXT).replace("Three", "Four"))
+        self.note(routine_briefs.hashed(TEXT).replace("Three", "Four"))
         self.assertEqual([c["copy"] for c in self.imported()["conflicts"]],
                          ["its mirror-hash does not match: a hand edit"])
 

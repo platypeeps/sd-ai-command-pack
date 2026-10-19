@@ -69,7 +69,7 @@ Write a kind with keys only from `KIND_KEYS` in `bin/sd` (eight), with
 is a decision record before it is a commit, and `validate_kind` turns a
 manifest carrying one away by name (R11-D14).
 A store block names `"driver": "db"`: the rows are the source, `sd store`
-reads and writes them, and the vault holds a rendered mirror. The `vault`
+reads and writes them, and the vault holds one HTML page per base. The `vault`
 driver is gone, and a manifest that names it is refused with the fix.
 The rows in `bin/sd_rules.py` state each rule; none is restated here.
 `sd-rules --for <path>` prints the rows in scope for the file being

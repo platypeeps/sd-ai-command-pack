@@ -18,7 +18,6 @@ import importlib.machinery
 import importlib.util
 import itertools
 import json
-import os
 import pathlib
 import random
 import subprocess
@@ -138,55 +137,19 @@ class StoreFixture(unittest.TestCase):
 
 
 class ResolutionTests(StoreFixture):
-    """The vault root `store add` reads for title collisions, and the manifest lookups every verb makes."""
+    """The manifest lookups every verb makes."""
 
-    def test_an_unset_knob_names_the_knob(self) -> None:
-        self.plugin()
-        done = self.add(vault=None)
-        self.assertEqual(done.returncode, 1, done.stdout)
-        self.assertIn("OBSIDIAN_VAULT is not set", done.stderr)
-
-    def test_a_vault_that_is_not_there_says_so_rather_than_reporting_empty(self) -> None:
-        self.plugin()
-        done = self.add(vault=str(self.tmp / "absent"))
-        self.assertEqual(done.returncode, 1, done.stdout)
-        self.assertIn("vault path does not exist", done.stderr)
-
-    @unittest.skipIf(os.geteuid() == 0, "root reads a directory with no permissions")
-    def test_an_unreadable_vault_says_permission_denied_and_not_macos(self) -> None:
-        """Each probe answer gets its own sentence, and only one mentions macOS.
-
-        Found in review. The first draft folded the timeout and the denial
-        together, so a directory with the read bit off reported "on macOS this
-        is Documents access" and sent somebody to System Settings for a
-        `chmod`. **A hang is the TCC signature; a refusal is not.**
-        """
+    def test_add_reads_no_vault(self) -> None:
+        """pack sd:5133: with the base notes retired, `add` neither probes nor scans the vault."""
 
         self.plugin()
-        closed = self.tmp / "closed"
-        closed.mkdir()
-        closed.chmod(0o000)
-        self.addCleanup(closed.chmod, 0o755)
-        done = self.add(vault=str(closed))
-        self.assertEqual(done.returncode, 1, done.stdout)
-        self.assertIn("permission denied", done.stderr)
-        self.assertNotIn("Full Disk Access", done.stderr)
-
-    def test_a_vault_that_is_a_file_says_so(self) -> None:
-        self.plugin()
-        flat = self.tmp / "flat"
-        flat.write_text("not a vault\n", encoding="utf-8")
-        done = self.add(vault=str(flat))
-        self.assertEqual(done.returncode, 1, done.stdout)
-        self.assertIn("is not a directory", done.stderr)
-
-    def test_a_relative_vault_root_refuses(self) -> None:
-        """The same command must not answer differently from two directories."""
-
-        self.plugin()
-        done = self.add(vault="vault")
-        self.assertEqual(done.returncode, 1, done.stdout)
-        self.assertIn("must be an absolute path", done.stderr)
+        (self.vault / "Learning").mkdir()
+        (self.vault / "Learning" / "Shared name.md").write_text("A note.\n", encoding="utf-8")
+        for title, vault in (("Unset", None), ("Absent", str(self.tmp / "absent")), ("Shared name", "")):
+            done = self.add(title, vault=vault)
+            self.assertEqual(done.returncode, 0, f"{title}: {done.stderr}")
+        self.assertEqual(self.titles(), ["Unset", "Absent", "Shared name"])
+        self.assertFalse((self.tmp / "absent").exists())
 
     def test_an_unknown_prefix_and_an_unknown_kind_refuse_differently(self) -> None:
         self.plugin()
@@ -685,106 +648,6 @@ class EditSectionTests(unittest.TestCase):
     def test_an_empty_body_leaves_one_blank_line_and_no_text(self) -> None:
         after = self.edit("## Tip\n\nold\n\n## Score\n\ns\n", "Tip", "")
         self.assertEqual(after, "## Tip\n\n## Score\n\ns\n")
-
-
-class VaultWideTitleTests(StoreFixture):
-    """`pack.py`'s `vault_title_taken`, which the retarget would have dropped.
-
-    A vault's titles share one namespace -- an Obsidian wikilink resolves on
-    the filename alone -- so `add` refuses a title held anywhere in the vault,
-    not just in the kind's own base, because the mirror will write there.
-    """
-
-    def setUp(self) -> None:
-        super().setUp()
-        self.plugin()
-
-    def elsewhere(self, relative: str, name: str) -> pathlib.Path:
-        where = self.vault / relative
-        where.mkdir(parents=True, exist_ok=True)
-        path = where / f"{name}.md"
-        path.write_text("---\nstatus: inbox\n---\n\nSomewhere else.\n", encoding="utf-8")
-        return path
-
-    def test_a_title_held_in_another_directory_is_refused(self) -> None:
-        self.elsewhere("Learning", "Shared name")
-        done = self.add("Shared name")
-        self.assertEqual(done.returncode, 1, done.stdout)
-        self.assertIn("title collision", done.stderr)
-        self.assertIn("Learning/Shared name.md", done.stderr)
-
-    def test_a_copy_in_a_dot_directory_does_not_count(self) -> None:
-        """Obsidian's `.trash` holds deleted notes; nothing links to them.
-
-        `pack.py` names seven dot-directories and skips all of them, so the
-        rule here is the generalisation rather than the list.
-        """
-
-        self.elsewhere(".trash", "Shared name")
-        done = self.add("Shared name")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(self.titles(), ["Shared name"])
-
-    def test_a_directory_it_cannot_read_refuses_rather_than_passing(self) -> None:
-        """The one way this guard could be worse than not having it.
-
-        `os.walk` swallows per-directory errors by default, so an unreadable
-        directory hiding a colliding title would come back as "free" and the
-        note would be written. macOS answers an ungranted `~/Documents` read
-        the same way -- empty rather than failing -- which would make every
-        collision check pass vacuously on a vault behind a missing TCC grant.
-        """
-
-        held = self.elsewhere("Locked", "Shared name")
-        locked = held.parent
-        locked.chmod(0o000)
-        self.addCleanup(locked.chmod, 0o755)
-        done = self.add("Shared name")
-        self.assertEqual(done.returncode, 1, done.stdout)
-        self.assertIn("cannot scan", done.stderr)
-
-    def test_the_existing_note_is_left_alone(self) -> None:
-        """A refused `add` must not have written anything on its way to refusing."""
-
-        held = self.elsewhere("Learning", "Shared name")
-        before = held.read_text(encoding="utf-8")
-        self.assertEqual(self.add("Shared name").returncode, 1)
-        self.assertEqual(held.read_text(encoding="utf-8"), before)
-
-    def test_add_probes_the_vault_once_and_not_once_per_use_of_the_root(self) -> None:
-        """`store add` needs the vault root twice; it may only probe for it once.
-
-        `store_root` ends in `vault_reason`, which lists the vault in a bounded
-        child process. That is not a cheap call: it spawns an interpreter, and
-        against an ungranted vault it is fifteen seconds of waiting. `add`
-        resolves the root for the kind's base and again for the vault-wide
-        title scan, and resolving it twice paid for the probe twice. This runs
-        `add` in-process so the calls can be counted; every other case in this
-        class runs the real command.
-        """
-
-        self.elsewhere("Learning", "Neighbour")
-        sd = sd_module()
-        calls: list[pathlib.Path] = []
-        real = sd.vault_reason
-
-        def counted(root: pathlib.Path) -> str:
-            calls.append(root)
-            return real(root)
-
-        sd.vault_reason = counted
-        self.addCleanup(setattr, sd, "vault_reason", real)
-        before = {name: os.environ.get(name) for name in ("HOME", "XDG_CONFIG_HOME", "OBSIDIAN_VAULT")}
-        self.addCleanup(lambda: [os.environ.__setitem__(name, value) if value is not None
-                                 else os.environ.pop(name, None)
-                                 for name, value in before.items()])
-        os.environ["HOME"] = str(self.home)
-        os.environ["XDG_CONFIG_HOME"] = str(self.config_home)
-        os.environ["OBSIDIAN_VAULT"] = str(self.vault)
-
-        self.assertEqual(sd.main(["store", "add", "pp.tip", "Fresh", "--field", "score=7"]), 0)
-        self.assertEqual(len(calls), 1, f"probed the vault {len(calls)} times")
-        self.assertEqual(self.titles(), ["Fresh"])
 
 
 if __name__ == "__main__":

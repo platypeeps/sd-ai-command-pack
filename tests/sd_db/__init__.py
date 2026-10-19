@@ -13,7 +13,7 @@ from pathlib import Path
 # defaulted, so an operator's exported value never reaches a test either.
 os.environ["SD_DB_BACKUP_ROOT"] = "Documents/sd-backups"
 
-# A base row write renders the vault mirror under `$OBSIDIAN_VAULT` (sd:3976).
+# A base row write renders its base's HTML page under `$OBSIDIAN_VAULT` (sd:3976).
 # Assigned to a folder that does not exist, so a test that names no vault of
 # its own refuses to render rather than writing into the operator's vault.
 os.environ["OBSIDIAN_VAULT"] = os.path.join(tempfile.gettempdir(), "sd-db-tests-name-their-own-vault")

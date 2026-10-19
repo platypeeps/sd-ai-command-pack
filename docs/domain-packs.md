@@ -108,9 +108,9 @@ registration for that would fail a correct manifest.
 
 `store` without `kinds` refuses.
 
-Under `db` the database rows are the source and the vault holds a mirror. Every
-`sd store` verb reads and writes rows through `sd_db.records`, `status` is the
-row's stage, and every kind needs a `workflow` map. `sd store` refuses
+Under `db` the database rows are the source and the vault holds one HTML page
+per base. Every `sd store` verb reads and writes rows through `sd_db.records`,
+`status` is the row's stage, and every kind needs a `workflow` map. `sd store` refuses
 `human-only` moves and `protected-fields` writes; the
 operator makes them on the dashboard. `sd plugin list --json` reports each
 kind's checked rules under `rules`, which is where the library reads them.
@@ -196,7 +196,7 @@ exactly what it caught, three runs before anyone read the line.
 
 **Rows.** A domain repo's work reaches `sd today` and the dashboard through the
 shared database, by repository path. That needs no manifest key. `kinds` and
-`store` are for artifacts the plugin keeps as database rows, mirrored into a vault;
+`store` are for artifacts the plugin keeps as database rows, with a page per base in a vault;
 `workflow` names those kinds and maps each ladder word to a row status.
 
 ## What a domain pack may not do

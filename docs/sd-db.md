@@ -155,7 +155,7 @@ The message names the verb and the hub.
 - the publication journal and the `sd writing` cutover;
 - shadow sync;
 - `repo lane-host`, which holds the hub's ship lock while it moves a lane (sd:3075);
-- `records render`, the vault mirror of base rows (next section).
+- `records render`, the HTML page of each base (next section).
 - `sd reports brief render`, the vault copies of routine briefs.
 
 `ledger.reserve` raises `LedgerRefused` with scope `hub`: provider calls are charged on the hub.
@@ -503,21 +503,17 @@ A vault base row's kind is refused: `records` lists it by item kind `idea`.
 Read them as a group with `reads.backlog_items(connection, repo=reads.NO_REPO)` or the dashboard's `/tasks?repo=no%20repo`.
 That is filing behaviour, not a constraint: `item.repo` has no per-kind CHECK, and `writes.create_item` takes a `repo` for any kind.
 
-## `records render`: the vault mirror of base rows
+## `records render`: the HTML page of each base
 
 Once a plugin's `store.driver` is `db`, its vault base rows live in `item` and `sd_db.records` writes them.
-`records render [KIND ...]` writes them back into the vault as a read-only mirror; with no kind it takes every kind a `db` plugin declares.
-
-- Each row's note sits at its `path`, with `status` from `stage`, the body verbatim and a `mirror-hash` of the rest of the file.
-- One HTML page per base goes to `<vault>/docs/dashboard/base-<kind>.html`, for the dashboard's Documents tab.
-- A file is overwritten only when its `mirror-hash` matches its content, or it has none and reads as its row. Any other file is a hand edit: it stays, and the render reports it.
-- A note in the base folder that no row holds is reported and kept.
-- It refuses off the hub, while a `restore` is unresolved, for a kind whose plugin list still reports the removed `vault` driver, and when a base folder does not exist.
+`records render [KIND ...]` writes one read-only HTML page per base to `<vault>/docs/dashboard/base-<kind>.html`, for the dashboard's Documents tab; with no kind it takes every kind a `db` plugin declares.
+It writes no note into the vault: the note mirror was retired (sd:5133).
+It refuses off the hub, for a kind whose plugin list still reports the removed `vault` driver, and when the vault root is not a directory.
 
 Each committed `records` write renders its kind, or every kind after a failed render. A write never fails for its render: it prints `mirror not updated: <reason>`.
-Every render records the `heartbeat` state row `records-mirror`, body `{at, ok, kinds, written, refused, reason}`.
+Every render records the `heartbeat` state row `records-mirror`, body `{at, ok, kinds, written, reason}`.
 `records.mirror_state(connection)` reads the last one, `(timestamp, body)` or None; the dashboard's Health shows it.
-The verb exits 1 on any refused file or a render that stopped.
+The verb exits 1 on a render that stopped.
 
 ## `sd reports brief`: routine briefs
 
@@ -532,11 +528,11 @@ It is filed `done` and stays `done`: `sd reports list` skips it, and `acknowledg
 
 The row is the source of truth: no counter or time decides a difference, because a restore rolls those back with the rows.
 
-`render` writes each row's copy, `<vault>/<folder>/<stem>.md`, under the `records render` mirror rule (sd:4041).
+`render` writes each row's copy, `<vault>/<folder>/<stem>.md`, with a `mirror-hash` line as its last frontmatter line (sd:4041).
 
 - The folder is the owning repository's `channels` obsidian folder; no setting or `obsidian: {}` is `Briefs/<repo>`, and a setting without `obsidian` writes no copy.
 - A setting it cannot read writes no copy and names the cause.
-- A hand-edited copy and a brief-shaped note no row holds are kept and refused; the verb then exits 1.
+- A copy is overwritten only when its `mirror-hash` matches its content, or it has none and holds the row's text. Any other copy is a hand edit. It and a brief-shaped note no row holds are kept and refused; the verb then exits 1.
 - It refuses off the hub and while a `restore` is unresolved. A lock beside the database serializes renders, and each reads the rows only once it holds the lock.
 - When the folder moves, it names the copies left in the previous folder and deletes none.
 - Every render records the `heartbeat` state row `brief-copies`; `routine_briefs.copies_state` reads the last one.

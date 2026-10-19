@@ -1,7 +1,7 @@
 """What the vault's `item` rows and the registered plugins share: `SOURCE`, the plugin list and the vault root.
 
 The vault import is gone (sd:4627): every plugin keeps its rows in the
-database (`store.driver: db`), and the vault holds only their rendered mirror.
+database (`store.driver: db`), and the vault holds only one HTML page per base.
 Rows the import landed keep `source` `vault`, so `SOURCE` stays the name that
 finds them. What remains is how the readers of those rows find the plugins and
 the vault root.
@@ -14,7 +14,7 @@ trusts only what that command has validated: a second validator here would be a
 copy of the pack's rules in another repository.
 
 **`fields` drops `NOT_FIELDS`:** `status`, which is `stage`, and `mirror-hash`,
-which belongs to the mirror file.
+which belonged to the retired note mirror (sd:5133).
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ LIST_SECONDS = 120
 
 DUE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
-#: Frontmatter keys a row keeps elsewhere: `status` is `stage`, `mirror-hash` is the mirror file's.
+#: Frontmatter keys a row keeps elsewhere: `status` is `stage`, `mirror-hash` was the note mirror's.
 NOT_FIELDS = frozenset({"status", "mirror-hash"})
 
 

@@ -66,7 +66,7 @@ class RecordsCase(support.TempRootCase):
                               topics={"a topic": "active"})
         support.land_vault(self.db, vault)
         self.home = root / "home"
-        # Each write renders the mirror (sd:3976): into the vault its rules name, with these rules.
+        # Each write renders its base's page (sd:3976): into the vault its rules name, with these rules.
         self.env = {"OBSIDIAN_VAULT": str(vault)}
         patcher = patch("sd_db.records.plugin_entries", return_value=[flipped()])
         patcher.start()

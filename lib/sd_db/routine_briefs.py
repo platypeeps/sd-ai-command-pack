@@ -21,10 +21,9 @@ stems, folders and `--replace` names are compared by `records._file_key`.
 `add` and `import_folder` refuse a stem another row spells the same way,
 naming both; `render` writes neither of two such rows.
 
-`sd_db.records` holds the mirror rule a vault copy is written and read by:
-`hashed` adds the `mirror-hash` line, and `unhashed` and `hash_holds` read it.
-`render` writes the copies under that rule (sd:4041), into the folder each
-owning repository's `channels` setting names.
+`hashed` adds the `mirror-hash` line a vault copy carries, and `unhashed` and
+`hash_holds` read it. `render` writes the copies under that rule (sd:4041),
+into the folder each owning repository's `channels` setting names.
 """
 
 from __future__ import annotations
@@ -40,7 +39,7 @@ from typing import Any
 
 from . import channels, records, repos, runner_journal
 from .database import refuse_hub_only, transaction
-from .records import RecordRefused, _closing, _file_key, hash_holds, hashed, unhashed
+from .records import RecordRefused, _file_key
 from .reporting import MAX_REPORT
 from .workflow import MissingItem, WorkflowError, _text, item_state
 from .writes import (
@@ -61,7 +60,7 @@ STEM = re.compile(r"([0-9]{4}-[0-9]{2}-[0-9]{2}) - (\S(?:.*\S)?)")
 #: How much of the body, whitespace folded, a row keeps to show without its text.
 LEAD = 200
 
-#: What a conflict says about the vault copy, by `records.hash_holds`.
+#: What a conflict says about the vault copy, by `hash_holds`.
 COPY = {True: "its mirror-hash matches: a copy the render wrote",
         False: "its mirror-hash does not match: a hand edit",
         None: "no mirror-hash: a hand edit or an unrendered note"}
@@ -83,8 +82,49 @@ class BriefCollision(BriefRefused):
     """Another row's stem names the same file on macOS (`records._file_key`); nothing was written."""
 
 
+#: What starts the line a render adds as the last frontmatter line.
+HASH_LINE = "mirror-hash:"
+
 #: Room for the `mirror-hash` line a render adds: a copy of a row at `MAX_REPORT` still imports.
-HASH_ROOM = len(f"{records.HASH_LINE} {'0' * 64}\n")
+HASH_ROOM = len(f"{HASH_LINE} {'0' * 64}\n")
+
+
+def hashed(content: str) -> str:
+    """`content` with `mirror-hash: <sha256 of content>` as its last frontmatter line: the copy's mark.
+
+    `unhashed` of the result is `content` again.
+    """
+    lines = content.split("\n")
+    end = _closing(lines)
+    if end is None:
+        raise BriefRefused("it opens no frontmatter, so there is no place for its mirror-hash")
+    digest = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    return "\n".join([*lines[:end], f"{HASH_LINE} {digest}", *lines[end:]])
+
+
+def unhashed(text: str) -> tuple[str, str | None]:
+    """`text` without its frontmatter's `mirror-hash` line, and that line's value; `(text, None)` with none."""
+    lines = text.split("\n")
+    for index in range(1, _closing(lines) or 1):
+        if lines[index].startswith(HASH_LINE):
+            return "\n".join(lines[:index] + lines[index + 1:]), lines[index][len(HASH_LINE):].strip()
+    return text, None
+
+
+def hash_holds(text: str) -> bool | None:
+    """Whether a file's `mirror-hash` is its own content's: True for a copy the render wrote, None with no hash.
+
+    False is a file changed since it was written: a hand edit, which no render overwrites.
+    """
+    rest, value = unhashed(text)
+    return None if value is None else hashlib.sha256(rest.encode("utf-8")).hexdigest() == value
+
+
+def _closing(lines: list[str]) -> int | None:
+    """The index of the line that closes the frontmatter, or None when the text opens none."""
+    if not lines or lines[0] != "---":
+        return None
+    return next((index for index in range(1, len(lines)) if lines[index] == "---"), None)
 
 
 def read_draft(path: Path, *, room: int = 0) -> tuple[str, str]:
@@ -305,7 +345,7 @@ DEFAULT_FOLDER = "Briefs"
 def render(connection: sqlite3.Connection, vault: Path | str | None) -> dict[str, Any]:
     """Write each brief row's vault copy, `<vault>/<folder>/<stem>.md`, and record a `brief-copies` heartbeat.
 
-    The copy is `body.text` with `records.hashed`'s `mirror-hash` line. A file
+    The copy is `body.text` with `hashed`'s `mirror-hash` line. A file
     is written only when its bytes differ, by temporary file and rename, and
     overwritten only when its own `mirror-hash` holds, or it has none and
     equals the row's text: else it is a hand edit, kept and refused. A

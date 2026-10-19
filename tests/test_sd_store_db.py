@@ -2,7 +2,7 @@
 
 Every case runs `bin/sd` as a subprocess against a temporary home, whose
 database the fixture creates, and a temporary vault that must stay empty:
-under `db` the vault holds only the mirror, and no verb writes a note.
+under `db` the vault holds no base notes, and no verb writes one.
 """
 
 from __future__ import annotations
@@ -190,13 +190,6 @@ class TheWrites(DbStoreFixture):
         self.assertEqual(body, "# First tip\n\n## Tip\n\nUse the flag.\n\n## Notes\n\nSeen twice.\n")
         again = self.ok("store", "set-section", "pp.tip", "First tip", "--section", "Notes=Seen twice.")
         self.assertIn("already holds", again.stdout)
-
-    def test_add_refuses_a_title_another_vault_note_holds(self) -> None:
-        """A wikilink resolves on the file name alone, so the vault's other notes share the namespace."""
-
-        (self.vault / "Learning").mkdir()
-        (self.vault / "Learning" / "Taken.md").write_text("A note.\n", encoding="utf-8")
-        self.refused("store", "add", "pp.tip", "Taken", "--field", "score=7", says="Learning/Taken.md")
 
     def test_a_missing_row_refuses(self) -> None:
         self.refused("store", "set", "pp.tip", "No such tip", "score", "8", says="no tip row has the title")
