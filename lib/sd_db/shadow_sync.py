@@ -211,16 +211,15 @@ def jira_rows(connection: sqlite3.Connection, keys) -> dict[str, dict]:
     """The `tracker = 'jira'` shadow rows of `keys`, by key: `{key, url, title, state}`. One statement.
 
     The key is the last path segment of the row's url (`.../browse/KEY`), as
-    `shadow_jira.normalize` writes it; a key no row holds is absent.
+    `shadow_jira.normalize` writes it; a key no row holds is absent. It reads
+    every Jira row and filters here: one OR'd clause per key hit SQLite's
+    expression depth (1000) at lifetime history.
     """
-    keys = list(dict.fromkeys(keys))
-    if not keys:
+    wanted = set(keys)
+    if not wanted:
         return {}
     rows = connection.execute(
-        "SELECT url, title, state FROM shadow WHERE tracker = 'jira' AND ("
-        + " OR ".join("url LIKE ?" for _ in keys) + ") ORDER BY last_seen, id",
-        [f"%/browse/{key}" for key in keys]).fetchall()
-    wanted = set(keys)
+        "SELECT url, title, state FROM shadow WHERE tracker = 'jira' ORDER BY last_seen, id").fetchall()
     found = {}
     for row in rows:
         key = row["url"].rsplit("/browse/", 1)[-1]
