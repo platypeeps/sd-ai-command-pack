@@ -140,7 +140,7 @@ def suggest_publish(args) -> int:
         ):
             if (sd_lib.same_repo(item["repo"], repo)
                     and item["title"].strip().lower() == title.strip().lower()):
-                print(f"already open as sd:{item['id']}; filed nothing")
+                print(f"already open as {sd_db.repos.item_ref(item['id'], item['repo'])}; filed nothing")
                 return 0
 
         state = workflow.capture_task(
@@ -152,5 +152,5 @@ def suggest_publish(args) -> int:
         raise rows.RowsRefusal(str(error)) from error
     finally:
         connection.close()
-    print(f"filed sd:{state['item']['id']} in {repo}; the proposal note stays")
+    print(f"filed {sd_db.repos.item_ref(state['item']['id'], repo)} in {repo}; the proposal note stays")
     return 0

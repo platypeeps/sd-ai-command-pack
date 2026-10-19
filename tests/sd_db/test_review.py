@@ -1049,7 +1049,7 @@ class TheVerb(unittest.TestCase):
 
     def test_file_then_export_then_apply(self):
         filed = self.sd_db("review", "file", str(self.write("batch.json", sealed())))
-        self.assertIn("filed sd:", filed.stdout)
+        self.assertRegex(filed.stdout, r"sd-db: filed fleet sd:\d+ ")
         again = self.sd_db("review", "file", str(self.write("batch.json", sealed())))
         self.assertIn("unchanged", again.stdout)
         item = self.store().execute("SELECT id FROM item WHERE external_id = 'review:jev-entry-2:C1'").fetchone()[0]
@@ -1081,7 +1081,7 @@ class TheVerb(unittest.TestCase):
     def test_a_kev_file_files_blind_and_exports_as_reviews(self):
         path = self.write("aura.jsonl", kev_text([kev_line("span:a"), kev_line("span:b")]))
         filed = self.sd_db("review", "file", "--kev", str(path), "--batch", "aura", "--blind")
-        self.assertIn("filed sd:", filed.stdout)
+        self.assertRegex(filed.stdout, r"sd-db: filed fleet sd:\d+ ")
         row = self.store().execute("SELECT id FROM item WHERE external_id = 'review:kev:aura'").fetchone()
         self.assertIsNotNone(row)
         self.assertIn("unchanged", self.sd_db("review", "file", "--kev", str(path), "--batch", "aura",

@@ -3829,8 +3829,8 @@ class Watch(Lane):
         with mock.patch.object(sd_lane, "watch_pause", pause):
             code, lines = self.watch_items(one, 1, 2)
         self.assertEqual((code, pauses), (1, [0]))
-        self.assertEqual(lines, ["sd:1 merged at merged-1", "sd:2 failed: a blocking finding"])
-        self.assertEqual(self.watch_items(self.repo, 1), (0, ["sd:1 merged at merged-1"]))
+        self.assertEqual(lines, ["pack sd:1 merged at merged-1", "pack sd:2 failed: a blocking finding"])
+        self.assertEqual(self.watch_items(self.repo, 1), (0, ["pack sd:1 merged at merged-1"]))
 
     def test_watch_item_skips_cancelled_entries_and_ends_an_item_with_none_at_once(self) -> None:
         sd_lane.enqueue_entry(self.feature, 3, "three", self.body, self.environ, manual=True, claim="deliver")
@@ -3842,8 +3842,8 @@ class Watch(Lane):
         with mock.patch.object(sd_lane, "watch_pause", side_effect=AssertionError("waited")):
             code, lines = self.watch_items(self.repo, 3, 4, 5)
         self.assertEqual(code, 1)
-        self.assertEqual(lines, ["sd:3 merged at merged-3", "sd:4 none: no lane entry that is not cancelled",
-                                 "sd:5 none: no lane entry that is not cancelled"])
+        self.assertEqual(lines, ["pack sd:3 merged at merged-3", "pack sd:4 none: no lane entry that is not cancelled",
+                                 "pack sd:5 none: no lane entry that is not cancelled"])
 
     def test_watch_item_reads_again_after_a_hub_fault(self) -> None:
         """A read the hub did not answer is unknown, not an end."""
@@ -3858,7 +3858,7 @@ class Watch(Lane):
                 sd_lane, "watch_pause", lambda: sd_lane.run_lane(self.repo, self.environ, self.ship)):
             code, lines = self.watch_items(self.repo, 1)
         self.assertEqual(code, 0)
-        self.assertEqual(lines, ["hub unavailable: down; reading again", "sd:1 merged at merged-1"])
+        self.assertEqual(lines, ["hub unavailable: down; reading again", "pack sd:1 merged at merged-1"])
 
 
 class HostedOrder(Lane):

@@ -315,7 +315,7 @@ class TheCriterion(SuggestCase):
         self.assertEqual(("task", "the installer leaves a stale lock"),
                          (added[0]["kind"], added[0]["title"]))
         self.assertTrue(sd_lib.same_repo(self.root, added[0]["repo"]), added[0]["repo"])
-        self.assertIn(f"filed sd:{added[0]['id']}", out)
+        self.assertIn(f"filed {self.root.name} sd:{added[0]['id']} in ", out)
         self.assertEqual([], self.gh_calls())
 
     def test_the_retired_to_refuses_by_name_and_files_nothing(self):
@@ -447,7 +447,7 @@ class TheDedupRead(SuggestCase):
         code, out = self.publish(note)
 
         self.assertEqual(0, code)
-        self.assertIn(f"already open as sd:{existing}", out)
+        self.assertIn(f"already open as {self.root.name} sd:{existing}; filed nothing", out)
         self.assertEqual(before, self.items())
 
     def test_the_match_ignores_case_and_surrounding_space(self):
@@ -471,7 +471,7 @@ class TheDedupRead(SuggestCase):
         before = self.items()
         _, out = self.publish(note)
         self.assertEqual(len(before) + 1, len(self.items()))
-        self.assertIn("filed sd:", out)
+        self.assertRegex(out, r"filed \S+ sd:\d+ in ")
 
     def test_a_done_item_with_the_title_does_not_hold_a_new_one_back(self):
         """A closed item is history; the friction came back, so it files again."""
@@ -482,7 +482,7 @@ class TheDedupRead(SuggestCase):
         before = self.items()
         _, out = self.publish(note)
         self.assertEqual(len(before) + 1, len(self.items()))
-        self.assertIn("filed sd:", out)
+        self.assertRegex(out, r"filed \S+ sd:\d+ in ")
 
     def test_the_title_is_the_first_line_of_the_body(self):
         """A body is a paragraph; an item title is one line, and a bounded one."""
@@ -1059,7 +1059,7 @@ class TheRefusalReachesTheOperator(SuggestCase):
         before = len(self.items())
         done = self.run_cli("suggest", "publish", "--note", str(note), "--belongs-to", ".")
         self.assertEqual(0, done.returncode, done.stderr)
-        self.assertIn("filed sd:", done.stdout)
+        self.assertRegex(done.stdout, r"filed \S+ sd:\d+ in ")
         self.assertEqual(before + 1, len(self.items()))
         self.assertEqual([], self.gh_calls())
 

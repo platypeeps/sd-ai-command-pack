@@ -2389,7 +2389,12 @@ class Ship(SharedReview):
             return None
         steps = [self.by_hand(commit)] if hand else []
         if held:
-            steps.append(f"close the co-delivered items {', '.join(f'sd:{number}' for number in held)} the same way")
+            # Each item names its repository (sd:5124).
+            sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+            from sd_db.repos import item_refs  # noqa: PLC0415
+
+            named = item_refs(self.connection, held)
+            steps.append(f"close the co-delivered items {', '.join(named[number] for number in held)} the same way")
         pending = blocked("base_advanced_at_merge", "ci",
                           f"Verify the combined tree at {commit} (default-branch CI), then {'; '.join(steps)}.",
                           state="operator_decision")

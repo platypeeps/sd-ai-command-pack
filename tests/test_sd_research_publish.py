@@ -1364,7 +1364,7 @@ class ObsidianItemTests(Fixture):
         said = self.publish()
         self.assertEqual(self.published(self.item), {"%s::a" % self.repo: {"title": "A", "obsidian": self.link}})
         self.assertEqual(self.comments(self.item), ["Published obsidian a: %s" % self.link])
-        self.assertTrue(any("item: obsidian link for sd:%d recorded" % self.item in line for line in said), said)
+        self.assertTrue(any("item: obsidian link for %s sd:%d recorded" % (self.repo.name, self.item) in line for line in said), said)
         self.publish()
         self.assertEqual(len(self.comments(self.item)), 1)
 
@@ -1375,7 +1375,7 @@ class ObsidianItemTests(Fixture):
         later = self.item + 1
         said = self.publish([dict(src="10-x/a.md", out="a", title="A", item=later)])
         self.assertTrue((self.briefs() / "a.md").is_file())
-        self.assertTrue(any("item: obsidian link for sd:%d not recorded (" % later in line
+        self.assertTrue(any("item: obsidian link for %s sd:%d not recorded (" % (self.repo.name, later) in line
                             for line in said), said)
         self.assertEqual(create_item(self.connection, kind="task", title="Later"), later)
         self.publish([dict(src="10-x/a.md", out="a", title="A", item=later)])
@@ -2678,6 +2678,154 @@ class ChannelsTests(Fixture):
             self.hold("unreadable file")
             said = self.publish()
         self.assertFalse(any(line.startswith(PUBLISH.HELD) for line in said), said)
+
+
+class BriefTests(Fixture):
+    """sd:5102: a routine brief is designated on its item, `fields.publish`, and queued like a document.
+
+    A brief is a database row with no `research.conf.py`, so its item holds the designation, with the keys a conf
+    entry takes. The request is the same file, fingerprint and receipt; its `content` is the row's text and its
+    `source` names the item, since no file holds the brief.
+    """
+
+    STEM = "2026-10-18 - Daily Intel Brief"
+    TEXT = "---\ntags:\n  - brief\n---\n\n# Daily Intel Brief\n\nThree things.\n"
+    URL = "https://www.notion.so/example-page-0123456789abcdef0123456789abcdef"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.database()
+        from sd_db import routine_briefs  # noqa: PLC0415 - after the path is set
+        from sd_db.writes import upsert_repo  # noqa: PLC0415
+        sd_db = sd_lib.import_sd_db().module
+        self.key = sd_db.paths.key(str(self.repo.resolve()))
+        upsert_repo(self.connection, self.key)
+        self.brief = routine_briefs.add(self.connection, self.STEM, self.TEXT, repo=str(self.repo.resolve()),
+                                        who="test")["item"]
+
+    def fields(self, value: object) -> None:
+        self.connection.execute("UPDATE item SET fields = ? WHERE id = ?", (json.dumps(value), self.brief))
+        self.connection.commit()
+
+    def request(self, destination: str = "notion") -> dict:
+        return json.loads((PUBLISH.QUEUE / ("my-research.%s.%s.json" % (self.STEM, destination))).read_text())
+
+    def designate(self, publish: dict) -> None:
+        """Set `fields.publish` alone, keeping what step 6 recorded in `fields.published`."""
+        self.connection.execute("UPDATE item SET fields = json_set(fields, '$.publish', json(?)) WHERE id = ?",
+                                (json.dumps(publish), self.brief))
+        self.connection.commit()
+
+    def deliver(self, destination: str = "notion") -> None:
+        """Drain step 6 for the pending request, as `sd-research-kit delivered` runs it."""
+        name = "my-research.%s.%s.json" % (self.STEM, destination)
+        self.assertEqual(PUBLISH.delivered_main([name, self.request(destination)["fingerprint"], "--url", self.URL]), 0)
+
+    def extend(self, more: str) -> None:
+        self.connection.execute("UPDATE item SET body = ? WHERE id = ?", (json.dumps({"text": self.TEXT + more}),
+                                                                           self.brief))
+        self.connection.commit()
+
+    def test_an_undesignated_brief_queues_nothing(self) -> None:
+        self.assertEqual(PUBLISH.enqueue_briefs(self.connection), [])
+        self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_a_designated_brief_queues_its_row_text_naming_its_item(self) -> None:
+        self.fields({"publish": {"notion": {}}})
+        reports = PUBLISH.enqueue_briefs(self.connection)
+        self.assertTrue(any(line.startswith("mirror: queued %s " % self.STEM) for line in reports), reports)
+        request = self.request()
+        self.assertEqual((request["content"], request["item"], request["source"], request["rendered"]),
+                         (self.TEXT, self.brief, "sd:%d" % self.brief, ""))
+        self.assertEqual((request["document"], request["title"], request["space_id"]), (self.STEM, self.STEM, PRIVATE_FOLDER))
+
+    def test_the_same_text_again_is_already_queued(self) -> None:
+        self.fields({"publish": {"drive": {}}})
+        PUBLISH.enqueue_briefs(self.connection)
+        again = PUBLISH.enqueue_briefs(self.connection)
+        self.assertTrue(any("%s: already queued" % self.STEM in line for line in again), again)
+
+    def test_a_delivered_copy_is_updated_by_the_next_generation_in_its_container(self) -> None:
+        # Drain step 6 records the URL and the container it went to; the next generation there updates that copy.
+        self.designate({"notion": {}})
+        PUBLISH.enqueue_briefs(self.connection)
+        self.deliver()
+        again = PUBLISH.enqueue_briefs(self.connection)
+        self.assertTrue(any("unchanged since it was last mirrored" in line for line in again), again)
+        self.extend("Four things.\n")
+        PUBLISH.enqueue_briefs(self.connection)
+        self.assertEqual(self.request()["page"], self.URL)
+
+    def test_a_delivered_copy_is_not_reused_in_another_container(self) -> None:
+        # sd:5122 round 1: a URL belongs to the container it was created under, as a carried id does (contract
+        # step 4), so another scope, space or folder publishes afresh there.
+        for before, after, destination, what in (
+                ({"notion": {}}, {"notion": {"team": True}}, "notion", "page"),
+                ({"notion": {}}, {"notion": {"space": "Archive"}}, "notion", "page"),
+                ({"drive": {}}, {"drive": {"folder": "Elsewhere"}}, "drive", "file")):
+            with self.subTest(after=after):
+                self.designate(before)
+                PUBLISH.enqueue_briefs(self.connection)
+                self.deliver(destination)
+                self.designate(after)
+                PUBLISH.enqueue_briefs(self.connection)
+                self.assertEqual(self.request(destination).get(what, ""), "")
+
+    def test_a_delivery_of_an_older_generation_records_no_container(self) -> None:
+        # A newer request was queued after the drain read the older one: the receipt's container is the newer
+        # request's, not where this URL went, so nothing is carried from it.
+        self.designate({"notion": {}})
+        PUBLISH.enqueue_briefs(self.connection)
+        drained = self.request()["fingerprint"]
+        self.designate({"notion": {"team": True}})
+        PUBLISH.enqueue_briefs(self.connection)
+        name = "my-research.%s.notion.json" % self.STEM
+        self.assertEqual(PUBLISH.delivered_main([name, drained, "--url", self.URL]), 0)
+        self.assertNotIn("delivered_to", json.loads((PUBLISH.receipts() / name).read_text()))
+        self.extend("Four things.\n")
+        PUBLISH.enqueue_briefs(self.connection)
+        self.assertEqual(self.request().get("page", ""), "")
+
+    def test_a_receipt_from_before_containers_were_recorded_carries_nothing(self) -> None:
+        # Older state: a receipt the previous version wrote names no container, so the drain adopts by title.
+        self.designate({"drive": {}})
+        PUBLISH.enqueue_briefs(self.connection)
+        self.deliver("drive")
+        receipt = PUBLISH.receipts() / ("my-research.%s.drive.json" % self.STEM)
+        record = json.loads(receipt.read_text())
+        record.pop("delivered_to", None)
+        receipt.write_text(json.dumps(record))
+        self.extend("Four things.\n")
+        PUBLISH.enqueue_briefs(self.connection)
+        self.assertEqual(self.request("drive").get("file", ""), "")
+
+    def test_a_page_the_designation_names_wins_over_the_delivered_url(self) -> None:
+        self.designate({"notion": {}})
+        PUBLISH.enqueue_briefs(self.connection)
+        self.deliver()
+        self.designate({"notion": {"page": "https://notion.so/mine"}})
+        PUBLISH.enqueue_briefs(self.connection)
+        self.assertEqual(self.request()["page"], "https://notion.so/mine")
+
+    def test_fields_that_are_not_an_object_are_reported_not_queued(self) -> None:
+        for value in ([1], {"publish": ["notion"]}):
+            with self.subTest(value=value):
+                self.fields(value)
+                reports = PUBLISH.enqueue_briefs(self.connection)
+                self.assertTrue(any("sd:%d" % self.brief in line and "not queued" in line for line in reports), reports)
+                self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_only_the_named_items_are_queued(self) -> None:
+        self.fields({"publish": {"notion": {}}})
+        self.assertEqual(PUBLISH.enqueue_briefs(self.connection, items={self.brief + 1}), [])
+        self.assertFalse(PUBLISH.QUEUE.exists())
+
+    def test_a_channel_the_repo_leaves_out_is_refused(self) -> None:
+        self.connection.execute("UPDATE repo SET channels = ? WHERE path = ?", (json.dumps({"obsidian": {}}), self.key))
+        self.connection.commit()
+        self.fields({"publish": {"notion": {}}})
+        PUBLISH.enqueue_briefs(self.connection)
+        self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")) if PUBLISH.QUEUE.exists() else [], [])
 
 
 if __name__ == "__main__":

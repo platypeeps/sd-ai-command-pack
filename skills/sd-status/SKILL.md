@@ -57,6 +57,7 @@ opens with seventeen top-level lines; the sixteen below are the sections.
 
 `pending`, `merge lane`, the needs-you rows of `issues`, and `jira` print their rows as `sd today` prints a table (sd:5098): a header row, a dash rule, aligned columns, the title cut to the terminal width.
 The other sections keep their own lines: a class grid, key and value records, counts, or one line per finding with its command.
+The `merge lane` table carries a Repo column, and a failed lane row's title names its item as `<repo> sd:<n>`; relay an item the same way (sd:5124).
 
 The contribution section filters the shared projection by the current checkout path and its GitHub repository name.
 Its order is newly unblocked, awaiting you, awaiting them, merged, then closed.

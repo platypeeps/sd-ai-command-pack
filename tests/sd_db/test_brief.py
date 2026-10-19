@@ -82,7 +82,7 @@ class ThreeFollowups(BriefCase):
             ],
         )
         self.assertTrue(result.text.startswith(
-            f"Open followups and questions on the work (sd:{self.work}, branch feat/work):\n"
+            f"Open followups and questions on the work (system sd:{self.work}, branch feat/work):\n"
         ))
         self.assertNotIn("more open", result.text, "nothing was cut, so no trailer")
 
@@ -268,8 +268,8 @@ class WhichItems(BriefCase):
         for absent in ("on finished", "on parked", "on elsewhere"):
             self.assertNotIn(absent, result.text)
         # More than one item, so each line names its item.
-        self.assertIn(f"(planning, sd:{planning})", result.text)
-        self.assertIn(f"(blocked, sd:{blocked})", result.text)
+        self.assertIn(f"(planning, system sd:{planning})", result.text)
+        self.assertIn(f"(blocked, system sd:{blocked})", result.text)
         self.assertIn("across 2 live items", result.text)
 
     def test_a_done_item_on_the_checked_out_branch_does_not_match(self):

@@ -89,6 +89,7 @@ from . import reporting
 from .backup import Snapshot, passed
 from .database import refuse_hub_only, transaction
 from .errors import SdDbError
+from .repos import item_refs
 from .writes import add_note, set_item_fields, transition
 
 #: How long an `exec` note keeps its output file.
@@ -336,10 +337,11 @@ def park_untouched_p4(connection, *, now: datetime) -> list[int]:
     return ids
 
 
-def _unreadable(ids: list[int], limit: int) -> str:
-    named = ", ".join(f"#{item}" for item in ids[:limit])
-    more = f" and {len(ids) - limit} more" if len(ids) > limit else ""
-    return f"{len(ids)} report(s) in planning have unreadable fields: {named}{more}"
+def _unreadable(refs: list[str], limit: int) -> str:
+    """The unreadable reports, each named as `item_ref` names it (sd:5124), the first `limit` of them."""
+    named = ", ".join(refs[:limit])
+    more = f" and {len(refs) - limit} more" if len(refs) > limit else ""
+    return f"{len(refs)} report(s) in planning have unreadable fields: {named}{more}"
 
 
 def prune(connection, backup: Snapshot, *, now: datetime | None = None) -> Pruned:
@@ -375,7 +377,8 @@ def prune(connection, backup: Snapshot, *, now: datetime | None = None) -> Prune
     text = (f"sd-db prune after backup {backup.directory.name} ({backup.run_id}): {result}; "
             f"cost rows and exec notes are never pruned.\n")
     if parked:
-        text += "Parked: " + ", ".join(f"#{item}" for item in parked) + "\n"
+        named = item_refs(connection, parked)
+        text += "Parked: " + ", ".join(named[item] for item in parked) + "\n"
     # A report the settle cannot read would otherwise sit in `planning`
     # silently, where before the guard it failed the whole prune. So the
     # prune report names it and asks for a person. The predicate is the dry
@@ -386,8 +389,10 @@ def prune(connection, backup: Snapshot, *, now: datetime | None = None) -> Prune
         f" AND {reporting.UNREADABLE_FIELDS} ORDER BY id")]
     attention = {}
     if unreadable:
-        text += _unreadable(unreadable, UNREADABLE_TEXT_IDS) + "\n"
-        attention = {"attention": True, "attention_basis": _unreadable(unreadable, UNREADABLE_BASIS_IDS)}
+        named = item_refs(connection, unreadable)
+        refs = [named[item] for item in unreadable]
+        text += _unreadable(refs, UNREADABLE_TEXT_IDS) + "\n"
+        attention = {"attention": True, "attention_basis": _unreadable(refs, UNREADABLE_BASIS_IDS)}
     # One backup, one prune, one report: the row's identity is the backup's
     # run id, so a second prune against the same snapshot is refused by
     # `ingest` as a report that already exists with different evidence.
