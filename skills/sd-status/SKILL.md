@@ -152,13 +152,16 @@ already supports, and `--actions` lists every row, the ones `pending` leaves
 out included. Take the options from the text report's `pending`, not from
 `actions` in `--json`: `pending` is the first ten of it.
 
-Three rules on that question:
+Four rules on that question:
 
 - **Never renumber the options.** The label is the id the report printed.
 - **Never substitute your own ordering.** The order is `pending`'s, which is
   the ranking table's, which the user can predict.
 - **Never invent an option that is not an inventory row.** An option the report
   did not produce has no id, and nothing acts on it.
+- **Never offer a waiting question.** `sd-status` walks no questions: `sd-next`
+  walks the Decisions rows, and review questions wait on the dashboard's
+  Review page.
 
 ## The protection section is the one that matters
 

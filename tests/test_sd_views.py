@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bin"))
 
 import sd_db  # noqa: E402
 import sd_views  # noqa: E402
-from sd_db import today  # noqa: E402
+from sd_db import review, today  # noqa: E402
 from sd_db.writes import add_note, transition  # noqa: E402
 
 from tests.clean_env import clean_environment  # noqa: E402
@@ -216,6 +216,22 @@ class SdToday(Zone):
         text = sd_views.render_sections(today.sections(self.connection, now=NOW, gate=GATE), now=MOMENT, width=100)
         self.maxDiff = None
         self.assertEqual(text, TODAY)
+
+    def test_review_questions_are_a_line_under_decisions_not_rows(self):
+        """sd:5130: a review batch's questions wait on the Review page; Decisions names their count."""
+        fill(self.connection)
+        review.file(self.connection, {
+            "schema": 1, "queue": "labels", "batch": "B1", "title": "Label B1", "source": "example.test@1a2b3c4",
+            "mode": "open", "questions": [{"subject": f"example.test/{number}", "text": "Which tier fits?",
+                                           "options": ["cheap", "deep"]} for number in range(2)]}, who="tester")
+        found = today.sections(self.connection, now=NOW, gate=GATE)
+        lines = sd_views.render_sections(found, now=MOMENT, width=100).splitlines()
+        at = lines.index("Decisions (1)")
+        self.assertEqual(lines[at + 3:at + 5], [lines[at + 3], "+2 review questions wait on the dashboard's Review page"])
+        self.assertIn("Which store holds the rows?", lines[at + 3])
+        found["summary"]["review_questions"] = 1
+        self.assertIn("+1 review question waits on the dashboard's Review page",
+                      sd_views.render_sections(found, now=MOMENT, width=100).splitlines())
 
     def test_an_empty_store_prints_every_heading(self):
         text = sd_views.render_sections(today.sections(self.connection, now=NOW), now=MOMENT, width=100)
