@@ -4253,7 +4253,8 @@ class ReportSectionTests(InventoryFixture):
     every structural test became visible at once.
     """
 
-    def report(self, **overrides: Any) -> str:
+    def report(self, shown: dict[str, Any] | None = None, **overrides: Any) -> str:
+        """The rendered report; `shown` replaces sections of the result the inventory does not read."""
         inventory = self.inventory(**overrides)
         result = {
             "repo": str(self.repo),
@@ -4277,6 +4278,7 @@ class ReportSectionTests(InventoryFixture):
             "jira": {"available": False, "reason": "no shared database yet",
                      "freshness": None, "rows": []},
         }
+        result.update(shown or {})
         stream = io.StringIO()
         status.render(result, stream)
         return stream.getvalue()
@@ -4284,6 +4286,25 @@ class ReportSectionTests(InventoryFixture):
     def headings(self, text: str) -> list[str]:
         return [line for line in text.splitlines()
                 if line and not line[0].isspace() and not line.startswith("sd-status:")]
+
+    def test_open_pull_requests_and_backends_print_as_tables(self) -> None:
+        """sd:5116: the two sections whose rows share one shape take `sd today`'s layout.
+
+        A state too long for its cell, as an unreadable registry's reason is,
+        prints whole under the table rather than cut.
+        """
+        pulls = {"repo": "acme/widget", "available": True, "reason": "", "pull_requests": [{
+            "number": 7, "title": "Teach the widget to fold", "head": "task/fold", "base": "main",
+            "draft": False, "mergeable": "MERGEABLE", "merge_state": "CLEAN", "review_decision": "APPROVED",
+            "behind_by": 0, "checks": {"success": 1}, "failing": []}]}
+        reason = "unreadable (no provider registry at /example.test/providers.yaml)"
+        backends = [{"backend": "codex", "command": "codex", "state": "present"},
+                    {"backend": "registry", "command": "", "state": reason}]
+        text = self.report(shown={"pull_requests": pulls, "backends": backends})
+        self.assertRegex(text, r"\nopen pull requests\n  PR +State +Review +Checks +Head +Base +Title\n  -+")
+        self.assertRegex(text, r"\n  #7 +CLEAN +APPROVED +success:1 +task/fold +main +Teach the widget to fold\n")
+        self.assertRegex(text, r"\nbackends\n  Backend +State\n  -+  -+\n  codex +present\n")
+        self.assertIn(f"\n  registry: {reason}\n", text)
 
     #: `design.md`'s skeleton, verbatim. The three new sections lead because
     #: the report is read top-down and the judgement is what the reader came

@@ -3620,8 +3620,12 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     _render_handoff(result["handoff"], write)
 
     write("\nbackends\n")
+    _table(write, ["Backend", "State"], [[entry["backend"], entry["state"]] for entry in result["backends"]])
+    import sd_views  # noqa: PLC0415 - only the table sections need it
+
     for entry in result["backends"]:
-        write(f"  {entry['backend']:<12} {entry['state']}\n")
+        if len(entry["state"]) > sd_views.CELL_MAX:  # a reason the cell cut prints whole
+            write(f"  {entry['backend']}: {entry['state']}\n")
 
     write("\nlegacy residue\n")
     if not result["residue"]:
