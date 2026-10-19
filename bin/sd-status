@@ -1109,6 +1109,10 @@ def _gh_fetch(root: pathlib.Path) -> sd_protection.Fetch:
 # --------------------------------------------------------------------------
 
 
+#: The detail when no packet file exists: an absence, so the report counts 0 packets, not unknown.
+NO_PACKET = "no packet written for this directory"
+
+
 def handoff_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
     """The pending packet for this directory, *read* -- never consumed.
 
@@ -1133,7 +1137,7 @@ def handoff_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, An
         "detail": "",
     }
     if not path.is_file():
-        packet["detail"] = "no packet written for this directory"
+        packet["detail"] = NO_PACKET
     else:
         try:
             loaded = json.loads(path.read_text(encoding="utf-8"))
@@ -1471,6 +1475,8 @@ def _database_issues(slug: str) -> dict[str, Any]:
 #: it, because a permanent list of every ticket ever closed is not a worklist
 #: (sd:361, design "Readers"). Open rows are never dropped.
 JIRA_CLOSED_DAYS = 7
+#: Jira rows the text prints before `… N more` (ruling on sd:5357).
+JIRA_ROWS = 10
 
 
 def jira_section() -> dict[str, Any]:
@@ -1485,13 +1491,16 @@ def jira_section() -> dict[str, Any]:
     read-only connection; each absence is a reported reason in the same shape.
 
     `state=None` because a close must be recorded, not hidden. The seven-day
-    rule on closed rows is applied here and not in the renderer, so the
-    `rows` list `--json` carries is the list the text prints.
+    rule on closed rows and the assigned-or-filed rule (`sd_db.repos.MINE`;
+    a watched or unknown row is not the operator's worklist, ruling on
+    sd:5357) are applied here and not in the renderer, so the `rows` list
+    `--json` carries is the list the text prints before its cap.
     """
     connection, reason = _shared_connection("shared tracker library", "progress")
     if connection is None:
         return {"available": False, "reason": reason, "freshness": None, "rows": []}
     from sd_db.progress import tracker_freshness, tracker_items
+    from sd_db.repos import MINE
     try:
         try:
             rows = tracker_items(connection, tracker="jira", state=None)
@@ -1502,7 +1511,7 @@ def jira_section() -> dict[str, Any]:
         return {"available": False, "reason": f"shared database unreadable: {error}", "freshness": None, "rows": []}
     cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=JIRA_CLOSED_DAYS)
     return {"available": True, "reason": "", "source": "database", "freshness": freshness,
-            "rows": [row for row in rows if _jira_row_is_current(row, cutoff)]}
+            "rows": [row for row in rows if row.get("reason") in MINE and _jira_row_is_current(row, cutoff)]}
 
 
 def _jira_row_is_current(row: dict[str, Any], cutoff: datetime.datetime) -> bool:
@@ -3365,12 +3374,6 @@ def _always_listed(entry: dict[str, Any]) -> bool:
 
 
 def _render_work(work: dict[str, Any], write: Any) -> None:
-    write("\nwork items\n")
-    if not work["total"]:
-        write("  none under docs/work\n")
-        return
-    counts = ", ".join(f"{name} {count}" for name, count in sorted(work["counts"].items()))
-    write(f"  {work['total']} items ({work['active']} active): {counts}\n")
     live = [entry for entry in work["items"] if not entry["archived"]]
     # An item with a finding is always listed, whatever its status. A stale
     # `status:` line and a `done` row nothing marked are both reported on
@@ -3379,28 +3382,42 @@ def _render_work(work: dict[str, Any], write: Any) -> None:
     # to avoid -- the same reasoning the protection section states at length.
     shown = [entry for entry in live if _always_listed(entry)]
     rest = [entry for entry in live if not _always_listed(entry)]
-    for entry in shown + rest[:LISTED_ITEMS]:
-        write(f"  {entry['status']:<12} {entry['slug']}\n")
+    listed = shown + rest[:LISTED_ITEMS]
+    _heading(write, "Work items", len(live))
+    if listed:
+        _table(write, ["State", "Item"], [[entry["status"], entry["slug"]] for entry in listed], flex="Item")
+    for entry in listed:
         for problem in entry["inconsistencies"]:
-            write(f"    ! {problem}\n")
+            write(f"  ! {entry['slug']}: {problem}\n")
     if len(rest) > LISTED_ITEMS:
         write(f"  ... and {len(rest) - LISTED_ITEMS} more not being worked\n")
+    if work["total"]:
+        counts = ", ".join(f"{name} {count}" for name, count in sorted(work["counts"].items()))
+        write(f"  {work['total']} items ({work['active']} active): {counts}\n")
 
 
 def _render_protection(section: dict[str, Any], write: Any) -> None:
-    write("\nprotection\n")
+    """Gaps, acceptances and merge-setting flags, one table row each: `ID`, `State`, `Detail`.
+
+    Unavailable protection counts `unknown`, never 0: a gap list nobody could
+    read is not an empty one. A malformed acknowledgement is a fact about the
+    repo row, not about GitHub, so its gap still prints there -- without it
+    the declaration would reach `--json` and never the terminal, a file that
+    silently accepts nothing, which is the failure this feature exists to avoid.
+    """
+    accepted = section.get("accepted") or []
+    rows = [[gap["id"], "gap", gap["gap"]] for gap in section["gaps"]]
+    if section["available"]:
+        rows += [[entry["id"], "accepted", f"{entry['since']}: {entry['because']}"] for entry in accepted]
+        rows += [[flag["id"], "flag" if flag["flagged"] else "ok", flag["gap"] if flag["flagged"] else flag["value"]]
+                 for flag in section["merge_settings"]]
+    _heading(write, "Protection", len(rows) if section["available"] else None)
+    if rows:
+        _table(write, ["ID", "State", "Detail"], rows, flex="Detail", whole=("Detail",))
     if not section["available"]:
         write(f"  unavailable: {section['reason']}\n")
-        # A malformed acknowledgement file is a fact about this checkout, not
-        # about GitHub, and it is the one finding this branch can still make.
-        # Without this loop it would reach `--json` and never the terminal --
-        # a file that silently accepts nothing, reported nowhere a human
-        # looks, which is the failure this whole feature exists to avoid.
-        for gap in section["gaps"]:
-            write(f"  GAP [{gap['id']}] {gap['gap']}\n")
     else:
         branch = section["default_branch"]
-        accepted = section.get("accepted") or []
         # The all-clear is claimed only when there is genuinely nothing to
         # report. An accepted finding is not an absent one, and printing
         # "fully enforcing" over the top of one would be the tool lying about
@@ -3413,31 +3430,29 @@ def _render_protection(section: dict[str, Any], write: Any) -> None:
             write(f"  {branch}: protection is fully enforcing -- admins included, "
                   "checks strict and matched, review required\n")
         for gap in section["gaps"]:
-            write(f"  GAP [{gap['id']}] {gap['gap']}\n")
             if gap.get("acknowledgement_stale"):
-                write(f"      ! {gap['acknowledgement_stale']}\n")
+                write(f"  ! {gap['id']}: {gap['acknowledgement_stale']}\n")
         for entry in accepted:
-            write(f"  ok  [{entry['id']}] accepted {entry['since']}: {entry['because']}\n")
             # The end condition prints every run beside the acceptance: it is
             # what stops this being a permanent silence nobody rereads.
-            write(f"      until {entry['until']}\n")
-        for flag in section["merge_settings"]:
-            label = "FLAG" if flag["flagged"] else "ok  "
-            body = flag["gap"] if flag["flagged"] else f"{flag['id']}: {flag['value']}"
-            write(f"  {label} {body}\n")
+            write(f"  {entry['id']} until: {entry['until']}\n")
     for note in section["detail"].get("workflow_notes") or []:
         write(f"  note: {note}\n")
 
 
 def _render_handoff(section: dict[str, Any], write: Any) -> None:
-    write("\nresumable handoffs\n")
+    """The pending packet as one table row; a packet that did not read counts `unknown`, never 0."""
     packet = section["packet"]
     if packet["pending"]:
-        write(f"  packet: pending ({packet.get('age')}) for {packet['directory']}\n")
-        write(f"    item: {packet.get('item')}  summary: {packet.get('summary')}\n")
-        write(f"    {packet['detail']}\n")
-    else:
-        write(f"  packet: {packet['detail']}\n")
+        _heading(write, "Resumable handoffs", 1)
+        _table(write, ["State", "Age", "Item", "Directory", "Summary"],
+               [["pending", str(packet.get("age")), str(packet.get("item")), packet["directory"],
+                 str(packet.get("summary"))]], flex="Summary", whole=("Directory", "Summary"))
+        write(f"  {packet['detail']}\n")
+        return
+    readable = "consumed" in packet or packet["detail"] == NO_PACKET
+    _heading(write, "Resumable handoffs", 0 if readable else None)
+    write(f"  packet: {packet['detail'] or 'unreadable: not a JSON object'}\n")
 
 
 #: `pending` is capped so a hundred-row backlog does not bury the nine
@@ -3458,27 +3473,40 @@ BANNER_LIMIT = 3
 #: that tuple widens the column on the next run; a hardcoded number would let
 #: one long name break the alignment of every other line silently.
 CHECK_WIDTH = max(len(kind.check) for kind in CLASSES)
-SOURCE_WIDTH = max(len(kind.source) for kind in CLASSES)
 
 
 def _render_banner(section: dict[str, Any], write: Any) -> None:
-    """Every abnormal class, whether or not it fired.
+    """Every abnormal class, whether or not it fired, as a row: check, state, findings.
 
-    A class that produced nothing prints `clear`, one that fired prints its
-    count, and one that could not be asked prints `unchecked: <reason>`. The
-    third is why this section lists classes rather than only findings: a
-    reader who sees eight lines learns what was looked at, and a missing line
-    would read as health nobody established.
+    A class that produced nothing is `clear`, one that fired carries its
+    count, and one that could not be asked is `unchecked` with `-` for its
+    count and its reason on a line under the table. The third is why this
+    section lists classes rather than only findings: a reader who sees every
+    class learns what was looked at, and a missing row would read as health
+    nobody established. The findings follow in a second table, at most
+    `BANNER_LIMIT` per class, each elision counted on its own line.
     """
-    write("\nabnormalities\n")
+    classes = section["classes"]
+    _heading(write, "Abnormalities", len(classes))
+    if classes:
+        _table(write, ["Check", "State", "Findings"],
+               [[row["check"], row["state"], "-" if row["state"] == UNCHECKED else str(row["count"])]
+                for row in classes])
+    for row in classes:
+        if row["state"] == UNCHECKED:
+            write(f"  {row['check']}: {row['label']}\n")
     write(f"  {section['summary']}\n")
-    for row in section["classes"]:
-        write(f"  {row['check']:<{CHECK_WIDTH}} {row['label']}\n")
-        fired = [f for f in section["findings"] if f["check"] == row["check"]]
-        for found in fired[:BANNER_LIMIT]:
-            write(f"    {found['id']}  {found['detail']}\n")
+    shown: list[list[str]] = []
+    held: list[str] = []
+    for row in classes:
+        fired = [found for found in section["findings"] if found["check"] == row["check"]]
+        shown += [[found["id"], found["check"], found["detail"]] for found in fired[:BANNER_LIMIT]]
         if len(fired) > BANNER_LIMIT:
-            write(f"    ... {len(fired) - BANNER_LIMIT} more, ranked in `pending`\n")
+            held.append(f"  {row['check']}: ... {len(fired) - BANNER_LIMIT} more, ranked in `pending`\n")
+    if shown:
+        _table(write, ["ID", "Check", "Detail"], shown, flex="Detail", whole=("Detail",))
+    for line in held:
+        write(line)
 
 
 def _widened_note(rows: list[dict[str, Any]], write: Any) -> None:
@@ -3498,60 +3526,82 @@ def _widened_note(rows: list[dict[str, Any]], write: Any) -> None:
           f"{', '.join(widened)}\n")
 
 
-def _table(write: Any, heads: list[str], rows: list[list[str]]) -> None:
-    """Rows as `sd today`'s tables print them (sd:5098), indented under the section heading."""
+def _heading(write: Any, name: str, count: int | None) -> None:
+    """`<Section> (<count>)`, as `sd today` heads a section (sd:5357); `None` is a count nobody could read."""
+    write(f"\n{name} ({'unknown' if count is None else count})\n")
+
+
+def _table(write: Any, heads: list[str], rows: list[list[str]], *, flex: str = "Title",
+           whole: tuple[str, ...] = (), width: int | None = None) -> None:
+    """Rows as `sd today`'s tables print them (sd:5098), indented under the section heading.
+
+    A `whole` column's cell that the table cuts prints whole under it, as
+    `<first cell> <column>: <text>`, the way `sd-pr-state` prints a cut cell:
+    a finding, a reason or a path is not a title, and a cut one says less
+    than the record holds.
+    """
     import sd_views  # noqa: PLC0415 - only the table sections need it
 
-    width = shutil.get_terminal_size((sd_views.DEFAULT_WIDTH, 24)).columns - 2
-    for line in sd_views.table(heads, rows, width):
+    width = width or shutil.get_terminal_size((sd_views.DEFAULT_WIDTH, 24)).columns - 2
+    for line in sd_views.table(heads, rows, width, flex):
         write(f"  {line}\n")
+    sizes = sd_views.widths(heads, rows, width, flex)
+    for row in rows:
+        for name in whole:
+            text = " ".join(row[heads.index(name)].split())
+            if len(text) > sizes[heads.index(name)]:
+                write(f"  {row[0]} {name.lower()}: {text}\n")
 
 
 def _render_pending(rows: list[dict[str, Any]], write: Any) -> None:
-    """The whole inventory by rank, capped, with the cap's denominator."""
-    write("\npending\n")
+    """The whole inventory by rank, capped, with the cap's denominator under the table."""
+    _heading(write, "Pending", len(rows))
     if not rows:
-        write("  nothing pending\n")
         return
     shown = rows[:PENDING_LIMIT]
-    write(f"  {len(shown)} of {len(rows)}, by rank\n")
     _table(write, ["ID", "Check", "Title"], [[row["id"], row["check"], row["title"]] for row in shown])
+    write(f"  {len(shown)} of {len(rows)}, by rank\n")
     _widened_note(rows, write)
 
 
 def _render_next(rows: list[dict[str, Any]], write: Any) -> None:
-    """One row's `suggest`, from the top of `pending`.
+    """One row's `suggest`, from the top of `pending`, as a one-row table.
 
     Deliberately the same row rather than a fourth judgement: the id printed
     here appears in `pending` and, when abnormal, in `abnormalities`, and a
-    reader who sees it three times is looking at one object.
+    reader who sees it three times is looking at one object. The suggestion
+    is the instruction, so a cut one prints whole under the table.
     """
-    write("\nnext\n")
+    _heading(write, "Next", 1 if rows else 0)
     if not rows:
-        write("  nothing to do that this tool can see\n")
         return
     top = rows[0]
-    write(f"  {top['id']}  {top['suggest']}\n")
+    _table(write, ["ID", "Check", "Suggest"], [[top["id"], top["check"], top["suggest"]]],
+           flex="Suggest", whole=("Suggest",))
 
 
 def _render_views(section: dict[str, Any] | None, write: Any, *, now: datetime.datetime | None = None,
                   width: int | None = None) -> None:
     """`sd today`'s sections for this repository, in the layout `sd today` prints them (sd:5098).
 
+    The heading counts the repositories, one table row each, this one first.
     The block is indented two spaces like every other section's body, so its
     one heading stays the only column-0 line and the skeleton stays fixed.
     """
     import sd_views  # noqa: PLC0415 - only this section renders tables
 
-    write("\nwork across the shared database\n")
+    heading = "Work across the shared database"
     if not section or not section["available"]:
+        _heading(write, heading, None)
         write(f"  ! {section['reason'] if section else 'not collected'}\n")
         return
-    write(f"  repositories: {', '.join(sd_views.repo_short(repo) for repo in section['repos'])}\n")
+    columns = (width or shutil.get_terminal_size((sd_views.DEFAULT_WIDTH, 24)).columns) - 2
+    _heading(write, heading, len(section["repos"]))
+    _table(write, ["Repo", "Role"], [[sd_views.repo_short(repo), "companion" if index else "this repo"]
+                                     for index, repo in enumerate(section["repos"])], width=columns)
     if section.get("companions_error"):
         write(f"  ! {section['companions_error']}\n")
     moment = now or datetime.datetime.fromisoformat(section["now"].replace("Z", "+00:00"))
-    columns = (width or shutil.get_terminal_size((sd_views.DEFAULT_WIDTH, 24)).columns) - 2
     text = sd_views.render_sections(section["sections"], now=moment, width=columns, keys=VIEW_KEYS)
     write("".join(f"  {line}" if line.strip() else line for line in text.splitlines(keepends=True)))
 
@@ -3561,17 +3611,15 @@ def _render_threads(rows: list[dict[str, Any]], write: Any) -> None:
 
     The counts give `pending`'s cap a denominator per source. The exclusions
     are printed rather than implied, so the section never reads as a claim to
-    have swept what it declined to read.
+    have swept what it declined to read. The heading counts sources.
     """
-    write("\nopen threads\n")
     counts: dict[str, int] = {}
     for row in rows:
         counts[row["source"]] = counts.get(row["source"], 0) + 1
-    if not counts:
-        write("  no source carries an open thread\n")
-    for kind in CLASSES:
-        if kind.source in counts:
-            write(f"  {kind.source:<{SOURCE_WIDTH}} {counts.pop(kind.source)}\n")
+    ordered = [[kind.source, str(counts.pop(kind.source))] for kind in CLASSES if kind.source in counts]
+    _heading(write, "Open threads", len(ordered))
+    if ordered:
+        _table(write, ["Source", "Rows"], ordered, flex="Source")
     write("  not swept, and named so the counts above are not read as total:\n")
     for reason in EXCLUDED:
         write(f"    - {reason}\n")
@@ -3589,72 +3637,61 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     _render_work(result["work"], write)
     _render_contributions(result.get("contributions"), write)
 
-    write("\nopen pull requests\n")
-    pr_state.render_pulls(result["pull_requests"], stream)
+    pulls = result["pull_requests"]
+    _heading(write, "Open pull requests", len(pulls["pull_requests"]) if pulls["available"] else None)
+    if not pulls["available"] or pulls["pull_requests"]:
+        pr_state.render_pulls(pulls, stream)
     _render_lane(result.get("lane"), write)
-
-    setup = result["setup"]
-    write("\ndetected setup\n")
-    write(f"  mode: {setup['mode']}\n")
-    if setup["mode_error"]:
-        write(f"  ! {setup['mode_error']}\n")
-    if setup.get("demoted"):
-        write(f"  lowered to guest: {setup['demoted']}\n")
-    # Named, not counted: the operator moves these by path. Ten is where a
-    # list stops being a list and becomes a screenful, and the tail is one
-    # line saying how much was not shown.
-    shared = setup.get("shared_tree") or []
-    if shared:
-        write(f"  already in the shared tree ({len(shared)}), yours to move:\n")
-        for path in shared[:10]:
-            write(f"    {path}\n")
-        if len(shared) > 10:
-            write(f"    ... and {len(shared) - 10} more\n")
-    write(f"  entrypoints: {setup['source'] or 'none'} ({setup['detected']})\n")
-    for name, argv in setup["entrypoints"].items():
-        write(f"    {name:<6} {' '.join(argv)}\n")
-
+    _render_setup(result["setup"], write)
     _render_issues(result["issues"], write)
     _render_jira(result["jira"], write)
     _render_protection(result["protection"], write)
     _render_handoff(result["handoff"], write)
 
-    write("\nbackends\n")
-    _table(write, ["Backend", "State"], [[entry["backend"], entry["state"]] for entry in result["backends"]])
-    import sd_views  # noqa: PLC0415 - only the table sections need it
+    backends = result["backends"]
+    _heading(write, "Backends", len(backends))
+    if backends:
+        _table(write, ["Backend", "State"], [[entry["backend"], entry["state"]] for entry in backends],
+               whole=("State",))
 
-    for entry in result["backends"]:
-        if len(entry["state"]) > sd_views.CELL_MAX:  # a reason the cell cut prints whole
-            write(f"  {entry['backend']}: {entry['state']}\n")
-
-    write("\nlegacy residue\n")
-    if not result["residue"]:
-        write("  none found\n")
-    for entry in result["residue"]:
-        write(f"  {entry['id']}: {', '.join(entry['paths'])} -- {entry['why']}\n")
-        write(f"    remove: {entry['remove']}\n")
+    residue = result["residue"]
+    _heading(write, "Legacy residue", len(residue))
+    if residue:
+        _table(write, ["ID", "Paths", "Why"], [[entry["id"], ", ".join(entry["paths"]), entry["why"]]
+                                              for entry in residue], flex="Why", whole=("Paths", "Why"))
+    for entry in residue:
+        write(f"  {entry['id']} remove: {entry['remove']}\n")
 
 
-#: Display order only; `sd_lib.display_fields` takes membership from the row,
-#: so a key named here that the library did not project costs nothing and a key
-#: it projects that is not named here still prints, after these, sorted. The
-#: issue and draft keys are named so an issue row reads as one row rather than
-#: as a pull request with five stray keys in its alphabetical tail.
-CONTRIBUTION_ORDER = (
-    "key", "item_id", "url", "issue_url", "local_status", "external_state", "reasons",
-    "observed_at", "freshness", "blocked_on", "depends_on", "local_clone", "local_branch",
-    "tested_commit", "target_repo", "draft_title", "draft_path", "draft_verified",
-    "evidence", "evidence_verified", "notification_state", "attention_sources",
-)
+def _render_setup(setup: dict[str, Any], write: Any) -> None:
+    """Key and value, as a Field and Value table; every value prints whole."""
+    rows = [["mode", setup["mode"]]]
+    if setup["mode_error"]:
+        rows.append(["mode error", setup["mode_error"]])
+    if setup.get("demoted"):
+        rows.append(["lowered to guest", setup["demoted"]])
+    # Named, not counted: the operator moves these by path. Ten is where a
+    # list stops being a list and becomes a screenful, and the tail is one
+    # line saying how much was not shown.
+    shared = setup.get("shared_tree") or []
+    rows += [["shared tree", path] for path in shared[:10]]
+    rows.append(["entrypoints", f"{setup['source'] or 'none'} ({setup['detected']})"])
+    rows += [[name, " ".join(argv)] for name, argv in setup["entrypoints"].items()]
+    _heading(write, "Detected setup", len(rows))
+    _table(write, ["Field", "Value"], rows, flex="Value", whole=("Value",))
+    if shared:
+        write(f"  already in the shared tree ({len(shared)}), yours to move"
+              + (f"; ... and {len(shared) - 10} more" if len(shared) > 10 else "") + "\n")
 
 
 def _render_lane(section: dict[str, Any] | None, write: Any) -> None:
-    write("\nmerge lane (this repo, shared database)\n")
+    heading = "Merge lane, this repo, shared database"
     if not section or not section["available"]:
+        _heading(write, heading, None)
         write(f"  ! {section['reason'] if section else 'not collected'}\n")
         return
+    _heading(write, heading, len(section["entries"]))
     if not section["entries"]:
-        write("  nothing queued\n")
         return
     import sd_views  # noqa: PLC0415 - only the table sections need it
 
@@ -3667,53 +3704,86 @@ def _render_lane(section: dict[str, Any] | None, write: Any) -> None:
             write(f"  {_lane_ref(section, entry['item'])}: {entry['reason']}\n")
 
 
+#: A GitHub pull request or issue URL, read for its short `<name>#<number>` cell.
+_GITHUB_REF = re.compile(r"github\.com/[^/]+/([^/]+)/(?:pull|issues)/([0-9]+)")
+
+
+def _contribution_ref(row: dict[str, Any]) -> str:
+    """`widget#7` for a pull request or issue, else the key (`item:14`): a URL key is wider than a cell."""
+    found = _GITHUB_REF.search(str(row.get("url") or row.get("issue_url") or row.get("key") or ""))
+    return f"{found[1]}#{found[2]}" if found else str(row.get("key") or "-")
+
+
 def _render_contributions(section: dict[str, Any] | None, write: Any) -> None:
-    write("\ncontributions (this repo, shared database order)\n")
+    """One table row per contribution, in the library's order; every field is `--json`'s and `show`'s.
+
+    JSON string encoding of the title and the reasons keeps external text from
+    injecting terminal controls or a second status heading.
+    """
+    heading = "Contributions, this repo, shared database order"
     if not section or not section["available"]:
+        _heading(write, heading, None)
         write("  ! " + json.dumps(section["reason"] if section else "not collected", ensure_ascii=False) + "\n")
         return
+    rows = section["rows"]
+    _heading(write, heading, len(rows))
+    if rows:
+        _table(write, ["Lane", "Ref", "Item", "Local", "External", "Title"],
+               [[str(row.get("lane") or "-"), _contribution_ref(row),
+                 f"sd:{row['item_id']}" if row.get("item_id") else "-", str(row.get("local_status") or "-"),
+                 str(row.get("external_state") or "-"), json.dumps(row.get("title"), ensure_ascii=False)]
+                for row in rows])
+    for row in rows:
+        if row.get("reasons"):
+            write(f"  {_contribution_ref(row)} reasons: {json.dumps(row['reasons'], ensure_ascii=False)}\n")
     write("  external activity and dependency readiness do not complete local tasks\n")
-    if not section["rows"]:
-        write("  none recorded\n")
-    for row in section["rows"]:
-        # JSON string encoding prevents external metadata from injecting terminal
-        # controls or a second status heading. Ordering belongs to the library.
-        write(f"  [{row['lane']}] " + json.dumps(row["title"], ensure_ascii=False) + "\n")
-        # The tuple is the display ORDER, not the membership. Every other key
-        # the library projected follows it, sorted, because a reader that
-        # iterated the tuple alone dropped five live keys without a word.
-        for key in sd_lib.display_fields(row, CONTRIBUTION_ORDER, ("lane", "title")):
-            value = row.get(key)
-            if sd_lib.display_value(value):
-                write(f"    {key}: " + json.dumps(value, ensure_ascii=False, sort_keys=True) + "\n")
+    if rows:
+        write("  every field: `sd task contribution show <key> --json`, or `sd-status --json`\n")
 
 
 def _render_issues(issues: dict[str, Any], write: Any) -> None:
-    write("\nissues (this repo, shared database)\n")
+    """Every open issue, the needs-you rows first; the title is external text, so quoted like Jira's."""
+    heading = "Issues, this repo, shared database"
     if not issues["available"]:
+        _heading(write, heading, None)
         write(f"  ! {issues['reason']}\n")
         return
+    needs, other = issues["needs_you"], issues["other"]
+    _heading(write, heading, len(needs) + len(other))
+    if needs or other:
+        _table(write, ["Number", "Why", "Title"],
+               [[f"#{row.get('number')}", ", ".join(row.get("why") or []) or "-",
+                 json.dumps(row.get("title"), ensure_ascii=False)] for row in [*needs, *other]])
+        write(f"  needs you: {len(needs)}; other open: {len(other)}\n")
     freshness = issues.get("freshness")
     if freshness:
         write(f"  external context: {freshness['state']}; last successful sync "
               f"{freshness.get('last_success_at') or 'never'}\n")
         write("  local work progress is independent; refresh with `sd shadow sync`\n")
-    needs, other = issues["needs_you"], issues["other"]
-    if not needs and not other:
-        write("  none open\n")
-        return
-    write(f"  needs you: {len(needs)}\n")
-    if needs:
-        _table(write, ["Number", "Why", "Title"],
-               [[f"#{row['number']}", ", ".join(row["why"]), row["title"]] for row in needs])
-    write(f"  other open: {len(other)}\n")
 
 
 def _render_jira(section: dict[str, Any], write: Any) -> None:
-    write("\njira (shared database, all repositories)\n")
+    heading = "Jira, shared database, all repositories"
     if not section["available"]:
+        _heading(write, heading, None)
         write(f"  ! {section['reason']}\n")
         return
+    rows = section["rows"]
+    _heading(write, heading, len(rows))
+    # Every stored row, whatever the freshness line says: a truncated first
+    # run stored what it saw and the verb reported writing it. Open rows
+    # first; the producer has already limited the closed ones to seven days.
+    ordered = sorted(rows, key=lambda row: (row.get("state") or "").lower() != "open")
+    # The key is the URL tail and nothing formats `number`, which a Jira row
+    # does not have. The title is external text, quoted for the same reason
+    # `_render_contributions` quotes its rows: a newline or an escape in a
+    # Jira summary would otherwise print as a second heading.
+    if rows:
+        _table(write, ["Key", "State", "Title"],
+               [[str(row.get("url") or "").rpartition("/")[2], (row.get("state") or "").lower(),
+                 json.dumps(row.get("title"), ensure_ascii=False)] for row in ordered[:JIRA_ROWS]])
+    if len(rows) > JIRA_ROWS:
+        write(f"  … {len(rows) - JIRA_ROWS} more\n")
     # Keyed on `last_success_at`, not on the state word: `tracker_freshness`
     # says `degraded`, not `never`, once one failed heartbeat exists, and an
     # unconfigured Jira writes one every night.
@@ -3724,21 +3794,6 @@ def _render_jira(section: dict[str, Any], write: Any) -> None:
     else:
         write(f"  external context: {freshness['state']}; last successful sync "
               f"{freshness['last_success_at']}\n")
-    rows = section["rows"]
-    if not rows:
-        write("  none\n")
-        return
-    # Every stored row, whatever the freshness line said: a truncated first
-    # run stored what it saw and the verb reported writing it. Open rows
-    # first; the producer has already limited the closed ones to seven days.
-    ordered = sorted(rows, key=lambda row: (row.get("state") or "").lower() != "open")
-    # The key is the URL tail and nothing formats `number`, which a Jira row
-    # does not have. The title is external text, quoted for the same reason
-    # `_render_contributions` quotes its rows: a newline or an escape in a
-    # Jira summary would otherwise print as a second heading.
-    _table(write, ["Key", "State", "Title"],
-           [[str(row.get("url") or "").rpartition("/")[2], (row.get("state") or "").lower(),
-             json.dumps(row.get("title"), ensure_ascii=False)] for row in ordered])
 
 
 def build_parser() -> argparse.ArgumentParser:

@@ -64,11 +64,12 @@ class ContributionStatusTests(unittest.TestCase):
         self.assertFalse(result["available"])
         self.assertIn("incomplete checkpoint", result["reason"])
 
-    def test_text_retains_projection_order_evidence_and_control_escaping(self) -> None:
-        rows = [{"key": "item:14", "title": "Local\n\u001b[31mwork", "lane": "newly_unblocked",
-                 "local_status": "planning", "local_branch": "fix/library", "tested_commit": "c" * 40,
-                 "evidence": [{"argv": ["python", "-m", "unittest"], "exit_code": 1, "sha256": "d" * 64}],
-                 "freshness": {"status": "unknown", "reason": "Incomplete observation"}},
+    def test_text_is_one_table_row_per_contribution_in_projection_order_with_controls_escaped(self) -> None:
+        """sd:5357: a row per contribution, as `sd today` prints a table; the fields beyond the
+        columns are `sd task contribution show`'s and `--json`'s, named on a line under the table."""
+        rows = [{"key": "item:14", "title": "Local\n\u001b[31mwork", "lane": "newly_unblocked", "item_id": 14,
+                 "local_status": "planning", "local_branch": "fix/library",
+                 "reasons": ["Dependency \u001b[2J merged"]},
                 {"key": "github:closed", "title": "Closed without merge", "lane": "awaiting_you", "external_state": "CLOSED"},
                 {"key": "github:waiting", "title": "Waiting for maintainer", "lane": "awaiting_them"},
                 {"key": "github:merged", "title": "Merged upstream", "lane": "merged"}]
@@ -79,55 +80,32 @@ class ContributionStatusTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertNotIn("\u001b", text)
         self.assertIn("Local\\n\\u001b[31mwork", text)
-        for value in ("fix/library", "c" * 40, "d" * 64, '"exit_code": 1', "Incomplete observation", "CLOSED"):
-            self.assertIn(value, text)
+        lines = text.splitlines()
+        self.assertEqual("Contributions, this repo, shared database order (4)", lines[1])
+        self.assertRegex(lines[2], r"^  Lane +Ref +Item +Local +External +Title$")
+        self.assertRegex(lines[3], r"^  -+(  -+)*$")
+        self.assertRegex(lines[4], r'^  newly_unblocked +item:14 +sd:14 +planning +- +"Local')
+        self.assertRegex(lines[5], r'^  awaiting_you +github:closed +- +- +CLOSED +"Closed without merge"$')
+        self.assertIn('  item:14 reasons: ["Dependency \\u001b[2J merged"]', lines)
+        self.assertIn("  every field: `sd task contribution show <key> --json`, or `sd-status --json`", lines)
+        self.assertNotIn("fix/library", text)
 
-    def test_a_projected_field_the_renderer_does_not_name_is_printed(self) -> None:
-        """sd:602. The tuple was the membership, so five live keys vanished.
-
-        Measured on the real projection before the fix, `_render_contributions`
-        dropped `blocking_labels`, `event_ids`, `needs_you`, `repo` and
-        `revision` -- no error, no warning, nothing for a reader to notice.
-        """
-        rows = [{"key": "item:1", "title": "A contribution", "lane": "awaiting_you",
-                 "blocking_labels": ["needs-rebase"], "repo": "acme/widget",
-                 "a_field_invented_after_this_test": "surfaced"}]
+    def test_a_github_url_reads_as_its_short_reference(self) -> None:
+        """A URL key is wider than a cell; the row names `<repo>#<number>` instead."""
+        url = "https://github.com/example/project/pull/2"
         output = io.StringIO()
-        status._render_contributions({"available": True, "rows": rows}, output.write)
-        text = output.getvalue()
-        for key in ("blocking_labels", "repo", "a_field_invented_after_this_test"):
-            self.assertIn(key, text)
-        self.assertIn("needs-rebase", text)
+        status._render_contributions({"available": True, "rows": [
+            {"key": f"github:{url}", "url": url, "lane": "merged", "title": "Merged"},
+            {"key": "issue:https://github.com/example/project/issues/7", "lane": "closed", "title": "Bug"}]},
+            output.write)
+        self.assertRegex(output.getvalue(), r"\n  merged +project#2 +")
+        self.assertRegex(output.getvalue(), r"\n  closed +project#7 +")
 
-    def test_the_named_fields_still_lead_in_the_order_the_tuple_gives(self) -> None:
-        """The control. Without it the test above passes on unordered dumping.
-
-        `CONTRIBUTION_ORDER` is still the display order; what changed is that
-        it no longer decides what appears at all.
-        """
-        rows = [{"key": "item:1", "title": "A contribution", "lane": "awaiting_you",
-                 "url": "https://example.invalid/pull/1", "local_status": "planning",
-                 "zzz_unknown": "last"}]
+    def test_an_unread_projection_counts_unknown_and_says_why(self) -> None:
         output = io.StringIO()
-        status._render_contributions({"available": True, "rows": rows}, output.write)
-        text = output.getvalue()
-        self.assertLess(text.index("key:"), text.index("url:"))
-        self.assertLess(text.index("url:"), text.index("local_status:"))
-        self.assertLess(text.index("local_status:"), text.index("zzz_unknown:"))
-
-    def test_a_row_of_only_known_fields_renders_exactly_as_before(self) -> None:
-        """The second control: the fix must add nothing to an ordinary row.
-
-        A renderer that appended a key unconditionally would satisfy both
-        assertions above while corrupting every existing line.
-        """
-        rows = [{"key": "item:1", "title": "A contribution", "lane": "merged",
-                 "local_status": "done"}]
-        output = io.StringIO()
-        status._render_contributions({"available": True, "rows": rows}, output.write)
-        printed = [line.strip().split(":")[0]
-                   for line in output.getvalue().splitlines() if line.startswith("    ")]
-        self.assertEqual(["key", "local_status"], printed)
+        status._render_contributions({"available": False, "reason": "no database", "rows": []}, output.write)
+        self.assertEqual('\nContributions, this repo, shared database order (unknown)\n  ! "no database"\n',
+                         output.getvalue())
 
     def test_no_registration_never_invents_contributions_from_generic_tasks(self) -> None:
         connection = sd_db.connect(self.database)

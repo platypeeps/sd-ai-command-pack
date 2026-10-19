@@ -147,8 +147,11 @@ ID   Repo  State        Due              Priority  Title             When
 
 STATUS = """\
 
-work across the shared database
-  repositories: app, lib
+Work across the shared database (2)
+  Repo  Role
+  ----  ---------
+  app   this repo
+  lib   companion
   2 landing · 1 delivered · 1 planned this week · 1 blocked · 8 unscheduled
 
   Landing now (2)
@@ -247,6 +250,18 @@ class SdToday(Zone):
         self.assertEqual(runs[0], runs[1])
         self.assertEqual([line for line in runs[0].splitlines() if line.endswith(")") and "(" in line][:3],
                          ["Attention (1)", "Decisions (1)", "Landing now (2)"])
+
+
+class Table(unittest.TestCase):
+    def test_a_named_column_takes_the_width_the_others_leave(self):
+        """sd:5357: a Detail or Value column flexes as Title does; every other cell stops at `CELL_MAX`."""
+        heads, rows = ["ID", "Note", "Detail"], [["strict", "x" * 40, "a finding sentence " * 6]]
+        sizes = sd_views.widths(heads, rows, 80, flex="Detail")
+        self.assertEqual([6, sd_views.CELL_MAX, 80 - 6 - sd_views.CELL_MAX - 4], sizes)
+        lines = sd_views.table(heads, rows, 80, flex="Detail")
+        self.assertEqual(80, len(lines[2]))
+        self.assertTrue(lines[2].endswith("…"))
+        self.assertEqual("x" * (sd_views.CELL_MAX - 1) + "…", lines[2].split()[1])
 
 
 class SdStatus(Zone):
