@@ -182,6 +182,13 @@ class TheIssueDoors(DoubleCase):
         self.assertEqual([(issue["number"], issue["title"]) for issue in listed], [(2, "A title"), (1, "older")])
         self.assertEqual(listed[0]["html_url"], "https://github.com/fixture/repo/issues/2")
 
+    def test_the_issue_list_carries_pull_requests_marked_as_github_does(self):
+        self.remote.add_issue("an issue")
+        self.remote.open_pull_request("feature", title="a pull request", body="its body")
+        listed = json.loads(self.gh("api", "/repos/fixture/repo/issues").stdout)
+        self.assertEqual([(entry["number"], "pull_request" in entry) for entry in listed], [(2, True), (1, False)])
+        self.assertEqual((listed[0]["body"], listed[0]["html_url"]), ("its body", "https://github.com/fixture/repo/pull/2"))
+
     def test_a_refused_create_files_nothing_and_says_why_once(self):
         self.remote.fail_next("create issue", 410, "HTTP 410: Issues are disabled for this repo")
         self.assertIn("HTTP 410", self.file(expect=1).stderr)

@@ -17,7 +17,7 @@ else, enumerated from the callers rather than from the API:
     GET    /repos/{slug}/pulls                          the open pull requests
     GET    /repos/{slug}/pulls/{n}                      state, mergeable, sha
     GET    /repos/{slug}/commits/{ref}/check-runs       the checks
-    GET    /repos/{slug}/issues                         the newest issues, newest first
+    GET    /repos/{slug}/issues                         issues and pull requests, newest first
     POST   /repos/{slug}/issues                         a new issue
     PUT    /repos/{slug}/pulls/{n}/merge                merge, with `sha`
     DELETE /repos/{slug}/git/refs/heads/{branch}        the branch deletion
@@ -52,7 +52,7 @@ def _issue_json(remote: FixtureRemote, issue) -> dict:
         "number": issue.number,
         "title": issue.title,
         "body": issue.body,
-        "created_at": issue.created_at,
+        "created_at": getattr(issue, "created_at", ""),
         "html_url": f"https://github.com/{remote.slug}/issues/{issue.number}",
     }
 
@@ -132,7 +132,12 @@ class GitHubDouble:
             return 200, [{"name": name} for name in remote.branches()]
 
         if method == "GET" and path == f"/repos/{slug}/issues":
-            return 200, [_issue_json(remote, issue) for issue in remote.list_issues()]
+            # GitHub lists pull requests as issues too, marked by a `pull_request` key.
+            pulls = [{**_issue_json(remote, pull), "html_url": f"https://github.com/{slug}/pull/{pull.number}",
+                      "pull_request": {"url": f"https://api.github.com/repos/{slug}/pulls/{pull.number}"}}
+                     for pull in remote.pull_requests.values()]
+            listed = [_issue_json(remote, issue) for issue in remote.list_issues()] + pulls
+            return 200, sorted(listed, key=lambda entry: entry["number"], reverse=True)
 
         if method == "POST" and path == f"/repos/{slug}/issues":
             payload = body or {}
