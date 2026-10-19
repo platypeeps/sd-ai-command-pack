@@ -18,7 +18,7 @@ and its last cut -- the constant `posted` key -- is `PostedKeyCut` below.
 CI lane hard-failed the logins it listed; no workflow, no action under
 `actions/` and no code in `bin/` ever read the list, and `setup-github`'s own
 line said as much -- "(none listed; rule 5 hard-fails for nobody)". It is a
-`RETIRED_POLICY_KEYS` row now, so a repository whose `.github/sd-review.json`
+`RETIRED_POLICY_KEYS` row now, so a repository whose review declaration
 still carries it is refused by name with a remedy rather than by "unknown
 key". The grep is bounded to let that row and the assertion proving it name
 the key; `TheAuthorsBoundStillFindsAKey` is the control on the bound.
@@ -354,7 +354,7 @@ PROSE_SYMBOLS = (
 
 #: The 31(b1) symbol that is **kept**, with the files that may carry it.
 #: `_protection_gaps` is the live function of `bin/sd-status`'s protection
-#: section that the accepted gaps of `.github/sd-status.json` -- a tracked
+#: section that the accepted gaps of the repo row's `status` declaration -- a
 #: record that today holds the `unprotected` acceptance of 2026-09-12 -- are
 #: applied to. `load_acknowledgements` sat beside it until sd:1110 moved the
 #: loader to `bin/sd_lib.py`, where `sd-ship merge` reads it too; the row

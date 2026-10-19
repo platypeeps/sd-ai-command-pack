@@ -528,7 +528,7 @@ RULES: tuple[Rule, ...] = (
         id="R15-D1",
         subject="sd-ship prepare's gate reuses a passing gate receipt instead "
                 "of running the check again, only at the receipt's head, or at "
-                "its tree where `.github/sd-gate-reuse.json` declares tree "
+                "its tree where the repository's gate_reuse declaration names tree "
                 "keying, and only under the same binding",
         checker="bin/sd_gate_receipts.py::from_receipts",
         proof="replace the `examine` call in "

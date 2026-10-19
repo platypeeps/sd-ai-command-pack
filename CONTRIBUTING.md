@@ -99,7 +99,8 @@ Lower a floor only in the pull request that reduces the measured implementation.
 Every change to `main` requires a pull request.
 Branch protection on `main` requires a pull request, the strict `sd/local-gate` check, and enforce_admins.
 It requires no approving review, because the sole maintainer cannot approve their own pull request.
-[.github/sd-status.json](.github/sd-status.json) records that accepted `reviews` gap, its reason, and the condition that ends it.
+The pack's `status` declaration on its repo row records that accepted `reviews` gap, its reason, and the condition that ends it.
+Read it with `sd-db repo declare <checkout> status`.
 Run `bin/sd-status` to inspect live protection.
 
 Use the pack's ship workflow for publication, review and merge.

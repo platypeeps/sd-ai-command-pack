@@ -38,6 +38,9 @@ import time
 import unittest
 from unittest import mock
 
+import sd_db
+from sd_db import writes as sd_writes
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SD = REPO_ROOT / "bin" / "sd"
 
@@ -1228,6 +1231,60 @@ class CorePolicyConfigTests(PluginFixture):
             with self.subTest(key=key):
                 self.assertNotEqual(self.run_sd("config", "set", "sd." + key, value).returncode, 0)
                 self.assertFalse(self.config_path.exists())
+
+
+class PluginSettingRowTests(PluginFixture):
+    """sd:5109: a plugin key is a `setting` row wherever a workflow database exists; `config.json` only where none does."""
+
+    def configured(self) -> None:
+        root = self.plugin(config=ConfigTests.DECLARED)
+        added = self.run_sd("plugin", "add", str(root))
+        self.assertEqual(added.returncode, 0, added.stderr)
+        self.home = self.tmp / "home"
+        sd_db.initialise(home=self.home)
+
+    def row(self) -> object:
+        connection = sd_db.connect(home=self.home)
+        try:
+            return sd_writes.read_settings(connection, ["pp.google_account"]).get("pp.google_account")
+        finally:
+            connection.close()
+
+    def test_a_plugin_key_reads_the_row_and_ignores_the_file_line(self) -> None:
+        self.configured()
+        config = self.config()
+        config["config"] = {"pp": {"google_account": "file"}}
+        self.write_config(config)
+        unset = self.run_sd("config", "get", "pp.google_account")
+        self.assertNotEqual(unset.returncode, 0, unset.stdout)
+        self.assertIn("pp.google_account is not set", unset.stderr)
+        self.assertIn("is not read: the workflow database answers for it", unset.stderr)
+        done = self.run_sd("config", "set", "pp.google_account", "row")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.row(), "row")
+        self.assertEqual(self.config()["config"], {"pp": {"google_account": "file"}})
+        self.assertEqual(self.run_sd("config", "get", "pp.google_account").stdout.strip(), "row")
+        self.assertEqual(self.run_sd("config", "unset", "pp.google_account").returncode, 0)
+        self.assertIsNone(self.row())
+
+    def test_a_row_the_pattern_refuses_is_named_not_returned(self) -> None:
+        self.configured()
+        connection = sd_db.connect(home=self.home, write=True)
+        try:
+            sd_writes.set_setting(connection, "pp.google_account", "Not-Lower")
+        finally:
+            connection.close()
+        got = self.run_sd("config", "get", "pp.google_account")
+        self.assertNotEqual(got.returncode, 0)
+        self.assertIn("in the workflow database does not match", got.stderr)
+
+    def test_a_database_that_does_not_answer_is_not_the_file(self) -> None:
+        self.configured()
+        self.write_config({**self.config(), "config": {"pp": {"google_account": "file"}}})
+        sd_db.default_path(self.home).write_bytes(b"not a database")
+        got = self.run_sd("config", "get", "pp.google_account")
+        self.assertNotEqual(got.returncode, 0)
+        self.assertNotIn("file", got.stdout)
 
 
 if __name__ == "__main__":

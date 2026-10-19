@@ -50,16 +50,17 @@ correct, not a gap. `--only lint` still runs one on demand.
 
 ## Docs-only scope
 
-A repository may track `.github/sd-check-scope.json`:
+A repository may declare a docs-only scope on its repo row (sd:5109):
 
-```json
-{"schema_version": 1, "docs_paths": ["docs/**", "*.md"], "docs_command": ["make", "docs-check"]}
+```sh
+sd-db repo declare PATH check_scope '{"schema_version": 1, "docs_paths": ["docs/**", "*.md"], "docs_command": ["make", "docs-check"]}'
 ```
 
 With `--base REF`, when every path changed since the merge base matches a `docs_paths` glob, only `docs_command` runs.
 The three names then read `skipped` with reason `docs-only scope`, a fourth row `docs` carries the result, and `scope.mode` is `docs-only`.
-A change to the declaration, a Makefile, the entrypoint's source file, `CLAUDE.local.md`, or a file a check command names runs the full check.
+A change to a Makefile, the entrypoint's source file, `CLAUDE.local.md`, or a file a check command names runs the full check.
 The full check also runs without a declaration, without `--base`, or on an empty range.
+A declaration that does not parse, or a database that does not answer, exits 2 and runs nothing.
 The local gate and the review lane's gate check pass the pull request's base branch.
 
 ## Required services
@@ -89,12 +90,13 @@ A repository whose check reads no commit history may key its gate receipts by tr
 {"schema_version": 1, "key": "tree", "reason": "the check reads no commit message, range or tag"}
 ```
 
-Track it as `.github/sd-gate-reuse.json`.
+Declare it as `sd-db repo declare PATH gate_reuse '<json>'`; the gate reads the repo row (sd:5109).
+A database that does not answer fails the gate unrun: an unknown key neither reuses nor records.
 A new head with the same tree, and a merge base with the base branch of the same tree, then reuses the earlier pass.
 The merge base binds by its tree, not its commit, so a predicted landing and the real one match (sd:2586).
 That covers an empty commit, a reworded message, or a rebase that changed nothing (sd:1912).
 Without the declaration a new head runs again, since a commit-message lint can pass at one head and fail at the next.
-A run with no base branch, a declaration that does not parse, or another `key` keeps the head key.
+A run with no base branch or another `key` keeps the head key; `sd-db repo declare` refuses a declaration that does not parse.
 A tree-keyed receipt stands for 6 hours (`TREE_REUSE_WINDOW_SECONDS`); a head-keyed one stays at 30 minutes.
 An optional `"tool": "tree"` is for the pack gating itself (sd:2613); the gate ignores it in any other repository.
 

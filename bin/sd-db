@@ -35,6 +35,8 @@ Usage: sd-db <verb> [arguments]
   init, migrate, status, fence, restore, repo, item, work, import,
   verify, usage, judgments, review, credentials, records
               sd_db.jobs.cli answers these, with the arguments given.
+              `repo declare PATH KIND JSON` first passes the JSON through
+              the pack reader of KIND, and refuses what it refuses.
               fence exits 1 on a machine whose tailnet name is not sd.hub_name.
               -h or --help anywhere prints this text and acts on nothing.
   backup [ARGS]
@@ -125,7 +127,36 @@ def run_sd_db_verb(argv: list[str], sd_db: Any) -> int:
         return serve.main(argv[1:])
     from sd_db.jobs import cli  # noqa: PLC0415 - the chosen copy
 
+    if argv[:2] == ["repo", "declare"] and len(argv) == 5 and argv[4] != "off":
+        problems = reader_refusals(argv[3], argv[4])
+        if problems:
+            for problem in problems:
+                print(f"sd-db repo declare: {problem}", file=sys.stderr)
+            return 1
     return cli.main(argv)
+
+
+def reader_refusals(kind: str, word: str) -> list[str]:
+    """What the pack reader of `kind` refuses in `word`, a JSON object (sd:5109); empty to let the library decide.
+
+    The library checks the kind and the shape and refuses text that is not an
+    object; this runs the reader's own validator, which lives in `bin/` and
+    which the library does not import, so a row holds only what a reader reads.
+    """
+    import json  # noqa: PLC0415 - only this verb needs it
+
+    import sd_lib  # noqa: PLC0415 - bin/ is this script's own path entry
+
+    if kind not in sd_lib.DECLARATION_KINDS:
+        return []
+    try:
+        value = json.loads(word)
+    except (ValueError, RecursionError):
+        return []
+    if not isinstance(value, dict):
+        return []
+    value.pop("$schema", None)
+    return sd_lib.declaration_problems(kind, value)
 
 if __name__ == "__main__":
     raise SystemExit(dispatch_verb(sys.argv[1:]))

@@ -86,13 +86,13 @@ else is. Its executables write these paths, and no others:
   must be a checkout of a managed `runner_merge=auto` repository (sd:1620): the routing lane and
   its Dependabot guard as `setup-github` writes them,
   `.github/workflows/sd-check.yml` where no other workflow runs on
-  `pull_request` (created only: an existing one is kept as written), the `unprotected` entry in `.github/sd-status.json`
-  (only where the remote says nobody else may push, where GitHub reports the
-  default branch unprotected by both classic protection and rulesets, and only
-  where the file declares no gap yet; a protection read that fails is reported
-  `unknown` and lays nothing), and a `docs/dashboard/` line in
-  `.gitignore`. **Tracked**, and written only on a feature branch. A repository
-  whose `sd-status.json` entry or `CLAUDE.md` rule forbids CI gets no workflow.
+  `pull_request` (created only: an existing one is kept as written), and a `docs/dashboard/` line in
+  `.gitignore`. **Tracked**, and written only on a feature branch.
+  Where the remote says nobody else may push, GitHub reports the default branch unprotected by both
+  classic protection and rulesets, and the repo row's `status` declaration accepts no `unprotected` gap,
+  the plan prints the `sd-db repo declare` command that adds it; the stamp writes no row.
+  A protection read that fails is reported `unknown` and prints nothing.
+  A repository whose `status` declaration or `CLAUDE.md` rule forbids CI gets no workflow.
   A repository whose `repo.ci` row says `local` gets no workflow either, from
   the stamp or from `setup-github`; see [WORKFLOW.md § No-CI mode](WORKFLOW.md#no-ci-mode).
   A repository declines any of these files once, in a tracked
@@ -216,8 +216,8 @@ The installer preserves restrictions and refuses malformed answers. It cannot re
 
 `sd.copilot_review` says when `sd-ship` requests a GitHub Copilot review by itself: `deep` on deep-tier changes only, `always` on every reviewing tier, `never` on none.
 Unset reads `deep`, so every repository gets Copilot on deep changes without a per-repository file.
-A repository's `.github/sd-review.json` `copilot_review.automatic_deep` overrides `deep` and `always` when the file names the key; a file that does not name it inherits.
-A machine `never` wins over the file.
+A repository's review declaration (`sd-db repo declare PATH review`) `copilot_review.automatic_deep` overrides `deep` and `always` when it names the key; one that does not name it inherits.
+A machine `never` wins over the declaration.
 `sd-review --explain` reports the effective policy and its source (`repository`, `machine config`, `machine default`) under `remote_reviews.copilot`.
 `sd-ship` applies the setting as it stands at dispatch to the tiers the retained passes recorded, so a change takes effect without another review.
 `sd-ship prepare --copilot-review request|skip` still overrides both for one prepare.
@@ -504,7 +504,7 @@ Each prose skill has a "State of the tooling" section.
 | `sd-review` | `bin/` | Local review on the exact diff; findings dispositioned locally, never posted |
 | `sd-ship` | `bin/` | Review committed work, prepare its PR, verify merge authority, and reconcile delivery |
 | `sd-spec` | prose | Update `docs/spec/**` on the PR branch |
-| `sd-status` | `bin/` | Read-only: derived status, open PRs, branch-protection gaps and the states this repo accepts (`.github/sd-status.json`) |
+| `sd-status` | `bin/` | Read-only: derived status, open PRs, branch-protection gaps and the states this repo accepts (its `status` declaration) |
 | `sd-help` | prose | Runtime catalog of installed `sd-*` surfaces |
 | `sd-skill-adopt` | `bin/` | Safety pre-screen, lint, and canonical transform for an incoming skill |
 | `sd-handoff` | `bin/` | Write the local session packet for this directory; `/clear` restores it |
@@ -533,7 +533,7 @@ WORKFLOW.md "No-CI mode" describes the gate.
 branch and has no bypass actors. Its rules block deletion and non-fast-forward
 pushes, require a pull request with no required approvals, and require the strict
 `sd/local-gate` status check.
-`.github/sd-status.json` accepts one gap, `reviews`: the approval count is 0
+The pack's `status` declaration accepts one gap, `reviews`: the approval count is 0
 because the sole maintainer cannot approve their own pull request. `sd-ship merge`
 reads the protection object before it reads the pull request's checks and
 refuses a missing or weaker one (`bin/sd_ship_remote.py`, `gate()`). The

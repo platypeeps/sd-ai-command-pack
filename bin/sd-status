@@ -25,7 +25,7 @@ Fourteen sections, in output order, under the `pack` banner naming the checkout 
 Open-row closing contradictions require trailers reachable from local or remote default refs.
 Enforcing GitHub branch protection is merge authority; mere presence is insufficient.
 Report each missing enforcement condition, including admin exemptions and non-strict checks.
-Repository acknowledgements in .github/sd-status.json match observed facts, not gap IDs.
+Repository acknowledgements in the repo row's status declaration match observed facts, not gap IDs.
 Changed protection invalidates them; load_acknowledgements holds incident and deletion criteria.
 
 Exit 0 includes reported gaps. Exit 2 indicates invocation or configuration faults, explained without a traceback.
@@ -202,8 +202,8 @@ def setup_section(root: pathlib.Path) -> dict[str, Any]:
 
 # The minimal YAML reader and the acknowledgement loader live in `sd_lib`
 # since sd:1110: `sd-ship merge` reads the same workflow triggers and the
-# same `.github/sd-status.json` at the reviewed head, and two readers of one
-# file is the drift this pack refuses. The private names stay bound here so
+# same `status` declaration from the repo row (sd:5109), and two readers of one
+# source is the drift this pack refuses. The private names stay bound here so
 # section 5 reads as it did; each is the `sd_lib` definition, not a copy.
 _KEY_RE = sd_lib.YAML_KEY_RE
 _ITEM_RE = sd_lib.YAML_ITEM_RE
@@ -531,7 +531,7 @@ def _job_names(
     produced.update(names)
 
 
-ACKNOWLEDGEMENT_RELATIVE_PATH = sd_lib.ACKNOWLEDGEMENT_RELATIVE_PATH
+ACKNOWLEDGEMENT_SOURCE = sd_lib.ACKNOWLEDGEMENT_SOURCE
 ACKNOWLEDGED_FACTS = sd_lib.ACKNOWLEDGED_FACTS
 ACKNOWLEDGEABLE_GAPS = sd_lib.ACKNOWLEDGEABLE_GAPS
 load_acknowledgements = sd_lib.load_acknowledgements
@@ -876,14 +876,14 @@ def _baseline_for(root: pathlib.Path, slug: str, section: dict[str, Any]) -> lis
 def _protection_reading(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]:
     produced, notes = produced_contexts(root)
     acknowledgements, problems = load_acknowledgements(root)
-    # A file that exists and is wrong is itself a finding, reported wherever
+    # A declaration that is wrong or unread is itself a finding, reported wherever
     # this section gets to -- including the branches that never reach GitHub.
     # It is a gap and not a note because it fails closed: while it is wrong,
     # nothing is accepted, and the reader should know why.
     #
     # `acknowledgements` is built here rather than through `_gap` and is
     # deliberately absent from ACKNOWLEDGEABLE_GAPS: these rows never reach
-    # `_apply_acknowledgements`, because a file that accepted its own faults
+    # `_apply_acknowledgements`, because a declaration that accepted its own faults
     # would be a suppression that switches itself on the moment it breaks.
     unreadable: list[dict[str, Any]] = [
         {"id": "acknowledgements", "gap": problem} for problem in problems
@@ -902,9 +902,7 @@ def _protection_reading(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any
         "detail": {
             "produced_contexts": sorted(produced),
             "workflow_notes": notes,
-            "acknowledgement_source": str(ACKNOWLEDGEMENT_RELATIVE_PATH)
-            if (root / ACKNOWLEDGEMENT_RELATIVE_PATH).is_file()
-            else "none",
+            "acknowledgement_source": "repo row" if acknowledgements or problems else "none",
         },
     }
     if not gh["available"]:
@@ -940,7 +938,7 @@ def _protection_reading(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any
         # This branch used to return here, one line before the acknowledgements
         # it had already loaded were applied -- so `unprotected`, the only
         # finding a repository with no protection can ever be told about, was
-        # the one finding `.github/sd-status.json` could not accept. The file
+        # the one finding the acknowledgement file could not accept. The file
         # was read and its path was reported in `detail`, which is precisely
         # what made the omission read as a working feature.
         read = sd_protection.read_rulesets(_gh_fetch(root), f"repos/{slug}", default_branch)
@@ -1618,7 +1616,7 @@ CLASSES = (
     Class("protection-gap", "g", True, 40, "protection",
           "an enforcement leg missing on the default branch", ("protection",)),
     Class("accepted-gap-standing", "g", False, 45,
-          ".github/sd-status.json accepted_gaps[]",
+          "repo row status declaration accepted_gaps[]",
           "a written acceptance whose until condition nothing re-reads"),
     Class("pr-needs-action", "p", False, 60, "open pull requests",
           "an open pull request waiting on a review or a merge"),
@@ -2755,7 +2753,7 @@ def _concern_row(
 
 
 def _accepted_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
-    """Written acceptances from `.github/sd-status.json`, standing until read.
+    """Written acceptances from the repo row's `status` declaration, standing until read.
 
     Not abnormal. An acceptance is a decision, and re-flagging a decision as a
     defect is how a banner becomes noise. It is listed because `until` is prose
@@ -2772,7 +2770,7 @@ def _accepted_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
             f"accepted {entry.get('since') or 'at an unrecorded date'}: "
             f"{entry.get('because') or 'no reason recorded'}",
             f"re-read `until {entry.get('until') or 'no condition recorded'}`, "
-            f"and drop the entry from {ACKNOWLEDGEMENT_RELATIVE_PATH} if it "
+            f"and drop the entry from {ACKNOWLEDGEMENT_SOURCE} if it "
             f"has come true",
         ))
     return rows
@@ -2887,7 +2885,7 @@ def _protection_rows(protection: dict[str, Any]) -> list[dict[str, Any]]:
         _row(
             "protection-gap", f"{default}#{gap['id']}", gap["id"], gap["gap"],
             f"close the {gap['id']} gap on {default}, or accept it in "
-            f"{ACKNOWLEDGEMENT_RELATIVE_PATH}",
+            f"{ACKNOWLEDGEMENT_SOURCE}",
         )
         for gap in protection.get("gaps") or []
     ]

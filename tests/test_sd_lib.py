@@ -1908,5 +1908,63 @@ class SiblingTests(unittest.TestCase):
         self.assertEqual(adopt.Finding("warn", "rule", 1).line, 1)
 
 
+class RepoDeclarationTests(Fixture):
+    """`sd_lib.repo_declaration` (sd:5109): the row's object, and what a read that fails means."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.home = self.tmp / "home"
+        self.env = {"HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config")}
+
+    def register(self, root: pathlib.Path, remote: str | None = None) -> None:
+        if not sd_db.default_path(self.home).exists():
+            sd_db.initialise(home=self.home)
+        connection = sd_db.connect(home=self.home, write=True)
+        try:
+            sd_db.upsert_repo(connection, str(root), remote=remote, managed=1)
+        finally:
+            connection.close()
+
+    def declare(self, root: pathlib.Path, kind: str, value: dict) -> None:
+        self.register(root)
+        connection = sd_db.connect(home=self.home, write=True)
+        try:
+            sd_db.repos.set_declaration(connection, str(root), kind, value)
+        finally:
+            connection.close()
+
+    def test_a_linked_worktree_reads_its_repositorys_row(self) -> None:
+        root = self.make_repo()
+        self.declare(root, "review", {"default_tier": "cheap"})
+        worktree = self.add_worktree(root)
+        self.assertEqual(sd_lib.repo_declaration(worktree, "review", self.env), {"default_tier": "cheap"})
+        self.assertIsNone(sd_lib.repo_declaration(worktree, "status", self.env))
+
+    def test_no_database_on_the_machine_declares_nothing(self) -> None:
+        self.assertIsNone(sd_lib.repo_declaration(self.make_repo(), "review", self.env))
+
+    def test_a_database_that_does_not_open_is_unknown_never_none(self) -> None:
+        root = self.make_repo()
+        self.declare(root, "review", {})
+        sd_db.default_path(self.home).write_bytes(b"not a database")
+        with self.assertRaises(sd_lib.DatabaseUnreadable):
+            sd_lib.repo_declaration(root, "review", self.env)
+
+    def test_a_clone_whose_origin_two_rows_share_is_refused(self) -> None:
+        """Older state: two rows for one remote. A guess would apply another repository's policy."""
+        remote = "https://github.com/example/shared.git"
+        for name in ("one", "two"):
+            self.register(self.make_repo(name), remote)
+        clone = self.make_repo("clone")
+        self.git(clone, "remote", "add", "origin", remote)
+        with self.assertRaises(sd_lib.DatabaseUnreadable) as caught:
+            sd_lib.repo_declaration(clone, "review", self.env)
+        self.assertIn("origin is the remote of 2 rows", str(caught.exception))
+
+    def test_an_unknown_kind_is_a_programming_error(self) -> None:
+        with self.assertRaises(ValueError):
+            sd_lib.repo_declaration(self.tmp, "reviews", self.env)
+
+
 if __name__ == "__main__":
     unittest.main()

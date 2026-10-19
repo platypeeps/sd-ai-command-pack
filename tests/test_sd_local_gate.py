@@ -35,6 +35,7 @@ import sd_local_gate  # noqa: E402
 from sd_ship_remote import Refusal  # noqa: E402
 
 from tests.clean_env import clean_environment  # noqa: E402
+from tests.row_seed import seed_declaration  # noqa: E402
 
 BLOCK_START, BLOCK_END = sd_lib.LOCAL_BLOCK_START, sd_lib.LOCAL_BLOCK_END
 
@@ -99,6 +100,14 @@ class Repository(unittest.TestCase):
         git(self.root, "init", "-q", "-b", "main")
         git(self.root, "config", "user.email", "t@example.com")
         git(self.root, "config", "user.name", "t")
+
+    def declare_row(self, kind: str, value: dict) -> None:
+        """The fixture repository's `kind` declaration on its row (sd:5109), in a scratch database this test reads."""
+        home = self.root.parent / "home"
+        seed_declaration(home, self.root, kind, value)
+        patch = mock.patch.dict(os.environ, {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config")})
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def commit(self, makefile: str) -> str:
         (self.root / "Makefile").write_text(makefile, encoding="utf-8")
@@ -580,6 +589,28 @@ class Receipts(ReceiptFixture):
         self.assertNotIn("receipt_revision", result)
         self.assertEqual(result["receipt_skipped"], "moved during the run: scope mode")
 
+    def test_a_pass_under_another_scope_command_is_not_recorded(self) -> None:
+        """sd:5109: the child reads the check_scope row itself; a row changed and changed back during
+        the run leaves the binding equal, so the command the child ran must be the binding's."""
+        head = self.counted()
+
+        def run(argv, env, tree, timeout):  # type: ignore[no-untyped-def]
+            return 0, json.dumps({"status": "pass", "scope": {"mode": "full", "command": ["true"]}, "checks": []}), ""
+        result = self.gate(head, run=run)
+        self.assertEqual(result["status"], "success")
+        self.assertNotIn("receipt_revision", result)
+        self.assertEqual(result["receipt_skipped"], "moved during the run: scope command")
+
+    def test_a_database_that_does_not_answer_fails_the_gate_unrun(self) -> None:
+        """sd:5109: the gate_reuse row is unknown, so no receipt is read or written and no check runs under a guess."""
+        head = self.counted()
+        with mock.patch.object(sd_lib, "repo_declaration", side_effect=sd_lib.DatabaseUnreadable("down")):
+            result = self.gate(head)
+        self.assertEqual(result["status"], "failure")
+        self.assertTrue(result["summary"].startswith("the gate_reuse declaration cannot be read: down"), result["summary"])
+        self.assertNotIn("receipt_revision", result)
+        self.assertEqual(self.runs(), 0)
+
     def test_a_different_path_runs_the_check_again(self) -> None:
         head = self.counted()
         self.gate(head)
@@ -763,11 +794,7 @@ class MergeReuse(ReceiptFixture):
         """A branch off `main` whose tree declares the tree key; `origin/main` is the base."""
         self.counted()
         if declared:
-            (self.root / ".github").mkdir()
-            (self.root / ".github" / "sd-gate-reuse.json").write_text(json.dumps(
-                {"schema_version": 1, "key": "tree", "reason": "the check reads no commit history"}), encoding="utf-8")
-            git(self.root, "add", "-A")
-            git(self.root, "commit", "-q", "-m", "declare")
+            self.declare_row("gate_reuse", {"schema_version": 1, "key": "tree", "reason": "the check reads no commit history"})
         git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
         git(self.root, "checkout", "-q", "-b", "topic")
         (self.root / "src.txt").write_text("one\n", encoding="utf-8")
@@ -1048,9 +1075,7 @@ class PackGatesItself(ReceiptFixture):
         self.pack = self.root / "bin"
         self.pack.mkdir()
         (self.pack / "sd-check").write_text("#!/bin/sh\n", encoding="utf-8")
-        (self.root / ".github").mkdir()
-        (self.root / ".github" / "sd-gate-reuse.json").write_text(json.dumps(
-            {"schema_version": 1, "key": "tree", "reason": "a fixture", "tool": "tree"}), encoding="utf-8")
+        self.declare_row("gate_reuse", {"schema_version": 1, "key": "tree", "reason": "a fixture", "tool": "tree"})
         self.head = self.counted()
 
     def land(self) -> None:
@@ -1087,8 +1112,23 @@ class PackGatesItself(ReceiptFixture):
         self.assertEqual(argvs[0][1], str(foreign / "sd-check"))
 
 
+#: The pack row's `gate_reuse` declaration (sd:5109), as the move after merge writes it from the retired file.
+PACK_GATE_REUSE = {'schema_version': 1, 'key': 'tree', 'reason': "make check reads no commit message, trailer, range or tag of this checkout: docs-lint runs --no-history (sd:2606), the suites read history only in fixture repositories (sd:2593), and a GIT_TRACE of lint, audit and docs-lint at f7a3a90f shows only rev-parse paths, ls-files and remote get-url (sd:2610); tool tree: the pack's gate runs its own bin/sd-check from the gated tree (sd:2613)", 'tool': 'tree'}
+
+
 class PackDeclaresTreeReuse(unittest.TestCase):
-    """The pack keys its own gate receipts by tree (sd:2610): `make check` reads no commit history."""
+    """The pack keys its own gate receipts by tree (sd:2610): `make check` reads no commit history.
+
+    The declaration is the pack row's (sd:5109): seeded here in a scratch database, read through the gate's own reader.
+    """
+
+    def setUp(self) -> None:
+        home = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, home, ignore_errors=True)
+        patch = mock.patch.dict(os.environ, {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config")})
+        patch.start()
+        self.addCleanup(patch.stop)
+        seed_declaration(home, sd_lib.main_worktree_root(REPO_ROOT), "gate_reuse", PACK_GATE_REUSE)
 
     def test_the_pack_keys_its_gate_receipts_by_tree(self) -> None:
         self.assertTrue(sd_gate_receipts.keyed_by_tree(REPO_ROOT), sd_gate_receipts.REUSE_DECLARATION)
@@ -1336,9 +1376,7 @@ class DocsScopeGate(Repository):
     """The merge gate passes the base branch, so a declared docs-only change runs the docs command (sd:2072)."""
 
     def test_a_docs_only_change_posts_docs_only(self) -> None:
-        (self.root / ".github").mkdir()
-        (self.root / ".github" / "sd-check-scope.json").write_text(
-            '{"schema_version": 1, "docs_paths": ["docs/**"], "docs_command": ["true"]}', encoding="utf-8")
+        self.declare_row("check_scope", {"schema_version": 1, "docs_paths": ["docs/**"], "docs_command": ["true"]})
         self.commit("check:\n\t@false\n")
         git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
         (self.root / "docs").mkdir()
@@ -1386,9 +1424,7 @@ class PostHead(Repository):
 
     def docs_only_head(self) -> str:
         """A docs commit on top of a head whose full check fails, under a declared docs-only scope."""
-        (self.root / ".github").mkdir()
-        (self.root / ".github" / "sd-check-scope.json").write_text(
-            '{"schema_version": 1, "docs_paths": ["docs/**"], "docs_command": ["true"]}', encoding="utf-8")
+        self.declare_row("check_scope", {"schema_version": 1, "docs_paths": ["docs/**"], "docs_command": ["true"]})
         self.commit("check:\n\t@false\n")
         git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
         git(self.root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")

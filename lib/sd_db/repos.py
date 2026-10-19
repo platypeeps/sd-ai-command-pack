@@ -35,6 +35,7 @@ next sitting.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
@@ -1084,6 +1085,91 @@ def jira_project(connection: sqlite3.Connection, path: Path | str) -> str | None
             raise SchemaTooOld(schema_version(connection), SCHEMA_VERSION) from error
         raise
     return None if row is None else row["jira_project"]
+
+
+#: The kinds `repo.declarations` holds, each the object a `.github/sd-<kind>.json`
+#: file held before migration 37 (sd:5109). The pack's readers validate each value.
+DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status")
+#: The longest declarations object, as compact JSON: the largest file moved was under 1 KiB.
+DECLARATION_BYTES = 16384
+#: The word `repo declare` takes to remove a kind; the kind leaves the object.
+DECLARATION_OFF = "off"
+
+
+def _declarations_text(value: dict[str, Any]) -> str:
+    """`value` as the column stores it: compact JSON with sorted keys."""
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
+
+
+def set_declaration(connection: sqlite3.Connection, path: Path | str, kind: str,
+                    value: dict[str, Any] | None) -> tuple[str, dict[str, Any] | None]:
+    """Set or remove (`None`) one registered repository's `kind` declaration. Returns `(path, before)`.
+
+    The one writer of `repo.declarations` (sd:5109). It checks the shape only:
+    a known kind, a JSON object, the whole column within `DECLARATION_BYTES`.
+    What a kind's object may say is its reader's rule, which `bin/sd-db` runs
+    before calling this. Same path refusal as `set_runner_merge`. Writing the
+    value a kind already holds changes nothing but `updated_at`.
+    """
+    if kind not in DECLARATION_KINDS:
+        raise RepoRefusal(f"{kind!r} is not a declaration kind; expected {', '.join(DECLARATION_KINDS)}")
+    if value is not None and not isinstance(value, dict):
+        raise RepoRefusal(f"a {kind} declaration is a JSON object, not {type(value).__name__}")
+    given = str(Path(path).expanduser().resolve())
+    probe = paths.keys(given)
+    with transaction(connection):
+        row = connection.execute(
+            f"SELECT path, declarations FROM repo WHERE path IN ({paths.placeholders(probe)})",
+            probe).fetchone()
+        if row is None:
+            raise RepoRefusal(f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
+        held = _declarations(row["declarations"], row["path"])
+        before = held.get(kind)
+        if value is None:
+            held.pop(kind, None)
+        else:
+            held[kind] = value
+        try:
+            text = _declarations_text(held) if held else None
+        except (TypeError, ValueError, RecursionError) as error:
+            raise RepoRefusal(f"the {kind} declaration is not JSON: {error}") from None
+        if text is not None and len(text.encode("utf-8")) > DECLARATION_BYTES:
+            raise RepoRefusal(f"the declarations would take more than {DECLARATION_BYTES} bytes")
+        connection.execute("UPDATE repo SET declarations = ?, updated_at = ? WHERE path = ?",
+                           (text, now(), row["path"]))
+    return row["path"], before
+
+
+def _declarations(text: Any, where: str) -> dict[str, Any]:
+    """The column's object; `{}` for NULL. Anything else raises: an unread declaration is unknown."""
+    if text is None:
+        return {}
+    try:
+        value = json.loads(text)
+    except (TypeError, ValueError):
+        value = None
+    if not isinstance(value, dict):
+        raise SdDbError(f"{where}: repo.declarations does not read as a JSON object; set it again")
+    return value
+
+
+def declarations(connection: sqlite3.Connection, path: Path | str) -> dict[str, Any] | None:
+    """One repository's declarations by kind; `{}` when it declares none, None when no row holds `path`.
+
+    A store before 37 has no column and so holds no declaration: `{}` for a
+    row, a known answer and not a failed read, so code ahead of the hub's
+    `sd-db migrate` reads what the store holds (sd:5109). A column that does
+    not read raises `SdDbError`, never `{}`.
+    """
+    probe = paths.keys(str(Path(path).expanduser().resolve()))
+    where = f"FROM repo WHERE path IN ({paths.placeholders(probe)}) ORDER BY path"
+    try:
+        row = connection.execute(f"SELECT path, declarations {where}", probe).fetchone()
+    except sqlite3.OperationalError as error:
+        if "no such column: declarations" not in str(error):
+            raise
+        return None if connection.execute(f"SELECT path {where}", probe).fetchone() is None else {}
+    return None if row is None else _declarations(row["declarations"], row["path"])
 
 
 #: What `repo.ci` accepts, in the order the CHECK constraint lists them:

@@ -52,10 +52,11 @@ A repository that needs more uses the explicit dependency contract,
 `sd-check --record-receipt` with a declared inventory (sd:1912).
 
 A repository whose check reads no commit history may key its receipts by tree
-instead of head, in its reviewed tree:
+instead of head, as the `gate_reuse` declaration on its repo row (sd:5109;
+`.github/sd-gate-reuse.json` held it before):
 
-    .github/sd-gate-reuse.json
-    {"schema_version": 1, "key": "tree", "reason": "the check reads no commit message, range or tag"}
+    sd-db repo declare PATH gate_reuse \
+        '{"schema_version": 1, "key": "tree", "reason": "the check reads no commit message, range or tag"}'
 
 Two heads with one tree -- an empty commit, a reworded message, a
 rebase that changed nothing -- then share one receipt: the key and the binding
@@ -68,8 +69,9 @@ apart. A run with no base keeps the head key: the merge base is what binds
 the content below the branch. Without the
 declaration a new head runs again, because a commit-message lint or a version
 stamp from `git describe` can pass at one head and fail at the next. A
-declaration that does not parse, or names another key, keeps the head key; the
-file is in the tree, so changing it is a new tree and runs the check. A
+declaration that does not parse, or names another key, keeps the head key. One
+the database cannot answer is unknown: the gate refuses rather than guess a key
+or a runner (`sd_lib.DatabaseUnreadable`). A
 tree-keyed receipt stands for `TREE_REUSE_WINDOW_SECONDS` (6 hours, ruling
 D2'), long enough for a builder's pass to serve the lane's prepare and merge;
 the head key keeps `REUSE_WINDOW_SECONDS`.
@@ -115,8 +117,8 @@ REUSE_WINDOW_SECONDS = 30 * 60
 #: serves the lane's later prepare and merge of the same tree and merge base.
 TREE_REUSE_WINDOW_SECONDS = 6 * 60 * 60
 WRITER = "sd-local-gate"
-#: The reviewed file that keys a repository's receipts by tree instead of head.
-REUSE_DECLARATION = ".github/sd-gate-reuse.json"
+#: The repo row declaration that keys a repository's receipts by tree instead of head, as messages name it.
+REUSE_DECLARATION = "the gate_reuse declaration"
 REUSE_FIELDS = {"schema_version", "key", "reason"}
 #: Optional in the declaration: `"tool": "tree"` says the gate runs this tree's own `bin/sd-check` (sd:2613).
 TOOL_FIELD = "tool"
@@ -143,32 +145,51 @@ def _content_digest(path: str | pathlib.Path) -> str:
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
-def keyed_by_tree(tree: pathlib.Path) -> bool:
-    """True when `tree` declares, in `REUSE_DECLARATION`, that its check reads no commit history.
+def reuse_problems(value: Any) -> list[str]:
+    """Why `value` is not a tree-key declaration; empty when it is one (sd:5109).
 
-    Anything short of exactly that declaration -- no file, a file that does not
-    parse, another key, an empty reason -- keeps the head key.
+    `sd-db repo declare` refuses a value with any problem, so a row holds the
+    exact shape `keyed_by_tree` accepts: the three fields, optionally `tool`.
     """
-    try:
-        value = json.loads((tree / REUSE_DECLARATION).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    return (isinstance(value, dict) and set(value) - {TOOL_FIELD} == REUSE_FIELDS and value["schema_version"] == 1
-            and value["key"] == "tree" and isinstance(value["reason"], str) and bool(value["reason"].strip()))
+    if not isinstance(value, dict):
+        return [f"{REUSE_DECLARATION} is a JSON object, not {type(value).__name__}"]
+    extra, missing = sorted(set(value) - REUSE_FIELDS - {TOOL_FIELD}), sorted(REUSE_FIELDS - set(value))
+    problems = [f"{REUSE_DECLARATION}: unknown key(s) {', '.join(extra)}"] if extra else []
+    problems += [f"{REUSE_DECLARATION}: missing {', '.join(missing)}"] if missing else []
+    if problems:
+        return problems
+    if value["schema_version"] != 1 or isinstance(value["schema_version"], bool):
+        problems.append(f"{REUSE_DECLARATION}: schema_version must be 1")
+    if value["key"] != "tree":
+        problems.append(f"{REUSE_DECLARATION}: key must be tree")
+    if not isinstance(value["reason"], str) or not value["reason"].strip():
+        problems.append(f"{REUSE_DECLARATION}: reason must say why the check reads no history")
+    if TOOL_FIELD in value and value[TOOL_FIELD] != "tree":
+        problems.append(f"{REUSE_DECLARATION}: tool, when given, must be tree")
+    return problems
+
+
+def keyed_by_tree(tree: pathlib.Path) -> bool:
+    """True when `tree`'s repository declares, as its `gate_reuse` declaration, that its check reads no commit history.
+
+    No declaration, or one short of exactly that shape, keeps the head key. A
+    database that does not answer raises `sd_lib.DatabaseUnreadable`: unknown
+    is neither key, and the caller refuses rather than reuse or record.
+    """
+    value = sd_lib.repo_declaration(tree, "gate_reuse")
+    return value is not None and not reuse_problems(value)
 
 
 def gates_itself(root: pathlib.Path, tree: pathlib.Path, pack: pathlib.Path) -> bool:
     """True when the run in `tree` is the pack gating itself (sd:2613), so the gate runs and binds the tree's own code.
 
-    `tree` must declare the tree key with `"tool": "tree"` and carry `bin/sd-check`, and `pack`, the running
-    pack's `bin/`, must belong to `root`'s repository. A foreign repository's field is ignored: its gate keeps
-    running, and binding, the checkout's pack.
+    The repository must declare the tree key with `"tool": "tree"`, `tree` must carry `bin/sd-check`, and
+    `pack`, the running pack's `bin/`, must belong to `root`'s repository. A foreign repository's field is
+    ignored: its gate keeps running, and binding, the checkout's pack. Raises as `keyed_by_tree` does.
     """
-    try:
-        value = json.loads((tree / REUSE_DECLARATION).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return False
-    if not (keyed_by_tree(tree) and value.get(TOOL_FIELD) == "tree" and (tree / "bin" / "sd-check").is_file()):
+    value = sd_lib.repo_declaration(tree, "gate_reuse")
+    if not (value is not None and not reuse_problems(value) and value.get(TOOL_FIELD) == "tree"
+            and (tree / "bin" / "sd-check").is_file()):
         return False
     common = ["rev-parse", "--path-format=absolute", "--git-common-dir"]
     mine = sd_lib.git_output(common, pack)
@@ -429,6 +450,9 @@ def record_unless_moved(database: pathlib.Path, key: str, identity: Mapping[str,
     scope = (reading["report"] or {}).get("scope") or {}
     moved = [name for name in identity if after.get(name) != identity[name]] if after else ["the binding"]
     moved += ["scope mode"] if scope.get("mode") != identity["scope"]["mode"] else []
+    # The child reads the check_scope declaration itself (sd:5109): a row changed and changed back during the
+    # run leaves an equal binding, so the command the child ran must be the one the binding names.
+    moved += ["scope command"] if list(scope.get("command") or []) != list(identity["scope"]["command"]) else []
     if moved:
         reading["receipt_skipped"] = "moved during the run: " + ", ".join(moved)
         return

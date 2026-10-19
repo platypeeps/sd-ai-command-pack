@@ -46,10 +46,10 @@ def copilot_policy(repository: bool | None, machine: str | None) -> tuple[str, s
     """The effective Copilot policy word and who said it.
 
     A machine `sd.copilot_review` of `never` wins first, as the operator's
-    cost lever (sd:1444); then the repository's `.github/sd-review.json` when
+    cost lever (sd:1444); then the repository's review declaration when
     it named `copilot_review.automatic_deep` (`True` is `deep`, `False` is
     `never`); then the machine's word; then the default, so a repository with
-    no file gets one Copilot review on a deep-tier change only (sd:1328).
+    no declaration gets one Copilot review on a deep-tier change only (sd:1328).
     Pure on purpose: `sd-review` resolves it when it reports, and `sd-ship`
     resolves it again when it dispatches, against the setting as it stands.
     """
@@ -100,7 +100,7 @@ CORE_CONFIG = {
     "copilot_review": {"pattern": "|".join(COPILOT_REVIEW_POLICIES),
                        "description": "When sd-ship requests a Copilot review by itself: deep (unset reads deep) on deep-tier "
                                       "changes only, always on every reviewing tier, never on none; a repository's "
-                                      ".github/sd-review.json copilot_review overrides deep and always, and never wins over it."},
+                                      "review declaration's copilot_review overrides deep and always, and never wins over it."},
     "gate_slots": {"pattern": "[0-9]+",
                    "description": "How many gates (sd-check runs, sd gate run, the pack's make test) may run at once on this "
                                   "machine; 0 is no cap. Unset reads a quarter of the cores; SD_GATE_SLOTS overrides it "
@@ -683,56 +683,71 @@ def fleet_connection(environ: Mapping[str, str] | None = None, *, write: bool = 
         raise DatabaseUnreadable(f"the workflow database did not open: {type(error).__name__}: {error}") from None
 
 
-def fleet_setting(key: str, environ: Mapping[str, str] | None = None) -> tuple[str | None, str]:
-    """A fleet key's value and where it came from: `database`, `file` or `default`.
+def database_setting(name: str, environ: Mapping[str, str] | None = None) -> tuple[bool, str | None]:
+    """`(answered, value)` for the setting row `name`, such as `sd.copilot_review` or `songs.delivery_folder`.
 
-    Row wins: once the database holds a row for the key, `config.json` is not
-    read for it, and a cleared row reads unset. The file answers only for a
-    key the database never held, so the key moves with no flag day.
+    `answered` is False only on a machine with no workflow database
+    (`fleet_connection`), whose settings stay in `config.json`. With a
+    database the row alone answers (sd:5109): no row and a cleared row are
+    both `None`, and `config.json` is not read. A failed read raises
+    `DatabaseUnreadable`: unknown, never unset.
     """
     connection = fleet_connection(environ)
-    if connection is not None:
-        from sd_db import writes as sd_writes  # noqa: PLC0415
-        try:
-            held = sd_writes.read_settings(connection, [f"sd.{key}"])
-        except Exception as error:  # noqa: BLE001 - a failed read is unknown, named
-            raise DatabaseUnreadable(f"sd.{key} was not read from the workflow database: "
-                              f"{type(error).__name__}: {error}") from None
-        finally:
-            connection.close()
-        if f"sd.{key}" in held:
-            value = held[f"sd.{key}"]
-            if value is not None and not re.fullmatch(CORE_CONFIG[key]["pattern"], value):
-                raise ConfigError(f"invalid sd.{key} policy in the workflow database")
-            return value, "database"
-    value = file_setting(key, environ)
-    return value, "file" if value is not None else "default"
-
-
-def set_fleet_setting(key: str, value: str | None,
-                      environ: Mapping[str, str] | None = None) -> tuple[bool, str | None]:
-    """Write the fleet key's row (`None` unsets): whether a row was written, and the value it replaced.
-
-    No row is written on a machine with no database (`fleet_connection`);
-    its caller writes `config.json` as before.
-
-    The replaced value is the one `fleet_setting` answered: the row, else the
-    file. The file is never written here; a file value the row now hides
-    stays until the lead deletes it.
-    """
-    was, _source = fleet_setting(key, environ)
-    connection = fleet_connection(environ, write=True)
     if connection is None:
-        return False, was
+        return False, None
     from sd_db import writes as sd_writes  # noqa: PLC0415
     try:
-        sd_writes.set_setting(connection, f"sd.{key}", value)
+        held = sd_writes.read_settings(connection, [name])
+    except Exception as error:  # noqa: BLE001 - a failed read is unknown, named
+        raise DatabaseUnreadable(f"{name} was not read from the workflow database: "
+                                 f"{type(error).__name__}: {error}") from None
+    finally:
+        connection.close()
+    return True, held.get(name)
+
+
+def set_database_setting(name: str, value: str | None,
+                         environ: Mapping[str, str] | None = None) -> tuple[bool, str | None]:
+    """Write the setting row `name` (`None` unsets): whether a row was written, and the row value it replaced.
+
+    No row is written on a machine with no database (`fleet_connection`); its
+    caller writes `config.json` as before. The file is never written here; a
+    file value the row now hides stays until the operator deletes it.
+    """
+    connection = fleet_connection(environ, write=True)
+    if connection is None:
+        return False, None
+    from sd_db import writes as sd_writes  # noqa: PLC0415
+    try:
+        was = sd_writes.set_setting(connection, name, value)
     except Exception as error:  # noqa: BLE001 - a failed write is named; nothing was written
-        raise ConfigError(f"sd.{key} was not written to the workflow database: "
+        raise ConfigError(f"{name} was not written to the workflow database: "
                           f"{type(error).__name__}: {error}") from None
     finally:
         connection.close()
     return True, was
+
+
+def fleet_setting(key: str, environ: Mapping[str, str] | None = None) -> tuple[str | None, str]:
+    """A fleet key's value and where it came from: `database`, `file` or `default`.
+
+    With a database, its row alone answers, and `database` is the source even
+    for a key no row holds (sd:5109): `config.json` is not read. Only a machine
+    with no database reads the file.
+    """
+    answered, value = database_setting(f"sd.{key}", environ)
+    if not answered:
+        value = file_setting(key, environ)
+        return value, "file" if value is not None else "default"
+    if value is not None and not re.fullmatch(CORE_CONFIG[key]["pattern"], value):
+        raise ConfigError(f"invalid sd.{key} policy in the workflow database")
+    return value, "database"
+
+
+def set_fleet_setting(key: str, value: str | None,
+                      environ: Mapping[str, str] | None = None) -> tuple[bool, str | None]:
+    """Write the fleet key's row (`None` unsets): whether a row was written, and the row value it replaced."""
+    return set_database_setting(f"sd.{key}", value, environ)
 
 
 def core_setting(key: str, environ: Mapping[str, str] | None = None) -> str | None:
@@ -1224,6 +1239,79 @@ def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
     except Exception:  # every fault is "not said"; see the docstring
         return "github"
     return value if value in CI_MODES else "github"
+
+
+#: The kinds a repository row declares (sd:5109), the library's `repos.DECLARATION_KINDS`:
+#: each is the object a `.github/sd-<kind>.json` file held before migration 37.
+DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status")
+
+
+def repo_declaration(root: pathlib.Path | str, kind: str, environ: Mapping[str, str] | None = None) -> Any:
+    """`kind`'s object on the repository row `root` is a checkout of, or None when the row declares none (sd:5109).
+
+    Resolved through `registered_base`, as `repo_ci` is, so a linked worktree,
+    a runner clone and a gate's detached worktree read their repository's row.
+    A machine with no workflow database (`fleet_connection`) declares nothing.
+    A store before 37 holds none, and reads so. Every other fault raises
+    `DatabaseUnreadable`, never None: no library, an open or read that fails,
+    and a clone whose origin two rows share, since a guessed row would apply
+    another repository's policy.
+    """
+    if kind not in DECLARATION_KINDS:
+        raise ValueError(f"{kind!r} is not a declaration kind")
+    connection = fleet_connection(environ)
+    if connection is None:
+        return None
+    try:
+        from sd_db import repos  # noqa: PLC0415 - fleet_connection imported the library
+
+        here = pathlib.Path(root).resolve()
+        path = registered_base(here, import_sd_db().module, connection)
+        held = repos.declarations(connection, path)
+        if held is None:
+            origin = git_output(["remote", "get-url", "origin"], here)
+            shared = [row["path"] for row in connection.execute(
+                "SELECT path, remote FROM repo WHERE remote IS NOT NULL") if origin and repos.same_remote(row["remote"], origin)]
+            if len(shared) > 1:
+                raise ConfigError(f"{here} has no row and its origin is the remote of {len(shared)} rows")
+            return None
+    except Exception as error:  # noqa: BLE001 - a failed read is unknown, named
+        raise DatabaseUnreadable(f"the {kind} declaration was not read from the workflow database: "
+                                 f"{type(error).__name__}: {error}") from None
+    finally:
+        connection.close()
+    return held.get(kind)
+
+
+def declaration_problems(kind: str, value: Any) -> list[str]:
+    """What `kind`'s reader would refuse in `value`; empty when it reads (sd:5109).
+
+    `bin/sd-db repo declare` asks before the library writes, so a row holds
+    only what a reader accepts. Each kind's own validator answers; this restates none.
+    """
+    where = f"the {kind} declaration"
+    if kind == "review":
+        review = sibling("sd_review_declaration", "sd-review")
+        try:
+            review.validate_policy(value, where)
+        except review.PolicyError as error:
+            return [str(error)]
+        return []
+    if kind == "gate_reuse":
+        import sd_gate_receipts  # noqa: PLC0415 - it imports this module
+
+        return sd_gate_receipts.reuse_problems(value)
+    if kind == "check_scope":
+        import sd_check_scope  # noqa: PLC0415 - it imports this module
+
+        try:
+            sd_check_scope.parse_declaration(value)
+        except sd_check_scope.DeclarationError as error:
+            return [str(error)]
+        return []
+    if kind == "status":
+        return parse_acknowledgements(value)[1]
+    return [f"{kind!r} is not a declaration kind; expected {', '.join(DECLARATION_KINDS)}"]
 
 
 def hosts_lane(connection: Any, database: Any, repository: str) -> bool:
@@ -3188,13 +3276,12 @@ def workflow_triggers(lines: list[str]) -> set[str]:
 EVENT_NAME_RE = re.compile(r"^[a-z][a-z_]*$")
 
 #: Where a repository records that it has looked at a protection state and
-#: decided to keep it. A sibling of `.github/sd-review.json` rather than a key
-#: inside it: that file is `bin/sd-review`'s routing policy, it rejects unknown
-#: keys by design, and a malformed acknowledgement must not take the review
-#: lane down with it. Same directory, same `<command>.json` convention, same
-#: property that matters -- it is in git, so a collaborator sees it in a diff
-#: instead of finding it in somebody's machine config.
-ACKNOWLEDGEMENT_RELATIVE_PATH = pathlib.Path(".github") / "sd-status.json"
+#: decided to keep it: the `status` declaration on its repo row (sd:5109),
+#: which `.github/sd-status.json` held before. Its own kind rather than a key
+#: inside `review`: that is `bin/sd-review`'s routing policy, it rejects
+#: unknown keys by design, and a malformed acknowledgement must not take the
+#: review lane down with it. Named in every message about it.
+ACKNOWLEDGEMENT_SOURCE = "the status declaration (`sd-db repo declare PATH status`)"
 
 #: The facts an acknowledgement may pin, and the whole vocabulary it may use.
 #: Deliberately not the gap id: `reviews` is emitted for two opposite states of
@@ -3238,8 +3325,8 @@ ACKNOWLEDGED_FACTS = (
 #: What is deliberately *not* here is as load-bearing as what is.
 #: `squash_message` and `rebase_merge` are real ids the report prints, on merge
 #: settings that never pass through `_apply_acknowledgements`; `acknowledgements`
-#: is the id a fault in the file itself carries, and a broken file must not be
-#: able to accept its own breakage. All three are ids no acknowledgement could
+#: is the id a fault in the declaration itself carries, and a broken one must
+#: not be able to accept its own breakage. All three are ids no acknowledgement could
 #: ever match, so admitting them here would re-open the hole under a
 #: better-spelled name.
 #:
@@ -3259,7 +3346,7 @@ ACKNOWLEDGEABLE_GAPS = (
 
 
 def load_acknowledgements(root: pathlib.Path) -> tuple[list[dict[str, Any]], list[str]]:
-    """Accepted protection states, read from `.github/sd-status.json`.
+    """Accepted protection states, read from the repository row's `status` declaration.
 
     **Incident.** One of this repository's protection gaps cannot be closed:
     `main` requires a pull request but zero approving reviews, and with
@@ -3272,48 +3359,37 @@ def load_acknowledgements(root: pathlib.Path) -> tuple[list[dict[str, Any]], lis
 
     **Deletion criterion.** Each entry carries `until:`, the condition that
     ends it, and it is printed every run beside the acceptance. When that
-    condition is met the entry is deleted from the file and the gap returns on
-    its own; nothing here needs changing for that to happen. An entry whose
-    `until` has come true and which is still in the file is a bug in the file,
-    not in this reader.
+    condition is met the entry is removed from the declaration and the gap
+    returns on its own; nothing here needs changing for that to happen. An
+    entry whose `until` has come true and which is still declared is a bug in
+    the declaration, not in this reader.
 
-    Returns `(entries, problems)`. A file that exists and is wrong yields no
-    entries and a problem per fault: never a silent fall back, and never a
-    partial application. Failing this way fails closed -- every gap the file
-    meant to accept goes on printing as a gap.
-    """
-    path = root / ACKNOWLEDGEMENT_RELATIVE_PATH
-    try:
-        text = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return [], []
-    except (OSError, UnicodeDecodeError) as error:
-        return [], [f"{ACKNOWLEDGEMENT_RELATIVE_PATH}: cannot be read ({error})"]
-    return parse_acknowledgements(text)
-
-
-def parse_acknowledgements(text: str) -> tuple[list[dict[str, Any]], list[str]]:
-    """The file's content, wherever it was read from, to `(entries, problems)`.
-
-    `load_acknowledgements` reads the working tree and hands the text here;
-    `sd-ship merge` reads the reviewed head (`git show <head>:...`) and hands
-    its text here. One parser, two readers: a declaration the merge honours
-    is the one `sd-status` reports, by construction rather than by agreement.
+    Returns `(entries, problems)`. A declaration that is wrong, or that cannot
+    be read, yields no entries and a problem per fault: never a silent fall
+    back, and never a partial application. Failing this way fails closed --
+    every gap the declaration meant to accept goes on printing as a gap.
     """
     try:
-        loaded = json.loads(text)
-    except ValueError as error:
-        return [], [f"{ACKNOWLEDGEMENT_RELATIVE_PATH}: not valid JSON ({error})"]
+        value = repo_declaration(root, "status")
+    except DatabaseUnreadable as error:
+        return [], [f"{ACKNOWLEDGEMENT_SOURCE}: cannot be read ({error})"]
+    return ([], []) if value is None else parse_acknowledgements(value)
 
-    where = str(ACKNOWLEDGEMENT_RELATIVE_PATH)
+
+def parse_acknowledgements(loaded: Any) -> tuple[list[dict[str, Any]], list[str]]:
+    """The declaration's object to `(entries, problems)`.
+
+    `sd-status` and `sd-ship merge` both read the row through
+    `load_acknowledgements` and land here. One parser, one source: a
+    declaration the merge honours is the one `sd-status` reports, and
+    `sd-db repo declare` refuses what this refuses.
+    """
+    where = ACKNOWLEDGEMENT_SOURCE
     if not isinstance(loaded, dict):
         return [], [f"{where}: the top level must be a JSON object"]
-    known = ("$schema", "accepted_gaps")
+    known = ("accepted_gaps",)
     unknown = sorted(set(loaded) - set(known))
     if unknown:
-        # Both known keys are named, `$schema` included: a message that listed
-        # only `accepted_gaps` would read as though the schema pointer this
-        # repository's own file carries were itself the mistake.
         return [], [
             f"{where}: unknown key(s) {', '.join(unknown)}; known keys are {', '.join(known)}"
         ]
@@ -3328,8 +3404,8 @@ def parse_acknowledgements(text: str) -> tuple[list[dict[str, Any]], list[str]]:
         problems.extend(faults)
         if not faults:
             # A faulty entry is not carried, and it makes no difference which
-            # way that goes: one fault anywhere discards the whole file two
-            # lines below. Dropping it here keeps the list that reaches the
+            # way that goes: one fault anywhere discards the whole declaration
+            # two lines below. Dropping it here keeps the list that reaches the
             # matcher to entries this reader has fully checked.
             entries.append(entry)
     if problems:

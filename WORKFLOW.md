@@ -77,9 +77,9 @@ These run without being asked.
   `sd-status` reports gaps; executable merge stops when required protection is absent.
   Protection is read from both of GitHub's mechanisms: the classic object first, and when that is absent, the branch's active rulesets.
   A ruleset with a `pull_request` or `required_status_checks` rule is the protection, held to the same guards; one that only forbids deletion or force-push is not.
-  One accepted gap changes that gate: an `unprotected` entry in `.github/sd-status.json` at the reviewed commit.
+  One accepted gap changes that gate: an `unprotected` entry in the repo row's `status` declaration, read at merge time (sd:5109).
   Under it, `sd-ship merge` requires every check run, every status, and a `pull_request` run of every workflow at the head to pass.
-  The receipt records `declared_gap: unprotected`. Any other gap, and a declaration only in the working tree, do not change the gate.
+  The receipt records `declared_gap: unprotected`. Any other gap, and a `.github/sd-status.json` file, do not change the gate.
 - `make check` runs `sd-docs-lint` against the checkout's own `docs/work/`, `docs/spec/` and `docs/decisions/`.
   `sd-ship` runs it again at delivery time. A consumer that wants the gate
   checks the pack out in its own workflow and runs `<pack>/bin/sd-docs-lint`
@@ -153,13 +153,13 @@ After the switch:
 - It posts the result to that exact commit as the `sd/local-gate` status, `success` or `failure`.
   It refuses to post for any commit other than the one the worktree held.
 - The description carries `inputs <digest>` as provenance: the head, the copied `CLAUDE.local.md` and the pack's `bin/` files.
-  A tree whose `.github/sd-gate-reuse.json` adds `"pack": "sd-check"` declares that its check runs no other pack command.
+  A repository whose `gate_reuse` declaration adds `"pack": "sd-check"` declares that its check runs no other pack command.
   Its inputs then hash only what `sd-check` and the gate's `sd_gate_run` import, so a pack landing elsewhere voids no receipt (sd:2722).
 - Every merge attempt posts a fresh status. `sd-ship prepare` runs this same gate, through `sd-review --gate-check`.
   Prepare's pass leaves a receipt; the merge gate at the same head and binding, within 30 minutes, reads it instead of running `sd-check` again.
   The status then says `(reused)`. The merge gate never writes a receipt.
   Prepare reads one too: a pass that `sd gate check` or an earlier prepare left at the same head and binding (sd:1912).
-  A repository that tracks `.github/sd-gate-reuse.json` keys receipts by tree and merge base instead of head, for 6 hours (sd:1912).
+  A repository whose row carries a `gate_reuse` declaration keys receipts by tree and merge base instead of head, for 6 hours (sd:1912, sd:5109).
   The merge base binds by its tree, not its commit (sd:2586).
   The pack's own declaration adds `"tool": "tree"`: its gate runs the gated tree's own `bin/sd-check` and binds that tree, not the checkout's `bin/` (sd:2613).
   A pack landing between a builder's gate and the lane's prepare then keeps the pack item's receipt.
@@ -574,7 +574,7 @@ name. Copilot and Greptile are not entries: they post on the pull request, and
 this lane never posts.
 
 This file is the only list of provider identities. `sd-review` reads it through the
-library. `.github/sd-review.json` carries repository policy, paths and severity;
+library. The repo row's review declaration carries repository policy, paths and severity;
 it names no provider chain. Effective authorization restricts the registry's
 reviewer chain before vendor, transport, availability and spending gates run.
 
@@ -583,7 +583,8 @@ reviewer chain before vendor, transport, availability and spending gates run.
 Core settings use `sd config get|set|unset|list` and the existing atomic machine configuration writer.
 The file is `~/.config/sd-ai-command-pack/config.json`, honoring `XDG_CONFIG_HOME`.
 These keys serve every machine and live in the workflow database as `setting` rows: `sd.fleet_owners`, `sd.copilot_review` (sd:3989), `sd.hub_name` (sd:4044), `sd.status_companions` (sd:5098) and the `sd.notion_*` publish ids (sd:5141).
-`sd config set` and `unset` write the row; once a row exists, the file's line for that key is not read, and `get` names it on stderr.
+Every plugin key (`hoa.*`, `sdw.*`, `songs.*`) is a `setting` row too (sd:5109).
+`sd config set` and `unset` write the row; with a database the row alone answers, the file's line for that key is not read, and `get` names it on stderr.
 A machine with no database and no `hub.json` keeps them in the file. A database that cannot be read is an error, never the file's value.
 `sd config list sd --json` gives each key's `source`: `database`, `file` or `default`.
 Merge permission is one setting, `repo.runner_merge`: a column on the repository row in the workflow database, not an `sd` key.
@@ -600,9 +601,9 @@ The reserved `sd` namespace declares these settings:
   `deny` vetoes all local allowances. Absence supplies no standing grant.
 - `sd.copilot_review`: when `sd-ship` requests a Copilot review by itself. `deep` requests one on deep-tier changes only,
   `always` on every reviewing tier, `never` on none. Absence reads `deep`, so a repository with no
-  `.github/sd-review.json` gets Copilot on deep changes and on nothing else.
-  A repository file that names `copilot_review.automatic_deep` overrides `deep` and `always`; one that does not inherits.
-  `never` wins over the file.
+  review declaration gets Copilot on deep changes and on nothing else.
+  A review declaration that names `copilot_review.automatic_deep` overrides `deep` and `always`; one that does not inherits.
+  `never` wins over the declaration.
   `sd-review` reports the effective policy, its source and the repository's say under `remote_reviews.copilot`.
   `sd-ship` resolves the decision again at dispatch, from the setting as it stands then and the tiers the
   retained passes recorded, so a setting changed after the review takes effect without another review.

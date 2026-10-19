@@ -146,7 +146,9 @@ class ReceiptTests(ReviewFixture):
                 if name == "sd_db" or name.startswith("sd_db."):
                     self.assertTrue(entered, "receipt imported sd_db before its library gateway")
                 return original_import(name, *args, **kwargs)
+            # The binding's review declaration has its own gateway read (sd:5109); this test is the receipt's.
             with self.subTest(operation=operation), \
+                    mock.patch.object(receipts.sd_lib, "repo_declaration", return_value=None), \
                     mock.patch.object(receipts.sd_lib, "import_sd_db", side_effect=enter_gateway), \
                     mock.patch.object(builtins, "__import__", side_effect=guarded_import):
                 self.assertIsNotNone(operation())
@@ -162,6 +164,7 @@ class ReceiptTests(ReviewFixture):
             return original_import(name, *args, **kwargs)
         missing = receipts.sd_lib.Imported(None, "synthetic unavailable library", "")
         with mock.patch.object(receipts.sd_lib, "import_sd_db", return_value=missing) as gateway, \
+                mock.patch.object(receipts.sd_lib, "repo_declaration", return_value=None), \
                 mock.patch.object(builtins, "__import__", side_effect=observe_import):
             with self.assertRaisesRegex(receipts.Unavailable, "requires the shared database library"):
                 receipts.store_check_receipt(self.root, self.env, self.database, before, result)
@@ -339,6 +342,19 @@ class ReceiptTests(ReviewFixture):
         # The example is itself a declaration the parser accepts.
         (self.root / receipts.CONTRACT).write_text(receipts.EXAMPLE)
         self.assertEqual(receipts.reuse_contract(self.root)["schema_version"], 1)
+
+    def test_the_review_declaration_binds_and_an_unread_one_refuses(self):
+        """sd:5109: the row's review declaration replaces `.github/sd-review.json` in the binding."""
+        declared = receipts.sd_lib
+        with mock.patch.object(declared, "repo_declaration", return_value=None):
+            absent = receipts.check_binding(self.root, self.env)
+        with mock.patch.object(declared, "repo_declaration", return_value={"default_tier": "cheap"}):
+            policy = receipts.check_binding(self.root, self.env)
+        self.assertNotEqual(absent["files"]["policy:review_declaration"], policy["files"]["policy:review_declaration"])
+        self.assertNotIn("policy:.github/sd-review.json", policy["files"])
+        with mock.patch.object(declared, "repo_declaration", side_effect=declared.DatabaseUnreadable("down")), \
+                self.assertRaisesRegex(receipts.Unavailable, "the review declaration cannot be read: down"):
+            receipts.check_binding(self.root, self.env)
 
     def test_recorded_checks_run_under_one_locale_whatever_the_caller_sets(self):
         # sd:2386: an undeclared LANG/LC_ALL is fixed, so the locale cannot vary between runs.

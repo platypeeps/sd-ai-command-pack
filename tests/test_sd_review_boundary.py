@@ -951,11 +951,15 @@ class LineBudgetTests(unittest.TestCase):
         # probe and the opencode probe's version in the outcome (`bin/sd-review`
         # +13), and a probe that runs out of time names its stage and elapsed
         # seconds and reads as a timeout, not a breach (`bin/sd_opencode.py` +24).
+        #
+        # 4798 -> 4813 is sd:5109, under the operator's 4900 ceiling: the review
+        # policy and the gate's reuse key read the repo row, and a row that does
+        # not read refuses (`bin/sd_gate_run.py` +4, `bin/sd_check_receipts.py` +6).
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4798,
+            4813,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

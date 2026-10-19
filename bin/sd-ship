@@ -118,7 +118,7 @@ DELIVERING_KINDS = ("work", "task", "followup")
 #: **That is not the whole of what the router says, and reading it as such was
 #: wrong.** `docs_skip` is qualified by `never_skip`, which beats it outright
 #: (`bin/sd_route.py`, "unless any path is in the ``never_skip`` deny-list,
-#: which always wins"). This repository's `.github/sd-review.json` puts
+#: which always wins"). This repository's review declaration puts
 #: `docs/spec/**` in that deny-list and the built-in default puts it there
 #: too, so a blanket `docs/` exemption here was not "strictly less than the
 #: router already does" -- it skipped the one directory inside `docs/` the
@@ -817,7 +817,7 @@ class Ship(SharedReview):
                 and self.copilot_tiers_selected(passes, self.copilot_repository_at_dispatch()))
 
     def copilot_repository_at_dispatch(self) -> bool | None:
-        """What `.github/sd-review.json` says of Copilot now, or `None`.
+        """What the repository's review declaration says of Copilot now, or `None`.
 
         Read through `sd-review`'s validated loader, as `repository_skippable`
         reads it. A file that will not parse refuses: it has said nothing a
@@ -831,7 +831,7 @@ class Ship(SharedReview):
                 f"the repository's review policy does not parse, so its Copilot word "
                 f"cannot be read at dispatch: {error}",
                 code="review_policy_malformed", boundary="review", state="operator_decision",
-                next_action="Fix .github/sd-review.json, then retry.",
+                next_action="Fix the review declaration (`sd-db repo declare PATH review`), then retry.",
             ) from None
         return policy["copilot_review"]["automatic_deep"]
 
@@ -1179,7 +1179,7 @@ class Ship(SharedReview):
                 f"the repository's review policy does not parse, so its skip lists "
                 f"cannot be applied to the merge gate: {error}",
                 code="review_policy_malformed", boundary="review", state="operator_decision",
-                next_action="Fix .github/sd-review.json, then retry merge.",
+                next_action="Fix the review declaration (`sd-db repo declare PATH review`), then retry merge.",
             ) from None
         route = review.sd_route
         allowed, denied = policy.get("docs_skip") or (), policy.get("never_skip") or ()

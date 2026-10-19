@@ -183,8 +183,12 @@ def check_in_worktree(root: pathlib.Path, head: str, *, timeout: int = CHECK_SEC
             if not os.path.lexists(tree / LOCAL_BLOCK):  # the digested block only, an empty one for no file; a tracked copy, even a link, is the tree's
                 (tree / LOCAL_BLOCK).write_text(sd_lib.local_policy_text(sd_lib.read_local_block(local) if (local := untracked_local_block(root)) else {}), encoding="utf-8")
             env = gate_environment(root, None if environ is None else dict(environ))
-            content, fork = sd_gate_receipts.tree_key(tree, base)
-            own = sd_gate_receipts.gates_itself(root, tree, BIN)
+            try:
+                content, fork = sd_gate_receipts.tree_key(tree, base)
+                own = sd_gate_receipts.gates_itself(root, tree, BIN)
+            except sd_lib.DatabaseUnreadable as error:
+                # Unknown key and runner: no receipt is read or written, and no check runs under a guess (sd:5109).
+                return {"head": head, **check_reading(None, f"the gate_reuse declaration cannot be read: {error}")}
             gated = sd_gate_receipts.Worktree(root, tree, head, base, env, content, fork, own,
                                               gate_inputs(root, head, content, own))
             identity = sd_gate_receipts.gate_binding(tree, head, gated.inputs, base, env, fork) if database is not None else None

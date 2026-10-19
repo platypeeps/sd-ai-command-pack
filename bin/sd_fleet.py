@@ -9,9 +9,10 @@ things the repository itself carries (sd:1326, decision D5 on sd:1334):
     `bin/sd_setup_github.py`, not a second copy;
   * a check workflow, because `every_check` refuses a head nothing validated
     and a repository with no `pull_request` workflow has nothing to run;
-  * the `unprotected` entry in `.github/sd-status.json`, in the plain
-    "no protection by decision" form, only where GitHub positively reports
-    the default branch unprotected (see `branch_protection`);
+  * the `unprotected` entry in the repo row's `status` declaration, in the
+    plain "no protection by decision" form, only where GitHub positively
+    reports the default branch unprotected (see `branch_protection`). The
+    stamp writes no row: it prints the `sd-db repo declare` command (sd:5109);
   * the `CLAUDE.local.md` block, rendered by `bin/sd_install.py`, and
     `docs/dashboard/` ignored and present for generated HTML;
   * the Claude Code settings baseline, `SECRET_READ_DENY` (sd:1661), per
@@ -73,6 +74,7 @@ import difflib
 import json
 import pathlib
 import re
+import shlex
 import sys
 from typing import Any, Callable, Iterable
 from urllib.parse import quote
@@ -99,7 +101,10 @@ PACK_SLUG = sd_setup_github.ACTION_REPOSITORY
 ROUTE_PATH = str(sd_setup_github.WORKFLOW_RELATIVE_PATH)
 DEPENDABOT_PATH = str(sd_setup_guard.DEPENDABOT_RELATIVE_PATH)
 CHECK_PATH = ".github/workflows/sd-check.yml"
-STATUS_PATH = ".github/sd-status.json"
+#: How the plan names the repo row's `status` declaration (sd:5109).
+STATUS_DECLARATION = "status declaration"
+#: The file the declaration lived in before migration 37; an exempt list that still names it is ignored.
+RETIRED_EXEMPT = (".github/sd-status.json",)
 GITIGNORE_PATH = ".gitignore"
 LOCAL_BLOCK_PATH = "CLAUDE.local.md"
 DASHBOARD_DIR = "docs/dashboard"
@@ -107,7 +112,7 @@ FLEET_PATH = ".github/sd-fleet.json"
 SETTINGS_PATH = ".claude/settings.json"
 LOCAL_SETTINGS_PATH = ".claude/settings.local.json"
 #: Every path the stamp writes, so every path `.github/sd-fleet.json` may exempt.
-EXEMPTABLE = (ROUTE_PATH, DEPENDABOT_PATH, CHECK_PATH, STATUS_PATH, GITIGNORE_PATH, SETTINGS_PATH,
+EXEMPTABLE = (ROUTE_PATH, DEPENDABOT_PATH, CHECK_PATH, GITIGNORE_PATH, SETTINGS_PATH,
               LOCAL_SETTINGS_PATH, LOCAL_BLOCK_PATH, DASHBOARD_DIR)
 
 #: The Claude Code settings baseline (sd:1661, ruling #6991): reads an agent
@@ -425,10 +430,10 @@ def exemptions(tree: "Tree") -> tuple[frozenset[str], str]:
     listed = loaded.get("exempt", [])
     if not isinstance(listed, list) or not all(isinstance(path, str) for path in listed):
         return frozenset(), '"exempt" must be a list of paths'
-    unknown = [path for path in listed if path not in EXEMPTABLE]
+    unknown = [path for path in listed if path not in EXEMPTABLE + RETIRED_EXEMPT]
     if unknown:
         return frozenset(), f"exempts {', '.join(unknown)}, which the stamp does not write ({', '.join(EXEMPTABLE)})"
-    return frozenset(listed), ""
+    return frozenset(path for path in listed if path in EXEMPTABLE), ""
 
 
 def owner_slug(remote: str | None) -> str:
@@ -464,21 +469,15 @@ def pack_pin(given: str | None) -> str:
     return commit
 
 
-def status_text(current: str | None) -> str:
-    """`.github/sd-status.json` with the plain `unprotected` entry added.
+def declares_unprotected(gaps: list[dict[str, Any]]) -> bool:
+    """Whether `gaps`, a row's accepted gaps, hold the entry `sd-ship merge` takes as the declared gap."""
+    return any(gap.get("id") == "unprotected" and gap.get("state") == {"branch_protection": False} for gap in gaps)
 
-    Additive only: a file that already declares any accepted gap comes back
-    byte for byte, because its entries are the operator's reasons and a
-    rewrite would lose them. Raises ValueError on a file that is not the
-    object the schema describes.
-    """
-    data: dict[str, Any] = {} if current is None else json.loads(current)
-    if not isinstance(data, dict) or not isinstance(data.get("accepted_gaps", []), list):
-        raise ValueError("not an object with an accepted_gaps list")
-    if current is not None and data.get("accepted_gaps"):
-        return current
-    data["accepted_gaps"] = [dict(UNPROTECTED_ENTRY)]
-    return json.dumps(data, indent=2, ensure_ascii=False) + "\n"
+
+def status_command(root: pathlib.Path, gaps: list[dict[str, Any]]) -> str:
+    """The `sd-db repo declare` line that adds `UNPROTECTED_ENTRY` to the row's `gaps`, kept as written."""
+    value = json.dumps({"accepted_gaps": [*gaps, dict(UNPROTECTED_ENTRY)]}, ensure_ascii=False)
+    return f"sd-db repo declare {shlex.quote(str(root))} status {shlex.quote(value)}"
 
 
 def settings_text(current: str | None) -> str:
@@ -530,15 +529,11 @@ NO_CI_DECLARED = re.compile(r"\bforbids (?:adding )?CI\b", re.IGNORECASE)
 NO_CI_RULE = re.compile(r"^\s*(?:-\s*)?(?:No CI\b|(?:Do not|Don't) add (?:CI|workflows)\b)", re.IGNORECASE | re.MULTILINE)
 
 
-def forbids_ci(tree: Tree) -> str | None:
-    """Where `tree` says it takes no CI, or None."""
-    try:
-        gaps = json.loads(tree.text_at(STATUS_PATH) or "{}").get("accepted_gaps", [])
-    except (ValueError, AttributeError):
-        gaps = []
-    for gap in gaps if isinstance(gaps, list) else []:
-        if isinstance(gap, dict) and NO_CI_DECLARED.search(str(gap.get("because", ""))):
-            return f"{STATUS_PATH} entry {gap.get('id')!r} says CI is forbidden"
+def forbids_ci(tree: Tree, gaps: list[dict[str, Any]]) -> str | None:
+    """Where `tree`, or the row's accepted `gaps`, says it takes no CI, or None."""
+    for gap in gaps:
+        if NO_CI_DECLARED.search(str(gap.get("because", ""))):
+            return f"{STATUS_DECLARATION} entry {gap.get('id')!r} says CI is forbidden"
     if NO_CI_RULE.search(tree.text_at("CLAUDE.md") or ""):
         return "CLAUDE.md forbids adding CI"
     return None
@@ -594,8 +589,18 @@ def pull_request_workflows(tree: Tree, *, besides: Iterable[str]) -> list[str]:
 def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None], *, pin: str,
                     owned: bool, self_install: bool, protection: Protection | None = None,
                     ci: str = "github") -> None:
-    """The tracked half of a plan: route, guard, check, declaration, ignore line."""
-    no_ci = forbids_ci(tree)
+    """The tracked half of a plan: route, guard, check, declaration, ignore line.
+
+    The row's `status` declaration says whether CI is forbidden and whether the
+    gap is declared. A declaration that does not read refuses the tracked half:
+    an unknown answer neither forbids CI nor permits proposing it.
+    """
+    gaps, problems = sd_lib.load_acknowledgements(tree.root)
+    if problems:
+        plan.refused.append(f"tracked files: the {STATUS_DECLARATION} does not read ({'; '.join(problems)}); "
+                            "fix it, then re-run")
+        return
+    no_ci = forbids_ci(tree, gaps)
     if ci == "local":
         plan.adapted.append(f"workflows: none laid ({ROUTE_PATH}, {DEPENDABOT_PATH}, {CHECK_PATH}); repo.ci is "
                             f"local, so sd-ship merge runs sd-check at the head and posts "
@@ -611,23 +616,20 @@ def tracked_changes(plan: Plan, tree: Tree, propose: Callable[[str, str], None],
     # The declared gap, on owned repositories only, only where GitHub says
     # the branch is unprotected, and only where none is declared.
     if not owned:
-        plan.adapted.append(f"{STATUS_PATH}: not declared; {plan.slug or 'this remote'} is an employer's repository "
-                            "or others may push to it, so its protection stands")
+        plan.adapted.append(f"{STATUS_DECLARATION}: not declared; {plan.slug or 'this remote'} is an employer's "
+                            "repository or others may push to it, so its protection stands")
     elif protection is None or protection.state == UNKNOWN:
         why = protection.reason if protection else "it was not read"
-        plan.adapted.append(f"{STATUS_PATH}: not declared; protection is unknown ({why}), and only a positive "
-                            "\"unprotected\" from GitHub lays the declaration")
+        plan.adapted.append(f"{STATUS_DECLARATION}: not declared; protection is unknown ({why}), and only a "
+                            "positive \"unprotected\" from GitHub lays the declaration")
     elif protection.state == PROTECTED:
-        plan.adapted.append(f"{STATUS_PATH}: not declared; {protection.reason}")
+        plan.adapted.append(f"{STATUS_DECLARATION}: not declared; {protection.reason}")
+    elif declares_unprotected(gaps):
+        plan.adapted.append(f"{STATUS_DECLARATION}: kept as declared; it already accepts the unprotected gap")
     else:
-        try:
-            after = status_text(tree.text_at(STATUS_PATH))
-        except ValueError as error:
-            plan.refused.append(f"{STATUS_PATH}: unreadable ({error}); fix it by hand, then re-run")
-        else:
-            if after == tree.text_at(STATUS_PATH):
-                plan.adapted.append(f"{STATUS_PATH}: kept as written; it already declares its gaps")
-            propose(STATUS_PATH, after)
+        # The stamp writes files, not rows (sd:5109): the operator runs the line.
+        plan.adapted.append(f"{STATUS_DECLARATION}: GitHub reports the branch unprotected and the row declares no "
+                            f"unprotected gap; run: {status_command(tree.root, gaps)}")
 
     propose(GITIGNORE_PATH, gitignore_text(tree.text_at(GITIGNORE_PATH)))
     settings_change(plan, SETTINGS_PATH, lambda: tree.text_at(SETTINGS_PATH), lambda after: propose(SETTINGS_PATH, after))

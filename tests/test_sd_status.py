@@ -33,6 +33,7 @@ from typing import Any
 from unittest import mock
 from urllib.parse import parse_qs, urlsplit
 
+from tests.row_seed import seed_declaration
 from tests.test_sd_pr_state import (
     BIN,
     REPO_SETTINGS,
@@ -660,7 +661,7 @@ class GapVocabularyTests(unittest.TestCase):
 
 
 class AcknowledgementTests(unittest.TestCase):
-    """`.github/sd-status.json`: what it accepts, and when it stops accepting.
+    """The repo row's `status` declaration (sd:5109): what it accepts, and when it stops accepting.
 
     The one property worth more than the rest: an acknowledgement is keyed on
     the *observed protection state*, never on the gap id. `reviews` is emitted
@@ -700,11 +701,8 @@ class AcknowledgementTests(unittest.TestCase):
         )
 
     def written(self, body: str) -> tuple[list[dict[str, Any]], list[str]]:
-        with tempfile.TemporaryDirectory() as directory:
-            root = pathlib.Path(directory)
-            (root / ".github").mkdir()
-            (root / ".github" / "sd-status.json").write_text(body, encoding="utf-8")
-            return status.load_acknowledgements(root)
+        """`body` as a declaration's value, through the parser both readers share."""
+        return status.sd_lib.parse_acknowledgements(json.loads(body))
 
     def test_an_enforce_admins_off_acknowledgement_still_accepts_a_known_off(self) -> None:
         """sd:2755's other half: keeping unknown apart from `False` must not
@@ -893,10 +891,13 @@ class AcknowledgementTests(unittest.TestCase):
         # while proving nothing the loader does not already enforce. The file
         # is tracked, so a new acceptance arrives as a reviewed diff, which is
         # where it is meant to be read.
-        entries, problems = status.load_acknowledgements(BIN.parent)
+        # The pack's own value, which the lead moves to its row with `sd-db repo declare` (sd:5109).
+        value = json.loads((BIN.parent / ".github" / "sd-status.json").read_text(encoding="utf-8"))
+        value.pop("$schema", None)
+        entries, problems = status.sd_lib.parse_acknowledgements(value)
         self.assertEqual(problems, [])
-        # An absent file also loads as `([], [])`; the tracked acceptance must be read (sd:1002).
-        self.assertTrue(entries, "the repository's own acceptance file read as empty")
+        # An empty declaration also loads as `([], [])`; the acceptance must be read (sd:1002).
+        self.assertTrue(entries, "the repository's own acceptance read as empty")
 
     def test_an_empty_state_is_rejected_rather_than_accepting_the_id(self) -> None:
         # An entry with no facts would accept `reviews` whatever the branch
@@ -981,18 +982,35 @@ class AcknowledgementTests(unittest.TestCase):
         author who wrote it meant all of it, and the failure direction that is
         safe is the one where every gap goes on printing.
         """
-        entries, problems = self.written("{not json")
+        entries, problems = self.written("[]")
         self.assertEqual(entries, [])
-        self.assertTrue(any("not valid JSON" in problem for problem in problems))
+        self.assertTrue(any("the top level must be a JSON object" in problem for problem in problems))
+
+    def test_an_unread_declaration_accepts_nothing_and_says_so(self) -> None:
+        """sd:5109: a database that does not answer is a problem, never "nothing declared"."""
+        unread = status.sd_lib.DatabaseUnreadable("the workflow database did not open")
+        with mock.patch.object(status.sd_lib, "repo_declaration", side_effect=unread):
+            entries, problems = status.load_acknowledgements(pathlib.Path("/nonexistent"))
+        self.assertEqual(entries, [])
+        self.assertEqual(problems, [f"{status.ACKNOWLEDGEMENT_SOURCE}: cannot be read (the workflow database did not open)"])
+
+    def test_a_declaration_on_the_row_is_read_and_a_file_is_not(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            home, root, other = (pathlib.Path(directory) / name for name in ("home", "repo", "other"))
+            for checkout in (root, other):
+                (checkout / ".github").mkdir(parents=True)
+            (other / ".github" / "sd-status.json").write_text(json.dumps({"accepted_gaps": [self.ZERO_APPROVALS]}))
+            seed_declaration(home, root, "status", {"accepted_gaps": [self.ZERO_APPROVALS]})
+            with mock.patch.dict(os.environ, {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config")}):
+                self.assertEqual(status.load_acknowledgements(root), ([self.ZERO_APPROVALS], []))
+                self.assertEqual(status.load_acknowledgements(other), ([], []))
 
     def test_an_unknown_top_level_key_is_named(self) -> None:
         entries, problems = self.written(json.dumps({"accepted_gap": []}))
         self.assertEqual(entries, [])
         self.assertTrue(any("unknown key(s) accepted_gap" in problem for problem in problems))
-        # `$schema` is named as known too. Listing only `accepted_gaps` would
-        # read as though the schema pointer this repository's own file carries
-        # were itself the mistake.
-        self.assertTrue(any("known keys are $schema, accepted_gaps" in p for p in problems))
+        # `sd-db repo declare` drops `$schema` before writing (sd:5109), so a row never carries it.
+        self.assertTrue(any("known keys are accepted_gaps" in p for p in problems))
 
 
 class MergeSettingsTests(unittest.TestCase):
@@ -1267,12 +1285,9 @@ class ProtectionSectionTests(StatusFixture):
         self.assertIn("GAP [enforce_admins]", completed.stdout)
         self.assertIn("prose, not authority", completed.stdout)
 
-    def acknowledge(self, *entries: dict[str, Any]) -> None:
-        directory = self.repo / ".github"
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "sd-status.json").write_text(
-            json.dumps({"accepted_gaps": list(entries)}), encoding="utf-8"
-        )
+    def acknowledge(self, *entries: Any, body: Any = None) -> None:
+        """The fixture repository's `status` declaration on its row (sd:5109)."""
+        seed_declaration(self.home, self.repo, "status", {"accepted_gaps": list(entries)} if body is None else body)
 
     ZERO_APPROVALS = AcknowledgementTests.ZERO_APPROVALS
 
@@ -1391,9 +1406,7 @@ class ProtectionSectionTests(StatusFixture):
         which never applied acknowledgements also never reported why, leaving
         `unprotected` printing with no hint that the file meant to accept it.
         """
-        directory = self.repo / ".github"
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "sd-status.json").write_text("[]", encoding="utf-8")
+        self.acknowledge(body={"accepted_gaps": "nope"})
         self.with_github(pulls=[], protection=None)
         section = self.report()["protection"]
         self.assertEqual(
@@ -1402,9 +1415,7 @@ class ProtectionSectionTests(StatusFixture):
         self.assertEqual(section["accepted"], [])
 
     def test_an_unreadable_acknowledgement_file_is_itself_a_gap(self) -> None:
-        directory = self.repo / ".github"
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "sd-status.json").write_text("[]", encoding="utf-8")
+        self.acknowledge(body={"accepted_gaps": "nope"})
         self.with_github(
             pulls=[],
             protection={
@@ -1433,15 +1444,13 @@ class ProtectionSectionTests(StatusFixture):
         would silently accept nothing in exactly the situation -- no `gh`, no
         network -- where nobody is reading the JSON.
         """
-        directory = self.repo / ".github"
-        directory.mkdir(parents=True, exist_ok=True)
-        (directory / "sd-status.json").write_text("{not json", encoding="utf-8")
+        self.acknowledge(body={"accepted_gaps": "nope"})
         self.install_gh()
         completed = self.run_tool(SD_STATUS)
         self.assertEqual(completed.returncode, 0, completed.stderr)
         self.assertIn("unavailable:", completed.stdout)
         self.assertIn("GAP [acknowledgements]", completed.stdout)
-        self.assertIn("not valid JSON", completed.stdout)
+        self.assertIn("accepted_gaps must be a list", completed.stdout)
 
 
 class WorkItemTests(StatusFixture):
@@ -2705,7 +2714,7 @@ class AdapterInventoryTests(InventoryFixture):
         found = self.by_check(self.rows(protection=protection), "protection-gap")
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0]["key"], "main#enforce_admins")
-        self.assertIn(".github/sd-status.json", found[0]["suggest"])
+        self.assertIn(status.ACKNOWLEDGEMENT_SOURCE, found[0]["suggest"])
 
     def test_an_issue_in_the_section_is_context_not_a_row(self) -> None:
         """sd:3497: the two issue classes could never fire from the shared database; they are gone."""
@@ -5255,11 +5264,11 @@ class RulesetProtectionCase(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory, mock.patch.object(
                 status.pr_state, "gh_json", answer):
+            home = pathlib.Path(directory) / "home"
             if accepted:
-                (pathlib.Path(directory) / ".github").mkdir()
-                (pathlib.Path(directory) / ".github" / "sd-status.json").write_text(
-                    json.dumps({"accepted_gaps": list(accepted)}), encoding="utf-8")
-            result = status.protection_section(pathlib.Path(directory), self.GH)
+                seed_declaration(home, pathlib.Path(directory), "status", {"accepted_gaps": list(accepted)})
+            with mock.patch.dict(os.environ, {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config")}):
+                result = status.protection_section(pathlib.Path(directory), self.GH)
         result["_seen"] = seen
         return result
 

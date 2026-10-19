@@ -39,8 +39,7 @@ class TheEmptySubjectIsNotAReview(ReviewRunFixture):
         """`prepare` always builds `repo`; a test needing a control needs two."""
         root = self.make_repo(name)
         (root / "src.py").write_text("the_review_subject = 123\n")
-        (root / ".github").mkdir()
-        (root / ".github/sd-review.json").write_text(json.dumps({"default_tier": "cheap"}))
+        self.declare_policy(root, {"default_tier": "cheap"})
         return root
 
     def commit_everything(self, root):

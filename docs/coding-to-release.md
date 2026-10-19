@@ -53,8 +53,8 @@ An active-session agent remains the coordinator.
 - Explicit local check reuse requires a tracked complete local-only declaration and unchanged full-check identity.
   Read the [receipt contract](../skills/sd-check/references/check-receipts.md) before enabling it.
   Unknown dependencies, dirty inputs, and legacy receipts rerun checks.
-  The pack declares no `sd-check` reuse; its merge gate reuses gate receipts instead (`sd gate check`, `.github/sd-gate-reuse.json`).
-- The pack's `main` is protected; `.github/sd-status.json` accepts only its zero-approval `reviews` gap.
+  The pack declares no `sd-check` reuse; its merge gate reuses gate receipts instead (`sd gate check`, the repo row's `gate_reuse` declaration).
+- The pack's `main` is protected; its `status` declaration accepts only its zero-approval `reviews` gap.
   `sd-ship merge` is the merge path; it refuses absent or weaker protection.
 - Each reviewing tier requires one independent local review under the revised policy.
   Existing installations need the updated code and an explicit reviewer-order migration.

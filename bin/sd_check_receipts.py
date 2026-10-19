@@ -266,9 +266,15 @@ def check_binding(root: pathlib.Path, env: Mapping[str, str]) -> dict[str, Any]:
     files = dependency_files(root, value["dependencies"], secret_name_exceptions(root, value))
     for name in ("sd-check", "sd_check_receipts.py", "sd_lib.py"):
         files["pack:" + name] = file_digest(BIN / name)
-    for name in ("CLAUDE.local.md", ".github/sd-review.json", CONTRACT):
+    for name in ("CLAUDE.local.md", CONTRACT):
         path = sd_lib.local_block_path(root) if name == "CLAUDE.local.md" else root / name
         files["policy:" + name] = file_digest(path) if path.exists() else "absent"
+    # The row's review declaration, which `.github/sd-review.json` held (sd:5109); an unread one refuses the binding.
+    try:
+        declared = sd_lib.repo_declaration(root, "review")
+    except sd_lib.DatabaseUnreadable as error:
+        raise Unavailable(f"the review declaration cannot be read: {error}") from None
+    files["policy:review_declaration"] = hashlib.sha256(json.dumps(declared, sort_keys=True).encode()).hexdigest()
     return {"schema_version": 1, "checkout": str(root), "head": sd_lib.git_output(["rev-parse", "HEAD"], root),
             "tree": sd_lib.git_output(["rev-parse", "HEAD^{tree}"], root),
             "argv": [sys.executable, str(BIN / "sd-check"), "--json"],

@@ -7,8 +7,8 @@ without modifying or replacing it.
 
 **Two of the obligations below are conditional.** The concern ledger of
 section 3 and the per-round cross-artifact sweep of section 2 apply when the
-changed artifact set touches a path listed under `sensitive` in
-`.github/sd-review.json`, and nowhere else. Off a sensitive path the review
+changed artifact set touches a path listed under `sensitive` in the
+repository's review declaration, and nowhere else. Off a sensitive path the review
 still runs and still reports; it carries no stable-id ledger and no sweep, and
 section 5's report says so rather than inventing either.
 
