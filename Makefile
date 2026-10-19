@@ -123,7 +123,11 @@ VENV_BIN = $(VENV)/bin
 # installing this branch's requirements over whatever another session is
 # running on. So setup provisions the checkout it stands in, unless VENV was
 # set deliberately, which `origin` is what distinguishes from our own default.
-SETUP_VENV = $(if $(filter command line environment,$(origin VENV)),$(VENV),.venv)
+# Trailing slashes come off first: `[ -L link/ ]` is false, so `VENV=link/`
+# passed the detach and the rebuild wiped the link's target (sd:5254). `/`
+# strips to empty, which setup refuses.
+setup_path = $(if $(filter %/,$(1)),$(call setup_path,$(patsubst %/,%,$(1))),$(1))
+SETUP_VENV = $(call setup_path,$(if $(filter command line environment,$(origin VENV)),$(VENV),.venv))
 SETUP_PYTHON = $(SETUP_VENV)/bin/python
 
 .PHONY: setup hooks fonts test lint precheck audit docs-lint check gate-env post-merge
@@ -185,7 +189,12 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 # `pyvenv.cfg`, which that run had already made lie; an interpreter that does
 # not answer is a mismatch, and a PYTHON that does not answer stops the run
 # before anything moves. `bin/` goes last, so a run stopped mid-wipe leaves
-# the old interpreter there for the next run to find and finish.
+# the old interpreter there for the next run to find and finish. Three
+# refusals come before any mutation: a PYTHON inside the environment, which
+# the wipe would delete before `venv` ran it, asked of the logical and the
+# physical path; and a non-empty directory with neither `pyvenv.cfg` nor the
+# marker, such as `/usr/local`, which is not ours to empty. The marker counts
+# because a stopped wipe may already have taken `pyvenv.cfg`.
 #
 # No `sd_db` goes into the environment: `bin/` reads this checkout's `lib/`
 # (sd:3280). The uninstall takes out a copy an older `make setup` or a
@@ -204,14 +213,28 @@ setup:
 	  probe='import sys; print("%d.%d" % sys.version_info[:2])'; \
 	  want=$$("$(PYTHON)" -c "$$probe") && [ -n "$$want" ] \
 	    || { printf '%s\n' "error: $(PYTHON) did not report its version; nothing was changed" >&2; exit 1; }; \
+	  python="$(PYTHON)"; case "$$python" in */*) ;; *) python=$$(command -v "$$python") \
+	    || { printf '%s\n' "error: $(PYTHON) is not on PATH; nothing was changed" >&2; exit 1; };; esac; \
+	  if [ -d "$$venv" ]; then \
+	    for how in -L -P; do \
+	      [ "$$how" = -P ] && [ -L "$$venv" ] && continue; \
+	      dir=$$(cd $$how "$$(dirname "$$python")" && pwd $$how) && root=$$(cd $$how "$$venv" && pwd $$how) \
+	        || { printf '%s\n' "error: cannot tell whether $(PYTHON) lives in $$venv; nothing was changed" >&2; exit 1; }; \
+	      case "$$dir/" in "$$root"/*) printf '%s\n' "error: $(PYTHON) lives in $$venv, which setup may rebuild; pass a PYTHON from outside it" >&2; exit 1;; esac; \
+	    done; \
+	  fi; \
+	  have=; if [ ! -L "$$venv" ] && { [ -e "$$venv/bin/python" ] || [ -L "$$venv/bin/python" ]; }; then \
+	    have=$$("$$venv/bin/python" -c "$$probe" 2>/dev/null) || have=; [ -n "$$have" ] || have="unknown (it does not run)"; \
+	  fi; \
+	  if [ ! -L "$$venv" ] && [ -d "$$venv" ] && [ ! -f "$$venv/pyvenv.cfg" ] && [ ! -f "$$venv/sd-provisioning" ]; then \
+	    entries=$$(ls -A "$$venv") || { printf '%s\n' "error: cannot list $$venv; nothing was changed" >&2; exit 1; }; \
+	    [ -z "$$entries" ] || { printf '%s\n' "error: $$venv is not a virtualenv (no pyvenv.cfg) and is not empty; nothing was changed. Pick another VENV" >&2; exit 1; }; \
+	  fi; \
 	  if [ -L "$$venv" ]; then \
 	    target=$$(readlink "$$venv") || exit 1; \
 	    printf '%s\n' "detaching $$venv, a link to $$target; the environment it points at is left alone" >&2 || exit 1; \
 	    rm "$$venv" || exit 1; \
 	    [ ! -L "$$venv" ] || { printf '%s\n' "error: $$venv is still a link; refusing to provision through it" >&2; exit 1; }; \
-	  fi; \
-	  have=; if [ -e "$$venv/bin/python" ] || [ -L "$$venv/bin/python" ]; then \
-	    have=$$("$$venv/bin/python" -c "$$probe" 2>/dev/null) || have=; [ -n "$$have" ] || have="unknown (it does not run)"; \
 	  fi; \
 	  mkdir -p "$$venv" || exit 1; \
 	  printf '%s\n' "make setup is building this environment; nothing may be taken out of it until this file is gone" > "$$venv/sd-provisioning" || exit 1; \

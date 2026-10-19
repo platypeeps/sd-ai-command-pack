@@ -1471,7 +1471,8 @@ class ProvisioningRecordTests(unittest.TestCase):
     #: it to <dir>/bin/python, so the steps after it run it too, and each
     #: step's exit code is an environment variable the test sets. `-c` prints
     #: the version baked in on the first line, so a copy answers with its
-    #: creator's. It mirrors the two real behaviours the recipe works around
+    #: creator's. `pyvenv.cfg` is written on every run, as venv writes it. It
+    #: mirrors the two real behaviours the recipe works around
     #: -- CPython's venv refuses a path that is a symlink, and keeps a
     #: `bin/python` that is already there, even a dangling link -- and
     #: `test_the_real_interpreter_refuses_a_symlinked_target` and
@@ -1488,6 +1489,7 @@ case " $* " in
       exit 1
     fi
     mkdir -p "$last/bin" || exit 1
+    echo "version = $version" > "$last/pyvenv.cfg" || exit 1
     if [ ! -e "$last/bin/python" ] && [ ! -L "$last/bin/python" ]; then
       cp "$0" "$last/bin/python" || exit 1
       chmod +x "$last/bin/python"
@@ -1766,6 +1768,7 @@ exit 0
 
         venv = self.linked / ".venv"
         (venv / "bin").mkdir(parents=True)
+        (venv / "pyvenv.cfg").write_text("version = 3.14.0\n", encoding="utf-8")
         (venv / "bin" / "python").symlink_to(self.tmp / "gone" / "python3.14")
         done = self.setup()
         self.assertEqual(done.returncode, 0, done.stderr)
@@ -1813,6 +1816,57 @@ exit 0
         self.assertFalse((venv / "sd-provisioning").exists())
         self.assertEqual(self.dry_run("docs-lint").returncode, 0)
 
+    def test_a_trailing_slash_still_names_the_link(self) -> None:
+        """`env/` is no link to `[ -L ]`, so the wipe used to run through it into the target."""
+
+        other = self.tmp / "other"
+        self.assertEqual(self.setup(venv=str(other), python=self.interpreter("3.14")).returncode, 0)
+        (other / "lib").mkdir()
+        (other / "lib" / "data").write_text("theirs\n", encoding="utf-8")
+        (self.linked / "env").symlink_to(other)
+
+        done = self.setup(venv="env/")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("detaching env", done.stderr)
+        self.assertTrue((other / "lib" / "data").is_file(), "the wipe reached through the link")
+        self.assertEqual(self.version_in(other), "3.14")
+        self.assertFalse((self.linked / "env").is_symlink())
+        self.assertEqual(self.version_in(self.linked / "env"), "3.15")
+
+    def test_a_directory_that_is_not_a_virtualenv_is_refused(self) -> None:
+        """A prefix such as /usr/local has a bin/python too; with no pyvenv.cfg setup touches nothing."""
+
+        prefix = self.linked / "prefix"
+        (prefix / "bin").mkdir(parents=True)
+        shutil.copy(self.interpreter("3.14"), prefix / "bin" / "python")
+        (prefix / "lib").mkdir()
+        (prefix / "lib" / "data").write_text("theirs\n", encoding="utf-8")
+
+        done = self.setup(venv="prefix")
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertIn("not a virtualenv", done.stderr)
+        self.assertTrue((prefix / "lib" / "data").is_file(), "a non-virtualenv was emptied")
+        self.assertEqual(self.version_in(prefix), "3.14")
+        self.assertFalse((prefix / "sd-provisioning").exists(), "the refusal came after a mutation")
+
+    def test_a_python_inside_the_environment_is_refused(self) -> None:
+        """A mixed environment holds a 3.15 beside its 3.14; the wipe would delete the PYTHON it runs."""
+
+        venv = self.linked / ".venv"
+        inside = venv / "bin" / "sd-test-python3.15"
+        for python, env in ((inside, {}), (pathlib.Path(inside.name),
+                                           {"PATH": f"{venv / 'bin'}{os.pathsep}{os.environ['PATH']}"})):
+            with self.subTest(python=str(python)):
+                shutil.rmtree(venv, ignore_errors=True)
+                self.assertEqual(self.setup(python=self.interpreter("3.14")).returncode, 0)
+                shutil.copy(self.stub, inside)
+                done = self.setup(python=python, **env)
+                self.assertNotEqual(done.returncode, 0, done.stdout)
+                self.assertIn("from outside it", done.stderr)
+                self.assertTrue(inside.is_file(), "setup deleted the PYTHON it was running")
+                self.assertTrue(self.record.is_dir(), "the refusal came after a mutation")
+                self.assertFalse((venv / "sd-provisioning").exists())
+
     def test_the_real_interpreter_keeps_an_existing_python(self) -> None:
         """The premise of sd:5254, asked of the real interpreter.
 
@@ -1833,6 +1887,7 @@ exit 0
                 done = subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(env)],
                                       capture_output=True, text=True)
                 self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertTrue((env / "pyvenv.cfg").is_file(), "the stand-in writes it on this premise")
                 if kind == "file":
                     self.assertFalse(python.is_symlink())
                     self.assertEqual(python.read_text(encoding="utf-8"), "#!/bin/sh\necho 3.14\n")
