@@ -805,12 +805,23 @@ def upsert_shadow(
     state: str | None = None,
     author: str | None = None,
     reason: str | None = None,
+    merged_at: str | None = None,
+    closed_at: str | None = None,
+    branch: str | None = None,
+    linked_issues: list[str] | None = None,
 ) -> None:
     """A tracker's row, keyed by `(tracker, url)`. Seen once, then kept current.
 
     `reason` (migration 34) is `assigned`, `filed` or `watched`. None is
     unknown and keeps the stored value: an importer names none, and a collect
     whose stronger bucket failed cannot say the row lost it.
+
+    `merged_at` and `closed_at` (migration 38, sd:5303) follow the same rule,
+    except that a row written `open` loses both: a reopened row is not settled.
+
+    `branch` and `linked_issues` (migration 38, sd:5315) are a pull request's
+    head branch and the urls of the issues it closes; None keeps the stored
+    value, and `[]` says it closes none.
 
     The conflict target is both columns, so this updates only the row this
     tracker already owns. Until sd:603 it was `url` alone and the update set
@@ -823,13 +834,21 @@ def upsert_shadow(
     with transaction(connection):
         connection.execute(
             "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, "
-            "author, reason, first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "author, reason, merged_at, closed_at, branch, linked_issues, first_seen, last_seen) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(tracker, url) DO UPDATE SET "
             "repo = excluded.repo, number = excluded.number, kind = excluded.kind, "
             "title = excluded.title, state = excluded.state, "
             "author = excluded.author, reason = COALESCE(excluded.reason, shadow.reason), "
+            "merged_at = CASE WHEN excluded.state = 'open' THEN NULL "
+            "ELSE COALESCE(excluded.merged_at, shadow.merged_at) END, "
+            "closed_at = CASE WHEN excluded.state = 'open' THEN NULL "
+            "ELSE COALESCE(excluded.closed_at, shadow.closed_at) END, "
+            "branch = COALESCE(excluded.branch, shadow.branch), "
+            "linked_issues = COALESCE(excluded.linked_issues, shadow.linked_issues), "
             "last_seen = excluded.last_seen",
-            (tracker, repo, url, number, kind, title, state, author, reason, stamp, stamp),
+            (tracker, repo, url, number, kind, title, state, author, reason, merged_at, closed_at, branch,
+             None if linked_issues is None else json.dumps(list(linked_issues)), stamp, stamp),
         )
 
 
@@ -846,12 +865,16 @@ def open_shadow_issues(connection: sqlite3.Connection, *, tracker: str, repos: t
         f"AND lower(repo) IN ({', '.join('?' * len(lowered))}) ORDER BY id", (tracker, *lowered)).fetchall()
 
 
-def close_shadow(connection: sqlite3.Connection, *, tracker: str, urls: list[str]) -> int:
-    """Close the open rows of `urls`, each one a direct read said is no open issue (sd:4880). Returns the count."""
+def close_shadow(connection: sqlite3.Connection, *, tracker: str, closed: dict[str, str | None]) -> int:
+    """Close the open rows of `closed`'s urls, each one a direct read said is no open issue (sd:4880).
+
+    Each url maps to the close time that read gave, or None when it gave none
+    (sd:5303). Returns the count.
+    """
     with transaction(connection):
         cursor = connection.executemany(
-            "UPDATE shadow SET state = 'closed' WHERE tracker = ? AND url = ? AND state = 'open'",
-            [(tracker, url) for url in urls])
+            "UPDATE shadow SET state = 'closed', closed_at = ? WHERE tracker = ? AND url = ? AND state = 'open'",
+            [(at, tracker, url) for url, at in closed.items()])
     return cursor.rowcount
 
 

@@ -469,6 +469,22 @@ class TheMigrationVerbs(MigrationVerbCase):
             completed = self.sd_db("repo", "declare", *([str(self.checkout)] if extra else []), *extra, expect=1)
             self.assertIn("needs a path", completed.stderr)
 
+    def test_repo_declare_sets_an_experiment_and_refuses_one_it_cannot_read(self):
+        """sd:5302. The `experiment` kind links a research repository to its Notion experiment page."""
+        self.sd_db("repo", "add", str(self.checkout))
+        value = {"page": "0123456789abcdef0123456789abcdef", "data_source": "collection://0123456789abcdef0123456789abcdef"}
+        completed = self.sd_db("repo", "declare", str(self.checkout), "experiment", json.dumps(value))
+        self.assertIn("experiment none -> declared", completed.stdout)
+        self.assertEqual(json.loads(self.sd_db("repo", "declare", str(self.checkout), "experiment").stdout), value)
+        for word in ('{"page": "0123"}', '{"page": "0123456789abcdef0123456789abcdef", "data_source": "x"}',
+                     json.dumps({**value, "decks": []})):
+            with self.subTest(word=word):
+                completed = self.sd_db("repo", "declare", str(self.checkout), "experiment", word, expect=1)
+                self.assertIn("the experiment declaration", completed.stderr)
+        self.assertEqual(json.loads(self.sd_db("repo", "declare", str(self.checkout), "experiment").stdout), value)
+        completed = self.sd_db("repo", "declare", str(self.checkout), "experiment", "off")
+        self.assertIn("experiment declared -> none", completed.stdout)
+
     def test_repo_list_managed_prints_only_the_managed_rows(self):
         other = self.home / "other"
         subprocess.run(["git", "init", "-q", str(other)], check=True, capture_output=True)

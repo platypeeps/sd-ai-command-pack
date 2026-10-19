@@ -3,13 +3,17 @@
 import copy
 import hashlib
 import json
+import sqlite3
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from sd_db import connect, initialise
 from sd_db import contributions as c
+from sd_db.migrate import migrate
+from sd_db.schema import migrations
 from sd_db.workflow import StaleItem, WorkflowError, item_state
 from sd_db.writes import set_item_fields, transition, upsert_shadow
 
@@ -612,6 +616,57 @@ class ProjectionTests(ContributionCase):
         # A reopen is live work again.
         self.observe(observed_at=T1, state="open", events=[self.event("reopened", actor_id="1", at=T1)])
         self.assertEqual({row["url"]: row["lane"] for row in c.projection(self.db)}, {URL: "awaiting_them", filed: "closed"})
+
+    def test_each_row_carries_when_github_settled_it(self):
+        """sd:5303. The shadow collector's merge and close dates reach the row, matched in any url spelling;
+        a row the collector holds no date for, or never saw, reads None."""
+        self.observe(state="merged")
+        self.store_issue(state="closed")
+        c.capture(self.db, title="Local", changes={"pull_url": URL.replace("12", "14")}, who="operator")
+        upsert_shadow(self.db, tracker="github", url="https://github.com/Upstream/Project/pull/12/", kind="pull",
+                      state="merged", merged_at="2026-09-10T00:01:00Z", closed_at="2026-09-10T00:01:00Z")
+        upsert_shadow(self.db, tracker="github", url=ISSUE, kind="issue", state="closed",
+                      closed_at="2026-09-10T00:02:00Z")
+        upsert_shadow(self.db, tracker="jira", url=URL.replace("12", "14"), state="closed",
+                      closed_at="2026-09-10T00:03:00Z")
+        by_url = {row["url"]: (row["merged_at"], row["closed_at"]) for row in c.projection(self.db)}
+        self.assertEqual(by_url, {URL: ("2026-09-10T00:01:00Z", "2026-09-10T00:01:00Z"),
+                                  ISSUE: (None, "2026-09-10T00:02:00Z"), URL.replace("12", "14"): (None, None)})
+
+    def test_each_row_carries_its_branch_its_closing_issues_and_its_jira_links(self):
+        """sd:5315. One statement for the Jira keys of every row: a known key links, an unknown key does not."""
+        self.observe(title="Retry on LOG-12")
+        c.capture(self.db, title="Local", changes={"pull_url": URL.replace("12", "14")}, who="operator")
+        upsert_shadow(self.db, tracker="github", url=URL, kind="pull", state="open", title="Retry on LOG-12",
+                      branch="feature/OPS-7-retry", linked_issues=[ISSUE])
+        upsert_shadow(self.db, tracker="github", url=URL.replace("12", "14"), kind="pull", state="open",
+                      title="Local", branch="ABC-9", linked_issues=[])
+        for key in ("LOG-12", "OPS-7"):
+            upsert_shadow(self.db, tracker="jira", url=f"https://jira.example.test/browse/{key}", state="open",
+                          title=f"ticket {key}")
+        rows = {row["url"]: row for row in c.projection(self.db)}
+        self.assertEqual(rows[URL]["branch"], "feature/OPS-7-retry")
+        self.assertEqual(rows[URL]["linked"], [
+            {"url": ISSUE, "kind": "github", "key": "upstream/project#56"},
+            {"url": "https://jira.example.test/browse/LOG-12", "kind": "jira", "key": "LOG-12"},
+            {"url": "https://jira.example.test/browse/OPS-7", "kind": "jira", "key": "OPS-7"}])
+        local = rows[URL.replace("12", "14")]
+        self.assertEqual((local["branch"], local["linked"]), ("ABC-9", []))
+
+    def test_a_store_before_38_reads_no_settle_date(self):
+        """Older state: the new library over a store not yet migrated reads its rows, each with no date."""
+        old = self.root / "old.db"
+        with mock.patch("sd_db.migrate.migrations", return_value=[m for m in migrations() if m[0] < 38]):
+            migrate(old)
+        raw = sqlite3.connect(old, isolation_level=None)
+        raw.row_factory = sqlite3.Row
+        self.addCleanup(raw.close)
+        c.observe_pull(raw, URL, self.observation(state="merged"), expected_revision=c.snapshot(raw, "github:" + URL)["revision"])
+        db = connect(old, write=False)
+        self.addCleanup(db.close)
+        [row] = c.projection(db)
+        self.assertEqual((row["lane"], row["merged_at"], row["closed_at"]), ("merged", None, None))
+        self.assertEqual((row["branch"], row["linked"]), (None, []))
 
     def test_tracker_context_preserves_observed_match_reasons_without_task_changes(self):
         from sd_db.progress import tracker_items

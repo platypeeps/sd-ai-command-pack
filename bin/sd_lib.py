@@ -1242,8 +1242,8 @@ def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
 
 
 #: The kinds a repository row declares (sd:5109), the library's `repos.DECLARATION_KINDS`:
-#: each is the object a `.github/sd-<kind>.json` file held before migration 37.
-DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status")
+#: the first four each the object a `.github/sd-<kind>.json` file held before migration 37.
+DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status", "experiment")
 
 
 def repo_declaration(root: pathlib.Path | str, kind: str, environ: Mapping[str, str] | None = None) -> Any:
@@ -1311,6 +1311,13 @@ def declaration_problems(kind: str, value: Any) -> list[str]:
         return []
     if kind == "status":
         return parse_acknowledgements(value)[1]
+    if kind == "experiment":
+        # The dashboard writes this kind through the library, so the library holds its one check.
+        if import_sd_db().module is None:
+            return [f"{where} is checked by the workflow library, which is not importable"]
+        from sd_db import repos  # noqa: PLC0415 - this commit's lib (sd:3278)
+
+        return repos.experiment_problems(value)
     return [f"{kind!r} is not a declaration kind; expected {', '.join(DECLARATION_KINDS)}"]
 
 

@@ -268,6 +268,11 @@ The design is `docs/work/2026-10-16-repo-github-issues/design.md`.
 Absence from a search does not close a row, since GitHub's index can omit an open issue: after a complete sweep, each stored open issue of its repositories that neither it nor this run's buckets saw is read directly (`GET repos/{owner}/{repo}/issues/{n}`, on the sync's budget).
 Only the read's own answer closes it: state `closed`, a `pull_request` key, or another issue number; its url spelling decides nothing, so an issue that still answers open under its number stays open, renamed or transferred. A failed, refused or over-budget read leaves it open and prints `intake sweep incomplete`.
 A failed or capped sweep reads and closes nothing, holds no cursor and prints the same line.
+Each GitHub row also keeps `merged_at` and `closed_at` (migration 38, sd:5303), read from the same search page and the direct read: no extra request.
+A reopened row loses both; a date that does not parse keeps the stored one. Rows older than the nightly window get theirs from one `sd shadow sync --since <date>`.
+A pull request's row also keeps `branch` and `linked_issues`, the urls of the issues it closes, at most ten (migration 38, sd:5315), from the same page.
+`shadow_sync.jira_links(connection, title, branch)` finds Jira keys in the texts and joins them to the `jira` rows; a key no row holds links nothing, and no Jira call is made.
+`contributions.projection`, the dashboard's `/api/contributions` read, gives each row `merged_at`, `closed_at`, `branch` and `linked`: each `{url, kind, key}`, kind `github` for an issue it closes or `jira` for a key it names.
 `repos.intake_issues` reads, per `on` repository, its open issues whose author is not the operator (the author of the `filed` rows) that no item carries as `--ref github:<owner>/<repo>#N`, for Today's intake.
 Agents close an issue with `mcp__github__issue_write` `update`. `bin/sd-issue-guard` lets that through in a managed `on` repo when the call names the row's own GitHub repository; filing an issue stays denied. The global deny list still refuses the tool until the system follow-up under sd:4810 lifts it for `on` repos.
 
@@ -286,7 +291,7 @@ A key is `A-Z`, then 1 to 254 of `A-Z`, `0-9` or `_`; the column's CHECK holds t
 ## Declarations
 
 `repo.declarations` holds a repository's pack declarations as one JSON object, or NULL for none (sd:5109).
-Each key is a kind; each value is the object the old `.github/` file held.
+Each key is a kind; each value is the object the old `.github/` file held, or for `experiment` the research link.
 
 | Kind | Reader | Old file |
 | --- | --- | --- |
@@ -294,6 +299,7 @@ Each key is a kind; each value is the object the old `.github/` file held.
 | `gate_reuse` | the gate's receipt key (`sd_gate_receipts`) | `.github/sd-gate-reuse.json` |
 | `check_scope` | `sd-check --base` docs-only scope | `.github/sd-check-scope.json` |
 | `status` | `sd-status` accepted gaps, `sd-ship merge` declared gap | `.github/sd-status.json` |
+| `experiment` | the system dashboard's research project link: `page` and `data_source`, Notion ids, and optional `url` and `title` (sd:5302) | none |
 
     bin/sd-db repo declare PATH                     # every kind, as JSON
     bin/sd-db repo declare PATH review              # one kind
@@ -302,6 +308,7 @@ Each key is a kind; each value is the object the old `.github/` file held.
 
 The verb checks a value with its reader's own validator first and drops `$schema`, so the row holds only what a reader accepts.
 The library refuses an unknown kind, a value that is not an object, more than 16384 bytes and an unregistered path.
+It also checks `experiment` itself (`repos.experiment_problems`), since the dashboard writes that kind directly.
 `sd_lib.repo_declaration` reads it through `registered_base`, so a linked worktree, a runner clone and a gate's worktree read their repository's row.
 No database on the machine, or a store before 37, reads as nothing declared; a failed read is unknown and each reader refuses or runs in full.
 The `.github/` files are no longer read.
