@@ -1388,9 +1388,11 @@ def config_set(args: argparse.Namespace) -> int:
         if written:
             print(f"{args.key}: {replaced or '(unset)'} -> {value} (workflow database)")
             return 0
-        if key in ("hub_name", "status_companions"):
+        if key in ("hub_name", "status_companions", "notion_private_folder", "notion_team_folder",
+                   "notion_experiments", "notion_experiment_tasks"):
             # The fence reads the row alone (sd:4044): a file value would show here and fence nothing.
-            # Non-secret fleet configuration lives in the database, not a file (sd:5109).
+            # Non-secret fleet configuration lives in the database, not a file (sd:5109); the publish
+            # settings read the row, then their old variable, never this file (sd:5141).
             raise Refusal(f"{args.key} lives in the workflow database, and this machine has none; "
                           "set it on the hub or on a satellite")
     config_path = sd_lib.machine_config_path()

@@ -73,8 +73,8 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
   project [--plan <request> --live <file>|--missing] [--writing <request>]
                 queue one notion-row request per item designated with
                 `sd task edit N --experiment`, for the items whose row would
-                change; needs SD_NOTION_EXPERIMENTS and
-                SD_NOTION_EXPERIMENT_TASKS. --plan is the drain's guard: it
+                change; needs sd.notion_experiments and
+                sd.notion_experiment_tasks (`sd config set`). --plan is the drain's guard: it
                 reads the request, the item and the row the drain fetched,
                 records the intent on the item and prints what to write.
                 --writing marks a planned create just before the drain's

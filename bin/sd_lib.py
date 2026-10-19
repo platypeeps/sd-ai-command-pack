@@ -88,6 +88,12 @@ def copilot_automatic(policy: str | None, tier: str, depth: int) -> bool:
     if policy == "always":
         return depth > 0
     return False
+#: A Notion id, dashed or not: what each publish setting names (sd:5141).
+NOTION_ID = r"[0-9a-fA-F]{8}-?(?:[0-9a-fA-F]{4}-?){3}[0-9a-fA-F]{12}"
+#: A folder setting: the page id, or a page URL whose path ends in it.
+NOTION_PAGE = rf"(?:https://[^\s/]+/(?:[^\s?#]*[/-])?)?{NOTION_ID}/?(?:[?#]\S*)?"
+#: A database setting: the data source id, bare or as `collection://<id>`.
+NOTION_DATA_SOURCE = rf"(?:collection://)?{NOTION_ID}"
 CORE_CONFIG = {
     "external_reviews": {"pattern": "configured|deny",
                          "description": "Standing private-code/context review authorization; unset uses local consent."},
@@ -136,6 +142,22 @@ CORE_CONFIG = {
     "privacy_patterns": {"pattern": r"[~/][^\x00]*",
                          "description": "The privacy-pattern file a pull request body is checked against, one "
                                         "extended regular expression per line. It grants nothing."},
+    "notion_private_folder": {"pattern": NOTION_PAGE,
+                              "description": "The Notion page id (or page URL) of the private briefs folder a "
+                                             "notion= mirror goes to. Unset reads $SD_NOTION_PRIVATE_FOLDER while "
+                                             "no row exists. It grants nothing."},
+    "notion_team_folder": {"pattern": NOTION_PAGE,
+                           "description": "The Notion page id (or page URL) of the team briefs folder a "
+                                          "notion=dict(team=True) mirror goes to. Unset reads $SD_NOTION_TEAM_FOLDER "
+                                          "while no row exists. It grants nothing."},
+    "notion_experiments": {"pattern": NOTION_DATA_SOURCE,
+                           "description": "The data source id of the team experiments database `sd-research-kit "
+                                          "project` writes rows to. Unset reads $SD_NOTION_EXPERIMENTS while no row "
+                                          "exists. It grants nothing."},
+    "notion_experiment_tasks": {"pattern": NOTION_DATA_SOURCE,
+                                "description": "The data source id of the experiment tasks database `sd-research-kit "
+                                               "project` writes rows to. Unset reads $SD_NOTION_EXPERIMENT_TASKS while "
+                                               "no row exists. It grants nothing."},
 }
 
 WORK_DIR = "docs/work"
@@ -633,7 +655,8 @@ def review_slot(result: dict[str, Any], environ: Mapping[str, str], root: pathli
 #: workflow database, not `config.json` (sd:3989). `external_reviews` stays per
 #: machine until each machine's value is known to match: it is the consent to
 #: send private code out, and the work satellite holds the work repositories.
-FLEET_KEYS = ("fleet_owners", "copilot_review", "hub_name", "status_companions")
+FLEET_KEYS = ("fleet_owners", "copilot_review", "hub_name", "status_companions",
+              "notion_private_folder", "notion_team_folder", "notion_experiments", "notion_experiment_tasks")
 
 
 def fleet_connection(environ: Mapping[str, str] | None = None, *, write: bool = False) -> Any:

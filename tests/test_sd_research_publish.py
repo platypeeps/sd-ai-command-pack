@@ -67,14 +67,20 @@ TEAM_FOLDER = "3cff52b1-5782-806a-acb0-ca0c8f41524b"
 class Configured(unittest.TestCase):
     """A test operator whose environment names both Notion folders.
 
-    `PUBLISH.ENVIRON` is replaced outright, so no test reads the configuration
-    of the machine running it and none of them leaks a folder to the next.
+    `PUBLISH.ENVIRON` is replaced outright, and `PUBLISH.DATABASE_HOME` is a
+    home with no database, so no test reads the configuration of the machine
+    running it, its setting rows included (sd:5141), and none of them leaks a
+    folder to the next.
     """
 
     def setUp(self) -> None:
         super().setUp()
-        original = PUBLISH.ENVIRON
-        self.addCleanup(setattr, PUBLISH, "ENVIRON", original)
+        original = PUBLISH.ENVIRON, PUBLISH.DATABASE_HOME
+        self.addCleanup(lambda: setattr(PUBLISH, "ENVIRON", original[0])
+                        or setattr(PUBLISH, "DATABASE_HOME", original[1]))
+        empty = tempfile.TemporaryDirectory()
+        self.addCleanup(empty.cleanup)
+        PUBLISH.DATABASE_HOME = Path(empty.name)
         self.configure(private=PRIVATE_FOLDER, team=TEAM_FOLDER)
 
     def configure(self, **folders: str) -> None:
@@ -156,6 +162,62 @@ class Fixture(Configured):
             for line in self.conf.read_text(encoding="utf-8").splitlines()
             if line.split("|")[1:2] == [key]
         ]
+
+
+class PublishSettingTests(Fixture):
+    """The Notion ids are setting rows (sd:5141): a row wins, a cleared row
+    reads unset, no row reads the old variable, and a read that fails is
+    unknown, never the variable's value."""
+
+    OTHER = "3e1f52b1-5782-8145-9c00-e9779a77804f"
+
+    def setting(self, key: str, value: str | None) -> None:
+        if not hasattr(self, "connection"):
+            self.database()
+        from sd_db.writes import set_setting  # noqa: PLC0415 - after the path is set
+        set_setting(self.connection, key, value)
+
+    def targets(self, team: bool = False) -> tuple[list[dict[str, str]], list[str]]:
+        return PUBLISH.mirror_targets({"notion": dict(team=team)}, REPO)
+
+    def test_a_row_wins_over_the_variable(self) -> None:
+        for team, key in ((False, "sd.notion_private_folder"), (True, "sd.notion_team_folder")):
+            with self.subTest(key=key):
+                self.setting(key, "https://example.test/p/" + self.OTHER.replace("-", ""))
+                (target,), problems = self.targets(team)
+                self.assertEqual((target["space_id"], problems), (self.OTHER.replace("-", ""), []))
+
+    def test_a_cleared_row_reads_unset_and_the_variable_is_not_read(self) -> None:
+        self.setting("sd.notion_private_folder", self.OTHER)
+        self.setting("sd.notion_private_folder", None)
+        targets, problems = self.targets()
+        self.assertEqual(targets, [])
+        self.assertIn("sd config set sd.notion_private_folder", problems[0])
+
+    def test_no_row_reads_the_variable_until_the_values_are_imported(self) -> None:
+        self.database()
+        (target,), _ = self.targets()
+        self.assertEqual(target["space_id"], PRIVATE_FOLDER)
+
+    def test_a_setting_that_cannot_be_read_is_unknown_and_queues_nothing(self) -> None:
+        self.setting("sd.notion_private_folder", self.OTHER)
+        self.connection.execute("UPDATE state SET body = 'not json' WHERE kind = 'setting'")
+        self.connection.commit()
+        targets, problems = self.targets()
+        self.assertEqual(targets, [])
+        self.assertIn("sd.notion_private_folder is unknown", problems[0])
+        reports = PUBLISH.enqueue(self.repo, [dict(src="10-x/a.md", out="a", title="A", notion=dict())])
+        self.assertFalse(PUBLISH.QUEUE.exists() and list(PUBLISH.QUEUE.glob("*.json")))
+        self.assertTrue(any("is unknown" in line for line in reports), reports)
+
+    def test_an_unreadable_database_is_unknown_not_the_variable(self) -> None:
+        sd_db = sd_lib.import_sd_db().module
+        path = sd_db.database.local_path(self.home)
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b"not a database")
+        targets, problems = self.targets()
+        self.assertEqual(targets, [])
+        self.assertIn("sd.notion_private_folder is unknown", problems[0])
 
 
 class RegisterTests(Fixture):
@@ -366,8 +428,8 @@ class MirrorTargetTests(Configured):
 
         So an unconfigured operator gets a refusal naming the variable to set,
         not a request bound for a page somebody else owns."""
-        for flag, setting in ((False, "SD_NOTION_PRIVATE_FOLDER"),
-                              (True, "SD_NOTION_TEAM_FOLDER")):
+        for flag, setting in ((False, "sd.notion_private_folder"),
+                              (True, "sd.notion_team_folder")):
             with self.subTest(team=flag):
                 self.configure()
                 targets, problems = PUBLISH.mirror_targets(
@@ -383,7 +445,7 @@ class MirrorTargetTests(Configured):
         self.configure(private="Briefs")
         targets, problems = PUBLISH.mirror_targets({"notion": {}}, REPO)
         self.assertEqual(targets, [])
-        self.assertIn("SD_NOTION_PRIVATE_FOLDER", problems[0])
+        self.assertIn("sd.notion_private_folder", problems[0])
 
     def test_one_scope_configured_does_not_serve_the_other(self) -> None:
         """A configured private folder is not a team folder. Reusing it would
@@ -394,7 +456,7 @@ class MirrorTargetTests(Configured):
         targets, problems = PUBLISH.mirror_targets(
             {"notion": dict(team=True)}, REPO)
         self.assertEqual(targets, [])
-        self.assertIn("SD_NOTION_TEAM_FOLDER", problems[0])
+        self.assertIn("sd.notion_team_folder", problems[0])
 
     def test_a_notion_default_names_the_repo_the_way_drive_does(self) -> None:
         """The vault uses `Briefs/<repo>`, and the configured folder already
@@ -422,7 +484,7 @@ class MirrorTargetTests(Configured):
         carries the id and no name at all."""
         for scope in PUBLISH.NOTION_SCOPES.values():
             with self.subTest(scope.scope):
-                self.assertTrue(scope.setting.startswith("SD_NOTION_"))
+                self.assertIn(scope.setting, PUBLISH.SETTING_VARIABLES)
                 self.assertNotIn("Briefs", scope.phrase)
         (private,), _ = PUBLISH.mirror_targets({"notion": {}}, REPO)
         self.assertEqual(private["space"], "")
@@ -555,7 +617,7 @@ class EnqueueTests(Fixture):
             src="10-x/a.md", out="a", title="A", notion=dict())])
         self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
         self.assertTrue(
-            any("SD_NOTION_PRIVATE_FOLDER" in line for line in reports),
+            any("sd.notion_private_folder" in line for line in reports),
             reports)
 
     def test_a_drive_designation_queues_a_drive_request(self) -> None:

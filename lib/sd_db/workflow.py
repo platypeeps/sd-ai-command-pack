@@ -522,7 +522,10 @@ def edit_item(
     the same edit: a kind change is how such a row is reclassified, and its
     other fields keep their own editing workflow. A kind change is recorded
     as a note naming both kinds and who made it, because it rewrites what the
-    row means.
+    row means. An `idea` may have `repo` edited alone (sd:5142): the row keeps
+    its kind, so a base row stays in its base and page, which `records` lists
+    by kind and never by repository. A writing piece keeps its repository,
+    which holds its file.
     """
     who = _text(who, "who")
     with transaction(connection):
@@ -532,8 +535,12 @@ def edit_item(
                       and set(changes) <= {"kind", "repo"} and changes.get("repo") is None)
         # An unpark alone touches no detail, so any kind takes it.
         unpark = isinstance(changes, dict) and set(changes) == PARK_FIELDS
-        if row["kind"] not in DETAIL_KINDS and not reclassify and not unpark:
+        move = isinstance(changes, dict) and set(changes) == {"repo"} and row["kind"] == "idea"
+        if row["kind"] not in DETAIL_KINDS and not reclassify and not unpark and not move:
             raise WorkflowError(f"{row['kind']} items use their own editing workflow")
+        if move and row["piece"] is not None:
+            raise WorkflowError(f"item {item} is writing piece {row['piece']!r}; its repository holds its file, "
+                                f"so the repository stays")
         values = _fields(connection, changes)
         if "parked_at" in values and row["piece"]:
             raise WorkflowError("a writing piece revives through its own park control, which moves its file")
@@ -546,7 +553,7 @@ def edit_item(
             key: value for key, value in values.items()
             if row[key] != (json.dumps(value, sort_keys=True) if key == "body" else value)
         }
-        if row["kind"] not in DETAIL_KINDS and changed and "kind" not in changed and not unpark:
+        if row["kind"] not in DETAIL_KINDS and changed and "kind" not in changed and not unpark and not move:
             # A repository clear rides only on a real reclassification.
             raise WorkflowError(f"{row['kind']} items use their own editing workflow")
         if "kind" in changed:

@@ -669,6 +669,31 @@ class KindEditing(WorkflowCase):
         self.assertEqual(edited["notes"][-1]["body"],
                          "Changed kind idea -> personal-idea by alex\nUpdated repo by alex")
 
+    def test_an_idea_moves_between_repositories_and_keeps_its_kind(self):
+        """sd:5142: a base row moves to the repository it belongs to and stays in its base and page."""
+        upsert_repo(self.db, "/repos/one")
+        item = create_item(self.db, kind="idea", title="Blog idea", source="vault",
+                           external_id="blog-idea:Blog Ideas/Blog idea.md", fields={"kind": "blog-idea"})
+        moved = edit_item(self.db, item, {"repo": "/repos/one"}, who="alex")
+        self.assertEqual((moved["item"]["kind"], moved["item"]["repo"], moved["item"]["source"]),
+                         ("idea", "/repos/one", "vault"))
+        self.assertEqual(moved["notes"][-1]["body"], "Updated repo by alex")
+        back = edit_item(self.db, item, {"repo": None}, who="alex")
+        self.assertEqual((back["item"]["kind"], back["item"]["repo"]), ("idea", None))
+        # Every other field keeps its own editing workflow, a move beside it too.
+        self.refused(item, {"title": "Renamed"}, "own editing workflow")
+        self.refused(item, {"repo": "/repos/one", "priority": 1}, "own editing workflow")
+        self.refused(item, {"repo": "/repos/unregistered"}, "is not registered")
+        personal = create_item(self.db, kind="personal-idea", title="Mine")
+        self.refused(personal, {"repo": "/repos/one"}, "own editing workflow")
+
+    def test_a_writing_piece_keeps_its_repository_because_its_file_lives_there(self):
+        upsert_repo(self.db, "/repos/one")
+        upsert_repo(self.db, "/repos/two")
+        item = create_item(self.db, kind="idea", title="Draft", repo="/repos/one")
+        set_item_fields(self.db, item, piece="pieces/draft")
+        self.refused(item, {"repo": "/repos/two"}, "writing piece")
+
     def test_who_is_required_and_has_no_default(self):
         item = self.capture()["item"]["id"]
         before = item_state(self.db, item)
