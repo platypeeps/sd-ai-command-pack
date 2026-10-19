@@ -273,7 +273,7 @@ def run(args: argparse.Namespace) -> int:
             print(json.dumps(result, ensure_ascii=False))
         elif isinstance(result, list):
             for entry in result:
-                print(f"#{entry['id']}  {entry['stage']}  {entry['title']}")
+                print(f"{sd_db.repos.item_ref(entry['id'], entry.get('repo'))}  {entry['stage']}  {entry['title']}")
         else:
             print(json.dumps(result, ensure_ascii=False, indent=2))
         return 1 if action == "verify" and not result["ok"] else 0

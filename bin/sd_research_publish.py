@@ -1270,6 +1270,12 @@ def record_item_url(item: Any, repo: str, document: str, title: str, channel: st
         connection.close()
 
 
+def item_named(item: Any, repo: Any) -> str:
+    """`system sd:5103`, as a person reads an item (sd:5124); bare `sd:<n>` only when `sd_db` will not import."""
+    imported = import_sd_db()
+    return imported.module.repos.item_ref(item, repo) if imported.module is not None else "sd:%s" % item
+
+
 def open_database() -> tuple[Any, str]:
     """The workflow database at `DATABASE_HOME`: `(connection, "")`, or `(None, reason)`.
 
@@ -1329,18 +1335,18 @@ def acknowledge_request(name: str, fingerprint: str, url: str = "") -> tuple[int
                        "written" % name)
         _, problem = record_item_row(item, fingerprint, url)
         if problem:
-            return 1, ("delivered: sd:%s not recorded (%s); request and receipt left in "
-                       "place" % (item, problem))
+            return 1, ("delivered: %s not recorded (%s); request and receipt left in "
+                       "place" % (item_named(item, pending.get("repo")), problem))
     elif item is not None:
         if not url:
-            return 2, ("delivered: %s names sd:%s; give --url <url> so the item can link "
-                       "it; nothing written" % (name, item))
+            return 2, ("delivered: %s names %s; give --url <url> so the item can link "
+                       "it; nothing written" % (name, item_named(item, pending.get("repo"))))
         _, problem = record_item_url(
             item, str(pending.get("repo", "")), str(pending.get("document", "")),
             str(pending.get("title", "")), str(pending.get("destination", "")), url)
         if problem:
-            return 1, ("delivered: sd:%s not recorded (%s); request and receipt left in "
-                       "place" % (item, problem))
+            return 1, ("delivered: %s not recorded (%s); request and receipt left in "
+                       "place" % (item_named(item, pending.get("repo")), problem))
     receipt = receipts() / name
     record = load_record(receipt)
     record.update(delivered=fingerprint)
@@ -1466,7 +1472,7 @@ def project() -> tuple[int, list[str]]:
             try:
                 requests.append((projection.request_for(connection, row, held, databases), held))
             except projection.ProjectionRefusal as refusal:
-                problems.append("sd:%s: %s" % (row["id"], refusal))
+                problems.append("%s: %s" % (item_named(row["id"], row["repo"]), refusal))
     except Exception as error:  # an unknown is not a pass: nothing is written
         return 1, ["project: cannot read the designated items (%s); nothing queued, and requests "
                    "queued earlier stay" % (error or type(error).__name__)]
@@ -1494,19 +1500,20 @@ def write_row_requests(requests: list[tuple[dict[str, Any], dict[str, Any]]]) ->
         if state == "delivered" and held.get("yielded"):
             state = ""
         if state == "pending":
-            reports.append("project: sd:%s: already queued for %s (unchanged): %s"
-                           % (request["item"], request["target"], path))
+            reports.append("project: %s: already queued for %s (unchanged): %s"
+                           % (item_named(request["item"], request["repo"]), request["target"], path))
             continue
         if state == "delivered":
-            reports.append("project: sd:%s: unchanged since it was last projected; not queued again"
-                           % request["item"])
+            reports.append("project: %s: unchanged since it was last projected; not queued again"
+                           % item_named(request["item"], request["repo"]))
             continue
         path.write_text(json.dumps(request, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         reports += record_queued(name, dict(queued=request["fingerprint"], repo=request["repo"],
                                             document=request["document"], destination=ROW_DESTINATION))
         held_back = " (sd holds no claim on %s until handed back)" % ", ".join(held["yielded"]) \
             if held.get("yielded") else ""
-        reports.append("project: queued sd:%s -> %s%s" % (request["item"], request["target"], held_back))
+        reports.append("project: queued %s -> %s%s" % (item_named(request["item"], request["repo"]),
+                                                         request["target"], held_back))
     for path in sorted(QUEUE.glob(row_request_name("*"))):
         if path.name not in named:
             reports.append("project: %s is pending for an item no longer designated; --plan refuses it "
@@ -1580,8 +1587,8 @@ def mark_request(path: Path) -> tuple[int, str]:
         return 1, "writing: %s" % (str(error) or type(error).__name__)
     finally:
         connection.close()
-    return 0, "writing: sd:%s's create is marked; create the row now, in one call, then run delivered" % (
-        request["item"])
+    return 0, "writing: %s's create is marked; create the row now, in one call, then run delivered" % (
+        item_named(request["item"], request.get("repo")))
 
 
 def project_main(argv: list[str]) -> int:
@@ -1992,7 +1999,7 @@ def record_obsidian(repo: Path, wrote: list[dict[str, Any]],
            else "%s=1" % MIRROR_DRY_RUN if ENVIRON.get(MIRROR_DRY_RUN)
            else publish_refusal(repo, "mirror"))
     if why:
-        return ["item: obsidian link for sd:%d not recorded (%s)" % (item, why) for _, item in named]
+        return ["item: obsidian link for %s not recorded (%s)" % (item_named(item, repo), why) for _, item in named]
     home = repo_home(repo)
     vault = Path(VAULT).expanduser()
     folder = vault_folder(repo, channels)
@@ -2004,9 +2011,9 @@ def record_obsidian(repo: Path, wrote: list[dict[str, Any]],
         answer, problem = record_item_url(item, str(home), out, str(cfg.get("title", out)),
                                           "obsidian", url)
         if problem:
-            reports.append("item: obsidian link for sd:%d not recorded (%s)" % (item, problem))
+            reports.append("item: obsidian link for %s not recorded (%s)" % (item_named(item, repo), problem))
         elif answer != "unchanged":
-            reports.append("item: obsidian link for sd:%d recorded: %s" % (item, url))
+            reports.append("item: obsidian link for %s recorded: %s" % (item_named(item, repo), url))
     return reports
 
 

@@ -108,7 +108,7 @@ def cmd_list(args, out=None, err=None) -> int:
         notes = sd_db.item_notes(connection, args.item)
     finally:
         connection.close()
-    title = f"sd:{item['id']} {item['title']} ({item['status']})"
+    title = f"{sd_db.repos.item_ref(item['id'], item['repo'])} {item['title']} ({item['status']})"
     if not notes:
         print(f"{title}: no notes", file=out)
         return 0

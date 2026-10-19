@@ -2760,6 +2760,9 @@ def watch_items(queue: Queue, items: list[int], write: Callable[[str], Any] = pr
     with no such entry ends at once. A read the hub did not answer is no end:
     it reads again after the pause, and a hub that refuses this build stops it.
     """
+    require_sd_db()
+    from sd_db.repos import item_ref  # noqa: PLC0415 - sd_db is required above
+
     left, merged = list(dict.fromkeys(items)), True
     while True:
         try:
@@ -2777,11 +2780,12 @@ def watch_items(queue: Queue, items: list[int], write: Callable[[str], Any] = pr
             if status in ("pending", "running"):
                 continue
             if entry is None:
-                write(f"sd:{item} none: no lane entry that is not cancelled")
+                write(f"{item_ref(item, queue.repository)} none: no lane entry that is not cancelled")
             elif status == "merged":
-                write(f"sd:{item} merged at {str(entry.get('merge_commit') or '')[:12]}")
+                write(f"{item_ref(item, queue.repository)} merged at {str(entry.get('merge_commit') or '')[:12]}")
             else:
-                write(f"sd:{item} {status}: {entry.get('reason') or entry.get('code') or 'no reason recorded'}")
+                write(f"{item_ref(item, queue.repository)} {status}: "
+                      f"{entry.get('reason') or entry.get('code') or 'no reason recorded'}")
             left.remove(item)
             merged = merged and status == "merged"
         if not left:

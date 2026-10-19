@@ -311,8 +311,8 @@ class Controls(unittest.TestCase):
         self.assertEqual(human.returncode, 0, human.stderr)
         lines = human.stdout.rstrip("\n").splitlines()
         self.assertEqual(lines[0], "clean reports before 2026-09-10T00:00:00+00:00: 1 selected, 1 declined")
-        self.assertIn(f"  selected #{first}  {self.FILED}  alpha: run report", lines)
-        self.assertIn(f"  declined #{second}: it has an unresolved followup", lines)
+        self.assertIn(f"  selected fleet sd:{first}  {self.FILED}  alpha: run report", lines)
+        self.assertIn(f"  declined fleet sd:{second}: it has an unresolved followup", lines)
         self.assertTrue(lines[-1].startswith(
             f"sd reports acknowledge --all-clean --before {self.CUTOFF} --apply --if-plan "), lines[-1])
 

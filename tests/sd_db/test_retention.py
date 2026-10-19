@@ -531,7 +531,7 @@ class AnUnreadableReport(PruneCase):
         followups = [note for note in workflow.item_state(self.db, row["id"])["notes"]
                      if note["kind"] == "followup" and not note["resolved_at"]]
         self.assertEqual(len(followups), 1)
-        line = f"1 report(s) in planning have unreadable fields: #{broken}"
+        line = f"1 report(s) in planning have unreadable fields: fleet sd:{broken}"
         self.assertIn(line + "\n", text)
         self.assertEqual(fields["report"]["attention_basis"], line)
 
@@ -556,7 +556,7 @@ class AnUnreadableReport(PruneCase):
                 _, fields, text, _ = self.prune_report()
                 self.assertEqual(self.status_of(broken), "planning")
                 self.assertIs(fields["attention"], True)
-                line = f"1 report(s) in planning have unreadable fields: #{broken}"
+                line = f"1 report(s) in planning have unreadable fields: fleet sd:{broken}"
                 self.assertIn(line + "\n", text)
 
     @hub_only
@@ -585,11 +585,11 @@ class AnUnreadableReport(PruneCase):
         _, fields, text, _ = self.prune_report()
         self.assertIs(fields["attention"], True)
         basis = fields["report"]["attention_basis"]
-        self.assertEqual([int(item) for item in re.findall(r"#(\d+)", basis)], broken[:20])
+        self.assertEqual([int(item) for item in re.findall(r"fleet sd:(\d+)", basis)], broken[:20])
         self.assertTrue(basis.endswith(" and 280 more"), basis)
         self.assertLessEqual(len(basis), 2000)
         line = self.unreadable_line(text)
-        self.assertEqual([int(item) for item in re.findall(r"#(\d+)", line)], broken)
+        self.assertEqual([int(item) for item in re.findall(r"fleet sd:(\d+)", line)], broken)
         self.assertNotIn("more", line)
 
     @hub_only
@@ -597,14 +597,14 @@ class AnUnreadableReport(PruneCase):
         self.unreadable(20)
         _, fields, _, _ = self.prune_report()
         basis = fields["report"]["attention_basis"]
-        self.assertEqual(len(re.findall(r"#\d+", basis)), 20)
+        self.assertEqual(len(re.findall(r"fleet sd:\d+", basis)), 20)
         self.assertNotIn("more", basis)
         self.unreadable(1)
         later = NOW + timedelta(days=1)
         pruned = prune(self.db, run(home=self.home, when=later), now=later)
         basis = json.loads(self.db.execute("SELECT fields FROM item WHERE id=?",
                                            (pruned.report,)).fetchone()[0])["report"]["attention_basis"]
-        self.assertEqual(len(re.findall(r"#\d+", basis)), 20)
+        self.assertEqual(len(re.findall(r"fleet sd:\d+", basis)), 20)
         self.assertTrue(basis.endswith(" and 1 more"), basis)
 
     @hub_only
@@ -613,7 +613,7 @@ class AnUnreadableReport(PruneCase):
         _, _, text, _ = self.prune_report()
         line = self.unreadable_line(text)
         self.assertTrue(line.startswith("1001 report(s) in planning have unreadable fields: "), line)
-        self.assertEqual([int(item) for item in re.findall(r"#(\d+)", line)], broken[:1000])
+        self.assertEqual([int(item) for item in re.findall(r"fleet sd:(\d+)", line)], broken[:1000])
         self.assertTrue(line.endswith(" and 1 more"), line)
 
 
@@ -813,7 +813,7 @@ class TheUntouchedP4(PruneCase):
         self.assertEqual(json.loads(report["fields"])["report"]["removed"]["parked"], 1)
         text = json.loads(report["body"])["text"]
         self.assertIn("1 untouched P4 item(s) parked", text)
-        self.assertIn(f"#{stale}", text)
+        self.assertIn(f"Parked: {self.repo.name} sd:{stale}\n", text)
 
 
 if __name__ == "__main__":

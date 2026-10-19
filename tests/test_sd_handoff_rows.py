@@ -215,8 +215,8 @@ class TheRenderedShape(RowCase):
         self.followup(first, "a thing")
         self.followup(second, "another thing")
         joined = "\n".join(self.read())
-        self.assertIn(f"(alpha, sd:{first}) a thing", joined)
-        self.assertIn(f"(beta, sd:{second}) another thing", joined)
+        self.assertIn(f"(alpha, checkout sd:{first}) a thing", joined)
+        self.assertIn(f"(beta, checkout sd:{second}) another thing", joined)
 
     def test_every_bullet_carries_the_id_that_resolves_it(self):
         item = self.item()
@@ -287,7 +287,7 @@ class TheBriefIsTheLibrarys(RowCase):
         command = self.injected().rsplit("`sd note list ", 1)[1].split("`", 1)[0]
         code, out, err = run_sd(["note", "list", command])
         self.assertEqual((code, err), (0, ""))
-        self.assertTrue(out.startswith(f"sd:{item} an-item (in_progress): 13 notes"), out)
+        self.assertTrue(out.startswith(f"checkout sd:{item} an-item (in_progress): 13 notes"), out)
 
     def test_a_body_with_other_line_breaks_is_injected_verbatim(self):
         """`\\r`, form feed and U+2028 are not line ends to the brief.
@@ -613,7 +613,7 @@ class TheLister(RowCase):
         code, out, err = self.note(["list", str(item)])
         self.assertEqual((code, err), (0, ""))
         lines = out.splitlines()
-        self.assertEqual(lines[0], f"sd:{item} an-item (in_progress): 4 notes, oldest first")
+        self.assertEqual(lines[0], f"checkout sd:{item} an-item (in_progress): 4 notes, oldest first")
         # The opening `status_change` `create_item` writes is history too.
         self.assertTrue(lines[1].startswith("- [status_change #"), lines)
         self.assertRegex(lines[2], rf"^- \[followup #{first} \d{{4}}-\d\d-\d\d, "
@@ -629,7 +629,7 @@ class TheLister(RowCase):
         self.connection.commit()
         code, out, err = self.note(["list", f"sd:{item}"])
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(out, f"sd:{item} an-item (in_progress): no notes\n")
+        self.assertEqual(out, f"checkout sd:{item} an-item (in_progress): no notes\n")
 
     def test_an_unknown_item_refuses_and_prints_nothing_on_stdout(self):
         code, out, err = self.note(["list", "4242"])
@@ -667,7 +667,7 @@ class TheNoteGroup(RowCase):
         code, out, err = run_sd(["note", "list", f"sd:{item}"])
         self.assertEqual((code, err), (0, ""))
         lines = out.splitlines()
-        self.assertEqual(lines[0], f"sd:{item} an-item (in_progress): 2 notes, oldest first")
+        self.assertEqual(lines[0], f"checkout sd:{item} an-item (in_progress): 2 notes, oldest first")
         self.assertTrue(lines[2].endswith("] wire the hook"), lines)
 
     def test_sd_note_resolve_closes_the_note(self):

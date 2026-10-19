@@ -45,7 +45,7 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
    It exits 69 at once, the tests not run, while a lane gate holds or waits: run it again after the time it prints.
    Do not run `make check` or `sd gate check`: the lead's `sd-ship prepare` runs the one full gate.
 6. Write the pull-request body to the path your brief names. It holds `## Summary`, one bullet group per item
-   naming `sd:N`, and `## Test plan`, with the fail-first tests and focused test lines.
+   naming `<repo> sd:N`, and `## Test plan`, with the fail-first tests and focused test lines.
    No tables or checklists, except the failure table that the sd-review skill's class pass asks for.
    No line starts with `Item:` or `Delivers:`; name the primary item in the report instead.
    A `Work:` line is allowed: `sd-ship prepare` strips one that matches what it writes.
@@ -93,5 +93,5 @@ Check each class your change touches before you commit.
 ## Report
 
 Return: branch, head SHA, whether the worktree is clean, each item's outcome (built, already fixed, or skipped and why),
-fail-first lines, focused test lines, the body file path and the primary item.
+fail-first lines, focused test lines, the body file path and the primary item, each item as `<repo> sd:N`.
 A partial pass is not a pass; "not verified" is a valid report.

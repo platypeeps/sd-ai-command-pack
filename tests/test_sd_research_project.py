@@ -424,13 +424,13 @@ class PlanTests(Projection):
         self.assertEqual(self.deliver(self.experiment)[0], 0)
         self.assertEqual(self.queue(), {})
         status, said = self.project()
-        self.assertTrue(any("queued sd:%d" % self.experiment in line for line in said), said)
+        self.assertTrue(any("queued fleet sd:%d" % self.experiment in line for line in said), said)
         planned = self.planned(self.experiment, self.live(row=ROW, Status="Todo"))
         self.assertEqual((planned["properties"], planned["yielded"]), ({"Status": "In Progress"}, []))
         self.assertEqual(self.deliver(self.experiment)[0], 0)
         held = self.held(self.experiment)
         self.assertEqual((held["written"], held.get("yielded")), ({"Status": "In Progress"}, None))
-        self.assertEqual(self.project()[1], ["project: sd:%d: unchanged since it was last projected; not queued "
+        self.assertEqual(self.project()[1], ["project: fleet sd:%d: unchanged since it was last projected; not queued "
                                               "again" % self.experiment])
 
     def test_two_episodes_give_two_notes_each_naming_its_own_written(self) -> None:

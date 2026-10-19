@@ -41,6 +41,7 @@ import sqlite3
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, Iterable
 
 from . import config, paths
 from .database import transaction
@@ -643,6 +644,34 @@ def absolute_under_home(connection: sqlite3.Connection) -> dict[str, int]:
 def registered(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     """Every repository the table holds, in path order. The enumeration bound."""
     return list(connection.execute("SELECT * FROM repo ORDER BY path"))
+
+
+#: The repository word of an item that belongs to none, such as a fleet-wide report (sd:5124).
+NO_REPO = "fleet"
+
+
+def short(repo: Any) -> str | None:
+    """A repository key's last part: `~/repos/system` is `system`, `owner/name` is `name`; None for none."""
+    return (str(repo).rstrip("/").rpartition("/")[2] or None) if repo else None
+
+
+def item_ref(item: Any, repo: Any) -> str:
+    """How a person reads an item: `system sd:5103`, or `fleet sd:5103` for an item in no repository (sd:5124).
+
+    Machine-read text (trailers, `--ref` keys, `--json`) keeps the bare `sd:<n>`.
+    """
+    return f"{short(repo) or NO_REPO} sd:{item}"
+
+
+def item_refs(connection: sqlite3.Connection, items: Iterable[Any], *, fallback: Any = None) -> dict[int, str]:
+    """`item_ref` for each id, the repository read from its row; an id with no row takes `fallback`'s."""
+    wanted = sorted({int(item) for item in items if str(item).isdigit()})
+    held: dict[int, Any] = {}
+    for start in range(0, len(wanted), 500):
+        chunk = wanted[start:start + 500]
+        held.update((row[0], row[1]) for row in connection.execute(
+            f"SELECT id, repo FROM item WHERE id IN ({', '.join('?' for _ in chunk)})", chunk))
+    return {item: item_ref(item, held[item] if item in held else fallback) for item in wanted}
 
 
 #: What `repo.runner_merge` accepts, in the order the CHECK constraint lists

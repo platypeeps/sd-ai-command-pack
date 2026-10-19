@@ -59,6 +59,8 @@ These run without being asked.
   The refusal names the remedy: `bin/sd-db repo managed <path> yes`.
   A checkout with no row proceeds; only a row marked unmanaged refuses.
 - `sd-status` reports. It never writes.
+- An item reference a person reads names its repository: `system sd:5103`, or `fleet sd:5103` for an item in none (sd:5124).
+  A table with a Repo column may keep its ID cell bare; trailers, `--ref` keys, `--json` and refusals keep the bare `sd:<n>`.
 - `sd-review --scope branch --challenge` runs on the machine before a push.
   Blocking findings are fixed or recorded before the branch leaves.
   Under `repo.ci = local`, see **Gate first, then review the same head** under [Parallel work](#parallel-work).

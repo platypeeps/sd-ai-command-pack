@@ -152,7 +152,7 @@ class TheVerb(CliCase):
         done = self.sd_db(
             "work", "register", "docs/work/2026-09-11-a-folder/prd.md", cwd=self.repo,
         )
-        self.assertIn("registered #", done.stdout)
+        self.assertRegex(done.stdout, r"sd-db: registered \S+ sd:\d+ ")
         row, = self.rows()
         self.assertEqual(row["title"], "A folder worth a shape")
         self.assertEqual(row["status"], "planning")
@@ -296,7 +296,7 @@ class TheVerb(CliCase):
         done = self.sd_db(
             "work", "register", "docs/work/2026-09-11-a-folder/prd.md", cwd=worktree,
         )
-        self.assertIn("registered #", done.stdout)
+        self.assertRegex(done.stdout, r"sd-db: registered \S+ sd:\d+ ")
         row, = self.rows()
         registered = [r["path"] for r in connection.execute("SELECT path FROM repo")]
         self.assertIn(row["repo"], registered)
@@ -311,7 +311,7 @@ class TheVerb(CliCase):
         again = self.sd_db(
             "work", "register", "docs/work/2026-09-11-a-folder/prd.md", cwd=self.repo,
         )
-        self.assertIn("already registered as #", again.stdout)
+        self.assertRegex(again.stdout, r"sd-db: already registered as \S+ sd:\d+ ")
         self.assertEqual(len(self.rows()), 1)
 
     def test_a_path_the_working_directory_does_not_contain_is_refused(self):
