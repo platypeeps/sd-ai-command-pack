@@ -580,7 +580,7 @@ class OneDefinitionEach(unittest.TestCase):
 
 #: 31(c)'s last cut: the constant `posted` key of `bin/sd-review`'s result
 #: object. The pattern is the key form and not the word. `sd-review` says
-#: "nothing was posted" in its own output and `.github/sd-review.schema.json`
+#: "nothing was posted" in its own output and the retired `.github/sd-review.schema.json`
 #: says findings "are never posted", and a bare grep cannot tell a sentence
 #: about the boundary from the key that restated it. What the cut removed is
 #: the quoted key, so that is what the grep looks for.

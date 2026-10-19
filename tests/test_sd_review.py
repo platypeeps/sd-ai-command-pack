@@ -350,21 +350,9 @@ class PolicyTests(ReviewFixture):
         policy, source = sd_review.load_policy(root)
         self.assertEqual((policy, source), (sd_review.DEFAULT_POLICY, "built-in default"))
 
-    def test_the_policy_this_repository_declares_validates(self) -> None:
-        """The pack's own value, which the lead moves to its row with `sd-db repo declare` (sd:5109)."""
-        value = json.loads((REPO_ROOT / ".github" / "sd-review.json").read_text(encoding="utf-8"))
-        value.pop("$schema", None)
-        self.assertIn("severity_floor", sd_review.validate_policy(value, sd_review.POLICY_SOURCE))
-
-    def test_shipped_schema_covers_every_policy_key(self) -> None:
-        schema = json.loads((REPO_ROOT / ".github" / "sd-review.schema.json").read_text())
-        self.assertEqual(set(schema["properties"]), set(sd_review.POLICY_KEYS))
-
     def test_default_severity_floor_is_the_fleet_default_high(self) -> None:
-        """sd:1657: the operator ruled the fleet floor `high`; the schema states the same default."""
+        """sd:1657: the operator ruled the fleet floor `high`."""
         self.assertEqual(sd_review.DEFAULT_POLICY["severity_floor"], "high")
-        schema = json.loads((REPO_ROOT / ".github" / "sd-review.schema.json").read_text())
-        self.assertEqual(schema["properties"]["severity_floor"]["default"], "high")
 
     def assert_rejects(self, payload: Any, fragment: str) -> None:
         self._rejections = getattr(self, "_rejections", 0) + 1
@@ -1926,7 +1914,14 @@ class ScopeProvidersOverASkipTier(unittest.TestCase):
     """
 
     def setUp(self) -> None:
-        self.policy = json.loads((REPO_ROOT / ".github" / "sd-review.json").read_text())
+        self.policy = {
+            "tier_order": ["skip", "cheap", "standard", "deep"],
+            "default_tier": "standard",
+            "categories": [
+                {"name": "installer", "required": True, "paths": ["bin/sd_install.py"], "tier": "deep"},
+            ],
+            "docs_skip": ["docs/**", "*.md"],
+        }
         self.skip = sd_review.sd_route.route(
             ["docs/work/2026-01-01-any-item/prd.md"],
             lines=1, draft=False, policy=self.policy)
