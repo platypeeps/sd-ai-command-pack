@@ -849,6 +849,18 @@ class TheReason(SyncCase):
         [row] = self.shadow().values()
         self.assertEqual(row["updated_at"], "2026-10-05T16:12:33Z")
 
+    def test_the_backfill_walk_is_the_custom_jql_and_dates_the_rows_it_reads(self):
+        """pack sd:5357 backfill: `JIRA_JQL` replaces the window, so one run re-reads older rows."""
+        jql = ("(assignee = currentUser() OR watcher = currentUser() OR reporter = currentUser()) "
+               "AND updated >= -90d ORDER BY updated DESC")
+        transport = jira_transport([{"issues": [jira_issue("ABC-9", updated="2026-08-28T09:00:00.000+0000")],
+                                     "isLast": True}])
+        with self.environment(), patch.dict(os.environ, {"JIRA_JQL": jql}):
+            self.assertTrue(sync(self.connection, tracker="jira", now=self.now, runner=transport).ok)
+        self.assertEqual(transport.seen["jql"], [jql])
+        [row] = self.shadow().values()
+        self.assertEqual(row["updated_at"], "2026-08-28T09:00:00Z")
+
     def test_a_writer_that_names_no_reason_keeps_the_stored_one(self):
         """The importers (`sources.issues`, `sources.index_cache`) call
         `upsert_shadow` without a reason; a refresh from them is not a
