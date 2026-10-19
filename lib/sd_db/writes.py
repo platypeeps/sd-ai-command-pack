@@ -819,7 +819,7 @@ def upsert_shadow(
     `merged_at` and `closed_at` (migration 38, sd:5303) follow the same rule,
     except that a row written `open` loses both: a reopened row is not settled.
 
-    `branch` and `linked_issues` (migration 39, sd:5315) are a pull request's
+    `branch` and `linked_issues` (migration 38, sd:5315) are a pull request's
     head branch and the urls of the issues it closes; None keeps the stored
     value, and `[]` says it closes none.
 

@@ -855,7 +855,7 @@ def _shadow_facts(connection) -> dict[str, dict]:
     """What the shadow collector read of each GitHub row, by canonical url (sd:5303, sd:5315).
 
     `merged_at`, `closed_at`, `branch`, `linked_issues` (a list or None) and
-    `title`. A store before 39 lacks these columns and so holds none of them:
+    `title`. A store before 38 lacks these columns and so holds none of them:
     `{}`, a known answer and not a failed read.
     """
     try:
@@ -883,18 +883,25 @@ def _shadow_facts(connection) -> dict[str, dict]:
     return found
 
 
+def _issue_key(url: str) -> str:
+    """`owner/repo#N` of a GitHub issue url; the url itself when it is not one."""
+    match = ISSUE.fullmatch(url)
+    return f"{match[1]}/{match[2]}#{match[3]}" if match else url
+
+
 def _with_shadow(rows: list[dict], facts: dict[str, dict], connection) -> None:
-    """Give each projected row the shadow's dates, branch and links, and the Jira rows its title or branches name."""
+    """Give each projected row the shadow's dates and branch, and `linked`: the issues it closes and the
+    Jira rows its title or branches name."""
     named = []
     for value in rows:
         fact = facts.get(value["url"], {})
-        value.update(merged_at=fact.get("merged_at"), closed_at=fact.get("closed_at"),
-                     branch=fact.get("branch"), linked_issues=fact.get("linked_issues"))
+        value.update(merged_at=fact.get("merged_at"), closed_at=fact.get("closed_at"), branch=fact.get("branch"))
+        value["linked"] = [{"url": url, "kind": "github", "key": _issue_key(url)} for url in fact.get("linked_issues") or []]
         named.append(shadow_sync.jira_keys(value["title"], fact.get("title"), value["branch"], value.get("local_branch")))
     # One statement for every row's keys, so the projection's statement count stays fixed (sd:2678).
     jira = shadow_sync.jira_rows(connection, [key for keys in named for key in keys])
     for value, keys in zip(rows, named, strict=True):
-        value["jira_links"] = [jira[key] for key in keys if key in jira]
+        value["linked"] += [{"url": jira[key]["url"], "kind": "jira", "key": key} for key in keys if key in jira]
 
 
 def projection(connection, *, repo=None) -> list[dict]:
@@ -902,9 +909,9 @@ def projection(connection, *, repo=None) -> list[dict]:
 
     Each row's `merged_at` and `closed_at` are when GitHub merged or closed
     it, as the shadow collector last read them, or None (sd:5303). `branch`
-    and `linked_issues` are a pull request's head branch and the urls of the
-    issues it closes, or None; `jira_links` the Jira shadow rows its title or
-    branches name, `[]` for none (sd:5315).
+    is a pull request's head branch, or None; `linked` the issues it closes
+    and the Jira rows its title or branches name, each `{url, kind, key}` with
+    kind `github` or `jira`, `[]` for none (sd:5315).
     """
     if repo is not None and not isinstance(repo, (str, list, tuple)):
         raise WorkflowError("repo filter must be an identity or list of identities")
