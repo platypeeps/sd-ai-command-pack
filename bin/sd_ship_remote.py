@@ -418,16 +418,16 @@ class GitHub:
                                       "bypass_actors; this command cannot treat a bypass list it was not shown as empty.")
 
     def declared_gap(self, head: str) -> dict | None:
-        """The `unprotected` acceptance at `head`, or `None` with the reasons.
+        """The `unprotected` acceptance on the repository row, or `None` with the reasons.
 
-        Read from the reviewed commit and never from the working tree: a
-        declaration nobody reviewed cannot let a merge through. One parser,
-        `sd_lib.parse_acknowledgements`, is what `sd-status` reads the working
-        tree with. The entry must name the id *and* pin exactly the fact this
-        branch state has, `{"branch_protection": false}`; an entry for another
-        gap that pins the same fact accepts that gap, not this one.
+        Read from the row's `status` declaration at merge time (sd:5109): the
+        operator dropped the audit trail that read it at the reviewed commit.
+        One parser, `sd_lib.parse_acknowledgements`, is what `sd-status` reads
+        too. The entry must name the id *and* pin exactly the fact this branch
+        state has, `{"branch_protection": false}`; an entry for another gap
+        that pins the same fact accepts that gap, not this one.
         """
-        where = sd_lib.ACKNOWLEDGEMENT_RELATIVE_PATH.as_posix()
+        where = sd_lib.ACKNOWLEDGEMENT_SOURCE
         entries, problems = self.acceptances(head)
         if problems:
             self.declaration_faults = problems
@@ -436,20 +436,19 @@ class GitHub:
             if entry["id"] == "unprotected" and entry["state"] == {"branch_protection": False}:
                 self.declaration_faults = []
                 return {"declared_gap": entry["id"], "until": entry["until"]}
-        self.declaration_faults = [f"{where} at {head[:12]} carries no `unprotected` entry pinning branch_protection: false"]
+        self.declaration_faults = [f"{where} carries no `unprotected` entry pinning branch_protection: false"]
         return None
 
     def acceptances(self, head: str) -> tuple[list[dict], list[str]]:
-        """`.github/sd-status.json` at `head`, parsed: `(entries, problems)`."""
-        where = sd_lib.ACKNOWLEDGEMENT_RELATIVE_PATH.as_posix()
-        try:
-            text = git(self.root, "show", f"{head}:{where}")
-        except Refusal:
-            return [], [f"{where} is not in the tree at {head[:12]}"]
-        return sd_lib.parse_acknowledgements(text)
+        """The repository row's `status` declaration, parsed: `(entries, problems)`.
+
+        `head` names nothing read any more; the row answers for every head. An
+        unread row is a problem, so it accepts nothing.
+        """
+        return sd_lib.load_acknowledgements(self.root)
 
     def accepted_gaps(self, head: str) -> list[dict]:
-        """The reviewed head's `accepted_gaps`; a file with any fault accepts nothing."""
+        """The row's `accepted_gaps`; a declaration with any fault accepts nothing."""
         entries, problems = self.acceptances(head)
         return [] if problems else entries
 
@@ -482,10 +481,10 @@ class GitHub:
         status, value = self.protection_observed(base)
         declaration = self.declared_gap(head)
         message = value.get("message") if isinstance(value, dict) else None
-        where = sd_lib.ACKNOWLEDGEMENT_RELATIVE_PATH
+        where = sd_lib.ACKNOWLEDGEMENT_SOURCE
         if status == 200:
             if declaration is not None:
-                raise Refusal(f"{where} at {head[:12]} declares main unprotected, "
+                raise Refusal(f"{where} declares main unprotected, "
                               "but GitHub returns a protection object; the declaration does not match the observed state")
             # Rulesets layer onto classic protection, strictest per rule
             # (sd:1419). A rules read that fails leaves the classic object as
@@ -504,7 +503,7 @@ class GitHub:
             raise Refusal(f"{message} (HTTP 403)", code="plan_limited",
                           next_action="This repository's plan does not offer branch protection. Move the repository "
                                       "to an organization whose plan has it, or declare the accepted gap in "
-                                      f"{where} at the reviewed commit.")
+                                      f"{where}.")
         if status == 404:
             read = self.rulesets_observed(base)
             if read["error"]:
@@ -514,7 +513,7 @@ class GitHub:
             if synthesized is not None:
                 if declaration is not None:
                     names = ", ".join(f"{entry['name']} (#{entry['id']})" for entry in synthesized["rulesets"])
-                    raise Refusal(f"{where} at {head[:12]} declares main unprotected, but a ruleset gates it "
+                    raise Refusal(f"{where} declares main unprotected, but a ruleset gates it "
                                   f"({names}); the declaration does not match the observed state")
                 return self.validate_protection(synthesized, self.accepted_gaps(head))
             if declaration is not None:
@@ -524,7 +523,7 @@ class GitHub:
                       + (f"; {detail}" if detail else ""),
                       code="protection_required" if status == 404 else "prerequisite_failed",
                       next_action="Restore branch protection, or declare the accepted gap in "
-                                  f"{where} at the reviewed commit.")
+                                  f"{where}.")
 
     def expected_workflows(self, head: str) -> list[tuple[str, str]]:
         """`(path, name)` for every workflow at `head` whose `on` includes `pull_request`.

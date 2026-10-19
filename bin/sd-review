@@ -41,7 +41,8 @@ import sd_route  # noqa: E402
 # lane names no provider at all -- it reports a plan and requests nobody.
 SETUP_GITHUB_SEAM = "load_policy; consumed by bin/sd_setup_github.py"
 
-POLICY_RELATIVE_PATH = pathlib.Path(".github") / "sd-review.json"
+#: Where the routing policy lives: the repository row (sd:5109), named in every message about it.
+POLICY_SOURCE = "the review declaration (`sd-db repo declare PATH review`)"
 SCOPES = ("worktree", "branch", "pr", "planning")
 SEVERITIES = ("high", "medium", "low", "unspecified")
 BLOCKING_ORDER = {"high": 3, "medium": 2, "low": 1, "unspecified": 0}
@@ -136,7 +137,7 @@ class UsageError(Exception):
 
 
 class PolicyError(Exception):
-    """A malformed or impossible `.github/sd-review.json`: exit 2."""
+    """A malformed, impossible or unread review declaration: exit 2."""
 
 
 class Refusal(Exception):
@@ -144,9 +145,9 @@ class Refusal(Exception):
 
 # Policy
 
-# The policy when `.github/sd-review.json` is absent, deliberately conservative:
+# The policy when the repository declares none, deliberately conservative:
 # documentation-only changes are free, everything else pays for codex, anything
-# sensitive or large escalates. A repository that wants otherwise writes the file.
+# sensitive or large escalates. A repository that wants otherwise declares one.
 #
 # `copilot_review.automatic_deep` is `None` here on purpose: the repository has
 # not said, so the machine's `sd.copilot_review` answers (`deep` when unset).
@@ -286,13 +287,17 @@ def read_json_file(path: pathlib.Path, refusal: type[Exception]) -> Any:
 
 
 def load_policy(root: pathlib.Path) -> tuple[dict[str, Any], str]:
-    """Return repository policy and provenance; malformed existing policy never falls back."""
-    path = root / POLICY_RELATIVE_PATH
+    """Return repository policy and provenance: the repo row's `review` declaration (sd:5109).
+
+    None declared, or no database, is the built-in default; a malformed or unread one refuses, never the default.
+    """
     try:
-        value = read_json_file(path, PolicyError)
-    except FileNotFoundError:
+        value = sd_lib.repo_declaration(root, "review")
+    except sd_lib.DatabaseUnreadable as error:
+        raise PolicyError(f"{POLICY_SOURCE} cannot be read: {error}") from None
+    if value is None:
         return dict(DEFAULT_POLICY), "built-in default"
-    return validate_policy(value, str(path)), str(path)
+    return validate_policy(value, POLICY_SOURCE), POLICY_SOURCE
 
 
 # The subject: one exact change

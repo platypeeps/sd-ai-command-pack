@@ -7,6 +7,7 @@ import dataclasses
 import hashlib
 import importlib
 import json
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -15,10 +16,12 @@ import unittest
 from unittest.mock import patch
 
 from tests import test_sd_ship as fixture
+from tests.row_seed import seed_declaration
 
 ship = fixture.ship
 
 bindings = importlib.import_module("sd_ship_bindings")
+sd_lib = importlib.import_module("sd_lib")
 dispositions = ship.sd_ship_dispositions
 ItemHistory, ItemIdentity, SharedReview = ship.ItemHistory, ship.ItemIdentity, ship.SharedReview
 digest, review_history = ship.digest, ship.review_history
@@ -156,6 +159,11 @@ class SharedBindingTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="sd-shared-bindings-")
         self.addCleanup(self.temporary.cleanup)
         self.root = pathlib.Path(self.temporary.name).resolve()
+        # The review declaration is a row (sd:5109): a scratch database, never the operator's.
+        self.home = self.root / "home"
+        home = patch.dict(os.environ, {"HOME": str(self.home), "XDG_CONFIG_HOME": str(self.home / ".config")})
+        home.start()
+        self.addCleanup(home.stop)
         self.head = "a" * 40
         self.report = {"status": "blocking", "scope": "branch", "subject": {"head": self.head},
                        "requested_reviews": 1, "completed_reviews": 1, "reviewed_by": ["fixture"],
@@ -211,9 +219,20 @@ class SharedBindingTests(unittest.TestCase):
         self.assertIn("sd-ship prepare", caught.exception.workflow["next_action"])
 
     def test_a_policy_change_refuses_and_is_named(self):
+        seed_declaration(self.home, self.root, "review", {})
+        with self.assertRaisesRegex(ship.Refusal, "changed after review: review_declaration \\(policy\\)$"):
+            self.operation.review_inputs(self.head)
+
+    def test_a_policy_file_in_the_tree_binds_nothing(self):
+        """sd:5109: `.github/sd-review.json` is retired; the row's declaration is the policy."""
         (self.root / ".github").mkdir()
         (self.root / ".github" / "sd-review.json").write_text("{}")
-        with self.assertRaisesRegex(ship.Refusal, "changed after review: .github/sd-review.json \\(policy\\)$"):
+        self.assertEqual(self.operation.review_inputs(self.head), self.report)
+
+    def test_an_unread_declaration_refuses_rather_than_binding_absent(self):
+        seed_declaration(self.home, self.root, "review", {})
+        sd_lib.import_sd_db().module.default_path(self.home).write_bytes(b"not a database")
+        with self.assertRaisesRegex(ship.Refusal, "review binding input cannot be read"):
             self.operation.review_inputs(self.head)
 
     def test_a_receipt_without_a_manifest_refuses_once_and_says_why(self):
@@ -306,9 +325,8 @@ class SharedBindingTests(unittest.TestCase):
         """Policy stays byte-exact (sd:1834 operator decision); no replay is even asked."""
         self.operation.state["passes"][-1]["review_request"] = {"sha256": "asked", "verify": None, "resume": None}
         calls = self.replaying("asked")
-        (self.root / ".github").mkdir()
-        (self.root / ".github" / "sd-review.json").write_text("{}")
-        with self.assertRaisesRegex(ship.Refusal, "\\.github/sd-review.json \\(policy\\)$"):
+        seed_declaration(self.home, self.root, "review", {})
+        with self.assertRaisesRegex(ship.Refusal, "review_declaration \\(policy\\)$"):
             self.operation.review_inputs(self.head)
         self.assertEqual(calls, [])
 

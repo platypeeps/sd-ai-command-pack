@@ -258,6 +258,31 @@ class ReviewFixture(unittest.TestCase):
         started = [call["argv"][1:3] for call in runner.calls]
         self.assertIn(started, ([], [SKILL_PROBE_WORDS, ["--version"]]), started)
 
+    def declare_policy(self, root: pathlib.Path, policy: Any) -> None:
+        self.declare(root, "review", policy)
+
+    def stub_policy(self, policy: Any) -> None:
+        """`policy` as the review declaration this process reads, and no other kind declared (sd:5109).
+
+        For an in-process run whose test is what a machine with no database does: no database is made.
+        `declare_policy` writes a real row, which a child process reads too.
+        """
+        def declared(root: Any, kind: str, environ: Any = None) -> Any:
+            return policy if kind == "review" else None
+        patcher = unittest.mock.patch.object(sd_review.sd_lib, "repo_declaration", side_effect=declared)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def declare(self, root: pathlib.Path, kind: str, value: Any) -> None:
+        """`root`'s `kind` declaration on its row (sd:5109), in a database under the fixture's HOME.
+
+        This process reads that HOME too for the rest of the test, as a run under `environment()` does.
+        """
+        row_seed.seed_declaration(self.registry_home, root, kind, value)
+        patcher = unittest.mock.patch.dict(os.environ, {"HOME": str(self.registry_home)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def environment(self, **extra: str) -> dict[str, str]:
         """An environment whose HOME is the fixture's, so the run reads the
         fixture's registry rather than the developer's. A gate it starts reads
@@ -306,23 +331,30 @@ class PolicyTests(ReviewFixture):
         self.assertEqual(source, "built-in default")
         self.assertEqual(policy, sd_review.DEFAULT_POLICY)
 
-    def test_present_file_is_merged_over_the_default(self) -> None:
+    def test_declared_policy_is_merged_over_the_default(self) -> None:
         root = self.make_repo()
-        (root / ".github").mkdir()
-        (root / ".github" / "sd-review.json").write_text(
-            json.dumps({"severity_floor": "low"}), encoding="utf-8"
-        )
+        self.declare_policy(root, {"severity_floor": "low"})
         policy, source = sd_review.load_policy(root)
         self.assertEqual(policy["severity_floor"], "low")
         self.assertEqual(policy["large_change_lines"], 800)
-        # Not said by the file, so not decided by the file: the machine answers.
+        # Not said by the declaration, so not decided by it: the machine answers.
         self.assertEqual(policy["copilot_review"], {"automatic_deep": None})
-        self.assertTrue(source.endswith("sd-review.json"))
+        self.assertEqual(source, sd_review.POLICY_SOURCE)
 
-    def test_this_repository_ships_a_policy_that_validates(self) -> None:
-        policy, source = sd_review.load_policy(REPO_ROOT)
-        self.assertTrue(source.endswith(".github/sd-review.json"), source)
-        self.assertIn("severity_floor", policy)
+    def test_a_policy_file_in_the_tree_is_not_read(self) -> None:
+        """sd:5109: `.github/sd-review.json` is retired; the row alone declares the policy."""
+        root = self.make_repo()
+        (root / ".github").mkdir()
+        (root / ".github" / "sd-review.json").write_text(json.dumps({"severity_floor": "low"}), encoding="utf-8")
+        self.declare_policy(self.make_repo("other"), {"severity_floor": "medium"})
+        policy, source = sd_review.load_policy(root)
+        self.assertEqual((policy, source), (sd_review.DEFAULT_POLICY, "built-in default"))
+
+    def test_the_policy_this_repository_declares_validates(self) -> None:
+        """The pack's own value, which the lead moves to its row with `sd-db repo declare` (sd:5109)."""
+        value = json.loads((REPO_ROOT / ".github" / "sd-review.json").read_text(encoding="utf-8"))
+        value.pop("$schema", None)
+        self.assertIn("severity_floor", sd_review.validate_policy(value, sd_review.POLICY_SOURCE))
 
     def test_shipped_schema_covers_every_policy_key(self) -> None:
         schema = json.loads((REPO_ROOT / ".github" / "sd-review.schema.json").read_text())
@@ -337,17 +369,14 @@ class PolicyTests(ReviewFixture):
     def assert_rejects(self, payload: Any, fragment: str) -> None:
         self._rejections = getattr(self, "_rejections", 0) + 1
         root = self.make_repo(f"reject-{self._rejections}")
-        (root / ".github").mkdir()
-        (root / ".github" / "sd-review.json").write_text(
-            payload if isinstance(payload, str) else json.dumps(payload), encoding="utf-8"
-        )
+        self.declare_policy(root, payload)
         with self.assertRaises(sd_review.PolicyError) as caught:
             sd_review.load_policy(root)
         self.assertIn(fragment, str(caught.exception))
 
     def test_malformed_policies_name_what_is_wrong(self) -> None:
-        self.assert_rejects("{not json", "not valid JSON")
-        self.assert_rejects([], "must be a JSON object")
+        # Not JSON and not an object no longer reach a reader: the row holds an object or nothing
+        # (`TheDeclarationsSetting`), and `sd-db repo declare` refuses both before writing.
         self.assert_rejects({"nonsense": 1}, "unknown key(s) nonsense")
         self.assert_rejects({"tiers": {"cheap": []}}, "tiers is retired")
         self.assert_rejects({"default_tier": "gold"}, "default_tier must be one of")
@@ -371,10 +400,11 @@ class PolicyTests(ReviewFixture):
 
     def test_a_broken_policy_never_falls_back_to_the_default(self) -> None:
         root = self.make_repo()
-        (root / ".github").mkdir()
-        (root / ".github" / "sd-review.json").write_text("{", encoding="utf-8")
-        with self.assertRaises(sd_review.PolicyError):
+        self.declare_policy(root, {"default_tier": "cheap"})
+        sd_review.sd_lib.import_sd_db().module.default_path(self.registry_home).write_bytes(b"not a database")
+        with self.assertRaises(sd_review.PolicyError) as caught:
             sd_review.load_policy(root)
+        self.assertIn(f"{sd_review.POLICY_SOURCE} cannot be read", str(caught.exception))
 
 
 def _planned_for(case: Any, *, start: str) -> list[dict[str, Any]]:
@@ -800,10 +830,7 @@ class PipelineTests(ReviewFixture):
     def test_automatic_deep_keeps_the_remote_review_report_shape(self) -> None:
         root = self.make_repo()
         self.prepare(root)
-        (root / ".github").mkdir()
-        (root / ".github" / "sd-review.json").write_text(json.dumps({
-            "sensitive": ["src.py"], "copilot_review": {"automatic_deep": True},
-        }))
+        self.declare_policy(root, {"sensitive": ["src.py"], "copilot_review": {"automatic_deep": True}})
         runner = FakeRunner({"sd-check": sd_review.Completed(0, "{}", ""),
                              "codex": sd_review.Completed(0, '{"findings": []}', "")})
         result = self.run_review(root, runner)
@@ -1265,12 +1292,11 @@ class CliTests(ReviewFixture):
 
     def test_a_malformed_policy_exits_two_without_a_traceback(self) -> None:
         root = self.make_repo()
-        (root / ".github").mkdir()
-        (root / ".github" / "sd-review.json").write_text("{oops", encoding="utf-8")
+        self.declare_policy(root, {"default_tier": "gold"})
         finished = self.run_cli(["--explain"], root)
         self.assertEqual(finished.returncode, sd_review.EXIT_USAGE)
         self.assertNotIn("Traceback", finished.stderr)
-        self.assertIn("not valid JSON", finished.stderr)
+        self.assertIn("default_tier must be one of", finished.stderr)
 
 
 class TheExplainRenderTests(ReviewFixture):
@@ -2027,8 +2053,7 @@ class TimingPlanTests(ReviewFixture):
     def planned(self, count=4, depth="deep", timeout=1800):
         root = self.make_repo()
         (root / "src.py").write_text("x=1\n")
-        (root / ".github").mkdir()
-        (root / ".github/sd-review.json").write_text(json.dumps({"default_tier": depth}))
+        self.declare_policy(root, {"default_tier": depth})
         registry = self.registry_home / ".local/share/sd/providers.yaml"
         entries = [f"p{index}" for index in range(count)]
         registry.write_text("bills:\n  fixture: {cost: subscription}\nproviders:\n"
@@ -2101,28 +2126,29 @@ class CopilotPolicyTests(ReviewFixture):
     """Where `remote_reviews.copilot.automatic` comes from (sd:1328).
 
     The machine's `sd.copilot_review` is the default for every repository;
-    unset it reads `deep`, so a repository with no `.github/sd-review.json`
+    unset it reads `deep`, so a repository with no review declaration
     gets Copilot on deep-tier changes and on nothing else. The repository's
     own `copilot_review.automatic_deep` wins over `deep` and `always` when the
-    file names it, and a file that does not name it inherits. A machine
-    `never` wins over the file (sd:1444). `--explain` says which one answered.
+    declaration names it, and one that does not name it inherits. A machine
+    `never` wins over the declaration (sd:1444). `--explain` says which one answered.
     """
 
     def machine(self, value: str | None) -> None:
+        """`external_reviews` in the machine's file; `sd.copilot_review` a row, as a fleet key is (sd:5109)."""
         path = self.registry_home / ".config" / sd_review.sd_lib.CONFIG_RELATIVE_PATH
         path.parent.mkdir(parents=True, exist_ok=True)
-        config = {"config": {"sd": {"external_reviews": "configured"}}}
-        if value is not None:
-            config["config"]["sd"]["copilot_review"] = value
-        path.write_text(json.dumps(config))
+        path.write_text(json.dumps({"config": {"sd": {"external_reviews": "configured"}}}))
+        sd_db = sd_review.sd_lib.import_sd_db().module
+        if not sd_db.default_path(self.registry_home).exists():
+            sd_db.initialise(home=self.registry_home)
+        sd_review.sd_lib.set_database_setting("sd.copilot_review", value, {"HOME": str(self.registry_home)})
 
     def repo(self, name: str, *, deep: bool, policy: dict[str, Any] | None = None) -> pathlib.Path:
         """A repository whose one change routes deep (a sensitive path under
         the built-in policy) or standard, with or without a policy file."""
         root = self.make_repo(name)
         if policy is not None:
-            (root / ".github").mkdir(exist_ok=True)
-            (root / ".github" / "sd-review.json").write_text(json.dumps(policy))
+            self.declare_policy(root, policy)
         if deep:
             (root / ".github" / "workflows").mkdir(parents=True, exist_ok=True)
             (root / ".github" / "workflows" / "ci.yml").write_text("on: push\n")

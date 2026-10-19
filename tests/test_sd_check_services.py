@@ -20,6 +20,8 @@ import unittest
 from typing import Any
 
 from tests.clean_env import clean_environment
+from tests.clean_env import home as clean_home
+from tests.row_seed import seed_declaration
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SD_CHECK = REPO_ROOT / "bin" / "sd-check"
@@ -126,10 +128,11 @@ class RequiredServices(ServiceFixture):
                 self.assertFalse(self.witness.exists())
 
     def test_a_docs_only_scope_probes_nothing(self) -> None:
-        (self.root / ".github").mkdir()
-        (self.root / ".github/sd-check-scope.json").write_text(json.dumps(
-            {"schema_version": 1, "docs_paths": ["docs/**"], "docs_command": [sys.executable, "-c", "pass"]}))
-        self.git("add", ".github")
+        # The scope is the repo row's `check_scope` declaration (sd:5109), under the clean HOME the run reads.
+        seed_declaration(pathlib.Path(clean_home()), self.root, "check_scope",
+                         {"schema_version": 1, "docs_paths": ["docs/**"], "docs_command": [sys.executable, "-c", "pass"]})
+        (self.root / "base.txt").write_text("b\n")
+        self.git("add", "base.txt")
         self.git("commit", "-q", "-m", "base")
         self.git("checkout", "-q", "-b", "topic")
         (self.root / "docs").mkdir()

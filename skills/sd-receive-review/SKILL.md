@@ -20,7 +20,7 @@ Use when findings exist on a change the user is responsible for and must be
 answered — a pull request review, an automated reviewer's comments, or notes
 from a colleague. A planning contract's concern ledger is one more source, on
 the repositories that keep one: the ledger and the per-round cross-artifact
-sweep apply to paths listed under `sensitive` in `.github/sd-review.json` and
+sweep apply to paths listed under `sensitive` in the repository's review declaration and
 nowhere else.
 
 The failure this exists for has two faces and the second is the common one.

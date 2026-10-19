@@ -1,22 +1,23 @@
 """A repository's declared docs-only check scope (sd:2072).
 
 A Markdown-only change ran the whole repository check twice, once at prepare
-and once at the merge gate. A repository may declare, in its reviewed tree,
-which paths are documentation and which command checks them:
+and once at the merge gate. A repository may declare which paths are
+documentation and which command checks them, as the `check_scope` declaration
+on its repo row (sd:5109; `.github/sd-check-scope.json` held it before):
 
-    .github/sd-check-scope.json
-    {"schema_version": 1, "docs_paths": ["docs/**", "*.md"], "docs_command": ["make", "docs-check"]}
+    sd-db repo declare PATH check_scope \
+        '{"schema_version": 1, "docs_paths": ["docs/**", "*.md"], "docs_command": ["make", "docs-check"]}'
 
 When every path changed between the merge base and the head matches a
 `docs_paths` glob, `sd-check --base REF` runs only `docs_command`. Anything
 else runs the full check, and so does a change to a file that decides what the
-check is: the declaration itself, a Makefile, the file the entrypoints were
-detected from, `CLAUDE.local.md`, and any repository file a check command
-names in its argv. No declaration, no `--base`, an empty diff or a declaration
-that does not parse all run the full check: the scope only ever narrows what
-runs when every condition for narrowing holds.
-A declared repository's `--base` that names no commit is a usage error, not a
-full check (sd:2863).
+check is: a Makefile, the file the entrypoints were detected from,
+`CLAUDE.local.md`, and any repository file a check command names in its argv.
+No declaration, no `--base` and an empty diff run the full check: the scope
+only ever narrows what runs when every condition for narrowing holds.
+A declaration that does not parse, a database that does not answer and a
+declared repository's `--base` that names no commit are usage errors, not a
+full check (sd:2863): `sd-check` names the fault and runs nothing.
 
 An optional `docs_tools` lists every executable the docs command reaches, the
 shell included, by bare name on `PATH`, such as `["sh", "python3"]` (sd:2881). A hub that accepts a
@@ -31,14 +32,14 @@ spans segments, and a leading dot is matched like any other character.
 from __future__ import annotations
 
 import glob
-import json
 import pathlib
 import re
 from dataclasses import dataclass, field
 
 import sd_lib
 
-DECLARATION = ".github/sd-check-scope.json"
+#: How every message names the declaration.
+DECLARATION = "the check_scope declaration"
 FIELDS = {"schema_version", "docs_paths", "docs_command"}
 OPTIONAL_FIELDS = {"docs_tools"}
 FULL = "full"
@@ -74,16 +75,22 @@ class Scope:
 
 
 def declaration(root: pathlib.Path) -> tuple[list[str], list[str], list[str] | None] | None:
-    """`(docs_paths, docs_command, docs_tools or None)`, None when the tree has none; `DeclarationError` when it is malformed."""
-    path = root / DECLARATION
-    if not path.is_file():
-        return None
+    """`(docs_paths, docs_command, docs_tools or None)` from the repo row, None when it declares none.
+
+    `DeclarationError` when the declaration is malformed or the database does not answer:
+    either way nothing narrows the check.
+    """
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        raise DeclarationError(f"{DECLARATION} does not parse: {error}") from None
+        value = sd_lib.repo_declaration(root, "check_scope")
+    except sd_lib.DatabaseUnreadable as error:
+        raise DeclarationError(f"{DECLARATION} cannot be read: {error}") from None
+    return None if value is None else parse_declaration(value)
+
+
+def parse_declaration(value: object) -> tuple[list[str], list[str], list[str] | None]:
+    """The declaration's object, checked; `DeclarationError` naming the fault otherwise."""
     if (not isinstance(value, dict) or not FIELDS <= set(value) <= FIELDS | OPTIONAL_FIELDS
-            or value.get("schema_version") != 1):
+            or value.get("schema_version") != 1 or isinstance(value.get("schema_version"), bool)):
         raise DeclarationError(f"{DECLARATION} needs exactly {sorted(FIELDS)}, optionally {sorted(OPTIONAL_FIELDS)}, "
                                "with schema_version 1")
     for name in ("docs_paths", "docs_command"):
@@ -95,6 +102,10 @@ def declaration(root: pathlib.Path) -> tuple[list[str], list[str], list[str] | N
     if tools is not None and (not isinstance(tools, list)
                               or any(not isinstance(v, str) or not v or "/" in v or v in (".", "..") for v in tools)):
         raise DeclarationError(f"{DECLARATION}: docs_tools must be a list of bare command names, resolved on PATH")
+    try:
+        matcher(list(value["docs_paths"]))
+    except (re.error, ValueError) as error:
+        raise DeclarationError(f"{DECLARATION}: docs_paths holds a glob that does not compile: {error}") from None
     return list(value["docs_paths"]), list(value["docs_command"]), None if tools is None else list(tools)
 
 
@@ -123,7 +134,7 @@ def named_files(commands: list[list[str]]) -> set[str]:
 
 def forcing(path: str, detection: sd_lib.Detection, root: pathlib.Path, named: set[str]) -> bool:
     """Whether a change to `path` changes what the check is, so only the full check may answer."""
-    if path in (DECLARATION, sd_lib.LOCAL_FILE_NAME) or BUILD_FILES.search(path) or path in named:
+    if path == sd_lib.LOCAL_FILE_NAME or BUILD_FILES.search(path) or path in named:
         return True
     origin = detection.origin
     return origin is not None and origin.resolve() == (root / path).resolve()
@@ -136,7 +147,7 @@ def decide(root: pathlib.Path, base: str | None, detection: sd_lib.Detection) ->
         return Scope(FULL, NO_BASE)
     value = declaration(root)
     if value is None:
-        return Scope(FULL, f"no {DECLARATION}")
+        return Scope(FULL, "no check_scope declaration")
     if not sd_lib.git_output(["rev-parse", "--verify", "--quiet", f"{base}^{{commit}}"], root):
         raise MissingBase(f"--base {base} names no commit here; fetch it, or name a base that exists")
     fork = sd_lib.git_output(["merge-base", base, "HEAD"], root)

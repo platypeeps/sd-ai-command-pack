@@ -62,7 +62,6 @@ IMPORT_EXEMPT = {
     "sd_jev_shadow.py": "the Jev shadow stages record an answer and never read it back; they decide no verdict",
 }
 REVIEW_TOOL_FILES = VERDICT_FILES + GATE_FILES + CHECK_FILES
-POLICY_FILES = ("CLAUDE.local.md", ".github/sd-review.json")
 ADJUDICATOR_POLICY_FILES = (
     "skills/sd-check/SKILL.md", "skills/sd-review/SKILL.md", "skills/sd-ship/SKILL.md",
     "skills/sd-check/references/check-receipts.md", ".claude/rules/sd-planning-adversarial-review.md",
@@ -145,14 +144,14 @@ def tool_files() -> dict:
 
 
 def policy_files(root: pathlib.Path) -> dict:
-    files = {}
-    for name in POLICY_FILES:
-        if name == sd_lib.LOCAL_FILE_NAME:  # the parsed block, as the gate's `inputs` read it (sd:2854)
-            files[name] = sd_lib.local_policy_digest(sd_lib.local_block_path(root))
-            continue
-        path = root / name
-        # Preserve item-backed repository-policy I/O errors for existing callers.
-        files[name] = hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() or path.is_symlink() else "absent"
+    # The parsed block, as the gate's `inputs` read it (sd:2854).
+    files = {sd_lib.LOCAL_FILE_NAME: sd_lib.local_policy_digest(sd_lib.local_block_path(root))}
+    # The repository row's review declaration (sd:5109), which `.github/sd-review.json` held:
+    # a policy changed between review and merge moves the binding. Unread refuses, never "absent".
+    try:
+        files["review_declaration"] = digest({"value": sd_lib.repo_declaration(root, "review")})
+    except sd_lib.DatabaseUnreadable as error:
+        raise Refusal(f"required review binding input cannot be read: {error}") from None
     # The setting's value, never the config file's path: that follows HOME, and a
     # satellite under another login then moved the binding the hub checks (sd:2793).
     files["external_review_policy"] = digest({"value": sd_lib.core_setting("external_reviews")})

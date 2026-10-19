@@ -1,8 +1,8 @@
 """Fleet-wide settings as `setting` rows, and a Documents root's label (sd:3989, sd:3987, sd:3986).
 
 The design is the system repository's `docs/work/2026-10-13-config-to-db/design.md`, slice P1.
-Row wins: once the database holds a row for a key, `config.json` is not read for it, and a
-cleared row is a row. A read that fails is unknown: a `ConfigError`, never the file's value.
+With a database the row alone answers (sd:5109): `config.json` is not read for a fleet key, and
+a cleared row is a row. A read that fails is unknown: a `ConfigError`, never the file's value.
 """
 
 import json
@@ -153,10 +153,11 @@ class TheFleetRead(FleetCase):
         self.assertEqual(sd_lib.fleet_setting("copilot_review", self.env), ("never", "file"))
         self.assertEqual(sd_lib.fleet_setting("fleet_owners", self.env), (None, "default"))
 
-    def test_the_row_wins_over_the_file_and_a_cleared_row_hides_it(self):
+    def test_with_a_database_the_row_alone_answers_and_the_file_is_not_read(self):
+        """sd:5109: no file fallback; a key no row holds reads unset."""
         self.write_file(copilot_review="never")
         path = self.database()
-        self.assertEqual(sd_lib.fleet_setting("copilot_review", self.env), ("never", "file"))
+        self.assertEqual(sd_lib.fleet_setting("copilot_review", self.env), (None, "database"))
         connection = connect(path)
         set_setting(connection, "sd.copilot_review", "always")
         self.assertEqual(sd_lib.core_setting("copilot_review", self.env), "always")
@@ -208,25 +209,30 @@ class TheFleetVerbs(FleetCase):
         path = self.database()
         done = self.run_sd("config", "set", "sd.copilot_review", "always")
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("never -> always (workflow database)", done.stdout)
+        self.assertIn("(unset) -> always (workflow database)", done.stdout)
         self.assertEqual(self.file_keys(), {"copilot_review": "never"})
         connection = connect(path)
         self.addCleanup(connection.close)
         self.assertEqual(read_settings(connection, ["sd.copilot_review"]), {"sd.copilot_review": "always"})
         got = self.run_sd("config", "get", "sd.copilot_review")
         self.assertEqual((got.returncode, got.stdout), (0, "always\n"))
-        self.assertIn("is not read: the workflow database holds it", got.stderr)
+        self.assertIn("is not read: the workflow database answers for it", got.stderr)
 
-    def test_unset_with_a_file_key_present_reads_unset(self):
+    def test_a_file_line_alone_reads_unset_and_unset_clears_the_row(self):
+        """sd:5109: with a database the file line is never read, so it is not set."""
         self.write_file(copilot_review="never")
-        self.database()
-        done = self.run_sd("config", "unset", "sd.copilot_review")
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(self.file_keys(), {"copilot_review": "never"})
+        path = self.database()
         got = self.run_sd("config", "get", "sd.copilot_review")
         self.assertNotEqual(got.returncode, 0)
         self.assertIn("sd.copilot_review is not set", got.stderr)
         self.assertNotEqual(self.run_sd("config", "unset", "sd.copilot_review").returncode, 0)
+        connection = connect(path)
+        self.addCleanup(connection.close)
+        set_setting(connection, "sd.copilot_review", "always")
+        done = self.run_sd("config", "unset", "sd.copilot_review")
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.file_keys(), {"copilot_review": "never"})
+        self.assertEqual(read_settings(connection, ["sd.copilot_review"]), {"sd.copilot_review": None})
 
     def test_a_failed_write_exits_non_zero_and_the_old_answer_stands(self):
         self.write_file(copilot_review="never")
@@ -306,25 +312,23 @@ class TheFleetVerbs(FleetCase):
         self.assertEqual(done.returncode, 0, done.stderr)
         listed = json.loads(done.stdout)
         self.assertEqual({key: (listed[key]["value"], listed[key]["source"]) for key in sd_lib.FLEET_KEYS},
-                         {"copilot_review": ("never", "database"), "fleet_owners": ("example", "file"),
-                          "hub_name": (None, "default"), "status_companions": (None, "default"),
-                          "notion_private_folder": (None, "default"), "notion_team_folder": (None, "default"),
-                          "notion_experiments": (None, "default"), "notion_experiment_tasks": (None, "default")})
+                         {key: (None, "database") for key in sd_lib.FLEET_KEYS} | {"copilot_review": ("never", "database")})
         self.assertEqual((listed["external_reviews"]["value"], listed["external_reviews"]["source"]), ("deny", "file"))
         self.assertEqual((listed["gate_slots"]["value"], listed["gate_slots"]["source"]), (None, "default"))
         text = self.run_sd("config", "list", "sd")
         self.assertEqual(text.returncode, 0, text.stderr)
         self.assertIn("never  [database]", text.stdout)
 
-    def test_a_database_still_at_twenty_nine_reads_the_file_and_refuses_a_set_by_name(self):
-        """Older state: the hub not yet migrated. No `setting` row can exist, so the file answers; a write names why."""
+    def test_a_database_still_at_twenty_nine_reads_unset_and_refuses_a_set_by_name(self):
+        """Older state: the hub not yet migrated. No `setting` row can exist and the file is not read (sd:5109),
+        so the key reads unset; a write names why."""
         self.write_file(copilot_review="never")
         path = self.home / ".local/share/sd/sd.db"
         path.parent.mkdir(parents=True)
         through = [m for m in schema_module.migrations() if m[0] <= 29]
         with mock.patch("sd_db.migrate.migrations", return_value=through):
             migrate(path)
-        self.assertEqual(sd_lib.fleet_setting("copilot_review", self.env), ("never", "file"))
+        self.assertEqual(sd_lib.fleet_setting("copilot_review", self.env), (None, "database"))
         done = self.run_sd("config", "set", "sd.copilot_review", "always")
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("SchemaTooOld", done.stderr)

@@ -28,10 +28,13 @@ from ..database import connect, default_path, schema_version, tables
 from ..errors import SdDbError
 from ..migrate import initialise, migrate
 from ..repos import (
+    DECLARATION_KINDS,
+    DECLARATION_OFF,
     LANE_HUB,
     ConfMissing,
     absolute_under_home,
     clone_lines,
+    declarations,
     item_ref,
     item_refs,
     registered,
@@ -42,6 +45,7 @@ from ..repos import (
     set_channels,
     set_ci,
     set_clones,
+    set_declaration,
     set_dependabot,
     set_github_issues,
     set_jira_project,
@@ -541,7 +545,7 @@ def command_repo(argv: list[str]) -> int:
     `repo channels <path> [obsidian=.. notion=.. drive=.. feed=URL jira=KEY github=OWNER/NAME email=LABEL,.. | none]`,
     `repo clones <path> <P,Q | none | +P | -P>`, `repo dependabot <path> <yes|no>`,
     `repo github-issues <path> <on|off>`, `repo jira-project <path> <KEY|off>`,
-    `repo remove <path> ...`.
+    `repo declare <path> [KIND [JSON|off]]`, `repo remove <path> ...`.
 
     The `repo` table is what criterion 6 enumerates from, so an empty one
     makes that criterion pass over nothing. `add` and `seed` are the two ways
@@ -567,7 +571,10 @@ def command_repo(argv: list[str]) -> int:
     repository takes third-party GitHub issues.
     `jira-project` sets `repo.jira_project` (sd:5103): the Jira project the
     dashboard files a sanitized issue in, or `off`. `list` does not show it,
-    so no reader that counts fields moves.
+    so no reader that counts fields moves. `declare` prints or sets
+    `repo.declarations` (sd:5109), the objects the pack's readers once read
+    from `.github/sd-<kind>.json`; `bin/sd-db` checks a kind's object with its
+    reader before this writes it.
 
     `list` prints `managed`, `ci`, `github_issues`, `lane_host`, then
     `runner_merge`, so the merge setting stays the last field of each row,
@@ -575,7 +582,7 @@ def command_repo(argv: list[str]) -> int:
     `lane_host` so the first four fields and the last two stay put.
     """
     verbs = ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "clones",
-             "dependabot", "github-issues", "jira-project", "remove")
+             "dependabot", "github-issues", "jira-project", "declare", "remove")
     if not argv or argv[0] not in verbs:
         print(f"sd-db repo: expected {', '.join(verbs[:-1])} or {verbs[-1]}",
               file=sys.stderr)
@@ -643,6 +650,8 @@ def command_repo(argv: list[str]) -> int:
             return 0
         if verb == "channels":
             return _repo_channels(connection, rest)
+        if verb == "declare":
+            return _repo_declare(connection, rest)
         if verb == "clones":
             if len(rest) != 2:
                 print("sd-db repo clones: needs a path and P,Q, none, +P or -P (P is personal, work or terra)",
@@ -782,6 +791,52 @@ def _repo_channels(connection, rest: list[str]) -> int:
         channels.kept(channels.validate(value), None if before == "none" else before))
     print(f"sd-db: {target} channels {before} -> {after}")
     print(f"sd-db: run `sd-research-kit render` in {target} to publish under it, or wait for the next commit")
+    return 0
+
+
+def declaration_value(kind: str, word: str) -> dict | None:
+    """`repo declare`'s JSON word as an object, `off` as None; a word that is neither raises `SdDbError`."""
+    if word == DECLARATION_OFF:
+        return None
+    try:
+        value = json.loads(word)
+    except (ValueError, RecursionError) as error:
+        raise SdDbError(f"sd-db repo declare: the {kind} value is not JSON ({error}); "
+                        f"give an object, or {DECLARATION_OFF}") from None
+    if not isinstance(value, dict):
+        raise SdDbError(f"sd-db repo declare: the {kind} value is a JSON object, not {type(value).__name__}")
+    # `$schema` named the file's JSON schema; a row has no file to point from.
+    value.pop("$schema", None)
+    return value
+
+
+def _repo_declare(connection, rest: list[str]) -> int:
+    """`repo declare PATH` prints every kind, `PATH KIND` one, `PATH KIND JSON|off` sets or removes it.
+
+    A kind not declared prints `none`. A read that fails raises to `main`,
+    which exits 1 with the cause, never `none`.
+    """
+    if not rest or len(rest) > 3:
+        print(f"sd-db repo declare: needs a path, then nothing, a kind ({', '.join(DECLARATION_KINDS)}), "
+              f"or a kind and a JSON object or {DECLARATION_OFF}", file=sys.stderr)
+        return 1
+    path = rest[0]
+    if len(rest) < 3:
+        held = declarations(connection, path)
+        if held is None:
+            print(f"sd-db: {path} is not a registered repository; no row is no declaration", file=sys.stderr)
+            held = {}
+        if len(rest) == 1:
+            print(json.dumps(held, sort_keys=True, indent=2) if held else "none")
+            return 0
+        if rest[1] not in DECLARATION_KINDS:
+            raise SdDbError(f"sd-db repo declare: {rest[1]!r} is not a kind; expected {', '.join(DECLARATION_KINDS)}")
+        print(json.dumps(held[rest[1]], sort_keys=True, indent=2) if rest[1] in held else "none")
+        return 0
+    kind, word = rest[1], rest[2]
+    target, before = set_declaration(connection, path, kind, declaration_value(kind, word))
+    print(f"sd-db: {target} {kind} {'declared' if before is not None else 'none'} -> "
+          f"{'none' if word == DECLARATION_OFF else 'declared'}")
     return 0
 
 

@@ -246,7 +246,7 @@ class BuilderReceipt(BuilderFixture):
         root, database = self.repo()
         done = self.builder(root, database)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertIn("sd gate check: full check: no .github/sd-check-scope.json", done.stderr)
+        self.assertIn("sd gate check: full check: no check_scope declaration", done.stderr)
 
     def test_a_builders_gate_queues_for_a_slot_on_its_own_bound(self) -> None:
         """sd:2607: `sd gate check` waits in the machine pool for hours, and its check still gets the whole bound."""
@@ -337,7 +337,7 @@ class BuilderReceipt(BuilderFixture):
 
 
 class TreeReceipt(BuilderFixture):
-    """`.github/sd-gate-reuse.json` (sd:1912): a check that reads no commit history is keyed by its tree.
+    """The `gate_reuse` declaration (sd:1912, sd:5109): a check that reads no commit history is keyed by its tree.
 
     Two heads with one tree -- an empty commit, a message-only amend --
     differ only in commit metadata. A repository that declares its check reads
@@ -348,12 +348,9 @@ class TreeReceipt(BuilderFixture):
 
     def declared(self) -> tuple[pathlib.Path, pathlib.Path]:
         root, database = self.repo()
-        (root / ".github").mkdir(exist_ok=True)
-        (root / ".github" / "sd-gate-reuse.json").write_text(
-            json.dumps({"schema_version": 1, "key": "tree",
-                        "reason": "the check reads no commit message, range or tag"}), encoding="utf-8")
-        git(root, "add", ".github/sd-gate-reuse.json")
-        git(root, "commit", "-q", "-m", "declare tree reuse")
+        self.declare(root, "gate_reuse", {"schema_version": 1, "key": "tree",
+                                          "reason": "the check reads no commit message, range or tag"})
+        git(root, "commit", "-q", "--allow-empty", "-m", "declare tree reuse")
         return root, database
 
     def test_a_declared_tree_reuses_the_pass_at_a_new_head_with_the_same_tree(self) -> None:
@@ -370,7 +367,7 @@ class TreeReceipt(BuilderFixture):
         root, database = self.declared()
         built = git(root, "rev-parse", "HEAD")
         self.assertEqual(self.builder(root, database).returncode, 0)
-        git(root, "commit", "-q", "--amend", "-m", "declare tree reuse, reworded")
+        git(root, "commit", "-q", "--amend", "--allow-empty", "-m", "declare tree reuse, reworded")
         merged = sd_gate_run.check_in_worktree(root, git(root, "rev-parse", "HEAD"), base=sd_gate_run.base_ref("main"),
                                                database=database, environ=self.environment(), record=False)
         self.assertEqual((merged["status"], merged["head"]), ("success", git(root, "rev-parse", "HEAD")))
@@ -396,8 +393,8 @@ class TreeReceipt(BuilderFixture):
 
     def test_a_declaration_that_names_another_key_keeps_the_head_key(self) -> None:
         root, database = self.declared()
-        (root / ".github" / "sd-gate-reuse.json").write_text(json.dumps({"schema_version": 1, "key": "content", "reason": "x"}), encoding="utf-8")
-        git(root, "commit", "-q", "-am", "unknown key")
+        self.declare(root, "gate_reuse", {"schema_version": 1, "key": "content", "reason": "x"})
+        git(root, "commit", "-q", "--allow-empty", "-m", "unknown key")
         self.assertEqual(self.builder(root, database).returncode, 0)
         git(root, "commit", "-q", "--allow-empty", "-m", "attribute")
         gate = self.gate(root, database)

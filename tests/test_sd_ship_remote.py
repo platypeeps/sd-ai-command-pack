@@ -354,7 +354,7 @@ DEPLOY_KEY_WORDS = "main (#42) [pull_request, required_status_checks]: DeployKey
 
 
 def acceptance(gap: str, **state: Any) -> dict:
-    """One `accepted_gaps` entry as `.github/sd-status.json` carries it."""
+    """One `accepted_gaps` entry as the repo row's `status` declaration carries it (sd:5109)."""
     return {"id": gap, "state": state, "because": "autocommit", "since": "2026-09-23", "until": "later"}
 
 
@@ -385,7 +385,7 @@ class PathStubbedGitHub(sd_ship_remote.GitHub):
 
     def declared_gap(self, head: str) -> dict | None:
         self.declaration_faults = [] if self.declaration else [
-            ".github/sd-status.json at 0123456789ab carries no `unprotected` entry pinning branch_protection: false"]
+            f"{sd_ship_remote.sd_lib.ACKNOWLEDGEMENT_SOURCE} carries no `unprotected` entry pinning branch_protection: false"]
         return self.declaration
 
     def accepted_gaps(self, head: str) -> list[dict]:

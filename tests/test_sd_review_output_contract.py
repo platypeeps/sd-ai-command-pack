@@ -20,8 +20,7 @@ class URLContractTests(ReviewFixture):
     def prepare(self):
         root = self.make_repo()
         (root / "prior.py").write_text("# unchanged prior blocker\n" + "value = 'évidence'\n" * 1000)
-        (root / ".github").mkdir()
-        (root / ".github/sd-review.json").write_text(json.dumps({"default_tier": "standard"}))
+        self.stub_policy({"default_tier": "standard"})
         (root / "CLAUDE.local.md").write_text(
             "<!-- SD-AI-COMMAND-PACK:LOCAL:START -->\n"
             "reviewers: first@first.example, second@second.example, third@third.example\n"

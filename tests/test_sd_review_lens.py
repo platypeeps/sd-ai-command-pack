@@ -90,7 +90,7 @@ class TheChainStillChoosesTests(ReviewRunFixture):
 
 class ALensedMarkdownChangeIsReadTests(ReviewRunFixture):
     def brief(self) -> pathlib.Path:
-        # No `.github/sd-review.json`: the built-in policy, whose `docs_skip`
+        # No review declaration: the built-in policy, whose `docs_skip`
         # routes a change of only `*.md` to tier `skip` and asks nobody.
         root = self.make_repo()
         (root / "brief.md").write_text("# A brief\n\nThe rate doubled.\n")

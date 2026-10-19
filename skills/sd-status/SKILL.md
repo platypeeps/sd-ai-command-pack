@@ -101,7 +101,7 @@ predict `pending` from this table before running the command.
 | 30 | `pr-check-missing` | `p` | yes | `open PRs + protection` | an open pull request reporting no check the branch requires |
 | 30 | `dirty-tree-with-open-pr` | `p` | yes | `git + open PRs` | uncommitted work on a branch that already has a pull request |
 | 40 | `protection-gap` | `g` | yes | `protection` | an enforcement leg missing on the default branch |
-| 45 | `accepted-gap-standing` | `g` | no | `.github/sd-status.json accepted_gaps[]` | a written acceptance whose until condition nothing re-reads |
+| 45 | `accepted-gap-standing` | `g` | no | `repo row status declaration accepted_gaps[]` | a written acceptance whose until condition nothing re-reads |
 | 60 | `pr-needs-action` | `p` | no | `open pull requests` | an open pull request waiting on a review or a merge |
 | 75 | `mirror-sync-pending` | `n` | no | `~/.claude/pending-mirror-syncs/` | a published document whose designated mirror is not written yet |
 | 80 | `unmerged-branch` | `b` | no | `origin heads` | a branch on origin with no open pull request carrying it |
@@ -210,8 +210,8 @@ configuration fault, printed as a sentence, never a traceback.
 
 ## Accepted states are not silenced states
 
-A repository can record, in tracked `.github/sd-status.json`, a protection
-state it has looked at and decided to keep. Those findings print as
+A repository can record, in its repo row's `status` declaration
+(`sd-db repo declare PATH status`), a protection state it has looked at and decided to keep. Those findings print as
 `ok  [id] accepted <date>: <reason>` with the ending condition on the line
 below, and move from `protection.gaps` to `protection.accepted` in `--json` —
 so a consumer counting gaps counts open ones only, and never mistakes an
@@ -228,10 +228,10 @@ What makes it an acknowledgement rather than a suppression:
 - **`because` and `until` are both required, and both print every run.**
   `until` is the deletion criterion: when it comes true the entry is deleted
   and the gap returns on its own.
-- **A malformed file accepts nothing and says so** — each fault prints as its
+- **A malformed declaration accepts nothing and says so** — each fault prints as its
   own gap. It fails closed and loudly, never silently.
 
-`sd-ship merge` reads two kinds of acceptance itself, at the reviewed head:
+`sd-ship merge` reads two kinds of acceptance itself, from the row at merge time:
 `bypass`, for a bypass by `DeployKey` actors only, and `strict`. Each must pin
 its own fact, and every fact it pins must equal the live state. No other
 actor type and no other gap can be accepted that way.

@@ -33,8 +33,7 @@ class ReviewRunFixture(ReviewFixture):
     def prepare(self, tier: str = "cheap") -> pathlib.Path:
         root = self.make_repo()
         (root / "src.py").write_text("the_review_subject = 123\n")
-        (root / ".github").mkdir()
-        (root / ".github/sd-review.json").write_text(json.dumps({"default_tier": tier}))
+        self.stub_policy({"default_tier": tier})
         return root
 
     def run_review(self, root: pathlib.Path, runner: FakeRunner, **options: Any) -> dict[str, Any]:

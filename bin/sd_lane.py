@@ -1473,7 +1473,11 @@ def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
                 return {"skipped": "the predicted landing could not be built"}
             if not catch_up_in(tree, landed, message):
                 return {"skipped": f"it conflicts with sd:{entry['item']}'s predicted landing"}
-            if not sd_gate_receipts.keyed_by_tree(tree):
+            try:
+                keyed = sd_gate_receipts.keyed_by_tree(tree)
+            except sd_lib.DatabaseUnreadable as error:
+                return {"skipped": f"{sd_gate_receipts.REUSE_DECLARATION} cannot be read: {error}"}
+            if not keyed:
                 return {"skipped": f"no tree key in {sd_gate_receipts.REUSE_DECLARATION}, so prepare could not reuse a pass"}
             head = scratch_git(tree, "rev-parse", "HEAD")
         finally:
