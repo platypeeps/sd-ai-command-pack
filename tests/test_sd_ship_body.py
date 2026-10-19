@@ -152,6 +152,38 @@ class ClosingTests(unittest.TestCase):
         self.assertIn(f"`sd reports acknowledge {report}`", caught.exception.workflow["next_action"])
 
 
+class SummaryHeadingTests(unittest.TestCase):
+    """sd:5375: the `## Summary` group headings `<repo> sd:N` a delivering enqueue reads."""
+
+    def ids(self, body: str) -> tuple[int, ...]:
+        return sd_ship_body.summary_ids(body, ("pack",))
+
+    def test_a_quoted_heading_neither_opens_nor_closes_the_section(self) -> None:
+        """Codex review: a heading inside a fence or comment ended the Summary, so a later group was missed."""
+        self.assertEqual(self.ids("## Summary\n```markdown\n## Example\n```\npack sd:2: delivered\n"), (2,))
+        self.assertEqual(self.ids("## Summary\n<!--\n## Example\n-->\npack sd:3: delivered\n"), (3,))
+        self.assertEqual(self.ids("## Test plan\n```\n## Summary\npack sd:4: example\n```\n"), ())
+
+    def test_any_atx_spelling_of_the_summary_heading_opens_it(self) -> None:
+        """Codex review: closing hashes and up to three leading spaces are the same heading."""
+        for heading in ("## Summary ##", "  ## Summary", "## summary", "# Summary", "## Summary\r"):
+            with self.subTest(heading=heading):
+                self.assertEqual(self.ids(f"{heading}\npack sd:2: delivered\r\n## Test plan\npack sd:5: test\n"), (2,))
+        for heading in ("### Summary", "    ## Summary", "##Summary", "## Summary of it"):
+            with self.subTest(heading=heading):
+                self.assertEqual(self.ids(f"{heading}\npack sd:2: delivered\n"), ())
+
+    def test_only_this_repositorys_name_at_the_line_start_counts(self) -> None:
+        body = ("## Summary\nPack sd:2: case folds\n- pack sd:3, a bullet\nsystem sd:4: elsewhere\n"
+                "See pack sd:5 in prose\n  pack sd:6 indented\npack sd:22x\npack sd:2 again\n")
+        self.assertEqual(self.ids(body), (2, 3))
+
+    def test_a_refs_line_names_only_what_a_reader_sees(self) -> None:
+        """Codex review: an id inside an HTML comment on a `Refs:` line exempted a delivered item."""
+        self.assertEqual(sd_ship_body.referenced_ids("Refs: sd:2, sd:3\nrefs: sd:4\n  Refs: sd:5\n"), {2, 3, 4})
+        self.assertEqual(sd_ship_body.referenced_ids("Refs: <!-- sd:2 --> sd:3\nRefs: sd:4 <!-- sd:5\n"), {3, 4})
+
+
 class TemplateTests(unittest.TestCase):
     def test_the_template_writes_no_owned_trailer_outside_a_comment(self) -> None:
         text = re.sub(r"<!--.*?-->", "", TEMPLATE.read_text(encoding="utf-8"), flags=re.DOTALL)

@@ -684,7 +684,7 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
         raise LaneError(f"sd:{item} is already queued in this lane")
     body = body_file.read_text(encoding="utf-8")
     closes = tuple(dict.fromkeys(number for number in closes if number != item))
-    on_hub(queue, lambda connection: check_item(connection, worktree, item, body, claim, closes))
+    on_hub(queue, lambda connection: check_item(connection, worktree, item, body, claim, closes, title))
     entry = {"id": entry_id(), "repository": queue.repository, "item": item, "branch": branch, "expected_head": head,
              "title": title, "body": body, "closes": list(closes),
              "acceptance": acceptance_file.read_text(encoding="utf-8") if acceptance_file else None,
@@ -695,7 +695,7 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
 
 
 def check_item(connection: Any, worktree: pathlib.Path, item: int, body: str, claim: str | None,
-               closes: tuple[int, ...] = ()) -> None:
+               closes: tuple[int, ...] = (), title: str = "") -> None:
     """Refuse what prepare refuses on the item before it reviews, so the entry never waits for it (sd:3473).
 
     Each refused in seconds once the entry reached the head of the queue,
@@ -706,6 +706,11 @@ def check_item(connection: Any, worktree: pathlib.Path, item: int, body: str, cl
     could not close (`sd_ship_body.refuse_unclosable`). These are
     prepare's own reads, and prepare makes them again; a hub fault still
     refuses `HUB_UNAVAILABLE` through `on_hub`.
+
+    One is the lane's own: a delivering entry whose title or `## Summary`
+    headings name an open item of this repository missing from `--item`
+    (`sd_ship_body.refuse_left_open`, sd:5375). Prepare only warns of a
+    title id, and inside the lane no one read the warning.
     """
     require_sd_db()
     import sd_ship_body  # noqa: PLC0415
@@ -731,6 +736,9 @@ def check_item(connection: Any, worktree: pathlib.Path, item: int, body: str, cl
         sd_ship_body.normalize(body, item)  # a body `Closes:` line, among others (sd:3704)
         # A title closes nothing; the items named with --item do (sd:3704).
         sd_ship_body.refuse_unclosable(connection, item, info["item"]["repo"], closes, claim == "deliver")
+        names = (pathlib.Path(info["item"]["repo"]).name, (registered or "").partition("/")[2])
+        sd_ship_body.refuse_left_open(connection, item, info["item"]["repo"], names, title, body, closes,
+                                      claim == "deliver")
     except Refusal as error:
         raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
 
@@ -980,8 +988,8 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     if cancelled:
         branch_unmoved(root, last)
         check_unmerged(root, queue, last)
-    on_hub(queue, lambda connection: check_item(connection, root, item, last["body"],
-                                                last.get("claim"), tuple(last.get("closes") or ())))
+    on_hub(queue, lambda connection: check_item(connection, root, item, last["body"], last.get("claim"),
+                                                tuple(last.get("closes") or ()), str(last.get("title") or "")))
     worktree, head = pathlib.Path(str(last.get("worktree"))), last["expected_head"]
     if last.get("enqueued_on") == this_host() and worktree.is_dir():
         head = caught_up(worktree, head)

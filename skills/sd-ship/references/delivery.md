@@ -16,6 +16,7 @@ The lane passes the list to `prepare` the same way; prepare stores the closing s
 The merge adds `Delivers:` for each item in the set and closes it; only a `--deliver` claim closes them.
 A merge whose stored set was read at another head, or a receipt prepared before sd:3704, refuses `closing_set_stale`; prepare again.
 The title and commit `Delivers:` lines close nothing; builders write none, and prepare warns once about a title's ids.
+A delivering enqueue or retry refuses `closing_set_incomplete` when the title, or a `## Summary` group heading `<repo> sd:N` of this repository, names an open item missing from `--item`; it lists the `--item` flags to add, and a `Refs:` line names one the merge leaves open (sd:5375).
 An `--associate-only` claim closes nothing: a second `--item` on one stops the enqueue and the prepare (sd:3365).
 Prepare and enqueue refuse an `--item` id that is no item or belongs to another repository.
 An item the merge could not close returns `delivery_pending: true` with `closes_failed`; `reconcile` retries it.
