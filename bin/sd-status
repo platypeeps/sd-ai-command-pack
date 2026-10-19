@@ -1336,6 +1336,8 @@ LANE_SETTLED = ("merged", "cancelled")
 LANE_FAILED = ("failed", "skipped")
 #: What the section shows of an entry; the body and acceptance texts stay in `sd-ship lane list`.
 LANE_FIELDS = ("item", "branch", "status", "step", "code", "reason", "held", "expected_head")
+#: An item in one of these states is finished; a failed lane entry of it is history, and no lane verb clears one (sd:5062).
+ITEM_FINISHED = ("done", "cancelled")
 
 
 def lane_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
@@ -1360,6 +1362,7 @@ def lane_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
         try:
             rows = sd_lane.stored(connection, repository)
             order = sd_lane.enqueue_order(connection, repository)
+            item_status = _item_statuses(connection, [row.get("item") for row in rows])
         finally:
             connection.close()
     except Exception as error:
@@ -1369,9 +1372,21 @@ def lane_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]:
         seen = newest.get(row.get("item"))
         if seen is None or order.get(row["id"], 0) > order.get(seen["id"], 0):
             newest[row.get("item")] = row
-    entries = [{key: row.get(key) for key in LANE_FIELDS} for row in rows
+    entries = [{**{key: row.get(key) for key in LANE_FIELDS}, "item_status": item_status.get(row.get("item"))}
+               for row in rows
                if newest.get(row.get("item")) is row and row.get("status") not in LANE_SETTLED]
     return {"available": True, "reason": "", "repository": repository, "entries": entries}
+
+
+def _item_statuses(connection: Any, items: list[Any]) -> dict[Any, str]:
+    """Each item's status; an item with no row is absent, so it reads as unknown, never as finished."""
+    wanted = sorted({int(item) for item in items if str(item).isdigit()})
+    found: dict[Any, str] = {}
+    for start in range(0, len(wanted), 500):
+        chunk = wanted[start:start + 500]
+        found.update(connection.execute(
+            f"SELECT id, status FROM item WHERE id IN ({', '.join('?' for _ in chunk)})", chunk))
+    return found
 
 
 #: The sections `sd today` shows that `sd-status` shows for its repository, in `sd_db.today.ORDER` (sd:5098).
@@ -2845,7 +2860,7 @@ def _lane_rows(lane: dict[str, Any]) -> list[dict[str, Any]]:
     """Each item whose newest lane entry stopped short of a merge (sd:3495)."""
     rows: list[dict[str, Any]] = []
     for entry in lane.get("entries") or []:
-        if entry.get("status") not in LANE_FAILED:
+        if entry.get("status") not in LANE_FAILED or entry.get("item_status") in ITEM_FINISHED:
             continue
         item = entry.get("item")
         why = entry.get("code") or entry.get("step") or ""
