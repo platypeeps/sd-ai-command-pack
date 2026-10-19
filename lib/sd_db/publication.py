@@ -158,7 +158,7 @@ def _source_files(row, assets):
 def render_payload(connection, item):
     from .publication_render import build
     row = writing._piece(connection, item)["item"]
-    return build(writing._snapshot(row), _fields(row["fields"]).get("writing", {}), row["repo"])
+    return build(writing._snapshot(row), _fields(row["fields"]).get("writing", {}), row["repo"], connection)
 
 
 def create_claim(connection, item, payload, context, *, expected_revision=None, who):

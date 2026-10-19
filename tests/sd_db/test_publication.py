@@ -1,5 +1,6 @@
 """A real SQLite claim with connector-shaped failures and native readback."""
 
+import json
 import os
 import sqlite3
 import subprocess
@@ -8,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import paths
+from sd_db import paths, upsert_item
 from sd_db import publication as pub
 from sd_db.publication_render import md_to_html
 from sd_db.schema import SCHEMA_DIR, SCHEMA_VERSION
@@ -151,6 +152,32 @@ class Publication(WritingCase):
         self.assertEqual(result["phase"], "published")
         self.assertFalse(result["current_draft_published"])
         self.assertEqual(piece_state(self.db, self.item)["item"]["stage"], "review")
+
+    def tip(self, stage, used_by=None):
+        """A tip row as the `db` driver keeps it, and a writing manifest naming the tip base; no vault note."""
+        (self.repo / "sd-plugin.json").write_text(json.dumps(
+            {"prefix": "sdw", "store": {"driver": "db", "root": "$OBSIDIAN_VAULT", "bases": {"tip": "Tips"}}}))
+        upsert_item(self.db, source="vault", external_id="tip:Tips/A tip.md", kind="idea", title="A tip",
+                    status="planning", who="test", path="Tips/A tip.md", stage=stage,
+                    fields={"kind": "tip", "used-by": used_by}, body={"markdown": "# A tip\n\n## Tip\n\nUse the flag.\n"})
+        update_piece_metadata(self.db, self.item, {"tip": "A tip"}, who="operator")
+
+    def test_an_attached_tip_renders_from_its_row_with_no_vault_note(self):
+        """pack sd:5133: the vault holds no base notes, so the tip is read from its row."""
+        self.tip("approved")
+        self.assertFalse(Path(os.environ["OBSIDIAN_VAULT"]).exists())
+        payload = pub.render_payload(self.db, self.item)
+        self.assertIn("Use the flag.", payload["html"])
+        self.assertEqual(sorted(payload["tip_source"]), ["item", "sha256"])
+        self.payload = payload
+        self.imported(self.claim())
+
+    def test_an_attached_tip_whose_row_is_not_approved_or_is_used_refuses(self):
+        for stage, used_by in (("accepted", None), ("approved", "2026/other")):
+            with self.subTest(stage=stage, used_by=used_by):
+                self.tip(stage, used_by)
+                with self.assertRaisesRegex(WorkflowError, "attached tip must still be approved and unused"):
+                    pub.render_payload(self.db, self.item)
 
     def test_active_claim_blocks_writers_and_database_enforces_uniqueness(self):
         claim = self.claim()
