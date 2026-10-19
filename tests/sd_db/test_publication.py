@@ -157,10 +157,13 @@ class Publication(WritingCase):
         """A tip row as the `db` driver keeps it, and a writing manifest naming the tip base; no vault note."""
         (self.repo / "sd-plugin.json").write_text(json.dumps(
             {"prefix": "sdw", "store": {"driver": "db", "root": "$OBSIDIAN_VAULT", "bases": {"tip": "Tips"}}}))
+        self.tip_row(stage, used_by)
+        update_piece_metadata(self.db, self.item, {"tip": "A tip"}, who="operator")
+
+    def tip_row(self, stage, used_by=None, text="Use the flag."):
         upsert_item(self.db, source="vault", external_id="tip:Tips/A tip.md", kind="idea", title="A tip",
                     status="planning", who="test", path="Tips/A tip.md", stage=stage,
-                    fields={"kind": "tip", "used-by": used_by}, body={"markdown": "# A tip\n\n## Tip\n\nUse the flag.\n"})
-        update_piece_metadata(self.db, self.item, {"tip": "A tip"}, who="operator")
+                    fields={"kind": "tip", "used-by": used_by}, body={"markdown": f"# A tip\n\n## Tip\n\n{text}\n"})
 
     def test_an_attached_tip_renders_from_its_row_with_no_vault_note(self):
         """pack sd:5133: the vault holds no base notes, so the tip is read from its row."""
@@ -178,6 +181,67 @@ class Publication(WritingCase):
                 self.tip(stage, used_by)
                 with self.assertRaisesRegex(WorkflowError, "attached tip must still be approved and unused"):
                     pub.render_payload(self.db, self.item)
+
+    def held_by_another_piece(self, tip_source, phase="creating"):
+        """Another piece's claim on the tip, inserted as an older version left it."""
+        other = self.db.execute("SELECT id FROM item WHERE title='A tip'").fetchone()[0]
+        self.db.execute("INSERT INTO publication_claim VALUES (?,?,?,?,?,?,?)",
+                        ("other-claim", other, None, json.dumps({"tip": "A tip", "tip_source": tip_source}),
+                         json.dumps({"phase": phase}), "2026-10-01T00:00:00Z", "2026-10-01T00:00:00Z"))
+        self.db.commit()
+
+    def legacy(self, payload):
+        """A payload as the code before pack sd:5133 wrote it: the tip named by its vault note."""
+        return {**payload, "tip_source": {"path": "/vault.example.test/Tips/A tip.md", "sha256": "0" * 64}}
+
+    def test_a_claim_from_before_the_row_read_still_reserves_its_tip(self):
+        """pack sd:5133: a legacy {path, sha256} tip_source names the tip by its note's title."""
+        self.tip("approved")
+        self.held_by_another_piece(self.legacy({})["tip_source"])
+        self.payload = pub.render_payload(self.db, self.item)
+        with self.assertRaisesRegex(WorkflowError, "already reserved or published by another piece"):
+            self.claim()
+
+    def test_a_tip_edited_after_another_claim_stays_reserved(self):
+        """The reservation names the tip, not its content hash."""
+        self.tip("approved")
+        self.payload = pub.render_payload(self.db, self.item)
+        self.held_by_another_piece({**self.payload["tip_source"], "sha256": "0" * 64})
+        with self.assertRaisesRegex(WorkflowError, "already reserved or published by another piece"):
+            self.claim()
+
+    def test_an_abandoned_claim_on_the_tip_reserves_nothing(self):
+        self.tip("approved")
+        self.held_by_another_piece(self.legacy({})["tip_source"], "abandoned")
+        self.payload = pub.render_payload(self.db, self.item)
+        self.claim()
+
+    def test_an_unchanged_claim_from_before_the_row_read_stays_current(self):
+        """pack sd:5133: an older claim hashed a vault note that is gone; it must still dispatch."""
+        self.tip("approved")
+        self.payload = pub.render_payload(self.db, self.item)
+        claim = self.claim()
+        payload = pub.claim_state(self.db, self.item, claim, include_payload=True)["payload"]
+        pub._current(self.db, self.item, self.legacy(payload))
+
+    def test_a_claim_from_before_the_row_read_refuses_a_changed_or_used_tip(self):
+        self.tip("approved")
+        self.payload = pub.render_payload(self.db, self.item)
+        claim = self.claim()
+        payload = self.legacy(pub.claim_state(self.db, self.item, claim, include_payload=True)["payload"])
+        self.tip_row("approved", text="Use the other flag.")
+        with self.assertRaisesRegex(WorkflowError, "attached tip changed after the claim"):
+            pub._current(self.db, self.item, payload)
+        self.tip_row("approved", "2026/other")
+        with self.assertRaisesRegex(WorkflowError, "approved and unused"):
+            pub._current(self.db, self.item, payload)
+
+    def test_a_legacy_tip_payload_cannot_open_a_claim(self):
+        """A payload rendered by the older code differs from the current render, so no claim opens."""
+        self.tip("approved")
+        self.payload = self.legacy(pub.render_payload(self.db, self.item))
+        with self.assertRaisesRegex(WorkflowError, "canonical"):
+            self.claim()
 
     def test_active_claim_blocks_writers_and_database_enforces_uniqueness(self):
         claim = self.claim()

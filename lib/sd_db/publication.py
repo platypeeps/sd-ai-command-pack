@@ -155,6 +155,21 @@ def _source_files(row, assets):
     return snapshot, hashes
 
 
+def _tip_keys(payload):
+    """Names of a payload's attached tip: its title, and its row once the claim carries one.
+
+    A claim from before sd:5133 carries `{path, sha256}` of the vault note; its title still
+    reserves the tip. The hash is no part of the name, so an edited tip stays reserved.
+    """
+    source = payload.get("tip_source") or {}
+    keys = {("title", payload["tip"])} if payload.get("tip") else set()
+    if "item" in source:
+        keys.add(("item", source["item"]))
+    if "path" in source:
+        keys.add(("title", Path(source["path"]).stem))
+    return keys
+
+
 def render_payload(connection, item):
     from .publication_render import build
     row = writing._piece(connection, item)["item"]
@@ -188,7 +203,7 @@ def create_claim(connection, item, payload, context, *, expected_revision=None, 
         if tip:
             for existing in connection.execute("SELECT item,payload,state FROM publication_claim WHERE item<>?", (item,)):
                 other, progress = json.loads(existing["payload"]), json.loads(existing["state"])
-                if other.get("tip_source") == payload.get("tip_source") and (progress["phase"] != "abandoned" or progress.get("reconcile_required")):
+                if _tip_keys(other) & _tip_keys(payload) and (progress["phase"] != "abandoned" or progress.get("reconcile_required")):
                     raise WorkflowError("the attached tip is already reserved or published by another piece")
         snapshot, hashes = _source_files(row, payload.get("assets", {}))
         if payload != render_payload(connection, item):
@@ -286,7 +301,14 @@ def _current(connection, item, payload, *, reconciled_epoch=None):
     if _fields(row["fields"]).get("writing", {}) != payload["metadata"]:
         raise WorkflowError("publication metadata changed after the claim")
     rendered = render_payload(connection, item)
-    if rendered["html"] != payload["html"] or rendered["tip_source"] != payload.get("tip_source"):
+    claimed = payload.get("tip_source")
+    if claimed and "item" not in claimed:
+        # A claim from before sd:5133 hashed a vault note that is gone. The metadata check binds
+        # the tip title, the html carries its text, and the render refuses a tip no longer approved and unused.
+        same_tip = rendered["tip_source"] is not None
+    else:
+        same_tip = rendered["tip_source"] == claimed
+    if rendered["html"] != payload["html"] or not same_tip:
         raise WorkflowError("publication payload or attached tip changed after the claim")
 
 
