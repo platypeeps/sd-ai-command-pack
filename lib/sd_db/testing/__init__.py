@@ -18,7 +18,8 @@ library because the library is what both repositories install.
 
 What each module holds:
 
-* `remote` -- the state. A real bare repository, a pull-request table, a
+* `remote` -- the state. A real bare repository, a pull-request table, an
+  issue table with one-shot faults for filing and listing, a
   protection state, a collaborator list, and the answers to the questions
   the system asks about them.
 * `github` -- two doors onto that state, an HTTP one and a `gh` one, so a
@@ -53,7 +54,7 @@ from .providers import (
     provider_environment,
     write_registry,
 )
-from .remote import Call, FixtureRemote, PullRequest, RemoteRefusal
+from .remote import Call, FixtureRemote, Issue, PullRequest, RemoteRefusal
 from .store import add_unknown_table, break_foreign_keys, make_store
 from .stubs import STUB_NAMES, StubCall, Stubs
 
@@ -65,6 +66,7 @@ __all__ = [
     "GH_SHIM",
     "GitHubDouble",
     "HOME_DIRS",
+    "Issue",
     "ProviderCall",
     "ProviderDouble",
     "PullRequest",
