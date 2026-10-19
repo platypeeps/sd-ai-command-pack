@@ -793,6 +793,20 @@ class TaskCLI(unittest.TestCase):
         cleared = json.loads(self.call("task", "edit", item, "--no-repo", "--json").stdout)
         self.assertIsNone(cleared["item"]["repo"])
 
+    def test_an_idea_row_moves_to_a_repository_and_back_and_keeps_its_kind(self):
+        """sd:5142: `--belongs-to` and `--no-repo` move an idea; every other field edit on it stays refused."""
+        root = self._checkout("ideas")
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            sd_db.repos.add(connection, root, home=self.home)
+            item = sd_db.writes.create_item(connection, kind="idea", title="Blog idea", source="vault",
+                                            external_id="blog-idea:Blog Ideas/Blog idea.md")
+        moved = json.loads(self.call("task", "edit", item, "--belongs-to", root, "--json").stdout)
+        self.assertEqual((moved["item"]["kind"], moved["item"]["repo"]), ("idea", sd_lib.stored_repo(root)))
+        cleared = json.loads(self.call("task", "edit", item, "--no-repo", "--json").stdout)
+        self.assertEqual((cleared["item"]["kind"], cleared["item"]["repo"]), ("idea", None))
+        refused = self.call("task", "edit", item, "--title", "Renamed", code=1)
+        self.assertIn("idea items use their own editing workflow", refused.stderr)
+
     def test_the_move_is_recorded_on_the_item_rather_than_happening_silently(self):
         root = self._checkout("recorded")
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:

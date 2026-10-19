@@ -1657,7 +1657,8 @@ def register(groups: Any, store: Any) -> None:
     # both verbs.
     belongs = edit.add_mutually_exclusive_group()
     belongs.add_argument("--belongs-to", metavar="PATH",
-                         help="move the item to a registered checkout (`.` is this one)")
+                         help="move the item to a registered checkout (`.` is this one); an idea "
+                              "moves alone and keeps its kind")
     belongs.add_argument("--no-repo", action="store_true",
                          help="leave the item belonging to no checkout")
     kind = edit.add_argument(
