@@ -178,6 +178,15 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 # write alone -- measured, not assumed -- which is why the marker survives
 # the step that rebuilds the interpreter around it.
 #
+# An environment another Python built is emptied, all but the marker, before
+# `venv` runs (sd:5254). venv keeps a `bin/python` it finds, so over a 3.14
+# environment python3.15 rewrote `pyvenv.cfg` and pip still ran 3.14, into
+# `lib/python3.14`. The version is asked of each interpreter, not read from
+# `pyvenv.cfg`, which that run had already made lie; an interpreter that does
+# not answer is a mismatch, and a PYTHON that does not answer stops the run
+# before anything moves. `bin/` goes last, so a run stopped mid-wipe leaves
+# the old interpreter there for the next run to find and finish.
+#
 # No `sd_db` goes into the environment: `bin/` reads this checkout's `lib/`
 # (sd:3280). The uninstall takes out a copy an older `make setup` or a
 # satellite self-install left, so a caller that still reads the environment
@@ -192,15 +201,26 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 setup:
 	@venv="$(SETUP_VENV)"; \
 	  [ -n "$$venv" ] || { printf '%s\n' "error: VENV is empty; there is no path to provision" >&2; exit 1; }; \
+	  probe='import sys; print("%d.%d" % sys.version_info[:2])'; \
+	  want=$$("$(PYTHON)" -c "$$probe") && [ -n "$$want" ] \
+	    || { printf '%s\n' "error: $(PYTHON) did not report its version; nothing was changed" >&2; exit 1; }; \
 	  if [ -L "$$venv" ]; then \
 	    target=$$(readlink "$$venv") || exit 1; \
 	    printf '%s\n' "detaching $$venv, a link to $$target; the environment it points at is left alone" >&2 || exit 1; \
 	    rm "$$venv" || exit 1; \
 	    [ ! -L "$$venv" ] || { printf '%s\n' "error: $$venv is still a link; refusing to provision through it" >&2; exit 1; }; \
 	  fi; \
+	  have=; if [ -e "$$venv/bin/python" ] || [ -L "$$venv/bin/python" ]; then \
+	    have=$$("$$venv/bin/python" -c "$$probe" 2>/dev/null) || have=; [ -n "$$have" ] || have="unknown (it does not run)"; \
+	  fi; \
 	  mkdir -p "$$venv" || exit 1; \
 	  printf '%s\n' "make setup is building this environment; nothing may be taken out of it until this file is gone" > "$$venv/sd-provisioning" || exit 1; \
-	  rm -rf "$$venv/sd-requirements" "$$venv/.sd-requirements.new"
+	  rm -rf "$$venv/sd-requirements" "$$venv/.sd-requirements.new"; \
+	  if [ -n "$$have" ] && [ "$$have" != "$$want" ]; then \
+	    printf '%s\n' "recreating $$venv: its bin/python is Python $$have and $(PYTHON) is $$want" >&2 || exit 1; \
+	    find "$$venv" -mindepth 1 -maxdepth 1 ! -name sd-provisioning ! -name bin -exec rm -rf {} + || exit 1; \
+	    rm -rf "$$venv/bin" || exit 1; \
+	  fi
 	"$(PYTHON)" -m venv "$(SETUP_VENV)"
 	"$(SETUP_PYTHON)" -m pip install --require-hashes -r requirements-dev.txt -r requirements-security.txt
 	"$(SETUP_PYTHON)" -m pip uninstall --yes --quiet sd-db

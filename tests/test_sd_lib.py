@@ -1469,12 +1469,16 @@ class ProvisioningRecordTests(unittest.TestCase):
 
     #: Stands in for the interpreter the recipe calls. `-m venv <dir>` copies
     #: it to <dir>/bin/python, so the steps after it run it too, and each
-    #: step's exit code is an environment variable the test sets. It mirrors
-    #: the one real behaviour the recipe now works around -- CPython's venv
-    #: refuses a path that is a symlink -- and
-    #: `test_the_real_interpreter_refuses_a_symlinked_target` is what keeps
-    #: that mirror honest rather than convenient.
+    #: step's exit code is an environment variable the test sets. `-c` prints
+    #: the version baked in on the first line, so a copy answers with its
+    #: creator's. It mirrors the two real behaviours the recipe works around
+    #: -- CPython's venv refuses a path that is a symlink, and keeps a
+    #: `bin/python` that is already there, even a dangling link -- and
+    #: `test_the_real_interpreter_refuses_a_symlinked_target` and
+    #: `test_the_real_interpreter_keeps_an_existing_python` are what keep that
+    #: mirror honest rather than convenient.
     STUB = """#!/bin/sh
+version=3.15
 last=""
 for a in "$@"; do last="$a"; done
 case " $* " in
@@ -1484,10 +1488,13 @@ case " $* " in
       exit 1
     fi
     mkdir -p "$last/bin" || exit 1
-    cp "$0" "$last/bin/python" || exit 1
-    chmod +x "$last/bin/python"
+    if [ ! -e "$last/bin/python" ] && [ ! -L "$last/bin/python" ]; then
+      cp "$0" "$last/bin/python" || exit 1
+      chmod +x "$last/bin/python"
+    fi
     exit 0
     ;;
+  *" -c "*) echo "$version"; exit 0 ;;
   *" -m pip uninstall "*) exit "${STUB_UNINSTALL_EXIT:-0}" ;;
   *" -m pip "*) exit "${STUB_PIP_EXIT:-0}" ;;
 esac
@@ -1532,13 +1539,30 @@ exit 0
         subprocess.run(["git", *args], cwd=cwd, check=True,
                        capture_output=True, text=True)
 
-    def setup(self, venv: str = ".venv", **env: str) -> subprocess.CompletedProcess[str]:
+    def setup(self, venv: str = ".venv", python: pathlib.Path | None = None,
+              **env: str) -> subprocess.CompletedProcess[str]:
         """The command the borrow refusal recommends, verbatim."""
 
         return subprocess.run(
-            ["make", "-s", "setup", f"PYTHON={self.stub}", f"VENV={venv}"],
+            ["make", "-s", "setup", f"PYTHON={python or self.stub}", f"VENV={venv}"],
             cwd=self.linked, capture_output=True, text=True,
             env=child_make_env(**env))
+
+    def interpreter(self, version: str) -> pathlib.Path:
+        """A stand-in for another installed Python, such as the one brew replaced."""
+
+        path = self.tmp / f"stub-python{version}"
+        path.write_text(self.STUB.replace("version=3.15", f"version={version}", 1),
+                        encoding="utf-8")
+        path.chmod(0o755)
+        return path
+
+    def version_in(self, venv: pathlib.Path) -> str:
+        from tests.clean_env import clean_environment
+
+        done = subprocess.run([str(venv / "bin" / "python"), "-c", "import sys"],
+                              capture_output=True, text=True, env=clean_environment())
+        return done.stdout.strip()
 
     def dry_run(self, target: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["make", "-s", "-n", target], cwd=self.linked,
@@ -1703,6 +1727,117 @@ exit 0
         self.assertFalse(self.record.exists(), "the record should be gone")
         self.assertTrue((self.linked / ".venv" / "sd-provisioning").is_file(),
                         "the marker should have been written before the removal")
+
+    def test_setup_rebuilds_an_environment_another_python_made(self) -> None:
+        """sd:5254: a newer PYTHON over an older environment installed into the older one.
+
+        venv rewrites `pyvenv.cfg` and adds `python3.15`, but keeps the
+        `bin/python` the old version linked, so pip ran under 3.14 and put
+        every package in `lib/python3.14` of an environment that said 3.15.
+        """
+
+        venv = self.linked / ".venv"
+        self.assertEqual(self.setup(python=self.interpreter("3.14")).returncode, 0)
+        self.assertEqual(self.version_in(venv), "3.14")
+        (venv / "lib" / "python3.14").mkdir(parents=True)
+
+        done = self.setup()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.version_in(venv), "3.15",
+                         "setup kept the old interpreter's bin/python")
+        self.assertIn("3.14", done.stderr)
+        self.assertFalse((venv / "lib" / "python3.14").exists(),
+                         "the old version's packages were left behind")
+        self.assertFalse((venv / "sd-provisioning").exists())
+        self.assertTrue(self.record.is_dir())
+
+    def test_setup_keeps_an_environment_of_the_same_python(self) -> None:
+        venv = self.linked / ".venv"
+        self.assertEqual(self.setup().returncode, 0)
+        kept = venv / "lib" / "kept"
+        kept.mkdir(parents=True)
+        done = self.setup()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertNotIn("recreating", done.stderr)
+        self.assertTrue(kept.is_dir(), "a matching environment was rebuilt")
+
+    def test_an_environment_whose_python_does_not_run_is_rebuilt(self) -> None:
+        """A failed probe is an unknown version, never a match: brew removed the old one."""
+
+        venv = self.linked / ".venv"
+        (venv / "bin").mkdir(parents=True)
+        (venv / "bin" / "python").symlink_to(self.tmp / "gone" / "python3.14")
+        done = self.setup()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.version_in(venv), "3.15")
+        self.assertIn("recreating", done.stderr)
+
+    def test_a_python_that_does_not_run_changes_nothing(self) -> None:
+        """The version probe comes before the first mutation, so its failure leaves the record."""
+
+        self.assertEqual(self.setup().returncode, 0)
+        done = self.setup(python=self.tmp / "no-such-python")
+        self.assertNotEqual(done.returncode, 0, done.stdout)
+        self.assertTrue(self.record.is_dir(), "a failed probe removed the record")
+        self.assertFalse((self.linked / ".venv" / "sd-provisioning").exists())
+        self.assertEqual(self.version_in(self.linked / ".venv"), "3.15")
+
+    def test_a_rebuild_stopped_midway_is_refused_and_then_finished(self) -> None:
+        """Stop the wipe between its two steps; the next run must find it and finish it.
+
+        A directory the wipe cannot empty stops the first step. `bin/` goes
+        last, so the old interpreter is still there to say a rebuild is owed.
+        """
+
+        venv = self.linked / ".venv"
+        self.assertEqual(self.setup(python=self.interpreter("3.14")).returncode, 0)
+        locked = venv / "lib" / "locked"
+        locked.mkdir(parents=True)
+        (locked / "package.py").write_text("", encoding="utf-8")
+        locked.chmod(0o555)
+        self.addCleanup(lambda: locked.exists() and locked.chmod(0o755))
+
+        stopped = self.setup()
+        self.assertNotEqual(stopped.returncode, 0, stopped.stdout)
+        self.assertEqual(self.version_in(venv), "3.14")
+        self.assertTrue((venv / "sd-provisioning").is_file())
+        refused = self.dry_run("docs-lint")
+        self.assertNotEqual(refused.returncode, 0, refused.stdout)
+        self.assertIn("mid-provision", refused.stderr)
+
+        locked.chmod(0o755)
+        done = self.setup()
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(self.version_in(venv), "3.15")
+        self.assertFalse(locked.exists())
+        self.assertFalse((venv / "sd-provisioning").exists())
+        self.assertEqual(self.dry_run("docs-lint").returncode, 0)
+
+    def test_the_real_interpreter_keeps_an_existing_python(self) -> None:
+        """The premise of sd:5254, asked of the real interpreter.
+
+        Two installed versions are not portable, so this asks the narrower
+        fact the fault rests on: venv leaves a `bin/python` it finds, a file
+        or a dangling link, in place.
+        """
+
+        for kind in ("file", "dangling link"):
+            with self.subTest(kind=kind):
+                env = self.tmp / f"real-{kind.replace(' ', '-')}"
+                python = env / "bin" / "python"
+                python.parent.mkdir(parents=True)
+                if kind == "file":
+                    python.write_text("#!/bin/sh\necho 3.14\n", encoding="utf-8")
+                else:
+                    python.symlink_to(self.tmp / "gone" / "python3.14")
+                done = subprocess.run([sys.executable, "-m", "venv", "--without-pip", str(env)],
+                                      capture_output=True, text=True)
+                self.assertEqual(done.returncode, 0, done.stderr)
+                if kind == "file":
+                    self.assertFalse(python.is_symlink())
+                    self.assertEqual(python.read_text(encoding="utf-8"), "#!/bin/sh\necho 3.14\n")
+                else:
+                    self.assertEqual(os.readlink(python), str(self.tmp / "gone" / "python3.14"))
 
     def test_the_real_interpreter_refuses_a_symlinked_target(self) -> None:
         """The premise the stand-in mirrors, asked of the real interpreter.
