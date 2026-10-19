@@ -17,6 +17,8 @@ else, enumerated from the callers rather than from the API:
     GET    /repos/{slug}/pulls                          the open pull requests
     GET    /repos/{slug}/pulls/{n}                      state, mergeable, sha
     GET    /repos/{slug}/commits/{ref}/check-runs       the checks
+    GET    /repos/{slug}/issues                         issues and pull requests, newest first
+    POST   /repos/{slug}/issues                         a new issue
     PUT    /repos/{slug}/pulls/{n}/merge                merge, with `sha`
     DELETE /repos/{slug}/git/refs/heads/{branch}        the branch deletion
 
@@ -43,6 +45,16 @@ MERGE = re.compile(r"^/repos/(?P<slug>[^/]+/[^/]+)/pulls/(?P<number>\d+)/merge$"
 PROTECTION = re.compile(r"^/repos/(?P<slug>[^/]+/[^/]+)/branches/(?P<branch>.+)/protection$")
 REF = re.compile(r"^/repos/(?P<slug>[^/]+/[^/]+)/git/refs/heads/(?P<branch>.+)$")
 CHECKS = re.compile(r"^/repos/(?P<slug>[^/]+/[^/]+)/commits/(?P<ref>[^/]+)/check-runs$")
+
+
+def _issue_json(remote: FixtureRemote, issue) -> dict:
+    return {
+        "number": issue.number,
+        "title": issue.title,
+        "body": issue.body,
+        "created_at": getattr(issue, "created_at", ""),
+        "html_url": f"https://github.com/{remote.slug}/issues/{issue.number}",
+    }
 
 
 def _pull_json(remote: FixtureRemote, pull) -> dict:
@@ -118,6 +130,18 @@ class GitHubDouble:
 
         if method == "GET" and path == f"/repos/{slug}/branches":
             return 200, [{"name": name} for name in remote.branches()]
+
+        if method == "GET" and path == f"/repos/{slug}/issues":
+            # GitHub lists pull requests as issues too, marked by a `pull_request` key.
+            pulls = [{**_issue_json(remote, pull), "html_url": f"https://github.com/{slug}/pull/{pull.number}",
+                      "pull_request": {"url": f"https://api.github.com/repos/{slug}/pulls/{pull.number}"}}
+                     for pull in remote.pull_requests.values()]
+            listed = [_issue_json(remote, issue) for issue in remote.list_issues()] + pulls
+            return 200, sorted(listed, key=lambda entry: entry["number"], reverse=True)
+
+        if method == "POST" and path == f"/repos/{slug}/issues":
+            payload = body or {}
+            return 201, _issue_json(remote, remote.file_issue(payload.get("title", ""), payload.get("body", "")))
 
         if method == "GET" and path == f"/repos/{slug}/collaborators":
             return 200, list(remote.collaborators)
@@ -290,7 +314,30 @@ def main(argv):
         return 0
     if argv[0] == "pr":
         return pr(argv[1:])
+    if argv[0] == "issue":
+        return issue(argv[1:])
     fail(2, {"message": f"gh: unsupported command {argv[0]}"})
+
+
+def issue(argv):
+    """`gh issue create --repo R --title T --body-file -`, the one form callers use; like `pr`, it files on SLUG."""
+    if argv[:1] != ["create"]:
+        fail(2, {"message": f"gh issue: unsupported subcommand {argv[:1]}"})
+    title, body, index = "", "", 1
+    while index < len(argv):
+        token = argv[index]
+        if token == "--title":
+            title = argv[index + 1]
+        elif token == "--body-file" and argv[index + 1] == "-":
+            body = sys.stdin.read()
+        elif token != "--repo":
+            fail(2, {"message": f"gh issue create: unsupported flag {token}"})
+        index += 2
+    status, payload = call("POST", f"/repos/{SLUG}/issues", {"title": title, "body": body})
+    if status >= 400:
+        fail(status, payload)
+    sys.stdout.write(payload["html_url"] + "\n")
+    return 0
 
 
 def pr(argv):

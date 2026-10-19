@@ -16,6 +16,7 @@ default branch that must not be pushed to -- are exactly the ones a mocked
 
 from __future__ import annotations
 
+import datetime
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -65,6 +66,14 @@ class PullRequest:
         return remote.rev_parse(self.head)
 
 
+@dataclass
+class Issue:
+    number: int
+    title: str
+    body: str = ""
+    created_at: str = ""
+
+
 def _git(repo: Path, *args: str) -> str:
     result = subprocess.run(
         ["git", "-C", str(repo), *args],
@@ -96,6 +105,9 @@ class FixtureRemote:
         self.collaborators: list[dict] = []
         self.protection: dict | None = None
         self.delete_branch_on_merge = False
+        self.issues: dict[int, Issue] = {}
+        #: One-shot answers for the next call to a route, set by `fail_next`.
+        self._faults: dict[str, tuple[int, str]] = {}
         self._next_number = 1
         self._make_bare()
 
@@ -201,6 +213,35 @@ class FixtureRemote:
         if self.delete_branch_on_merge:
             _git(self.path, "update-ref", "-d", f"refs/heads/{pull.head}")
         return pull.merge_commit_sha
+
+    def fail_next(self, route: str, status: int, message: str) -> None:
+        """Make the next `route` call (`"create issue"` or `"list issues"`) answer `status` with `message`, once."""
+        if route not in ("create issue", "list issues"):
+            raise ValueError(f"no route {route!r} takes a fault")
+        self._faults[route] = (status, message)
+
+    def _fail_if_set(self, route: str) -> None:
+        fault = self._faults.pop(route, None)
+        if fault:
+            raise RemoteRefusal(*fault)
+
+    def file_issue(self, title: str, body: str = "") -> Issue:
+        """Create an issue, the way `POST /repos/{slug}/issues` does. Issues and pull requests share numbers."""
+        self._fail_if_set("create issue")
+        return self.add_issue(title, body)
+
+    def add_issue(self, title: str, body: str = "") -> Issue:
+        """An issue someone else filed: no fault applies and nothing is recorded."""
+        created = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        issue = Issue(number=self._next_number, title=title, body=body, created_at=created)
+        self._next_number += 1
+        self.issues[issue.number] = issue
+        return issue
+
+    def list_issues(self) -> list[Issue]:
+        """Newest first, as `GET /repos/{slug}/issues?sort=created&direction=desc` answers."""
+        self._fail_if_set("list issues")
+        return sorted(self.issues.values(), key=lambda issue: issue.number, reverse=True)
 
     def can_administer(self, login: str) -> bool:
         for entry in self.collaborators:

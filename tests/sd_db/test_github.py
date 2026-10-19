@@ -157,5 +157,54 @@ class TheGhDoor(DoubleCase):
         self.assertIn("no route", completed.stderr)
 
 
+class TheIssueDoors(DoubleCase):
+    def file(self, body="the body\n", expect=0):
+        environment = gh_environment(self.double, self.bin_dir)
+        completed = subprocess.run(
+            [str(self.shim), "issue", "create", "--repo", "fixture/repo", "--title", "A title", "--body-file", "-"],
+            capture_output=True, text=True, input=body, env=environment,
+        )
+        self.assertEqual(completed.returncode, expect, completed.stderr)
+        return completed
+
+    def test_issue_create_files_the_stdin_body_and_prints_the_issue_url(self):
+        completed = self.file()
+        self.assertEqual(completed.stdout, "https://github.com/fixture/repo/issues/1\n")
+        issue = self.remote.issues[1]
+        self.assertEqual((issue.title, issue.body), ("A title", "the body\n"))
+        call = self.remote.calls[-1]
+        self.assertEqual((call.door, call.method, call.path, call.status), ("gh", "POST", "/repos/fixture/repo/issues", 201))
+
+    def test_issues_list_newest_first_through_gh_api(self):
+        self.remote.add_issue("older", "one")
+        self.file()
+        listed = json.loads(self.gh("api", "repos/fixture/repo/issues?state=all&sort=created&direction=desc").stdout)
+        self.assertEqual([(issue["number"], issue["title"]) for issue in listed], [(2, "A title"), (1, "older")])
+        self.assertEqual(listed[0]["html_url"], "https://github.com/fixture/repo/issues/2")
+
+    def test_the_issue_list_carries_pull_requests_marked_as_github_does(self):
+        self.remote.add_issue("an issue")
+        self.remote.open_pull_request("feature", title="a pull request", body="its body")
+        listed = json.loads(self.gh("api", "/repos/fixture/repo/issues").stdout)
+        self.assertEqual([(entry["number"], "pull_request" in entry) for entry in listed], [(2, True), (1, False)])
+        self.assertEqual((listed[0]["body"], listed[0]["html_url"]), ("its body", "https://github.com/fixture/repo/pull/2"))
+
+    def test_a_refused_create_files_nothing_and_says_why_once(self):
+        self.remote.fail_next("create issue", 410, "HTTP 410: Issues are disabled for this repo")
+        self.assertIn("HTTP 410", self.file(expect=1).stderr)
+        self.assertEqual(self.remote.issues, {})
+        self.file()
+        self.assertEqual(list(self.remote.issues), [1])
+
+    def test_a_failed_list_fails_once(self):
+        self.remote.fail_next("list issues", 503, "HTTP 503: Service Unavailable")
+        self.assertIn("HTTP 503", self.gh("api", "/repos/fixture/repo/issues", expect=1).stderr)
+        self.assertEqual(json.loads(self.gh("api", "/repos/fixture/repo/issues").stdout), [])
+
+    def test_only_issue_routes_take_a_fault(self):
+        with self.assertRaises(ValueError):
+            self.remote.fail_next("merge", 500, "no")
+
+
 if __name__ == "__main__":
     unittest.main()
