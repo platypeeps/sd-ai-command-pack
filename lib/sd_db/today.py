@@ -17,6 +17,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from .reads import REVIEW_BATCH, _now, _parse, _unparked_clause, open_notes, today_items
+from .reporting import _current_basis
+from .ship import this_host
 
 #: `sd_lane.KEY_PREFIX`: a lane entry is the newest `checkpoint` row of its key.
 LANE_KEY_PREFIX = "lane:v1:"
@@ -25,7 +27,7 @@ ACTIVE_ASSIGNMENTS = ("queued", "running", "ending")
 #: Lane states in the order `landing` lists them; the queue holds the first two.
 LANE_ORDER = ("running", "pending", "prepared", "handed_back", "failed", "skipped")
 #: The section keys of `sections`, in the order every renderer prints them.
-ORDER = ("attention", "decisions", "landing", "delivered", "planned", "blocked", "unscheduled", "followups", "work")
+ORDER = ("attention", "operations", "decisions", "landing", "delivered", "planned", "blocked", "unscheduled", "followups", "work")
 #: A choice line of a decision, as the dashboard's Decisions reads one (sd:3012).
 OPTION_LINE = re.compile(r"^[ \t]*Option:[ \t]*\S", re.MULTILINE)
 #: Kinds that are not work to schedule: ideas wait for promotion, reports for acknowledgement.
@@ -53,12 +55,8 @@ def _first_line(text: Any) -> str:
     return str(text or "").strip().partition("\n")[0]
 
 
-def attention(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None) -> list[dict]:
-    """Open reports whose fields say they need attention, newest first: `status`, `why`, `at`.
-
-    Unreadable fields count, as an unknown is no pass.
-    """
-    keep = _keep(repos)
+def _attention_rows(connection: sqlite3.Connection, keep: set[str | None] | None) -> list[tuple[Any, Any]]:
+    """Each open report whose fields say it needs attention, newest first, with that `attention` value."""
     where, values = _in("repo", keep)
     rows = connection.execute(
         f"SELECT * FROM item WHERE kind = 'report' AND source IS NOT 'brief' AND status != 'done' AND {where}"
@@ -70,9 +68,70 @@ def attention(connection: sqlite3.Connection, *, repos: Iterable[str] | None = N
         except (ValueError, AttributeError):
             why = "fields unreadable"
         if why:
-            found.append({"id": row["id"], "repo": row["repo"], "status": row["status"], "title": row["title"],
-                          "why": why if isinstance(why, str) else "", "at": row["created_at"]})
+            found.append((row, why))
     return found
+
+
+def attention(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None) -> list[dict]:
+    """Open reports whose fields say they need attention, newest first: `status`, `why`, `at`.
+
+    Unreadable fields count, as an unknown is no pass.
+    """
+    return [{"id": row["id"], "repo": row["repo"], "status": row["status"], "title": row["title"],
+             "why": why if isinstance(why, str) else "", "at": row["created_at"]}
+            for row, why in _attention_rows(connection, _keep(repos))]
+
+
+#: The finding of a report whose fields do not parse: it may name this machine, so it is a row, not a pass.
+FIELDS_UNREAD = "fields unreadable; whether this report names this machine is unknown"
+
+
+def _host_findings(basis: Any, host: str) -> list[str]:
+    """The lines of a report's attention basis that name `host`, each cut to its finding.
+
+    A cron report writes `<job> on <host>: <finding>` per line, and a failed
+    run `job exited N on <host>`; the second is its own finding. A line that
+    only heads the next ones (`App Store updates pending:` over
+    `App Store updates pending: <app>`) is dropped, as the lines under it say it.
+    """
+    pattern = re.compile(rf"^(?P<head>.*?) on {re.escape(host)}(?::[ \t]*(?P<finding>.*)|[ \t]*)$")
+    found = [(match["finding"] or match["head"]).strip()
+             for match in map(pattern.match, str(basis or "").splitlines()) if match]
+    return [text for text in found
+            if not (text.endswith(":") and any(other != text and other.startswith(text) for other in found))]
+
+
+def machine_gate(gate: Any) -> dict | None:
+    """`_gate`'s holders and waiters, with the slot cap, the load and its limit when the snapshot has them."""
+    found = _gate(gate)
+    if found is not None and isinstance(gate, dict):
+        found.update({key: gate.get(key) for key in ("slots", "load", "load_max")})
+    return found
+
+
+def operations(connection: sqlite3.Connection, *, host: str | None = None, gate: Any = None) -> dict:
+    """This machine's findings and gate (pack sd:5432): `host`, `findings` and `gate` (`machine_gate`).
+
+    The reports are `attention`'s, every repository's: a machine belongs to
+    none. Each finding row is one line of a report's current basis
+    (`reporting._current_basis`) that names `host`, by default `this_host`,
+    `hostname -s` lower-cased: `id`, `repo`, `title`, `job` (the
+    `external_id` before `:`) and `finding`. A report with no `fields.report`
+    names no host; one whose fields do not parse is a `FIELDS_UNREAD` row.
+    """
+    host = host or this_host()
+    findings = []
+    for row, _ in _attention_rows(connection, None):
+        try:
+            lines = _host_findings(_current_basis({"fields": row["fields"] or "{}"}), host)
+        except KeyError:
+            lines = []
+        except (ValueError, TypeError, AttributeError):
+            lines = [FIELDS_UNREAD]
+        job = str(row["external_id"] or "").partition(":")[0] or "-"
+        findings += [{"id": row["id"], "repo": row["repo"], "title": row["title"], "job": job, "finding": text}
+                     for text in lines]
+    return {"host": host, "findings": findings, "gate": machine_gate(gate)}
 
 
 def _notes(connection: sqlite3.Connection, kind: str, keep: set[str | None] | None, *,
@@ -333,6 +392,7 @@ def sections(connection: sqlite3.Connection, *, repos: Iterable[str] | None = No
     keep = None if repos is None else sorted(set(repos))
     found: dict[str, Any] = {
         "attention": attention(connection, repos=keep),
+        "operations": operations(connection, gate=gate),
         "decisions": decisions(connection, repos=keep),
         "landing": landing(connection, repos=keep, gate=gate),
         "delivered": delivered(connection, repos=keep, now=now),
@@ -344,8 +404,9 @@ def sections(connection: sqlite3.Connection, *, repos: Iterable[str] | None = No
     }
     by_hand = closed_by_hand(connection, repos=keep, now=now)
     week = ((_parse(_now(now)) or datetime.now(timezone.utc)) + timedelta(days=7)).strftime("%Y-%m-%d")
-    summary = {key: len(found[key]) for key in ORDER if key != "landing"}
+    summary = {key: len(found[key]) for key in ORDER if key not in ("landing", "operations")}
     summary["landing"] = len(found["landing"]["entries"])
+    summary["operations"] = len(found["operations"]["findings"])
     summary["planned_this_week"] = sum(1 for row in found["planned"] if row["due"] <= week)
     summary["closed_by_hand"] = len(by_hand)
     summary["review_questions"] = review_questions(connection, repos=keep)

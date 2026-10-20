@@ -84,12 +84,15 @@ GATE = {"holders": [{"slot": 1, "pid": 7, "label": "app tests", "since": "2026-0
         "waiters": [{"place": 1, "pid": 8, "label": "lib tests", "since": "2026-09-06T17:58:00Z", "cwd": "/tmp"}]}
 
 TODAY = """\
-1 attention · 1 decisions · 2 landing · 1 delivered · 1 planned this week · 1 blocked · 8 unscheduled · 7 followups · 1 work
+1 attention · 0 on this machine · 1 decisions · 2 landing · 1 delivered · 1 planned this week · 1 blocked · 8 unscheduled · 7 followups · 1 work
 
 Attention (1)
 ID  Repo  State     Why             Title                           When
 --  ----  --------  --------------  ------------------------------  -------
 #1  app   planning  two stale rows  nightly-sweep: needs attention  5 d ago
+
+Operations, this machine (0)
+Gate slots: 1 holding (app tests since 11:55 MDT) · 1 waiting (lib tests)
 
 Decisions (1)
 ID  Repo  State     Note  Title                        When
@@ -101,7 +104,6 @@ ID   Repo  State    Position  Title             When
 ---  ----  -------  --------  ----------------  ---------
 #11  app   running  1         Land the cache    11:50 MDT
 #12  app   pending  2         Land the index    12:00 MDT
-Gate slots: 1 holding (app tests since 11:55 MDT) · 1 waiting (lib tests)
 
 Delivered (1)
 ID   Repo  State   PR   Commit     Title             When
@@ -248,8 +250,8 @@ class SdToday(Zone):
                                                      SD_GATE_SLOTS_DIR=str(self.home)),
                                check=True).stdout for _ in range(2)]
         self.assertEqual(runs[0], runs[1])
-        self.assertEqual([line for line in runs[0].splitlines() if line.endswith(")") and "(" in line][:3],
-                         ["Attention (1)", "Decisions (1)", "Landing now (2)"])
+        self.assertEqual([line for line in runs[0].splitlines() if line.endswith(")") and "(" in line][:4],
+                         ["Attention (1)", "Operations, this machine (0)", "Decisions (1)", "Landing now (2)"])
 
 
 class Table(unittest.TestCase):

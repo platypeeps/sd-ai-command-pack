@@ -4,10 +4,12 @@
 No repo-path argument or fleet walk; the dashboard owns cross-repository views.
 No repository, state-directory or cache writes. Derive from files, Git and GitHub.
 
-Fourteen sections, in output order, under the `pack` banner naming the checkout these tools came from:
+The sections, under the `pack` banner naming the checkout these tools came from; SKILL.md has their output order:
   abnormalities  every abnormal class, fired or clear or unchecked
   pending        actionable rows by rank, capped, with the denominator
   next           the top-ranked row and its suggestion
+  views          `sd today`'s sections for this repository and its companions
+  operations     open report findings that name this machine, and the gate line, in every repository
   open threads   a count per source, then the exclusions
   work           counted docs/work status from frontmatter or the authoritative row;
                  flag stale status lines and done rows without closing evidence
@@ -1457,6 +1459,42 @@ def views_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]
         return {"available": False, "reason": f"shared database unreadable: {error}", "repos": [], "sections": None}
     return {"available": True, "reason": "", "repos": repos, "companions_error": unread, "now": stamp,
             "sections": found}
+
+
+def _machine_gate(snapshot: Any) -> dict[str, Any] | None:
+    """`today.machine_gate` over the snapshot, or the gate unknown, with why, when that library will not import."""
+    try:
+        from sd_db import today
+    except ImportError as error:
+        return {"holders": [], "waiters": [], "error": f"gate not read: {error}"}
+    return today.machine_gate(snapshot)
+
+
+def operations_section(environ: dict[str, str]) -> dict[str, Any]:
+    """This machine's open report findings and its gate line, the same in every repository (pack sd:5432).
+
+    `sd_db.today.operations` builds both, the function `sd today` prints, over
+    the gate snapshot `sd gate status` reads (`machine_snapshot`). A failed
+    database read is a reason, never an empty section; the gate reads apart
+    from the database, so either can fail alone.
+    """
+    import sd_gate_slots  # noqa: PLC0415 - only this section reads the gate
+
+    snapshot = sd_gate_slots.machine_snapshot(environ)
+    connection, reason = _shared_connection("workflow database library", "today")
+    if connection is None:
+        return {"available": False, "reason": reason, "host": None, "findings": [], "gate": _machine_gate(snapshot)}
+    try:
+        try:
+            from sd_db import today
+
+            found = today.operations(connection, gate=snapshot)
+        finally:
+            connection.close()
+    except Exception as error:  # noqa: BLE001 - a failed read is unknown, named
+        return {"available": False, "reason": f"shared database unreadable: {error}", "host": None,
+                "findings": [], "gate": _machine_gate(snapshot)}
+    return {"available": True, "reason": "", **found}
 
 
 def _database_issues(slug: str) -> dict[str, Any]:
@@ -3322,6 +3360,7 @@ def collect(root: pathlib.Path, environ: dict[str, str], limit: int) -> dict[str
         "contributions": contributions_section(root),
         "lane": lane_section(root, environ),
         "views": views_section(root, environ),
+        "operations": operations_section(environ),
     }
     inventory = actionable_inventory(root, result, environ=environ)
     result["inventory"] = {"rows": inventory.rows, "unchecked": inventory.unchecked}
@@ -3611,6 +3650,26 @@ def _render_views(section: dict[str, Any] | None, write: Any, *, now: datetime.d
     write("".join(f"  {line}" if line.strip() else line for line in text.splitlines(keepends=True)))
 
 
+def _render_operations(section: dict[str, Any] | None, write: Any, *, now: datetime.datetime | None = None,
+                       width: int | None = None) -> None:
+    """`sd today`'s Operations rows for this machine, uncapped, a cut finding whole under the table (pack sd:5432)."""
+    import sd_views  # noqa: PLC0415 - only the table sections need it
+
+    heading = sd_views.HEADINGS["operations"]
+    if not section or not section["available"]:
+        _heading(write, heading, None)
+        write(f"  ! {section['reason'] if section else 'not collected'}\n")
+    else:
+        rows = section["findings"]
+        _heading(write, heading, len(rows))
+        if rows:
+            _table(write, ["ID", "Job", "Finding"], [[f"#{row['id']}", row["job"], row["finding"]] for row in rows],
+                   flex="Finding", whole=("Finding",), width=width)
+    gate = section.get("gate") if section else {"error": "not collected"}
+    for line in sd_views.gate_line(gate, now or datetime.datetime.now(datetime.timezone.utc)):
+        write(f"  {line}\n")
+
+
 def _render_threads(rows: list[dict[str, Any]], write: Any) -> None:
     """Per-source counts over the same list, and what was not swept.
 
@@ -3638,6 +3697,7 @@ def render(result: dict[str, Any], stream: TextIO) -> None:
     _render_pending(rows, write)
     _render_next(rows, write)
     _render_views(result.get("views"), write)
+    _render_operations(result.get("operations"), write)
     _render_threads(rows, write)
     _render_work(result["work"], write)
     _render_contributions(result.get("contributions"), write)

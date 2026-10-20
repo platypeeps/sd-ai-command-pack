@@ -613,11 +613,7 @@ def _today_gate() -> Any:
     """`sd gate status --json`'s snapshot, or why it could not be read: a failed read is unknown, not idle."""
     import sd_gate_slots
 
-    environ = dict(os.environ)
-    try:
-        return sd_gate_slots.snapshot(sd_gate_slots.directory(environ), 0, sd_gate_slots.load_rule(environ))
-    except (OSError, ValueError) as error:
-        return str(error)
+    return sd_gate_slots.machine_snapshot(dict(os.environ))
 
 
 def _print_today(connection: Any) -> None:
