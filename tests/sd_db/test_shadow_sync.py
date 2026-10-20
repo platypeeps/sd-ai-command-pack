@@ -1219,7 +1219,7 @@ class TheIntakeSearch(SyncCase):
         cases: tuple = (
             ("gh failure", dict(read=None), {}),
             ("not found", dict(read=lambda path: (404, {"message": "Not Found"})), {}),
-            ("gone", dict(read=lambda path: (410, {"message": "Gone"})), {}),
+            ("forbidden", dict(read=lambda path: (403, {"message": "Resource not accessible"})), {}),
             ("redirect not followed", dict(read=lambda path: (301, {"url": "elsewhere"})), {}),
             ("no number", dict(read=lambda path: (200, {"state": "open"})), {}),
             ("text number", dict(read=lambda path: (200, {"state": "open", "number": "1"})), {}),
@@ -1264,6 +1264,23 @@ class TheIntakeSearch(SyncCase):
                 self.assertEqual(self.reasons(), {"1": (state, None)})
                 self.assertFalse(any("intake" in line for line in result.report()), result.report())
 
+    def test_a_gone_answer_closes_the_row_with_no_close_date(self):
+        """Pack sd:5415. GitHub answers 410 for a deleted issue and for every
+        issue of a repository whose Issues are disabled: no open issue is
+        there, and no later read will say otherwise. A 404 stays unknown
+        (above): a token without access to a private repository gets one too."""
+        for message in ("Issues are disabled for this repo", "This issue was deleted"):
+            with self.subTest(message):
+                self.connection.execute("DELETE FROM shadow")
+                self.connection.execute(
+                    "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, first_seen, last_seen) "
+                    "VALUES ('github', ?, ?, 1, 'issue', 'old', 'open', 't1', 't1')", (self.REPO, node(1)["url"]))
+                result = sync(self.connection, now=self.now,
+                              runner=QueryGh(lambda query: [], read=lambda path, message=message: (410, {"message": message})))
+                [row] = self.shadow().values()
+                self.assertEqual((row["state"], row["closed_at"]), ("closed", None))
+                self.assertFalse(any("intake" in line for line in result.report()), result.report())
+
     def test_an_incomplete_sweep_reads_and_closes_nothing(self):
         """A failed, capped or short sweep is no listing: no absent issue is read or closed."""
         for name, runner in (
@@ -1302,6 +1319,105 @@ class TheIntakeSearch(SyncCase):
         sync(self.connection, now=self.now, runner=runner)
         self.assertEqual(len(runner.queries), 4)
         self.assertFalse(any("repo:" in query for query in runner.queries))
+
+
+class TheStaleRead(SyncCase):
+    """Pack sd:5415. An open issue row of a repository outside intake came
+    from the operator's windowed buckets, and a closure no window saw, such as
+    one after the operator was unassigned, or a repository whose Issues were
+    disabled, left it open for good. A row no search has seen for a week is
+    read directly, oldest first, on the search budget, by the intake rules."""
+
+    INTAKE = "example-org/benchmark"
+    OTHER = "example-org/other"
+    STALE = "2026-08-01T00:00:00+00:00"
+
+    def setUp(self):
+        super().setUp()
+        from sd_db.writes import upsert_repo
+
+        upsert_repo(self.connection, "/srv/example/benchmark", remote=f"git@github.com:{self.INTAKE}.git")
+        self.connection.execute("UPDATE repo SET github_issues = 1")
+
+    def url(self, number, repo=OTHER):
+        return f"https://github.com/{repo}/issues/{number}"
+
+    def stored(self, number, last_seen=STALE, repo=OTHER):
+        self.connection.execute(
+            "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, first_seen, last_seen) "
+            "VALUES ('github', ?, ?, ?, 'issue', 'old', 'open', ?, ?)",
+            (repo, self.url(number, repo), number, last_seen, last_seen))
+
+    def row(self, number, repo=OTHER):
+        return self.shadow()[self.url(number, repo)]
+
+    def test_a_stale_row_outside_intake_is_read_and_closed(self):
+        answers = (
+            ("closed", issue(3, state="closed", closed_at="2026-08-20T09:00:00Z"), "2026-08-20T09:00:00Z"),
+            ("issues disabled", (410, {"message": "Issues are disabled for this repo"}), None),
+        )
+        for name, answer, closed_at in answers:
+            with self.subTest(name):
+                self.connection.execute("DELETE FROM shadow")
+                self.stored(3)
+                runner = QueryGh(lambda query: [], read=lambda path, answer=answer: answer)
+                result = sync(self.connection, now=self.now, runner=runner)
+                self.assertTrue(result.ok, result.reason)
+                self.assertEqual(runner.paths, [f"repos/{self.OTHER}/issues/3"])
+                self.assertEqual((self.row(3)["state"], self.row(3)["closed_at"]), ("closed", closed_at))
+
+    def test_a_not_found_answer_stays_open_and_is_named(self):
+        """A 404 can be a token that lost access, not a closure."""
+        self.stored(3)
+        result = sync(self.connection, now=self.now,
+                      runner=QueryGh(lambda query: [], read=lambda path: (404, {"message": "Not Found"})))
+        self.assertEqual(self.row(3)["state"], "open")
+        self.assertTrue(any(self.url(3) in line for line in result.report()), result.report())
+
+    def test_an_open_answer_is_a_sighting_and_is_not_read_again_at_once(self):
+        self.stored(3)
+        result = sync(self.connection, now=self.now, runner=QueryGh(lambda query: [], read=lambda path: issue(3)))
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.row(3)["state"], "open")
+        self.assertGreater(self.row(3)["last_seen"], self.STALE)
+        runner = QueryGh(lambda query: [], read=lambda path: issue(3))
+        sync(self.connection, now=self.now + timedelta(hours=1), runner=runner)
+        self.assertEqual(runner.paths, [])
+
+    def test_a_fresh_row_or_one_a_bucket_saw_this_run_is_not_read(self):
+        self.stored(4, last_seen="2026-09-05T00:00:00+00:00")
+        self.stored(5)
+        seen = node(5, url=self.url(5))
+        runner = QueryGh(lambda query: [seen] if "mentions:@me" in query else [], read=lambda path: issue(5))
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(runner.paths, [])
+
+    def test_the_budget_reads_the_oldest_first_and_names_the_rest(self):
+        """Four bucket pages, the intake sweep and one read fit in six requests."""
+        self.stored(6, last_seen="2026-08-02T00:00:00+00:00")
+        self.stored(7, last_seen="2026-08-01T00:00:00+00:00")
+        runner = QueryGh(lambda query: [], read=lambda path: issue(7, state="closed"))
+        result = sync(self.connection, now=self.now, runner=runner, max_requests=6)
+        self.assertEqual(runner.paths, [f"repos/{self.OTHER}/issues/7"])
+        self.assertEqual((self.row(6)["state"], self.row(7)["state"]), ("open", "closed"))
+        self.assertTrue(any(self.url(6) in line for line in result.report()), result.report())
+
+    def test_an_intake_row_or_a_failed_collect_reads_no_stale_row(self):
+        """An intake row is read only after its complete sweep; a run whose
+        buckets failed reads no stale row, since its reads may fail the same way."""
+        self.stored(8, repo=self.INTAKE)
+        runner = QueryGh(lambda query: [], failing=sweep, read=lambda path: issue(8, state="closed"))
+        sync(self.connection, now=self.now, runner=runner)
+        self.assertEqual(runner.paths, [])
+        self.connection.execute("DELETE FROM shadow")
+        self.stored(9)
+        runner = QueryGh(lambda query: [], failing=lambda query: "mentions:@me" in query,
+                         read=lambda path: issue(9, state="closed"))
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertFalse(result.ok)
+        self.assertEqual(runner.paths, [])
+        self.assertEqual(self.row(9)["state"], "open")
 
 
 class PaginationIntegrity(unittest.TestCase):

@@ -55,6 +55,8 @@ from .writes import (
     open_shadow_issues,
     record_state,
     resolve_state,
+    see_shadow,
+    stale_shadow_issues,
     upsert_shadow,
 )
 
@@ -105,6 +107,10 @@ BUCKETS = (
 INTAKE = "intake"
 #: Repositories per intake sweep: GitHub refuses a long search query.
 INTAKE_GROUP = 5
+#: How long an open issue row outside intake goes unseen before `sync` reads
+#: it directly (pack sd:5415). A bucket sees a closure in its window; a week
+#: unseen means no bucket will, and an open answer starts the week again.
+STALE_AFTER = timedelta(days=7)
 
 #: `shadow.reason` (migration 34), strongest first, with the `why` words that
 #: give each: GitHub's buckets and Jira's `normalize`. Any other word is
@@ -693,12 +699,19 @@ def _observe_protection(connection: sqlite3.Connection, client, observed_at: str
     return summary
 
 
-def confirm_absent(connection: sqlite3.Connection, swept, client, *,
-                   tracker: str = TRACKER) -> tuple[dict[str, str | None], list[str]]:
-    """Read each stored open issue a complete sweep missed. Returns `(close, unknown)`.
+def confirm_absent(connection: sqlite3.Connection, swept, client, *, tracker: str = TRACKER,
+                   stale=()) -> tuple[dict[str, str | None], list[str], list[str]]:
+    """Read each stored open issue a complete sweep missed, then each url of `stale`.
 
-    `close` maps each url to close to the `closed_at` its read gave, or None
-    when that read gave none it could parse or read another issue (sd:5303).
+    Returns `(close, unknown, open)`. `close` maps each url to close to the
+    `closed_at` its read gave, or None when that read gave none it could
+    parse, read another issue (sd:5303), or answered 410 (pack sd:5415).
+    `open` names the urls whose read said open.
+
+    `stale` names stored open issues outside intake that no search has seen
+    for `STALE_AFTER`, oldest first (pack sd:5415): a windowed bucket sees a
+    closure only while the issue is still the operator's, so these are read
+    by the same rules, on the same budget.
 
     Absence from a search is no proof of a closure: GitHub's index can omit
     an open issue for a while (sd:4880 lane review). So each one is read
@@ -708,39 +721,46 @@ def confirm_absent(connection: sqlite3.Connection, swept, client, *,
     nothing: REST answers a canonical spelling that a stored url in another
     case, with a trailing slash or under an old repository name does not
     match (round 2). An open answer leaves the row, a transferred issue that
-    keeps its number too: it is open somewhere, and Today offers it. A failed,
-    refused, malformed or over-budget read is unknown: the row stays open and
-    is named in `unknown`, and the next run reads it again.
+    keeps its number too: it is open somewhere, and Today offers it. A 410
+    closes the row: GitHub gives it for a deleted issue and for every issue
+    of a repository whose Issues are disabled. Any other failed, refused,
+    malformed or over-budget read is unknown, a 404 too, since a token that
+    lost access gets one: the row stays open and is named in `unknown`, and
+    the next run reads it again.
     """
-    from .contribution_github import ISSUE, Unavailable
+    from .contribution_github import ISSUE, Gone, Unavailable
 
+    urls = [row["url"] for slugs, seen in swept
+            for row in open_shadow_issues(connection, tracker=tracker, repos=slugs) if row["url"] not in seen]
     close: dict[str, str | None] = {}
     unknown: list[str] = []
-    for slugs, seen in swept:
-        for row in open_shadow_issues(connection, tracker=tracker, repos=slugs):
-            url = row["url"]
-            if url in seen:
-                continue
-            match = ISSUE.fullmatch(url)
-            if not match:
-                unknown.append(f"{url}: not an issue url")
-                continue
-            try:
-                payload = client.get(f"repos/{match[1]}/{match[2]}/issues/{match[3]}")
-            except Unavailable as error:
-                unknown.append(f"{url}: {error}")
-                continue
-            if not isinstance(payload, dict):
-                unknown.append(f"{url}: the issue read is not an object")
-            elif payload.get("state") == "closed" or "pull_request" in payload:
-                close[url] = settled_at(payload.get("closed_at"))
-            elif type(payload.get("number")) is not int:
-                unknown.append(f"{url}: the issue read has no number")
-            elif payload["number"] != int(match[3]):
-                close[url] = None  # another issue's read says nothing of when this one closed
-            elif payload.get("state") != "open":
-                unknown.append(f"{url}: the issue read says state {payload.get('state')!r}")
-    return close, unknown
+    opened: list[str] = []
+    for url in dict.fromkeys([*urls, *stale]):
+        match = ISSUE.fullmatch(url)
+        if not match:
+            unknown.append(f"{url}: not an issue url")
+            continue
+        try:
+            payload = client.get(f"repos/{match[1]}/{match[2]}/issues/{match[3]}")
+        except Gone:
+            close[url] = None
+            continue
+        except Unavailable as error:
+            unknown.append(f"{url}: {error}")
+            continue
+        if not isinstance(payload, dict):
+            unknown.append(f"{url}: the issue read is not an object")
+        elif payload.get("state") == "closed" or "pull_request" in payload:
+            close[url] = settled_at(payload.get("closed_at"))
+        elif type(payload.get("number")) is not int:
+            unknown.append(f"{url}: the issue read has no number")
+        elif payload["number"] != int(match[3]):
+            close[url] = None  # another issue's read says nothing of when this one closed
+        elif payload.get("state") != "open":
+            unknown.append(f"{url}: the issue read says state {payload.get('state')!r}")
+        else:
+            opened.append(url)
+    return close, unknown, opened
 
 
 @dataclass
@@ -890,8 +910,13 @@ def _sync(
     intake = tuple(dict.fromkeys(repos.intake_repos(connection).values()))
     result = collect(previous, moment, runner, since=since,
                      max_requests=max_requests, max_seconds=max_seconds, budget=search_budget, intake=intake)
-    closing, unconfirmed = confirm_absent(connection, result.swept, Client(search_budget, runner=runner),
-                                          tracker=tracker)
+    # Stale rows wait for a run whose buckets completed: one that failed may fail these reads too.
+    seen = {row["url"] for row in result.issues}
+    stale = [row["url"] for row in stale_shadow_issues(
+        connection, tracker=tracker, outside=intake, before=(moment - STALE_AFTER).isoformat(timespec="seconds"))
+        if row["url"] not in seen] if result.ok else []
+    closing, unconfirmed, opened = confirm_absent(connection, result.swept, Client(search_budget, runner=runner),
+                                                  tracker=tracker, stale=stale)
     if unconfirmed:
         result.incomplete.append(f"{len(unconfirmed)} absent issue(s) left open unread, first {unconfirmed[0]}")
     budget.remaining -= search_budget.requests
@@ -921,6 +946,7 @@ def _sync(
     with transaction(connection):
         written = store(connection, result.issues)
         close_shadow(connection, tracker=tracker, closed=closing)
+        see_shadow(connection, tracker=tracker, urls=opened)
         previous_time = parse_iso(read_watermark(connection, tracker))
         # A complete explicit recovery can still leave an uncovered prefix.
         moved = search_complete and detail["staged"] and (previous_time is None or (
