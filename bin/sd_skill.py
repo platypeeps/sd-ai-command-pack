@@ -73,14 +73,37 @@ def run(args: argparse.Namespace) -> int:
         connection.close()
 
 
+def intake_connection(write: bool):
+    """The workflow database, which holds the tracked repositories as one setting row; and its error class."""
+    sd_db = sd_handoff_rows.library()
+    return sd_handoff_rows.connect(sd_db, write=write), sd_db.SdDbError
+
+
 def skill_intake(args: argparse.Namespace) -> int:
     """`sd skill intake`: deferred, because only this verb fetches from GitHub."""
+    import sqlite3  # noqa: PLC0415
+
     import sd_skill_intake  # noqa: PLC0415 - loads sd-skill-adopt as a sibling
 
+    listing = [name for name in ("tracked", "track", "untrack", "refresh") if getattr(args, name)]
+    if len(listing) + bool(args.source) != 1:
+        raise SkillRefusal("give one of a source, --tracked, --track URL, --untrack URL or --refresh URL")
+    if listing and args.approve:
+        raise SkillRefusal("--approve installs one skill: give its URL, as the refresh printed it")
+    if listing and args.scope and not args.track:
+        raise SkillRefusal("--scope goes with a source or --track")
     try:
-        return sd_skill_intake.run_intake(args, checkout(), pathlib.Path.home())
-    except (sd_skill_intake.IntakeError, OSError) as error:
+        if not listing:
+            return sd_skill_intake.run_intake(args, checkout(), pathlib.Path.home())
+        connection, database_error = intake_connection(write=not args.tracked)
+    except (sd_skill_intake.IntakeError, sd_handoff_rows.RowsRefusal, OSError) as error:
         raise SkillRefusal(str(error)) from error
+    try:
+        return sd_skill_intake.run_tracking(args, connection, checkout(), pathlib.Path.home())
+    except (sd_skill_intake.IntakeError, database_error, sqlite3.Error, OSError) as error:
+        raise SkillRefusal(str(error)) from error
+    finally:
+        connection.close()
 
 
 skill_try = run
@@ -98,7 +121,15 @@ def register_extra(verbs: Any) -> None:
     intake = verbs.add_parser(
         "intake",
         help="judge a GitHub skill, or re-import an installed one, against the installed set; install only on approval")
-    intake.add_argument("source", help="a https://github.com/ skill URL, or the name of a skill installed from one")
+    intake.add_argument("source", nargs="?",
+                        help="a https://github.com/ skill URL, or the name of a skill installed from one")
+    tracking = intake.add_mutually_exclusive_group()
+    tracking.add_argument("--tracked", action="store_true",
+                          help="list the tracked source repositories and the skills adopted from each")
+    tracking.add_argument("--track", metavar="URL", help="track a https://github.com/<owner>/<repo> repository")
+    tracking.add_argument("--untrack", metavar="URL", help="stop tracking a repository; its installed skills stay")
+    tracking.add_argument("--refresh", metavar="URL",
+                          help="judge every skill of a tracked repository at its default branch; installs nothing")
     intake.add_argument("--scope", choices=("pack", "user"),
                         help="pack: contrib/ with the sd- prefix (default for a URL); user: ~/.claude/skills")
     intake.add_argument("--approve", metavar="REVISION",

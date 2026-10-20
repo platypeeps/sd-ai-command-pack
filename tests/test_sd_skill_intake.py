@@ -444,5 +444,233 @@ class TheVerb(IntakeCase):
         self.assertIn("--approve REVISION", done.stdout)
 
 
+class TrackedCase(IntakeCase):
+    """A tracked-repository list in a scratch workflow database; the fixture upstream is `example/skills`."""
+
+    REPO = "https://github.com/example/skills"
+
+    def setUp(self) -> None:
+        super().setUp()
+        sys.path.insert(0, str(REPO_ROOT / "lib"))
+        from sd_db import connect  # noqa: PLC0415
+        from sd_db.migrate import initialise  # noqa: PLC0415
+
+        self.database = path = self.root.parent / "sd.db"
+        initialise(path)
+        self.connection = connect(path)
+        self.addCleanup(self.connection.close)
+
+    def row(self):
+        from sd_db.writes import read_settings  # noqa: PLC0415
+
+        held = read_settings(self.connection, [intake.TRACKED_KEY])
+        return json.loads(held[intake.TRACKED_KEY]) if held.get(intake.TRACKED_KEY) else held.get(intake.TRACKED_KEY, "absent")
+
+    def install(self, name: str, scope: str | None = None) -> None:
+        report = self.intake(URL.format(name), scope=scope)
+        self.intake(URL.format(name), scope=scope, approve=report["revision"])
+
+    def view(self):
+        return intake.tracked(self.connection, self.root, self.home)
+
+    def refresh(self, url: str | None = None):
+        return intake.refresh(self.connection, url or self.REPO, self.root, self.home, TODAY)
+
+
+class TheTrackedList(TrackedCase):
+    """One setting row lists the tracked repositories; a row never held is the Provenance's, written by nobody."""
+
+    def test_a_list_never_held_is_seeded_from_provenance_and_writes_nothing(self) -> None:
+        self.install("ledger")
+        view = self.view()
+        self.assertTrue(view["seeded"])
+        self.assertEqual([repo["url"] for repo in view["repos"]], [self.REPO])
+        self.assertEqual([skill["name"] for skill in view["repos"][0]["skills"]], ["sd-ledger"])
+        self.assertEqual(view["repos"][0]["scope"], "pack")
+        self.assertEqual(self.row(), "absent")
+
+    def test_a_user_scope_adoption_seeds_a_user_scope_entry(self) -> None:
+        self.install("ledger", scope="user")
+        self.assertEqual(self.view()["repos"][0]["scope"], "user")
+
+    def test_track_takes_a_repository_url_only(self) -> None:
+        for bad in ("https://github.com/example/skills/tree/main", "https://example.test/example/skills",
+                    "https://github.com/example", "https://github.com/example/..", "github.com/example/skills"):
+            with self.assertRaisesRegex(intake.IntakeError, "not a GitHub repository URL"):
+                intake.track(self.connection, bad, None, self.root, self.home)
+        self.assertEqual(self.row(), "absent")
+        view = intake.track(self.connection, "https://github.com/example/other.git/", None, self.root, self.home)
+        self.assertEqual(view["url"], "https://github.com/example/other")
+        self.assertEqual([entry["url"] for entry in self.row()], ["https://github.com/example/other"])
+
+    def test_the_first_write_keeps_the_seed(self) -> None:
+        self.install("ledger")
+        intake.track(self.connection, "https://github.com/example/other", "user", self.root, self.home)
+        self.assertEqual([(entry["url"], entry["scope"]) for entry in self.row()],
+                         [(self.REPO, "pack"), ("https://github.com/example/other", "user")])
+        self.assertFalse(self.view()["seeded"])
+
+    def test_tracking_a_tracked_repository_writes_nothing(self) -> None:
+        intake.track(self.connection, self.REPO, None, self.root, self.home)
+        before = self.row()
+        intake.track(self.connection, "https://github.com/Example/Skills", None, self.root, self.home)
+        self.assertEqual(self.row(), before)
+
+    def test_untrack_drops_the_repository_and_keeps_its_skills(self) -> None:
+        self.install("ledger")
+        view = intake.untrack(self.connection, self.REPO, self.root, self.home)
+        self.assertEqual(view["repos"], [])
+        self.assertEqual(view["removed"]["url"], self.REPO)
+        self.assertEqual([repo["url"] for repo in view["untracked"]], [self.REPO])
+        self.assertTrue((self.root / "contrib" / "sd-ledger" / "SKILL.md").is_file())
+        self.assertEqual(self.row(), [])
+        self.assertFalse(self.view()["seeded"], "a held empty list is not seeded again")
+
+    def test_untracking_an_untracked_repository_is_refused(self) -> None:
+        with self.assertRaisesRegex(intake.IntakeError, "not tracked; nothing written"):
+            intake.untrack(self.connection, self.REPO, self.root, self.home)
+
+    def test_a_row_that_does_not_read_is_unknown_not_empty(self) -> None:
+        from sd_db.writes import set_setting  # noqa: PLC0415
+
+        set_setting(self.connection, intake.TRACKED_KEY, '{"url": 1}')
+        with self.assertRaisesRegex(intake.IntakeError, "does not read"):
+            self.view()
+
+    def test_a_write_over_a_changed_row_is_refused(self) -> None:
+        intake.track(self.connection, self.REPO, None, self.root, self.home)
+        with self.assertRaisesRegex(intake.IntakeError, "changed since"):
+            intake.write_tracked(self.connection, [], "[]")
+        self.assertEqual([entry["url"] for entry in self.row()], [self.REPO])
+
+
+class TheRefresh(TrackedCase):
+    """A refresh judges every skill of the repository through the intake's report, and installs nothing."""
+
+    def test_a_refresh_shows_new_and_changed_skills_and_installs_nothing(self) -> None:
+        self.install("ledger")
+        self.write(self.upstream / "skills" / "ledger", GOOD + "\nSecond version.\n")
+        self.commit()
+        before = self.tree()
+        report = self.refresh()
+        self.assertEqual(self.tree(), before)
+        modes = {skill["skill"]: skill["mode"] for skill in report["skills"]}
+        self.assertEqual(modes, {"sd-ledger": "re-import", "sd-installer": "new", "sd-tabulate": "new",
+                                 "sd-planner": "new"})
+        ledger = next(skill for skill in report["skills"] if skill["skill"] == "sd-ledger")
+        self.assertEqual(ledger["url"], URL.format("ledger"), "a changed skill keeps its recorded URL")
+        self.assertTrue(any("Second version." in line for line in ledger["diff"]))
+        self.assertEqual(report["result"], "3 new, 1 changed")
+        self.assertTrue(report["recorded"])
+        self.assertEqual(self.row()[0]["result"], "3 new, 1 changed")
+        self.assertEqual(self.row()[0]["refreshed"], report["refreshed"])
+
+    def test_a_refreshed_skill_installs_through_the_intake_approval(self) -> None:
+        intake.track(self.connection, self.REPO, None, self.root, self.home)
+        ledger = next(skill for skill in self.refresh()["skills"] if skill["skill"] == "sd-ledger")
+        self.intake(ledger["url"], scope=ledger["scope"], approve=ledger["revision"])
+        self.assertEqual(intake.source_of(self.root / "contrib" / "sd-ledger")[0], ledger["url"])
+
+    def test_an_unchanged_skill_reads_unchanged(self) -> None:
+        self.install("ledger")
+        modes = {skill["skill"]: skill["mode"] for skill in self.refresh()["skills"]}
+        self.assertEqual(modes["sd-ledger"], "unchanged")
+
+    def test_a_skill_removed_upstream_reads_gone(self) -> None:
+        self.install("ledger")
+        self.git("rm", "-rq", "skills/ledger")
+        self.commit()
+        report = self.refresh()
+        gone = [skill for skill in report["skills"] if skill.get("mode") == "gone"]
+        self.assertEqual([skill["skill"] for skill in gone], ["sd-ledger"])
+        self.assertIn("1 gone", report["result"])
+
+    def test_one_skill_that_cannot_be_judged_does_not_stop_the_rest(self) -> None:
+        self.write(self.upstream / "skills" / "escape", skill_text("../../home", "Escape the root."))
+        self.commit()
+        intake.track(self.connection, self.REPO, None, self.root, self.home)
+        report = self.refresh()
+        failed = [skill for skill in report["skills"] if "error" in skill]
+        self.assertEqual([skill["path"] for skill in failed], ["skills/escape"])
+        self.assertIn("one path segment", failed[0]["error"])
+        self.assertIn("4 new", report["result"])
+
+    def test_a_refresh_of_an_untracked_repository_is_refused(self) -> None:
+        with self.assertRaisesRegex(intake.IntakeError, "is not tracked"):
+            self.refresh()
+        self.assertEqual(self.row(), "absent")
+
+    def test_a_failed_fetch_is_recorded_as_failed_and_raised(self) -> None:
+        intake.track(self.connection, "https://github.com/example/missing", None, self.root, self.home)
+        with self.assertRaisesRegex(intake.IntakeError, "git"):
+            self.refresh("https://github.com/example/missing")
+        self.assertTrue(self.row()[0]["result"].startswith("failed: git"), self.row())
+
+    def test_an_untrack_while_the_fetch_runs_stays_untracked(self) -> None:
+        intake.track(self.connection, self.REPO, None, self.root, self.home)
+        real = intake.survey
+
+        def untracked_meanwhile(*args, **kwargs):
+            report = real(*args, **kwargs)
+            intake.untrack(self.connection, self.REPO, self.root, self.home)
+            return report
+
+        with mock.patch.object(intake, "survey", untracked_meanwhile):
+            report = self.refresh()
+        self.assertFalse(report["recorded"])
+        self.assertIn("untracked while it refreshed", report["unrecorded"])
+        self.assertEqual(self.row(), [])
+
+    def test_a_failed_record_leaves_the_report_standing(self) -> None:
+        intake.track(self.connection, self.REPO, None, self.root, self.home)
+        with mock.patch.object(intake, "write_tracked", side_effect=intake.IntakeError("disk full")):
+            report = self.refresh()
+        self.assertFalse(report["recorded"])
+        self.assertEqual(report["unrecorded"], "disk full")
+        self.assertIsNone(self.row()[0]["refreshed"])
+
+
+class TheTrackingVerb(TrackedCase):
+    """`sd skill intake --tracked|--track|--untrack|--refresh`: the list and the survey from the CLI."""
+
+    def run_verb(self, *argv: str) -> tuple[int, str]:
+        root = argparse.ArgumentParser()
+        verbs = root.add_subparsers(dest="verb")
+        sd_skill.register_extra(verbs)
+        args = root.parse_args(["intake", *argv])
+        out = io.StringIO()
+        from sd_db import connect  # noqa: PLC0415
+
+        # The verb closes its connection, so each run gets its own, as `sd` opens one.
+        with mock.patch.object(sd_skill, "checkout", return_value=self.root), \
+                mock.patch.object(sd_skill, "intake_connection", side_effect=lambda write: (connect(self.database), Exception)), \
+                mock.patch.object(Path, "home", return_value=self.home), contextlib.redirect_stdout(out):
+            code = args.handler(args)
+        return code, out.getvalue()
+
+    def test_track_then_tracked_lists_the_repository(self) -> None:
+        self.run_verb("--track", self.REPO)
+        code, output = self.run_verb("--tracked", "--json")
+        self.assertEqual(code, 0)
+        self.assertEqual([repo["url"] for repo in json.loads(output)["repos"]], [self.REPO])
+
+    def test_refresh_prints_each_approval_line(self) -> None:
+        self.run_verb("--track", self.REPO)
+        code, output = self.run_verb("--refresh", self.REPO)
+        self.assertIn("result: 4 new", output)
+        self.assertRegex(output, r"approve: sd skill intake \S+/tree/main/skills/ledger --scope pack --approve [0-9a-f]{16}")
+        self.assertNotIn("skills/installer --scope", output, "a refused skill offers no approval")
+
+    def test_one_action_at_a_time(self) -> None:
+        for argv in ((), (URL.format("ledger"), "--refresh", self.REPO), ("--refresh", self.REPO, "--approve", "0" * 16),
+                     ("--untrack", self.REPO, "--scope", "pack")):
+            with self.assertRaises(sd_skill.SkillRefusal, msg=argv):
+                self.run_verb(*argv)
+
+    def test_a_refusal_reaches_sd_as_a_skill_refusal(self) -> None:
+        with self.assertRaisesRegex(sd_skill.SkillRefusal, "not tracked"):
+            self.run_verb("--untrack", self.REPO)
+
+
 if __name__ == "__main__":
     unittest.main()
