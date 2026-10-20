@@ -876,8 +876,9 @@ def survey(entry: dict[str, Any], root: pathlib.Path, home: pathlib.Path, today:
         _git(work, "fetch", "-q", "--depth", "1", "--no-tags", "--no-recurse-submodules", remote, branch)
         commit = _git(work, "rev-parse", "FETCH_HEAD^{commit}").strip()
         listing = _listing(work, "")
-        paths = sorted({str(pathlib.PurePosixPath(name).parent).removeprefix(".") for mode, _o, _s, name in listing
-                        if pathlib.PurePosixPath(name).name == SKILL_FILE and mode not in ("120000", "160000")})
+        folders = {str(pathlib.PurePosixPath(name).parent) for mode, _o, _s, name in listing
+                   if pathlib.PurePosixPath(name).name == SKILL_FILE and mode not in ("120000", "160000")}
+        paths = sorted("" if folder == "." else folder for folder in folders)  # "" is the repository root
         if len(paths) > MAX_REPO_SKILLS:
             raise IntakeError(f"{entry['url']} holds {len(paths)} skills, over the {MAX_REPO_SKILLS} a refresh judges")
         here, elsewhere, skipped = _place(installed, branch, paths)
@@ -896,7 +897,8 @@ def _now() -> str:
 def record_refresh(connection: Any, repo: str, at: str, result: str, root: pathlib.Path, home: pathlib.Path) -> str:
     """Write the refresh's time and result on its entry, read again first; "" when written, else why not.
 
-    An entry untracked while the fetch ran stays untracked: the result is dropped, not the removal.
+    An entry untracked while the fetch ran stays untracked: the result is dropped, not the removal. So is the
+    result of a refresh that started before the one recorded: the newer reading stays.
     """
 
     for _attempt in range(2):
@@ -905,6 +907,8 @@ def record_refresh(connection: Any, repo: str, at: str, result: str, root: pathl
             entry = next((each for each in entries if each["url"].lower() == repo.lower()), None)
             if entry is None:
                 return f"{repo} was untracked while it refreshed"
+            if entry["refreshed"] and entry["refreshed"] > at:
+                return f"a newer refresh, started {entry['refreshed']}, is recorded"
             entry.update(refreshed=at, result=result[:RESULT_LENGTH])
             write_tracked(connection, entries, raw)
             return ""

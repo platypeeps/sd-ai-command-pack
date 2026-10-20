@@ -631,6 +631,24 @@ class TheRefresh(TrackedCase):
         self.assertIn("untracked while it refreshed", report["unrecorded"])
         self.assertEqual(self.row(), [])
 
+    def test_a_skill_under_a_dot_folder_keeps_its_path(self) -> None:
+        # The root's "." was stripped as a prefix, so .claude/skills/hidden read as claude/skills/hidden and matched no blob.
+        self.write(self.upstream / ".claude" / "skills" / "hidden", skill_text("hidden", "Keep a hidden folder's skill readable."))
+        self.commit()
+        intake.track(self.connection, self.REPO, None, self.root, self.home)
+        hidden = next(skill for skill in self.refresh()["skills"] if "hidden" in skill["path"])
+        self.assertEqual(hidden["path"], ".claude/skills/hidden")
+        self.assertNotIn("error", hidden)
+        self.assertEqual(hidden["mode"], "new")
+
+    def test_an_older_refresh_does_not_overwrite_a_newer_record(self) -> None:
+        # Two refreshes of one repository: the one that started last is the newer reading, whichever ends last.
+        intake.track(self.connection, self.REPO, None, self.root, self.home)
+        self.assertEqual(intake.record_refresh(self.connection, self.REPO, "2026-10-13T10:05:00Z", "2 new", self.root, self.home), "")
+        why = intake.record_refresh(self.connection, self.REPO, "2026-10-13T10:00:00Z", "1 new", self.root, self.home)
+        self.assertIn("newer refresh", why)
+        self.assertEqual((self.row()[0]["refreshed"], self.row()[0]["result"]), ("2026-10-13T10:05:00Z", "2 new"))
+
     def test_a_failed_record_leaves_the_report_standing(self) -> None:
         intake.track(self.connection, self.REPO, None, self.root, self.home)
         with mock.patch.object(intake, "write_tracked", side_effect=intake.IntakeError("disk full")):
