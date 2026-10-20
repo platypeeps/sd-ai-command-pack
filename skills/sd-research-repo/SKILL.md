@@ -98,7 +98,8 @@ records the differences that are on purpose. Both are in
 3. Keep the document's shape: H1, provenance paragraph, `---`, numbered `##`
    sections, and a closing Status section separating verified from not verified.
    An experiment's status brief keeps the six fixed sections of
-   `references/conventions.md` **Status brief**.
+   `references/conventions.md` **Status brief**, and its `30-brief/deck.json`
+   changes with it; `sd-research-kit deck` lays that out as slides.
 4. Render, from inside the repo:
 
    ```bash

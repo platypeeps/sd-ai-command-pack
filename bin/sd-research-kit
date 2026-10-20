@@ -15,13 +15,14 @@ pointed at another checkout is a command that can act on one. The six research
 repos already invoked it as `research-kit render .` from inside the repo, so the
 positional form was carrying no traffic.
 
-`render` needs python-markdown, which does not install into a system python.
-It is resolved in this order, and none of the three writes anything next to this
-script -- `bin/` is enumerated from git for the lint target, so a `.venv`
+`render` needs python-markdown, which does not install into a system python;
+`deck` and `roundup` need python-pptx the same way. Each is resolved in this
+order, and none of the three writes anything next to this script -- `bin/` is
+enumerated from git for the lint target, so a `.venv`
 appearing in it would be linted:
 
 1. already importable  -> run in this interpreter;
-2. `uv` on PATH        -> re-exec through `uv run --with markdown`, which
+2. `uv` on PATH        -> re-exec through `uv run --with <package>`, which
                           resolves into uv's own cache;
 3. neither             -> bootstrap `$XDG_CACHE_HOME/sd-research-kit/venv`
                           (default `~/.cache/...`) and re-exec with it.
@@ -45,7 +46,8 @@ CHECKOUT = HERE.parent
 CONVENTIONS = CHECKOUT / "skills" / "sd-research-repo" / "references" / "conventions.md"
 
 USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pins|
-                          init-hook|init-claude-md|conventions|delivered|project
+                          init-hook|init-claude-md|conventions|delivered|project|
+                          deck|roundup
 
   render        render research.conf.py into docs/dashboard/, write the vault
                 copies, register with the dashboard, queue outward mirrors
@@ -104,10 +106,17 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                 `## Local overrides of the shared template` records the ones
                 that are deliberate
   conventions   print the path of the standard every research repo follows
+  deck          lay out 30-brief/deck.json, the status brief's slides, into
+                docs/dashboard/deck.pptx. Needs python-pptx, resolved as render
+                resolves markdown
+  roundup <out.pptx> <deck.json> ...
+                one deck from several experiments' deck.json files: a title
+                page each, then its slides, one call to action at the end.
+                Its arguments are files, not a checkout
 
 Every verb acts on the current working directory. There is no repo argument;
 `delivered`, `project --plan` and `project --writing` name a request in the
-machine's queue, which is not a repository.
+machine's queue, which is not a repository; `roundup` names deck files.
 """
 
 
@@ -134,15 +143,15 @@ def cache_venv() -> Path:
     return Path(root) / "sd-research-kit" / "venv"
 
 
-def reexec_with_markdown(argv: list[str]) -> None:
-    """Re-run this script under an interpreter that has python-markdown.
+def reexec_with(module: str, package: str, argv: list[str]) -> None:
+    """Re-run this script under an interpreter that has `package`.
 
     Never returns: it either replaces the process or exits with the child's
-    status. Called only when `import markdown` has already failed here.
+    status. Called only when `import <module>` has already failed here.
     """
 
     if shutil.which("uv"):
-        command = ["uv", "run", "--quiet", "--with", "markdown", "python", __file__]
+        command = ["uv", "run", "--quiet", "--with", package, "python", __file__]
         raise SystemExit(subprocess.call(command + argv))
 
     venv = cache_venv()
@@ -151,6 +160,7 @@ def reexec_with_markdown(argv: list[str]) -> None:
         print(f"bootstrapping {venv}", file=sys.stderr)
         venv.parent.mkdir(parents=True, exist_ok=True)
         subprocess.check_call([sys.executable, "-m", "venv", str(venv)])
+    if subprocess.call([str(python), "-c", f"import {module}"], stderr=subprocess.DEVNULL):
         subprocess.check_call(
             [
                 str(python),
@@ -159,7 +169,7 @@ def reexec_with_markdown(argv: list[str]) -> None:
                 "install",
                 "--quiet",
                 "--disable-pip-version-check",
-                "markdown",
+                package,
             ]
         )
     raise SystemExit(subprocess.call([str(python), __file__] + argv))
@@ -167,8 +177,16 @@ def reexec_with_markdown(argv: list[str]) -> None:
 
 def run_render(argv: list[str]) -> int:
     if importlib.util.find_spec("markdown") is None:
-        reexec_with_markdown(["render"] + argv)
+        reexec_with("markdown", "markdown", ["render"] + argv)
     return int(load("sd_research_render").main())
+
+
+def run_deck(verb: str, argv: list[str]) -> int:
+    # python-pptx, like markdown for render, is resolved only for the verbs that need it.
+    if importlib.util.find_spec("pptx") is None:
+        reexec_with("pptx", "python-pptx", [verb] + argv)
+    deck = load("sd_research_deck")
+    return int(deck.roundup_main(argv) if verb == "roundup" else deck.deck_main())
 
 
 def main(argv: list[str]) -> int:
@@ -186,6 +204,10 @@ def main(argv: list[str]) -> int:
         # Like `delivered`, it acts on the machine's queue and the workflow
         # database, never on a checkout, so its arguments are not R10-D6's.
         return int(load("sd_research_publish").project_main(rest))
+    if verb == "roundup":
+        # Like `delivered`: its arguments name deck files and the output, never
+        # a checkout to act on; it reads each deck.json and writes one file.
+        return run_deck(verb, rest)
     if rest:
         print(f"sd-research-kit: {verb} takes no arguments\n", file=sys.stderr)
         print(USAGE, end="", file=sys.stderr)
@@ -193,6 +215,8 @@ def main(argv: list[str]) -> int:
 
     if verb == "render":
         return run_render(rest)
+    if verb == "deck":
+        return run_deck(verb, rest)
     if verb == "publish":
         # `render` already does this; the verb exists so a repo can register
         # itself without a rebuild, and so the git hook has something to call
