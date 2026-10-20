@@ -772,7 +772,7 @@ class Synced:
 
     def report(self) -> list[str]:
         lines = [
-            f"shadow sync: {self.written} row(s) from {self.window_start}, "
+            f"shadow sync: {self.written} row(s) from {self.window_start or 'an unwindowed custom query'}, "
             f"watermark {'moved' if self.watermark_moved else 'held'}"
         ]
         if self.truncated:
@@ -976,7 +976,10 @@ def _sync_jira(connection: sqlite3.Connection, moment: datetime, transport, sinc
     with transaction(connection):
         written = store(connection, result.issues)
         previous_time = parse_iso(read_watermark(connection, shadow_jira.TRACKER))
-        moved = result.ok and (previous_time is None or moment > previous_time)
+        # A custom `JIRA_JQL` run has no window (empty `window_start`), so it
+        # holds the cursor; `windowed` lets `tracker_freshness` count it (pack sd:5376).
+        windowed = bool(result.window_start)
+        moved = result.ok and windowed and (previous_time is None or moment > previous_time)
         if moved:
             write_watermark(connection, shadow_jira.TRACKER, iso(moment), result.window_start)
         record_state(
@@ -984,7 +987,7 @@ def _sync_jira(connection: sqlite3.Connection, moment: datetime, transport, sinc
             timestamp=datetime.fromtimestamp(time.time(), timezone.utc).isoformat(timespec="seconds"),
             body={"ok": result.ok, "reason": result.reason, "truncated": result.truncated,
                   "window_start": result.window_start, "window_end": result.window_end,
-                  "requests": result.requests, "coverage": result.coverage,
+                  "windowed": windowed, "requests": result.requests, "coverage": result.coverage,
                   "queued": 0, "incomplete": []},
         )
     return Synced(

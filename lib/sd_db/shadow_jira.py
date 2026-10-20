@@ -553,11 +553,16 @@ def collect(watermark: str | None, now: datetime, seam=None, environ=None, *,
             clock=time.monotonic) -> Collected:
     """Every involved issue touched inside the window.
 
+    A set `JIRA_JQL` has no window, so `window_start` is empty and the caller
+    holds the cursor: a run of it covers no span a default run could resume
+    from (pack sd:5376).
+
     `clock` is the test seam for the time `search_window` widens a later
     half by.
     """
     config = settings(environ)
     start = window_start(watermark, now)
+    covered = "" if config["jql"] else iso(start)
     absent = missing(config)
     if absent:
         reasons = []
@@ -579,7 +584,7 @@ def collect(watermark: str | None, now: datetime, seam=None, environ=None, *,
             reason="; ".join(reasons),
             issues=[],
             truncated=[],
-            window_start=iso(start),
+            window_start=covered,
             window_end=iso(now),
         )
     spent = 0
@@ -598,7 +603,7 @@ def collect(watermark: str | None, now: datetime, seam=None, environ=None, *,
             reason=error,
             issues=[],
             truncated=[],
-            window_start=iso(start),
+            window_start=covered,
             window_end=iso(now),
             requests=spent,
         )
@@ -612,13 +617,14 @@ def collect(watermark: str | None, now: datetime, seam=None, environ=None, *,
     # reported `truncated` beside it. The pack's reader looked at `ok` only, and
     # never advanced a cursor over a truncated page because `truncated` was
     # reported rather than guarded. `Collected` is `ok=not errors and not
-    # truncated`, so the caller's watermark guard on `ok` alone is sound here.
+    # truncated`, so the caller's watermark guard needs only `ok` and a
+    # non-empty `window_start` here.
     return Collected(
         ok=not error and not cut,
         reason=error,
         issues=rows,
         truncated=["jql"] if cut else [],
-        window_start=iso(start),
+        window_start=covered,
         window_end=iso(now),
         requests=spent,
     )

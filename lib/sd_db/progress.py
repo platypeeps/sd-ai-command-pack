@@ -431,7 +431,17 @@ def tracker_freshness(
     if moment.tzinfo is None or type(max_age_seconds) is not int or max_age_seconds < 0:
         raise WorkflowError("freshness needs an aware time and nonnegative maximum age")
     success = read_watermark(connection, tracker)
+    # A custom `JIRA_JQL` run succeeds without moving the cursor (pack sd:5376),
+    # so its heartbeat counts too. CASE, because `json_type` raises on malformed JSON.
+    unwindowed = connection.execute(
+        "SELECT timestamp FROM state WHERE kind = 'heartbeat' AND key = ? AND CASE WHEN json_valid(body) "
+        "THEN json_type(body, '$.ok') = 'true' AND json_type(body, '$.windowed') = 'false' ELSE 0 END "
+        "ORDER BY timestamp DESC, id DESC LIMIT 1", (f"tracker-sync:{tracker}",),
+    ).fetchone()
+    ran = _moment(unwindowed["timestamp"]) if unwindowed else None
     parsed = _moment(success)
+    if ran is not None and (parsed is None or ran > parsed):
+        success, parsed = unwindowed["timestamp"], ran
     age = max(0, int((moment - parsed).total_seconds())) if parsed else None
     state = "never" if parsed is None else "fresh" if age <= max_age_seconds else "stale"
     latest = connection.execute(

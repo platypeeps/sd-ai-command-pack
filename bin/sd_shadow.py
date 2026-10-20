@@ -143,6 +143,9 @@ def report_sync(result, *, name: str, strict: bool) -> int:
     # is read off the cursor, and the reason off the collect.
     if result.watermark_moved:
         say(f"cursor moved to cover from {result.window_start}")
+    elif result.ok and not result.window_start:
+        # A custom JIRA_JQL has no window, so it covers no span (pack sd:5376).
+        say("custom JIRA_JQL ran unwindowed; cursor held")
     elif result.ok:
         say(f"coverage completed from {result.window_start}; existing cursor retained")
     else:

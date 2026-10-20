@@ -623,6 +623,15 @@ class TheShadowSyncOverTrackers(unittest.TestCase):
         self.assertIn(f"shadow sync[jira]: cursor held: {reason}", lines)
         self.assertEqual(f"shadow sync[jira]: cursor held: {reason}", lines[3], lines)
 
+    def test_an_unwindowed_custom_query_says_it_covered_no_window(self):
+        """pack sd:5376: a `JIRA_JQL` run succeeds with no window and holds the cursor."""
+        custom = self.Synced()
+        custom.window_start, custom.watermark_moved = "", False
+        code, lines, _ = self.sync({"github": self.Synced(), "jira": custom}, strict=True)
+        self.assertEqual(0, code, lines)
+        self.assertIn("shadow sync[jira]: custom JIRA_JQL ran unwindowed; cursor held", lines)
+        self.assertEqual([], [line for line in lines if "from ;" in line or "from  " in line], lines)
+
     def test_a_bounded_run_is_githubs_alone_and_says_so_for_the_rest(self):
         """The 2026-09-12 decision: the recovery flags cannot reach Jira."""
         code, lines, calls = self.sync({
