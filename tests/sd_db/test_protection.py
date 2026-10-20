@@ -1019,26 +1019,47 @@ class Baseline(SyncCase):
         body = json.loads(row["body"])
         return row, body, {flag["id"]: flag for flag in body["merge_settings"]}
 
-    def test_a_ruleset_only_branch_requiring_ci_clears_both_flags(self):
-        row, body, flags = self.observe("target", NO_CLASSIC, CI_RULES)
+    def test_a_classic_only_branch_requiring_ci_clears_both_flags(self):
+        """sd:5406: the fleet baseline is classic protection and no repository ruleset."""
+        classic = full_protection(required_status_checks={"strict": True, "contexts": ["ci"]})
+        row, body, flags = self.observe("target", classic, [])
         self.assertEqual(row["status"], "protected")
-        self.assertEqual(body["detail"]["source"], "ruleset")
+        self.assertNotIn("source", body["detail"])
         self.assertEqual((flags["protection_source"]["flagged"], flags["protection_source"]["value"]),
-                         (False, "ruleset"))
+                         (False, "classic"))
         self.assertEqual((flags["required_check"]["flagged"], flags["required_check"]["value"]), (False, "ci"))
 
-    def test_classic_and_combined_protection_flag_the_source(self):
+    def test_ruleset_and_combined_protection_flag_the_source(self):
         classic = full_protection(required_status_checks={"strict": True, "contexts": ["ci"]})
-        for name, rules, source in (("classic", [], "classic"), ("combined", CI_RULES, "combined")):
+        for name, branch, source in (("ruleset", NO_CLASSIC, "ruleset"), ("combined", classic, "combined")):
             with self.subTest(source=source):
-                _, _, flags = self.observe(name, classic, rules)
+                _, _, flags = self.observe(name, branch, CI_RULES)
                 self.assertTrue(flags["protection_source"]["flagged"])
                 self.assertEqual(flags["protection_source"]["value"], source)
+                self.assertIn("classic protection and no repository ruleset", flags["protection_source"]["gap"])
                 self.assertFalse(flags["required_check"]["flagged"])
 
+    def test_classic_beside_a_ruleset_that_gates_nothing_flags_the_source(self):
+        """`_combine` keeps the classic object when no rule gates a merge, so
+        `source` reads classic; the active ruleset still stands beside it."""
+        classic = full_protection(required_status_checks={"strict": True, "contexts": ["ci"]})
+        rules = [{"type": "deletion", "ruleset_id": 42}, {"type": "non_fast_forward", "ruleset_id": 42}]
+        _, body, flags = self.observe("beside", classic, rules)
+        self.assertNotIn("source", body["detail"])
+        self.assertTrue(flags["protection_source"]["flagged"])
+        self.assertEqual(flags["protection_source"]["value"], "classic, beside a ruleset")
+
+    def test_classic_with_a_failed_rules_read_flags_the_source(self):
+        """A rules read that failed is no evidence that no ruleset stands: not a pass."""
+        classic = full_protection(required_status_checks={"strict": True, "contexts": ["ci"]})
+        _, body, flags = self.observe("dark", classic, Response(403, {}, "{}"))
+        self.assertIn("rules_read_error", body["detail"])
+        self.assertTrue(flags["protection_source"]["flagged"])
+        self.assertEqual(flags["protection_source"]["value"], "classic, rulesets unread")
+        self.assertIn("unknown", flags["protection_source"]["gap"])
+
     def test_a_classic_object_that_gates_nothing_still_flags_the_source(self):
-        """`_combine` reads such a branch as `ruleset`; the classic object
-        still stands, and the baseline is rulesets alone."""
+        """`_combine` reads such a branch as `ruleset`, and a ruleset is not the baseline."""
         _, body, flags = self.observe("leftover", {"url": "x", "allow_deletions": {"enabled": False}}, CI_RULES)
         self.assertEqual(body["detail"]["source"], "ruleset")
         self.assertTrue(flags["protection_source"]["flagged"])
@@ -1388,10 +1409,11 @@ class Rows(SyncCase):
         self.assertEqual(row["status"], "protected")
         self.assertEqual([gap["id"] for gap in row["gaps"]], ["enforce_admins"])
         # A platypeeps remote carries the two baseline flags (sd:1741): classic
-        # protection requiring `CI Result` raises both.
+        # protection alone is the baseline (sd:5406), but requiring `CI Result`
+        # raises the check.
         self.assertEqual({flag["id"]: flag["flagged"] for flag in row["merge_settings"]},
                          {"squash_message": False, "rebase_merge": True,
-                          "protection_source": True, "required_check": True})
+                          "protection_source": False, "required_check": True})
         self.assertEqual(row["requests"], 3)
         self.assertIsNone(row["reason"])
 
