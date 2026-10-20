@@ -212,6 +212,87 @@ def refuse_unclosable(connection, item: int, repo: str, named, deliver: bool) ->
                           next_action="Close that item from its own repository, or name it in a Refs: line.")
 
 
+#: A `## Summary` group heading: a column-zero line or bullet that opens `<repo> sd:<n>` (sd:5375).
+_HEADING = re.compile(r"^(?:[-*] +)?([A-Za-z0-9_.-]+) sd:([0-9]+)\b")
+#: A level-one or level-two ATX heading, its text without closing hashes (CommonMark).
+_SECTION = re.compile(r"^ {0,3}#{1,2}(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*$")
+#: A column-zero `Refs:` line; the items it names stay open.
+_REFS = re.compile(r"^Refs[ \t]*:(.*)$", re.IGNORECASE)
+#: The kinds a merge closes (`close_items`) and the statuses it would close from.
+_CLOSABLE_KINDS = ("work", "task", "personal", "followup")
+_OPEN_STATUSES = ("planning", "ready", "in_progress", "ready_to_send")
+
+
+def summary_ids(body: str, names) -> tuple[int, ...]:
+    """The ids the `## Summary` group headings of `body` name under one of `names`, in order, once.
+
+    A heading is a line at column zero, or a `- ` bullet, that opens with
+    `<repo> sd:<n>`, as builders write one group per item (sd:5375). The
+    section runs to the next `#` or `##` heading; a code block or comment
+    holds examples, neither headings nor groups. Each name is compared
+    case-folded.
+    """
+    names = {name.lower() for name in names if name}
+    quoted = quoted_lines(body)
+    found, inside = [], False
+    for number, line in enumerate(body.split("\n"), start=1):
+        line = line.rstrip("\r")
+        if number in quoted:
+            continue
+        section = _SECTION.match(line)
+        if section:
+            inside = (section[1] or "").strip().lower() == "summary"
+            continue
+        match = _HEADING.match(line)
+        if inside and match and match[1].lower() in names:
+            found.append(int(match[2]))
+    return tuple(dict.fromkeys(found))
+
+
+def referenced_ids(body: str) -> set[int]:
+    """The ids the column-zero `Refs:` lines of `body` name: related items the merge leaves open.
+
+    Text in an HTML comment names nothing, since a reader of the page never sees it.
+    """
+    quoted = quoted_lines(body)
+    return {int(number) for index, line in enumerate(body.split("\n"), start=1)
+            if index not in quoted and (match := _REFS.match(line.rstrip("\r")))
+            for number in _TITLE_ID.findall(re.sub(r"<!--.*?(?:-->|$)", "", match[1]))}
+
+
+def refuse_left_open(connection, item: int, repo: str, names, title: str, body: str, named, deliver: bool) -> None:
+    """Refuse a delivering entry whose title or Summary headings name an open item missing from --item (sd:5375).
+
+    The --item list stays the one closing set (operator ruling 2026-10-13,
+    sd:3704); this asks for it complete before anything is queued. A
+    bundled pull request named only its first --item, and 18 items it
+    delivered stayed open; prepare's title warning ran inside the lane,
+    where no one read it. An item counts when it belongs to `repo`, is a
+    kind a merge closes, and is open: done and blocked items are not
+    demanded. A `Refs:` line names one the merge leaves open. `names`
+    are the repository names a heading may use (`summary_ids`).
+    """
+    if not deliver:
+        return
+    left = referenced_ids(body) | {item, *named}
+    missing = []
+    for number in dict.fromkeys(title_ids(title) + summary_ids(body, names)):
+        if number in left:
+            continue
+        row = connection.execute("SELECT repo, kind, status FROM item WHERE id = ?", (number,)).fetchone()
+        if row is not None and row["repo"] == repo and row["kind"] in _CLOSABLE_KINDS \
+                and row["status"] in _OPEN_STATUSES:
+            missing.append(number)
+    if missing:
+        raise Refusal("the title or a Summary heading names "
+                      + ", ".join(f"sd:{number}" for number in missing)
+                      + ", which this merge leaves open; add "
+                      + " ".join(f"--item {number}" for number in missing),
+                      code="closing_set_incomplete", boundary="input", state="operator_decision",
+                      next_action="Enqueue again with each item the pull request delivers named by --item, "
+                                  "or name an item it leaves open in a Refs: line.")
+
+
 def published(body: str, item: int) -> str:
     """The body as `sd-ship` publishes it: normalized, then one `Work:` line."""
     return f"{body}\n\n{sd_lib.WORK_TRAILER} sd:{item}\n"

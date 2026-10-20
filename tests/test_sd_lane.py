@@ -30,6 +30,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "bin"))
 
 import sd_lane  # noqa: E402
+import sd_ship_body  # noqa: E402
 
 from tests.clean_env import clean_environment  # noqa: E402
 from tests.row_seed import seed_declaration  # noqa: E402
@@ -1905,6 +1906,88 @@ class ItemChecks(SharedQueue):
         entry = sd_lane.enqueue_entry(self.tree, self.own, f"Two fixes (sd:{self.own}, sd:{self.foreign})", self.body,
                                       self.environ, claim="deliver")
         self.assertEqual(entry["status"], "pending")
+
+    def items(self, *statuses: str, kind: str = "task") -> list[int]:
+        """One item of this repository in each of `statuses`."""
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            return [sd_db.create_item(connection, kind=kind, title=f"also {status}", status=status,
+                                      repo=str(self.repo)) for status in statuses]
+        finally:
+            connection.close()
+
+    def queued(self, title: str, body: str, claim: str = "deliver", closes: tuple[int, ...] = ()) -> None:
+        self.body.write_text(body, encoding="utf-8")
+        entry = sd_lane.enqueue_entry(self.tree, self.own, title, self.body, self.environ, claim=claim, closes=closes)
+        self.assertEqual(entry["status"], "pending")
+
+    def test_a_summary_heading_naming_an_open_item_missing_from_item_is_refused(self) -> None:
+        """sd:5375: a bundled pull request closed only its first --item, and 18 items it delivered stayed open.
+        Each `## Summary` group heading `<repo> sd:N` of this repository must be named with --item."""
+        also, later = self.items("planning", "ready")
+        body = (f"## Summary\n\npack sd:{self.own}: the first\n\n- pack sd:{also}: the second\n\n"
+                f"## Test plan\n\n- pack sd:{later}: its test\n")
+        refused = self.refused(self.own, "Two fixes", body)
+        self.assertEqual(refused.code, "closing_set_incomplete")
+        self.assertIn(f"names sd:{also}, which this merge leaves open; add --item {also}", str(refused))
+        self.assertNotIn(f"sd:{later}", str(refused))
+
+    def test_a_title_naming_an_open_item_missing_from_item_is_refused(self) -> None:
+        """sd:5375: the title's ids of this repository count too; prepare's warning ran where no one read it."""
+        first, second = self.items("in_progress", "ready_to_send", kind="work")
+        refused = self.refused(self.own, f"Three fixes (sd:{self.own}, sd:{first}, sd:{second})", closes=(first,))
+        self.assertEqual(refused.code, "closing_set_incomplete")
+        self.assertIn(f"add --item {second}", str(refused))
+        self.assertNotIn(f"--item {first}", str(refused))
+
+    def test_every_named_item_with_an_item_flag_is_queued(self) -> None:
+        also, = self.items("planning")
+        self.queued(f"Two fixes (sd:{self.own}, sd:{also})", f"## Summary\n\npack sd:{also}: the second\n",
+                    closes=(also,))
+
+    def test_an_item_the_merge_cannot_or_need_not_close_is_not_demanded(self) -> None:
+        """Done and blocked items, another repository's heading, a Refs: line, a quoted heading and an idea
+        name nothing the merge must close; an associate-only claim closes nothing at all."""
+        done, blocked, refs, quoted, other = self.items("done", "blocked", "planning", "planning", "planning")
+        idea, = self.items("planning", kind="idea")
+        body = (f"## Summary\n\npack sd:{done}: done\n\npack sd:{blocked}: blocked\n\nsystem sd:{other}: elsewhere\n\n"
+                f"pack sd:{refs}: context only\n\npack sd:{idea}: an idea\n\n```\npack sd:{quoted}: example\n```\n\n"
+                f"Refs: sd:{refs}\n")
+        self.queued(f"Fixes (sd:{done}, sd:{self.foreign}, sd:{self.unregistered})", body)
+        sd_lane.update(self.store(), lambda rows: rows[0].update(status="cancelled"))
+        self.queued(f"Context (sd:{other})", "## Summary\n\nWords.\n", claim="associate-only")
+
+    def test_a_failed_read_of_a_named_item_is_unknown_and_queues_nothing(self) -> None:
+        """Failures: the hub fails on the named item's read; that is no pass, so nothing is pushed or queued."""
+        also, = self.items("planning")
+        real = sd_ship_body.refuse_left_open
+
+        def hub_drops(connection: Any, *args: Any) -> None:
+            class Dropped:
+                def execute(self, *_: Any) -> None:
+                    raise sqlite3.OperationalError("disk I/O error")
+            real(Dropped(), *args)
+        with mock.patch.object(sd_ship_body, "refuse_left_open", hub_drops):
+            refused = self.refused(self.own, f"Two fixes (sd:{self.own}, sd:{also})")
+        self.assertEqual(refused.code, sd_lane.HUB_UNAVAILABLE)
+
+    def test_retry_of_an_entry_whose_named_item_reopened_is_refused(self) -> None:
+        """Older state: an entry queued while its named item was done; the item reopened, so a retry
+        would leave it open."""
+        also, = self.items("done")
+        self.queued(f"Two fixes (sd:{self.own}, sd:{also})", "Words.\n")
+        sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed"))
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            connection.execute("UPDATE item SET status = 'planning' WHERE id = ?", (also,))
+        finally:
+            connection.close()
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, self.own, self.environ)
+        self.assertEqual(refused.exception.code, "closing_set_incomplete")
+        self.assertEqual([row["status"] for row in self.entries()], ["failed"])
 
     def test_an_associate_only_claim_with_a_second_item_is_refused(self) -> None:
         refused = self.refused(self.own, claim="associate-only", closes=(self.own + 99,))

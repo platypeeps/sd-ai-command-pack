@@ -111,6 +111,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    An associated merge carries `Item:`; only whole-item delivery adds `Delivers:`.
    Each later `--item` on `sd-ship lane enqueue` names a co-delivered item; each gets `Delivers:` and closes on the merge (sd:3704).
    A body `Closes:` line is refused, and the title and commit `Delivers:` lines close nothing.
+   A delivering enqueue refuses a title or `## Summary` heading `<repo> sd:N` naming an open item of this repository missing from `--item` (sd:5375).
    An `--associate-only` claim closes nothing (sd:3365).
    A body `Refs: sd:N` line names a related or partial item; the merge leaves it open.
    Record the row only after the remote confirms the merge.
