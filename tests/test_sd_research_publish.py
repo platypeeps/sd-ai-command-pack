@@ -1267,13 +1267,8 @@ class PublishedUrlTests(ReceiptFixture):
         self.assertNotEqual(self.fingerprint(), first)
 
 
-class DeliveredItemTests(ReceiptFixture):
-    """sd:3979: `delivered` records the URL on the item, for the drained generation only.
-
-    Before, the URL and the pending request's `item` went on the receipt
-    whatever generation was pending, and nothing reached the item row. Every
-    step that did not finish printed its reason and exited 0.
-    """
+class DeliveredItemFixture(ReceiptFixture):
+    """One document designated for Notion with an item, queued once."""
 
     NAME = "my-research.a.notion.json"
     URL = "https://example.test/p"
@@ -1305,6 +1300,15 @@ class DeliveredItemTests(ReceiptFixture):
 
     def key(self) -> str:
         return "%s::a" % self.repo
+
+
+class DeliveredItemTests(DeliveredItemFixture):
+    """sd:3979: `delivered` records the URL on the item, for the drained generation only.
+
+    Before, the URL and the pending request's `item` went on the receipt
+    whatever generation was pending, and nothing reached the item row. Every
+    step that did not finish printed its reason and exited 0.
+    """
 
     def test_the_url_reaches_the_item_with_one_note(self) -> None:
         status, said = self.deliver("--url", self.URL)
@@ -1399,6 +1403,112 @@ class DeliveredItemTests(ReceiptFixture):
         self.assertEqual(status, 0, said)
         self.assertEqual(self.receipt()["url"], self.URL)
         self.assertNotIn("item", self.receipt())
+
+
+class TrashTests(DeliveredItemFixture):
+    """sd:5492: an unticked designation queues a trash request, and `delivered` acknowledges it.
+
+    Before, the dashboard refused an untick: the designation held the id a drain wrote, and nothing could take a copy
+    down. A trash request carries that id or the delivered URL, so the designation can go while the request still says
+    which copy to trash; its acknowledgement drops the URL from the item and the receipt.
+    """
+
+    def delivered_copy(self) -> None:
+        status, said = self.deliver("--url", self.URL)
+        self.assertEqual(status, 0, said)
+
+    def trash(self, **extra) -> tuple[str, str]:
+        return PUBLISH.enqueue_trash(self.repo, "a", "notion", **extra)
+
+    def test_untick_queues_a_trash_request_naming_the_delivered_copy(self) -> None:
+        self.delivered_copy()
+        state, said = self.trash(designated="0123456789abcdef0123456789abcdef", item=self.item)
+        self.assertEqual(state, "queued", said)
+        request = json.loads(self.request())
+        self.assertEqual(request["action"], "trash")
+        self.assertEqual((request["page"], request["url"], request["item"]),
+                         ("0123456789abcdef0123456789abcdef", self.URL, self.item))
+        self.assertEqual(request["repo"], str(self.repo))
+        self.assertNotIn("content", request)
+        self.assertEqual(self.receipt()["trashing"]["fingerprint"], request["fingerprint"])
+
+    def test_nothing_queued_or_delivered_writes_no_trash_request(self) -> None:
+        (PUBLISH.QUEUE / self.NAME).unlink()
+        (PUBLISH.receipts() / self.NAME).unlink()
+        state, said = self.trash()
+        self.assertEqual(state, "nothing", said)
+        self.assertFalse((PUBLISH.QUEUE / self.NAME).exists())
+
+    def test_a_pending_request_never_drained_becomes_a_trash_by_pointer(self) -> None:
+        """A drain may have created the page before step 4: no id, so the trash request keeps the container."""
+        state, said = self.trash(item=self.item)
+        self.assertEqual(state, "queued", said)
+        request = json.loads(self.request())
+        self.assertEqual((request["action"], request["page"], request["url"]), ("trash", "", ""))
+        self.assertEqual(request["space_id"], PRIVATE_FOLDER)
+
+    def test_the_acknowledgement_drops_the_item_url_and_the_receipt_url(self) -> None:
+        self.delivered_copy()
+        self.trash(item=self.item)
+        status, said = self.deliver()
+        self.assertEqual(status, 0, said)
+        self.assertIn("trashed", said)
+        self.assertEqual(self.published(self.item), {})
+        self.assertEqual(self.comments(self.item)[-1], "Trashed notion a: %s" % self.URL)
+        receipt = self.receipt()
+        self.assertNotIn("url", receipt)
+        self.assertNotIn("delivered", receipt)
+        self.assertNotIn("trashing", receipt)
+        self.assertFalse((PUBLISH.QUEUE / self.NAME).exists())
+
+    def test_a_refused_drop_leaves_request_and_receipt(self) -> None:
+        from sd_db.writes import record_state  # noqa: PLC0415
+        self.delivered_copy()
+        self.trash(item=self.item)
+        record_state(self.connection, "restore", key="example", body={})
+        before, receipt = self.request(), self.receipt()
+        status, said = self.deliver()
+        self.assertEqual(status, 1, said)
+        self.assertEqual((self.request(), self.receipt()), (before, receipt))
+        self.assertEqual(self.published(self.item), {self.key(): {"title": "A", "notion": self.URL}})
+
+    def test_a_retick_before_the_drain_replaces_the_trash_and_carries_no_id(self) -> None:
+        self.delivered_copy()
+        self.trash(designated="0123456789abcdef0123456789abcdef", item=self.item)
+        PUBLISH.enqueue(self.repo, self.doc(self.item))
+        request = json.loads(self.request())
+        self.assertNotIn("action", request)
+        self.assertEqual(request["page"], "")
+
+    def test_a_trash_drained_after_a_retick_clears_the_url_and_keeps_the_newer_request(self) -> None:
+        self.delivered_copy()
+        self.trash(item=self.item)
+        trashed = self.fingerprint()
+        PUBLISH.enqueue(self.repo, self.doc(self.item))
+        newer = self.request()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            status = PUBLISH.delivered_main([self.NAME, trashed])
+        self.assertEqual(status, 0, out.getvalue())
+        self.assertEqual(self.request(), newer)
+        self.assertNotIn("url", self.receipt())
+        self.assertEqual(self.published(self.item), {})
+
+    def test_another_checkouts_request_in_the_slot_is_refused(self) -> None:
+        request = json.loads(self.request())
+        request["repo"] = str(self.root / "elsewhere" / "my-research")
+        (PUBLISH.QUEUE / self.NAME).write_text(json.dumps(request))
+        before = self.request()
+        state, said = self.trash()
+        self.assertEqual(state, "", said)
+        self.assertIn("another checkout", said)
+        self.assertEqual(self.request(), before)
+
+    def test_an_unreadable_request_is_refused_not_read_as_none(self) -> None:
+        (PUBLISH.QUEUE / self.NAME).write_text("{not json")
+        state, said = self.trash()
+        self.assertEqual(state, "", said)
+        self.assertEqual(self.request(), b"{not json")
 
 
 class ObsidianItemTests(Fixture):

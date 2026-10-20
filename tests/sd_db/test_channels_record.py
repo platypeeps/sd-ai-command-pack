@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from sd_db import connect
-from sd_db.channels import UrlRefusal, record_url
+from sd_db.channels import UrlRefusal, drop_url, record_url
 from sd_db.migrate import initialise
 from sd_db.writes import create_item, record_state
 
@@ -94,3 +94,35 @@ class RecordUrl(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class DropUrl(RecordUrl):
+    """sd:5492: a trashed copy's URL leaves the item, with one note; a refusal writes nothing."""
+
+    def drop(self, **changes):
+        given: dict[str, Any] = dict(item=self.item, repo=self.repo, document="a", channel="notion", who="sd-research-kit")
+        given.update(changes)
+        return drop_url(self.connection, **given)
+
+    def test_the_url_leaves_with_one_note_and_the_other_channel_stays(self):
+        self.record()
+        self.record(channel="drive", url="https://example.test/d")
+        self.assertEqual(self.drop(), "dropped")
+        self.assertEqual(self.published(), {f"{self.repo}::a": {"title": "A", "drive": "https://example.test/d"}})
+        self.assertEqual(self.notes()[-1], f"Trashed notion a: {URL}")
+
+    def test_the_last_channel_takes_the_entry(self):
+        self.record()
+        self.drop()
+        self.assertEqual(self.published(), {})
+
+    def test_no_url_is_unchanged_with_no_note(self):
+        self.assertEqual(self.drop(), "unchanged")
+        self.assertEqual(self.notes(), [])
+
+    def test_an_open_restore_refuses_and_writes_nothing(self):
+        self.record()
+        record_state(self.connection, "restore", key="example", body={})
+        with self.assertRaises(UrlRefusal):
+            self.drop()
+        self.assertEqual(self.published(), {f"{self.repo}::a": {"title": "A", "notion": URL}})

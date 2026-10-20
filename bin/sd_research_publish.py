@@ -1031,6 +1031,10 @@ def recorded(path: Path, wanted: dict[str, Any], what: str) -> str:
         return ""
     if not isinstance(pending, dict):
         return ""
+    # A trash request's id names a copy that may already be in the trash
+    # (sd:5492): a re-tick adopts the live one by its pointer, under step 3.
+    if pending.get("action") == TRASH:
+        return ""
     if any(pending.get(field) != value for field, value in wanted.items()):
         return ""
     return str(pending.get(what, "")).strip()
@@ -1333,6 +1337,10 @@ def acknowledge_request(name: str, fingerprint: str, url: str = "") -> tuple[int
     pending = load_record(path)
     if not pending:
         return 1, "delivered: no readable request at %s" % path
+    trashing = load_record(receipts() / name).get("trashing")
+    if pending.get("action") == TRASH or (isinstance(trashing, dict)
+                                          and trashing.get("fingerprint") == fingerprint):
+        return acknowledge_trash(name, pending, fingerprint)
     drained = pending.get("fingerprint") == fingerprint
     item = pending.get("item") if drained else None
     if pending.get("destination") == ROW_DESTINATION:
@@ -1417,6 +1425,155 @@ def delivered_main(argv: list[str]) -> int:
     status, said = mirror_delivered(name, argv[1], url)
     print(said, file=sys.stdout if status == 0 else sys.stderr)
     return status
+
+
+#: A request's `action` when it asks the drain to move a copy to the trash,
+#: not to mirror one (sd:5492). A mirror request carries no `action`.
+TRASH = "trash"
+#: What a trash request drops from the mirror request it replaces: the text
+#: and the paths a mirror reads. The container stays, for a drain that finds
+#: the copy by its pointer.
+TRASH_DROPS = ("content", "rendered", "markdown", "revision", "fingerprint", "action")
+
+
+def enqueue_trash(repo: Path, document: str, destination: str, *, designated: str = "",
+                  item: int | None = None, url: str = "") -> tuple[str, str]:
+    """Queue the trash of `document`'s `destination` copy, before its
+    designation is dropped (sd:5492): `(state, line)`.
+
+    `state` is `queued` (a trash request sits in the slot), `nothing` (no
+    request was queued and no copy delivered, so nothing is written), or `""`
+    when it refused, with nothing written. The request names the copy by
+    everything that records it: `designated` (the `page=` or `file=` the
+    designation holds), an id the pending request carries, `url` (the item's
+    `fields.published`) and the URL the receipt says was delivered. Where none
+    does but a request was pending, a drain may have created the page before
+    its step 4, so the request keeps that request's container and the drain
+    looks for the copy by its pointer.
+
+    It replaces whatever request sits in the slot: a pending mirror of a
+    document no longer designated is not one to drain. A re-tick replaces
+    the trash in turn, before any drain, and carries no id from it
+    (`recorded`). The receipt notes the trash's generation first, so an
+    acknowledgement that finds a newer request in the slot still knows which
+    trash it answers (`acknowledge_trash`).
+    """
+    dest = BY_NAME.get(destination)
+    if dest is None:
+        return "", "trash: %r is not a destination; expected %s" % (destination, " or ".join(BY_NAME))
+    home = repo_home(repo)
+    name = "%s.%s.%s.json" % (repo_key(home), document, destination)
+    try:
+        with queue_locked():
+            request, said = trash_request(QUEUE / name, receipts() / name, str(home), document,
+                                          dest, designated=designated, item=item, url=url)
+            if request:
+                write_trash(name, request)
+    except OSError as problem:
+        return "", "trash: %s not queued (%s)" % (name, problem)
+    return ("queued" if request else said[0]), said[1]
+
+
+def trash_request(path: Path, receipt_path: Path, home: str, document: str, dest: Destination, *,
+                  designated: str, item: int | None, url: str) -> tuple[dict[str, Any], tuple[str, str]]:
+    """The trash request `enqueue_trash` writes, from the pending request and
+    the receipt, and its report; `{}` with the state when it writes none."""
+    pending = load_record(path)
+    if path.exists() and not pending:
+        return {}, ("", "trash: %s is not a readable request, so whether a copy exists is "
+                        "not known; nothing queued" % path)
+    if pending and pending.get("repo") != home:
+        return {}, ("", "trash: %s holds another checkout's request (%s); nothing queued"
+                        % (path, pending.get("repo")))
+    receipt = load_record(receipt_path)
+    mine = receipt.get("repo") == home and receipt.get("document") == document
+    shipped = receipt.get("url") if mine and receipt.get("delivered") else ""
+    copy_id = (designated or str(pending.get(dest.what) or "")).strip()
+    url = (url or (shipped if isinstance(shipped, str) else "")).strip()
+    if not (copy_id or url or pending):
+        return {}, ("nothing", "trash: %s: no %s copy was queued or delivered; nothing to "
+                               "trash" % (document, dest.name))
+    request = {k: v for k, v in pending.items() if k not in TRASH_DROPS}
+    request.update(action=TRASH, repo=home, document=document, destination=dest.name, url=url)
+    request[dest.what] = copy_id
+    if item is not None:
+        request["item"] = item
+    request["fingerprint"] = hashlib.sha256(json.dumps(request, sort_keys=True).encode("utf-8")).hexdigest()
+    return request, ("queued", "trash: queued %s -> %s" % (
+        document, copy_id or url or "the copy its pointer names"))
+
+
+def write_trash(name: str, request: dict[str, Any]) -> None:
+    """The receipt's note of the trash's generation, then the request itself, atomically."""
+    receipt = load_record(receipts() / name)
+    receipt.update({field: request[field] for field in ("repo", "document", "destination")})
+    receipt.update(trashing={"fingerprint": request["fingerprint"], "item": request.get("item")})
+    receipts().mkdir(parents=True, exist_ok=True)
+    (receipts() / name).write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    QUEUE.mkdir(parents=True, exist_ok=True)
+    path = QUEUE / name
+    partial = path.with_name(path.name + ".partial")
+    partial.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+    os.replace(partial, path)
+
+
+def drop_item_url(item: Any, repo: str, document: str, channel: str) -> tuple[str, str]:
+    """`record_item_url`'s inverse, for a trashed copy: `(answer, "")` with
+    `dropped` or `unchanged`, or `("", reason)`."""
+    connection, problem = open_database()
+    if connection is None:
+        return "", problem
+    try:
+        from sd_db import channels  # noqa: PLC0415
+        return channels.drop_url(connection, item, repo, document, channel, "sd-research-kit"), ""
+    except Exception as problem:  # refused or failed: the row is as it was
+        return "", str(problem) or type(problem).__name__
+    finally:
+        connection.close()
+
+
+def acknowledge_trash(name: str, pending: dict[str, Any], fingerprint: str) -> tuple[int, str]:
+    """`delivered` for a trash request, under the queue lock (sd:5492).
+
+    The drain moved the copy to the trash; this takes its URL off the item,
+    then off the receipt, then removes the request while it is still that
+    generation. The copy is gone whatever is pending now, so a newer request
+    a re-tick queued meanwhile stays, and the URL still goes: its drain finds
+    no page and creates one. A step that does not finish leaves the request
+    and exits 1; the rerun's drop answers `unchanged`.
+    """
+    path = QUEUE / name
+    receipt = load_record(receipts() / name)
+    trashing = receipt.get("trashing") if isinstance(receipt.get("trashing"), dict) else {}
+    drained = pending.get("action") == TRASH and pending.get("fingerprint") == fingerprint
+    if not drained and trashing.get("fingerprint") != fingerprint:
+        return 1, ("delivered: %s is a trash request of another generation than %s; nothing "
+                   "recorded" % (name, fingerprint[:12]))
+    item = pending.get("item") if drained else trashing.get("item")
+    repo, document = (str(pending.get(k) or receipt.get(k) or "") for k in ("repo", "document"))
+    destination = str(pending.get("destination") or receipt.get("destination") or "")
+    if item is not None:
+        _, problem = drop_item_url(item, repo, document, destination)
+        if problem:
+            return 1, ("delivered: the trashed copy's URL is still on %s (%s); request and "
+                       "receipt left in place" % (item_named(item, repo), problem))
+    for field in ("delivered", "url", "delivered_to", "item", "trashing"):
+        receipt.pop(field, None)
+    receipt.update(trashed=fingerprint)
+    try:
+        receipts().mkdir(parents=True, exist_ok=True)
+        (receipts() / name).write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    except OSError as problem:
+        return 1, "delivered: cannot write receipt for %s (%s); request left in place" % (name, problem)
+    if not drained:
+        return 0, ("delivered: trashed %s for %s; a newer request is pending and stays"
+                   % (fingerprint[:12], name))
+    try:
+        path.unlink()
+    except OSError as problem:
+        return 1, "delivered: trashed %s for %s; cannot remove the request (%s)" % (
+            fingerprint[:12], name, problem)
+    return 0, "delivered: trashed %s for %s; request removed" % (fingerprint[:12], name)
 
 
 #: The destination of an item's row request (sd:3982). Not a row in

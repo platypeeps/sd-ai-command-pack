@@ -636,6 +636,7 @@ procedure whose failure mode is the bug it prevents is not a fix.
 | a row's plan, before its write | `creating` (`planned`) or `writing` on the item | plans again: the same create, or the update from the row as it is |
 | a create's mark, before `delivered` | `creating` marked `writing` | searches by the pointer, adopts one match and asks about none or two |
 | a row's write, before step 6 | values Notion took, unconfirmed | refuses those fields as possibly sd's own write, until a person hands them back |
+| a trash, before step 6 | a copy in the trash, its URL on the item | finds it in the trash, nothing left to trash, runs step 6 |
 
 Every row survives a render in between, because a render carries a recorded id
 forward under step 4 rather than overwriting the request.
@@ -649,6 +650,32 @@ whatever it is now called. A destination that creates a page and returns an
 error instead of an id lands in the first row and recovers there — by title,
 so rename a mirrored document whose drain errored and check its mirror by
 hand.
+
+### An unticked destination moves its copy to the trash
+
+Unticking a destination on the dashboard (sd:5489) queues a trash request in the
+same slot, then drops the designation (sd:5492). The request carries
+`action: "trash"`, the copy's `page` or `file` id and its `url`, as far as the
+designation, the pending request, the item and the receipt record them, and no
+`content`. Nothing queued and nothing delivered queues nothing. A drain handles
+it in place of steps 3 to 5:
+
+- Step 2 is the same: a refusal leaves the request.
+- Move the one copy it names to the trash, recoverably: `notion` with
+  `notion-delete-pages` and `user_confirmed: true` (the untick asked for that
+  page), `drive` with `update_drive_file` and `trashed: true`. With no id, take
+  it from `url`; with neither, look in the request's container for the copy
+  whose pointer names its `source`, as step 3 does. None found, or a copy
+  already in the trash, is nothing left to trash; two is an ambiguity: report
+  it and leave the request. A read that fails any other way leaves it too.
+- Never trash anything else: no other page, no folder, no parent.
+- Step 6 without `--url`: `delivered` takes the URL off the item and the
+  receipt, then removes the request while it is that generation.
+
+A re-tick before the drain replaces the trash request with a mirror request
+that carries no id from it; that drain adopts the live copy by its pointer.
+A page or file a mirror request names that is in the trash is not updated:
+step 3 treats it as no page.
 
 Never drain a request into a container it does not resolve to, never create a
 page or file outside that container -- the one the document names, or the
