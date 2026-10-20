@@ -534,6 +534,9 @@ SNOOZE_DAYS = 31
 SNOOZE_KEY_LENGTH = 512
 #: `seen` is the page's fingerprint of the row's problem, a short hash.
 SNOOZE_SEEN_LENGTH = 128
+#: A snooze with no end, Health's Ignore (system sd:5470): no time to judge,
+#: so only a changed problem (`seen`) or a clear shows the row again.
+SNOOZE_FOREVER = "forever"
 
 
 def snooze(
@@ -553,12 +556,14 @@ def snooze(
     `SNOOZE_DAYS`. `seen` is what the operator saw of the row's problem, the
     page's fingerprint: an id names a resource, not its problem, so a snooze
     holds only while the row still reads `seen` (the page's `snooze.split`).
+    `until=SNOOZE_FOREVER` has no end, so it skips the time checks; it still
+    needs `seen`. An earlier reader cannot parse it as a time and shows the row.
     """
     if not isinstance(key, str) or not key.strip() or len(key) > SNOOZE_KEY_LENGTH:
         raise SdDbError(f"a snooze needs the row's key, 1 to {SNOOZE_KEY_LENGTH} characters")
-    if until is not None:
-        if not isinstance(seen, str) or not seen.strip() or len(seen) > SNOOZE_SEEN_LENGTH:
-            raise SdDbError(f"a snooze needs what the row showed (seen), 1 to {SNOOZE_SEEN_LENGTH} characters")
+    if until is not None and (not isinstance(seen, str) or not seen.strip() or len(seen) > SNOOZE_SEEN_LENGTH):
+        raise SdDbError(f"a snooze needs what the row showed (seen), 1 to {SNOOZE_SEEN_LENGTH} characters")
+    if until not in (None, SNOOZE_FOREVER):
         until = stamp(until)
         moment = datetime.fromisoformat(until)
         start = datetime.fromisoformat(stamp(now)) if now else datetime.now(UTC)
@@ -570,7 +575,7 @@ def snooze(
 
 
 def snoozed(connection: sqlite3.Connection, *, now: str) -> dict[str, dict[str, str]]:
-    """Every row key hidden at `now`: the time it shows again, and what it showed when snoozed.
+    """Every row key hidden at `now`: the time it shows again, or `SNOOZE_FOREVER`, and what it showed when snoozed.
 
     The latest `snooze` row per key, read through `state_by_kind_key`. A body
     this cannot read hides nothing: an unreadable snooze shows its row, and so
@@ -584,12 +589,15 @@ def snoozed(connection: sqlite3.Connection, *, now: str) -> dict[str, dict[str, 
     ):
         try:
             body = json.loads(row["body"])
-            moment = datetime.fromisoformat(stamp(body.get("until")))
+            until = body.get("until")
+            if until != SNOOZE_FOREVER:
+                moment = datetime.fromisoformat(stamp(until))
+                until = moment.isoformat(timespec="seconds") if moment > at else None
             seen = body["seen"]
         except (TypeError, ValueError, AttributeError, KeyError, SdDbError):
             continue
-        if moment > at and isinstance(seen, str) and seen:
-            found[row["key"]] = {"until": moment.isoformat(timespec="seconds"), "seen": seen}
+        if until and isinstance(seen, str) and seen:
+            found[row["key"]] = {"until": until, "seen": seen}
     return found
 
 

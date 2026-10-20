@@ -33,7 +33,7 @@ from sd_db import (
 )
 from sd_db.errors import SdDbError
 from sd_db.migrate import initialise
-from sd_db.writes import TransitionRefused, now, stamp
+from sd_db.writes import SNOOZE_FOREVER, TransitionRefused, now, stamp
 
 
 class WriteCase(unittest.TestCase):
@@ -238,6 +238,19 @@ class TheSnooze(WriteCase):
                 snooze(self.connection, "health:dep:/c/alpha", "2026-10-11T08:00:00Z", seen=seen, now=self.NOW)
             self.assertIn("seen", str(raised.exception))
         self.assertEqual(self.connection.execute("SELECT count(*) FROM state").fetchone()[0], 0)
+
+    def test_a_snooze_with_no_end_holds_past_any_time_and_clears_like_any_other(self):
+        """Health's Ignore (system sd:5470): `SNOOZE_FOREVER` has no time to judge, still binds to `seen`, and clears with None."""
+        snooze(self.connection, "health:dep:/c/alpha", SNOOZE_FOREVER, seen="0f0f", now=self.NOW)
+        held = {"health:dep:/c/alpha": {"until": SNOOZE_FOREVER, "seen": "0f0f"}}
+        self.assertEqual(snoozed(self.connection, now=self.NOW), held)
+        self.assertEqual(snoozed(self.connection, now="2036-10-10T12:00:00Z"), held)
+        self.assertEqual(self.connection.execute("SELECT body FROM state").fetchone()[0], '{"seen": "0f0f", "until": "forever"}')
+        with self.assertRaises(SdDbError) as raised:
+            snooze(self.connection, "health:dep:/c/beta", SNOOZE_FOREVER, seen=None, now=self.NOW)
+        self.assertIn("seen", str(raised.exception))
+        snooze(self.connection, "health:dep:/c/alpha", None, now=self.NOW)
+        self.assertEqual(snoozed(self.connection, now=self.NOW), {})
 
     def test_a_body_the_reader_cannot_parse_shows_the_row(self):
         """An unreadable snooze is not a snooze: the row it would hide shows. So is one an earlier build wrote
