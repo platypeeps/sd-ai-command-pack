@@ -1463,6 +1463,7 @@ def views_section(root: pathlib.Path, environ: dict[str, str]) -> dict[str, Any]
 
 def _machine_gate(snapshot: Any) -> dict[str, Any] | None:
     """`today.machine_gate` over the snapshot, or the gate unknown, with why, when that library will not import."""
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
     try:
         from sd_db import today
     except ImportError as error:
