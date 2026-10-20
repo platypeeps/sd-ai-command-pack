@@ -31,6 +31,7 @@ from typing import Any
 
 DECK = Path("30-brief") / "deck.json"
 OUT = Path("docs") / "dashboard" / "deck.pptx"
+ROUNDUP = Path("docs") / "dashboard" / "roundup.pptx"
 
 #: The deck's own slides: a status deck is short, and a roundup repeats it per experiment.
 SLIDES = 3
@@ -416,16 +417,30 @@ def deck_main() -> int:
     return 0
 
 
-def roundup_main(argv: list[str]) -> int:
-    """`sd-research-kit roundup <out.pptx> <deck.json> ...`: every deck, each after its title page."""
-    if len(argv) < 2 or not argv[0].endswith(".pptx"):
-        print("usage: sd-research-kit roundup <out.pptx> <deck.json> [<deck.json> ...]", file=sys.stderr)
-        return 2
+def fleet_decks(trees: list[Path]) -> list[Path]:
+    """Each checkout's own `30-brief/deck.json`, not a symlink, newest `date` first, then by checkout name."""
+    found = []
+    for tree in trees:
+        path = Path(tree) / DECK
+        if path.is_file() and not path.is_symlink():
+            found.append((load_deck(path), path))
+    found.sort(key=lambda pair: pair[1].parent.parent.name)
+    found.sort(key=lambda pair: pair[0]["date"], reverse=True)
+    return found
+
+
+def roundup_main(trees: list[Path]) -> int:
+    """`sd-research-kit roundup`: every checkout's deck.json into `docs/dashboard/roundup.pptx` here."""
     try:
-        decks = [load_deck(Path(p)) for p in argv[1:]]
-        count = build(decks, Path(argv[0]), titles=True)
+        found = fleet_decks(trees)
+        if not found:
+            print(f"sd-research-kit roundup: no checkout beside this one keeps a {DECK}", file=sys.stderr)
+            return 2
+        count = build([deck for deck, _ in found], Path.cwd() / ROUNDUP, titles=True)
     except Invalid as problem:
         print(f"sd-research-kit roundup: {problem}", file=sys.stderr)
         return 1
-    print(f"wrote {argv[0]}: {count} slides from {len(decks)} decks")
+    print(f"wrote {ROUNDUP}: {count} slides from {len(found)} decks")
+    for _, path in found:
+        print(f"  {path}")
     return 0

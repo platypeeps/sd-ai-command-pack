@@ -97,19 +97,35 @@ class TemplateDeck(unittest.TestCase):
         self.assertIn("slides[0].cards: at most 6 cards", result.stderr)
         self.assertFalse((self.tmp / "docs").exists())
 
-    def test_roundup_gives_each_experiment_a_title_page_and_one_call_to_action(self):
-        other = copy.deepcopy(self.deck)
-        other.update(name="Second Study", tagline="Built. Next: measure.")
-        other["theme"]["cta"] = {"text": "Ignored", "url": "https://example.test/ignored"}
-        out = self.tmp / "roundup.pptx"
-        result = kit("roundup", str(out), str(self.write("a.json", self.deck)), str(self.write("b.json", other)),
-                     cwd=self.tmp)
+    def fleet(self, *checkouts):
+        """`~/repos` under a home of its own: each `(relative path, deck or None)` a git checkout."""
+        for rel, deck in checkouts:
+            tree = self.tmp / "home" / "repos" / rel
+            (tree / ".git").mkdir(parents=True)
+            if deck is not None:
+                (tree / "30-brief").mkdir()
+                (tree / "30-brief" / "deck.json").write_text(json.dumps(deck), encoding="utf-8")
+        here = self.tmp / "work"
+        here.mkdir(exist_ok=True)
+        return here
+
+    def roundup(self, here):
+        return subprocess.run([sys.executable, str(KIT), "roundup"], cwd=here, capture_output=True, text=True,
+                              timeout=120, env=clean_environment(HOME=str(self.tmp / "home")))
+
+    def test_roundup_gives_each_checkouts_deck_a_title_page_newest_first_and_one_call_to_action(self):
+        older = copy.deepcopy(self.deck)
+        older.update(name="Second Study", tagline="Built. Next: measure.", date="2026-10-01")
+        older["theme"]["cta"] = {"text": "Ignored", "url": "https://example.test/ignored"}
+        here = self.fleet(("org/older", older), ("newer", self.deck), ("org/none", None))
+        result = self.roundup(here)
         self.assertEqual(result.returncode, 0, result.stderr)
-        slides = list(Presentation(str(out)).slides)
+        self.assertIn("from 2 decks", result.stdout)
+        slides = list(Presentation(str(here / "docs" / "dashboard" / "roundup.pptx")).slides)
         self.assertEqual(len(slides), 6)
         self.assertIn("EXPERIMENT 1 OF 2  ·  OCTOBER 20, 2026", texts(slides[0]))
         self.assertIn("Example Revamp", texts(slides[0]))
-        self.assertIn("EXPERIMENT 2 OF 2", texts(slides[3]))
+        self.assertIn("EXPERIMENT 2 OF 2  ·  OCTOBER 1, 2026", texts(slides[3]))
         self.assertIn("Built. Next: measure.", texts(slides[3]))
         everywhere = [url for slide in slides for url in links(slide)]
         # The first deck's theme rules the roundup: its call to action, once, on the last slide.
@@ -117,9 +133,34 @@ class TemplateDeck(unittest.TestCase):
                          ["https://example.test/"])
         self.assertIn("https://example.test/", links(slides[-1]))
 
-    def test_roundup_names_its_usage(self):
-        self.assertEqual(kit("roundup", cwd=self.tmp).returncode, 2)
-        self.assertEqual(kit("roundup", "out.txt", "a.json", cwd=self.tmp).returncode, 2)
+    def test_roundup_skips_a_symlinked_deck_and_a_folder_that_is_no_checkout(self):
+        here = self.fleet(("real", self.deck))
+        outside = self.tmp / "outside.json"
+        outside.write_text(json.dumps(self.deck), encoding="utf-8")
+        linked = self.tmp / "home" / "repos" / "linked"
+        (linked / ".git").mkdir(parents=True)
+        (linked / "30-brief").mkdir()
+        (linked / "30-brief" / "deck.json").symlink_to(outside)
+        loose = self.tmp / "home" / "repos" / "loose" / "30-brief"
+        loose.mkdir(parents=True)
+        (loose / "deck.json").write_text(json.dumps(self.deck), encoding="utf-8")
+        result = self.roundup(here)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("from 1 decks", result.stdout)
+        self.assertIn(str(self.tmp / "home" / "repos" / "real" / "30-brief" / "deck.json"), result.stdout)
+
+    def test_roundup_with_no_deck_or_a_bad_one_writes_nothing(self):
+        here = self.fleet(("none", None))
+        result = self.roundup(here)
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("no checkout beside this one keeps a 30-brief/deck.json", result.stderr)
+        bad = copy.deepcopy(self.deck)
+        bad["date"] = "soon"
+        self.fleet(("bad", bad))
+        result = self.roundup(here)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("bad/30-brief/deck.json", result.stderr)
+        self.assertFalse((here / "docs").exists())
 
     def test_a_logo_resolves_beside_its_deck_json(self):
         from PIL import Image

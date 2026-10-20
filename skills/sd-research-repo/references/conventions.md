@@ -209,8 +209,9 @@ Use no emoji in the State cell: the deck and the mirrors are read outside the te
 
 `30-brief/deck.json` holds the brief condensed to at most three slides.
 Update it in the same change as the brief, so the two never disagree.
-`sd-research-kit deck` lays it out into `docs/dashboard/deck.pptx`; `sd-research-kit roundup <out.pptx> <deck.json> ...`
-builds one deck from several experiments, each after a title page, with one call to action on the last slide.
+`sd-research-kit deck` lays it out into `docs/dashboard/deck.pptx`; `sd-research-kit roundup` builds
+`docs/dashboard/roundup.pptx` from every checkout's deck.json under `~/repos`, newest `date` first, each after a title
+page, with one call to action on the last slide.
 The example and the schema in use are `skills/sd-research-repo/templates/deck.json`; the builder refuses an unknown key,
 an em dash, more than six cards (three beside a track) and text past its bound, naming the value's path.
 
