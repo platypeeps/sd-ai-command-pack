@@ -3056,6 +3056,109 @@ class ViewsTests(InventoryFixture):
         self.assertIn("  ! ", stream.getvalue())
 
 
+class OperationsTests(InventoryFixture):
+    """sd:5432: the open report findings that name this machine, and the gate line, in every repository."""
+
+    def environ(self) -> dict[str, str]:
+        gate = self.base / "gate-slots"
+        gate.mkdir(exist_ok=True)
+        return {"HOME": str(self.home), "SD_GATE_SLOTS": "2", "SD_GATE_SLOTS_DIR": str(gate),
+                "SD_GATE_LOAD_MAX": "40"}
+
+    def report(self, connection: Any, job: str, basis: str, *, status: str = "planning",
+               attention: bool = True, **extra: Any) -> int:
+        import sd_db
+
+        made = sd_db.create_item(connection, kind="report", title=f"{job} findings", source="cron-report",
+                                 external_id=f"{job}:20261020T101505Z-1",
+                                 fields={"attention": attention, "report": {"attention_basis": basis}, **extra})
+        connection.execute("UPDATE item SET status = ? WHERE id = ?", (status, made))
+        return made
+
+    def fill(self) -> dict[str, int]:
+        import sd_db
+
+        sd_db.initialise(home=self.home)
+        connection = sd_db.connect(home=self.home)
+        try:
+            with connection:
+                made = {
+                    "health": self.report(connection, "health-check-nightly", "\n".join((
+                        "health check on alpha: launchd: com.example.test.job reports a failed run",
+                        "health check on beta: disk: under 10% free",
+                        "health check on alphabet: not this machine"))),
+                    "maintenance": self.report(connection, "maintenance-nightly", "\n".join((
+                        "maintenance on alpha: App Store updates pending:",
+                        "maintenance on alpha: App Store updates pending: 1 Example (1.0 -> 1.1)"))),
+                    "exited": self.report(connection, "secret-scan-weekly", "job exited 2 on alpha"),
+                    "other": self.report(connection, "repo-sync-nightly", "repo-sync on beta: hygiene report"),
+                    "folded": self.report(connection, "brew-doctor-nightly", "brew doctor on alpha: first set",
+                                          repeats={"basis": "brew doctor on alpha: current set"}),
+                    "done": self.report(connection, "done-nightly", "done on alpha: closed", status="done"),
+                    "quiet": self.report(connection, "quiet-nightly", "quiet on alpha: x", attention=False),
+                    "unread": self.report(connection, "broken-nightly", "broken on beta: x"),
+                }
+                connection.execute("UPDATE item SET fields = 'not json' WHERE id = ?", (made["unread"],))
+        finally:
+            connection.close()
+        return made
+
+    def section(self) -> dict[str, Any]:
+        with mock.patch("socket.gethostname", return_value="Alpha.example.test"):
+            return status.operations_section(self.environ())
+
+    def test_only_the_lines_that_name_this_machine_are_rows(self) -> None:
+        import sd_db.today
+
+        made = self.fill()
+        section = self.section()
+        self.assertTrue(section["available"], section)
+        self.assertEqual(section["host"], "alpha")
+        self.assertEqual(sorted((row["id"], row["job"], row["finding"]) for row in section["findings"]), sorted([
+            (made["health"], "health-check-nightly", "launchd: com.example.test.job reports a failed run"),
+            (made["maintenance"], "maintenance-nightly", "App Store updates pending: 1 Example (1.0 -> 1.1)"),
+            (made["exited"], "secret-scan-weekly", "job exited 2"),
+            (made["folded"], "brew-doctor-nightly", "current set"),
+            (made["unread"], "broken-nightly", sd_db.today.FIELDS_UNREAD),
+        ]))
+        self.assertEqual(section["gate"], {"holders": [], "waiters": [], "error": None, "slots": 2,
+                                           "load": section["gate"]["load"], "load_max": 40.0})
+        stream = io.StringIO()
+        status._render_operations(section, stream.write, width=120)
+        text = stream.getvalue()
+        self.assertIn("\nOperations, this machine (5)\n  ID ", text)
+        self.assertRegex(text, rf"\n  #{made['health']} +health-check-nightly +launchd: com\.example\.test\.job ")
+        self.assertNotIn("disk: under 10% free", text)
+        self.assertNotIn("not this machine", text)
+        self.assertRegex(text, r"\n  Gate slots: 0 holding · 0 waiting · load \S+, limit 40\n$")
+
+    def test_a_database_read_that_fails_counts_unknown_not_zero(self) -> None:
+        self.fill()
+        import sd_db.today
+
+        with mock.patch.object(sd_db.today, "operations", side_effect=RuntimeError("disk I/O error")):
+            section = self.section()
+        self.assertFalse(section["available"])
+        self.assertEqual(section["reason"], "shared database unreadable: disk I/O error")
+        stream = io.StringIO()
+        status._render_operations(section, stream.write)
+        self.assertTrue(stream.getvalue().startswith(
+            "\nOperations, this machine (unknown)\n  ! shared database unreadable: disk I/O error\n"
+            "  Gate slots: 0 holding · 0 waiting · load "))
+
+    def test_no_database_counts_unknown_and_a_gate_that_does_not_read_is_named(self) -> None:
+        import sd_gate_slots
+
+        with mock.patch.object(sd_gate_slots, "snapshot", side_effect=PermissionError("slot directory denied")):
+            section = self.section()
+        self.assertFalse(section["available"])
+        self.assertEqual(section["gate"], {"holders": [], "waiters": [], "error": "slot directory denied"})
+        stream = io.StringIO()
+        status._render_operations(section, stream.write)
+        self.assertIn("\nOperations, this machine (unknown)\n  ! no shared sd_db database yet", stream.getvalue())
+        self.assertIn("\n  Gate slots: unknown (slot directory denied)\n", stream.getvalue())
+
+
 class LowYieldProducerTests(InventoryFixture):
     def test_a_marker_in_tracked_source_is_found_and_one_in_docs_is_not(self) -> None:
         # Spelled in halves so this repository's own scan stays at zero, which
@@ -4380,6 +4483,11 @@ class ReportSectionTests(InventoryFixture):
         return {
             "views": {"available": True, "reason": "", "repos": [str(self.repo)], "companions_error": "",
                       "now": "2026-09-01T12:00:00Z", "sections": found},
+            "operations": {"available": True, "reason": "", "host": "alpha", "findings": [
+                {"id": 31, "repo": None, "title": "health-check-nightly: needs attention", "job": "health-check-nightly",
+                 "finding": "disk: under 10% free"}],
+                           "gate": {"holders": [], "waiters": [], "error": None, "slots": 2,
+                                    "load": [1.0, 1.0, 1.0], "load_max": 40.0}},
             "contributions": {"available": True, "reason": "", "rows": [
                 {"key": f"github:{url}", "url": url, "lane": "awaiting_you", "item_id": 14,
                  "local_status": "planning", "external_state": "open", "title": "Fold the widget",
@@ -4446,7 +4554,8 @@ class ReportSectionTests(InventoryFixture):
         for heading in ("Contributions, this repo, shared database order (unknown)", "Open pull requests (unknown)",
                         "Issues, this repo, shared database (unknown)",
                         "Jira, shared database, all repositories (unknown)", "Protection (unknown)",
-                        "Work across the shared database (unknown)", "Merge lane, this repo, shared database (unknown)"):
+                        "Work across the shared database (unknown)", "Operations, this machine (unknown)",
+                        "Merge lane, this repo, shared database (unknown)"):
             self.assertIn(heading, found)
         for heading in found:
             self.assertRegex(heading, self.HEADING)
@@ -4477,7 +4586,8 @@ class ReportSectionTests(InventoryFixture):
     #: the report is read top-down and the judgement is what the reader came
     #: for; the eight below keep the order they already had.
     ORDER = [
-        "Abnormalities", "Pending", "Next", "Work across the shared database", "Open threads", "Work items",
+        "Abnormalities", "Pending", "Next", "Work across the shared database", "Operations, this machine",
+        "Open threads", "Work items",
         "Contributions, this repo, shared database order",
         "Open pull requests", "Merge lane, this repo, shared database", "Detected setup",
         "Issues, this repo, shared database",

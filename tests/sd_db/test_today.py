@@ -6,6 +6,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from sd_db import (
     connect,
@@ -205,6 +206,53 @@ class TheSections(TodayCase):
 
     def test_the_active_assignment_states_match_the_workflow(self):
         self.assertEqual(today.ACTIVE_ASSIGNMENTS, workflow.ACTIVE_ASSIGNMENTS)
+
+
+class TheOperations(TodayCase):
+    """pack sd:5432: the open report lines that name this machine, every repository's, and the gate."""
+
+    def report(self, job, basis, *, repo=None, **fields):
+        return self.item(f"{job}: needs attention", kind="report", repo=repo, source="cron-report",
+                         external_id=f"{job}:20261020T101505Z-1",
+                         fields={"attention": fields.pop("attention", True), "report": {"attention_basis": basis},
+                                 **fields})
+
+    def test_only_the_lines_naming_the_host_are_rows_and_the_gate_rides_along(self):
+        health = self.report("health-check-nightly", "\n".join((
+            "health check on alpha: launchd: com.example.test.job reports a failed run",
+            "health check on beta: disk: under 10% free",
+            "health check on alphabet: not this machine")), repo=APP)
+        store = self.report("maintenance-nightly", "\n".join((
+            "maintenance on alpha: App Store updates pending:",
+            "maintenance on alpha: App Store updates pending: 1 Example (1.0 -> 1.1)")), repo=LIB)
+        exited = self.report("secret-scan-weekly", "job exited 2 on alpha")
+        folded = self.report("brew-doctor-nightly", "brew doctor on alpha: first set",
+                             repeats={"basis": "brew doctor on alpha: current set"})
+        self.report("quiet-nightly", "quiet on alpha: x", attention=False)
+        transition(self.connection, self.report("done-nightly", "done on alpha: x"), "done", who="operator",
+                   reason="acknowledged")
+        unread = self.report("broken-nightly", "broken on beta: x")
+        self.connection.execute("UPDATE item SET fields = 'not json' WHERE id = ?", (unread,))
+        self.item("No basis", kind="report", fields={"attention": "look"})
+        snapshot = {"slots": 2, "load": [1.5, 1.0, 0.5], "load_max": 40.0,
+                    "holders": [{"slot": 1, "pid": 7, "label": "tests", "since": WHEN, "cwd": "/tmp"}], "waiters": []}
+        found = today.operations(self.connection, host="alpha", gate=snapshot)
+        self.assertEqual(sorted((row["id"], row["job"], row["finding"]) for row in found["findings"]), sorted([
+            (health, "health-check-nightly", "launchd: com.example.test.job reports a failed run"),
+            (store, "maintenance-nightly", "App Store updates pending: 1 Example (1.0 -> 1.1)"),
+            (exited, "secret-scan-weekly", "job exited 2"),
+            (folded, "brew-doctor-nightly", "current set"),
+            (unread, "broken-nightly", today.FIELDS_UNREAD),
+        ]))
+        self.assertEqual(found["gate"], {"holders": [{"slot": 1, "label": "tests", "since": WHEN}], "waiters": [],
+                                         "error": None, "slots": 2, "load": [1.5, 1.0, 0.5], "load_max": 40.0})
+        self.assertEqual(today.operations(self.connection, host="beta", gate="slots unreadable")["gate"],
+                         {"holders": [], "waiters": [], "error": "slots unreadable"})
+        # A machine belongs to no repository: the repository filter leaves the section whole.
+        with mock.patch.object(today, "this_host", return_value="alpha"):
+            mine = today.sections(self.connection, repos=[LIB], now=NOW, gate=snapshot)
+        self.assertEqual(mine["operations"], {**found, "host": "alpha"})
+        self.assertEqual(mine["summary"]["operations"], 5)
 
 
 class TheRepositoryFilter(TodayCase):

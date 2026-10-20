@@ -9,7 +9,8 @@ is its heading alone. The one-line summary, the gate line, Delivered's
 `+N closed by hand` line and Decisions' `+N review questions wait` line are
 plain lines.
 
-Each table is ID, Repo, State, the section's own columns, Title and When.
+Each table is ID, Repo, State, the section's own columns, Title and When,
+except Operations, this machine: ID, Job and Finding, then the gate line.
 Title takes the width the other columns leave, out of `width` (the terminal's,
 else `DEFAULT_WIDTH`), and is cut to fit. When is a relative time ("3 d ago",
 "in 2 h") or, where the moment matters (a landing, a lane start), a local time
@@ -31,7 +32,7 @@ TITLE_MIN = 16
 #: The widest any other column grows; longer text is cut, so Title keeps its room.
 CELL_MAX = 32
 #: Each section's heading.
-HEADINGS = {"attention": "Attention", "decisions": "Decisions", "landing": "Landing now", "delivered": "Delivered",
+HEADINGS = {"attention": "Attention", "operations": "Operations, this machine", "decisions": "Decisions", "landing": "Landing now", "delivered": "Delivered",
             "planned": "Planned", "blocked": "Blocked", "unscheduled": "Unscheduled", "followups": "Followups",
             "work": "Work"}
 #: The sections that print whole.
@@ -202,7 +203,10 @@ def section_table(section: str, rows: list[dict[str, Any]], now: datetime.dateti
 
 
 def gate_line(gate: dict[str, Any] | None, now: datetime.datetime) -> list[str]:
-    """The machine's gate slots on one plain line; a failed read says unknown, never an idle gate."""
+    """The machine's gate slots on one plain line; a failed read says unknown, never an idle gate.
+
+    The load and its limit follow when the snapshot carries them, in `sd gate status`'s words.
+    """
     if gate is None:
         return []
     if gate.get("error"):
@@ -210,13 +214,32 @@ def gate_line(gate: dict[str, Any] | None, now: datetime.datetime) -> list[str]:
     holders, waiters = gate["holders"], gate["waiters"]
     held = ", ".join(f"{entry['label'] or 'unlabelled'} since {local(entry['since'], now)}" for entry in holders)
     queued = ", ".join(entry["label"] or "unlabelled" for entry in waiters[:3])
+    load = ""
+    if gate.get("load_max") is not None:
+        limit = f"{gate['load_max']:g}" if gate["load_max"] > 0 else "off"
+        load = f" · load {'/'.join(f'{value:.1f}' for value in gate.get('load') or []) or 'unknown'}, limit {limit}"
     return [f"Gate slots: {len(holders)} holding" + (f" ({held})" if held else "")
-            + f" · {len(waiters)} waiting" + (f" ({queued}{', …' if len(waiters) > 3 else ''})" if queued else "")]
+            + f" · {len(waiters)} waiting" + (f" ({queued}{', …' if len(waiters) > 3 else ''})" if queued else "")
+            + load]
+
+
+def operations_table(found: dict[str, Any], now: datetime.datetime, width: int, *,
+                     rows: int | None = ROWS) -> list[str]:
+    """This machine's findings (`sd_db.today.operations`): heading, ID, Job and Finding, capped at `rows`, the gate line."""
+    findings = found["findings"]
+    lines = [f"{HEADINGS['operations']} ({len(findings)})"]
+    shown = findings if rows is None else findings[:rows]
+    if shown:
+        lines += table(["ID", "Job", "Finding"], [[f"#{row['id']}", row["job"], row["finding"]] for row in shown],
+                       width, "Finding")
+    if len(findings) > len(shown):
+        lines.append(f"… {len(findings) - len(shown)} more")
+    return lines + gate_line(found["gate"], now)
 
 
 def summary_line(summary: dict[str, int], keys: Iterable[str]) -> str:
     """`2 attention · 71 decisions · 3 landing · …`, over the sections `keys` names."""
-    words = {"planned": ("planned_this_week", "planned this week")}
+    words = {"planned": ("planned_this_week", "planned this week"), "operations": ("operations", "on this machine")}
     parts = []
     for key in keys:
         count_key, word = words.get(key, (key, key))
@@ -230,10 +253,11 @@ def render_sections(found: dict[str, Any], *, now: datetime.datetime, width: int
     order = list(keys if keys is not None else HEADINGS)
     lines = [summary_line(found["summary"], order)]
     for key in order:
+        if key == "operations":
+            lines += ["", *operations_table(found[key], now, width)]
+            continue
         rows = found[key]["entries"] if key == "landing" else found[key]
         lines += ["", *section_table(key, rows, now, width)]
-        if key == "landing":
-            lines += gate_line(found["landing"]["gate"], now)
         if key == "delivered" and found.get("closed_by_hand"):
             lines.append(f"+{len(found['closed_by_hand'])} closed by hand")
         if key == "decisions" and (batched := found["summary"].get("review_questions")):

@@ -911,6 +911,20 @@ def snapshot(where: pathlib.Path, slots: int, rule: LoadRule, *,
             "last_admitted": utc_stamp(last) if isinstance(last, (int, float)) else None, "now": utc_stamp(wall())}
 
 
+def machine_snapshot(environ: Mapping[str, str]) -> dict | str:
+    """`snapshot` with the machine's slots and load rule, as `sd gate status` reads them, or why it could not be read.
+
+    For `sd today` and `sd-status`: a failed read is unknown, never an idle gate.
+    """
+    try:
+        settings = machine_settings(environ)
+        slots, _ = configured(environ, settings["gate_slots"])
+        rule = load_rule(environ, settings["gate_load_max"], settings["gate_settle_seconds"])
+        return snapshot(directory(environ), slots, rule)
+    except (OSError, ValueError) as error:
+        return str(error)
+
+
 def render_queue(report: dict) -> str:
     load = "/".join(f"{value:.1f}" for value in report["load"]) or "unknown"
     limit = f"{report['load_max']:g}" if report["load_max"] > 0 else "off"

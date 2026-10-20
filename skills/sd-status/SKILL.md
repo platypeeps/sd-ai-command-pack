@@ -12,9 +12,11 @@ section derives its answer at run time from the filesystem, git, GitHub, or the 
 
 **There is no repo-path argument and no fleet walk (R10-D6).** The repository
 is the one enclosing cwd, full stop. The old fleet-walking sd-status is
-dropped; the dashboard provides the cross-repo view of repositories. The one
-line here that is not scoped to the checkout is the `jira` section: a Jira
-ticket belongs to no repository, so it is read from the shared database whole.
+dropped; the dashboard provides the cross-repo view of repositories. Two
+sections are not scoped to the checkout. The `jira` section: a Jira ticket
+belongs to no repository, so it is read from the shared database whole. And
+`Operations, this machine`: a finding about the machine belongs to no
+repository, so every repository shows it.
 
 The report leads with the judgement. `Abnormalities`, `Pending` and `Next`
 answer "is anything wrong", "what is waiting" and "what do I do now" before a
@@ -28,13 +30,13 @@ vault and the dashboard's Documents tab by default, and reaches an
 outward destination — Notion, Google Drive — only where the user designated that
 document for it.
 
-## The sixteen sections, in output order
+## The seventeen sections, in output order
 
 Above them all sits the banner — two lines, `sd-status: <repo path>` and the
 `pack:` line naming the checkout these tools came from with its branch and
 head. It is a header rather than a section: it names where the report ran and
 what ran it, and nothing under it is a finding. Count it and the report
-opens with seventeen top-level lines; the sixteen below are the sections.
+opens with eighteen top-level lines; the seventeen below are the sections.
 
 | Section | What it shows |
 |---|---|
@@ -42,6 +44,7 @@ opens with seventeen top-level lines; the sixteen below are the sections.
 | `Pending` | at most ten actionable rows by rank, with the line under them stating the denominator — `10 of 123, by rank`. A class with a cap shows at most that many rows, and a line under the list says how many of its rows the list does not show |
 | `Next` | one row: the top-ranked id, its check and its `suggest`. Not a menu, not three options |
 | `Work across the shared database` | a Repo row for this repository and one for each companion the `sd.status_companions` setting row lists for it, then `sd today`'s Landing now, Delivered, Planned, Blocked and Unscheduled tables for them, in `sd today`'s layout, indented two spaces. A database that does not read is a `!` reason, never empty tables |
+| `Operations, this machine` | `sd today`'s section of that name, the same in every repository and uncapped: one row per line of an open attention report's current findings, every repository's, that names this machine as `<job> on <host>: <finding>`, `<host>` being the lower-cased `hostname -s`: item, job (the report's external id before its `:`) and finding. A line that only heads the next ones is dropped. A report whose fields do not parse is a row saying it may name this machine. Under the table, `sd today`'s gate line: slots holding and waiting from `sd gate status --json`'s source, then the load against `sd.gate_load_max`. A database or gate read that fails is a reason, never 0 |
 | `Open threads` | a row per `source` with its count, then the exclusions named in full, so the counts are never read as a total of everything that exists |
 | `Work items` | a row per live item with its status from the item's row; findings and the counts line under the table, archived ones counted and not listed |
 | `Contributions, this repo, shared database order` | a row per contribution: state (its lane), reference, item, when it merged or closed in local time, title. Each lane shows its first five rows, then `… N more <lane>`; a line points at the dashboard's Contributions page for every row. Every other field is `sd task contribution show KEY --json`'s and `--json`'s |
