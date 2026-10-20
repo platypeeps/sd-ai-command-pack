@@ -848,27 +848,35 @@ def trash_obsidian(repo: Path, document: str) -> tuple[str, str]:
     if unknown:
         return "", "obsidian: cannot read this repo's channels setting (%s); nothing trashed" % unknown
     vault = Path(VAULT).expanduser()
-    folder = vault_folder(repo, channels) or vault / BRIEFS / repo_home(repo).name
+    folder = vault_folder(repo, channels)
+    if folder is None:
+        return "", ("obsidian: not a channel of this repo, so which folder holds the copy is not known; nothing "
+                    "trashed. Turn it on, or move the copy by hand")
+    if Path(document).is_absolute() or ".." in Path(document).parts:
+        return "", "obsidian: %r is not a document name under the vault folder; nothing trashed" % document
     target = folder / (document + ".md")
     if not (target.exists() or target.is_symlink()):
         return "nothing", "obsidian: %s: no vault copy at %s; nothing to trash" % (document, target)
     owner = vault_owner(target)
     takeover = not (channels or {}).get("obsidian", {}).get("folder")
     try:
-        inside = target.resolve().is_relative_to(vault.resolve())
+        inside = target.resolve().is_relative_to(folder.resolve()) and folder.resolve().is_relative_to(vault.resolve())
     except OSError:
         inside = False
     if target.is_symlink() or not inside or owner is None or (owner and owner != _shown(repo_home(repo))) \
             or (not owner and not takeover):
         return "", "obsidian: %s is not this checkout's copy; left alone, nothing trashed" % target
-    trash = vault / ".trash"
-    stem = Path(document).name
+    return _into_trash(target, vault / ".trash")
+
+
+def _into_trash(target: Path, trash: Path) -> tuple[str, str]:
+    """Move `target` into `trash`, under a name not taken there yet."""
     try:
         trash.mkdir(exist_ok=True)
-        place, taken = trash / (stem + ".md"), 0
+        place, taken = trash / target.name, 0
         while place.exists() or place.is_symlink():
             taken += 1
-            place = trash / ("%s %d.md" % (stem, taken))
+            place = trash / ("%s %d.md" % (target.stem, taken))
         os.rename(target, place)
     except OSError as problem:
         return "", "obsidian: cannot move %s into %s (%s); nothing trashed" % (target, trash, problem)

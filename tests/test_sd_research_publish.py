@@ -950,6 +950,23 @@ class ObsidianDesignationTests(Fixture):
         self.assertIn("hub down", line)
         self.assertTrue((self.briefs() / "a.md").is_file())
 
+    def test_a_name_leading_out_of_the_folder_is_refused(self) -> None:
+        """From the adversarial review: `../../Personal` named a note outside the repo's folder."""
+        (self.vault / "Personal.md").parent.mkdir(parents=True, exist_ok=True)
+        (self.vault / "Personal.md").write_text("mine\n", encoding="utf-8")
+        for name in ("../../Personal", str(self.vault / "Personal")):
+            self.assertEqual(PUBLISH.trash_obsidian(self.repo, name)[0], "", name)
+        self.assertTrue((self.vault / "Personal.md").is_file())
+
+    def test_with_obsidian_off_for_the_repo_the_folder_is_unknown_and_nothing_moves(self) -> None:
+        """From the adversarial review: a copy in an older folder was missed and read as "nothing"."""
+        PUBLISH.write_obsidian(self.repo, [self.entry(obsidian={})])
+        with unittest.mock.patch.object(PUBLISH, "read_channels", return_value=({"notion": {}}, "")):
+            state, line = PUBLISH.trash_obsidian(self.repo, "a")
+        self.assertEqual(state, "")
+        self.assertIn("not a channel", line)
+        self.assertTrue((self.briefs() / "a.md").is_file())
+
     def test_a_link_in_the_vault_is_not_moved(self) -> None:
         self.briefs().mkdir(parents=True)
         outside = self.root / "outside.md"
