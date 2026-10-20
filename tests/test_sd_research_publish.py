@@ -1504,6 +1504,41 @@ class TrashTests(DeliveredItemFixture):
         self.assertIn("another checkout", said)
         self.assertEqual(self.request(), before)
 
+    def test_an_unreadable_receipt_is_refused_not_read_as_nothing(self) -> None:
+        """Codex review: a receipt that cannot be read leaves whether a copy was delivered unknown."""
+        self.delivered_copy()
+        (PUBLISH.receipts() / self.NAME).write_text("{not json")
+        state, said = self.trash()
+        self.assertEqual(state, "", said)
+        self.assertIn("not known", said)
+
+    def test_a_second_trash_of_the_same_copy_clears_the_old_trashed_mark(self) -> None:
+        """Codex review: an identical trash queued again must not read as done from the first one's receipt."""
+        self.delivered_copy()
+        self.trash(item=self.item)
+        first = self.fingerprint()
+        self.deliver()
+        PUBLISH.enqueue(self.repo, self.doc(self.item))
+        self.delivered_copy()
+        self.trash(item=self.item)
+        self.assertEqual(self.fingerprint(), first)
+        self.assertNotIn("trashed", self.receipt())
+
+    def test_a_repeated_acknowledgement_after_a_retick_records_nothing_more(self) -> None:
+        """Codex review: a rerun of a finished trash's `delivered` answers 0 and leaves the newer request and receipt."""
+        self.delivered_copy()
+        self.trash(item=self.item)
+        trashed = self.fingerprint()
+        PUBLISH.enqueue(self.repo, self.doc(self.item))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            PUBLISH.delivered_main([self.NAME, trashed])
+            newer, receipt = self.request(), self.receipt()
+            status = PUBLISH.delivered_main([self.NAME, trashed])
+        self.assertEqual(status, 0, out.getvalue())
+        self.assertEqual((self.request(), self.receipt()), (newer, receipt))
+        self.assertNotIn("delivered", receipt)
+
     def test_an_unreadable_request_is_refused_not_read_as_none(self) -> None:
         (PUBLISH.QUEUE / self.NAME).write_text("{not json")
         state, said = self.trash()

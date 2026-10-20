@@ -1337,10 +1337,9 @@ def acknowledge_request(name: str, fingerprint: str, url: str = "") -> tuple[int
     pending = load_record(path)
     if not pending:
         return 1, "delivered: no readable request at %s" % path
-    trashing = load_record(receipts() / name).get("trashing")
-    if pending.get("action") == TRASH or (isinstance(trashing, dict)
-                                          and trashing.get("fingerprint") == fingerprint):
-        return acknowledge_trash(name, pending, fingerprint)
+    trashed = trash_answer(name, pending, fingerprint)
+    if trashed:
+        return trashed
     drained = pending.get("fingerprint") == fingerprint
     item = pending.get("item") if drained else None
     if pending.get("destination") == ROW_DESTINATION:
@@ -1478,14 +1477,10 @@ def trash_request(path: Path, receipt_path: Path, home: str, document: str, dest
                   designated: str, item: int | None, url: str) -> tuple[dict[str, Any], tuple[str, str]]:
     """The trash request `enqueue_trash` writes, from the pending request and
     the receipt, and its report; `{}` with the state when it writes none."""
-    pending = load_record(path)
-    if path.exists() and not pending:
-        return {}, ("", "trash: %s is not a readable request, so whether a copy exists is "
-                        "not known; nothing queued" % path)
-    if pending and pending.get("repo") != home:
-        return {}, ("", "trash: %s holds another checkout's request (%s); nothing queued"
-                        % (path, pending.get("repo")))
-    receipt = load_record(receipt_path)
+    pending, receipt = load_record(path), load_record(receipt_path)
+    refused = trash_unknown(path, pending, receipt_path, receipt, home)
+    if refused:
+        return {}, ("", refused)
     mine = receipt.get("repo") == home and receipt.get("document") == document
     shipped = receipt.get("url") if mine and receipt.get("delivered") else ""
     copy_id = (designated or str(pending.get(dest.what) or "")).strip()
@@ -1503,11 +1498,26 @@ def trash_request(path: Path, receipt_path: Path, home: str, document: str, dest
         document, copy_id or url or "the copy its pointer names"))
 
 
+def trash_unknown(path: Path, pending: dict[str, Any], receipt_path: Path, receipt: dict[str, Any],
+                  home: str) -> str:
+    """Why `trash_request` cannot tell which copy exists, or "": an unreadable request or receipt is unknown, not none."""
+    if path.exists() and not pending:
+        return "trash: %s is not a readable request, so whether a copy exists is not known; nothing queued" % path
+    if pending and pending.get("repo") != home:
+        return "trash: %s holds another checkout's request (%s); nothing queued" % (path, pending.get("repo"))
+    if receipt_path.exists() and not receipt:
+        return ("trash: %s is not a readable receipt, so whether a copy was delivered is not known; "
+                "nothing queued" % receipt_path)
+    return ""
+
+
 def write_trash(name: str, request: dict[str, Any]) -> None:
     """The receipt's note of the trash's generation, then the request itself, atomically."""
     receipt = load_record(receipts() / name)
     receipt.update({field: request[field] for field in ("repo", "document", "destination")})
     receipt.update(trashing={"fingerprint": request["fingerprint"], "item": request.get("item")})
+    # An earlier trash of the same copy left its mark: this one is not done until its own drain says so.
+    receipt.pop("trashed", None)
     receipts().mkdir(parents=True, exist_ok=True)
     (receipts() / name).write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
     QUEUE.mkdir(parents=True, exist_ok=True)
@@ -1530,6 +1540,20 @@ def drop_item_url(item: Any, repo: str, document: str, channel: str) -> tuple[st
         return "", str(problem) or type(problem).__name__
     finally:
         connection.close()
+
+
+def trash_answer(name: str, pending: dict[str, Any], fingerprint: str) -> tuple[int, str] | None:
+    """`delivered`'s answer when `fingerprint` is a trash's generation, or None for a mirror's."""
+    held = load_record(receipts() / name)
+    trashing = held.get("trashing")
+    if pending.get("action") != TRASH and held.get("trashed") == fingerprint:
+        # A rerun of a trash already acknowledged, with a newer request in the slot: nothing more to record.
+        return 0, "delivered: trashed %s for %s already; a newer request is pending and stays" % (
+            fingerprint[:12], name)
+    if pending.get("action") == TRASH or (isinstance(trashing, dict)
+                                          and trashing.get("fingerprint") == fingerprint):
+        return acknowledge_trash(name, pending, fingerprint)
+    return None
 
 
 def acknowledge_trash(name: str, pending: dict[str, Any], fingerprint: str) -> tuple[int, str]:
