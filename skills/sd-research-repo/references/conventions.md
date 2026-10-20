@@ -451,6 +451,10 @@ Both keys on one entry are two mirrors, not a choice. Until one of these keys
 exists, the document publishes locally and nowhere else. Do not infer a target
 from a title, a folder or a neighbouring document.
 
+The vault copy is designated the same way, with `obsidian=dict()` on the entry:
+without it, a repository other than the vault's own writes no vault copy
+(system sd:5500). The vault's own repository writes every entry.
+
 `notion=True` is the same designation as `notion=dict()`, written shorter, and
 a write-back amends it into `notion=dict(page="<id>")`. `None` and `False` are
 the off position: they designate nothing, enqueue nothing, and never receive a

@@ -806,7 +806,7 @@ class ObsidianTests(Fixture):
     def docs(self) -> list[dict]:
         (self.repo / "10-x").mkdir(parents=True, exist_ok=True)
         (self.repo / "10-x" / "a.md").write_text("# A\n\nbody\n", encoding="utf-8")
-        return [dict(src="10-x/a.md", out="a", title="A")]
+        return [dict(src="10-x/a.md", out="a", title="A", obsidian={})]
 
     def test_the_markdown_lands_under_briefs_and_the_repo_name(self) -> None:
         PUBLISH.write_obsidian(self.repo, self.docs())
@@ -842,7 +842,7 @@ class ObsidianTests(Fixture):
         other = self.root / "elsewhere" / "my-research"
         (other / "10-x").mkdir(parents=True)
         (other / "10-x" / "a.md").write_text("# Other\n", encoding="utf-8")
-        said = PUBLISH.write_obsidian(other, [dict(src="10-x/a.md", out="a", title="A")])
+        said = PUBLISH.write_obsidian(other, [dict(src="10-x/a.md", out="a", title="A", obsidian={})])
         self.assertEqual((self.briefs() / "a.md").read_text(encoding="utf-8"), kept)
         self.assertTrue(any("a.md" in line and str(self.repo) in line for line in said), said)
 
@@ -871,10 +871,92 @@ class ObsidianTests(Fixture):
         self.assertTrue(any("OBSIDIAN_VAULT is not set" in line for line in said))
 
     def test_an_unreadable_source_is_reported_and_the_rest_continue(self) -> None:
-        docs = self.docs() + [dict(src="10-x/missing.md", out="b", title="B")]
+        docs = self.docs() + [dict(src="10-x/missing.md", out="b", title="B", obsidian={})]
         said = PUBLISH.write_obsidian(self.repo, docs)
         self.assertTrue(any("cannot read" in line for line in said))
         self.assertTrue((self.briefs() / "a.md").is_file())
+
+
+class ObsidianDesignationTests(Fixture):
+    """system sd:5500: outside the vault's own repository a document is written
+    into the vault only when its entry designates `obsidian=`, and the
+    dashboard's untick moves the copy to the vault's `.trash`."""
+
+    def entry(self, out: str = "a", **designation: object) -> dict:
+        (self.repo / "10-x").mkdir(parents=True, exist_ok=True)
+        (self.repo / "10-x" / f"{out}.md").write_text(f"# {out}\n", encoding="utf-8")
+        return dict(src=f"10-x/{out}.md", out=out, title=out, **designation)
+
+    def test_an_entry_without_obsidian_gets_no_vault_copy(self) -> None:
+        PUBLISH.write_obsidian(self.repo, [self.entry()])
+        self.assertFalse((self.briefs() / "a.md").exists())
+
+    def test_obsidian_false_or_none_is_not_a_designation(self) -> None:
+        PUBLISH.write_obsidian(self.repo, [self.entry("a", obsidian=False), self.entry("b", obsidian=None)])
+        self.assertFalse(self.briefs().exists())
+
+    def test_only_the_designated_entry_is_written_and_recorded_as_written(self) -> None:
+        wrote: list[dict] = []
+        said = PUBLISH.write_obsidian(self.repo, [self.entry("a"), self.entry("b", obsidian={})], wrote)
+        self.assertEqual(sorted(p.name for p in self.briefs().iterdir()), ["b.md"])
+        self.assertEqual([cfg["out"] for cfg in wrote], ["b"])
+        self.assertIn("obsidian: wrote 1 document(s) to %s" % self.briefs(), said)
+
+    def test_an_undesignated_entrys_old_copy_is_left_where_it_is(self) -> None:
+        """A render after the pack update and before the seed deletes nothing."""
+        PUBLISH.write_obsidian(self.repo, [self.entry(obsidian={})])
+        before = (self.briefs() / "a.md").read_text(encoding="utf-8")
+        PUBLISH.write_obsidian(self.repo, [self.entry()])
+        self.assertEqual((self.briefs() / "a.md").read_text(encoding="utf-8"), before)
+
+    def test_the_vaults_own_repository_writes_every_entry(self) -> None:
+        PUBLISH.VAULT = str(self.repo)
+        PUBLISH.write_obsidian(self.repo, [self.entry()])
+        self.assertTrue((self.repo / "Briefs" / "my-research" / "a.md").is_file())
+        self.assertTrue(PUBLISH.vault_repository(self.repo))
+        PUBLISH.VAULT = str(self.vault)
+        self.assertFalse(PUBLISH.vault_repository(self.repo))
+
+    def test_untick_moves_this_checkouts_copy_into_the_vault_trash(self) -> None:
+        PUBLISH.write_obsidian(self.repo, [self.entry(obsidian={})])
+        kept = (self.briefs() / "a.md").read_text(encoding="utf-8")
+        state, line = PUBLISH.trash_obsidian(self.repo, "a")
+        self.assertEqual(state, "trashed", line)
+        self.assertFalse((self.briefs() / "a.md").exists())
+        self.assertEqual((self.vault / ".trash" / "a.md").read_text(encoding="utf-8"), kept)
+
+    def test_a_second_untick_finds_nothing_and_a_taken_trash_name_is_numbered(self) -> None:
+        PUBLISH.write_obsidian(self.repo, [self.entry(obsidian={})])
+        self.assertEqual(PUBLISH.trash_obsidian(self.repo, "a")[0], "trashed")
+        self.assertEqual(PUBLISH.trash_obsidian(self.repo, "a")[0], "nothing")
+        PUBLISH.write_obsidian(self.repo, [self.entry(obsidian={})])
+        self.assertEqual(PUBLISH.trash_obsidian(self.repo, "a")[0], "trashed")
+        self.assertEqual(sorted(p.name for p in (self.vault / ".trash").iterdir()), ["a 1.md", "a.md"])
+
+    def test_another_checkouts_copy_or_an_unreadable_one_is_left_alone(self) -> None:
+        self.briefs().mkdir(parents=True)
+        note = self.briefs() / "a.md"
+        for held in (b"---\nsource_checkout: ~/elsewhere/my-research\n---\nx\n", b"\xff\xfe"):
+            note.write_bytes(held)
+            state, line = PUBLISH.trash_obsidian(self.repo, "a")
+            self.assertEqual((state, note.read_bytes()), ("", held), line)
+        self.assertFalse((self.vault / ".trash").exists())
+
+    def test_a_channels_setting_not_read_trashes_nothing(self) -> None:
+        PUBLISH.write_obsidian(self.repo, [self.entry(obsidian={})])
+        with unittest.mock.patch.object(PUBLISH, "read_channels", return_value=(None, "hub down")):
+            state, line = PUBLISH.trash_obsidian(self.repo, "a")
+        self.assertEqual(state, "")
+        self.assertIn("hub down", line)
+        self.assertTrue((self.briefs() / "a.md").is_file())
+
+    def test_a_link_in_the_vault_is_not_moved(self) -> None:
+        self.briefs().mkdir(parents=True)
+        outside = self.root / "outside.md"
+        outside.write_text("mine\n", encoding="utf-8")
+        (self.briefs() / "a.md").symlink_to(outside)
+        self.assertEqual(PUBLISH.trash_obsidian(self.repo, "a")[0], "")
+        self.assertTrue((self.briefs() / "a.md").is_symlink())
 
 
 class LegacyQueueTests(Fixture):
@@ -1562,7 +1644,7 @@ class ObsidianItemTests(Fixture):
         self.link = "obsidian://open?vault=vault&file=Briefs%2Fmy-research%2Fa"
 
     def docs(self, **extra: object) -> list[dict]:
-        return [dict(src="10-x/a.md", out="a", title="A", item=self.item, **extra)]
+        return [dict(src="10-x/a.md", out="a", title="A", item=self.item, obsidian={}, **extra)]
 
     def publish(self, docs: list[dict] | None = None) -> list[str]:
         return PUBLISH.publish(self.repo, "MINE", self.docs() if docs is None else docs)
@@ -1580,12 +1662,12 @@ class ObsidianItemTests(Fixture):
         refuses it too, but holds the whole render first (sd:3462)."""
         from sd_db.writes import create_item  # noqa: PLC0415
         later = self.item + 1
-        said = self.publish([dict(src="10-x/a.md", out="a", title="A", item=later)])
+        said = self.publish([dict(src="10-x/a.md", out="a", title="A", item=later, obsidian={})])
         self.assertTrue((self.briefs() / "a.md").is_file())
         self.assertTrue(any("item: obsidian link for %s sd:%d not recorded (" % (self.repo.name, later) in line
                             for line in said), said)
         self.assertEqual(create_item(self.connection, kind="task", title="Later"), later)
-        self.publish([dict(src="10-x/a.md", out="a", title="A", item=later)])
+        self.publish([dict(src="10-x/a.md", out="a", title="A", item=later, obsidian={})])
         self.assertEqual(self.published(later)["%s::a" % self.repo]["obsidian"], self.link)
 
     def test_no_database_reports_and_the_render_goes_on(self) -> None:
@@ -2010,7 +2092,7 @@ class SourceUrlTests(Fixture):
     """
 
     NAME = "my-research.a.notion.json"
-    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict())]
+    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict(), obsidian=dict())]
     URL = "https://github.com/example-org/research-repo/blob/HEAD/10-x/a.md"
 
     def setUp(self) -> None:
@@ -2120,7 +2202,7 @@ class WorktreeIdentityTests(Fixture):
     def test_the_vault_folder_is_the_primary_checkouts(self) -> None:
         self.assertEqual(PUBLISH.vault_folder(self.wt), self.briefs())
 
-    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict())]
+    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict(), obsidian=dict())]
 
     def test_a_worktree_render_queues_nothing_and_claims_no_page_id(self) -> None:
         """Publication is the main checkout's. A worktree render must neither
@@ -2194,7 +2276,7 @@ class BranchCheckoutTests(Fixture):
     """
 
     NAME = "my-research.a.notion.json"
-    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict())]
+    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict(), obsidian=dict())]
 
     def setUp(self) -> None:
         super().setUp()
@@ -2473,12 +2555,12 @@ class ChannelsTests(Fixture):
 
     #: Every shape of designation, so the no-setting fixture pins each one.
     SCENARIO = [
-        dict(src="10-x/a.md", out="a", title="A", notion=dict()),
-        dict(src="10-x/b.md", out="b", title="B", notion=dict(team=True), drive=dict()),
-        dict(src="10-x/c.md", out="c", title="C", notion=dict(space="Research"),
+        dict(src="10-x/a.md", out="a", title="A", obsidian=dict(), notion=dict()),
+        dict(src="10-x/b.md", out="b", title="B", obsidian=dict(), notion=dict(team=True), drive=dict()),
+        dict(src="10-x/c.md", out="c", title="C", obsidian=dict(), notion=dict(space="Research"),
              drive=dict(folder="Deliverables", file="1AbCdEf")),
-        dict(src="10-x/d.md", out="d", title="D"),
-        dict(src="10-x/e.md", out="e", title="E", notion=dict(page="https://notion.so/e")),
+        dict(src="10-x/d.md", out="d", title="D", obsidian=dict()),
+        dict(src="10-x/e.md", out="e", title="E", obsidian=dict(), notion=dict(page="https://notion.so/e")),
     ]
 
     def setUp(self) -> None:

@@ -9,23 +9,33 @@ judgment.
 
 | Destination | When | Format | Written by |
 | --- | --- | --- | --- |
-| Obsidian | on unless the repo turns it off | Markdown | the render, directly |
+| Obsidian | designated, or every document of the vault's own repo | Markdown | the render, directly |
 | Dashboard | always | HTML | the render, directly |
 | Notion | designated | Notion blocks | an agent session, from the queue |
 | Google Drive | designated | native Google Doc | an agent session, from the queue |
 
-A document is the Markdown in its repo. Obsidian is one channel, on by default,
-and a repo may turn it off (see [A repo's channels setting](#a-repos-channels-setting)).
+A document is the Markdown in its repo. Obsidian is one channel, designated per
+document like Notion and Drive, and a repo may turn it off (see
+[A repo's channels setting](#a-repos-channels-setting)).
 The others are duplicates of it, each in the
 format its destination reads natively — a Markdown file pasted into Drive, or an
 HTML blob pasted into Obsidian, is a copy nobody can use where it landed.
 
-## Obsidian is the default copy
+## Obsidian is the local copy
 
-A finished document is written into the vault as Markdown, under
-`Briefs/<repo>/<name>.md`, or under the folder the repo's channels setting
-names. `$OBSIDIAN_VAULT` names the vault; a machine with
-none still publishes everywhere else and reports the missing copy by name.
+A finished document whose DOCS entry carries `obsidian=` (any value but `None`
+or `False`; the dashboard writes `obsidian=dict()`) is written into the vault as
+Markdown, under `Briefs/<repo>/<name>.md`, or under the folder the repo's
+channels setting names. The vault's own repository, the checkout
+`$OBSIDIAN_VAULT` names, mirrors the whole vault, so every one of its entries is
+written without the key (system sd:5500). `$OBSIDIAN_VAULT` names the vault; a
+machine with none still publishes everywhere else and reports the missing copy
+by name.
+
+A render never deletes a vault copy: an entry that loses `obsidian=` keeps its
+old copy until the dashboard's untick moves it, by `trash_obsidian`, into the
+vault's `.trash`, where Obsidian restores it. Only this checkout's copy moves,
+by the ownership rule the write uses.
 
 Markdown, because the vault's whole value is that a note is editable, linkable
 and searchable in place. The file carries a frontmatter block naming the source

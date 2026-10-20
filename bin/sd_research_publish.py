@@ -798,6 +798,83 @@ def vault_owner(target: Path) -> str | None:
     return ""
 
 
+def vault_repository(repo: Path) -> bool:
+    """Whether this checkout is the vault itself (system sd:5500).
+
+    The vault's own repository mirrors the whole vault, so every one of its
+    entries is written as before. Every other repository writes only the
+    entries that designate `obsidian=`, as it queues only those that
+    designate `notion=` or `drive=`.
+    """
+    if not VAULT:
+        return False
+    try:
+        return repo_home(repo).resolve() == Path(VAULT).expanduser().resolve()
+    except OSError:
+        return False
+
+
+def obsidian_designated(cfg: dict[str, Any]) -> bool:
+    """An entry's `obsidian=`: any value but None or False designates, as for
+    `notion=` and `drive=`; `obsidian=dict()` is the form the dashboard writes."""
+    raw = cfg.get("obsidian")
+    return raw is not None and raw is not False
+
+
+def vault_entries(repo: Path, docs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The entries `write_obsidian` writes: every one in the vault's own
+    repository, else those that designate `obsidian=`."""
+    if vault_repository(repo):
+        return list(docs)
+    return [cfg for cfg in docs if obsidian_designated(cfg)]
+
+
+def trash_obsidian(repo: Path, document: str) -> tuple[str, str]:
+    """Move this checkout's vault copy of `document` into the vault's
+    `.trash` (system sd:5500): `(state, line)`.
+
+    The dashboard's untick of a document's Obsidian box, a local move like
+    the write it undoes, so nothing is queued. `state` is `trashed`,
+    `nothing` when no copy is there, or "" when it refused with nothing
+    moved: no vault, a channels setting that cannot be read, a copy that is
+    not this checkout's by the rule `write_obsidian` writes by, a link, or a
+    move that failed. `.trash` is Obsidian's own trash folder, so the copy
+    can be restored from there; a name already taken there gets ` 1`, ` 2`
+    and so on.
+    """
+    if not VAULT:
+        return "", "obsidian: OBSIDIAN_VAULT is not set; nothing trashed"
+    channels, unknown = read_channels(repo)
+    if unknown:
+        return "", "obsidian: cannot read this repo's channels setting (%s); nothing trashed" % unknown
+    vault = Path(VAULT).expanduser()
+    folder = vault_folder(repo, channels) or vault / BRIEFS / repo_home(repo).name
+    target = folder / (document + ".md")
+    if not (target.exists() or target.is_symlink()):
+        return "nothing", "obsidian: %s: no vault copy at %s; nothing to trash" % (document, target)
+    owner = vault_owner(target)
+    takeover = not (channels or {}).get("obsidian", {}).get("folder")
+    try:
+        inside = target.resolve().is_relative_to(vault.resolve())
+    except OSError:
+        inside = False
+    if target.is_symlink() or not inside or owner is None or (owner and owner != _shown(repo_home(repo))) \
+            or (not owner and not takeover):
+        return "", "obsidian: %s is not this checkout's copy; left alone, nothing trashed" % target
+    trash = vault / ".trash"
+    stem = Path(document).name
+    try:
+        trash.mkdir(exist_ok=True)
+        place, taken = trash / (stem + ".md"), 0
+        while place.exists() or place.is_symlink():
+            taken += 1
+            place = trash / ("%s %d.md" % (stem, taken))
+        os.rename(target, place)
+    except OSError as problem:
+        return "", "obsidian: cannot move %s into %s (%s); nothing trashed" % (target, trash, problem)
+    return "trashed", "obsidian: trashed %s -> %s" % (target, place)
+
+
 def write_obsidian(repo: Path, docs: list[dict[str, Any]],
                    wrote: list[dict[str, Any]] | None = None,
                    channels: dict[str, dict[str, str]] | None = None) -> list[str]:
@@ -819,6 +896,10 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]],
 
     The repo's `channels` setting (sd:3462) may move the folder, or leave
     Obsidian out, which writes no copy and says so.
+
+    Outside the vault's own repository only an entry that designates
+    `obsidian=` is written (system sd:5500); a copy of one that does not is
+    left where it is, and the dashboard's untick moves it to the trash.
     """
     refused = publish_refusal(repo, "obsidian")
     if refused:
@@ -839,7 +920,7 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]],
     takeover = not (channels or {}).get("obsidian", {}).get("folder")
     reports: list[str] = []
     written = 0
-    for cfg in docs:
+    for cfg in vault_entries(repo, docs):
         src = str(cfg.get("src", "")).strip()
         out = str(cfg.get("out", "")).strip()
         if not src or not out:
