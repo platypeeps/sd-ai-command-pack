@@ -1727,6 +1727,16 @@ class Rows:
         except Exception:  # noqa: BLE001 - a read that failed recorded nothing
             return ""
 
+    def repo(self, item_dir: pathlib.Path) -> str:
+        """The row's `repo` column, `""` when no row answers (sd:5371)."""
+        if not self.opened:
+            return ""
+        try:
+            row = self.item(item_dir)
+        except Exception:  # noqa: BLE001 - a read that failed named nothing
+            return ""
+        return str(row["repo"] or "") if row is not None else ""
+
     def identity(self, item_dir: pathlib.Path) -> str:
         """`sd:<id>` for this folder's row, or `""` when no row answers.
 
@@ -1912,19 +1922,38 @@ def _from_row(
         (statuses.rows.identity(item_dir), item_dir.name)
         if name
     ))
-    if (
-        said == "done"
-        and not recorded
-        and statuses.history
-        and delivered(statuses.root, wanted) != YES
-    ):
-        unmarked = _unmarked(item_dir, statuses, wanted)
-        if unmarked:
-            problems.append(f"{prd}: {unmarked}")
+    if said == "done" and not recorded and statuses.history:
+        root, unchecked = _delivery_root(item_dir, statuses)
+        if unchecked:
+            problems.append(f"{prd}: {unchecked}")
+        elif delivered(root, wanted) != YES:
+            unmarked = _unmarked(item_dir, statuses, wanted, root)
+            if unmarked:
+                problems.append(f"{prd}: {unmarked}")
     return StatusReport(said, False, tuple(problems))
 
 
-def _unmarked(item_dir: pathlib.Path, statuses: "Statuses", wanted: tuple[str, ...]) -> str:
+def _delivery_root(item_dir: pathlib.Path, statuses: "Statuses") -> tuple[pathlib.Path, str]:
+    """The checkout that answers for an item's delivery, else why none does (sd:5371).
+
+    A folder here may name a row of another repo: its trailers and its receipt
+    sit on that repo's default branch, and asking this one warned on delivered
+    work. A repo whose checkout git cannot read here leaves the item unchecked,
+    which is not the same as unmarked.
+    """
+    repo = statuses.rows.repo(item_dir)
+    if not repo or same_repo(repo, statuses.rows.base):
+        return statuses.root, ""
+    path = pathlib.Path(os.path.expanduser(repo))
+    if git_output(["rev-parse", "--git-dir"], path) is None:
+        return statuses.root, (f"its row {statuses.rows.identity(item_dir)} belongs to {repo}, "
+                               f"which has no readable checkout here, so its delivery is unchecked")
+    return path, ""
+
+
+def _unmarked(
+    item_dir: pathlib.Path, statuses: "Statuses", wanted: tuple[str, ...], root: pathlib.Path,
+) -> str:
     """The `unmarked` finding for a done row no trailer closes, `""` when its receipt does (sd:3346).
 
     A task or followup closed by `sd work deliver --associated` carries the
@@ -1939,7 +1968,7 @@ def _unmarked(item_dir: pathlib.Path, statuses: "Statuses", wanted: tuple[str, .
     identity = statuses.rows.identity(item_dir)
     if not commit or not identity:
         return finding
-    gap = _receipt_gap(statuses.root, commit, identity)
+    gap = _receipt_gap(root, commit, identity)
     return f"{finding}, and its receipt names {commit}, which {gap}" if gap else ""
 
 
