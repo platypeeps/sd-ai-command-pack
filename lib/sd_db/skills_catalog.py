@@ -222,7 +222,11 @@ def _authorship(root, skill):
 
 
 def request(connection, name, action, *, expected_revision=None, path_name=None, root=None, home=None, who):
-    """Queue intent only. No branch, skill or installed surface is changed here."""
+    """File intent only, as one ready item. No branch, skill or installed surface is changed here.
+
+    It queues no runner assignment: the runner is idle, so the item waits in
+    Tasks for the operator or a session (system sd:5477).
+    """
     if action not in {"review", "promote", "demote"}:
         raise workflow.WorkflowError("skill action must be review, promote or demote")
     with transaction(connection):
@@ -230,14 +234,14 @@ def request(connection, name, action, *, expected_revision=None, path_name=None,
         from .repos import row_for
         registered = row_for(connection, str(root))
         if registered is None:
-            raise workflow.WorkflowError("register the pack repository before queueing skill work")
+            raise workflow.WorkflowError("register the pack repository before filing skill work")
         # The key the row holds names the request, so two machines hash one
         # identity (sd:1439).
         key = registered["path"]
         bound_files = dict(skill["files"])
         if action in {"promote", "demote"}:
             if _git(root, "status", "--porcelain", "--", "skills/paths.json"):
-                raise workflow.WorkflowError("commit the workflow path changes before queueing a skill move")
+                raise workflow.WorkflowError("commit the workflow path changes before filing a skill move")
             bound_files["skills/paths.json"] = hashlib.sha256((root / "skills/paths.json").read_bytes()).hexdigest()
         bound_hash = _hash(bound_files)
         identity = _hash({"repo": key, "skill": name, "action": action, "source": bound_hash, "path": path_name})
@@ -249,10 +253,6 @@ def request(connection, name, action, *, expected_revision=None, path_name=None,
             raise workflow.WorkflowError("choose a declared path for a contrib skill")
         if action == "demote" and not skill["paths"]:
             raise workflow.WorkflowError("only a skill on a path can be demoted")
-        if action == "review":
-            choices = registry.read(connection=connection).order("reviewer")
-            if not any(provider.vendor.lower() not in vendors for provider in choices):
-                raise workflow.WorkflowError("no enabled reviewer is independent of the latest skill author")
         source = {"name": name, "path": skill["path"], "source_sha256": bound_hash,
                   "files": bound_files, "latest_author_vendors": vendors,
                   "latest_author_vendor": vendors[0] if len(vendors) == 1 else None, "latest_commit": latest,
@@ -269,10 +269,7 @@ def request(connection, name, action, *, expected_revision=None, path_name=None,
             source="skill-request", external_id=identity,
             fields={"skill_review": source}, body={"text": brief}, session=who)
         set_item_fields(connection, item, body={"text": brief.replace("ITEM_ID", str(item))})
-        queued = runner.enqueue(connection, [item], role="reviewer" if action == "review" else "author", scope="skill-review" if action == "review" else "skill-apply", who=who)
-        result = workflow.item_state(connection, item)
-        result["assignments"] = queued
-        return result
+        return workflow.item_state(connection, item)
 
 
 def record_review_proposals(connection, item, assignment, provider, document):

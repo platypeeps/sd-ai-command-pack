@@ -2847,12 +2847,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="print each skill's recorded uses beside its status")
     skill_lister.set_defaults(handler=sd_skill.skill_list)
 
-    # Promotion and demotion queue one task each and open nothing
+    # Promotion and demotion file one task each and open nothing
     # themselves: no branch, no request against `main`, and no move in this
-    # checkout. Criterion 27: the library queues the task, never the dashboard.
+    # checkout. Criterion 27: the library files the task, never the dashboard.
+    # The task queues no runner assignment (system sd:5477).
     promoter = trying.add_parser(
         "promote",
-        help="queue one task to move a contrib/ skill onto a path")
+        help="file one task to move a contrib/ skill onto a path")
     promoter.add_argument("name", help="a directory under contrib/")
     promoter.add_argument(
         "--path", required=True,
@@ -2861,7 +2862,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     demoter = trying.add_parser(
         "demote",
-        help="queue one task to move a skill back to contrib/")
+        help="file one task to move a skill back to contrib/")
     demoter.add_argument("name", help="a directory under skills/")
     demoter.set_defaults(handler=sd_skill.skill_demote)
     for skill_parser in (trier, skill_lister, promoter, demoter):

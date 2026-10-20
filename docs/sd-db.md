@@ -500,7 +500,7 @@ A list the library validates gets no CHECK: SQLite cannot alter one, so each new
 | `work` | a change to a repository, planned under `docs/work/` |
 | `task` | a scoped piece of work in a repository |
 | `report` | a run report a scheduled job wrote |
-| `skill-review` | a review of a skill, run by the catalogue |
+| `skill-review` | a review of a skill, filed by the catalogue |
 | `idea` | **a writing piece on the article ladder, and nothing else** |
 | `work-idea` | an idea about a repository or product, not yet planned work |
 | `personal-idea` | an idea about life, which does not enter the writing pipeline |

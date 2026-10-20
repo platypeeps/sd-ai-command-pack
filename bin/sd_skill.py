@@ -20,7 +20,7 @@ PATHS_FILE = "paths.json"
 
 
 class SkillRefusal(Exception):
-    """A skill request that cannot safely be queued."""
+    """A skill request that cannot safely be filed."""
 
 
 def checkout() -> pathlib.Path:
@@ -65,7 +65,7 @@ def run(args: argparse.Namespace) -> int:
             print(f"{args.name} on trial until {result['trial']['expires'][:10]}")
             print("Run sd-install to render it. The trial does not change installed files by itself.")
         else:
-            print(f"Queued item #{result['item']['id']}: {result['item']['title']}")
+            print(f"Filed item #{result['item']['id']}: {result['item']['title']}")
         return 0
     except (sd_db.SdDbError, ValueError, OSError) as error:
         raise SkillRefusal(str(error)) from error
@@ -90,7 +90,7 @@ skill_demote = run
 
 
 def register_extra(verbs: Any) -> None:
-    review = verbs.add_parser("review", help="queue one independent review of a skill")
+    review = verbs.add_parser("review", help="file one independent review of a skill")
     review.add_argument("name")
     applying = verbs.add_parser("apply", help="queue one isolated change from accepted proposal notes")
     applying.add_argument("item", type=item_id, help=ITEM_HELP)
