@@ -392,8 +392,8 @@ Gates and reviews:
   and fix each row that lacks a recovery or a test, fail-first. Record the trigger in `sd task note`. Split the pull request if the table shows it does too much.
 - **Gates share the machine through slots** (`sd.gate_slots`). Every `sd-check` run and every gate `sd-ship` runs queues in one machine-wide order.
   Wrap any other gate as `sd gate run -- make check`. Use no per-repository `lockf` and do not wait on the load average. `sd gate status` shows holders and waiters.
-- **A lane gate goes first** (sd:5078). Every `sd-check` run is a lane gate, so the merge gate never waits behind a builder's tests.
-  While a lane gate holds or waits for a slot, `sd gate run` exits 69 at once and runs nothing; retry after the time it prints. A run that holds a slot keeps it.
+- **Gates start in the order they queued** (sd:5409). Every `sd-check` run is a lane gate; a builder's `sd gate run` waits its turn beside it.
+  No later lane gate overtakes a waiting run, and a run that holds a slot keeps it. `--max-wait` bounds the wait: exit 75, the command not run.
 - **A repository's `precheck` target runs before the slot wait.** A failure stops the run there.
 - **Reviews take their own slots** (`sd.review_slots`) before the first reviewer starts.
 

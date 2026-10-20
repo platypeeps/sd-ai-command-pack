@@ -266,13 +266,15 @@ class SliceBuilderDecisionNote(unittest.TestCase):
 
 class SliceBuilderTestPause(unittest.TestCase):
     """sd:3173. Lane gates timed out while builders ran their focused tests beside them;
-    run through `sd gate run`, a builder's tests wait in the machine gate queue."""
+    run through `sd gate run`, a builder's tests wait in the machine gate queue.
+    sd:5409: in arrival order, bounded so the wait and the tests fit the 600 s foreground limit."""
 
     def test_the_slice_builder_runs_focused_tests_in_the_gate_queue(self) -> None:
         _, body = (AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8").split("\n---\n", 1)
-        self.assertIn("sd gate run --label", body)
+        self.assertIn("sd gate run --max-wait 240 --label", body)
         self.assertIn("every gate slot is held", body)
-        self.assertIn("exits 69 at once", body)
+        self.assertIn("exits 75", body)
+        self.assertNotIn("exits 69", body)
 
 
 class RenderTests(unittest.TestCase):

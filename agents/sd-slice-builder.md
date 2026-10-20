@@ -41,8 +41,8 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
 4. Commit one item per commit. Add no attribution lines: no Co-Authored-By, session or generated-with lines.
    Follow the repository's `CLAUDE.md` for any trailer it requires.
 5. Run the focused tests for the files you touched in the machine gate queue, in turn with lane gates:
-   `sd gate run --label '<branch> tests' -- <test command>`. It waits only while every gate slot is held.
-   It exits 69 at once, the tests not run, while a lane gate holds or waits: run it again after the time it prints.
+   `sd gate run --max-wait 240 --label '<branch> tests' -- <test command>`. It waits in arrival order while every gate slot is held.
+   It exits 75, the tests not run, when no slot came free in 240 s: run it again later.
    Do not run `make check` or `sd gate check`: the lead's `sd-ship prepare` runs the one full gate.
 6. Write the pull-request body to the path your brief names. It holds `## Summary`, one bullet group per item
    naming `<repo> sd:N`, and `## Test plan`, with the fail-first tests and focused test lines.

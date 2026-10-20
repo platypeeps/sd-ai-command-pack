@@ -52,16 +52,22 @@ pass on one thread and fail on eight.
 `MAKEFLAGS` gets no `-j`: a Makefile that orders prerequisites by their
 listing, as the pack's own `check` does, would run them at once.
 
-A lane gate goes first (sd:5078). On 2026-10-18 three of four lane gates hit
-the 60-minute gate limit: builder test runs took the other slot and loaded the
-machine. A lane gate is `sd-check`'s own wait, the merge gate wherever it runs;
-its ticket says `lane`, and the queue admits lane tickets before the rest. A
-builder's `run` refuses at once, exit `RUN_LANE_BUSY`, while a lane gate holds
-or waits, and a run already queued leaves at its next poll. A run that holds
-a slot keeps it. A lane gate that holds slot N also holds a `flock` on
-`slot.N.lane`, taken in the same admission step, with its label written in it:
-the kernel drops both when it dies, so it leaves nothing that holds a builder
-back. A lane state that cannot be read refuses the builder rather than admit it.
+Every waiter goes in the order it queued (sd:5409). sd:5078 admitted lane
+gates first and had a builder's `run` refuse, exit 69, while a lane gate held
+or waited. On 2026-10-19 three builders then waited 1.5 to 2 h: a lane gate
+nearly always held a slot, and each time one ended the next queued before the
+builder tried again. Now a builder's `run` queues as any waiter does, bounded
+by its `--max-wait`, and no later lane gate overtakes it; a lane gate that
+queued first still starts first. The slot count is the load bound for both.
+
+A lane gate is `sd-check`'s own wait, the merge gate wherever it runs; its
+ticket says `role: lane`, and while it holds slot N it holds a `flock` on
+`slot.N.lane`, taken in the same admission step, with its label written in it,
+so `status` names it; the kernel drops both when it dies. The key is not
+sd:5078's `lane: true`, which that version's admission put first: a waiter
+still running that code would wait for a lane ticket this version orders
+behind it, and each would wait for the other. A lane gate still on that code
+puts its own ticket first until it ends; nothing here can change that.
 
 Stdlib only: the harness runs this file from a bare fixture copy.
 """
@@ -99,10 +105,6 @@ TIMED_OUT = 4
 #: Exit codes of the `run` command, beside the command's own: as `timeout(1)`, except a wait past `--max-wait`,
 #: which exits `EX_TEMPFAIL` so a caller's own `timeout` keeps 124 for itself (sd:3996).
 RUN_NO_SLOT = 75
-#: A builder's run beside a lane gate (sd:5078): `EX_UNAVAILABLE`, the command not run.
-RUN_LANE_BUSY = 69
-#: When a refused run is told to try again: lane gates take minutes, and a poll costs nothing.
-LANE_RETRY_SECONDS = 300.0
 RUN_NOT_STARTED = 125
 RUN_NOT_FOUND = 127
 
@@ -129,14 +131,6 @@ NUMBER = re.compile(r"[0-9]+(\.[0-9]+)?")
 
 class LauncherExited(Exception):
     """The process that started the waiter exited: an orphan must not take a slot."""
-
-
-class LaneBusy(Exception):
-    """A lane gate holds or waits for a slot, so a builder's run does not start or wait (sd:5078)."""
-
-    def __init__(self, gate: dict) -> None:
-        super().__init__(gate.get("label", ""))
-        self.gate = gate
 
 
 def directory(environ: Mapping[str, str]) -> pathlib.Path:
@@ -256,13 +250,13 @@ def utc_stamp(seconds: float) -> str:
 class Ticket:
     """One waiter's place: its sequence number, the locked ticket file, and its place as the last `admit` read it.
 
-    `lane` marks a lane gate; `yields` marks a builder's run, which refuses beside one (sd:5078).
+    `lane` marks a lane gate, which marks the slot it takes (sd:5078).
     """
 
     def __init__(self, seq: int, path: pathlib.Path, fd: int | None, *, label: str = "", cwd: str = "",
-                 lane: bool = False, yields: bool = False) -> None:
+                 lane: bool = False) -> None:
         self.seq, self.path, self.fd = seq, path, fd
-        self.label, self.cwd, self.lane, self.yields = label, cwd, lane, yields
+        self.label, self.cwd, self.lane = label, cwd, lane
         self.place: tuple[int, int] | None = None
 
     def drop(self) -> None:
@@ -305,8 +299,7 @@ class Queue:
         partial.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
         os.replace(partial, target)
 
-    def enter(self, label: str, cwd: str, *, wall: Callable[[], float] = time.time, lane: bool = False,
-              yields: bool = False) -> Ticket:
+    def enter(self, label: str, cwd: str, *, wall: Callable[[], float] = time.time, lane: bool = False) -> Ticket:
         """Take the next place in the queue, held by this process until `leave` or death."""
         self.tickets.mkdir(parents=True, exist_ok=True)
         with self.admission_lock():
@@ -320,8 +313,8 @@ class Queue:
             fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_TRUNC, 0o644)
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             os.write(fd, json.dumps({"seq": seq, "pid": os.getpid(), "label": label, "cwd": cwd,
-                                     "since": wall(), "lane": lane}).encode())
-        return Ticket(seq, path, fd, label=label, cwd=cwd, lane=lane, yields=yields)
+                                     "since": wall(), **({"role": "lane"} if lane else {})}).encode())
+        return Ticket(seq, path, fd, label=label, cwd=cwd, lane=lane)
 
     def leave(self, ticket: Ticket) -> None:
         if ticket.fd is None:
@@ -371,21 +364,15 @@ class Queue:
 
         Returns the slot's index, or None and the reason it waits. An admitted
         ticket leaves the queue in the same step, and a lane ticket locks the
-        slot's `markers` entry in that step too. A ticket that `yields` raises
-        `LaneBusy` while a lane gate holds or waits, or when that cannot be read (sd:5078).
+        slot's `markers` entry in that step too (sd:5078).
         """
         with self.admission_lock():
             state = self.state()
             now = wall()
             try:
-                live = self.waiters(prune=True)
-                if ticket.yields:
-                    lanes = lane_gates(self.where, live)
-                    if lanes:
-                        raise LaneBusy(lanes[0])
-                ordered = admission_order(live)
+                ordered = admission_order(self.waiters(prune=True))
                 listed = any(entry["seq"] == ticket.seq for entry in ordered)
-                mine = [] if listed else [{"seq": ticket.seq, "lane": ticket.lane}]
+                mine = [] if listed else [{"seq": ticket.seq}]
                 order = [entry["seq"] for entry in admission_order([*ordered, *mine])]
                 ticket.place = (order.index(ticket.seq) + 1, len(order))
                 if order[0] != ticket.seq:
@@ -413,12 +400,16 @@ class Queue:
 
 
 def admission_order(entries: list[dict]) -> list[dict]:
-    """Lane tickets first, then the rest, each first in, first out (sd:5078). A ticket with no `lane` key is not one.
+    """First in, first out, lane gate or not (sd:5409).
 
-    A ticket that could not be opened is left out, as before sd:5078: nobody can say whether its waiter lives.
+    A ticket that could not be opened is left out: nobody can say whether its waiter lives.
     """
-    probed = [entry for entry in entries if not entry.get("unprobed")]
-    return sorted(probed, key=lambda entry: (entry.get("lane") is not True, entry["seq"]))
+    return sorted((entry for entry in entries if not entry.get("unprobed")), key=lambda entry: entry["seq"])
+
+
+def is_lane(entry: dict) -> bool:
+    """A lane gate's ticket: `role: lane`, or sd:5078's `lane: true`, which a waiter on that code may still write."""
+    return entry.get("role") == "lane" or entry.get("lane") is True
 
 
 def mark_lane(fd: int, label: str, cwd: str, now: float) -> bool:
@@ -453,7 +444,7 @@ def lane_gates(where: pathlib.Path, live: list[dict]) -> list[dict]:
 
     A lane gate holds slot N's `slot.N.lane` while it holds the slot, so only
     a live one counts. A marker or ticket that cannot be read is an `unknown`
-    entry, never no lane gate: a builder refuses on it (sd:5078).
+    entry, never no lane gate (sd:5078).
     """
     found: list[dict] = []
     try:
@@ -488,7 +479,7 @@ def lane_gates(where: pathlib.Path, live: list[dict]) -> list[dict]:
     found.extend({"state": "unknown", "reason": f"cannot read queue ticket {entry['seq']}"}
                  for entry in live if entry.get("unreadable"))
     for place, entry in enumerate(admission_order(live), start=1):
-        if entry.get("lane") is True:
+        if is_lane(entry):
             since = entry.get("since")
             found.append({"state": "waiting", "place": place, "pid": entry.get("pid"),
                           "label": entry.get("label", ""), "cwd": entry.get("cwd", ""),
@@ -497,20 +488,11 @@ def lane_gates(where: pathlib.Path, live: list[dict]) -> list[dict]:
 
 
 def lane_line(gate: dict) -> str:
-    """One lane gate as `status` and a refusal name it."""
+    """One lane gate as `status` names it."""
     if gate["state"] == "unknown":
         return f"unknown: {gate['reason']}"
     where = f"holds slot {gate['slot']}" if gate["state"] == "holding" else f"waits at place {gate['place']}"
     return f"{gate['label'] or 'an unlabelled gate'} (pid {gate['pid'] or '?'}) {where} since {gate['since'] or '?'}"
-
-
-def lane_refusal(gate: dict, now: float) -> str:
-    """The line a builder's run prints when it refuses beside `gate` (sd:5078)."""
-    told = (f"cannot tell whether a lane gate holds or waits ({gate['reason']})" if gate["state"] == "unknown"
-            else f"lane gate {lane_line(gate)}")
-    return (f"error: {told}; a gate run outside the lane does not start or wait beside one, "
-            f"so the command did not run (exit {RUN_LANE_BUSY}); retry after {utc_stamp(now + LANE_RETRY_SECONDS)}, "
-            f"or once `sd gate status` shows no lane gate\n")
 
 
 def record_sample(state: dict, rule: LoadRule, load1: float, now: float) -> None:
@@ -600,12 +582,10 @@ def wait_for_slot(fds: Sequence[int], where: pathlib.Path, *, poll: float, strea
                   stop: Callable[[], bool] = lambda: False, deadline: float | None = None,
                   clock: Callable[[], float] = time.monotonic, rule: LoadRule | None = None,
                   loadavg: Callable[[], Sequence[float]] = os.getloadavg, wall: Callable[[], float] = time.time,
-                  label: str = "", lane: bool = False, yields: bool = False, markers: Sequence[int] = ()) -> int | None:
+                  label: str = "", lane: bool = False, markers: Sequence[int] = ()) -> int | None:
     """Queue, then lock one of `fds` and return its index; None once `deadline` passes.
 
-    `lane` queues as a lane gate, which locks `markers[i]` with slot i; with
-    `yields` the wait raises `LaneBusy` beside one, at its first poll or any
-    later one, and when it cannot queue, since then it cannot tell (sd:5078).
+    `lane` queues as a lane gate, which locks `markers[i]` with slot i (sd:5078).
 
     `stop` is asked before every attempt, so a waiter whose launcher died
     takes nothing even when a slot frees during its sleep. While queued it
@@ -618,11 +598,8 @@ def wait_for_slot(fds: Sequence[int], where: pathlib.Path, *, poll: float, strea
     rule = rule if rule is not None else LoadRule(0.0, 0.0, "none")
     queue = Queue(where)
     try:
-        ticket: Ticket | None = queue.enter(label or f"pid {os.getpid()}", os.getcwd(), wall=wall, lane=lane,
-                                            yields=yields)
+        ticket: Ticket | None = queue.enter(label or f"pid {os.getpid()}", os.getcwd(), wall=wall, lane=lane)
     except OSError as error:
-        if yields:
-            raise LaneBusy({"state": "unknown", "reason": f"cannot queue under {where}: {error}"}) from None
         stream.write(f"warning: cannot queue under {where} ({error}); taking any free slot\n")
         ticket = None
     started = clock()
@@ -721,11 +698,10 @@ def kept_marker(markers: list[TextIO], taken: int | None) -> TextIO | None:
 
 
 def acquire(slots: int, environ: Mapping[str, str], *, stream: TextIO, timeout: float | None = None,
-            rule: LoadRule | None = None, label: str = "", lane: bool = False, yields: bool = False) -> Slot | None:
+            rule: LoadRule | None = None, label: str = "", lane: bool = False) -> Slot | None:
     """Take one of `slots` slots for this process, or None when `timeout` passed first.
 
-    `lane` and `yields` are `wait_for_slot`'s: `sd-check` waits as the lane
-    gate, a builder's `run` yields to one (sd:5078).
+    `lane` is `wait_for_slot`'s: `sd-check` waits as the lane gate (sd:5078).
 
     `slots` of 0 takes nothing. A directory that cannot be made runs uncapped
     with a warning, as the harness always has: a cap is load control, and no
@@ -740,8 +716,6 @@ def acquire(slots: int, environ: Mapping[str, str], *, stream: TextIO, timeout: 
         where.mkdir(parents=True, exist_ok=True)
         handles = [open(where / f"slot.{index}.lock", "a") for index in range(1, slots + 1)]
     except OSError as error:
-        if yields:
-            raise LaneBusy({"state": "unknown", "reason": f"cannot use {where}: {error}"}) from None
         stream.write(f"warning: cannot use {where} ({error}); running without the gate cap\n")
         return Slot(None, None, 0.0)
     markers = open_markers(where, slots, stream) if lane else []
@@ -751,7 +725,7 @@ def acquire(slots: int, environ: Mapping[str, str], *, stream: TextIO, timeout: 
                               stream=stream, stop=launcher_watch(os.getpid(), os.getppid()),
                               deadline=None if timeout is None else started + timeout,
                               rule=rule if rule is not None else load_rule(environ), label=label, lane=lane,
-                              yields=yields, markers=[marker.fileno() for marker in markers])
+                              markers=[marker.fileno() for marker in markers])
     except BaseException:
         for handle in [*markers, *handles]:
             handle.close()
@@ -812,7 +786,7 @@ def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int,
         label: str = "", max_wait: float | None = None) -> int:
     """Wait for a slot, at most `max_wait` seconds, run `command` with `SD_GATE_SLOTS=0`, free the slot,
     and return its exit code; `RUN_NO_SLOT` when the wait ran out, with the command not started.
-    It yields to a lane gate: `RUN_LANE_BUSY` at once while one holds or waits, the command not started (sd:5078).
+    It waits its turn beside lane gates, in the order it queued (sd:5409).
 
     The command runs in its own process group. SIGINT, SIGTERM and SIGHUP go
     to that whole group, and this process waits for the command to end. The
@@ -824,11 +798,7 @@ def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int,
         stream.write("error: name a command to run after --\n")
         return RUN_NOT_STARTED
     try:
-        slot = acquire(slots, environ, stream=stream, timeout=max_wait, rule=rule, label=label or shlex.join(command),
-                       yields=True)
-    except LaneBusy as busy:
-        stream.write(lane_refusal(busy.gate, time.time()))
-        return RUN_LANE_BUSY
+        slot = acquire(slots, environ, stream=stream, timeout=max_wait, rule=rule, label=label or shlex.join(command))
     except LauncherExited:
         stream.write("error: the process that started this gate exited while it waited for a slot\n")
         return RUN_NOT_STARTED
@@ -966,9 +936,8 @@ def wait_seconds(text: str) -> float:
 
 def add_gate_verbs(verbs: argparse._SubParsersAction) -> None:
     """`run` and `status`, shared by this file and `sd gate`."""
-    runner = verbs.add_parser("run", help="wait in the machine-wide gate queue, run a command, free the slot; "
-                              f"exit {RUN_LANE_BUSY} at once, the command not run, while a lane gate (sd-check) "
-                              "holds or waits for a slot")
+    runner = verbs.add_parser("run", help="wait in the machine-wide gate queue, in the order it queued beside "
+                              "lane gates (sd-check), run a command, free the slot")
     runner.add_argument("--label", default="", help="what `status` shows for this gate (default: the command)")
     runner.add_argument("--max-wait", type=wait_seconds, metavar="SECONDS",
                         help=f"give up waiting for a slot after this long and exit {RUN_NO_SLOT}, the command not run; "
