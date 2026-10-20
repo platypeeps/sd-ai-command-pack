@@ -818,6 +818,10 @@ def upsert_shadow(
     branch: str | None = None,
     linked_issues: list[str] | None = None,
     updated_at: str | None = None,
+    created_at: str | None = None,
+    filed: bool | None = None,
+    status: str | None = None,
+    assignee: str | None = None,
 ) -> None:
     """A tracker's row, keyed by `(tracker, url)`. Seen once, then kept current.
 
@@ -835,6 +839,11 @@ def upsert_shadow(
     `updated_at` (migration 39, pack sd:5357) is when the tracker last updated
     the row; None keeps the stored value.
 
+    `created_at`, `filed`, `status` and `assignee` (migration 40, pack sd:5496)
+    are when the tracker created the row, whether the operator filed it,
+    Jira's status name and the assignee; None keeps the stored value, and an
+    empty `assignee` says unassigned.
+
     The conflict target is both columns, so this updates only the row this
     tracker already owns. Until sd:603 it was `url` alone and the update set
     `tracker = excluded.tracker`, which meant the last collector to see a url
@@ -846,8 +855,9 @@ def upsert_shadow(
     with transaction(connection):
         connection.execute(
             "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, "
-            "author, reason, merged_at, closed_at, branch, linked_issues, updated_at, first_seen, last_seen) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "author, reason, merged_at, closed_at, branch, linked_issues, updated_at, "
+            "created_at, filed, status, assignee, first_seen, last_seen) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(tracker, url) DO UPDATE SET "
             "repo = excluded.repo, number = excluded.number, kind = excluded.kind, "
             "title = excluded.title, state = excluded.state, "
@@ -859,9 +869,14 @@ def upsert_shadow(
             "branch = COALESCE(excluded.branch, shadow.branch), "
             "linked_issues = COALESCE(excluded.linked_issues, shadow.linked_issues), "
             "updated_at = COALESCE(excluded.updated_at, shadow.updated_at), "
+            "created_at = COALESCE(excluded.created_at, shadow.created_at), "
+            "filed = COALESCE(excluded.filed, shadow.filed), "
+            "status = COALESCE(excluded.status, shadow.status), "
+            "assignee = COALESCE(excluded.assignee, shadow.assignee), "
             "last_seen = excluded.last_seen",
             (tracker, repo, url, number, kind, title, state, author, reason, merged_at, closed_at, branch,
-             None if linked_issues is None else json.dumps(list(linked_issues)), updated_at, stamp, stamp),
+             None if linked_issues is None else json.dumps(list(linked_issues)), updated_at,
+             created_at, None if filed is None else int(filed), status, assignee, stamp, stamp),
         )
 
 
