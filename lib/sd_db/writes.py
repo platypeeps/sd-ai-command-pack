@@ -870,6 +870,29 @@ def open_shadow_issues(connection: sqlite3.Connection, *, tracker: str, repos: t
         f"AND lower(repo) IN ({', '.join('?' * len(lowered))}) ORDER BY id", (tracker, *lowered)).fetchall()
 
 
+def stale_shadow_issues(connection: sqlite3.Connection, *, tracker: str, outside: tuple[str, ...],
+                        before: str) -> list[sqlite3.Row]:
+    """The stored open issue rows last seen before `before`, outside the repositories `outside`, oldest first.
+
+    Pack sd:5415: the rows only the operator's windowed buckets keep current.
+    """
+    lowered = [repo.lower() for repo in outside]
+    return connection.execute(
+        "SELECT id, url FROM shadow WHERE tracker = ? AND kind = 'issue' AND state = 'open' AND last_seen < ? "
+        f"AND lower(coalesce(repo, '')) NOT IN ({', '.join('?' * len(lowered))}) ORDER BY last_seen, id",
+        (tracker, before, *lowered)).fetchall()
+
+
+def see_shadow(connection: sqlite3.Connection, *, tracker: str, urls) -> int:
+    """Mark the open rows of `urls` seen now, each one a direct read said is open (pack sd:5415). Returns the count."""
+    stamp = now()
+    with transaction(connection):
+        cursor = connection.executemany(
+            "UPDATE shadow SET last_seen = ? WHERE tracker = ? AND url = ? AND state = 'open'",
+            [(stamp, tracker, url) for url in urls])
+    return cursor.rowcount
+
+
 def close_shadow(connection: sqlite3.Connection, *, tracker: str, closed: dict[str, str | None]) -> int:
     """Close the open rows of `closed`'s urls, each one a direct read said is no open issue (sd:4880).
 

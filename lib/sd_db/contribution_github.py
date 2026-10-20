@@ -71,6 +71,11 @@ class Exhausted(Unavailable):
     """The collection's request or time budget is spent."""
 
 
+class Gone(Unavailable):
+    """HTTP 410: GitHub says the resource is gone for good, such as a deleted
+    issue or any issue of a repository whose Issues are disabled (pack sd:5415)."""
+
+
 @dataclass
 class Response:
     status: int
@@ -118,7 +123,8 @@ class Client:
         if missing and response.status == 404:
             return None, {}
         if response.status != 200:
-            raise Unavailable(f"API HTTP {response.status}; retry on a later collection")
+            raise (Gone if response.status == 410 else Unavailable)(
+                f"API HTTP {response.status}; retry on a later collection")
         if len(response.body.encode()) > MAX_BYTES:
             raise Unavailable("API response exceeds collection size limit")
         try:
