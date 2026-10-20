@@ -606,6 +606,33 @@ class TheTrackerDispatch(SyncCase):
         self.assertEqual(read_watermark(self.connection, "github"), iso(later))
         self.assertEqual(read_watermark(self.connection, "jira"), iso(self.now))
 
+    def test_a_custom_jql_stores_its_rows_and_holds_the_cursor(self):
+        """pack sd:5376: `JIRA_JQL` has no window, so its run covers none.
+
+        Moving the cursor would let a later default sync, once `JIRA_JQL` is
+        unset, resume from it and skip every ticket touched in between. Both
+        the first run and a run over an existing cursor must hold it.
+        """
+        seeded = "2026-09-01T00:00:00Z"
+        for previous in (None, seeded):
+            with self.subTest(previous=previous):
+                self.connection.execute("DELETE FROM state")
+                self.connection.execute("DELETE FROM shadow")
+                if previous:
+                    write_watermark(self.connection, "jira", previous, "earlier")
+                transport = jira_transport([{"issues": [jira_issue("ABC-1")], "isLast": True}])
+                with self.environment(), patch.dict(os.environ, {"JIRA_JQL": "project = ABC"}):
+                    result = sync(self.connection, tracker="jira", now=self.now, runner=transport)
+                self.assertTrue(result.ok, result.reason)
+                self.assertEqual(result.written, 1)
+                self.assertFalse(result.watermark_moved)
+                self.assertEqual(read_watermark(self.connection, "jira"), previous)
+                self.assertEqual(result.window_start, "")
+                heartbeat = self.jira_heartbeats()[-1]
+                self.assertTrue(heartbeat["ok"])
+                self.assertEqual((heartbeat["window_start"], heartbeat["windowed"]), ("", False))
+                self.assertEqual(tracker_freshness(self.connection, "jira", now=self.now)["state"], "fresh")
+
     def test_an_unconfigured_jira_is_not_collected_and_writes_only_its_heartbeat(self):
         transport = jira_transport([{"issues": [jira_issue("ABC-1")], "isLast": True}])
         with self.environment(without=("JIRA_BASE_URL",)):

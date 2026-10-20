@@ -449,6 +449,27 @@ class TrackerFreshness(ProgressCase):
         self.assertEqual((fresh["state"], fresh["age_seconds"]), ("fresh", 3600))
         self.assertEqual(tracker_freshness(self.db, now=now, max_age_seconds=1800)["state"], "stale")
 
+    def test_an_unwindowed_success_counts_without_a_cursor(self):
+        """pack sd:5376: a custom `JIRA_JQL` run holds the cursor but still succeeded.
+
+        An older cursor stays the last success until a later unwindowed
+        heartbeat; a windowed or failed heartbeat never counts.
+        """
+        now = datetime(2026, 9, 8, 12, tzinfo=UTC)
+        write_watermark(self.db, "jira", "2026-09-05T11:00:00+00:00", "2026-09-04T00:00:00+00:00")
+        record_state(self.db, "heartbeat", key="tracker-sync:jira", timestamp="2026-09-08T10:00:00+00:00",
+                     body={"ok": False, "reason": "boom", "windowed": False})
+        record_state(self.db, "heartbeat", key="tracker-sync:jira", timestamp="2026-09-08T10:30:00+00:00",
+                     body={"ok": True, "reason": ""})
+        self.assertEqual(tracker_freshness(self.db, "jira", now=now)["last_success_at"],
+                         "2026-09-05T11:00:00+00:00")
+        record_state(self.db, "heartbeat", key="tracker-sync:jira", timestamp="2026-09-08T11:00:00+00:00",
+                     body={"ok": True, "reason": "", "windowed": False})
+        state = tracker_freshness(self.db, "jira", now=now)
+        self.assertEqual((state["state"], state["last_success_at"], state["age_seconds"]),
+                         ("fresh", "2026-09-08T11:00:00+00:00", 3600))
+        self.assertEqual(tracker_freshness(self.db, "github", now=now)["state"], "never")
+
     def test_failed_attempt_does_not_advance_successful_sync_or_appear_fresh(self):
         write_watermark(self.db, "github", "2026-09-08T11:00:00+00:00", "2026-09-07T00:00:00+00:00")
         record_state(self.db, "heartbeat", key="tracker-sync:github", timestamp="2026-09-08T11:30:00+00:00",
