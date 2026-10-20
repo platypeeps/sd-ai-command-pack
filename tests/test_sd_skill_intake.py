@@ -544,6 +544,68 @@ class TheTrackedList(TrackedCase):
         self.assertEqual([entry["url"] for entry in self.row()], [self.REPO])
 
 
+class TheOtherSources(TrackedCase):
+    """The `skills` CLI's lock file and a skill linked from a git checkout also name where skills came from."""
+
+    def lock(self, skills) -> Path:
+        path = self.home / ".agents" / ".skill-lock.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(skills if isinstance(skills, str) else json.dumps({"version": 3, "skills": skills}))
+        return path
+
+    def checkout(self, name: str, origin: str | None) -> Path:
+        top = self.root.parent / "checkouts" / name
+        self.write(top / "skills" / name, skill_text(name, f"Fixture skill {name} from a linked checkout."))
+        subprocess.run(["git", "init", "-q", str(top)], capture_output=True, env=clean_environment(), check=True)
+        if origin:
+            subprocess.run(["git", "-C", str(top), "remote", "add", "origin", origin], capture_output=True,
+                           env=clean_environment(), check=True)
+        (self.home / ".claude" / "skills" / name).symlink_to(top / "skills" / name)
+        return top
+
+    def test_the_lock_files_github_sources_seed_the_list_and_write_nothing(self) -> None:
+        self.lock({"archive": {"source": "example/archive", "sourceType": "github",
+                               "sourceUrl": "https://github.com/example/archive.git", "skillPath": "archive/SKILL.md"},
+                   "notes": {"source": "example/kit", "sourceType": "github", "skillPath": "skills/notes/SKILL.md"},
+                   "local": {"source": "/tmp/local", "sourceType": "local"}})
+        view = self.view()
+        self.assertTrue(view["seeded"])
+        self.assertEqual([(repo["url"], repo["scope"], [s["name"] for s in repo["skills"]]) for repo in view["repos"]],
+                         [("https://github.com/example/archive", "user", ["archive"]),
+                          ("https://github.com/example/kit", "user", ["notes"])])
+        self.assertEqual(self.row(), "absent")
+
+    def test_a_skill_linked_from_a_github_checkout_seeds_its_origin(self) -> None:
+        self.checkout("kit", "git@github.com:example/kit.git")
+        self.checkout("mirror", "https://example.test/example/mirror.git")
+        self.checkout("loose", None)
+        self.assertEqual([(repo["url"], repo["scope"], [s["name"] for s in repo["skills"]]) for repo in self.view()["repos"]],
+                         [("https://github.com/example/kit", "user", ["kit"])])
+        self.assertEqual(self.row(), "absent")
+
+    def test_once_written_the_other_sources_list_as_not_tracked(self) -> None:
+        self.lock({"archive": {"source": "example/archive", "sourceType": "github"}})
+        self.checkout("kit", "ssh://git@github.com/example/kit")
+        intake.untrack(self.connection, "https://github.com/example/archive", self.root, self.home)
+        view = self.view()
+        self.assertEqual([repo["url"] for repo in view["repos"]], ["https://github.com/example/kit"])
+        self.assertEqual([(u["url"], [s["name"] for s in u["skills"]]) for u in view["untracked"]],
+                         [("https://github.com/example/archive", ["archive"])])
+        self.assertEqual(intake.track(self.connection, "https://github.com/example/archive", None, self.root,
+                                      self.home)["repos"][-1]["scope"], "user")
+
+    def test_a_lock_file_that_does_not_read_is_unknown_not_empty(self) -> None:
+        path = self.lock("{not json")
+        with self.assertRaisesRegex(intake.IntakeError, f"cannot read {path}"):
+            self.view()
+        self.lock({"archive": {"source": "example/archive", "sourceType": "github"}})
+        path.chmod(0)
+        self.addCleanup(path.chmod, 0o600)
+        with self.assertRaisesRegex(intake.IntakeError, f"cannot read {path}"):
+            self.view()
+        self.assertEqual(self.row(), "absent")
+
+
 class TheRefresh(TrackedCase):
     """A refresh judges every skill of the repository through the intake's report, and installs nothing."""
 

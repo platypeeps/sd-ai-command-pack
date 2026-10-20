@@ -20,6 +20,7 @@ later fetch or a local edit changed.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import difflib
 import hashlib
@@ -686,6 +687,86 @@ def adopted(root: pathlib.Path, home: pathlib.Path) -> dict[str, dict[str, Any]]
     return found
 
 
+LOCK_FILE = pathlib.Path(".agents") / ".skill-lock.json"  # the `skills` CLI's record, under the home folder
+GITHUB_REMOTE_RE = re.compile(r"(?:https://(?:[^@/]+@)?|ssh://git@|git@)github\.com[:/]([^/]+)/(.+)")
+
+
+def _locked(home: pathlib.Path) -> list[tuple[str, str]]:
+    """`(skill, repository URL)` for each GitHub skill the `skills` CLI's lock file holds; no file, none.
+
+    A file that does not read raises: unknown, never "installed nothing".
+    """
+
+    path = home / LOCK_FILE
+    if not path.exists():
+        return []
+    try:
+        skills = json.loads(path.read_text(encoding="utf-8"))["skills"]
+        rows = [(name, row) for name, row in skills.items() if row.get("sourceType") == "github"]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        raise IntakeError(f"cannot read {path}: {error}") from error
+    out = []
+    for name, row in rows:
+        for text in (row.get("sourceUrl"), f"{GITHUB}{row.get('source')}"):
+            with contextlib.suppress(IntakeError):
+                out.append((name, repo_url(text)))
+                break
+    return out
+
+
+def _origin(top: pathlib.Path) -> str | None:
+    """The GitHub repository a checkout's `origin` names, or None: no origin, or not GitHub."""
+
+    try:
+        done = subprocess.run(["git", "-C", str(top), "config", "--get", "remote.origin.url"], capture_output=True,
+                              text=True, timeout=GIT_TIMEOUT, env=_git_env(), check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise IntakeError(f"cannot read the origin of {top}: {error}") from error
+    if done.returncode not in (0, 1):  # 1 is "no such key"
+        raise IntakeError(f"cannot read the origin of {top}: {_printable(done.stderr.strip())[:300]}")
+    found = GITHUB_REMOTE_RE.fullmatch(done.stdout.strip())
+    try:
+        return repo_url(f"{GITHUB}{found[1]}/{found[2]}") if found else None
+    except IntakeError:
+        return None
+
+
+def _linked(root: pathlib.Path, home: pathlib.Path) -> list[tuple[str, str]]:
+    """`(skill, repository URL)` for each user skill that resolves inside a git checkout with a GitHub origin.
+
+    The pack's own checkout is not a source: its skills ship with it.
+    """
+
+    out, origins = [], {}
+    directory = home / ".claude" / "skills"
+    for folder in sorted(directory.iterdir()) if directory.is_dir() else []:
+        real = folder.resolve()
+        top = next((each for each in (real, *real.parents) if (each / ".git").exists()), None)
+        if top is None or top == root.resolve():
+            continue
+        if top not in origins:
+            origins[top] = _origin(top)
+        if origins[top]:
+            out.append((folder.name, origins[top]))
+    return out
+
+
+def installed_from(root: pathlib.Path, home: pathlib.Path) -> dict[str, dict[str, Any]]:
+    """`adopted`, plus the repositories the lock file and linked checkouts name, as user skills with no commit.
+
+    Only the seed and the not-tracked list read these; a refresh places only what Provenance records.
+    """
+
+    found = adopted(root, home)
+    named = {skill["name"] for value in found.values() for skill in value["skills"]}
+    for name, repo in _locked(home) + _linked(root, home):
+        if name not in named:
+            named.add(name)
+            entry = found.setdefault(repo.lower(), {"url": repo, "skills": []})
+            entry["skills"].append({"name": name, "scope": "user", "url": repo, "commit": None})
+    return found
+
+
 def _writes() -> Any:
     imported = sd_lib.import_sd_db()
     if imported.module is None:
@@ -709,13 +790,13 @@ def _entries(raw: str) -> list[dict[str, Any]]:
 
 
 def read_tracked(connection: Any, root: pathlib.Path, home: pathlib.Path) -> tuple[str | None, list[dict[str, Any]], bool]:
-    """`(row text, entries, seeded)`. A row never held is seeded from Provenance and written by nothing here."""
+    """`(row text, entries, seeded)`. A row never held is seeded from `installed_from` and written by nothing here."""
 
     held = _writes().read_settings(connection, [TRACKED_KEY])
     if TRACKED_KEY in held:
         return held[TRACKED_KEY], [] if held[TRACKED_KEY] is None else _entries(held[TRACKED_KEY]), False
     seed = [{"url": value["url"], "scope": "user" if all(s["scope"] == "user" for s in value["skills"]) else "pack",
-             "refreshed": None, "result": None} for _key, value in sorted(adopted(root, home).items())]
+             "refreshed": None, "result": None} for _key, value in sorted(installed_from(root, home).items())]
     return None, seed, True
 
 
@@ -733,7 +814,7 @@ def tracked(connection: Any, root: pathlib.Path, home: pathlib.Path) -> dict[str
     """Each tracked repository with the installed skills adopted from it, then the adopted ones not tracked."""
 
     _raw, entries, seeded = read_tracked(connection, root, home)
-    found = adopted(root, home)
+    found = installed_from(root, home)
     keys = {entry["url"].lower() for entry in entries}
     return {"key": TRACKED_KEY, "seeded": seeded,
             "repos": [{**entry, "skills": found.get(entry["url"].lower(), {}).get("skills", [])} for entry in entries],
@@ -748,7 +829,7 @@ def track(connection: Any, url: str, scope: str | None, root: pathlib.Path, home
     if repo.lower() not in {entry["url"].lower() for entry in entries}:
         if len(entries) >= MAX_TRACKED:
             raise IntakeError(f"{MAX_TRACKED} repositories are tracked already; untrack one first")
-        skills = adopted(root, home).get(repo.lower(), {}).get("skills", [])
+        skills = installed_from(root, home).get(repo.lower(), {}).get("skills", [])
         default = "user" if skills and all(s["scope"] == "user" for s in skills) else "pack"
         entries.append({"url": repo, "scope": scope or default, "refreshed": None, "result": None})
         write_tracked(connection, entries, raw)
@@ -942,7 +1023,7 @@ def refresh(connection: Any, url: str, root: pathlib.Path, home: pathlib.Path, t
 
 
 def tracked_text(view: dict[str, Any]) -> str:
-    out = [f"tracked{' (seeded from Provenance, not yet written)' if view['seeded'] else ''}: "
+    out = [f"tracked{' (seeded from the installed skills, not yet written)' if view['seeded'] else ''}: "
            f"{len(view['repos'])} repositor{'y' if len(view['repos']) == 1 else 'ies'}"]
     for repo in view["repos"]:
         last = f"refreshed {repo['refreshed']}: {repo['result']}" if repo["refreshed"] else "never refreshed"
