@@ -810,8 +810,10 @@ def _place(installed: list[dict[str, Any]], branch: str, paths: list[str]) -> tu
 
 
 def _judged(report: dict[str, Any], path: str) -> dict[str, Any]:
+    """One skill's report in a refresh: its first DIFF_LINES diff lines, and how many there are; `evaluate` gives them all."""
+
     report.pop("_files")
-    return {"path": path, **report}
+    return {"path": path, **report, "diff": report["diff"][:DIFF_LINES], "diff_lines": len(report["diff"])}
 
 
 def _judge_tree(work: pathlib.Path, listing: list[tuple[str, str, str, str]], tree: dict[str, Any], entry: dict[str, Any],

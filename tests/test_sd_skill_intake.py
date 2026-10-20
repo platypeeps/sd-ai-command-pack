@@ -565,6 +565,16 @@ class TheRefresh(TrackedCase):
         self.assertEqual(self.row()[0]["result"], "3 new, 1 changed")
         self.assertEqual(self.row()[0]["refreshed"], report["refreshed"])
 
+    def test_a_refresh_carries_the_first_diff_lines_and_counts_the_rest(self) -> None:
+        # A whole repository of new skills is a diff per skill: one refresh of a public repository printed 31 MB of JSON.
+        self.write(self.upstream / "skills" / "ledger", GOOD + "".join(f"Line {n}.\n" for n in range(intake.DIFF_LINES)))
+        self.commit()
+        intake.track(self.connection, self.REPO, None, self.root, self.home)
+        ledger = next(skill for skill in self.refresh()["skills"] if skill["skill"] == "sd-ledger")
+        self.assertEqual(len(ledger["diff"]), intake.DIFF_LINES)
+        self.assertGreater(ledger["diff_lines"], intake.DIFF_LINES)
+        self.assertEqual(ledger["diff_lines"], len(intake.evaluate(ledger["url"], "pack", self.root, self.home, TODAY)["diff"]))
+
     def test_a_refreshed_skill_installs_through_the_intake_approval(self) -> None:
         intake.track(self.connection, self.REPO, None, self.root, self.home)
         ledger = next(skill for skill in self.refresh()["skills"] if skill["skill"] == "sd-ledger")
