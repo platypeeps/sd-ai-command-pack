@@ -32,6 +32,7 @@ import os
 import pathlib
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -1245,6 +1246,94 @@ class AFollowupRowIsClearedByItsDeliveryReceipt(Fixture):
         sd_db.workflow.change_status(self._connection, number, "planning", who="the test")
         self.close(number, "closed by hand")
         self.assertEqual(len(self.unmarked()), 1, self.only().inconsistencies)
+
+
+class AnItemOfAnotherRepoIsAskedOfThatRepo(Fixture):
+    """sd:5371. A folder here can name a row whose repo is another checkout.
+
+    The design for one repo's item may live in a second repo's `docs/work`.
+    Its receipt names a commit on the item's repo, so asking this checkout's
+    `origin/main` warned "not reachable" on delivered work. The item's repo
+    answers; a repo with no checkout here leaves the item unchecked, not unmarked.
+    """
+
+    named = ATaskKeyedFolder.named
+    unmarked = AFollowupRowIsClearedByItsTrailerAlone.unmarked
+    close = AFollowupRowIsClearedByItsDeliveryReceipt.close
+    receipt = AFollowupRowIsClearedByItsDeliveryReceipt.receipt
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.remote()
+        self.other = self.tmp / "other"
+        self.other.mkdir()
+        for args in (("init", "-q", "-b", "main"), ("config", "user.email", "test@example.com"),
+                     ("config", "user.name", "Test User"), ("config", "commit.gpgsign", "false")):
+            self.git_in(self.other, *args)
+
+    def git_in(self, root: pathlib.Path, *args: str) -> str:
+        return self.git("-C", str(root), *args)
+
+    def foreign(self) -> tuple[int, str]:
+        """A followup row of the other repo, named here, with its receipt on that repo's main."""
+        connection = getattr(self, "_connection", None) or self.database()
+        self._connection = connection
+        sd_db.upsert_repo(connection, str(self.other))
+        number = sd_db.writes.create_item(
+            connection, kind="followup", title="A thing, as a row", status="planning",
+            repo=str(self.other),
+        )
+        self.named(f"sd:{number}", status=None)
+        self.commit("chore: the folder names its row")
+        self.git("push", "-q", "origin", "main")
+        self.git_in(self.other, "commit", "-q", "--allow-empty", "-m", merge_message(f"Item: sd:{number}"))
+        bare = self.tmp / "other.git"
+        self.git("init", "-q", "--bare", "-b", "main", str(bare))
+        self.git_in(self.other, "remote", "add", "origin", str(bare))
+        self.git_in(self.other, "push", "-q", "origin", "main")
+        commit = self.git_in(self.other, "rev-parse", "HEAD")
+        self.receipt(number, commit)
+        return number, commit
+
+    def test_a_receipt_on_the_item_repo_main_clears_the_check(self) -> None:
+        self.foreign()
+        item = self.only()
+        self.assertEqual(item.status, "done")
+        self.assertEqual(self.unmarked(), [], item.inconsistencies)
+
+    def test_a_receipt_off_the_item_repo_main_still_warns(self) -> None:
+        number, _ = self.foreign()
+        self.git_in(self.other, "checkout", "-q", "-b", "side")
+        self.git_in(self.other, "commit", "-q", "--allow-empty", "-m", merge_message(f"Item: sd:{number}"))
+        side = self.git_in(self.other, "rev-parse", "HEAD")
+        sd_db.workflow.change_status(self._connection, number, "planning", who="the test")
+        self.receipt(number, side)
+        found = self.unmarked()
+        self.assertEqual(len(found), 1, self.only().inconsistencies)
+        self.assertIn(f"{side}, which is not reachable from origin/main", found[0])
+
+    def test_a_receipt_on_this_checkout_main_does_not_clear_another_repo_item(self) -> None:
+        """Evidence from the wrong subject: the commit names the item but sits on
+        this checkout's main, not on the item repo's, so it delivers nothing."""
+        number, _ = self.foreign()
+        self.git("commit", "-q", "--allow-empty", "-m", merge_message(f"Item: sd:{number}"))
+        self.git("push", "-q", "origin", "main")
+        here = self.git("rev-parse", "HEAD")
+        sd_db.workflow.change_status(self._connection, number, "planning", who="the test")
+        self.receipt(number, here)
+        found = self.unmarked()
+        self.assertEqual(len(found), 1, self.only().inconsistencies)
+        self.assertIn(f"{here}, which is not reachable from origin/main", found[0])
+
+    def test_an_item_repo_with_no_checkout_here_is_unchecked_not_unmarked(self) -> None:
+        number, _ = self.foreign()
+        shutil.rmtree(self.other)
+        item = self.only()
+        self.assertEqual(item.status, "done")
+        self.assertEqual(self.unmarked(), [], item.inconsistencies)
+        self.assertEqual(len(item.inconsistencies), 1, item.inconsistencies)
+        self.assertIn(f"sd:{number} belongs to {self.other}", item.inconsistencies[0])
+        self.assertIn("its delivery is unchecked", item.inconsistencies[0])
 
 
 class TheRowNamesTheBranch(Fixture):
