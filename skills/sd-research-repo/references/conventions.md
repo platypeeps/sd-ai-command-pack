@@ -181,6 +181,30 @@ reads, so reading those back after publication stays manual. The
 review's `ok   main document` line names the surfaces it did check, so that a
 pass is not read as a claim about the two it did not.
 
+## Status brief — an experiment's fixed sections
+
+A research repo that runs an experiment keeps one status brief, `30-brief/BRIEF-status.md`.
+It is the START HERE document for the experiment, and the one input to every other status surface:
+the experiment row, the roundup deck and the dashboard's Experiments view all read it, and none is edited on its own.
+Piloted in mcp-research (sd:5499); the template is `skills/sd-research-repo/templates/BRIEF-status.md`.
+
+Keep these six sections, numbered and in this order:
+
+1. **Status at a glance**: a two-column table with these rows, in this order.
+   - `State`: one of `Running`, `Waiting on <who or what>`, `Blocked on <what>`, `Decided` or `Done`; the first word is the state.
+   - `Updated`: the day the brief was last made true, `YYYY-MM-DD`. Over 7 days old, the dashboard calls it stale.
+   - `In one line`: the experiment's state in one or two sentences.
+   - `Experiment`: a link to the experiment's row, and its iteration.
+   - `Hypothesis`: this iteration's hypothesis, as one sentence.
+   - `Deck`: a link to the current roundup deck, once one is imported. Optional.
+2. **What we learned**: one finding per bullet, with its source and what was not probed.
+3. **What shipped**: a table of the changes, each linked, merged or open.
+4. **Asks**: a `Who | What` table. Asks are actions someone else must take now; decisions that wait go in Next.
+5. **Next**: a numbered list, then the tracker's tickets when the work is tracked.
+6. **Status**: verified, not verified, the second reader's pass, and each update as a dated entry.
+
+Use no emoji in the State cell: the deck and the mirrors are read outside the team, and the word carries the state.
+
 ## Documents
 
 Every document opens with an H1, a provenance paragraph, then `---`:
