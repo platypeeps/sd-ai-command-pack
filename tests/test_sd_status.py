@@ -5726,11 +5726,12 @@ class RulesetProtectionCase(unittest.TestCase):
 class BaselineFlagCase(unittest.TestCase):
     """The fleet baseline's two flags, as `sd_db.protection` writes them (sd:1807).
 
-    The dashboard showed `protection_source` (rulesets alone, no classic
-    object) and `required_check` (`ci`, or `sd/local-gate` under `repo.ci =
-    local`) for every owned repository; `sd-status` printed neither. They ride
-    in `merge_settings` beside the merge flags, so no acknowledgement reaches
-    them, and a repository outside the configured owners carries neither.
+    The dashboard showed `protection_source` (classic protection alone, no
+    repository ruleset: sd:5406) and `required_check` (`ci`, or `sd/local-gate`
+    under `repo.ci = local`) for every owned repository; `sd-status` printed
+    neither. They ride in `merge_settings` beside the merge flags, so no
+    acknowledgement reaches them, and a repository outside the configured
+    owners carries neither.
     """
 
     SLUG = "platypeeps/widget"
@@ -5747,7 +5748,7 @@ class BaselineFlagCase(unittest.TestCase):
                  "parameters": {"strict_required_status_checks_policy": True,
                                 "required_status_checks": [{"context": context}]}}]
 
-    def flags(self, classic: dict[str, Any] | str | None, rules: list[dict[str, Any]], *, ci: str = "github",
+    def flags(self, classic: dict[str, Any] | str | None, rules: list[dict[str, Any]] | str, *, ci: str = "github",
               owners: tuple[str, ...] = ("platypeeps",), admin: bool = True) -> dict[str, dict[str, Any]]:
         repo = dict(self.REPO, permissions={"admin": admin})
 
@@ -5760,7 +5761,7 @@ class BaselineFlagCase(unittest.TestCase):
                     return None, classic
                 return (classic, "") if classic is not None else (None, "gh: Branch not protected (HTTP 404)")
             if path.endswith("/rules/branches/main"):
-                return rules, ""
+                return (None, rules) if isinstance(rules, str) else (rules, "")
             if path.endswith("/rulesets/42"):
                 return RulesetProtectionCase.RULESET, ""
             raise AssertionError(f"unexpected read {path}")
@@ -5772,21 +5773,45 @@ class BaselineFlagCase(unittest.TestCase):
             section = status.protection_section(pathlib.Path(directory), self.GH)
         return {flag["id"]: flag for flag in section["merge_settings"]}
 
-    def test_a_ruleset_alone_requiring_ci_raises_neither_flag(self) -> None:
-        flags = self.flags(None, self.rules("ci"))
+    def test_classic_alone_requiring_ci_raises_neither_flag(self) -> None:
+        """sd:5406: the fleet baseline is classic protection and no repository ruleset."""
+        flags = self.flags(dict(self.CLASSIC, required_status_checks={"strict": True, "contexts": ["ci"]}), [])
         self.assertEqual({key: (flags[key]["value"], flags[key]["flagged"]) for key in status.BASELINE_FLAG_IDS},
-                         {"protection_source": ("ruleset", False), "required_check": ("ci", False)})
+                         {"protection_source": ("classic", False), "required_check": ("ci", False)})
 
-    def test_classic_protection_without_ci_raises_both(self) -> None:
+    def test_a_ruleset_alone_raises_the_source(self) -> None:
+        flags = self.flags(None, self.rules("ci"))
+        self.assertEqual((flags["protection_source"]["value"], flags["protection_source"]["flagged"]), ("ruleset", True))
+        self.assertIn("classic protection and no repository ruleset", flags["protection_source"]["gap"])
+        self.assertEqual((flags["required_check"]["value"], flags["required_check"]["flagged"]), ("ci", False))
+
+    def test_classic_protection_without_ci_raises_the_check(self) -> None:
         flags = self.flags(self.CLASSIC, [])
-        self.assertEqual((flags["protection_source"]["value"], flags["protection_source"]["flagged"]), ("classic", True))
+        self.assertEqual((flags["protection_source"]["value"], flags["protection_source"]["flagged"]), ("classic", False))
         self.assertEqual((flags["required_check"]["value"], flags["required_check"]["flagged"]), ("CI Result", True))
         self.assertIn("`ci` is not a required check", flags["required_check"]["gap"])
 
+    def test_combined_protection_raises_the_source(self) -> None:
+        flag = self.flags(self.CLASSIC, self.rules("ci"))["protection_source"]
+        self.assertEqual((flag["value"], flag["flagged"]), ("combined", True))
+
     def test_a_classic_object_that_gates_nothing_beside_a_ruleset_still_raises_the_source(self) -> None:
-        """The layered result reads `ruleset`, but the classic object still stands."""
+        """The layered result reads `ruleset`, and a ruleset is not the baseline."""
         flag = self.flags({"enforce_admins": {"enabled": True}}, self.rules("ci"))["protection_source"]
         self.assertEqual((flag["value"], flag["flagged"]), ("ruleset, beside a classic object", True))
+
+    def test_classic_beside_a_ruleset_that_gates_nothing_raises_the_source(self) -> None:
+        """`combine` keeps the classic object when no ruleset rule gates a merge,
+        so `source` reads classic; the active ruleset still stands beside it."""
+        rules = [{"type": "deletion", "ruleset_id": 42}, {"type": "non_fast_forward", "ruleset_id": 42}]
+        flag = self.flags(self.CLASSIC, rules)["protection_source"]
+        self.assertEqual((flag["value"], flag["flagged"]), ("classic, beside a ruleset", True))
+
+    def test_classic_with_a_failed_rules_read_raises_the_source(self) -> None:
+        """A rules read that failed is no evidence that no ruleset stands: not a pass."""
+        flag = self.flags(self.CLASSIC, "gh: Server Error (HTTP 502)")["protection_source"]
+        self.assertEqual((flag["value"], flag["flagged"]), ("classic, rulesets unread", True))
+        self.assertIn("unknown", flag["gap"])
 
     def test_a_local_ci_repository_is_judged_on_the_local_gate(self) -> None:
         self.assertTrue(self.flags(None, self.rules("ci"), ci="local")["required_check"]["flagged"])
@@ -5809,7 +5834,7 @@ class BaselineFlagCase(unittest.TestCase):
 
     def test_a_failed_classic_read_beside_a_ruleset_carries_neither(self) -> None:
         """The system files a classic read that failed as unknown, so the dashboard
-        shows no baseline flag; `ruleset` here would claim rulesets alone on no evidence."""
+        shows no baseline flag; `ruleset` here would be a verdict on no evidence."""
         flags = self.flags("gh: Server Error (HTTP 502)", self.rules("ci"))
         self.assertEqual(sorted(flags), ["rebase_merge", "squash_message"])
 

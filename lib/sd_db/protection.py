@@ -79,10 +79,10 @@ so classic alone is never reported stronger than it is.
 
 **The fleet baseline (sd:1741).** Two more flags ride in the same
 `merge_settings` list, for the repositories the operator owns
-(`BASELINE_OWNERS`): `protection_source`, raised unless rulesets alone
-protect the branch, and `required_check`, raised unless `ci` is among the
-required contexts -- present, not sole, so `route` or `body-lint` may stand
-beside it. A repository whose `repo.ci` is `local` runs no Actions, so for
+(`BASELINE_OWNERS`): `protection_source`, raised unless classic protection
+alone protects the branch, with no active ruleset beside it (sd:5406), and
+`required_check`, raised unless `ci` is among the required contexts --
+present, not sole, so `route` or `body-lint` may stand beside it. A repository whose `repo.ci` is `local` runs no Actions, so for
 it the check is `sd/local-gate`, and that is also the one context it
 produces, as the pack's `sd-status` reads it (sd:1992). Like the merge flags they are not gaps an acknowledgement can
 silence. A repository another owner holds carries neither, and the screen
@@ -207,6 +207,10 @@ COMBINED_SOURCE = "combined"
 #: How `_combine` names classic protection in `sources`; a ruleset is
 #: `ruleset:<id>`. The pack's `sd_protection.CLASSIC_SOURCE`.
 CLASSIC_SOURCE = "classic"
+
+#: The `protection_source` value of a classic branch whose rules read failed:
+#: no evidence that no ruleset stands beside it, so not the baseline (sd:5406).
+UNREAD_RULESETS = "classic, rulesets unread"
 
 #: Rule types that gate what a merge lands. `deletion`, `non_fast_forward`
 #: and the rest constrain how the branch moves, not what a pull request must
@@ -959,15 +963,20 @@ def baseline_check(ci: str | None) -> str:
 
 
 def baseline_flags(protection: dict[str, Any] | None, owner: str | None,
-                   classic_present: bool | None, ci: str | None = None) -> list[dict[str, Any]]:
+                   classic_present: bool | None, ci: str | None = None,
+                   ruleset_present: bool | None = None) -> list[dict[str, Any]]:
     """The two fleet-baseline flags (sd:1741, S1), or none for a repository
     outside `BASELINE_OWNERS`: its baseline is not this fleet's to set.
 
-    `protection_source` is raised unless rulesets alone protect the branch:
-    classic, combined, none at all, or a classic object that `_combine`
-    left out because it gates nothing but that still stands. `required_check`
-    is raised unless `baseline_check(ci)` is among the required contexts;
-    other names may stand beside it (decision D5).
+    `protection_source` is raised unless classic protection alone protects
+    the branch (sd:5406): a ruleset, combined, none at all, a classic object
+    that `_combine` left out because it gates nothing, or classic beside an
+    active ruleset that gates nothing, which `_combine` reads as classic.
+    `ruleset_present` says whether the branch's rules read found an active
+    rule; None is a read that failed, which is no evidence that no ruleset
+    stands, so it raises the flag too. `required_check` is raised unless
+    `baseline_check(ci)` is among the required contexts; other names may
+    stand beside it (decision D5).
     """
     if (owner or "").lower() not in BASELINE_OWNERS:
         return []
@@ -977,19 +986,19 @@ def baseline_flags(protection: dict[str, Any] | None, owner: str | None,
         source = str(protection.get("source") or CLASSIC_SOURCE)
         if source == RULESET_SOURCE and classic_present:
             source = f"{RULESET_SOURCE}, beside a classic object"
+        elif source == CLASSIC_SOURCE and ruleset_present is None:
+            source = UNREAD_RULESETS
+        elif source == CLASSIC_SOURCE and ruleset_present:
+            source = f"{CLASSIC_SOURCE}, beside a ruleset"
+    standard = "the fleet baseline is classic protection and no repository ruleset"
+    gap = (f"whether a ruleset stands beside the default branch's classic protection is unknown: "
+           f"the rules read failed; {standard}") if source == UNREAD_RULESETS else (
+        f"the default branch is protected by {source}, not by classic protection alone; {standard}")
     checks = (protection or {}).get("required_status_checks")
     contexts = [str(name) for name in checks.get("contexts") or []] if isinstance(checks, dict) else []
     check = baseline_check(ci)
     return [
-        {
-            "id": "protection_source",
-            "value": source,
-            "flagged": source != RULESET_SOURCE,
-            "gap": (
-                f"the default branch is protected by {source}, not by rulesets alone; "
-                "the fleet baseline is one repository ruleset and no classic protection"
-            ),
-        },
+        {"id": "protection_source", "value": source, "flagged": source != CLASSIC_SOURCE, "gap": gap},
         {
             "id": "required_check",
             "value": ", ".join(contexts) or "none",
@@ -1012,6 +1021,7 @@ def classify(
     owner: str | None = None,
     classic_present: bool | None = None,
     ci: str | None = None,
+    ruleset_present: bool | None = None,
 ) -> dict[str, Any]:
     """Pure. `protection` is the protection object, or None for a 404.
 
@@ -1028,9 +1038,11 @@ def classify(
     repository object names, else `owner` (the remote's). `classic_present`
     says a classic object stood even where the layered result reads
     `ruleset`. `ci` is the repository's `repo.ci`, which names the baseline
-    check (`baseline_check`).
+    check (`baseline_check`). `ruleset_present` says the rules read found an
+    active rule on the branch, None when that read failed.
     """
-    settings = merge_settings(repo) + baseline_flags(protection, _owner(repo, owner), classic_present, ci)
+    settings = merge_settings(repo) + baseline_flags(protection, _owner(repo, owner), classic_present, ci,
+                                                     ruleset_present)
     if protection is None:
         gaps = [
             {
@@ -1721,7 +1733,8 @@ def observe(client, path: str, owner: str, name: str, *, observed_at: str,
         # and that is the malformed body the module docstring files as
         # unknown (sd:1359). Outside, it raised through `sync`.
         result = classify(protection, repo, default_branch, produced, notes,
-                          owner=owner, classic_present=classic is not None, ci=ci)
+                          owner=owner, classic_present=classic is not None, ci=ci,
+                          ruleset_present=None if rules_error is not None else bool(rules))
     except MALFORMED as error:
         return _unknown(path, observed_at, _malformed(error),
                         default_branch=default_branch, requests=client.budget.requests - before)
@@ -1763,7 +1776,7 @@ def enrich(client, row: dict[str, Any]) -> None:
     protection = _layered(pending["classic"], pending["rules"], entries)
     result = classify(protection, pending["repo"], pending["default_branch"], pending["produced"], pending["notes"],
                       owner=pending["owner"], classic_present=pending["classic"] is not None,
-                      ci=pending["ci"])
+                      ci=pending["ci"], ruleset_present=bool(pending["rules"]))
     row["status"] = result["status"]
     row["body"]["gaps"] = result["gaps"]
     row["body"]["detail"] = result["detail"]

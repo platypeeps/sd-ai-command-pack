@@ -201,8 +201,9 @@ missing leg prints as a named gap:
 - the two r7 merge-settings flags: squash title/message source (a `wip:`
   subject reaching main) and whether rebase-merge is allowed
 - the two fleet-baseline flags, for a repository whose owner is in
-  `sd.fleet_owners`, else `platypeeps` as on the dashboard (sd:1807): `protection_source`, raised unless rulesets alone
-  protect the branch, and `required_check`, raised unless `ci` is required
+  `sd.fleet_owners`, else `platypeeps` as on the dashboard (sd:1807): `protection_source`, raised unless classic
+  protection alone protects the branch, with no active ruleset beside it or a rules read that failed (sd:5406),
+  and `required_check`, raised unless `ci` is required
   (`sd/local-gate` under `repo.ci = local`). The dashboard shows the same ids.
   A classic read that failed carries neither, as the system files it unknown.
 

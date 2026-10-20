@@ -805,26 +805,35 @@ def _baseline_owners() -> tuple[tuple[str, ...], str]:
 
 
 def _baseline_flags(protection: dict[str, Any] | None, owned: bool, classic_present: bool,
-                    ci: str | None) -> list[dict[str, Any]]:
+                    ci: str | None, ruleset_present: bool | None = None) -> list[dict[str, Any]]:
     """The two baseline flags for an owned repository, else none: another owner's baseline is not the fleet's.
 
-    `protection_source` is raised unless rulesets alone protect the branch;
-    `classic_present` says a classic object stood though the layered result
-    reads `ruleset`. `required_check` is raised unless the baseline check is
+    `protection_source` is raised unless classic protection alone protects the
+    branch (sd:5406); `classic_present` says a classic object stood though the
+    layered result reads `ruleset`, and `ruleset_present` says an active ruleset
+    stood though it reads classic, None when the rules read failed: no evidence
+    that none stands. `required_check` is raised unless the baseline check is
     required: `ci`, or `sd/local-gate` under `repo.ci = local`.
     """
     if not owned:
         return []
-    source = "none" if protection is None else str(protection.get("source") or sd_protection.CLASSIC_SOURCE)
+    classic = sd_protection.CLASSIC_SOURCE
+    source = "none" if protection is None else str(protection.get("source") or classic)
     if source == sd_protection.RULESET_SOURCE and classic_present:
         source = f"{sd_protection.RULESET_SOURCE}, beside a classic object"
+    elif source == classic and ruleset_present is None:
+        source = f"{classic}, rulesets unread"
+    elif source == classic and ruleset_present:
+        source = f"{classic}, beside a ruleset"
+    standard = "the fleet baseline is classic protection and no repository ruleset"
+    gap = (f"whether a ruleset stands beside the default branch's classic protection is unknown: "
+           f"the rules read failed; {standard}") if source == f"{classic}, rulesets unread" else (
+        f"the default branch is protected by {source}, not by classic protection alone; {standard}")
     checks = (protection or {}).get("required_status_checks")
     contexts = [str(name) for name in checks.get("contexts") or []] if isinstance(checks, dict) else []
     check = sd_lib.LOCAL_GATE_CONTEXT if ci == "local" else "ci"
     return [
-        {"id": "protection_source", "value": source, "flagged": source != sd_protection.RULESET_SOURCE,
-         "gap": (f"the default branch is protected by {source}, not by rulesets alone; "
-                 "the fleet baseline is one repository ruleset and no classic protection")},
+        {"id": "protection_source", "value": source, "flagged": source != classic, "gap": gap},
         {"id": "required_check", "value": ", ".join(contexts) or "none", "flagged": check not in contexts,
          "gap": (f"`{check}` is not a required check; the fleet baseline requires "
                  f"one aggregate check named `{check}`, and other names may stand beside it")},
@@ -856,8 +865,9 @@ def _baseline_for(root: pathlib.Path, slug: str, section: dict[str, Any]) -> lis
     """The baseline flags, read off a finished section; none while protection is unknown (sd:1807).
 
     `detail` already carries what `_baseline_flags` reads: the layered
-    `source` (absent for classic alone), the required contexts, and
-    `classic_visibility`, `present` where a classic object stood beside rulesets.
+    `source` (absent for classic alone), the required contexts,
+    `classic_visibility`, `present` where a classic object stood beside rulesets,
+    and `ruleset_rules` or `rules_read_error` from the rules read beside classic.
     A classic read that failed (`unread`) gets none: the system files it as
     unknown, so the dashboard shows no baseline flag either.
     """
@@ -870,7 +880,8 @@ def _baseline_for(root: pathlib.Path, slug: str, section: dict[str, Any]) -> lis
     protection = {"source": detail.get("source"),
                   "required_status_checks": {"contexts": detail.get("required_contexts") or []}}
     return _baseline_flags(protection if section["protected"] else None, slug.split("/")[0].lower() in owners,
-                           detail.get("classic_visibility") == "present", sd_lib.ci_mode(root))
+                           detail.get("classic_visibility") == "present", sd_lib.ci_mode(root),
+                           None if detail.get("rules_read_error") else bool(detail.get("ruleset_rules")))
 
 
 def _protection_reading(root: pathlib.Path, gh: dict[str, Any]) -> dict[str, Any]:
@@ -1066,15 +1077,18 @@ def _layered(
     were read only after a 404, so a ruleset beside classic protection was
     invisible here. They are read beside it now and combined the way GitHub
     layers them, strictest per rule (`sd_protection.combine`). A classic-only
-    branch comes back unchanged with no detail added; a rules read that fails
-    keeps the classic object and names the fault in `rules_read_error`.
+    branch comes back unchanged with no detail added, and one beside a ruleset
+    that gates nothing names its rules in `ruleset_rules` (the baseline flag,
+    sd:5406); a rules read that fails keeps the classic object and names the
+    fault in `rules_read_error`.
     """
     read = sd_protection.read_rulesets(_gh_fetch(root), f"repos/{slug}", default_branch)
     if read["error"]:
         return classic, {"rules_read_error": read["error"]}
     value = sd_protection.combine(classic, read["rules"], read["rulesets"])
     if value is classic:
-        return classic, {}
+        rules = sd_protection.rule_types(read["rules"], read["rulesets"])
+        return classic, {"ruleset_rules": rules} if rules else {}
     detail: dict[str, Any] = {"source": value["source"], "rulesets": value["rulesets"],
                               "classic_visibility": "present"}
     if value["source"] == sd_protection.COMBINED_SOURCE:

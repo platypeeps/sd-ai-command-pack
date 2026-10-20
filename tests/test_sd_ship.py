@@ -6612,7 +6612,7 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(result["protection"]["required_status_checks"]["checks"], [{"context": "route", "app_id": 7}])
 
     def test_a_ruleset_only_main_requiring_ci_is_path_a(self):
-        """The fleet's target shape (sd:1741): no classic object, one active
+        """The fleet's target shape until sd:5406 (sd:1741): no classic object, one active
         ruleset `main` requiring the strict aggregate `ci` from GitHub Actions
         (app 15368), no bypass actor. A green `ci` merges once with no
         declaration; a red one refuses and dispatches nothing (sd:1810)."""
