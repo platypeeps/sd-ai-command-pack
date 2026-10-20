@@ -13,7 +13,7 @@ Compiled 2026-10-20 from `owner/repo` @ `abc1234`, the open pull requests on `ow
 | **In one line** | Research is done. 11 pull requests are open and ready; none has a reviewer yet. |
 | **Experiment** | [Example Revamp: execution](https://example.test/experiments/execution), iteration 2 |
 | **Hypothesis** | Iteration 2: small, incremental improvements let both client generations work, and make use measurable, without a rebuild. |
-| **Deck** | [Example Revamp: status roundup, 2026-10-20](https://example.test/deck) |
+| **Deck** | [Example Revamp: status deck, 2026-10-20](https://example.test/deck) |
 
 ## 2. What we learned
 

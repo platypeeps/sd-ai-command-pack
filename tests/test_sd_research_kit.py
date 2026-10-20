@@ -45,7 +45,6 @@ VERBS = (
     "init-hook",
     "init-claude-md",
     "deck",
-    "roundup",
 )
 TEMPLATE = REPO_ROOT / "skills" / "sd-research-repo" / "templates" / "CLAUDE.md"
 #: The template as the five research repos copied it, before it shrank from

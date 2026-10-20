@@ -185,7 +185,7 @@ pass is not read as a claim about the two it did not.
 
 A research repo that runs an experiment keeps one status brief, `30-brief/BRIEF-status.md`.
 It is the START HERE document for the experiment, and the one input to every other status surface:
-the experiment row, the roundup deck and the dashboard's Experiments view all read it, and none is edited on its own.
+the experiment row, the status deck and the dashboard's Experiments view all read it, and none is edited on its own.
 Piloted in mcp-research (sd:5499); the template is `skills/sd-research-repo/templates/BRIEF-status.md`.
 
 Keep these six sections, numbered and in this order:
@@ -196,7 +196,7 @@ Keep these six sections, numbered and in this order:
    - `In one line`: the experiment's state in one or two sentences.
    - `Experiment`: a link to the experiment's row, and its iteration.
    - `Hypothesis`: this iteration's hypothesis, as one sentence.
-   - `Deck`: a link to the current roundup deck, once one is imported. Optional.
+   - `Deck`: a link to the current status deck, once one is imported. Optional.
 2. **What we learned**: one finding per bullet, with its source and what was not probed.
 3. **What shipped**: a table of the changes, each linked, merged or open.
 4. **Asks**: a `Who | What` table. Asks are actions someone else must take now; decisions that wait go in Next.
@@ -209,18 +209,17 @@ Use no emoji in the State cell: the deck and the mirrors are read outside the te
 
 `30-brief/deck.json` holds the brief condensed to at most three slides.
 Update it in the same change as the brief, so the two never disagree.
-`sd-research-kit deck` lays it out into `docs/dashboard/deck.pptx`; `sd-research-kit roundup` builds
-`docs/dashboard/roundup.pptx` from every checkout's deck.json under `~/repos`, newest `date` first, each after a title
-page, with one call to action on the last slide.
+`sd-research-kit deck` lays it out into `docs/dashboard/deck.pptx`: a title page, then the slides, with one call to
+action on the last slide.
 The example and the schema in use are `skills/sd-research-repo/templates/deck.json`; the builder refuses an unknown key,
 an em dash, more than six cards (three beside a track) and text past its bound, naming the value's path.
 
-- `name`, `tagline`, `date`: the title page a roundup gives the experiment.
+- `name`, `tagline`, `date`: the deck's title page.
 - `slides`: each has an `eyebrow` and a `title`, an optional `accent` (the title's tail, in the accent colour),
   an optional `track` of 2 to 5 stages (`done`, `now`, `next`), `cards` (`big`, `head`, `text`, `pill`, `tone`),
   a `foot` with an optional bold `foot_label`, and a `link` for the brief.
 - `theme`: overrides the builder's colours and font key by key, and adds a PNG `logo` (relative to the deck.json)
-  and the one `cta` (`text`, `url`). A roundup takes the first deck's theme.
+  and the one `cta` (`text`, `url`).
   A deck for an audience with its own brand kit takes its colours, font, logo and call to action from that kit.
 
 Building writes a file and nothing else: importing it into Slides is the operator's step.

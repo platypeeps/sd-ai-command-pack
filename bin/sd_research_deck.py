@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build an experiment's status deck, and the roundup of several, from `deck.json`.
+"""Build an experiment's status deck from `deck.json`.
 
 `deck.json` sits beside the status brief, `30-brief/deck.json`, and holds the
 slides the brief's status sections condense to. The agent that updates the
@@ -7,15 +7,14 @@ brief updates it; this file only lays it out. The standard is
 `skills/sd-research-repo/references/conventions.md`, section **Status brief**.
 
     sd-research-kit deck                          # this repo: docs/dashboard/deck.pptx
-    sd-research-kit roundup <out.pptx> <deck.json> ...
 
-`roundup` gives each experiment a title page ("Experiment 1 of 4"), then its
-slides, and keeps one call to action, on the last slide. Both write PowerPoint
+The deck opens with the experiment's title page ("Status · October 20, 2026"),
+then its slides, with one call to action on the last. It writes PowerPoint
 through python-pptx; nothing here uploads, imports or sends. A Slides import is
-the drain's or the operator's step, not this one.
+the operator's step, not this one.
 
 The look is the theme: `THEME` below, overridden key by key by the deck's own
-`theme` object. A roundup takes the first deck's theme. A `logo` is a PNG path,
+`theme` object. A `logo` is a PNG path,
 relative to the deck.json that names it.
 """
 
@@ -31,9 +30,8 @@ from typing import Any
 
 DECK = Path("30-brief") / "deck.json"
 OUT = Path("docs") / "dashboard" / "deck.pptx"
-ROUNDUP = Path("docs") / "dashboard" / "roundup.pptx"
 
-#: The deck's own slides: a status deck is short, and a roundup repeats it per experiment.
+#: The deck's own slides, after its title page: a status deck is short.
 SLIDES = 3
 CARDS = 6
 #: With a track, the cards share the slide with it and fit one row.
@@ -387,17 +385,13 @@ class Builder:
             raise
 
 
-def build(decks: list[dict], out: Path, titles: bool) -> int:
-    """Lay out `decks` into `out`; `titles` gives each a title page. Returns the slide count."""
-    look = theme(decks[0].get("theme"))
+def build(deck: dict, out: Path) -> int:
+    """Lay out `deck` into `out`: its title page, then its slides, the call to action on the last. Returns the slide count."""
+    look = theme(deck.get("theme"))
     builder = Builder(look)
-    for n, deck in enumerate(decks):
-        if titles:
-            builder.title_page(f"Experiment {n + 1} of {len(decks)}  ·  {spoken(deck['date'])}",
-                               deck["name"], deck["tagline"])
-        for k, slide in enumerate(deck["slides"]):
-            last = n == len(decks) - 1 and k == len(deck["slides"]) - 1
-            builder.status_slide(slide, look["cta"] if last else None)
+    builder.title_page(f"Status  ·  {spoken(deck['date'])}", deck["name"], deck["tagline"])
+    for k, slide in enumerate(deck["slides"]):
+        builder.status_slide(slide, look["cta"] if k == len(deck["slides"]) - 1 else None)
     builder.save_pptx(out)
     return len(builder.prs.slides)
 
@@ -409,38 +403,9 @@ def deck_main() -> int:
         print(f"sd-research-kit deck: no {DECK} here; the status brief's deck lives there", file=sys.stderr)
         return 2
     try:
-        count = build([load_deck(path)], Path.cwd() / OUT, titles=False)
+        count = build(load_deck(path), Path.cwd() / OUT)
     except Invalid as problem:
         print(f"sd-research-kit deck: {problem}", file=sys.stderr)
         return 1
     print(f"wrote {OUT}: {count} slides")
-    return 0
-
-
-def fleet_decks(trees: list[Path]) -> list[Path]:
-    """Each checkout's own `30-brief/deck.json`, not a symlink, newest `date` first, then by checkout name."""
-    found = []
-    for tree in trees:
-        path = Path(tree) / DECK
-        if path.is_file() and not path.is_symlink():
-            found.append((load_deck(path), path))
-    found.sort(key=lambda pair: pair[1].parent.parent.name)
-    found.sort(key=lambda pair: pair[0]["date"], reverse=True)
-    return found
-
-
-def roundup_main(trees: list[Path]) -> int:
-    """`sd-research-kit roundup`: every checkout's deck.json into `docs/dashboard/roundup.pptx` here."""
-    try:
-        found = fleet_decks(trees)
-        if not found:
-            print(f"sd-research-kit roundup: no checkout beside this one keeps a {DECK}", file=sys.stderr)
-            return 2
-        count = build([deck for deck, _ in found], Path.cwd() / ROUNDUP, titles=True)
-    except Invalid as problem:
-        print(f"sd-research-kit roundup: {problem}", file=sys.stderr)
-        return 1
-    print(f"wrote {ROUNDUP}: {count} slides from {len(found)} decks")
-    for _, path in found:
-        print(f"  {path}")
     return 0

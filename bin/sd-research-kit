@@ -16,7 +16,7 @@ repos already invoked it as `research-kit render .` from inside the repo, so the
 positional form was carrying no traffic.
 
 `render` needs python-markdown, which does not install into a system python;
-`deck` and `roundup` need python-pptx the same way. Each is resolved in this
+`deck` needs python-pptx the same way. Each is resolved in this
 order, and none of the three writes anything next to this script -- `bin/` is
 enumerated from git for the lint target, so a `.venv`
 appearing in it would be linted:
@@ -47,7 +47,7 @@ CONVENTIONS = CHECKOUT / "skills" / "sd-research-repo" / "references" / "convent
 
 USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pins|
                           init-hook|init-claude-md|conventions|delivered|project|
-                          deck|roundup
+                          deck
 
   render        render research.conf.py into docs/dashboard/, write the vault
                 copies, register with the dashboard, queue outward mirrors
@@ -109,10 +109,6 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
   deck          lay out 30-brief/deck.json, the status brief's slides, into
                 docs/dashboard/deck.pptx. Needs python-pptx, resolved as render
                 resolves markdown
-  roundup       one deck from every 30-brief/deck.json in the checkouts
-                beside this one, newest date first, into
-                docs/dashboard/roundup.pptx here: a title page each, then its
-                slides, one call to action at the end
 
 Every verb acts on the current working directory. There is no repo argument;
 `delivered`, `project --plan` and `project --writing` name a request in the
@@ -186,10 +182,6 @@ def run_deck(verb: str, argv: list[str]) -> int:
     if importlib.util.find_spec("pptx") is None:
         reexec_with("pptx", "python-pptx", [verb] + argv)
     deck = load("sd_research_deck")
-    if verb == "roundup":
-        # The fleet is the checkouts beside this one, walked as fleet-pins walks them.
-        pins = load("sd_research_pins")
-        return int(deck.roundup_main(pins.checkouts(pins.search_root())))
     return int(deck.deck_main())
 
 
@@ -215,7 +207,7 @@ def main(argv: list[str]) -> int:
 
     if verb == "render":
         return run_render(rest)
-    if verb in ("deck", "roundup"):
+    if verb == "deck":
         return run_deck(verb, rest)
     if verb == "publish":
         # `render` already does this; the verb exists so a repo can register
