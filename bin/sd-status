@@ -3085,7 +3085,9 @@ def _marker_rows(root: pathlib.Path) -> list[dict[str, Any]]:
 #: are pinned equal by a test rather than left to agree by coincidence.
 SKILL_ROOTS = ("skills", "contrib")
 
-_DISCLOSED_RE = re.compile(r"bin/(?P<tool>[A-Za-z0-9][A-Za-z0-9_-]*)")
+#: The pack's `bin/` starts a path: a `bin/` after a path segment, such as
+#: `.venv/bin/python` or `~/.local/bin/sd`, is another directory's.
+_DISCLOSED_RE = re.compile(r"(?<![\w./-])bin/(?P<tool>[A-Za-z0-9][A-Za-z0-9_-]*)")
 
 #: The one file suffix `bin/` uses. The regex above stops at the `.`, so a
 #: skill writing the true path `bin/sd_handoff_rows.py` discloses the tool

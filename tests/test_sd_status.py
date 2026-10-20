@@ -3261,6 +3261,16 @@ class LowYieldProducerTests(InventoryFixture):
         (self.repo / "bin" / "sd_rows.py").write_text("x = 1\n", encoding="utf-8")
         self.assertEqual([], self.by_check(self.rows(), "undisclosed-tool"))
 
+    def test_a_bin_inside_another_path_is_not_a_disclosure(self) -> None:
+        """`.venv/bin/python` names a virtualenv's interpreter, not `bin/python`.
+
+        `skills/sd-plan` writes `.venv/bin/python`, and the unanchored pattern
+        reported it as an unbuilt tool (k5245). The pack's `bin/` starts a path,
+        so a `bin/` after a path segment is someone else's.
+        """
+        self.disclose("Run `.venv/bin/python` or `~/.local/bin/sd-gone`.")
+        self.assertEqual([], self.by_check(self.rows(), "undisclosed-tool"))
+
     def test_a_module_sharing_a_stem_does_not_silence_a_missing_command(self) -> None:
         """A hyphenated tool is not built by an underscored module beside it.
 

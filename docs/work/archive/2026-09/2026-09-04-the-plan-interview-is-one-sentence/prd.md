@@ -174,7 +174,7 @@ ledger below is merged and deduplicated across both.
 | C-8 | host | 1 | low | no | addressed |
 | C-9 | codex | 2 | medium | yes | addressed |
 | C-10 | codex | 2 | medium | yes | addressed |
-| C-11 | codex | 2 | low | no | parked — user ruling, 2026-09-04 |
+| C-11 | codex | 2 | low | no | parked — user ruling, 2026-09-04; trigger sd:5430 (2026-10-20) |
 | C-12 | codex | 3 | medium | yes | addressed |
 | C-13 | codex | 3 | medium | yes | addressed |
 
@@ -279,7 +279,9 @@ judgment instead of being self-approved.
 
 **The ruling.** Non-blocking, parked. Trigger: the conduct-harness work item,
 which runs a skill against a subagent under a pressure scenario and asserts what
-it did. Owner: the user. Requirements 1 and 4 are that harness's first test
+it did. That item was abandoned on 2026-09-04; on 2026-10-20 the operator
+re-pointed the trigger to sd:5430, which tries `claude plugin eval` as the
+harness. Owner: the user. Requirements 1 and 4 are that harness's first test
 case. The reasoning recorded, so a later reader can disagree with it on the
 merits: the Codex lane's standard is one that no artifact in this pack meets —
 seventy-six skills have shipped and none has conduct-level CI — so enforcing it
