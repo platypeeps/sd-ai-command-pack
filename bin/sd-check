@@ -37,8 +37,8 @@ with `SD_GATE_SLOTS=0`, so a gate inside them never waits on this one's slot.
 With `--slot-timeout`, the wait has its own bound and each check gets the whole
 `--timeout` (sd:2607): a gate in a long queue then fails as unadmitted, never
 as a check cut short by the time it spent queued.
-Its wait is the lane gate's (sd:5078): it goes ahead of every other waiter,
-and a builder's `sd gate run` refuses while it holds or waits for a slot.
+Its wait is the lane gate's (sd:5078), in the order it queued beside every
+other waiter, a builder's `sd gate run` too (sd:5409); `sd gate status` names it.
 
 A Makefile that defines `precheck` has it run first, before the slot wait
 (sd:2604). It is the minute of checks that catches most failed full runs; a
@@ -485,8 +485,7 @@ def take_slot(environ: Mapping[str, str], timeout: int) -> tuple[sd_gate_slots.S
     The cap is `SD_GATE_SLOTS`, then the machine's `sd.gate_slots`, then a
     quarter of the cores; CI and a holder's children (`SD_GATE_SLOTS=0`) take
     none. The wait is a place in the sd:2262 queue, under its load rule, as
-    the lane gate: ahead of every other waiter, and a builder's `sd gate run`
-    refuses beside it (sd:5078).
+    the lane gate (sd:5078), first in, first out with every other waiter (sd:5409).
     """
     try:
         slots, source = sd_gate_slots.configured(environ, sd_lib.core_setting("gate_slots", dict(environ)))

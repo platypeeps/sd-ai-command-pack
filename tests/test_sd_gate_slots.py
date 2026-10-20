@@ -338,8 +338,8 @@ class OnePool(GateSlotFixture):
         self.assertIn(f" in {first}", waiting)
         self.assertRegex(waiting, r"since \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ")
 
-    def test_a_plain_run_in_one_repository_refuses_beside_a_gate_in_another(self):
-        """sd:5078: an `sd-check` gate is a lane gate, so a plain run beside it refuses rather than queue."""
+    def test_a_plain_run_in_one_repository_waits_for_a_gate_in_another_and_names_it(self):
+        """sd:5409: an `sd-check` gate is a lane gate, and a plain run beside it waits its turn rather than refuse."""
         first = self.repo("first", f"{PY} {shlex.quote(str(self.blocking))} "
                                    f"{shlex.quote(str(self.started))} {shlex.quote(str(self.release))}")
         second = self.repo("second", f"{PY} -c pass")
@@ -347,18 +347,17 @@ class OnePool(GateSlotFixture):
         gate = self.start(first, self.env())
         self.processes.append(gate)
         self.assertTrue(wait_until(self.started.exists), "the first repository's gate never started its check")
-        plain = self.plain_run(second, sys.executable, "-c", f"open({str(ran)!r}, 'w').close()")
-        code, _, err = Watched(plain).finish(120)
-        self.assertEqual(code, sd_gate_slots.RUN_LANE_BUSY, err)
-        self.assertIn("lane gate sd-check first", err)
-        self.assertFalse(ran.exists())
+        watched = Watched(self.plain_run(second, sys.executable, "-c", f"open({str(ran)!r}, 'w').close()"))
+        self.assertTrue(watched.waiting.wait(60), "the plain run never said it waits")
+        self.assertFalse(ran.exists(), "the plain run ran while the gate held the one slot")
         self.release.touch()
         code, report, err = self.finish(gate)
         self.assertEqual(code, 0, f"{err}\n{report}")
-        code, _, err = Watched(self.plain_run(second, sys.executable, "-c",
-                                              f"open({str(ran)!r}, 'w').close()")).finish(120)
+        code, _, err = watched.finish(120)
         self.assertEqual(code, 0, err)
         self.assertTrue(ran.exists())
+        waiting = next(line for line in err.splitlines() if line.startswith("waiting for a gate slot"))
+        self.assertIn("slot 1 held by sd-check first", waiting)
 
     def test_the_shell_reads_the_count_the_gates_read(self):
         """`count` is what the Makefile hands `run-tests.sh`, so a plain `make test` joins the pool."""
