@@ -20,6 +20,7 @@ later fetch or a local edit changed.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
 import difflib
 import hashlib
@@ -166,17 +167,23 @@ def fetch_skill(url: str) -> dict[str, Any]:
         _git(work, "fetch", "-q", "--depth", "1", "--no-tags", "--no-recurse-submodules", remote, ref)
         commit = _git(work, "rev-parse", "FETCH_HEAD^{commit}").strip()
         prefix = "/".join(rest)
-        entries = _listing(work, prefix)
-        sizes = [int(size) for _m, _o, size, _n in entries if size.isdigit()]
-        if len(entries) > MAX_FILES or sum(sizes) > MAX_TOTAL or any(size > MAX_FILE for size in sizes):
-            raise IntakeError(f"the skill at {url} exceeds {MAX_FILES} files, {MAX_FILE} bytes a file "
-                              f"or {MAX_TOTAL} bytes in all")
-        files = {}
-        for mode, oid, _size, name in entries:
-            # A link or submodule has no blob worth reading; `risk` refuses it by mode.
-            linked = mode in ("120000", "160000")
-            files[name[len(prefix) + 1:] if prefix else name] = (
-                mode, b"" if linked else _git(work, "cat-file", "blob", oid, text=False))
+        return _skill_at(work, _listing(work, prefix), url, commit, prefix)
+
+
+def _skill_at(work: pathlib.Path, entries: list[tuple[str, str, str, str]], url: str, commit: str,
+              prefix: str) -> dict[str, Any]:
+    """The skill whose `entries` sit under `prefix` at the fetched commit, its blobs read and bounded."""
+
+    sizes = [int(size) for _m, _o, size, _n in entries if size.isdigit()]
+    if len(entries) > MAX_FILES or sum(sizes) > MAX_TOTAL or any(size > MAX_FILE for size in sizes):
+        raise IntakeError(f"the skill at {url} exceeds {MAX_FILES} files, {MAX_FILE} bytes a file "
+                          f"or {MAX_TOTAL} bytes in all")
+    files = {}
+    for mode, oid, _size, name in entries:
+        # A link or submodule has no blob worth reading; `risk` refuses it by mode.
+        linked = mode in ("120000", "160000")
+        files[name[len(prefix) + 1:] if prefix else name] = (
+            mode, b"" if linked else _git(work, "cat-file", "blob", oid, text=False))
     if SKILL_FILE not in files:
         raise IntakeError(f"no {SKILL_FILE} at {prefix or 'the repository root'} of {url}")
     return {"url": url, "commit": commit, "path": prefix, "files": files}
@@ -537,7 +544,14 @@ def evaluate(source: str, scope: str | None, root: pathlib.Path, home: pathlib.P
         url, scope = source, scope or "pack"
     else:
         scope, _directory, url = locate(source, scope, root, home)
-    candidate = fetch_skill(url)
+    return judge(fetch_skill(url), scope, root, home, today, recovered)
+
+
+def judge(candidate: dict[str, Any], scope: str, root: pathlib.Path, home: pathlib.Path, today: str,
+          recovered: list[str]) -> dict[str, Any]:
+    """The report on one fetched skill: what `evaluate` answers, and each skill of a `refresh`."""
+
+    url = candidate["url"]
     text = candidate["files"][SKILL_FILE][1].decode("utf-8", "replace")
     claimed = (sd_lib.parse_frontmatter(text) or {}).get("name", "")
     if not ADOPT.SAFE_NAME_RE.match(claimed):
@@ -618,3 +632,436 @@ def run_intake(args: argparse.Namespace, root: pathlib.Path, home: pathlib.Path)
     print(json.dumps(report, ensure_ascii=False) if args.json else report_text(report))
     return 0
 
+
+
+# --------------------------------------------------------------------------
+# Tracked repositories: the list a refresh reads (pack sd:5498, system sd:5478)
+# --------------------------------------------------------------------------
+
+#: The one setting row that lists the repositories intake tracks: JSON, a list of
+#: `{url, scope, refreshed, result}`. A row never held reads as the repositories
+#: the installed skills' Provenance names, and the first write keeps that seed;
+#: a row that is held is the list, so an untracked repository stays untracked.
+TRACKED_KEY = "skills.intake_repos"
+MAX_TRACKED = 50
+#: A refresh judges at most this many skills; a larger repository is refused, not cut short.
+MAX_REPO_SKILLS = 100
+RESULT_LENGTH = 300
+REPO_RE = re.compile(r"https://github\.com/([A-Za-z0-9][A-Za-z0-9-]{0,38})/([A-Za-z0-9._-]{1,100}?)(?:\.git)?/?")
+
+
+def repo_url(text: str) -> str:
+    """`https://github.com/<owner>/<repo>` for a repository URL; anything else, a path inside one too, refuses."""
+
+    found = REPO_RE.fullmatch(text.strip()) if isinstance(text, str) else None
+    if not found or found[2] in (".", ".."):
+        raise IntakeError(f"not a GitHub repository URL: {text!r}; give https://github.com/<owner>/<repo>")
+    return f"{GITHUB}{found[1]}/{found[2]}"
+
+
+def repo_of(url: str) -> str | None:
+    """The repository a recorded skill URL names, or None."""
+
+    try:
+        return repo_url(parse_url(url)[0])
+    except IntakeError:
+        return None
+
+
+def adopted(root: pathlib.Path, home: pathlib.Path) -> dict[str, dict[str, Any]]:
+    """Lower-cased repository URL to `{url, skills}` for each installed skill this tool recorded.
+
+    A folder that cannot be listed or read raises `OSError`: unknown, never "adopted from nothing".
+    """
+
+    found: dict[str, dict[str, Any]] = {}
+    for scope in ("pack", "user"):
+        for directory in scope_roots(scope, root, home):
+            for folder in sorted(directory.iterdir()) if directory.is_dir() else []:
+                recorded = source_of(folder)
+                repo = repo_of(recorded[0]) if recorded else None
+                if recorded and repo:
+                    entry = found.setdefault(repo.lower(), {"url": repo, "skills": []})
+                    entry["skills"].append({"name": folder.name, "scope": scope, "url": recorded[0],
+                                            "commit": recorded[1]})
+    return found
+
+
+LOCK_FILE = pathlib.Path(".agents") / ".skill-lock.json"  # the `skills` CLI's record, under the home folder
+GITHUB_REMOTE_RE = re.compile(r"(?:https://(?:[^@/]+@)?|ssh://git@|git@)github\.com[:/]([^/]+)/(.+)")
+
+
+def _locked(home: pathlib.Path) -> list[tuple[str, str]]:
+    """`(skill, repository URL)` for each GitHub skill the `skills` CLI's lock file holds; no file, none.
+
+    A file that does not read raises: unknown, never "installed nothing".
+    """
+
+    path = home / LOCK_FILE
+    if not path.exists():
+        return []
+    try:
+        skills = json.loads(path.read_text(encoding="utf-8"))["skills"]
+        rows = [(name, row) for name, row in skills.items() if row.get("sourceType") == "github"]
+    except (OSError, ValueError, KeyError, TypeError, AttributeError) as error:
+        raise IntakeError(f"cannot read {path}: {error}") from error
+    out = []
+    for name, row in rows:
+        for text in (row.get("sourceUrl"), f"{GITHUB}{row.get('source')}"):
+            with contextlib.suppress(IntakeError):
+                out.append((name, repo_url(text)))
+                break
+    return out
+
+
+def _origin(top: pathlib.Path) -> str | None:
+    """The GitHub repository a checkout's `origin` names, or None: no origin, or not GitHub."""
+
+    try:
+        done = subprocess.run(["git", "-C", str(top), "config", "--get", "remote.origin.url"], capture_output=True,
+                              text=True, timeout=GIT_TIMEOUT, env=_git_env(), check=False)
+    except (OSError, subprocess.SubprocessError) as error:
+        raise IntakeError(f"cannot read the origin of {top}: {error}") from error
+    if done.returncode not in (0, 1):  # 1 is "no such key"
+        raise IntakeError(f"cannot read the origin of {top}: {_printable(done.stderr.strip())[:300]}")
+    found = GITHUB_REMOTE_RE.fullmatch(done.stdout.strip())
+    try:
+        return repo_url(f"{GITHUB}{found[1]}/{found[2]}") if found else None
+    except IntakeError:
+        return None
+
+
+def _linked(root: pathlib.Path, home: pathlib.Path) -> list[tuple[str, str]]:
+    """`(skill, repository URL)` for each user skill that resolves inside a git checkout with a GitHub origin.
+
+    The pack's own checkout is not a source: its skills ship with it.
+    """
+
+    out, origins = [], {}
+    directory = home / ".claude" / "skills"
+    for folder in sorted(directory.iterdir()) if directory.is_dir() else []:
+        real = folder.resolve()
+        top = next((each for each in (real, *real.parents) if (each / ".git").exists()), None)
+        if top is None or top == root.resolve():
+            continue
+        if top not in origins:
+            origins[top] = _origin(top)
+        origin = origins[top]
+        if origin:
+            out.append((folder.name, origin))
+    return out
+
+
+def installed_from(root: pathlib.Path, home: pathlib.Path) -> dict[str, dict[str, Any]]:
+    """`adopted`, plus the repositories the lock file and linked checkouts name, as user skills with no commit.
+
+    Only the seed and the not-tracked list read these; a refresh places only what Provenance records.
+    """
+
+    found = adopted(root, home)
+    named = {skill["name"] for value in found.values() for skill in value["skills"]}
+    for name, repo in _locked(home) + _linked(root, home):
+        if name not in named:
+            named.add(name)
+            entry = found.setdefault(repo.lower(), {"url": repo, "skills": []})
+            entry["skills"].append({"name": name, "scope": "user", "url": repo, "commit": None})
+    return found
+
+
+def _writes() -> Any:
+    imported = sd_lib.import_sd_db()
+    if imported.module is None:
+        raise IntakeError(f"cannot read the tracked repositories: {imported.problem}")
+    from sd_db import writes  # noqa: PLC0415 - only the tracked list needs the database
+
+    return writes
+
+
+def _entries(raw: str) -> list[dict[str, Any]]:
+    try:
+        rows = json.loads(raw)
+    except ValueError:
+        rows = None
+    if not isinstance(rows, list) or not all(
+            isinstance(row, dict) and isinstance(row.get("url"), str) and row.get("scope") in ("pack", "user")
+            for row in rows):
+        raise IntakeError(f"the {TRACKED_KEY} setting row does not read; set it again with --track")
+    return [{"url": repo_url(row["url"]), "scope": row["scope"], "refreshed": row.get("refreshed"),
+             "result": row.get("result")} for row in rows]
+
+
+def read_tracked(connection: Any, root: pathlib.Path, home: pathlib.Path) -> tuple[str | None, list[dict[str, Any]], bool]:
+    """`(row text, entries, seeded)`. A row never held is seeded from `installed_from` and written by nothing here."""
+
+    held = _writes().read_settings(connection, [TRACKED_KEY])
+    if TRACKED_KEY in held:
+        return held[TRACKED_KEY], [] if held[TRACKED_KEY] is None else _entries(held[TRACKED_KEY]), False
+    seed = [{"url": value["url"], "scope": "user" if all(s["scope"] == "user" for s in value["skills"]) else "pack",
+             "refreshed": None, "result": None} for _key, value in sorted(installed_from(root, home).items())]
+    return None, seed, True
+
+
+def write_tracked(connection: Any, entries: list[dict[str, Any]], before: str | None) -> None:
+    """Write the list, refused when the row no longer holds `before`, the text it was read as."""
+
+    writes = _writes()
+    try:
+        writes.set_setting(connection, TRACKED_KEY, json.dumps(entries, sort_keys=True), before=before)
+    except writes.SettingStale:
+        raise IntakeError("the tracked repositories changed since they were read; read them again") from None
+
+
+def tracked(connection: Any, root: pathlib.Path, home: pathlib.Path) -> dict[str, Any]:
+    """Each tracked repository with the installed skills adopted from it, then the adopted ones not tracked."""
+
+    _raw, entries, seeded = read_tracked(connection, root, home)
+    found = installed_from(root, home)
+    keys = {entry["url"].lower() for entry in entries}
+    return {"key": TRACKED_KEY, "seeded": seeded,
+            "repos": [{**entry, "skills": found.get(entry["url"].lower(), {}).get("skills", [])} for entry in entries],
+            "untracked": [value for key, value in sorted(found.items()) if key not in keys]}
+
+
+def track(connection: Any, url: str, scope: str | None, root: pathlib.Path, home: pathlib.Path) -> dict[str, Any]:
+    """Add a repository to the list; one already there is left as it is."""
+
+    repo = repo_url(url)
+    raw, entries, _seeded = read_tracked(connection, root, home)
+    if repo.lower() not in {entry["url"].lower() for entry in entries}:
+        if len(entries) >= MAX_TRACKED:
+            raise IntakeError(f"{MAX_TRACKED} repositories are tracked already; untrack one first")
+        skills = installed_from(root, home).get(repo.lower(), {}).get("skills", [])
+        default = "user" if skills and all(s["scope"] == "user" for s in skills) else "pack"
+        entries.append({"url": repo, "scope": scope or default, "refreshed": None, "result": None})
+        write_tracked(connection, entries, raw)
+    return {**tracked(connection, root, home), "url": repo}
+
+
+def untrack(connection: Any, url: str, root: pathlib.Path, home: pathlib.Path) -> dict[str, Any]:
+    """Drop a repository from the list. Its installed skills stay; `removed` is the entry, for an undo."""
+
+    repo = repo_url(url)
+    raw, entries, _seeded = read_tracked(connection, root, home)
+    removed = next((entry for entry in entries if entry["url"].lower() == repo.lower()), None)
+    if removed is None:
+        raise IntakeError(f"{repo} is not tracked; nothing written")
+    write_tracked(connection, [entry for entry in entries if entry is not removed], raw)
+    return {**tracked(connection, root, home), "url": repo, "removed": removed}
+
+
+def _default_branch(work: pathlib.Path, remote: str) -> str:
+    for line in _git(work, "ls-remote", "--symref", remote, "HEAD").splitlines():
+        if line.startswith("ref: refs/heads/") and line.endswith("\tHEAD"):
+            return line[len("ref: refs/heads/"):-len("\tHEAD")]
+    raise IntakeError(f"{remote} names no default branch")
+
+
+def _recorded_at(url: str, branch: str) -> str | None:
+    """The path a recorded skill URL names on `branch` ("" for the root), or None when it names another ref."""
+
+    _remote, parts, kind = parse_url(url)
+    if kind == "blob" and parts and parts[-1] == SKILL_FILE:
+        parts = parts[:-1]
+    joined = "/".join(parts)
+    if not parts or joined == branch:
+        return ""
+    return joined[len(branch) + 1:] if joined.startswith(branch + "/") else None
+
+
+def _bucket(report: dict[str, Any]) -> str:
+    if report.get("mode") == "gone":
+        return "gone"
+    if "error" in report:
+        return "failed"
+    return {"re-import": "changed"}.get(report["mode"], report["mode"])
+
+
+def _place(installed: list[dict[str, Any]], branch: str, paths: list[str]) -> tuple[dict[str, Any], list[dict[str, Any]], set[str]]:
+    """Installed skills by the branch path they record; those recorded at another ref; and the paths those cover."""
+
+    here, elsewhere = {}, []
+    for skill in installed:
+        path = _recorded_at(skill["url"], branch)
+        if path is None:
+            elsewhere.append(skill)
+        else:
+            here[path] = skill if path in paths else {**skill, "gone": True}
+    # A skill installed from another ref is judged at that ref, and its path at the branch is not judged again.
+    covered = {("/" + "/".join(parse_url(skill["url"])[1])).removesuffix("/" + SKILL_FILE) for skill in elsewhere}
+    return here, elsewhere, {path for path in paths if path and any(c.endswith("/" + path) for c in covered)}
+
+
+def _judged(report: dict[str, Any], path: str) -> dict[str, Any]:
+    """One skill's report in a refresh: its first DIFF_LINES diff lines, and how many there are; `evaluate` gives them all."""
+
+    report.pop("_files")
+    return {"path": path, **report, "diff": report["diff"][:DIFF_LINES], "diff_lines": len(report["diff"])}
+
+
+def _judge_tree(work: pathlib.Path, listing: list[tuple[str, str, str, str]], tree: dict[str, Any], entry: dict[str, Any],
+                root: pathlib.Path, home: pathlib.Path, today: str) -> list[dict[str, Any]]:
+    """Each skill folder at the fetched commit, judged under the URL an approval of it names."""
+
+    out = []
+    for path in tree["paths"]:
+        if path in tree["skipped"]:
+            continue
+        own = tree["here"].get(path)
+        url = own["url"] if own else f"{entry['url']}/tree/{tree['branch']}" + (f"/{path}" if path else "")
+        rows = [row for row in listing if not path or row[3].startswith(path + "/")]
+        try:
+            candidate = _skill_at(work, rows, url, tree["commit"], path)
+            out.append(_judged(judge(candidate, own["scope"] if own else entry["scope"], root, home, today, []), path))
+        except IntakeError as error:
+            out.append({"path": path, "url": url, "error": str(error)})
+    return out
+
+
+def _judge_rest(tree: dict[str, Any], root: pathlib.Path, home: pathlib.Path, today: str) -> list[dict[str, Any]]:
+    """Skills recorded at another ref, each fetched by its own `evaluate`; then those removed from the branch."""
+
+    out = []
+    for skill in tree["elsewhere"]:
+        try:
+            out.append(_judged(evaluate(skill["url"], skill["scope"], root, home, today), ""))
+        except IntakeError as error:
+            out.append({"path": "", "url": skill["url"], "skill": skill["name"], "error": str(error)})
+    out += [{"path": path, "url": skill["url"], "skill": skill["name"], "scope": skill["scope"], "mode": "gone",
+             "error": f"no {SKILL_FILE} at {path} on {tree['branch']}: removed upstream"}
+            for path, skill in sorted(tree["here"].items()) if skill.get("gone")]
+    return out
+
+
+def _summary(out: list[dict[str, Any]]) -> tuple[dict[str, int], str]:
+    counts = {"new": 0, "changed": 0, "unchanged": 0, "blocked": 0, "gone": 0, "failed": 0}
+    for report in out:
+        counts[_bucket(report)] += 1
+    return counts, ", ".join(f"{n} {name}" for name, n in counts.items() if n) or "no skills"
+
+
+def survey(entry: dict[str, Any], root: pathlib.Path, home: pathlib.Path, today: str) -> dict[str, Any]:
+    """Every skill of one tracked repository at its default branch, each judged as `evaluate` would.
+
+    One fetch reads the whole tree. A skill installed from that branch keeps its
+    recorded URL, so its report is the re-import's and its revision is the one
+    `--approve` checks; a skill installed from another ref is judged by its own
+    `evaluate`. Nothing installs.
+    """
+
+    recovered = recover(scope_roots("pack", root, home) + scope_roots("user", root, home))
+    remote = entry["url"] + ".git"
+    installed = adopted(root, home).get(entry["url"].lower(), {}).get("skills", [])
+    with tempfile.TemporaryDirectory(prefix="sd-skill-intake-") as scratch:
+        work = pathlib.Path(scratch) / "fetch"
+        _git(pathlib.Path(scratch), "init", "-q", "--template=", str(work))
+        branch = _default_branch(work, remote)
+        _git(work, "fetch", "-q", "--depth", "1", "--no-tags", "--no-recurse-submodules", remote, branch)
+        commit = _git(work, "rev-parse", "FETCH_HEAD^{commit}").strip()
+        listing = _listing(work, "")
+        folders = {str(pathlib.PurePosixPath(name).parent) for mode, _o, _s, name in listing
+                   if pathlib.PurePosixPath(name).name == SKILL_FILE and mode not in ("120000", "160000")}
+        paths = sorted("" if folder == "." else folder for folder in folders)  # "" is the repository root
+        if len(paths) > MAX_REPO_SKILLS:
+            raise IntakeError(f"{entry['url']} holds {len(paths)} skills, over the {MAX_REPO_SKILLS} a refresh judges")
+        here, elsewhere, skipped = _place(installed, branch, paths)
+        tree = {"branch": branch, "commit": commit, "paths": paths, "here": here, "elsewhere": elsewhere, "skipped": skipped}
+        out = _judge_tree(work, listing, tree, entry, root, home, today)
+    out += _judge_rest(tree, root, home, today)
+    counts, result = _summary(out)
+    return {"url": entry["url"], "branch": branch, "commit": commit, "skills": out, "counts": counts, "result": result,
+            "recovered": recovered}
+
+
+def _now() -> str:
+    return datetime.datetime.now(datetime.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def record_refresh(connection: Any, repo: str, at: str, result: str, root: pathlib.Path, home: pathlib.Path) -> str:
+    """Write the refresh's time and result on its entry, read again first; "" when written, else why not.
+
+    An entry untracked while the fetch ran stays untracked: the result is dropped, not the removal. So is the
+    result of a refresh that started before the one recorded: the newer reading stays.
+    """
+
+    for _attempt in range(2):
+        try:
+            raw, entries, _seeded = read_tracked(connection, root, home)
+            entry = next((each for each in entries if each["url"].lower() == repo.lower()), None)
+            if entry is None:
+                return f"{repo} was untracked while it refreshed"
+            if entry["refreshed"] and entry["refreshed"] > at:
+                return f"a newer refresh, started {entry['refreshed']}, is recorded"
+            entry.update(refreshed=at, result=result[:RESULT_LENGTH])
+            write_tracked(connection, entries, raw)
+            return ""
+        except IntakeError as error:
+            why = str(error)
+        except Exception as error:  # noqa: BLE001 - a failed write is named on the report, never a pass
+            return f"{type(error).__name__}: {error}"
+    return why
+
+
+def refresh(connection: Any, url: str, root: pathlib.Path, home: pathlib.Path, today: str) -> dict[str, Any]:
+    """Survey one tracked repository and record when and how it went. Nothing installs.
+
+    A failed survey is recorded as failed and raised. A failed record leaves the
+    report standing, `recorded` false and `unrecorded` saying why.
+    """
+
+    repo = repo_url(url)
+    _raw, entries, _seeded = read_tracked(connection, root, home)
+    entry = next((each for each in entries if each["url"].lower() == repo.lower()), None)
+    if entry is None:
+        raise IntakeError(f"{repo} is not tracked; track it first with --track")
+    at = _now()
+    try:
+        report = survey(entry, root, home, today)
+    except (IntakeError, OSError) as error:
+        record_refresh(connection, entry["url"], at, f"failed: {_printable(str(error))}", root, home)
+        raise IntakeError(str(error)) from error
+    why = record_refresh(connection, entry["url"], at, report["result"], root, home)
+    return {**report, "refreshed": at, "recorded": not why, "unrecorded": why}
+
+
+def tracked_text(view: dict[str, Any]) -> str:
+    out = [f"tracked{' (seeded from the installed skills, not yet written)' if view['seeded'] else ''}: "
+           f"{len(view['repos'])} repositor{'y' if len(view['repos']) == 1 else 'ies'}"]
+    for repo in view["repos"]:
+        last = f"refreshed {repo['refreshed']}: {repo['result']}" if repo["refreshed"] else "never refreshed"
+        out.append(f"  {repo['url']} ({repo['scope']}) · {len(repo['skills'])} adopted · {last}")
+    for repo in view["untracked"]:
+        out.append(f"untracked: {repo['url']} · {len(repo['skills'])} adopted · sd skill intake --track {repo['url']}")
+    return _printable("\n".join(out))
+
+
+def refresh_text(report: dict[str, Any]) -> str:
+    out = [f"refreshed: {report['url']} at {report['branch']} {report['commit']}", f"result: {report['result']}"]
+    out += [f"recovered: {line}" for line in report["recovered"]]
+    if not report["recorded"]:
+        out.append(f"not recorded: {report['unrecorded']}")
+    for skill in report["skills"]:
+        if "error" in skill:
+            out.append(f"  {skill.get('mode', 'failed')}: {skill.get('skill') or skill['path'] or skill['url']}: {skill['error']}")
+            continue
+        line = f"  {skill['mode']}: {skill['skill']} ({skill['scope']}) · {skill['verdict']['action']} ({skill['verdict']['reason']})"
+        if skill["mode"] in ("new", "re-import") and not any(f["severity"] == ADOPT.REFUSE for f in skill["risk"]):
+            line += f"\n    approve: sd skill intake {skill['url']} --scope {skill['scope']} --approve {skill['revision']}"
+        out.append(line)
+    return _printable("\n".join(out))
+
+
+def run_tracking(args: argparse.Namespace, connection: Any, root: pathlib.Path, home: pathlib.Path) -> int:
+    """`--tracked`, `--track URL`, `--untrack URL` and `--refresh URL`: the list and one repository's survey."""
+
+    if args.refresh:
+        report = refresh(connection, args.refresh, root, home, datetime.date.today().isoformat())
+        print(json.dumps(report, ensure_ascii=False) if args.json else refresh_text(report))
+        return 0
+    if args.track:
+        view = track(connection, args.track, args.scope, root, home)
+    elif args.untrack:
+        view = untrack(connection, args.untrack, root, home)
+    else:
+        view = tracked(connection, root, home)
+    print(json.dumps(view, ensure_ascii=False) if args.json else tracked_text(view))
+    return 0

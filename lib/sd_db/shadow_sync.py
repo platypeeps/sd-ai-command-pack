@@ -141,14 +141,16 @@ query($q: String!, $n: Int!, $after: String) {
     nodes {
       __typename
       ... on Issue {
-        number title url state updatedAt closedAt
+        number title url state createdAt updatedAt closedAt
         author { login }
+        assignees(first: 10) { nodes { login } }
         repository { nameWithOwner }
       }
       ... on PullRequest {
-        number title url state updatedAt closedAt mergedAt headRefName
+        number title url state createdAt updatedAt closedAt mergedAt headRefName
         closingIssuesReferences(first: 10) { nodes { url } }
         author { login }
+        assignees(first: 10) { nodes { login } }
         repository { nameWithOwner }
       }
     }
@@ -202,6 +204,19 @@ def closing_issues(node: dict) -> list[str] | None:
             return None
         urls.append(url)
     return list(dict.fromkeys(urls))
+
+
+def assignees(node: dict) -> str | None:
+    """A node's assignee logins joined by `, `, `""` for none, or None when the field does not read (pack sd:5496).
+
+    ponytail: the query reads the first ten; an issue with more lists ten.
+    """
+    block = node.get("assignees")
+    found = block.get("nodes") if isinstance(block, dict) else None
+    if not isinstance(found, list):
+        return None
+    logins = [entry.get("login") for entry in found if isinstance(entry, dict)]
+    return ", ".join(login for login in logins if isinstance(login, str) and login)
 
 
 #: A Jira issue key: a project key, a dash and a number, not inside a longer word or number (sd:5315).
@@ -524,6 +539,8 @@ def normalize(node: dict, why: str) -> dict | None:
         "branch": (node.get("headRefName") or None) if isinstance(node.get("headRefName"), str) else None,
         "linked_issues": closing_issues(node) if node.get("__typename") == "PullRequest" else None,
         "updated_at": node.get("updatedAt") or "",
+        "created_at": settled_at(node.get("createdAt")),
+        "assignee": assignees(node),
         "why": [why],
     }
 
@@ -627,6 +644,10 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
     for row in rows:
         row["why"].sort()
         row["reason"] = None if row["url"] in swept_only else reason_of(row["why"], truncated)
+        # Apart from `reason`, which names an assigned row assigned. A row `author:@me` returned is filed, even from
+        # a cut search; absence from a cut one is unknown, as `reason_of` reads it.
+        row["filed"] = (None if row["url"] in swept_only else True if "author" in row["why"]
+                        else None if "author" in truncated else False)
     return Collected(
         ok=not errors and not truncated,
         reason="; ".join(errors),
@@ -647,7 +668,8 @@ def store(connection: sqlite3.Connection, issues: list[dict]) -> int:
     `normalize` returns fourteen keys and this writes thirteen, plus the `reason`
     `collect` derives from `why` (migration 34). `updated_at` (migration 39)
     is written as `iso` spells it, or None when it does not read, which keeps
-    the stored one. The one it does not write, `why`, is not an oversight;
+    the stored one. `created_at`, `filed`, `status` and `assignee` (migration
+    40) follow the same rule. The one it does not write, `why`, is not an oversight;
     the `shadow` table has no column for it, and the comment above that table
     says why and where it goes instead. It goes there *before* this runs:
     `sync` passes the same `result.issues` to `contribution_sync.refresh`
@@ -670,6 +692,10 @@ def store(connection: sqlite3.Connection, issues: list[dict]) -> int:
             branch=issue.get("branch"),
             linked_issues=issue.get("linked_issues"),
             updated_at=settled_at(issue.get("updated_at")),
+            created_at=settled_at(issue.get("created_at")),
+            filed=issue.get("filed"),
+            status=issue.get("status") or None,
+            assignee=issue.get("assignee"),
         )
     return len(issues)
 

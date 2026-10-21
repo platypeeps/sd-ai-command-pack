@@ -392,11 +392,12 @@ def discover_surfaces(
         # Everything beside the skill, at the path it already has. Wider than
         # the `templates/*.md` this used to look for, and derived rather than
         # named: a skill that grows a `references/` or a `scripts/` directory
-        # ships it without the installer needing to learn the word.
+        # ships it without the installer needing to learn the word. `evals/`
+        # is the one word it knows: `claude plugin eval` runs it from here.
         extras = [
             Extra(str(path.relative_to(entry)), path)
             for path in sorted(entry.rglob("*"))
-            if path.is_file() and path != skill
+            if path.is_file() and path != skill and path.relative_to(entry).parts[0] != "evals"
         ]
         local = {extra.relative for extra in extras}
         for cited in sorted(set(CITATION.findall(skill.read_text(encoding="utf-8")))):

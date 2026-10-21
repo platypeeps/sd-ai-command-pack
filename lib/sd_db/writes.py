@@ -534,6 +534,9 @@ SNOOZE_DAYS = 31
 SNOOZE_KEY_LENGTH = 512
 #: `seen` is the page's fingerprint of the row's problem, a short hash.
 SNOOZE_SEEN_LENGTH = 128
+#: A snooze with no end, Health's Ignore (system sd:5470): no time to judge,
+#: so only a changed problem (`seen`) or a clear shows the row again.
+SNOOZE_FOREVER = "forever"
 
 
 def snooze(
@@ -553,12 +556,14 @@ def snooze(
     `SNOOZE_DAYS`. `seen` is what the operator saw of the row's problem, the
     page's fingerprint: an id names a resource, not its problem, so a snooze
     holds only while the row still reads `seen` (the page's `snooze.split`).
+    `until=SNOOZE_FOREVER` has no end, so it skips the time checks; it still
+    needs `seen`. An earlier reader cannot parse it as a time and shows the row.
     """
     if not isinstance(key, str) or not key.strip() or len(key) > SNOOZE_KEY_LENGTH:
         raise SdDbError(f"a snooze needs the row's key, 1 to {SNOOZE_KEY_LENGTH} characters")
-    if until is not None:
-        if not isinstance(seen, str) or not seen.strip() or len(seen) > SNOOZE_SEEN_LENGTH:
-            raise SdDbError(f"a snooze needs what the row showed (seen), 1 to {SNOOZE_SEEN_LENGTH} characters")
+    if until is not None and (not isinstance(seen, str) or not seen.strip() or len(seen) > SNOOZE_SEEN_LENGTH):
+        raise SdDbError(f"a snooze needs what the row showed (seen), 1 to {SNOOZE_SEEN_LENGTH} characters")
+    if until not in (None, SNOOZE_FOREVER):
         until = stamp(until)
         moment = datetime.fromisoformat(until)
         start = datetime.fromisoformat(stamp(now)) if now else datetime.now(UTC)
@@ -570,7 +575,7 @@ def snooze(
 
 
 def snoozed(connection: sqlite3.Connection, *, now: str) -> dict[str, dict[str, str]]:
-    """Every row key hidden at `now`: the time it shows again, and what it showed when snoozed.
+    """Every row key hidden at `now`: the time it shows again, or `SNOOZE_FOREVER`, and what it showed when snoozed.
 
     The latest `snooze` row per key, read through `state_by_kind_key`. A body
     this cannot read hides nothing: an unreadable snooze shows its row, and so
@@ -584,12 +589,15 @@ def snoozed(connection: sqlite3.Connection, *, now: str) -> dict[str, dict[str, 
     ):
         try:
             body = json.loads(row["body"])
-            moment = datetime.fromisoformat(stamp(body.get("until")))
+            until = body.get("until")
+            if until != SNOOZE_FOREVER:
+                moment = datetime.fromisoformat(stamp(until))
+                until = moment.isoformat(timespec="seconds") if moment > at else None
             seen = body["seen"]
         except (TypeError, ValueError, AttributeError, KeyError, SdDbError):
             continue
-        if moment > at and isinstance(seen, str) and seen:
-            found[row["key"]] = {"until": moment.isoformat(timespec="seconds"), "seen": seen}
+        if until and isinstance(seen, str) and seen:
+            found[row["key"]] = {"until": until, "seen": seen}
     return found
 
 
@@ -810,6 +818,10 @@ def upsert_shadow(
     branch: str | None = None,
     linked_issues: list[str] | None = None,
     updated_at: str | None = None,
+    created_at: str | None = None,
+    filed: bool | None = None,
+    status: str | None = None,
+    assignee: str | None = None,
 ) -> None:
     """A tracker's row, keyed by `(tracker, url)`. Seen once, then kept current.
 
@@ -827,6 +839,11 @@ def upsert_shadow(
     `updated_at` (migration 39, pack sd:5357) is when the tracker last updated
     the row; None keeps the stored value.
 
+    `created_at`, `filed`, `status` and `assignee` (migration 40, pack sd:5496)
+    are when the tracker created the row, whether the operator filed it,
+    Jira's status name and the assignee; None keeps the stored value, and an
+    empty `assignee` says unassigned.
+
     The conflict target is both columns, so this updates only the row this
     tracker already owns. Until sd:603 it was `url` alone and the update set
     `tracker = excluded.tracker`, which meant the last collector to see a url
@@ -838,8 +855,9 @@ def upsert_shadow(
     with transaction(connection):
         connection.execute(
             "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, "
-            "author, reason, merged_at, closed_at, branch, linked_issues, updated_at, first_seen, last_seen) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "author, reason, merged_at, closed_at, branch, linked_issues, updated_at, "
+            "created_at, filed, status, assignee, first_seen, last_seen) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(tracker, url) DO UPDATE SET "
             "repo = excluded.repo, number = excluded.number, kind = excluded.kind, "
             "title = excluded.title, state = excluded.state, "
@@ -851,9 +869,14 @@ def upsert_shadow(
             "branch = COALESCE(excluded.branch, shadow.branch), "
             "linked_issues = COALESCE(excluded.linked_issues, shadow.linked_issues), "
             "updated_at = COALESCE(excluded.updated_at, shadow.updated_at), "
+            "created_at = COALESCE(excluded.created_at, shadow.created_at), "
+            "filed = COALESCE(excluded.filed, shadow.filed), "
+            "status = COALESCE(excluded.status, shadow.status), "
+            "assignee = COALESCE(excluded.assignee, shadow.assignee), "
             "last_seen = excluded.last_seen",
             (tracker, repo, url, number, kind, title, state, author, reason, merged_at, closed_at, branch,
-             None if linked_issues is None else json.dumps(list(linked_issues)), updated_at, stamp, stamp),
+             None if linked_issues is None else json.dumps(list(linked_issues)), updated_at,
+             created_at, None if filed is None else int(filed), status, assignee, stamp, stamp),
         )
 
 

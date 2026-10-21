@@ -181,6 +181,49 @@ reads, so reading those back after publication stays manual. The
 review's `ok   main document` line names the surfaces it did check, so that a
 pass is not read as a claim about the two it did not.
 
+## Status brief — an experiment's fixed sections
+
+A research repo that runs an experiment keeps one status brief, `30-brief/BRIEF-status.md`.
+It is the START HERE document for the experiment, and the one input to every other status surface:
+the experiment row, the status deck and the dashboard's Experiments view all read it, and none is edited on its own.
+Piloted in mcp-research (sd:5499); the template is `skills/sd-research-repo/templates/BRIEF-status.md`.
+
+Keep these six sections, numbered and in this order:
+
+1. **Status at a glance**: a two-column table with these rows, in this order.
+   - `State`: one of `Running`, `Waiting on <who or what>`, `Blocked on <what>`, `Decided` or `Done`; the first word is the state.
+   - `Updated`: the day the brief was last made true, `YYYY-MM-DD`. Over 7 days old, the dashboard calls it stale.
+   - `In one line`: the experiment's state in one or two sentences.
+   - `Experiment`: a link to the experiment's row, and its iteration.
+   - `Hypothesis`: this iteration's hypothesis, as one sentence.
+   - `Deck`: a link to the current status deck, once one is imported. Optional.
+2. **What we learned**: one finding per bullet, with its source and what was not probed.
+3. **What shipped**: a table of the changes, each linked, merged or open.
+4. **Asks**: a `Who | What` table. Asks are actions someone else must take now; decisions that wait go in Next.
+5. **Next**: a numbered list, then the tracker's tickets when the work is tracked.
+6. **Status**: verified, not verified, the second reader's pass, and each update as a dated entry.
+
+Use no emoji in the State cell: the deck and the mirrors are read outside the team, and the word carries the state.
+
+### The deck beside the brief
+
+`30-brief/deck.json` holds the brief condensed to at most three slides.
+Update it in the same change as the brief, so the two never disagree.
+`sd-research-kit deck` lays it out into `docs/dashboard/deck.pptx`: a title page, then the slides, with one call to
+action on the last slide.
+The example and the schema in use are the JSON block in `skills/sd-research-repo/templates/deck.md`; the builder refuses an unknown key,
+an em dash, more than six cards (three beside a track) and text past its bound, naming the value's path.
+
+- `name`, `tagline`, `date`: the deck's title page.
+- `slides`: each has an `eyebrow` and a `title`, an optional `accent` (the title's tail, in the accent colour),
+  an optional `track` of 2 to 5 stages (`done`, `now`, `next`), `cards` (`big`, `head`, `text`, `pill`, `tone`),
+  a `foot` with an optional bold `foot_label`, and a `link` for the brief.
+- `theme`: overrides the builder's colours and font key by key, and adds a PNG `logo` (relative to the deck.json)
+  and the one `cta` (`text`, `url`).
+  A deck for an audience with its own brand kit takes its colours, font, logo and call to action from that kit.
+
+Building writes a file and nothing else: importing it into Slides is the operator's step.
+
 ## Documents
 
 Every document opens with an H1, a provenance paragraph, then `---`:
@@ -450,6 +493,10 @@ drive=dict(folder="Research deliverables", file="https://docs.google.com/documen
 Both keys on one entry are two mirrors, not a choice. Until one of these keys
 exists, the document publishes locally and nowhere else. Do not infer a target
 from a title, a folder or a neighbouring document.
+
+The vault copy is designated the same way, with `obsidian=dict()` on the entry:
+without it, a repository other than the vault's own writes no vault copy
+(system sd:5500). The vault's own repository writes every entry.
 
 `notion=True` is the same designation as `notion=dict()`, written shorter, and
 a write-back amends it into `notion=dict(page="<id>")`. `None` and `False` are

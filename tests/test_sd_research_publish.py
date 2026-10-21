@@ -806,7 +806,7 @@ class ObsidianTests(Fixture):
     def docs(self) -> list[dict]:
         (self.repo / "10-x").mkdir(parents=True, exist_ok=True)
         (self.repo / "10-x" / "a.md").write_text("# A\n\nbody\n", encoding="utf-8")
-        return [dict(src="10-x/a.md", out="a", title="A")]
+        return [dict(src="10-x/a.md", out="a", title="A", obsidian={})]
 
     def test_the_markdown_lands_under_briefs_and_the_repo_name(self) -> None:
         PUBLISH.write_obsidian(self.repo, self.docs())
@@ -842,7 +842,7 @@ class ObsidianTests(Fixture):
         other = self.root / "elsewhere" / "my-research"
         (other / "10-x").mkdir(parents=True)
         (other / "10-x" / "a.md").write_text("# Other\n", encoding="utf-8")
-        said = PUBLISH.write_obsidian(other, [dict(src="10-x/a.md", out="a", title="A")])
+        said = PUBLISH.write_obsidian(other, [dict(src="10-x/a.md", out="a", title="A", obsidian={})])
         self.assertEqual((self.briefs() / "a.md").read_text(encoding="utf-8"), kept)
         self.assertTrue(any("a.md" in line and str(self.repo) in line for line in said), said)
 
@@ -871,10 +871,109 @@ class ObsidianTests(Fixture):
         self.assertTrue(any("OBSIDIAN_VAULT is not set" in line for line in said))
 
     def test_an_unreadable_source_is_reported_and_the_rest_continue(self) -> None:
-        docs = self.docs() + [dict(src="10-x/missing.md", out="b", title="B")]
+        docs = self.docs() + [dict(src="10-x/missing.md", out="b", title="B", obsidian={})]
         said = PUBLISH.write_obsidian(self.repo, docs)
         self.assertTrue(any("cannot read" in line for line in said))
         self.assertTrue((self.briefs() / "a.md").is_file())
+
+
+class ObsidianDesignationTests(Fixture):
+    """system sd:5500: outside the vault's own repository a document is written
+    into the vault only when its entry designates `obsidian=`, and the
+    dashboard's untick moves the copy to the vault's `.trash`."""
+
+    def entry(self, out: str = "a", **designation: object) -> dict:
+        (self.repo / "10-x").mkdir(parents=True, exist_ok=True)
+        (self.repo / "10-x" / f"{out}.md").write_text(f"# {out}\n", encoding="utf-8")
+        return dict(src=f"10-x/{out}.md", out=out, title=out, **designation)
+
+    def test_an_entry_without_obsidian_gets_no_vault_copy(self) -> None:
+        PUBLISH.write_obsidian(self.repo, [self.entry()])
+        self.assertFalse((self.briefs() / "a.md").exists())
+
+    def test_obsidian_false_or_none_is_not_a_designation(self) -> None:
+        PUBLISH.write_obsidian(self.repo, [self.entry("a", obsidian=False), self.entry("b", obsidian=None)])
+        self.assertFalse(self.briefs().exists())
+
+    def test_only_the_designated_entry_is_written_and_recorded_as_written(self) -> None:
+        wrote: list[dict] = []
+        said = PUBLISH.write_obsidian(self.repo, [self.entry("a"), self.entry("b", obsidian={})], wrote)
+        self.assertEqual(sorted(p.name for p in self.briefs().iterdir()), ["b.md"])
+        self.assertEqual([cfg["out"] for cfg in wrote], ["b"])
+        self.assertIn("obsidian: wrote 1 document(s) to %s" % self.briefs(), said)
+
+    def test_an_undesignated_entrys_old_copy_is_left_where_it_is(self) -> None:
+        """A render after the pack update and before the seed deletes nothing."""
+        PUBLISH.write_obsidian(self.repo, [self.entry(obsidian={})])
+        before = (self.briefs() / "a.md").read_text(encoding="utf-8")
+        PUBLISH.write_obsidian(self.repo, [self.entry()])
+        self.assertEqual((self.briefs() / "a.md").read_text(encoding="utf-8"), before)
+
+    def test_the_vaults_own_repository_writes_every_entry(self) -> None:
+        PUBLISH.VAULT = str(self.repo)
+        PUBLISH.write_obsidian(self.repo, [self.entry()])
+        self.assertTrue((self.repo / "Briefs" / "my-research" / "a.md").is_file())
+        self.assertTrue(PUBLISH.vault_repository(self.repo))
+        PUBLISH.VAULT = str(self.vault)
+        self.assertFalse(PUBLISH.vault_repository(self.repo))
+
+    def test_untick_moves_this_checkouts_copy_into_the_vault_trash(self) -> None:
+        PUBLISH.write_obsidian(self.repo, [self.entry(obsidian={})])
+        kept = (self.briefs() / "a.md").read_text(encoding="utf-8")
+        state, line = PUBLISH.trash_obsidian(self.repo, "a")
+        self.assertEqual(state, "trashed", line)
+        self.assertFalse((self.briefs() / "a.md").exists())
+        self.assertEqual((self.vault / ".trash" / "a.md").read_text(encoding="utf-8"), kept)
+
+    def test_a_second_untick_finds_nothing_and_a_taken_trash_name_is_numbered(self) -> None:
+        PUBLISH.write_obsidian(self.repo, [self.entry(obsidian={})])
+        self.assertEqual(PUBLISH.trash_obsidian(self.repo, "a")[0], "trashed")
+        self.assertEqual(PUBLISH.trash_obsidian(self.repo, "a")[0], "nothing")
+        PUBLISH.write_obsidian(self.repo, [self.entry(obsidian={})])
+        self.assertEqual(PUBLISH.trash_obsidian(self.repo, "a")[0], "trashed")
+        self.assertEqual(sorted(p.name for p in (self.vault / ".trash").iterdir()), ["a 1.md", "a.md"])
+
+    def test_another_checkouts_copy_or_an_unreadable_one_is_left_alone(self) -> None:
+        self.briefs().mkdir(parents=True)
+        note = self.briefs() / "a.md"
+        for held in (b"---\nsource_checkout: ~/elsewhere/my-research\n---\nx\n", b"\xff\xfe"):
+            note.write_bytes(held)
+            state, line = PUBLISH.trash_obsidian(self.repo, "a")
+            self.assertEqual((state, note.read_bytes()), ("", held), line)
+        self.assertFalse((self.vault / ".trash").exists())
+
+    def test_a_channels_setting_not_read_trashes_nothing(self) -> None:
+        PUBLISH.write_obsidian(self.repo, [self.entry(obsidian={})])
+        with unittest.mock.patch.object(PUBLISH, "read_channels", return_value=(None, "hub down")):
+            state, line = PUBLISH.trash_obsidian(self.repo, "a")
+        self.assertEqual(state, "")
+        self.assertIn("hub down", line)
+        self.assertTrue((self.briefs() / "a.md").is_file())
+
+    def test_a_name_leading_out_of_the_folder_is_refused(self) -> None:
+        """From the adversarial review: `../../Personal` named a note outside the repo's folder."""
+        (self.vault / "Personal.md").parent.mkdir(parents=True, exist_ok=True)
+        (self.vault / "Personal.md").write_text("mine\n", encoding="utf-8")
+        for name in ("../../Personal", str(self.vault / "Personal")):
+            self.assertEqual(PUBLISH.trash_obsidian(self.repo, name)[0], "", name)
+        self.assertTrue((self.vault / "Personal.md").is_file())
+
+    def test_with_obsidian_off_for_the_repo_the_folder_is_unknown_and_nothing_moves(self) -> None:
+        """From the adversarial review: a copy in an older folder was missed and read as "nothing"."""
+        PUBLISH.write_obsidian(self.repo, [self.entry(obsidian={})])
+        with unittest.mock.patch.object(PUBLISH, "read_channels", return_value=({"notion": {}}, "")):
+            state, line = PUBLISH.trash_obsidian(self.repo, "a")
+        self.assertEqual(state, "")
+        self.assertIn("not a channel", line)
+        self.assertTrue((self.briefs() / "a.md").is_file())
+
+    def test_a_link_in_the_vault_is_not_moved(self) -> None:
+        self.briefs().mkdir(parents=True)
+        outside = self.root / "outside.md"
+        outside.write_text("mine\n", encoding="utf-8")
+        (self.briefs() / "a.md").symlink_to(outside)
+        self.assertEqual(PUBLISH.trash_obsidian(self.repo, "a")[0], "")
+        self.assertTrue((self.briefs() / "a.md").is_symlink())
 
 
 class LegacyQueueTests(Fixture):
@@ -1267,13 +1366,8 @@ class PublishedUrlTests(ReceiptFixture):
         self.assertNotEqual(self.fingerprint(), first)
 
 
-class DeliveredItemTests(ReceiptFixture):
-    """sd:3979: `delivered` records the URL on the item, for the drained generation only.
-
-    Before, the URL and the pending request's `item` went on the receipt
-    whatever generation was pending, and nothing reached the item row. Every
-    step that did not finish printed its reason and exited 0.
-    """
+class DeliveredItemFixture(ReceiptFixture):
+    """One document designated for Notion with an item, queued once."""
 
     NAME = "my-research.a.notion.json"
     URL = "https://example.test/p"
@@ -1305,6 +1399,15 @@ class DeliveredItemTests(ReceiptFixture):
 
     def key(self) -> str:
         return "%s::a" % self.repo
+
+
+class DeliveredItemTests(DeliveredItemFixture):
+    """sd:3979: `delivered` records the URL on the item, for the drained generation only.
+
+    Before, the URL and the pending request's `item` went on the receipt
+    whatever generation was pending, and nothing reached the item row. Every
+    step that did not finish printed its reason and exited 0.
+    """
 
     def test_the_url_reaches_the_item_with_one_note(self) -> None:
         status, said = self.deliver("--url", self.URL)
@@ -1401,6 +1504,147 @@ class DeliveredItemTests(ReceiptFixture):
         self.assertNotIn("item", self.receipt())
 
 
+class TrashTests(DeliveredItemFixture):
+    """sd:5492: an unticked designation queues a trash request, and `delivered` acknowledges it.
+
+    Before, the dashboard refused an untick: the designation held the id a drain wrote, and nothing could take a copy
+    down. A trash request carries that id or the delivered URL, so the designation can go while the request still says
+    which copy to trash; its acknowledgement drops the URL from the item and the receipt.
+    """
+
+    def delivered_copy(self) -> None:
+        status, said = self.deliver("--url", self.URL)
+        self.assertEqual(status, 0, said)
+
+    def trash(self, **extra) -> tuple[str, str]:
+        return PUBLISH.enqueue_trash(self.repo, "a", "notion", **extra)
+
+    def test_untick_queues_a_trash_request_naming_the_delivered_copy(self) -> None:
+        self.delivered_copy()
+        state, said = self.trash(designated="0123456789abcdef0123456789abcdef", item=self.item)
+        self.assertEqual(state, "queued", said)
+        request = json.loads(self.request())
+        self.assertEqual(request["action"], "trash")
+        self.assertEqual((request["page"], request["url"], request["item"]),
+                         ("0123456789abcdef0123456789abcdef", self.URL, self.item))
+        self.assertEqual(request["repo"], str(self.repo))
+        self.assertNotIn("content", request)
+        self.assertEqual(self.receipt()["trashing"]["fingerprint"], request["fingerprint"])
+
+    def test_nothing_queued_or_delivered_writes_no_trash_request(self) -> None:
+        (PUBLISH.QUEUE / self.NAME).unlink()
+        (PUBLISH.receipts() / self.NAME).unlink()
+        state, said = self.trash()
+        self.assertEqual(state, "nothing", said)
+        self.assertFalse((PUBLISH.QUEUE / self.NAME).exists())
+
+    def test_a_pending_request_never_drained_becomes_a_trash_by_pointer(self) -> None:
+        """A drain may have created the page before step 4: no id, so the trash request keeps the container."""
+        state, said = self.trash(item=self.item)
+        self.assertEqual(state, "queued", said)
+        request = json.loads(self.request())
+        self.assertEqual((request["action"], request["page"], request["url"]), ("trash", "", ""))
+        self.assertEqual(request["space_id"], PRIVATE_FOLDER)
+
+    def test_the_acknowledgement_drops_the_item_url_and_the_receipt_url(self) -> None:
+        self.delivered_copy()
+        self.trash(item=self.item)
+        status, said = self.deliver()
+        self.assertEqual(status, 0, said)
+        self.assertIn("trashed", said)
+        self.assertEqual(self.published(self.item), {})
+        self.assertEqual(self.comments(self.item)[-1], "Trashed notion a: %s" % self.URL)
+        receipt = self.receipt()
+        self.assertNotIn("url", receipt)
+        self.assertNotIn("delivered", receipt)
+        self.assertNotIn("trashing", receipt)
+        self.assertFalse((PUBLISH.QUEUE / self.NAME).exists())
+
+    def test_a_refused_drop_leaves_request_and_receipt(self) -> None:
+        from sd_db.writes import record_state  # noqa: PLC0415
+        self.delivered_copy()
+        self.trash(item=self.item)
+        record_state(self.connection, "restore", key="example", body={})
+        before, receipt = self.request(), self.receipt()
+        status, said = self.deliver()
+        self.assertEqual(status, 1, said)
+        self.assertEqual((self.request(), self.receipt()), (before, receipt))
+        self.assertEqual(self.published(self.item), {self.key(): {"title": "A", "notion": self.URL}})
+
+    def test_a_retick_before_the_drain_replaces_the_trash_and_carries_no_id(self) -> None:
+        self.delivered_copy()
+        self.trash(designated="0123456789abcdef0123456789abcdef", item=self.item)
+        PUBLISH.enqueue(self.repo, self.doc(self.item))
+        request = json.loads(self.request())
+        self.assertNotIn("action", request)
+        self.assertEqual(request["page"], "")
+
+    def test_a_trash_drained_after_a_retick_clears_the_url_and_keeps_the_newer_request(self) -> None:
+        self.delivered_copy()
+        self.trash(item=self.item)
+        trashed = self.fingerprint()
+        PUBLISH.enqueue(self.repo, self.doc(self.item))
+        newer = self.request()
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            status = PUBLISH.delivered_main([self.NAME, trashed])
+        self.assertEqual(status, 0, out.getvalue())
+        self.assertEqual(self.request(), newer)
+        self.assertNotIn("url", self.receipt())
+        self.assertEqual(self.published(self.item), {})
+
+    def test_another_checkouts_request_in_the_slot_is_refused(self) -> None:
+        request = json.loads(self.request())
+        request["repo"] = str(self.root / "elsewhere" / "my-research")
+        (PUBLISH.QUEUE / self.NAME).write_text(json.dumps(request))
+        before = self.request()
+        state, said = self.trash()
+        self.assertEqual(state, "", said)
+        self.assertIn("another checkout", said)
+        self.assertEqual(self.request(), before)
+
+    def test_an_unreadable_receipt_is_refused_not_read_as_nothing(self) -> None:
+        """Codex review: a receipt that cannot be read leaves whether a copy was delivered unknown."""
+        self.delivered_copy()
+        (PUBLISH.receipts() / self.NAME).write_text("{not json")
+        state, said = self.trash()
+        self.assertEqual(state, "", said)
+        self.assertIn("not known", said)
+
+    def test_a_second_trash_of_the_same_copy_clears_the_old_trashed_mark(self) -> None:
+        """Codex review: an identical trash queued again must not read as done from the first one's receipt."""
+        self.delivered_copy()
+        self.trash(item=self.item)
+        first = self.fingerprint()
+        self.deliver()
+        PUBLISH.enqueue(self.repo, self.doc(self.item))
+        self.delivered_copy()
+        self.trash(item=self.item)
+        self.assertEqual(self.fingerprint(), first)
+        self.assertNotIn("trashed", self.receipt())
+
+    def test_a_repeated_acknowledgement_after_a_retick_records_nothing_more(self) -> None:
+        """Codex review: a rerun of a finished trash's `delivered` answers 0 and leaves the newer request and receipt."""
+        self.delivered_copy()
+        self.trash(item=self.item)
+        trashed = self.fingerprint()
+        PUBLISH.enqueue(self.repo, self.doc(self.item))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(out):
+            PUBLISH.delivered_main([self.NAME, trashed])
+            newer, receipt = self.request(), self.receipt()
+            status = PUBLISH.delivered_main([self.NAME, trashed])
+        self.assertEqual(status, 0, out.getvalue())
+        self.assertEqual((self.request(), self.receipt()), (newer, receipt))
+        self.assertNotIn("delivered", receipt)
+
+    def test_an_unreadable_request_is_refused_not_read_as_none(self) -> None:
+        (PUBLISH.QUEUE / self.NAME).write_text("{not json")
+        state, said = self.trash()
+        self.assertEqual(state, "", said)
+        self.assertEqual(self.request(), b"{not json")
+
+
 class ObsidianItemTests(Fixture):
     """sd:3979: the render records the vault copy's link on the item it names.
 
@@ -1417,7 +1661,7 @@ class ObsidianItemTests(Fixture):
         self.link = "obsidian://open?vault=vault&file=Briefs%2Fmy-research%2Fa"
 
     def docs(self, **extra: object) -> list[dict]:
-        return [dict(src="10-x/a.md", out="a", title="A", item=self.item, **extra)]
+        return [dict(src="10-x/a.md", out="a", title="A", item=self.item, obsidian={}, **extra)]
 
     def publish(self, docs: list[dict] | None = None) -> list[str]:
         return PUBLISH.publish(self.repo, "MINE", self.docs() if docs is None else docs)
@@ -1435,12 +1679,12 @@ class ObsidianItemTests(Fixture):
         refuses it too, but holds the whole render first (sd:3462)."""
         from sd_db.writes import create_item  # noqa: PLC0415
         later = self.item + 1
-        said = self.publish([dict(src="10-x/a.md", out="a", title="A", item=later)])
+        said = self.publish([dict(src="10-x/a.md", out="a", title="A", item=later, obsidian={})])
         self.assertTrue((self.briefs() / "a.md").is_file())
         self.assertTrue(any("item: obsidian link for %s sd:%d not recorded (" % (self.repo.name, later) in line
                             for line in said), said)
         self.assertEqual(create_item(self.connection, kind="task", title="Later"), later)
-        self.publish([dict(src="10-x/a.md", out="a", title="A", item=later)])
+        self.publish([dict(src="10-x/a.md", out="a", title="A", item=later, obsidian={})])
         self.assertEqual(self.published(later)["%s::a" % self.repo]["obsidian"], self.link)
 
     def test_no_database_reports_and_the_render_goes_on(self) -> None:
@@ -1865,7 +2109,7 @@ class SourceUrlTests(Fixture):
     """
 
     NAME = "my-research.a.notion.json"
-    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict())]
+    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict(), obsidian=dict())]
     URL = "https://github.com/example-org/research-repo/blob/HEAD/10-x/a.md"
 
     def setUp(self) -> None:
@@ -1975,7 +2219,7 @@ class WorktreeIdentityTests(Fixture):
     def test_the_vault_folder_is_the_primary_checkouts(self) -> None:
         self.assertEqual(PUBLISH.vault_folder(self.wt), self.briefs())
 
-    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict())]
+    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict(), obsidian=dict())]
 
     def test_a_worktree_render_queues_nothing_and_claims_no_page_id(self) -> None:
         """Publication is the main checkout's. A worktree render must neither
@@ -2049,7 +2293,7 @@ class BranchCheckoutTests(Fixture):
     """
 
     NAME = "my-research.a.notion.json"
-    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict())]
+    DOC = [dict(src="10-x/a.md", out="a", title="A", notion=dict(), obsidian=dict())]
 
     def setUp(self) -> None:
         super().setUp()
@@ -2328,12 +2572,12 @@ class ChannelsTests(Fixture):
 
     #: Every shape of designation, so the no-setting fixture pins each one.
     SCENARIO = [
-        dict(src="10-x/a.md", out="a", title="A", notion=dict()),
-        dict(src="10-x/b.md", out="b", title="B", notion=dict(team=True), drive=dict()),
-        dict(src="10-x/c.md", out="c", title="C", notion=dict(space="Research"),
+        dict(src="10-x/a.md", out="a", title="A", obsidian=dict(), notion=dict()),
+        dict(src="10-x/b.md", out="b", title="B", obsidian=dict(), notion=dict(team=True), drive=dict()),
+        dict(src="10-x/c.md", out="c", title="C", obsidian=dict(), notion=dict(space="Research"),
              drive=dict(folder="Deliverables", file="1AbCdEf")),
-        dict(src="10-x/d.md", out="d", title="D"),
-        dict(src="10-x/e.md", out="e", title="E", notion=dict(page="https://notion.so/e")),
+        dict(src="10-x/d.md", out="d", title="D", obsidian=dict()),
+        dict(src="10-x/e.md", out="e", title="E", obsidian=dict(), notion=dict(page="https://notion.so/e")),
     ]
 
     def setUp(self) -> None:

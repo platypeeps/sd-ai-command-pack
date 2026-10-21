@@ -29,6 +29,7 @@ reads them for Today.
 
 `record_url` puts where a document was published on the item that owns it
 (sd:3979): the item row holds the URL, and the dashboard reads the row.
+`drop_url` takes it off again once a drain moved that copy to the trash (sd:5492).
 """
 
 from __future__ import annotations
@@ -285,3 +286,48 @@ def record_url(connection: Any, item: int, repo: str, document: str, title: str,
         if moved:
             add_note(connection, item, "comment", f"Published {channel} {document}: {url}", session=who)
     return "recorded"
+
+
+def drop_url(connection: Any, item: int, repo: str, document: str, channel: str, who: str) -> str:
+    """Take `channel`'s URL for `document` of `repo` off item `item`, once a drain trashed that copy (sd:5492).
+
+    One transaction, the inverse of `record_url`: the entry loses the channel, an entry left with only its title goes, and
+    a `comment` note `Trashed <channel> <document>: <url>` gives the history. Returns `unchanged` when no URL was there (no
+    note), else `dropped`. Refuses, writing nothing, as `record_url` does.
+    """
+    from .writes import add_note, now, unresolved_state
+
+    if channel not in CHANNELS:
+        raise UrlRefusal(f"{channel!r} is not a channel; expected {', '.join(CHANNELS[:-1])} or {CHANNELS[-1]}")
+    if type(item) is not int or item < 1:
+        raise UrlRefusal(f"item must be an sd item number, not {item!r}")
+    key = f"{paths.key(repo)}::{document}"
+    with transaction(connection):
+        if unresolved_state(connection, "restore"):
+            raise UrlRefusal("a restore is unresolved, so the item rows may be older than the receipts; "
+                             "resolve the restore, then run again")
+        row = connection.execute("SELECT fields FROM item WHERE id = ?", (item,)).fetchone()
+        if row is None:
+            raise UrlRefusal(f"sd:{item} is not an item in this database")
+        try:
+            fields = json.loads(row["fields"]) if row["fields"] else {}
+        except ValueError as error:
+            raise UrlRefusal(f"sd:{item}'s fields are not JSON ({error}); left as they are") from error
+        if not isinstance(fields, dict):
+            raise UrlRefusal(f"sd:{item}'s fields are not an object; left as they are")
+        published = fields.get("published")
+        published = dict(published) if isinstance(published, dict) else {}
+        entry = published.get(key)
+        if not isinstance(entry, dict) or channel not in entry:
+            return "unchanged"
+        entry = dict(entry)
+        url = entry.pop(channel)
+        if set(entry) - {"title"}:
+            published[key] = entry
+        else:
+            published.pop(key)
+        fields["published"] = published
+        connection.execute("UPDATE item SET fields = ?, updated_at = ? WHERE id = ?",
+                           (json.dumps(fields, sort_keys=True), now(), item))
+        add_note(connection, item, "comment", f"Trashed {channel} {document}: {url}", session=who)
+    return "dropped"

@@ -126,6 +126,16 @@ class LocalCompanionTests(FixtureHarness):
                     (self.checkout / "skills" / "sd-probe" / relative).read_bytes(),
                 )
 
+    def test_a_skills_eval_suite_is_not_a_companion(self) -> None:
+        """`claude plugin eval` reads `<skill>/evals/` in the checkout; an install has no use for it (sd:5430)."""
+
+        self.skill("sd-probe")
+        self.write("skills/sd-probe/references/local.md", "local\n")
+        self.write("skills/sd-probe/evals/case/prompt.md", "prompt\n")
+        self.write("skills/sd-probe/evals/case/history.jsonl", "{}\n")
+        extras = [extra.relative for extra in self.surfaces()["sd-probe"].extras]
+        self.assertEqual(extras, ["references/local.md"])
+
     def test_companions_do_not_reach_the_flat_home(self) -> None:
         """OpenCode's loader reads every file in that directory as a command."""
 

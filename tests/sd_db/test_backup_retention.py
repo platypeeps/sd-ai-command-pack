@@ -1,6 +1,7 @@
 """Retention deletes only complete, unchanged backups with recorded ownership."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -171,14 +172,78 @@ class Retention(BackupCase):
         self.assertEqual(len(list(backup.backup_root(self.home).iterdir())), 2)
 
     @hub_only
+    def test_a_count_prune_stopped_while_verifying_keeps_what_it_removed_before(self):
+        # fleet sd:5543: every owned backup was verified before the first removal.
+        snapshots = [self.snapshot(day) for day in range(3)]
+        root = backup.backup_root(self.home)
+        real = backup._owned_backup
+        checked = []
+
+        def bound(path, **kwargs):
+            checked.append(path)
+            if len(checked) == 3:
+                raise KeyboardInterrupt  # the job's time bound, while the third backup is verified
+            return real(path, **kwargs)
+
+        with patch.object(backup, "_owned_backup", bound), self.assertRaises(KeyboardInterrupt):
+            backup.prune(root, 1)
+
+        self.assertFalse(snapshots[0].directory.exists())
+        self.assertTrue(snapshots[1].directory.exists())
+        self.assertTrue(snapshots[2].directory.exists())
+        self.assertEqual([path for path in root.iterdir() if path.name.endswith(".removing")], [])
+        self.assertEqual(backup.prune(root, 1), [snapshots[1].directory])
+
+    @hub_only
+    def test_a_count_prune_hashes_each_backup_once(self):
+        snapshots = [self.snapshot(day) for day in range(3)]
+        real = backup._retention_inventory
+        hashed = []
+
+        def counted(directory, **kwargs):
+            hashed.append(directory)
+            return real(directory, **kwargs)
+
+        with patch.object(backup, "_retention_inventory", counted):
+            self.assertEqual(backup.prune(backup.backup_root(self.home), 1),
+                             [snapshot.directory for snapshot in snapshots[:2]])
+        self.assertEqual(sorted(hashed), [snapshot.directory for snapshot in snapshots])
+
+    @hub_only
     def test_changed_ownership_at_final_check_preserves_backup(self):
         snapshot = self.snapshot()
-        identity = backup._owned_backup(snapshot.directory)
-        with patch.object(backup, "_owned_backup", side_effect=[identity, None]), \
+        real = backup._owned_backup
+
+        def changed(path, **kwargs):
+            identity = real(path, **kwargs)
+            manifest = path / backup.BACKUP_MANIFEST
+            manifest.write_bytes(manifest.read_bytes() + b"\n")  # between the check and the removal
+            return identity
+
+        with patch.object(backup, "_owned_backup", changed), \
                 patch.object(backup.shutil, "rmtree", side_effect=AssertionError("deletion reached")):
             with self.assertRaisesRegex(BackupError, "changed before retention"):
                 backup.prune(backup.backup_root(self.home), 0)
         self.assertTrue(snapshot.directory.exists())
+
+    @hub_only
+    def test_a_backup_replaced_while_it_is_hashed_stays(self):
+        snapshot = self.snapshot()
+        directory = snapshot.directory
+        recopy = self.home / "recopy"
+        real = backup._retention_inventory
+
+        def replaced(path, **kwargs):
+            inventory = real(path, **kwargs)
+            shutil.copytree(directory, recopy, symlinks=True)
+            (recopy / "added").write_bytes(b"never hashed")
+            shutil.rmtree(directory)
+            recopy.rename(directory)
+            return inventory
+
+        with patch.object(backup, "_retention_inventory", replaced):
+            self.assertEqual(backup.prune(backup.backup_root(self.home), 0), [])
+        self.assertEqual((directory / "added").read_bytes(), b"never hashed")
 
 
 if __name__ == "__main__":

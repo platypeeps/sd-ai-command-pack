@@ -899,6 +899,147 @@ class TheReason(SyncCase):
         self.assertEqual(self.reasons(), {"1": "filed"})
 
 
+class TheFiledColumns(SyncCase):
+    """pack sd:5496: each row stores when the tracker created it, whether the operator filed it apart from `reason`,
+    Jira's status name and the assignee, so the dashboard can list what the operator filed this year. A value a
+    collect cannot read is None and keeps the stored one."""
+
+    def environment(self, **extra):
+        values = {**os.environ, **JIRA_ENV, **extra}
+        if "JIRA_JQL" not in extra:
+            values.pop("JIRA_JQL", None)
+        return patch.dict(os.environ, values, clear=True)
+
+    def fields(self):
+        return {row["url"].rsplit("/", 1)[1]: (row["created_at"], row["filed"], row["status"], row["assignee"])
+                for row in self.shadow().values()}
+
+    @staticmethod
+    def gh(number, *, created="2026-02-03T04:05:06Z", assignees=("octocat",)):
+        return {**node(number), "createdAt": created, "assignees": {"nodes": [{"login": who} for who in assignees]}}
+
+    def test_github_rows_store_created_filed_apart_from_reason_and_assignees(self):
+        runner = BucketGh({"assignee:@me": [self.gh(1)], "author:@me": [self.gh(1), self.gh(2, assignees=())],
+                           "mentions:@me": [self.gh(3, assignees=("octocat", "hubot"))]})
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.fields(), {"1": ("2026-02-03T04:05:06Z", 1, None, "octocat"),
+                                         "2": ("2026-02-03T04:05:06Z", 1, None, ""),
+                                         "3": ("2026-02-03T04:05:06Z", 0, None, "octocat, hubot")})
+        self.assertEqual(self.shadow()[self.gh(1)["url"]]["reason"], "assigned")
+        query = next(argv[index + 1] for argv in runner.calls for index, value in enumerate(argv)
+                     if value == "-f" and argv[index + 1].startswith("query="))
+        self.assertEqual(query.count("createdAt"), 2)
+        self.assertEqual(query.count("assignees(first: 10) { nodes { login } }"), 2)
+
+    def test_a_failed_author_bucket_leaves_filed_unknown_and_keeps_the_stored_answer(self):
+        sync(self.connection, now=self.now, runner=BucketGh({"author:@me": [self.gh(1)]}))
+        later = self.now + timedelta(hours=1)
+        moved = {**self.gh(1), "updatedAt": iso(later)}
+        fresh = {**self.gh(2), "updatedAt": iso(later)}
+        result = sync(self.connection, now=later,
+                      runner=BucketGh({"mentions:@me": [moved, fresh]}, failing={"author:@me"}))
+        self.assertFalse(result.ok)
+        self.assertEqual({key: value[1] for key, value in self.fields().items()}, {"1": 1, "2": None})
+
+    def test_a_github_value_that_does_not_read_keeps_the_stored_one(self):
+        sync(self.connection, now=self.now, runner=BucketGh({"author:@me": [self.gh(1)]}))
+        later = self.now + timedelta(hours=1)
+        unread = {key: value for key, value in self.gh(1).items() if key != "assignees"} | {
+            "createdAt": "not a time", "updatedAt": iso(later)}
+        self.assertTrue(sync(self.connection, now=later, runner=BucketGh({"author:@me": [unread]})).ok)
+        self.assertEqual(self.fields(), {"1": ("2026-02-03T04:05:06Z", 1, None, "octocat")})
+
+    def test_jira_rows_store_created_filed_status_and_assignee(self):
+        me = "acct-1"
+        both = jira_issue("ABC-1", created="2026-01-05T10:12:33.123-0600",
+                          status={"name": "In Review", "statusCategory": {"name": "In Progress"}},
+                          reporter={"accountId": me, "displayName": "Alex"})
+        other = jira_issue("ABC-2", assignee=None, watches={"isWatching": True}, created="2025-12-30T00:00:00.000+0000")
+        transport = jira_transport([{"issues": [both, other], "isLast": True}], me=me)
+        with self.environment():
+            result = sync(self.connection, tracker="jira", now=self.now, runner=transport)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.fields(), {"ABC-1": ("2026-01-05T16:12:33Z", 1, "In Review", "Alex"),
+                                         "ABC-2": ("2025-12-30T00:00:00Z", 0, "Open", "")})
+        # Filed and assigned: `reason` names the stronger, `filed` still says the operator filed it.
+        self.assertEqual(self.shadow()["https://example.invalid/browse/ABC-1"]["reason"], "assigned")
+
+    def test_a_jira_value_that_does_not_read_keeps_the_stored_one(self):
+        transport = jira_transport([{"issues": [jira_issue("ABC-1", created="2026-01-05T00:00:00.000+0000")],
+                                     "isLast": True}])
+        with self.environment():
+            self.assertTrue(sync(self.connection, tracker="jira", now=self.now, runner=transport).ok)
+        bare = jira_issue("ABC-1", created="not a time")
+        del bare["fields"]["status"]["name"]
+        transport = jira_transport([{"issues": [bare], "isLast": True}])
+        with self.environment():
+            self.assertTrue(sync(self.connection, tracker="jira", now=self.now + timedelta(hours=1), runner=transport).ok)
+        self.assertEqual(self.fields(), {"ABC-1": ("2026-01-05T00:00:00Z", 0, "Open", "Alex")})
+
+    def test_a_jira_reporter_or_assignee_that_cannot_be_read_keeps_the_stored_answer(self):
+        """Codex review: a reporter with no id or email is not "someone else", and an assignee with no name is not
+        "unassigned"; both are unknown. An explicit null reporter or assignee is a known no."""
+        filed = jira_issue("ABC-1", reporter={"accountId": "acct-1", "displayName": "Alex"})
+        transport = jira_transport([{"issues": [filed], "isLast": True}])
+        with self.environment():
+            self.assertTrue(sync(self.connection, tracker="jira", now=self.now, runner=transport).ok)
+        later = self.now + timedelta(hours=1)
+        unread = jira_issue("ABC-1", reporter={"displayName": "Alex"}, assignee={"accountId": "acct-1"})
+        transport = jira_transport([{"issues": [unread], "isLast": True}])
+        with self.environment():
+            self.assertTrue(sync(self.connection, tracker="jira", now=later, runner=transport).ok)
+        self.assertEqual(self.fields()["ABC-1"][1:4:2], (1, "Alex"))
+        nobody = jira_issue("ABC-1", reporter=None, assignee=None)
+        transport = jira_transport([{"issues": [nobody], "isLast": True}])
+        with self.environment():
+            self.assertTrue(sync(self.connection, tracker="jira", now=later + timedelta(hours=1), runner=transport).ok)
+        self.assertEqual(self.fields()["ABC-1"][1:4:2], (0, ""))
+
+    def test_the_jira_search_asks_for_the_created_field(self):
+        from sd_db import shadow_jira
+
+        self.assertIn("created", shadow_jira.FIELDS)
+
+    def test_the_jira_backfill_is_the_custom_jql_of_what_the_operator_filed_this_year(self):
+        """pack sd:5496 backfill: one run with `JIRA_JQL` reads every ticket the operator filed this year, whatever its
+        age; the cursor holds, so the nightly window is untouched."""
+        jql = "reporter = currentUser() AND created >= startOfYear() ORDER BY created DESC"
+        old = jira_issue("ABC-7", created="2026-01-02T09:00:00.000+0000", updated="2026-01-03T09:00:00.000+0000",
+                         reporter={"accountId": "acct-1", "displayName": "Alex"}, assignee=None)
+        transport = jira_transport([{"issues": [old], "isLast": True}])
+        with self.environment(JIRA_JQL=jql):
+            result = sync(self.connection, tracker="jira", now=self.now, runner=transport)
+        self.assertTrue(result.ok, result.reason)
+        self.assertFalse(result.watermark_moved)
+        self.assertEqual(transport.seen["jql"], [jql])
+        self.assertEqual(self.fields(), {"ABC-7": ("2026-01-02T09:00:00Z", 1, "Open", "")})
+
+    def test_the_github_backfill_is_a_recovery_window_from_the_start_of_the_year(self):
+        """pack sd:5496 backfill: an issue created this year was updated this year too, so `--since` the first of
+        January reads every one the operator filed, through the same four buckets."""
+        runner = BucketGh({"author:@me": [self.gh(4, created="2026-01-02T00:00:00Z")]})
+        result = sync(self.connection, now=self.now, runner=runner, since=datetime(2026, 1, 1, tzinfo=timezone.utc))
+        self.assertTrue(result.ok, result.reason)
+        self.assertTrue(all(" updated:2026-01-01T00:00:00Z.." in query for query in runner.queries))
+        self.assertEqual(self.fields(), {"4": ("2026-01-02T00:00:00Z", 1, None, "octocat")})
+
+    def test_an_importer_that_names_none_keeps_every_stored_value(self):
+        from sd_db.writes import upsert_shadow
+
+        sync(self.connection, now=self.now, runner=BucketGh({"author:@me": [self.gh(1)]}))
+        upsert_shadow(self.connection, tracker=TRACKER, url=self.gh(1)["url"], title="imported")
+        self.assertEqual(self.fields(), {"1": ("2026-02-03T04:05:06Z", 1, None, "octocat")})
+
+    def test_tracker_items_carries_the_new_fields(self):
+        from sd_db.progress import tracker_items
+
+        sync(self.connection, now=self.now, runner=BucketGh({"author:@me": [self.gh(1)]}))
+        [row] = tracker_items(self.connection, state=None)
+        self.assertEqual({key: row[key] for key in ("created_at", "filed", "status", "assignee")},
+                         {"created_at": "2026-02-03T04:05:06Z", "filed": 1, "status": None, "assignee": "octocat"})
+
+
 class TheSettleDates(SyncCase):
     """sd:5303. Each row keeps when GitHub merged or closed it, read from the same search page."""
 

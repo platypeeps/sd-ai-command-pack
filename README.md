@@ -40,6 +40,13 @@ of install, fold or decline. It installs nothing until `--approve` names the
 revision the report printed; the skill then lands in `contrib/` and records its
 source URL and commit. `sd skill intake <name>` fetches that source again,
 shows the diff and updates only on the same kind of approval.
+`sd skill intake --track <repo URL>` adds a source repository to the tracked
+list, one workflow database setting row (`skills.intake_repos`). Until that
+row is first written, the list is read from the installed skills' Provenance,
+the `skills` CLI's `~/.agents/.skill-lock.json`, and the GitHub origin of any
+git checkout a user skill links into. `--refresh <repo URL>` judges each skill
+there and lists the new and changed ones, each with its approval line; it
+installs nothing. `--untrack` stops tracking, and installed skills stay.
 
 A repository can extend the framework from the other side. `sd plugin add`
 registers a **domain pack** — its own manifest, its own `<prefix>-*` skills, its

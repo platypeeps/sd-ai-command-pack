@@ -17,6 +17,7 @@ from sd_db import (
     registry,
     reporting,
     retention,
+    runner,
     skills_catalog,
     workflow,
     writes,
@@ -360,8 +361,11 @@ class Controls(unittest.TestCase):
         (self.repo / "unrelated.txt").write_text("Operator work")
         before_git = self.git("status", "--porcelain")
         state = skills_catalog.request(self.db, "sd-test", "review", root=self.repo, home=self.root, who="operator")
-        item, assignment = state["item"]["id"], state["assignments"][0]["id"]
-        self.assertEqual(state["assignments"][0]["role"], "reviewer")
+        item = state["item"]["id"]
+        # A review request files its item and queues nothing (system sd:5477); the runner's half is queued here.
+        self.assertNotIn("assignments", state)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM assignment").fetchone()[0], 0)
+        assignment = runner.enqueue(self.db, [item], role="reviewer", scope="skill-review", who="test")[0]["id"]
         registry.seed(self.db, registry.read(connection=self.db))
         self.db.execute("UPDATE assignment SET status='running',provider='claude' WHERE id=?", (assignment,))
         source = json.loads(state["item"]["fields"])["skill_review"]

@@ -92,9 +92,11 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if arguments.require_mount is not None:
                 require_mount(arguments.require_mount, arguments.destination)
+            # Flushed: the job's time bound TERMs this process, and the log
+            # must still name every copy removed before it (fleet sd:5543).
             removed = prune_older(arguments.destination, arguments.keep_days, now=datetime.now(UTC), moved=True,
                                   dry_run=arguments.dry_run, unmanifested=arguments.prune_unmanifested,
-                                  report=lambda line: print(f"sd-db backup: {line}"))
+                                  report=lambda line: print(f"sd-db backup: {line}", flush=True))
         except (BackupError, OSError) as failure:
             print(f"sd-db backup: {failure}", file=sys.stderr)
             return 1
