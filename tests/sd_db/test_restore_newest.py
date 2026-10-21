@@ -574,6 +574,15 @@ class MovedCopies(Case):
         self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), old[1:])
         self.assertEqual(list(self.nas.iterdir()), [])
 
+    def test_a_rename_that_fails_keeps_the_copy_for_the_next_run(self):
+        old = [self.mirror(self.snapshot(datetime(2026, 10, day, 9, 0, tzinfo=UTC))) for day in (1, 2)]
+
+        with mock.patch.object(Path, "rename", side_effect=OSError("busy")), self.assertRaisesRegex(OSError, "busy"):
+            prune_older(self.nas, 7, now=NOW, moved=True)
+
+        self.assertEqual(sorted(self.nas.iterdir()), old)
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), old)
+
     def test_each_copy_is_hashed_once_a_run(self):
         old = [self.mirror(self.snapshot(datetime(2026, 10, day, 9, 0, tzinfo=UTC))) for day in (1, 2)]
         real = backup._retention_inventory
