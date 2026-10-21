@@ -2540,6 +2540,68 @@ class TheShadowUpdatedColumn(SchemaCase):
         self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
 
 
+class TheShadowFiledColumns(SchemaCase):
+    """Migration 40 (pack sd:5496). `shadow.created_at`, `shadow.filed`, `shadow.status` and `shadow.assignee`: when
+    the tracker created a row, whether the operator filed it (kept apart from `reason`, which names only the strongest
+    of assigned and filed), Jira's status name and who it is assigned to. Added, not rebuilt: every existing row reads
+    NULL, unknown until a collect sees it again, and keeps its other values; `filed` holds 0, 1 or NULL; the reverse
+    returns the table to 39's shape."""
+
+    VERSION = 40
+    COLUMNS = TheShadowUpdatedColumn.COLUMNS + ", updated_at"
+    ROWS = [(*row, "2026-09-02T00:00:00Z") for row in TheShadowUpdatedColumn.ROWS]
+    ADDED = ("created_at", "filed", "status", "assignee")
+
+    def _before(self):
+        self.migrate_through(self.VERSION - 1)
+        raw = sqlite3.connect(self.path)
+        raw.executemany(f"INSERT INTO shadow ({self.COLUMNS}) VALUES ({', '.join('?' * 17)})", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(f"SELECT {self.COLUMNS} FROM shadow ORDER BY id")]
+
+    def test_every_existing_row_arrives_unknown_and_keeps_its_values(self):
+        self._before()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied),
+                         (self.VERSION - 1, list(range(self.VERSION, SCHEMA_VERSION + 1))))
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.ROWS)
+        self.assertEqual([tuple(row) for row in connection.execute(f"SELECT {', '.join(self.ADDED)} FROM shadow ORDER BY id")],
+                         [(None,) * 4, (None,) * 4])
+
+    def test_filed_holds_zero_one_or_unknown(self):
+        self._before()
+        self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        self.addCleanup(raw.close)
+        for value in (0, 1, None):
+            raw.execute("UPDATE shadow SET filed = ? WHERE id = 1", (value,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            raw.execute("UPDATE shadow SET filed = 2 WHERE id = 1")
+
+    def test_the_reverse_returns_the_file_to_the_prior_version(self):
+        self._before()
+        self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        raw.execute("UPDATE shadow SET created_at = '2026-01-05T16:12:33Z', filed = 1, status = 'In Review', "
+                    "assignee = 'Alex' WHERE id = 1")
+        raw.commit()
+        raw.close()
+        text = dict(schema_module.migrations())[self.VERSION].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        columns = [row[1] for row in raw.execute("PRAGMA table_info(shadow)")]
+        self.assertEqual([name for name in self.ADDED if name in columns], [])
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+
 class TheGithubIssuesColumn(SchemaCase):
     """Migration 35 (sd:4827, system sd:4810). `repo.github_issues` turns on
     third-party GitHub issue intake for one repository. Added, not rebuilt:

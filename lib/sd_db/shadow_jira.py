@@ -135,6 +135,7 @@ FIELDS = [
     "summary",
     "status",
     "updated",
+    "created",
     "assignee",
     "reporter",
     "project",
@@ -496,10 +497,10 @@ def normalize(raw: dict, config: dict[str, str], me: str) -> dict | None:
 
     `state` collapses to open/closed from the status *category*, which Jira
     derives itself, so it catches Done, Closed, Cancelled and whatever else a
-    project calls its end state. The human-readable status name is deliberately
-    not stored: the schema has no column for it, and adding one in the same
-    change that adds the second tracker would mean a migration on a table whose
-    first tracker has been live for one day.
+    project calls its end state. The status name is `status` (migration 40,
+    pack sd:5496), None when it does not read; `filed` is read from this
+    issue's own reporter, apart from `reason`, and `assignee` is `""` when no
+    one holds it. A person who cannot be read is None for both.
     """
     key = (raw.get("key") or "").strip()
     if not key:
@@ -522,6 +523,12 @@ def normalize(raw: dict, config: dict[str, str], me: str) -> dict | None:
             return who["id"] == me
         return bool(who["email"]) and who["email"] == config["email"].lower()
 
+    def known(name: str) -> bool:
+        # A null field is no one; a field that did not read, or a person with
+        # no id or email to match, cannot say whether it is the operator.
+        who = person(name)
+        return name in fields and (fields[name] is None or bool(me and who["id"]) or bool(who["email"]))
+
     assignee, reporter = person("assignee"), person("reporter")
     why = []
     if is_me(assignee):
@@ -540,6 +547,11 @@ def normalize(raw: dict, config: dict[str, str], me: str) -> dict | None:
         "state": state_of(fields),
         "author": reporter["name"],
         "updated_at": fields.get("updated") or "",
+        "created_at": fields.get("created") or "",
+        "status": (fields.get("status") or {}).get("name") or None,
+        "assignee": (None if "assignee" not in fields else "" if fields["assignee"] is None
+                     else assignee["name"] or None),
+        "filed": True if "filed" in why else False if known("reporter") else None,
         # `matched` rather than an empty list: the JQL selected it for some
         # reason, and a row with no reason at all reads as a collector bug
         # rather than as "your JQL is wider than the three named cases".
