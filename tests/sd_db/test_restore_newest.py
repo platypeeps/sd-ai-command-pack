@@ -600,6 +600,29 @@ class MovedCopies(Case):
         self.assertEqual(lines, [f"removed {old}", f"kept {broken}: its files differ from its manifest",
                                  f"kept 1 backup under {self.nas}, named {halted.name}: no manifest (stopped run?)"])
 
+    def test_the_log_of_a_job_its_bound_stops_names_what_it_removed(self):
+        old = [self.mirror(self.snapshot(datetime(2026, 10, day, 9, 0, tzinfo=UTC))) for day in (1, 2)]
+        script = (
+            "import importlib, os, signal, sys\n"
+            "backup = importlib.import_module('sd_db.backup')\n"
+            "from sd_db.jobs.backup import main\n"
+            "real = backup._check_backup\n"
+            "checked = []\n"
+            "def bound(path, **kwargs):\n"
+            "    checked.append(path)\n"
+            "    if len(checked) == 2:\n"
+            "        os.kill(os.getpid(), signal.SIGTERM)  # st_step's TERM at the bound\n"
+            "    return real(path, **kwargs)\n"
+            "backup._check_backup = bound\n"
+            "sys.exit(main(['--prune-only', '--destination', sys.argv[1], '--keep-days', '7']))\n"
+        )
+        completed = subprocess.run([sys.executable, "-c", script, str(self.nas)], capture_output=True, text=True,
+                                   check=False, env={**os.environ, "HOME": str(self.home), "SD_NOTIFY": "/usr/bin/true"})
+
+        self.assertEqual(completed.returncode, -15, completed.stdout + completed.stderr)
+        self.assertEqual(completed.stdout, f"sd-db backup: removed {old[0]}\n")
+        self.assertEqual(sorted(self.nas.iterdir()), old[1:])
+
     def test_a_leftover_holding_a_special_entry_is_kept_and_listed(self):
         leftover = self.nas / ".2026-10-01.removing"
         leftover.mkdir()
