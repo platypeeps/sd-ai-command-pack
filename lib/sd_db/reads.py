@@ -990,11 +990,18 @@ def age_histogram(
 # --------------------------------------------------------------------------
 
 
+def item_opens_on(connection: sqlite3.Connection, item: int) -> str | None:
+    """The day `opens_on_clause` gives one item (pack sd:5648), or None.
+
+    Its own read, not a column of `item_by_id`: `workflow.item_state` hashes that row into the revision `revisions` checks.
+    """
+    found = connection.execute(f"SELECT {opens_on_clause(connection)} FROM item WHERE item.id = ?", (item,)).fetchone()
+    return found[0] if found else None
+
+
 def item_by_id(connection: sqlite3.Connection, item: int) -> sqlite3.Row | None:
-    """The item row, with `status_since` and the `opens_on` day `opens_on_clause` gives (pack sd:5648)."""
     return connection.execute(
-        f"SELECT item.*, {_STATUS_SINCE} AS status_since, {opens_on_clause(connection)} AS opens_on"
-        " FROM item WHERE item.id = ?",
+        f"SELECT item.*, {_STATUS_SINCE} AS status_since FROM item WHERE item.id = ?",
         (item,),
     ).fetchone()
 
