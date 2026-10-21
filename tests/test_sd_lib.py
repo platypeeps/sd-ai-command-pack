@@ -1101,10 +1101,12 @@ class SetupStaysLocalTests(unittest.TestCase):
         subprocess.run(["git", *args], cwd=cwd, check=True,
                        capture_output=True, text=True)
 
-    def make(self, target: str, *extra: str) -> str:
+    def make(self, target: str, *extra: str, cwd: pathlib.Path | None = None) -> str:
+        env = child_make_env()
+        env.pop("SERVE", None)
         done = subprocess.run(["make", "-s", "-n", target, *extra],
-                              cwd=self.linked, capture_output=True, text=True,
-                              env=child_make_env())
+                              cwd=cwd or self.linked, capture_output=True, text=True,
+                              env=env)
         return done.stdout
 
     def test_setup_in_a_worktree_does_not_touch_the_main_virtualenv(self) -> None:
@@ -1133,9 +1135,34 @@ class SetupStaysLocalTests(unittest.TestCase):
     def test_setup_ends_by_serving_from_the_dedicated_checkout(self) -> None:
         """sd:1118: `make setup` is what refreshes the serving checkout; `SERVE=no` skips it."""
 
-        recipe = self.make("setup")
+        recipe = self.make("setup", cwd=self.main)
         self.assertTrue(recipe.rstrip().endswith('".venv/bin/python" bin/sd_install.py --serve'), recipe)
-        self.assertNotIn("--serve", self.make("setup", "SERVE=no"))
+        self.assertNotIn("--serve", self.make("setup", "SERVE=no", cwd=self.main))
+
+    def test_setup_in_a_linked_worktree_serves_only_when_asked(self) -> None:
+        """sd:5551: the tree serves the checkout's HEAD, so a worktree's setup served unmerged code.
+
+        A linked worktree skips the step and says so; `SERVE=yes` is the deliberate way back.
+        """
+
+        recipe = self.make("setup")
+        self.assertNotIn("--serve", recipe)
+        self.assertIn("not serving the machine", recipe)
+        self.assertIn("SERVE=yes", recipe)
+        self.assertTrue(self.make("setup", "SERVE=yes").rstrip().endswith("bin/sd_install.py --serve"))
+        self.assertNotIn("not serving", self.make("setup", "SERVE=no"))
+
+    def test_setup_where_git_cannot_say_serves_only_when_asked(self) -> None:
+        """A failed probe is no answer: unknown is not taken for the main checkout."""
+
+        loose = self.tmp / "loose"
+        loose.mkdir()
+        (loose / "Makefile").write_text(self.MAKEFILE.read_text(encoding="utf-8"), encoding="utf-8")
+        env = child_make_env(GIT_CEILING_DIRECTORIES=str(self.tmp))
+        env.pop("SERVE", None)
+        done = subprocess.run(["make", "-s", "-n", "setup"], cwd=loose, capture_output=True, text=True, env=env)
+        self.assertNotIn("--serve", done.stdout)
+        self.assertIn("cannot tell whether", done.stdout)
 
 
 class SetupUninstallsAPlantedCopyTests(unittest.TestCase):
