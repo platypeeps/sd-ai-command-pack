@@ -117,6 +117,11 @@ These run only when asked by name.
 A repository whose `repo.ci` row says `local` runs no GitHub Actions (sd:1843).
 `github` is the default. Every reader treats a missing column, row or library as `github`.
 
+`sd fleet standard`, run from a checkout, brings that repository to the whole managed standard (system sd:5610).
+That covers the sd-db row, GitHub merge and protection settings, Actions as `sd ci local` sets them, and the untracked fleet files.
+It previews an unmanaged row too, and sets `managed` and `runner_merge` last, after every other step held.
+It writes no ruleset, never turns Dependabot alerts on (off is a kept choice), and changes no GitHub setting outside `sd.fleet_owners`.
+
 Switch a repository with `sd ci local`, run from its checkout (sd:1914).
 It is a dry run; `--apply` makes the changes, and a second run finds none.
 It refuses a repository the sd database does not mark managed (`repo.managed = no`, sd:1620).
