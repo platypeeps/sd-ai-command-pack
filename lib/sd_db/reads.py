@@ -991,8 +991,10 @@ def age_histogram(
 
 
 def item_by_id(connection: sqlite3.Connection, item: int) -> sqlite3.Row | None:
+    """The item row, with `status_since` and the `opens_on` day `opens_on_clause` gives (pack sd:5648)."""
     return connection.execute(
-        f"SELECT item.*, {_STATUS_SINCE} AS status_since FROM item WHERE item.id = ?",
+        f"SELECT item.*, {_STATUS_SINCE} AS status_since, {opens_on_clause(connection)} AS opens_on"
+        " FROM item WHERE item.id = ?",
         (item,),
     ).fetchone()
 
