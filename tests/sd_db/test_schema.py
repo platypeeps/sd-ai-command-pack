@@ -400,9 +400,9 @@ class TheKindsForPersonalAndFollowupWork(SchemaCase):
         migrate(self.path)
         after = self._columns()
         # Every column survives. The only new ones are those a later
-        # migration appends with `ADD COLUMN`: 012's recurrence pair.
+        # migration appends with `ADD COLUMN`: 012's recurrence pair and 041's lead.
         self.assertLessEqual(before, after)
-        self.assertEqual(after - before, {"recurrence", "recurrence_anchor"})
+        self.assertEqual(after - before, {"recurrence", "recurrence_anchor", "recurrence_lead"})
         self.assertLessEqual({"source_commit", "piece", "parked_at",
                               "gate_generation", "ready_digest"}, after)
 

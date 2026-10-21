@@ -29,6 +29,7 @@ from typing import Mapping
 
 from . import paths
 from .errors import SdDbError
+from .recurrence import MAX_LEAD_DAYS
 
 __all__ = [
     "AgeBucket",
@@ -53,9 +54,11 @@ __all__ = [
     "OverBudget",
     "on_branch",
     "open_followups",
+    "opens_on_clause",
     "ready_to_send",
     "revisions",
     "runner_board",
+    "scheduled_clause",
     "scorecard",
     "status_changes",
     "today_items",
@@ -166,6 +169,36 @@ def _unparked_clause(connection: sqlite3.Connection, *, parked: bool = False) ->
     return "(item.parked_at IS NOT NULL AND item.piece IS NULL)" if parked else "item.parked_at IS NULL"
 
 
+def opens_on_clause(connection: sqlite3.Connection) -> str:
+    """SQL for the day an open recurring row shows: `due - recurrence_lead` days (pack sd:5648).
+
+    The one place a read decides that an occurrence is *scheduled*: open,
+    carrying a rule, and opening after today. A completion spawns the next
+    occurrence at once; until this day the Tasks list marks it, and Today's
+    `work` and `planned` leave it out. NULL lead is 0, so a series with no
+    lead opens on its due date.
+
+    NULL is a row that is not a scheduled occurrence: no rule, done, or no
+    `due`. A lead `workflow._fields` would refuse (negative, text, past
+    `MAX_LEAD_DAYS`), written around it, is NULL too: an unknown lead shows
+    the row rather than hiding work. A store before 041 has no lead, and one
+    before 012 has no rule, as `_unparked_clause` reads an older store.
+    """
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(item)")}
+    if "recurrence" not in columns:
+        return "NULL"
+    lead = "item.recurrence_lead" if "recurrence_lead" in columns else "NULL"
+    return (f"(CASE WHEN item.recurrence IS NULL OR item.status = 'done' THEN NULL"
+            f" WHEN {lead} IS NULL THEN date(item.due)"
+            f" WHEN typeof({lead}) = 'integer' AND {lead} BETWEEN 0 AND {MAX_LEAD_DAYS}"
+            f" THEN date(item.due, '-' || {lead} || ' days') END)")
+
+
+def scheduled_clause(connection: sqlite3.Connection, today: str = ":today") -> str:
+    """SQL true for a scheduled occurrence: `opens_on_clause` after `today`, a bound name or literal."""
+    return f"COALESCE({opens_on_clause(connection)} > {today}, 0)"
+
+
 def capture_items(connection: sqlite3.Connection) -> list[sqlite3.Row]:
     """All possible note parents, with active unparked items first.
 
@@ -200,6 +233,7 @@ SELECT item.*,
     OR (item.due IS NOT NULL AND item.due <= :horizon
         AND item.status NOT IN ('done')))
    AND {{unparked}}
+   AND NOT {{scheduled}}
  ORDER BY lane ASC, item.due IS NULL, item.due ASC, status_since ASC, item.id ASC
 """
 
@@ -215,11 +249,14 @@ def today_items(
     undated rows last (sd:3501), oldest in its status first after that, and
     the row id as the tie-break, because two rows that entered a status in
     the same second must still come out in one order.
+
+    A scheduled occurrence (`opens_on_clause`) is left out until it opens,
+    whatever the horizon: its lead is the operator's own horizon for it.
     """
     stamp = _now(now)
     horizon = (_parse(stamp) + timedelta(days=horizon_days)).strftime("%Y-%m-%d")
-    sql = _TODAY_SQL.format(unparked=_unparked_clause(connection))
-    return list(connection.execute(sql, {"horizon": horizon}).fetchall())
+    sql = _TODAY_SQL.format(unparked=_unparked_clause(connection), scheduled=scheduled_clause(connection))
+    return list(connection.execute(sql, {"horizon": horizon, "today": _day(stamp)}).fetchall())
 
 
 def days_since_status(row: sqlite3.Row, *, now: str | None = None) -> int | None:
@@ -771,7 +808,8 @@ _NOT_A_QUIET_REPORT = (
 )
 
 _BACKLOG_SQL = f"""
-SELECT item.*, {_STATUS_SINCE} AS status_since
+SELECT item.*, {_STATUS_SINCE} AS status_since,
+       {{opens_on}} AS opens_on, {{scheduled}} AS scheduled
   FROM item
  WHERE ({{clauses}})
    AND {_NOT_A_QUIET_REPORT}
@@ -808,16 +846,22 @@ def backlog_items(
     `_NOT_A_QUIET_REPORT`. Passing `kind="report"` therefore returns the
     attention reports and only those, which is the honest answer to "what
     reports need me" and not a filter the caller has to remember to apply.
+
+    Each row carries `opens_on` and `scheduled` (pack sd:5648): the day an
+    open recurring row shows, or None, and 1 while that day is after today,
+    else 0. A scheduled row stays in the set, so a caller hides it on the
+    flag and still counts it; `opens_on_clause` is the rule.
     """
     stamp = _now(now)
     cutoff = (_parse(stamp) - timedelta(days=include_done_days)).strftime("%Y-%m-%d")
     clauses = ["item.status != 'done'",
                "(item.status = 'done' AND "
                f"{_STATUS_SINCE} >= :cutoff)"]
-    params: dict[str, object] = {"cutoff": cutoff}
+    params: dict[str, object] = {"cutoff": cutoff, "today": _day(stamp)}
     if parked:
         clauses = ["item.status != 'done'"]
-    sql = _BACKLOG_SQL.format(clauses=" OR ".join(clauses), unparked=_unparked_clause(connection, parked=parked))
+    sql = _BACKLOG_SQL.format(clauses=" OR ".join(clauses), unparked=_unparked_clause(connection, parked=parked),
+                              opens_on=opens_on_clause(connection), scheduled=scheduled_clause(connection))
     rows = list(connection.execute(sql, params).fetchall())
     if kind:
         rows = [row for row in rows if row["kind"] == kind]

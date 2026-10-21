@@ -57,7 +57,7 @@ COLUMNS = {
              "history": "fields body title",
              "none": "id kind branch status stage priority due source shipped_at created_at updated_at "
                      "source_commit piece parked_at gate_generation ready_digest recurrence "
-                     "recurrence_anchor"},
+                     "recurrence_anchor recurrence_lead"},
     "judgment": {"history": "answer questions ordering changed override", "key": "location",
                  "none": "id timestamp caller stage arm pair shadow provider model primitive "
                          "question_id outcome cause confidence tokens_in tokens_out duration_ms usd "
@@ -255,7 +255,9 @@ class TheMigration(AThirteenStore):
         # `repo.managed`, `repo.ci`, `repo.satellite_gate`, `repo.lane_host`, 021's to 023's
         # `judgment` columns or `runner_run.detached_from`. 026's reverse puts
         # `status_source` back at `row`, which every row here held, and 025's
-        # puts `satellite_gate` back so 020's can drop it.
+        # puts `satellite_gate` back so 020's can drop it. 041's goes first of
+        # all: the one later column on `item`, whose rows this compares.
+        connection.executescript(reverse_script("041_recurrence_lead.sql"))
         connection.executescript(reverse_script("026_repo_drop_status_source.sql"))
         connection.executescript(reverse_script("025_repo_drop_satellite_gate.sql"))
         connection.executescript(reverse_script("024_repo_lane_host.sql"))

@@ -43,6 +43,13 @@ ANCHORS = ("schedule", "completion")
 #: occurrence in a century, such as February 30th, has none at all.
 HORIZON_YEARS = 100
 
+#: The largest `item.recurrence_lead`, in days (pack sd:5648). Ten years: a
+#: longer lead would open each occurrence the day it is created, as this one
+#: already does for any shorter rule, and the bound keeps `due - lead` a date
+#: SQLite and `datetime.date` both compute. `workflow` refuses a larger one
+#: and `reads` treats one it meets as open.
+MAX_LEAD_DAYS = 3660
+
 _NUMBER = re.compile(r"^[+-]?[0-9]{1,9}$")
 
 
