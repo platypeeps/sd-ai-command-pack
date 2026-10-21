@@ -10,7 +10,10 @@ drives the copied library end to end against a database under a temporary
 from __future__ import annotations
 
 import ast
+import os
+import select
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -33,10 +36,12 @@ def main(argv):
 """
 
 FAKE_BACKUP = """\
-import os, sys
+import os, sys, time
 BROKEN_SOURCE = 3
 def main(argv):
     print("lib backup", argv, flush=True)
+    if os.environ.get("FAKE_BACKUP_HANG"):
+        time.sleep(60)
     print("to stderr", file=sys.stderr)
     return int(os.environ["FAKE_BACKUP_EXIT"])
 if __name__ == "__main__":
@@ -122,16 +127,35 @@ class TheLauncher(LauncherTree):
     def test_a_passing_backup_prints_its_output_and_sends_no_mail(self) -> None:
         run = self.run_sd_db("backup", "--keep", "3", FAKE_BACKUP_EXIT="0")
         self.assertEqual(run.returncode, 0, run.stderr)
-        self.assertEqual(run.stdout, "lib backup ['--keep', '3']\nto stderr\n")
+        self.assertEqual((run.stdout, run.stderr), ("lib backup ['--keep', '3']\n", "to stderr\n"))
         self.assertEqual(self.mails(), [])
 
     def test_a_failed_backup_mails_its_output_and_exits_one(self) -> None:
         run = self.run_sd_db("backup", FAKE_BACKUP_EXIT="5")
         self.assertEqual(run.returncode, 1)
-        self.assertEqual(run.stdout, "")
-        self.assertIn("lib backup []\nto stderr", run.stderr)
-        self.assertEqual(self.mails(), [repr(["-t", "sd-db backup FAILED", "-k", "status", "-F", "-c", "ntfy,email",
-                                              "-b", "lib backup []\nto stderr"])])
+        self.assertEqual((run.stdout, run.stderr), ("lib backup []\n", "to stderr\n"))
+        # Two pipes: the body holds both streams in arrival order, which select may swap.
+        [mail] = [ast.literal_eval(line) for line in self.mails()]
+        self.assertEqual(mail[:-1], ["-t", "sd-db backup FAILED", "-k", "status", "-F", "-c", "ntfy,email", "-b"])
+        self.assertEqual(sorted(mail[-1].splitlines()), ["lib backup []", "to stderr"])
+
+    def test_a_line_the_backup_flushed_survives_a_stop(self) -> None:
+        """pack sd:5552: a time bound TERMs the job's group, and the launcher held every line until exit.
+
+        So a prune stopped after it removed copies left no `removed` line in the log.
+        """
+
+        steer = {"PYTHONPATH": str(self.root / "decoy"), "SD_NOTIFY": str(self.notify),
+                 "FAKE_BACKUP_EXIT": "0", "FAKE_BACKUP_HANG": "1"}
+        process = subprocess.Popen([sys.executable, str(self.root / "bin" / "sd-db"), "backup", "--prune-only"],
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                   env=clean_environment(**steer), start_new_session=True)
+        try:
+            select.select([process.stdout], [], [], 10)
+        finally:
+            os.killpg(process.pid, signal.SIGTERM)
+            out, _ = process.communicate(timeout=60)
+        self.assertEqual(out, "lib backup ['--prune-only']\n")
 
     def test_a_broken_source_mails_its_own_title_and_keeps_exit_three(self) -> None:
         run = self.run_sd_db("backup", FAKE_BACKUP_EXIT="3")
@@ -180,7 +204,7 @@ class NoVenvCopyAnswers(LauncherTree):
 
     def test_backup_runs_lib(self) -> None:
         run = self.run_sd_db("backup", FAKE_BACKUP_EXIT="0")
-        self.assertEqual((run.returncode, run.stdout), (0, "lib backup []\nto stderr\n"), run.stderr)
+        self.assertEqual((run.returncode, run.stdout, run.stderr), (0, "lib backup []\n", "to stderr\n"))
 
 
 class TheRealLibrary(unittest.TestCase):
