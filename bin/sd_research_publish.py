@@ -1657,7 +1657,9 @@ def acknowledge_trash(name: str, pending: dict[str, Any], fingerprint: str) -> t
     """
     path = QUEUE / name
     receipt = load_record(receipts() / name)
-    trashing = receipt.get("trashing") if isinstance(receipt.get("trashing"), dict) else {}
+    trashing = receipt.get("trashing")
+    if not isinstance(trashing, dict):
+        trashing = {}
     drained = pending.get("action") == TRASH and pending.get("fingerprint") == fingerprint
     if not drained and trashing.get("fingerprint") != fingerprint:
         return 1, ("delivered: %s is a trash request of another generation than %s; nothing "

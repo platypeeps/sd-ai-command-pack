@@ -746,8 +746,9 @@ def _linked(root: pathlib.Path, home: pathlib.Path) -> list[tuple[str, str]]:
             continue
         if top not in origins:
             origins[top] = _origin(top)
-        if origins[top]:
-            out.append((folder.name, origins[top]))
+        origin = origins[top]
+        if origin:
+            out.append((folder.name, origin))
     return out
 
 
