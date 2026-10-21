@@ -166,6 +166,7 @@ def create_item(
     created_at: str | None = None,
     recurrence: str | None = None,
     recurrence_anchor: str | None = None,
+    recurrence_lead: int | None = None,
 ) -> int:
     """Open an item, and write the note that says it was opened.
 
@@ -197,6 +198,8 @@ def create_item(
         # was before migration 012 added the columns.
         if recurrence is not None or recurrence_anchor is not None:
             values.update(recurrence=recurrence, recurrence_anchor=recurrence_anchor)
+        if recurrence_lead is not None:
+            values["recurrence_lead"] = recurrence_lead
         cursor = connection.execute(
             f"INSERT INTO item ({', '.join(values)}) "
             f"VALUES ({', '.join('?' for _ in values)})",
@@ -310,7 +313,7 @@ def set_item_fields(
         "source", "external_id", "shipped_at", "fields", "body", "source_commit",
         "created_at",
         "piece", "parked_at", "gate_generation", "ready_digest",
-        "recurrence", "recurrence_anchor",
+        "recurrence", "recurrence_anchor", "recurrence_lead",
     }
     unknown = set(columns) - allowed
     if unknown:

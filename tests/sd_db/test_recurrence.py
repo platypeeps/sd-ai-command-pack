@@ -16,8 +16,8 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import connect, upsert_repo
-from sd_db.migrate import initialise
+from sd_db import connect, reads, today, upsert_repo
+from sd_db.migrate import initialise, migrate
 from sd_db.schema import SCHEMA_VERSION, migrations
 from sd_db.workflow import (
     WorkflowError,
@@ -195,6 +195,41 @@ class TheSchema(unittest.TestCase):
             finally:
                 raw.close()
         self.assertLessEqual({"recurrence", "recurrence_anchor"}, columns)
+
+    def test_migration_041_adds_the_lead_and_a_series_from_before_reads_null(self):
+        # pack sd:5648. Built to 40 by hand with a recurring row on it; the
+        # reads run on the 40 store first, as a reader does before `migrate`.
+        self.assertGreaterEqual(SCHEMA_VERSION, 41)
+        self.assertEqual(dict(migrations())[41].name, "041_recurrence_lead.sql")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "sd.db"
+            through = [found for found in migrations() if found[0] <= 40]
+            with patch("sd_db.migrate.migrations", return_value=through):
+                migrate(path)
+            raw = sqlite3.connect(path)
+            try:
+                raw.execute("INSERT INTO item (id, kind, title, status, due, recurrence, recurrence_anchor, "
+                            "created_at, updated_at) VALUES (7, 'task', 'Water', 'planning', '2026-01-10', "
+                            "'FREQ=WEEKLY', 'schedule', 't', 't')")
+                raw.commit()
+            finally:
+                raw.close()
+            old = connect(path, write=False)
+            try:
+                rows = {row["id"]: row for row in reads.backlog_items(old, now="2026-01-09T12:00:00Z")}
+                self.assertEqual((rows[7]["opens_on"], rows[7]["scheduled"]), ("2026-01-10", 1))
+            finally:
+                old.close()
+            result = migrate(path)
+            self.assertEqual((result.before, result.applied), (40, list(range(41, SCHEMA_VERSION + 1))))
+            raw = sqlite3.connect(path)
+            try:
+                columns = {row[1]: row[2] for row in raw.execute("PRAGMA table_info(item)")}
+                kept = raw.execute("SELECT recurrence, recurrence_lead FROM item WHERE id = 7").fetchone()
+            finally:
+                raw.close()
+        self.assertEqual(columns["recurrence_lead"], "INTEGER")
+        self.assertEqual(kept, ("FREQ=WEEKLY", None))
 
 
 class RecurringTasks(unittest.TestCase):
@@ -582,11 +617,180 @@ class RecurringTasks(unittest.TestCase):
         # With the rule gone, the due date may go too.
         edit_item(self.db, item["id"], {"due": None}, who="operator")
 
+    # pack sd:5648: `recurrence_lead`, the days before `due` an occurrence shows.
+
+    def test_a_lead_is_a_whole_number_of_days_in_range(self):
+        # Extreme magnitudes and shapes: each is refused by name, before a write.
+        before = self.items()
+        for lead in (-1, -(2 ** 63), 3661, 2 ** 63, 2 ** 64, 1.0, 1.5, float("inf"), float("-inf"),
+                     float("nan"), 5e-324, True, False, "3", "", [3], {"days": 3}):
+            with self.subTest(lead=lead):
+                with self.assertRaisesRegex(WorkflowError, "recurrence_lead must be a whole number of days"):
+                    self.capture(recurrence="FREQ=WEEKLY", recurrence_lead=lead)
+        self.assertEqual(self.items(), before)
+        for lead in (0, 1, 3660):
+            with self.subTest(lead=lead):
+                self.assertEqual(self.capture(recurrence="FREQ=WEEKLY", recurrence_lead=lead)["recurrence_lead"],
+                                 lead)
+        item = self.capture(recurrence="FREQ=WEEKLY", recurrence_lead=2)
+        with self.assertRaisesRegex(WorkflowError, "recurrence_lead must be"):
+            edit_item(self.db, item["id"], {"recurrence_lead": -3}, who="operator")
+        self.assertEqual(self.row(item["id"])["recurrence_lead"], 2)
+
+    def test_a_lead_needs_a_rule(self):
+        before = self.items()
+        for lead in (0, 3):
+            with self.subTest(lead=lead):
+                with self.assertRaisesRegex(WorkflowError, "recurrence_lead needs a recurrence rule"):
+                    self.capture(recurrence_lead=lead)
+        self.assertEqual(self.items(), before)
+        plain = self.capture()
+        with self.assertRaisesRegex(WorkflowError, "recurrence_lead needs a recurrence rule"):
+            edit_item(self.db, plain["id"], {"recurrence_lead": 3}, who="operator")
+        series = self.capture(recurrence="FREQ=WEEKLY")
+        with self.assertRaisesRegex(WorkflowError, "recurrence_lead needs a recurrence rule"):
+            edit_item(self.db, series["id"], {"recurrence": None, "recurrence_lead": 3}, who="operator")
+        self.assertEqual(self.row(series["id"])["recurrence"], "FREQ=WEEKLY")
+
+    def test_the_edit_route_sets_the_lead_and_folds_its_note(self):
+        from sd_db.workflow import is_audit_note
+
+        item = self.capture(recurrence="FREQ=MONTHLY")
+        state = edit_item(self.db, item["id"], {"recurrence_lead": 5}, who="operator")
+        self.assertEqual(state["item"]["recurrence_lead"], 5)
+        self.assertEqual(state["notes"][-1]["body"], "Updated recurrence_lead by operator")
+        self.assertTrue(is_audit_note(state["notes"][-1]))
+
+    def test_clearing_the_rule_clears_the_lead(self):
+        item = self.capture(recurrence="FREQ=WEEKLY", recurrence_lead=4)
+        cleared = edit_item(self.db, item["id"], {"recurrence": None}, who="operator")["item"]
+        self.assertEqual((cleared["recurrence"], cleared["recurrence_anchor"], cleared["recurrence_lead"]),
+                         (None, None, None))
+
+    def test_the_lead_moves_to_the_next_row(self):
+        item = self.capture(recurrence="FREQ=WEEKLY", recurrence_lead=3)
+        result = self.complete(item["id"], "2026-01-01")
+        self.assertIsNone(result["item"]["recurrence_lead"])
+        spawned = self.row(result["next_occurrence"])
+        self.assertEqual((spawned["due"], spawned["recurrence_lead"]), ("2026-01-08", 3))
+        # And on again: the lead follows the series, not one row.
+        again = self.row(self.complete(spawned["id"], "2026-01-08")["next_occurrence"])
+        self.assertEqual((again["due"], again["recurrence_lead"]), ("2026-01-15", 3))
+
+    def test_an_ended_recurrence_clears_the_lead(self):
+        item = self.capture(recurrence="FREQ=WEEKLY", recurrence_lead=3)
+        self.db.execute("UPDATE item SET due = NULL WHERE id = ?", (item["id"],))
+        self.ended(item["id"], "2026-01-01")
+        self.assertIsNone(self.row(item["id"])["recurrence_lead"])
+
+    def test_a_failing_completion_keeps_the_lead_on_the_open_row(self):
+        # Steps: the spawn, the clear and the notes are one transaction. A
+        # failure after the spawn and the clear leaves the row as it was.
+        import sd_db.workflow as workflow
+
+        item = self.capture(recurrence="FREQ=WEEKLY", recurrence_lead=3)
+        before = self.items()
+        real = workflow.add_note
+
+        def failing(connection, target, kind, body, **options):
+            if body.startswith("Recurs from"):
+                raise RuntimeError("the disk filled")
+            return real(connection, target, kind, body, **options)
+
+        with patch("sd_db.workflow.add_note", side_effect=failing):
+            with self.assertRaisesRegex(RuntimeError, "disk filled"):
+                self.complete(item["id"], "2026-01-01")
+        self.assertEqual(self.items(), before)
+        row = self.row(item["id"])
+        self.assertEqual((row["status"], row["recurrence"], row["recurrence_lead"]),
+                         ("planning", "FREQ=WEEKLY", 3))
+        # The next completion finishes what the failed one started.
+        spawned = self.row(self.complete(item["id"], "2026-01-01")["next_occurrence"])
+        self.assertEqual(spawned["recurrence_lead"], 3)
+
     def test_a_kind_the_task_controls_cannot_complete_cannot_recur(self):
         item = self.capture(recurrence="FREQ=WEEKLY")
         with self.assertRaisesRegex(WorkflowError, "cannot recur"):
             edit_item(self.db, item["id"], {"kind": "work-idea"}, who="operator")
         self.assertEqual(self.row(item["id"])["kind"], "task")
+
+
+class ScheduledOccurrences(unittest.TestCase):
+    """pack sd:5648: an open occurrence is scheduled until `due - recurrence_lead`.
+
+    The boundary is the open day itself: on `due - lead` the row is open.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "sd.db"
+        initialise(self.path)
+        self.db = connect(self.path)
+        self.addCleanup(self.db.close)
+
+    def capture(self, title, **values):
+        return capture_task(self.db, title=title, who="operator", **values)["item"]["id"]
+
+    def views(self, day):
+        now = f"{day}T12:00:00Z"
+        backlog = {row["id"]: (row["opens_on"], row["scheduled"]) for row in reads.backlog_items(self.db, now=now)}
+        planned = {row["id"] for row in today.planned(self.db, now=now)}
+        work = {row["id"] for row in reads.today_items(self.db, now=now)}
+        work_ahead = {row["id"] for row in reads.today_items(self.db, now=now, horizon_days=30)}
+        summary = today.sections(self.db, now=now)["summary"]
+        return backlog, planned, work, work_ahead, summary
+
+    def test_the_lead_moves_the_open_day_and_the_open_day_is_open(self):
+        led = self.capture("Pay the dues", due="2026-01-10", recurrence="FREQ=MONTHLY", recurrence_lead=3)
+        backlog, planned, work, ahead, summary = self.views("2026-01-06")
+        self.assertEqual(backlog[led], ("2026-01-07", 1))
+        self.assertNotIn(led, planned | work | ahead)
+        self.assertEqual((summary["planned"], summary["planned_this_week"]), (0, 0))
+        backlog, planned, work, ahead, summary = self.views("2026-01-07")
+        self.assertEqual(backlog[led], ("2026-01-07", 0))
+        self.assertIn(led, planned)
+        self.assertNotIn(led, work)
+        self.assertIn(led, ahead)
+        self.assertEqual((summary["planned"], summary["planned_this_week"]), (1, 1))
+        backlog, planned, work, _, _ = self.views("2026-01-10")
+        self.assertEqual(backlog[led], ("2026-01-07", 0))
+        self.assertIn(led, work)
+
+    def test_no_lead_opens_on_the_due_date(self):
+        series = self.capture("Water", due="2026-01-10", recurrence="FREQ=WEEKLY")
+        backlog, planned, work, ahead, _ = self.views("2026-01-09")
+        self.assertEqual(backlog[series], ("2026-01-10", 1))
+        self.assertNotIn(series, planned | work | ahead)
+        backlog, planned, work, _, _ = self.views("2026-01-10")
+        self.assertEqual(backlog[series], ("2026-01-10", 0))
+        self.assertIn(series, work)
+
+    def test_a_plain_row_and_a_done_row_are_never_scheduled(self):
+        plain = self.capture("Plain", due="2026-01-10")
+        done = self.capture("Done", due="2026-01-10", recurrence="FREQ=WEEKLY", recurrence_lead=2)
+        with patch("sd_db.workflow._today", return_value=date(2026, 1, 1)):
+            spawned = change_status(self.db, done, "done", who="operator")["next_occurrence"]
+        backlog, planned, _, _, _ = self.views("2026-01-02")
+        self.assertEqual(backlog[plain], (None, 0))
+        self.assertIn(plain, planned)
+        self.assertEqual(backlog[done], (None, 0))
+        # The spawned row, due 2026-01-17 with the lead it carried, is scheduled.
+        self.assertEqual(backlog[spawned], ("2026-01-15", 1))
+        self.assertNotIn(spawned, planned)
+
+    def test_a_lead_written_around_the_checks_shows_the_row(self):
+        # Failures: a lead the library would refuse is unknown, and an
+        # unknown never hides work.
+        rows = {}
+        for lead in (-2, "abc", 3661, 2.5):
+            rows[lead] = self.capture(f"Lead {lead!r}", due="2026-01-10", recurrence="FREQ=WEEKLY")
+            self.db.execute("UPDATE item SET recurrence_lead = ? WHERE id = ?", (lead, rows[lead]))
+        backlog, planned, _, _, _ = self.views("2026-01-02")
+        for lead, item in rows.items():
+            with self.subTest(lead=lead):
+                self.assertEqual(backlog[item], (None, 0))
+                self.assertIn(item, planned)
 
 
 if __name__ == "__main__":

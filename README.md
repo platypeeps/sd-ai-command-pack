@@ -273,9 +273,12 @@ The rule is an RRULE subset (`FREQ`, `INTERVAL`, `BYMONTH`, `BYMONTHDAY`, and
 occurrence from the last due date; `completion` dates it from the day the task
 was done. Completing the task creates the next row and moves the rule to it,
 and `sd task status` prints `next occurrence: #N · due D`, or `recurrence
-ended:` with the reason when no next occurrence exists. `sd task edit` takes
-the same two flags, and `--clear-recur` stops the series. `sd_db` owns every
-refusal: the grammar, the anchor, the due date and the kinds that may recur.
+ended:` with the reason when no next occurrence exists. The next row stays
+out of `sd today` until its due date; `--recur-lead DAYS` brings it back that
+many days earlier. Until then `sd store items` prints `opens D` on it, and its
+read rows carry `scheduled` and `opens_on`. `sd task edit` takes the same three flags, and `--clear-recur`
+stops the series. `sd_db` owns every refusal: the grammar, the anchor, the
+lead, the due date and the kinds that may recur.
 
 A row another source raises carries a reference to the occurrence that raised it:
 `sd task add "repo-sync failed" --kind followup --ref job:repo-sync:42`.
