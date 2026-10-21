@@ -22,9 +22,12 @@ Exit 0 pass, 1 fail, 2 unknown (the run or the evidence could not be read).
 `contrib/sd-grill/evals/` (sd:5430): `first-question` is turn 1, and
 `stopped-after-adopting` replays turns 1 and 2 from the recorded fixture and
 sends turns 3 and 4 as one message. Keep results and the report out of the
-skill folder, which the installer ships whole, and off claude.ai:
+skill folder, which the installer ships whole, and off claude.ai. Name the
+judge: the default haiku judge failed single-demand questions 2 votes to 1, and
+a case cannot set its own (sd:5430):
 
     claude plugin eval contrib/sd-grill --trust-plugin --no-publish \\
+        --judge-model sonnet \\
         --allow-tools Write Edit --output-dir DIR --report DIR/report.html
 """
 
