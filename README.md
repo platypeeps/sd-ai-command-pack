@@ -359,6 +359,10 @@ plain clone on a detached `HEAD` that nobody works in, at
   the first time. It then fetches the working checkout's `HEAD` into the tree,
   which reaches a commit `origin` lacks, detaches the tree there and runs the
   tree's `make setup`. That builds the tree's own `.venv` and renders from it.
+- **A linked worktree:** `make setup` there builds the worktree's `.venv` and
+  serves nothing, since its `HEAD` is unmerged work (sd:5551). It says so on
+  stderr. `SERVE=yes` serves it anyway; a checkout where git cannot tell is
+  treated the same way.
 - **A running lane:** a lane runs `sd-ship` from the tree, so `--serve` holds
   every lane's runner lock while it moves the tree (sd:3273). When a lane is
   running, it leaves the tree where it is, says so and exits 0; run
@@ -524,7 +528,7 @@ Each prose skill has a "State of the tooling" section.
 ### Verify
 
 ```bash
-make setup   # once; it also refreshes the serving tree
+make setup   # once; outside a linked worktree it also refreshes the serving tree
 make check   # test + lint + audit + docs-lint
 make precheck   # lint + the always-run test modules, about a minute
 ```
