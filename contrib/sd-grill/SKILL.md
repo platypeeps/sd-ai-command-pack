@@ -256,9 +256,11 @@ interrogation that ended early.
 - **Assistant-supplied content** — every contaminated answer with its origin,
   including whether it came from an assistant-authored option set, and beside it
   any later independent answer to a question that did not carry the assistant's
-  version. Each contaminated entry carries the field `contaminated: Q<n>=<letter>`,
-  or `contaminated: Q<n>` for an answer not picked from a lettered option set. A
-  contaminated entry is never removed, cleared, or reclassified as stated intent;
+  version. Each contaminated entry opens with the field `contaminated: Q<n>=<letter>`,
+  or `contaminated: Q<n>` for an answer not picked from a lettered option set, as a
+  bare line and never a bullet, with its origin and any independent answer below
+  it. A contaminated entry is never removed, cleared, or reclassified as stated
+  intent;
 - **Not asked** — coverage the bound, a defect, or a stop cut short; and
 - **Handoffs** — proposed `sd-plan`, `sd-decide`, `sd-premortem`,
   `sd-red-team`, or `sd-socratic-review` work, each `not run` or `unavailable`,
@@ -268,7 +270,8 @@ interrogation that ended early.
 Number the questions `Q1`, `Q2`, … in the order asked, and letter an
 assistant-authored option set `A`, `B`, `C`. Write each field on a line of its
 own, exactly as shown: the key in lower case, a colon, one space, the value, and
-nothing else on the line, with no list marker, emphasis, or backticks. A reader
+nothing else on the line, with no list marker, emphasis, or backticks, even in a
+section whose other lines are a list. A reader
 or a test reads the field, not the prose around it, so a malformed or missing
 field counts as not reported.
 
