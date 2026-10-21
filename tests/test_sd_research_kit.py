@@ -20,6 +20,7 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import io
+import json
 import os
 import re
 import subprocess
@@ -1493,6 +1494,94 @@ class InitHookInstallTests(unittest.TestCase):
         self.assertEqual(digests, released)
         self.assertNotIn(hashlib.sha256(module.HOOK.encode("utf-8")).hexdigest(),
                          released, "the current body is listed as superseded")
+
+
+class RenderManifestTests(unittest.TestCase):
+    """`render` writes docs/dashboard/research.json (pack sd:5658).
+
+    The dashboard never executes research.conf.py, so a config that builds
+    DOCS with code is unreadable there; the manifest is what the render
+    executed, named by the sha256 of the bytes it ran.
+    """
+
+    CONF = (
+        'import pathlib\n'
+        'PROJECT = "Probe"\n'
+        'DOCS = [dict(src=name + ".md", out=name, title=name.title(), eyebrow=42,\n'
+        '             stand="One line.", links=[("Spec", "https://example.test/spec"), ("bad", 3)])\n'
+        '        for name in ("one", "two")]\n'
+    )
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.repo = Path(temporary.name)
+        for name in ("one", "two"):
+            (self.repo / f"{name}.md").write_text("# T\n\nBody.\n", encoding="utf-8")
+        (self.repo / "research.conf.py").write_text(self.CONF, encoding="utf-8")
+        self.manifest = self.repo / "docs" / "dashboard" / "research.json"
+
+    def render(self):
+        """Run the real `render` in-process; publication is stubbed, so nothing leaves the directory."""
+
+        load_publish()
+
+        class Converter:
+            def __init__(self, **_options: object) -> None:
+                self.toc_tokens: list = []
+
+            def convert(self, _text: str) -> str:
+                return "<p>Body.</p>"
+
+        fake = types.ModuleType("markdown")
+        fake.Markdown = Converter  # type: ignore[attr-defined]
+        with unittest.mock.patch.dict(sys.modules, {"markdown": fake}):
+            render = load_kit().load("sd_research_render")
+        here = os.getcwd()
+        os.chdir(self.repo)
+        self.addCleanup(os.chdir, here)
+        clean = {k: v for k, v in os.environ.items() if k not in ("SD_RESEARCH_TRIGGER", "GIT_EXEC_PATH")}
+        with unittest.mock.patch.dict(os.environ, clean, clear=True), \
+                unittest.mock.patch.object(render, "publish", unittest.mock.Mock(return_value=[])), \
+                unittest.mock.patch("sys.stdout", io.StringIO()):
+            return render.main()
+
+    def test_render_writes_the_manifest_of_what_it_executed(self) -> None:
+        source = (self.repo / "research.conf.py").read_bytes()
+        self.assertEqual(self.render(), 0)
+        link = [["Spec", "https://example.test/spec"]]
+        self.assertEqual(json.loads(self.manifest.read_text(encoding="utf-8")), {
+            "version": 1, "project": "Probe", "conf_sha256": hashlib.sha256(source).hexdigest(),
+            "docs": [{"src": "one.md", "out": "one", "title": "One", "stand": "One line.", "links": link},
+                     {"src": "two.md", "out": "two", "title": "Two", "stand": "One line.", "links": link}]})
+        self.assertEqual(sorted(p.name for p in self.manifest.parent.iterdir()),
+                         ["one.html", "research.json", "two.html"])
+
+    def test_the_digest_is_of_the_bytes_executed_not_the_file_after(self) -> None:
+        """A config that rewrites itself while it runs: the manifest names what ran."""
+
+        conf = self.repo / "research.conf.py"
+        conf.write_text(self.CONF + 'pathlib.Path("research.conf.py").write_text("DOCS = []\\n")\n', encoding="utf-8")
+        executed = conf.read_bytes()
+        self.render()
+        digest = json.loads(self.manifest.read_text(encoding="utf-8"))["conf_sha256"]
+        self.assertEqual(digest, hashlib.sha256(executed).hexdigest())
+        self.assertNotEqual(digest, hashlib.sha256(conf.read_bytes()).hexdigest())
+
+    def test_a_render_stopped_before_the_manifest_leaves_the_last_one(self) -> None:
+        """Pages first, manifest last: a failed page keeps the older manifest,
+        whose digest the dashboard reads as an older render; the next render replaces it."""
+
+        self.manifest.parent.mkdir(parents=True)
+        self.manifest.write_text('{"version": 1, "conf_sha256": "old"}\n', encoding="utf-8")
+        (self.repo / "two.md").unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.render()
+        self.assertEqual(json.loads(self.manifest.read_text(encoding="utf-8"))["conf_sha256"], "old")
+        (self.repo / "two.md").write_text("Body.\n", encoding="utf-8")
+        self.render()
+        self.assertNotEqual(json.loads(self.manifest.read_text(encoding="utf-8"))["conf_sha256"], "old")
+        self.assertFalse(list(self.manifest.parent.glob("*.partial")))
 
 
 class HookTriggerTests(unittest.TestCase):

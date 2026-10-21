@@ -298,6 +298,11 @@ def trust_conf(repo: Path, source: bytes) -> None:
         (Path(repo) / record).write_text(hashlib.sha256(source).hexdigest() + "\n", encoding="utf-8")
 
 
+#: The namespace key `execute_conf` sets to the sha256 of the bytes it
+#: executed: render's manifest says which config it describes.
+CONF_DIGEST = "__conf_sha256__"
+
+
 def execute_conf(repo: Path, verb: str) -> dict[str, Any] | None:
     """The namespace `repo`'s research.conf.py builds, or None when it has none.
 
@@ -322,6 +327,8 @@ def execute_conf(repo: Path, verb: str) -> dict[str, Any] | None:
     # same trust level as this script, and the format needs execution: at least
     # one live config builds its DOCS list with a loop.
     exec(compile(source, str(conf), "exec"), ns)  # nosec B102
+    # Set after the run, so the config cannot name a digest of its own.
+    ns[CONF_DIGEST] = hashlib.sha256(source).hexdigest()
     if not trigger:
         trust_conf(repo, source)
     return ns
