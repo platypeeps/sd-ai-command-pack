@@ -174,7 +174,7 @@ ledger below is merged and deduplicated across both.
 | C-8 | host | 1 | low | no | addressed |
 | C-9 | codex | 2 | medium | yes | addressed |
 | C-10 | codex | 2 | medium | yes | addressed |
-| C-11 | codex | 2 | low | no | parked — user ruling, 2026-09-04; trigger sd:5430 (2026-10-20) |
+| C-11 | codex | 2 | low | no | resolved — sd:5430, user ruling 2026-10-21 |
 | C-12 | codex | 3 | medium | yes | addressed |
 | C-13 | codex | 3 | medium | yes | addressed |
 
@@ -291,6 +291,14 @@ the gap acceptable here is narrow and must stay narrow: this document names
 verified them instead. A blanket disclaimer would not qualify, and the harness
 item exists so that "declared gap" does not become the escape hatch every later
 skill reaches for.
+
+**Resolved, 2026-10-21 (sd:5430).** `claude plugin eval` now checks both
+requirements on `contrib/sd-grill/evals/`, four runs a case with a sonnet judge.
+Requirement 1 (`first-question`): 4 of 4 runs scored 1.00. Requirement 4
+(`stopped-after-adopting`): 5 of 6 runs that loaded the skill passed every
+grader; the sixth left out the `contaminated: Q2=A` line, filed as sd:5586.
+The haiku judge failed two single-demand questions 2 votes to 1, so the run
+command names the judge. The user closed C-11 on that evidence.
 
 **Disclosure attached to that ruling.** The host lane is not a neutral judge of
 C-11. The same session wrote the skill, wrote the requirements, and wrote the
