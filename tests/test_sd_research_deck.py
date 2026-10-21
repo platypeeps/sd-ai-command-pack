@@ -1,6 +1,6 @@
 """`sd-research-kit deck`: the status brief's deck.json laid out as PowerPoint (pack sd:5525).
 
-The template `skills/sd-research-repo/templates/deck.json` is the fixture, so the
+The JSON block in `skills/sd-research-repo/templates/deck.md` is the fixture, so the
 example the standard points at is the one the builder is proven against.
 """
 
@@ -21,7 +21,7 @@ from tests.clean_env import clean_environment
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 KIT = REPO_ROOT / "bin" / "sd-research-kit"
-TEMPLATE = REPO_ROOT / "skills" / "sd-research-repo" / "templates" / "deck.json"
+TEMPLATE = REPO_ROOT / "skills" / "sd-research-repo" / "templates" / "deck.md"
 
 
 def load_deck_module():
@@ -52,9 +52,14 @@ def links(slide) -> list[str]:
     return found
 
 
+def template() -> dict:
+    """The example deck: the one fenced json block in the template (a shipped skill file is Markdown only)."""
+    return json.loads(TEMPLATE.read_text(encoding="utf-8").split("```json\n", 1)[1].split("```", 1)[0])
+
+
 class TemplateDeck(unittest.TestCase):
     def setUp(self):
-        self.deck = json.loads(TEMPLATE.read_text(encoding="utf-8"))
+        self.deck = template()
         self.tmp = Path(tempfile.mkdtemp())
 
     def write(self, name, deck):
@@ -124,7 +129,7 @@ class Refusals(unittest.TestCase):
     """Every refusal names the value's path; extreme and wrong-typed input refuses, never crashes."""
 
     def setUp(self):
-        self.deck = json.loads(TEMPLATE.read_text(encoding="utf-8"))
+        self.deck = template()
 
     def refuses(self, said):
         with self.assertRaises(deck_mod.Invalid) as raised:
@@ -161,7 +166,7 @@ class Refusals(unittest.TestCase):
             (("date",), float("inf"), "deck.date"),
         ):
             with self.subTest(path=path):
-                self.deck = json.loads(TEMPLATE.read_text(encoding="utf-8"))
+                self.deck = template()
                 target = self.deck
                 for key in path[:-1]:
                     target = target[key]
@@ -175,7 +180,7 @@ class Refusals(unittest.TestCase):
     def test_a_tone_needs_a_pill_and_a_foot_label_needs_a_foot(self):
         del self.deck["slides"][0]["cards"][0]["pill"]
         self.refuses("cards[0].tone: needs a pill")
-        self.deck = json.loads(TEMPLATE.read_text(encoding="utf-8"))
+        self.deck = template()
         del self.deck["slides"][1]["foot"]
         self.refuses("foot_label: needs a foot")
 

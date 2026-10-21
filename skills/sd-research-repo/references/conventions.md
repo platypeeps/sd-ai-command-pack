@@ -211,7 +211,7 @@ Use no emoji in the State cell: the deck and the mirrors are read outside the te
 Update it in the same change as the brief, so the two never disagree.
 `sd-research-kit deck` lays it out into `docs/dashboard/deck.pptx`: a title page, then the slides, with one call to
 action on the last slide.
-The example and the schema in use are `skills/sd-research-repo/templates/deck.json`; the builder refuses an unknown key,
+The example and the schema in use are the JSON block in `skills/sd-research-repo/templates/deck.md`; the builder refuses an unknown key,
 an em dash, more than six cards (three beside a track) and text past its bound, naming the value's path.
 
 - `name`, `tagline`, `date`: the deck's title page.

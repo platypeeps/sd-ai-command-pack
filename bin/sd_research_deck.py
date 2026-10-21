@@ -310,7 +310,7 @@ class Builder:
         self.put_text(40, 162, 640, 56, [(name, {"bold": True})], 44)
         self.put_text(40, 222, 640, 36, [(tagline, {"bold": True, "colour": self.look["accent"]})], 26)
 
-    def track(self, stages: list[dict]) -> None:
+    def stage_track(self, stages: list[dict]) -> None:
         look, x0, x1, yc = self.look, 80.0, 640.0, 116.0
         step = (x1 - x0) / (len(stages) - 1)
         reached = max((i for i, s in enumerate(stages) if s["state"] != "next"), default=0)
@@ -357,7 +357,7 @@ class Builder:
         self.head(slide["eyebrow"], slide["title"], slide.get("accent"))
         cards = slide.get("cards", [])
         if slide.get("track"):
-            self.track(slide["track"])
+            self.stage_track(slide["track"])
             self.cards(cards, 178, 132)
             foot_y = 326
         else:

@@ -1,3 +1,8 @@
+# deck.json example
+
+Copy the block below to `30-brief/deck.json`. It is the example and the schema in use; `tests/test_sd_research_deck.py` builds it.
+
+```json
 {
   "name": "Example Revamp",
   "tagline": "Iteration 2: execution.",
@@ -38,3 +43,4 @@
     }
   ]
 }
+```
