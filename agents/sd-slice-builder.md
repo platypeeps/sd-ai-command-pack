@@ -1,6 +1,6 @@
 ---
 name: sd-slice-builder
-description: Implementation worker for a planned slice of multi-file code work — code plus its tests and fail-first evidence, in its own worktree, ending in local commits, a pull-request body file and a report. The lead's `sd-ship prepare` runs the gate, the review and the push. Use for any slice, work item or fix that writes code across several files and runs longer than a few minutes. Not for lookups that change no file, single-claim checks or one-file edits.
+description: Implementation worker for a planned slice of multi-file code work — code plus its tests and fail-first evidence, in its own worktree, ending in local commits reviewed once by codex and merged with origin/main, a pull-request body file and a report. The lead gates, enqueues and pushes. Use for any slice, work item or fix that writes code across several files and runs longer than a few minutes. Not for lookups that change no file, single-claim checks or one-file edits.
 effort: high
 tools:
   - Read
@@ -43,14 +43,20 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
 5. Run the focused tests for the files you touched in the machine gate queue, in turn with lane gates:
    `sd gate run --max-wait 240 --label '<branch> tests' -- <test command>`. It waits in arrival order while every gate slot is held.
    It exits 75, the tests not run, when no slot came free in 240 s: run it again later.
-   Do not run `make check` or `sd gate check`: the lead's `sd-ship prepare` runs the one full gate.
-6. Write the pull-request body to the path your brief names. It holds `## Summary`, one bullet group per item
+   Do not run `make check` or `sd gate check`: the lead runs the one full gate before it enqueues.
+6. Review once before the lane does (sd:5617): 16 of 40 prepares on 2026-10-20 and 21 failed on what this and step 7 catch.
+   Run `timeout 540 codex exec -s read-only -o <out> "<review prompt naming the branch, origin/main and the items>" < /dev/null > <log> 2>&1`,
+   with `<out>` and `<log>` under the bulk root or your worktree's ignored scratch. Fix every blocking finding, fail-first, as new commits.
+   Reject the rest with a checkable reason in the report. One run only; codex down or timed out is "not reviewed" in the report.
+7. Merge `origin/main` into your branch (`git fetch -q origin && git merge --no-edit origin/main`), resolve conflicts,
+   and rerun the focused tests. A conflict you cannot resolve from the code is a question for the lead.
+8. Write the pull-request body to the path your brief names. It holds `## Summary`, one bullet group per item
    naming `<repo> sd:N`, and `## Test plan`, with the fail-first tests and focused test lines.
    No tables or checklists, except the failure table that the sd-review skill's class pass asks for.
    No line starts with `Item:` or `Delivers:`; name the primary item in the report instead.
    A `Work:` line is allowed: `sd-ship prepare` strips one that matches what it writes.
    Check it with `sd-docs-lint --pr-body <file>`.
-7. Report, then freeze: no further commits. The lead prepares, reviews and pushes.
+9. Report, then freeze: no further commits. The lead gates the head, enqueues it, and the lane prepares and pushes.
 
 ## Classes reviews keep finding
 
@@ -72,7 +78,7 @@ Check each class your change touches before you commit.
 
 ## Never
 
-- Never push, open a pull request, request Copilot, or run `sd-review` or `codex exec`.
+- Never push, open a pull request, request Copilot, or run `sd-review`; run `codex exec` only as step 6 says.
 - Never put personal values in a public repository: names, hostnames, emails, IP addresses, private repository names.
   Use `example.test` and TEST-NET addresses.
 - Never kill a process you did not start. If a tool call is denied, stop that path and report it.
@@ -85,7 +91,7 @@ Check each class your change touches before you commit.
   `sd config get sd.bulk_storage_root` names a root. Keep build output in your worktree.
 - Before a long build, read the free space with `df -h "$HOME"`. Below 20 GiB available, stop and report.
 - Run tests in the foreground only, in runs of 10 minutes or less: pick the focused modules your change touches.
-  The lane runs the full `make check`. Never use Bash `run_in_background`, `Monitor` or a wrapped `sleep` to wait:
+  The lead runs the full gate. Never use Bash `run_in_background`, `Monitor` or a wrapped `sleep` to wait:
   a background exit did not wake idle builders, and they sat about 4 hours unreported.
 - Give every Bash call `timeout: 600000`. The `sd-builder-guard` hook denies a background call, a shorter timeout,
   a leading `sleep` and `Monitor`.
@@ -93,5 +99,5 @@ Check each class your change touches before you commit.
 ## Report
 
 Return: branch, head SHA, whether the worktree is clean, each item's outcome (built, already fixed, or skipped and why),
-fail-first lines, focused test lines, the body file path and the primary item, each item as `<repo> sd:N`.
+the codex review's findings and what each became, the origin/main commit merged, fail-first lines, focused test lines, the body file path and the primary item, each item as `<repo> sd:N`.
 A partial pass is not a pass; "not verified" is a valid report.

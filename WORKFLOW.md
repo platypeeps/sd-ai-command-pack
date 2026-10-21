@@ -361,13 +361,14 @@ Four roles share the work:
 
 - **The lead plans and lands.** One lead session per machine plans, starts builders, runs the merge lane and records state in `sd task note`.
 - **A builder writes code in its own worktree.** It runs only the suites its change touches, never `make check`,
-  and ends with commits, a pull-request body file and a report. The lead's `sd-ship prepare` runs the one full gate.
+  and ends with commits, a pull-request body file and a report. The lead runs the one full gate before it enqueues.
 - **A reader is read-only and unlimited.** Investigation, review, planning and audits fan out across readers; a reader needs no worktree.
 - **An integrator is a builder that merges several builders' work** on one branch, so the lane lands one pull request, not several that conflict.
 
 Workers:
 
-- **Run at most 6 code-writing builders per machine.** More starve the gates and reviews they wait on.
+- **Run at most 6 code-writing builders per machine, and at most 3 per repository.** More starve the gates and reviews they wait on,
+  and one serial lane lands about 3 at a time: the rest only queue and go stale against main (sd:5617).
 - **Start no builder while load5 is above 40.**
 - **A writer runs alone in its checkout.** Any agent or session that changes files works in its own git worktree or clone.
   Never start a second writer in a checkout that already has one.
@@ -378,12 +379,19 @@ Workers:
   Cancel a silent writer and confirm it stopped before starting a replacement; if you cannot confirm, escalate.
   Only a read-only worker may be replaced on the deadline alone.
 - **Fan out only when the targets are independent, share no mutable state, and are cheap to verify.**
-- **Batch a repository's small items into one pull request**, one commit per row; rows that change the same files always group.
-  Keep a group near 300 changed lines. Name every grouped row in the pull request.
+- **Batch a repository's ready items into one pull request by default**, one commit per row; rows that change the same files always group.
+  Keep a group near 300 changed lines. Name every grouped row in the pull request. Where goldens exist, bless them once per bundle.
+  A change that moves state in steps still gets its own pull request.
 - **Large uncommitted data goes under `sd.bulk_storage_root`**, as `<root>/<repository>/`. Build output and owner-sensitive data stay on the system disk.
 - **Test one version per language, the latest stable (Python 3.15, Node 26); no version matrices.**
 
 Gates and reviews:
+
+- **Shift lane failures left: review and gate before enqueue (sd:5617).** 17 of 40 prepares on 2026-10-20 and 21 were redone:
+  10 review blocks, 3 gate failures after review and 3 conflicts with main, all visible before enqueue.
+  The builder runs one read-only `codex exec` review of its branch, fixes the blocking findings, then merges `origin/main`
+  (the `sd-slice-builder` flow, steps 6 and 7). After its report, the lead runs `sd gate check --base main` in its worktree
+  and enqueues only a pass, which prepare reuses at the same head. A failure goes back to the builder, not into the lane.
 
 - **Iterate on the fast path; gate once before the push.** `make check CHANGED="<paths>"` runs the tests those paths need.
   Only the full gate counts as evidence.
@@ -408,8 +416,8 @@ The merge lane:
   A hand-run prepare-and-merge chain jumps the queue and leaves no log. Verbs: `enqueue|list|retry|cancel|move|hold|release|run|watch`.
 - **`lane retry <item>` queues a failed, skipped or prepared entry again** at its head; a cancelled one needs `--expected-head`.
 - **Keep one `sd-ship lane watch --item A --item B ...` naming every item the lead has in that lane.**
-  Restart it after each enqueue and after an sd outage. Treat an exit as done only when its output says `ok: true`:
-  a bare `lane watch` never exits, and a hub build mismatch ends a watch with `ok: false` and exit 0.
+  Restart it after each enqueue, after an sd outage and after any exit whose output lacks `ok: true`:
+  a bare `lane watch` never exits, and a hub build mismatch ends a watch with `ok: false` (`hub_unavailable`).
 - **Stop an item's queued ship before its builder merges main.** Run `sd-ship lane cancel <item>`: the ship merges in the same worktree, and its abort can discard the builder's merge.
 - **Stop a running ship chain by its process group** (`kill -- -<pgid>`). A killed shell alone leaves its children holding a gate slot.
 - **Metadata that orders landings** (a session number, a ledger entry, a changelog position) is allocated when the work lands, never when the branch is cut.
