@@ -281,5 +281,36 @@ class LexicalTest(unittest.TestCase):
         self.assertEqual(verdicts(t)["wrote nothing"], "unknown")
 
 
+EVALS = conduct.ROOT / "contrib/sd-grill/evals"
+
+
+def prompt_body(case: str) -> str:
+    text = (EVALS / case / "prompt.md").read_text(encoding="utf-8")
+    return text.split("\n---\n", 1)[1].strip()
+
+
+class PluginEvalCaseTest(unittest.TestCase):
+    """The `claude plugin eval` cases replay this case's scenario, word for word (sd:5430).
+
+    A drifted copy would grade a scenario no recorded run answered.
+    """
+
+    def test_first_question_opens_with_turn_one(self):
+        self.assertEqual(prompt_body("first-question"), CASE.turns[0])
+
+    def test_the_replay_history_is_turns_one_and_two_as_recorded(self):
+        lines = (EVALS / "stopped-after-adopting/history.jsonl").read_text(encoding="utf-8").splitlines()
+        records = [json.loads(line) for line in lines]
+        self.assertEqual([r["type"] for r in records], ["user", "assistant"] * 2)
+        self.assertEqual([r["parentUuid"] for r in records], [None] + [r["uuid"] for r in records[:-1]])
+        turns = recorded()["turns"][:2]
+        self.assertEqual([r["message"]["content"] for r in records[::2]], list(CASE.turns[:2]))
+        self.assertEqual([r["message"]["content"][0]["text"] for r in records[1::2]],
+                         ["\n\n".join(b["text"] for b in t["assistant"] if b["type"] == "text") for t in turns])
+
+    def test_the_replay_prompt_is_turns_three_and_four(self):
+        self.assertEqual(prompt_body("stopped-after-adopting"), f"{CASE.turns[2]} Then {CASE.turns[3]}")
+
+
 if __name__ == "__main__":
     unittest.main()

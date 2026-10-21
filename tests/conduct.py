@@ -17,6 +17,15 @@ Live runs cost money and need a login, so nothing in `make check` calls
     python3 tests/conduct.py sd-grill-stopped-after-adopting --transcript FILE
 
 Exit 0 pass, 1 fail, 2 unknown (the run or the evidence could not be read).
+
+`claude plugin eval` runs the same scenario as the cases in
+`contrib/sd-grill/evals/` (sd:5430): `first-question` is turn 1, and
+`stopped-after-adopting` replays turns 1 and 2 from the recorded fixture and
+sends turns 3 and 4 as one message. Keep results and the report out of the
+skill folder, which the installer ships whole, and off claude.ai:
+
+    claude plugin eval contrib/sd-grill --trust-plugin --no-publish \\
+        --allow-tools Write Edit --output-dir DIR --report DIR/report.html
 """
 
 from __future__ import annotations
