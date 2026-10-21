@@ -1,6 +1,7 @@
 """Retention deletes only complete, unchanged backups with recorded ownership."""
 import json
 import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -224,6 +225,25 @@ class Retention(BackupCase):
             with self.assertRaisesRegex(BackupError, "changed before retention"):
                 backup.prune(backup.backup_root(self.home), 0)
         self.assertTrue(snapshot.directory.exists())
+
+    @hub_only
+    def test_a_backup_replaced_while_it_is_hashed_stays(self):
+        snapshot = self.snapshot()
+        directory = snapshot.directory
+        recopy = self.home / "recopy"
+        real = backup._retention_inventory
+
+        def replaced(path, **kwargs):
+            inventory = real(path, **kwargs)
+            shutil.copytree(directory, recopy, symlinks=True)
+            (recopy / "added").write_bytes(b"never hashed")
+            shutil.rmtree(directory)
+            recopy.rename(directory)
+            return inventory
+
+        with patch.object(backup, "_retention_inventory", replaced):
+            self.assertEqual(backup.prune(backup.backup_root(self.home), 0), [])
+        self.assertEqual((directory / "added").read_bytes(), b"never hashed")
 
 
 if __name__ == "__main__":

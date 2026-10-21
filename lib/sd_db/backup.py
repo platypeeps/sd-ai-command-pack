@@ -888,6 +888,9 @@ def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = F
         if not DATED_NAME.fullmatch(directory.name):
             raise BackupError("its name is not a backup's dated name")
         datetime.strptime(directory.name[:10], "%Y-%m-%d")
+        # Read before the hashes and compared after them: retention hashes a
+        # copy once, so a directory swapped in meanwhile was never read.
+        before = directory.stat()
         manifest = directory / BACKUP_MANIFEST
         if manifest.is_symlink() or not manifest.is_file() or manifest.stat().st_size > 16 * 1024 * 1024:
             raise BackupError("it holds no backup manifest")
@@ -916,6 +919,8 @@ def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = F
         if verify(directory / database, run_id=run_id, expected=counts, checkpointed=checkpointed) != counts:
             raise BackupError("its database holds other counts than its manifest")
         details = directory.stat()
+        if (details.st_dev, details.st_ino) != (before.st_dev, before.st_ino):
+            raise BackupError("it was replaced while it was read")
         return details.st_dev, details.st_ino, hashlib.sha256(material).hexdigest()
     except BackupError:
         raise

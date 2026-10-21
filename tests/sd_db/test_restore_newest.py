@@ -587,6 +587,27 @@ class MovedCopies(Case):
             self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), old)
         self.assertEqual(hashed, old)
 
+    def test_a_copy_replaced_while_it_is_hashed_stays(self):
+        # The one hash is the only proof: a directory swapped in after it was read is not the one verified.
+        old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
+        real = backup._retention_inventory
+
+        def replaced(directory, **kwargs):
+            inventory = real(directory, **kwargs)
+            if directory == old:
+                shutil.copytree(old, self.base / "recopy", symlinks=True)
+                (self.base / "recopy" / "added").write_bytes(b"never hashed")
+                shutil.rmtree(old)
+                (self.base / "recopy").rename(old)
+            return inventory
+
+        lines: list[str] = []
+        with mock.patch.object(backup, "_retention_inventory", replaced):
+            self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
+
+        self.assertEqual((old / "added").read_bytes(), b"never hashed")
+        self.assertEqual(lines, [f"kept {old}: it was replaced while it was read"])
+
     def test_removals_are_reported_as_they_happen(self):
         # A run the bound stops has then already named what it removed.
         old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
