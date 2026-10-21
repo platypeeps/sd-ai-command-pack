@@ -1456,6 +1456,11 @@ def alert(number, severity):
     return {"number": number, "security_advisory": {"severity": severity}}
 
 
+def setting(owner, name):
+    """GitHub's Dependabot alerts setting: 204 when on, 404 when off."""
+    return f"repos/{owner}/{name}/vulnerability-alerts"
+
+
 class Alerts(SyncCase):
     """sd:2205, sd:2206: a managed repository's alerts land in its row's body, read after every basic observation."""
 
@@ -1543,10 +1548,56 @@ class Alerts(SyncCase):
         self.assertEqual((stored[mine]["status"], stored[other]["status"]), ("protected", "protected"))
         self.assertEqual(self.alerts(mine)["dependabot"], {"reason": protection.REQUESTS_EXHAUSTED})
 
-    def test_the_reserve_holds_two_alert_reads_per_managed_repository(self):
+    def test_a_forbidden_alert_read_probes_the_setting_and_stores_alerts_off_as_a_setting(self):
+        """sd:5594. A repository with Dependabot alerts off read `dependencies not read` in Health."""
+        names = ("off", "on", "failed", "other")
+        off, on, failed, other = (self.managed(name) for name in names)
+        rows = {**self.protected("off"), **self.protected("on"), **self.protected("failed"),
+                **self.protected("other", permissions={"admin": False})}
+        for name in names:
+            rows[protection.alert_path("platypeeps", name, "dependabot")] = Response(403, {}, "{}")
+            rows[protection.alert_path("platypeeps", name, "secret-scanning")] = []
+        rows.update({setting("platypeeps", "off"): Response(404, {}, "{}"),
+                     setting("platypeeps", "on"): Response(204, {}, ""),
+                     setting("platypeeps", "failed"): Response(500, {}, ""),
+                     setting("platypeeps", "other"): Response(404, {}, "{}")})
+        forbidden = {"reason": "API HTTP 403; retry on a later collection"}
+        client, transport = self.client(rows)
+        protection.sync(self.db, client=client, observed_at=AT)
+        self.assertEqual(self.alerts(off), {"dependabot": {"setting": "disabled"},
+                                            "secret_scanning": {"visibility": "public", "setting": "enabled",
+                                                                "open": 0, "more": False}})
+        self.assertEqual(self.alerts(on)["dependabot"], forbidden)
+        self.assertEqual(self.alerts(failed)["dependabot"], forbidden)
+        # GitHub shows the setting only to an admin; without admin a 404 would say nothing.
+        self.assertEqual(self.alerts(other)["dependabot"], forbidden)
+        self.assertNotIn(setting("platypeeps", "other"), transport.calls)
+
+    def test_a_probe_the_budget_cannot_pay_for_keeps_the_forbidden_reason(self):
+        mine = self.managed("mine")
+        rows = {**self.protected("mine"),
+                protection.alert_path("platypeeps", "mine", "dependabot"): Response(403, {}, "{}"),
+                setting("platypeeps", "mine"): Response(404, {}, "{}")}
+        client, transport = self.client(rows, requests=4)
+        protection.sync(self.db, client=client, observed_at=AT)
+        self.assertEqual(self.alerts(mine)["dependabot"], {"reason": "API HTTP 403; retry on a later collection"})
+        self.assertNotIn(setting("platypeeps", "mine"), transport.calls)
+
+    def test_an_alert_read_that_fails_otherwise_spends_no_probe(self):
+        mine = self.managed("mine")
+        client, transport = self.client({**self.protected("mine"),
+                                         protection.alert_path("platypeeps", "mine", "dependabot"):
+                                             Response(404, {}, "{}"),
+                                         setting("platypeeps", "mine"): Response(404, {}, "{}")})
+        protection.sync(self.db, client=client, observed_at=AT)
+        self.assertEqual(self.alerts(mine)["dependabot"], {"reason": "API HTTP 404; retry on a later collection"})
+        self.assertNotIn(setting("platypeeps", "mine"), transport.calls)
+
+    def test_the_reserve_holds_three_alert_reads_per_managed_repository(self):
+        """Dependabot alerts, the setting probe a 403 costs, and secret-scanning alerts."""
         self.managed("mine")
         self.register("other", "git@github.com:platypeeps/other.git")
-        self.assertEqual(protection.reserve(self.db), 2 * 4 + 2)
+        self.assertEqual(protection.reserve(self.db), 2 * 4 + 3)
 
 
 class Slugs(unittest.TestCase):
