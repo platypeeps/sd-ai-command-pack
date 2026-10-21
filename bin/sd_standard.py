@@ -295,8 +295,12 @@ def github_steps(call: sd_ci.Call, repo: dict, takes_issues: bool) -> list[Step]
 
 
 def open_stamp_item(connection: Any, path: str) -> int | None:
-    found = connection.execute("SELECT id FROM item WHERE repo = ? AND title = ? AND status != 'done' ORDER BY id",
-                               (path, STAMP_TITLE)).fetchone()
+    from sd_db import paths  # noqa: PLC0415
+
+    # Every stored form of the path, as repos.row_for probes: an item written before 014 holds the absolute one.
+    probe = paths.keys(path)
+    found = connection.execute(f"SELECT id FROM item WHERE repo IN ({paths.placeholders(probe)}) AND title = ? AND status != 'done' "
+                               "ORDER BY id", (*probe, STAMP_TITLE)).fetchone()
     return int(found[0]) if found else None
 
 
@@ -398,10 +402,13 @@ def row_steps(connection: Any, row: Any) -> list[Step]:
 
 def used_before(connection: Any, path: str) -> bool:
     """Lane history for `path`: a runner run, or an item `sd-ship` moved. It picks a default button, nothing more."""
+    from sd_db import paths  # noqa: PLC0415
+
+    probe, marks = paths.keys(path), paths.placeholders(paths.keys(path))
     found = connection.execute(
-        "SELECT 1 FROM runner_run WHERE repo = ? UNION ALL SELECT 1 FROM note JOIN item ON item.id = note.item "
-        "WHERE item.repo = ? AND note.kind = 'status_change' AND note.body LIKE '%by sd-ship%' LIMIT 1",
-        (path, path)).fetchone()
+        f"SELECT 1 FROM runner_run WHERE repo IN ({marks}) UNION ALL SELECT 1 FROM note JOIN item ON item.id = note.item "
+        f"WHERE item.repo IN ({marks}) AND note.kind = 'status_change' AND note.body LIKE '%by sd-ship%' LIMIT 1",
+        (*probe, *probe)).fetchone()
     return found is not None
 
 
