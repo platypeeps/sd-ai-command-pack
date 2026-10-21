@@ -1156,6 +1156,16 @@ class ReportShapeTests(StatusFixture):
         completed = self.run_tool(SD_STATUS)
         self.assertIn(f"pack: {BIN.parent}", completed.stdout)
 
+    def test_a_detached_pack_checkout_prints_as_pinned(self) -> None:
+        """sd:5675: the hub pins the pack on purpose (system sd:3097); `HEAD @` read as a fault."""
+        stream = io.StringIO()
+        pack = {"root": "/pack", "branch": "HEAD", "head": "acd4be0", "dirty": False}
+        status._render_pack({"repo": "/repo", "pack": pack}, stream.write)
+        self.assertIn("  pack: /pack (pinned @ acd4be0)\n", stream.getvalue())
+        stream = io.StringIO()
+        status._render_pack({"repo": "/repo", "pack": dict(pack, branch="main")}, stream.write)
+        self.assertIn("  pack: /pack (main @ acd4be0)\n", stream.getvalue())
+
     def test_gaps_are_reported_not_raised(self) -> None:
         self.with_github(pulls=[], protection=None)
         completed = self.run_tool(SD_STATUS)
