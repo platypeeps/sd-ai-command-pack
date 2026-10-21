@@ -757,6 +757,13 @@ class ScheduledOccurrences(unittest.TestCase):
         self.assertEqual(backlog[led], ("2026-01-07", 0))
         self.assertIn(led, work)
 
+    def test_one_item_read_names_the_day_the_list_names(self):
+        # Details read one item (`item_by_id`); its open day is the list's, so the dashboard issues no SQL of its own.
+        led = self.capture("Pay the dues", due="2026-01-10", recurrence="FREQ=MONTHLY", recurrence_lead=3)
+        plain = self.capture("Plain", due="2026-01-10")
+        rows = [reads.item_by_id(self.db, item) for item in (led, plain)]
+        self.assertEqual([row["opens_on"] if row else "missing" for row in rows], ["2026-01-07", None])
+
     def test_no_lead_opens_on_the_due_date(self):
         series = self.capture("Water", due="2026-01-10", recurrence="FREQ=WEEKLY")
         backlog, planned, work, ahead, _ = self.views("2026-01-09")
