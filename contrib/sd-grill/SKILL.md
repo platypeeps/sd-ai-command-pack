@@ -52,8 +52,8 @@ Before the first question, classify the proposal and state the classification in
 one sentence, so the user can override it:
 
 - **probe** — a feasibility question whose output is an answer, not something
-  kept. Two or three questions, then stop: what would settle this, and what
-  result counts as settled.
+  kept. Two or three questions, one per turn — what would settle this, then
+  what result counts as settled — then stop.
 - **bounded** — a change to something that already exists and can be read. The
   existing thing must be readable in this repository or in a supplied source;
   familiarity with the *kind* of system is not the same as having the flow in
@@ -76,12 +76,18 @@ itself the signal to take the heavier.
 2. Read what already exists before asking about it. A question whose answer is
    in a supplied source spends the user's attention on something the assistant
    could have read.
-3. Ask exactly one answerable question per turn. Do not stack two demands in
-   one question, do not answer it yourself while waiting, and do not steer
-   toward the answer you expect — by wording, by example, or by an option set
-   built so that one choice is plainly the intended one. Whether candidate
-   answers may be offered *at all* is settled by the form rule immediately
-   below, which governs; read no blanket ban into this sentence.
+3. Ask exactly one answerable question per turn, and ask it for one thing.
+   Reread it before sending: a second question mark, or an "and" or "then" that
+   asks for something more — a reason, a count, a duration, what happens next —
+   is a second question. Cut it and hold it for a later turn, however naturally
+   it follows. The same holds for an ask elsewhere in the turn, such as a
+   request for sources; the opening turn's invitation to override the
+   classification is the one exception. Do not answer the question yourself
+   while waiting, and do not steer toward the answer you expect — by wording,
+   by example, or by an option set built so that one choice is plainly the
+   intended one. Whether candidate answers may be offered *at all* is settled
+   by the form rule immediately below, which governs; read no blanket ban into
+   this sentence.
 
    Questions take two forms, told apart by who wrote the candidate answers, not
    by whether an answer was expected — authorship is observable at the moment
@@ -120,9 +126,9 @@ itself the signal to take the heavier.
 5. Adapt from that record: pursue an `asserted` answer once for its evidence and,
    under `pressure=hard`, twice more; name both sides of a `contradiction` and
    ask which holds rather than picking one; convert an `unfalsifiable` criterion
-   by asking what command or observation would show it met and what result
-   counts as met; and on `scope-drift` ask whether the boundary moved or the
-   answer did.
+   by asking what command or observation would show it met, then, in the next
+   turn, what result counts as met; and on `scope-drift` ask whether the
+   boundary moved or the answer did.
 6. Hold the acceptance-criteria bar. A criterion names a check **and its
    result** — "`pytest tests/auth` passes with 0 failures", never "tests pass",
    never "it works". A criterion nobody but the author could evaluate has not
