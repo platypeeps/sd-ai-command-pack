@@ -94,7 +94,7 @@ BORROWED := $(shell \
       venv="$$main/.venv"; name="$$venv"; record="$$venv/sd-requirements"; strict=yes; \
     fi; \
   fi; \
-  own="run 'make setup VENV=.venv' to give this worktree its own environment"; \
+  own="run 'make setup VENV=.venv' to give this worktree its own environment (a linked worktree serves nothing unless SERVE=yes)"; \
   dir=$${name%/*}; where="in $$dir"; [ "$$dir" = "$$name" ] && where="here"; \
   why=; \
   if [ -x "$$venv/bin/python" ] && [ -f "$$venv/sd-provisioning" ]; then \
@@ -129,6 +129,17 @@ VENV_BIN = $(VENV)/bin
 setup_path = $(if $(filter %/,$(1)),$(call setup_path,$(patsubst %/,%,$(1))),$(1))
 SETUP_VENV = $(call setup_path,$(if $(filter command line environment,$(origin VENV)),$(VENV),.venv))
 SETUP_PYTHON = $(SETUP_VENV)/bin/python
+# Why setup leaves the machine alone, or empty to serve it. The serving tree
+# takes this checkout's HEAD, so a linked worktree's setup served its unmerged
+# branch to every sd command (sd:5551). A git that cannot say counts as a
+# worktree. A SERVE given on the command line or in the environment decides
+# alone. Lazy, so only setup pays the two `git` calls.
+SERVE_SKIP = $(if $(filter undefined,$(origin SERVE)),$(shell \
+  dir=$$(git rev-parse --path-format=absolute --git-dir 2>/dev/null) \
+    && common=$$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null) \
+    && [ -n "$$dir" ] && [ -n "$$common" ] \
+    || { printf '%s' "git cannot tell whether $(CURDIR) is a linked worktree"; exit 0; }; \
+  [ "$$dir" = "$$common" ] || printf '%s' "$(CURDIR) is a linked worktree"))
 
 .PHONY: setup hooks fonts test lint precheck audit docs-lint check gate-env post-merge
 
@@ -216,8 +227,9 @@ SETUP_PYTHON = $(SETUP_VENV)/bin/python
 # clone that nobody works in, at this checkout's HEAD (sd:3111). In the clone,
 # `--serve` renders it; in any other checkout, it clones the tree the first
 # time, fetches this HEAD into it, detaches there and runs this recipe there.
-# `SERVE=no` skips the serving step. README "A dedicated serving tree" has
-# the rest.
+# `SERVE=no` skips the serving step. A linked worktree skips it unless SERVE
+# is set (sd:5551): its HEAD is unmerged work. README "A dedicated serving
+# tree" has the rest.
 setup:
 	@venv="$(SETUP_VENV)"; name="$$venv"; \
 	  [ -n "$$venv" ] || { printf '%s\n' "error: VENV is empty; there is no path to provision" >&2; exit 1; }; \
@@ -267,7 +279,7 @@ setup:
 	@mv "$(SETUP_VENV)/.sd-requirements.new" "$(SETUP_VENV)/sd-requirements"
 	@rm -f "$(SETUP_VENV)/sd-provisioning"
 ifneq ($(SERVE),no)
-	"$(SETUP_PYTHON)" bin/sd_install.py --serve
+	$(if $(SERVE_SKIP),@printf '%s\n' "not serving the machine: $(SERVE_SKIP); SERVE=yes serves its HEAD" >&2,"$(SETUP_PYTHON)" bin/sd_install.py --serve)
 endif
 
 # The pre-commit tier of sd:431. `hooks/pre-commit` runs Ruff over the staged
