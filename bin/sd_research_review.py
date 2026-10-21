@@ -5,9 +5,10 @@ This checks the things a script can decide: that every rendered document carries
 a provenance block, closes with a Status section separating what was verified
 from what was not, and is rendered from a source no newer than its build; that
 exactly one configured document carries the `START HERE — ` title; that the
-repository's `CLAUDE.md` has not drifted from the pack's template; and that each
-map under `20-map/` carries stable row IDs and a gaps section, which warns
-rather than fails. It cannot
+repository's `CLAUDE.md` has not drifted from the pack's template; that each
+map under `20-map/` carries stable row IDs and a gaps section; and that the
+project has an architecture overview under `05-architecture/` that the config
+renders. The last two warn rather than fail. It cannot
 judge whether a claim is true — that is the other half, and it is printed as a
 checklist rather than pretending the green ticks cover it.
 
@@ -649,6 +650,29 @@ def map_ledgers(repo):
     return 0
 
 
+#: Where `references/conventions.md` puts the project's architecture overview.
+ARCHITECTURE_DOC = "05-architecture/architecture.md"
+
+
+def architecture_overview(repo, docs):
+    """The project has one architecture overview, and the config renders it.
+
+    pack sd:5660: the stage joined the layout on 2026-10-21, after every
+    research repo was laid out. So a missing overview, or one no `DOCS` entry
+    renders, warns and never fails; this returns 0.
+    """
+    rendered = {os.path.normpath(cfg.get("src", "")) for cfg in docs}
+    if not os.path.isfile(os.path.join(repo, ARCHITECTURE_DOC)):
+        print(f"  WARN {ARCHITECTURE_DOC}: missing -- copy it from the pack's "
+              "skills/sd-research-repo/templates/ and draw the project's parts")
+    elif os.path.normpath(ARCHITECTURE_DOC) not in rendered:
+        print(f"  WARN {ARCHITECTURE_DOC}: not in research.conf.py DOCS -- "
+              "render does not publish it")
+    else:
+        print(f"  ok   {ARCHITECTURE_DOC}: present and configured")
+    return 0
+
+
 NOT_A_RESEARCH_REPO = 2
 """`main()`'s exit when the cwd has no `research.conf.py` (sd:10 requirement 13).
 
@@ -703,7 +727,7 @@ def check(repo):
     if not bad:
         print(f"  ok   {len(docs)} document(s): provenance, Status, build freshness")
     return (bad + main_document(repo, docs) + template_drift(repo)
-            + map_ledgers(repo) + work_items(repo))
+            + map_ledgers(repo) + architecture_overview(repo, docs) + work_items(repo))
 
 
 CHECKLIST = """

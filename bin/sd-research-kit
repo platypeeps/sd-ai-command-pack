@@ -88,8 +88,9 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                 provenance block, Status section separating verified from not,
                 build freshness, the one `START HERE -- ` main document across
                 the configured H1s and rendered titles, this repo's
-                CLAUDE.md against the pack's template, and stable row IDs and
-                a gaps section in each 20-map/ map (warnings only). Then prints
+                CLAUDE.md against the pack's template, stable row IDs and
+                a gaps section in each 20-map/ map, and a configured
+                05-architecture/architecture.md (both warnings only). Then prints
                 the checklist for the half no script can do. Exit 1 if a check
                 fails, 2 outside a research repo
   pins          for every `source` @ `sha` the markdown asserts, say whether

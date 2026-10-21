@@ -126,6 +126,7 @@ class ReviewDocstringTests(unittest.TestCase):
         "template_drift": "`CLAUDE.md` has not drifted",
         "work_items": "work items under `docs/work/`",
         "map_ledgers": "stable row IDs and a gaps section",
+        "architecture_overview": "architecture overview under `05-architecture/`",
     }
 
     def test_the_docstring_names_every_check_review_runs(self) -> None:
@@ -1223,6 +1224,62 @@ class MapLedgerTests(unittest.TestCase):
         result = self.review(None)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertNotIn("20-map/", result.stdout)
+
+
+class ArchitectureOverviewTests(unittest.TestCase):
+    """pack sd:5660: the layout gains `05-architecture/`, one overview per project.
+
+    Every research repo predates the stage, so a missing or unrendered overview
+    warns and the exit stays 0.
+    """
+
+    DOC = "05-architecture/architecture.md"
+    OVERVIEW = REPO_ROOT / "skills" / "sd-research-repo" / "templates" / DOC
+
+    def review(self, *, overview: bool, configured: bool) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            docs = (f"[{{'src': './{self.DOC}', 'out': 'architecture',"
+                    " 'title': 'Architecture'}]" if configured else "[]")
+            (repo / "research.conf.py").write_text(f'PROJECT = "probe"\nDOCS = {docs}\n')
+            (repo / "CLAUDE.md").write_text(TEMPLATE.read_text(encoding="utf-8"))
+            if overview:
+                (repo / "05-architecture").mkdir()
+                (repo / self.DOC).write_text(self.OVERVIEW.read_text(encoding="utf-8"))
+            return run("review", cwd=repo)
+
+    def test_a_repo_without_the_overview_warns_and_does_not_fail(self) -> None:
+        result = self.review(overview=False, configured=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"WARN {self.DOC}: missing", result.stdout)
+
+    def test_an_overview_the_config_does_not_render_warns(self) -> None:
+        result = self.review(overview=True, configured=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"WARN {self.DOC}: not in research.conf.py DOCS", result.stdout)
+
+    def test_a_configured_overview_is_named_ok(self) -> None:
+        """A `./` spelling of the path is the same document."""
+
+        result = self.review(overview=True, configured=True)
+        self.assertIn(f"ok   {self.DOC}", result.stdout)
+        self.assertNotIn(f"WARN {self.DOC}", result.stdout)
+
+    def test_the_template_has_the_shape_review_checks(self) -> None:
+        load_publish()  # puts `bin/` on the path, so the class runs on its own
+        module = load_kit().load("sd_research_review")
+        text = self.OVERVIEW.read_text(encoding="utf-8")
+        self.assertTrue(module.provenance(text)[0], module.provenance(text))
+        self.assertTrue(module.status_section(text)[0], module.status_section(text))
+        self.assertIn("Archify", text)
+
+    def test_every_layout_table_names_the_stage(self) -> None:
+        conventions = REPO_ROOT / "skills" / "sd-research-repo" / "references" / "conventions.md"
+        for path in (TEMPLATE, conventions):
+            rows = [line for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.startswith("| `05-architecture/`")]
+            self.assertEqual(len(rows), 1, path)
+            self.assertIn("`architecture.md`", rows[0], path)
 
 
 class InitHookInstallTests(unittest.TestCase):
