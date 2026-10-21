@@ -1113,34 +1113,58 @@ def _finish_removals(root: Path, *, dry_run: bool = False, report=None) -> list[
     return finished
 
 
-def _remove_owned(directories: list[tuple[Path, tuple[int, int, str]]], identify, report=None) -> list[Path]:
-    removed = []
-    for path, identity in directories:
-        try:
-            again = identify(path)
-        except BackupError:
-            again = None
-        if again != identity:
-            raise BackupError(f"backup changed before retention: {path}; preserved for review")
-        doomed = path.with_name(f".{path.name}.removing")
-        path.rename(doomed)
-        shutil.rmtree(doomed)
-        removed.append(path)
-        if report is not None:
-            report(f"removed {path}")
-    return removed
+def _manifest_identity(directory: Path) -> tuple[int, int, str]:
+    """`_check_backup`'s identity without its hashes: the same directory, holding the same manifest bytes."""
+    try:
+        manifest = directory / BACKUP_MANIFEST
+        if directory.is_symlink() or not directory.is_dir() or manifest.is_symlink():
+            raise BackupError("it is a link or not a directory")
+        material = manifest.read_bytes()
+        details = directory.stat()
+    except OSError as error:
+        raise BackupError(f"it could not be read: {error}") from None
+    return details.st_dev, details.st_ino, hashlib.sha256(material).hexdigest()
+
+
+def _remove_owned(path: Path, identity: tuple[int, int, str], recheck, report=None) -> Path:
+    """Remove `path` if `recheck` still reads the `identity` its verification found.
+
+    The caller verifies one directory and removes it before it opens the next,
+    so a run stopped partway keeps what it removed (fleet sd:5543). `recheck`
+    is the cheap read just before the rename; the hashes are not read twice.
+    """
+    try:
+        again = recheck(path)
+    except BackupError:
+        again = None
+    if again != identity:
+        raise BackupError(f"backup changed before retention: {path}; preserved for review")
+    doomed = path.with_name(f".{path.name}.removing")
+    path.rename(doomed)
+    shutil.rmtree(doomed)
+    if report is not None:
+        report(f"removed {path}")
+    return path
 
 
 def prune(root: Path, keep: int | None = KEEP) -> list[Path]:
-    """Apply requested retention only to unchanged, verified owned backups."""
+    """Apply requested retention only to unchanged, verified owned backups.
+
+    The newest `keep` owned backups are found newest first; each older one is
+    then verified and removed in turn, oldest first.
+    """
     _check_keep(keep)
     if keep is None:
         return []
     _retention_root(root)
     _finish_removals(root)
-    directories = [(path, identity) for path in root.iterdir() if (identity := _owned_backup(path)) is not None]
-    directories.sort(key=lambda value: _directory_order(value[0]))
-    return _remove_owned(directories[:-keep] if keep else directories, _owned_backup)
+    dated = sorted((path for path in root.iterdir() if DATED_NAME.fullmatch(path.name)), key=_directory_order)
+    held = 0
+    while dated and held < keep:
+        if _owned_backup(dated.pop()) is not None:
+            held += 1
+    return [_remove_owned(path, identity, _manifest_identity)
+            for path in dated if (identity := _owned_backup(path)) is not None]
 
 
 def _taken_at(directory: Path) -> datetime:
@@ -1210,7 +1234,10 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
     Only a directory whose day is past the window is verified -- the cheap
     name test first -- so an hourly run opens the few snapshots it may
     delete, not the whole week. What it deletes is still only an unchanged,
-    verified owned backup, exactly as `prune` requires.
+    verified owned backup, exactly as `prune` requires. Each is verified and
+    removed before the next is opened, oldest first: on the share one copy
+    takes long to hash, and a run the job's time bound stops still keeps what
+    it removed (fleet sd:5543).
 
     `moved` prunes copies away from where they were written, such as the
     hourly mirror on a share (sd:4011): each is verified by its manifest's
@@ -1272,37 +1299,40 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
             return None
         return _check_backup(path, moved=moved)
 
-    directories = []
+    def unchanged(path: Path) -> tuple[int, int, str] | None:
+        """`identify` again just before the rename, with no second hash of a copy."""
+        return _manifest_identity(path) if _holds_manifest(path) else identify(path)
+
+    removed = []
     retained: dict[str, list[Path]] = {}
-    for path in sorted(root.iterdir()):
-        if not DATED_NAME.fullmatch(path.name):
-            continue
-        try:
-            day = datetime.strptime(path.name[:10], "%Y-%m-%d").date()
-        except ValueError:
-            continue
-        if day >= cutoff:
-            continue
-        try:
-            identity = identify(path)
-        except Retained as error:
-            retained.setdefault(str(error), []).append(path)
-            continue
-        except BackupError as error:
+    try:
+        for path in sorted((path for path in root.iterdir() if DATED_NAME.fullmatch(path.name)),
+                           key=_directory_order):
+            try:
+                day = datetime.strptime(path.name[:10], "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if day >= cutoff:
+                continue
+            try:
+                identity = identify(path)
+            except Retained as error:
+                retained.setdefault(str(error), []).append(path)
+                continue
+            except BackupError as error:
+                if report is not None:
+                    report(f"kept {path}: {error}")
+                continue
+            if identity is not None:
+                removed.append(path if dry_run else _remove_owned(path, identity, unchanged, report))
+    finally:
+        for reason, kept in retained.items():
             if report is not None:
-                report(f"kept {path}: {error}")
-            continue
-        if identity is not None:
-            directories.append((path, identity))
-    for reason, kept in retained.items():
-        if report is not None:
-            names = sorted((path.name for path in kept), key=lambda name: _directory_order(Path(name)))
-            named = names[0] if len(names) == 1 else f"{names[0]} to {names[-1]}"
-            report(f"kept {len(names)} backup{'' if len(names) == 1 else 's'} under {root}, named {named}: {reason}")
-    directories.sort(key=lambda value: _directory_order(value[0]))
-    if dry_run:
-        return [path for path, _ in directories]
-    return _remove_owned(directories, identify, report)
+                names = [path.name for path in kept]
+                named = names[0] if len(names) == 1 else f"{names[0]} to {names[-1]}"
+                report(f"kept {len(names)} backup{'' if len(names) == 1 else 's'} under {root}, "
+                       f"named {named}: {reason}")
+    return removed
 
 
 def _holds_manifest(path: Path) -> bool:

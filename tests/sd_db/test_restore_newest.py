@@ -310,9 +310,9 @@ class Unmanifested(Case):
         self.assertTrue(link.is_symlink())
         self.assertTrue((outside / "sd.db").exists())
         self.assertEqual(lines, [f"kept {link}: it is a link or not a directory",
+                                 f"removed {gone[0]}", f"removed {gone[1]}",
                                  f"kept 2 backups under {self.nas}, named {boundary.name} to {inside.name}: "
-                                 "no manifest (stopped run?)",
-                                 f"removed {gone[0]}", f"removed {gone[1]}"])
+                                 "no manifest (stopped run?)"])
 
     def test_without_the_flag_the_same_folder_stays(self):
         folder = self.leftover("2026-09-01")
@@ -553,6 +553,52 @@ class MovedCopies(Case):
         self.assertEqual(list(self.nas.iterdir()), [])
         self.assertEqual(dry, [f"would finish removing {doomed}, which an earlier prune stopped inside"])
         self.assertEqual(lines, [f"finished removing {doomed}, which an earlier prune stopped inside"])
+
+    def test_a_prune_stopped_while_verifying_keeps_what_it_removed_before(self):
+        # fleet sd:5543: every expired copy was hashed before the first removal, so the job's
+        # 300 s bound stopped each hourly run before anything went, and the next started over.
+        old = [self.mirror(self.snapshot(datetime(2026, 10, day, 9, 0, tzinfo=UTC))) for day in (1, 2, 3)]
+        real = backup._check_backup
+        checked = []
+
+        def bound(path, **kwargs):
+            checked.append(path)
+            if len(checked) == 2:
+                raise KeyboardInterrupt  # the job's time bound, while the second copy is hashed
+            return real(path, **kwargs)
+
+        with mock.patch.object(backup, "_check_backup", bound), self.assertRaises(KeyboardInterrupt):
+            prune_older(self.nas, 7, now=NOW, moved=True)
+
+        self.assertEqual(sorted(self.nas.iterdir()), old[1:])
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), old[1:])
+        self.assertEqual(list(self.nas.iterdir()), [])
+
+    def test_each_copy_is_hashed_once_a_run(self):
+        old = [self.mirror(self.snapshot(datetime(2026, 10, day, 9, 0, tzinfo=UTC))) for day in (1, 2)]
+        real = backup._retention_inventory
+        hashed = []
+
+        def counted(directory, **kwargs):
+            hashed.append(directory)
+            return real(directory, **kwargs)
+
+        with mock.patch.object(backup, "_retention_inventory", counted):
+            self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), old)
+        self.assertEqual(hashed, old)
+
+    def test_removals_are_reported_as_they_happen(self):
+        # A run the bound stops has then already named what it removed.
+        old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
+        broken = self.mirror(self.snapshot(datetime(2026, 10, 2, 9, 0, tzinfo=UTC)))
+        (broken / "added").write_bytes(b"not in the manifest")
+        halted = self.stopped(self.mirror(self.snapshot(datetime(2026, 10, 3, 9, 0, tzinfo=UTC))))
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [old])
+
+        self.assertEqual(lines, [f"removed {old}", f"kept {broken}: its files differ from its manifest",
+                                 f"kept 1 backup under {self.nas}, named {halted.name}: no manifest (stopped run?)"])
 
     def test_a_leftover_holding_a_special_entry_is_kept_and_listed(self):
         leftover = self.nas / ".2026-10-01.removing"
