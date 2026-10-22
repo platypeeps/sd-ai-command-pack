@@ -76,6 +76,11 @@ Codex exposes these procedures as skills: invoke `$sd-review`, `$sd-ship`, or `$
 Do not expect `/sd-*` entries in its slash-command menu.
 Shell commands remain separate; not every skill has an executable.
 
+## Pinned Checkout
+
+- The hub's serving checkout sits on a detached HEAD on purpose: it is pinned, so it moves only when the lane or `repo-sync.sh refresh` moves it (system sd:3097).
+- Do not switch it to a branch or report the detached HEAD as a fault; make changes in a worktree.
+
 ## When the Git Wrapper Is Refused
 
 - In a worktree-isolated session the guard refuses the hook's wrapped `git`; call `/usr/bin/git` and say so in the report.

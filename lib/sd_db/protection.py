@@ -101,7 +101,10 @@ when scanning is on in a public repository, its open alerts. The setting
 comes with the repository read the basic observation already made; the
 alert pages are read last, from what the observations and bypass reads
 left, so they never take a repository's three. An alert read that fails is
-that read's `reason`, never a count of zero. Health reads the row and calls
+that read's `reason`, never a count of zero. A refused Dependabot read in a
+repository the token administers costs one probe of the setting; when GitHub
+says the alerts are off, `dependabot` is `{setting: "disabled"}`, a state of
+its own rather than a failed read (sd:5594). Health reads the row and calls
 nothing.
 
 **A side observation, not the tracker.** `shadow_sync.sync` calls `sync`
@@ -190,8 +193,12 @@ SECONDS_PER_REPO = 3.0
 BYPASS_MARGIN_PER_REPO = 1
 
 #: What `reserve` holds back per managed repository for its alerts: one page
-#: of open Dependabot alerts and one of open secret-scanning alerts.
-ALERT_REQUESTS_PER_MANAGED = 2
+#: of open Dependabot alerts, the setting probe a 403 on it costs, and one
+#: page of open secret-scanning alerts.
+ALERT_REQUESTS_PER_MANAGED = 3
+#: What the client raises when GitHub refuses the Dependabot alert read; a
+#: repository with the alerts off answers it, as do others (`_dependabot`).
+ALERTS_FORBIDDEN = "API HTTP 403; retry on a later collection"
 #: One page of alerts, GitHub's largest; past it the count is "100+".
 ALERT_PAGE_SIZE = 100
 
@@ -1818,18 +1825,40 @@ def _open_alerts(client, path: str, *, severity: bool = False) -> dict[str, Any]
     return found
 
 
+def _dependabot(client, owner: str, name: str, repo: dict[str, Any]) -> dict[str, Any]:
+    """`_open_alerts` for Dependabot, or `{setting: "disabled"}` when the read
+    was refused and GitHub says the alerts are off.
+
+    GitHub refuses the read with a 403 for a repository whose alerts are off,
+    but a 403 alone does not say why. `vulnerability-alerts` answers 404 when
+    they are off and 204 when they are on, and only to an admin, so without
+    `admin` it is not asked. A 204, a failure or a spent budget keeps the 403.
+    """
+    from .contribution_github import Unavailable
+
+    found = _open_alerts(client, alert_path(owner, name, "dependabot"), severity=True)
+    if found != {"reason": ALERTS_FORBIDDEN} or not _administers(repo) or _exhausted(client):
+        return found
+    try:
+        probed, _ = client.request(f"repos/{owner}/{name}/vulnerability-alerts", missing=True)
+    except Unavailable:
+        return found
+    return {"setting": "disabled"} if probed is None else found
+
+
 def alerts(client, owner: str, name: str, repo: dict[str, Any]) -> dict[str, Any]:
     """A managed repository's `body.alerts`: `dependabot` and `secret_scanning`.
 
     `dependabot` is `{archived: true}` for an archived repository, which
-    Health leaves out, else `_open_alerts`. `secret_scanning` carries the
+    Health leaves out, else `_dependabot`: `{setting: "disabled"}` when its
+    alerts are off, else `_open_alerts`. `secret_scanning` carries the
     `visibility`; for a public repository also the `setting` from
     `security_and_analysis` -- None when the object does not show it, which
     it does only to an admin -- and, when the setting is `enabled`, the open
     alerts. A private repository is not scanned, by policy, and reads nothing.
     """
     dependabot = ({"archived": True} if repo.get("archived") is True else
-                  _open_alerts(client, alert_path(owner, name, "dependabot"), severity=True))
+                  _dependabot(client, owner, name, repo))
     private = repo.get("private")
     if private is True:
         return {"dependabot": dependabot, "secret_scanning": {"visibility": "private"}}

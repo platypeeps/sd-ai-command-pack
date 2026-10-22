@@ -3404,8 +3404,10 @@ def render_actions(rows: list[dict[str, Any]], stream: TextIO) -> None:
 def _render_pack(result: dict[str, Any], write: Any) -> None:
     pack = result["pack"]
     dirty = ", dirty" if pack["dirty"] else ""
+    # A detached checkout is pinned on purpose (system sd:3097), not a fault (sd:5675).
+    branch = "pinned" if pack["branch"] == "HEAD" else pack["branch"]
     write(f"sd-status: {result['repo']}\n")
-    write(f"  pack: {pack['root']} ({pack['branch']} @ {pack['head']}{dirty})\n")
+    write(f"  pack: {pack['root']} ({branch} @ {pack['head']}{dirty})\n")
 
 
 #: A backlog of a hundred `planning` items is a real state of the world (it is
