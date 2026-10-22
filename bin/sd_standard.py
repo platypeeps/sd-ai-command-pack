@@ -295,6 +295,7 @@ def github_steps(call: sd_ci.Call, repo: dict, takes_issues: bool) -> list[Step]
 
 
 def open_stamp_item(connection: Any, path: str) -> int | None:
+    sd_lib.import_sd_db()
     from sd_db import paths  # noqa: PLC0415
 
     # Every stored form of the path, as repos.row_for probes: an item written before 014 holds the absolute one.
@@ -346,6 +347,7 @@ def _only(stamped: Any, change: Any) -> Any:
 
 
 def _file_stamp_item(connection: Any, path: str, paths: str) -> None:
+    sd_lib.import_sd_db()
     from sd_db import workflow  # noqa: PLC0415
 
     if open_stamp_item(connection, path) is None:
@@ -359,6 +361,7 @@ def _file_stamp_item(connection: Any, path: str, paths: str) -> None:
 
 def row_steps(connection: Any, row: Any) -> list[Step]:
     """D4, D3, then D1 and D2 last: the lane takes the repository up only once both are set."""
+    sd_lib.import_sd_db()
     from sd_db import repos  # noqa: PLC0415
 
     path = row["path"]
@@ -402,6 +405,7 @@ def row_steps(connection: Any, row: Any) -> list[Step]:
 
 def used_before(connection: Any, path: str) -> bool:
     """Lane history for `path`: a runner run, or an item `sd-ship` moved. It picks a default button, nothing more."""
+    sd_lib.import_sd_db()
     from sd_db import paths  # noqa: PLC0415
 
     probe, marks = paths.keys(path), paths.placeholders(paths.keys(path))
@@ -416,6 +420,7 @@ def used_before(connection: Any, path: str) -> bool:
 
 
 def build_plan(root: pathlib.Path, sources: Sources) -> Plan:
+    sd_lib.import_sd_db()
     from sd_db import repos  # noqa: PLC0415
 
     origin = sd_lib.git_output(["config", "--get", "remote.origin.url"], root)
