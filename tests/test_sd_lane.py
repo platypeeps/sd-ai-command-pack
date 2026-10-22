@@ -2030,7 +2030,7 @@ class LineLimits(SharedQueue):
         self.assertEqual((self.rows(), "push" in self.git_verbs, self.remote_tip(tree.name)), ([], False, None))
         return refused.exception
 
-    def test_a_long_title_body_line_and_commit_line_are_named_before_any_push(self) -> None:
+    def test_long_title_body_and_commit_lines_are_named_before_any_push(self) -> None:
         tree, [first, _] = self.committed("topic", "s" * 73 + "\n\n" + "w" * 72 + "\n" + "b" * 80, "fine")
         self.body.write_text("## Summary\n\n" + "x" * 75 + "\n", encoding="utf-8")
         refused = self.refused(tree, "t" * 64)
