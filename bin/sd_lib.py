@@ -3580,11 +3580,55 @@ class _Terminated(BaseException):
     """SIGTERM, raised while `term_ends_group` holds it for a group that must end first."""
 
 
+#: A SIGTERM `_raise_terminated` holds while the main thread spawns a group (`spawn_group`, sd:5792).
+_TERM_HELD = {"spawning": False, "pending": False}
+
+
 def _raise_terminated(number: int, frame: object) -> None:
     import signal  # noqa: PLC0415 - only the group helpers need it
 
     signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a second SIGTERM must not cut the group's end short
+    if _TERM_HELD["spawning"]:
+        _TERM_HELD["pending"] = True
+        return
     raise _Terminated
+
+
+def _main_thread() -> bool:
+    import threading  # noqa: PLC0415 - only the group helpers need it
+
+    return threading.current_thread() is threading.main_thread()
+
+
+def spawn_group(argv: list[str], **popen: Any) -> subprocess.Popen:
+    """`Popen(argv)` leading a new group; a SIGTERM that lands before it returns is held (sd:5792).
+
+    Under load the group started, and wrote its pids, while the parent was
+    still inside `Popen`. A SIGTERM there raised `_Terminated` before the
+    caller held the process, so no `finally` ended the group. The caller
+    calls `release_term()` first inside the `try` whose `finally` ends the
+    group; it raises the held SIGTERM there. Only the main thread runs
+    signal handlers, so only it holds.
+    """
+    held = _main_thread()
+    if held:
+        _TERM_HELD["spawning"] = True
+    try:
+        return subprocess.Popen(list(argv), start_new_session=True, **popen)
+    except BaseException:
+        if held:
+            release_term()
+        raise
+
+
+def release_term() -> None:
+    """End `spawn_group`'s hold: raise `_Terminated` for a SIGTERM it held."""
+    if not _main_thread():
+        return
+    _TERM_HELD["spawning"] = False
+    if _TERM_HELD["pending"]:
+        _TERM_HELD["pending"] = False
+        raise _Terminated
 
 
 def _drained(process: subprocess.Popen) -> tuple[str, str]:
@@ -3678,12 +3722,13 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
     can end it early (sd:3361).
     """
     with term_ends_group():
-        process = subprocess.Popen(
-            list(argv), cwd=str(cwd), env=dict(env), text=True, start_new_session=True,
+        process = spawn_group(
+            list(argv), cwd=str(cwd), env=dict(env), text=True,
             stdin=subprocess.DEVNULL if input_text is None else subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         timed_out = False
         try:
+            release_term()
             if started is not None:
                 started(process.pid)
             output, errors = process.communicate(input_text, timeout=timeout)
