@@ -156,6 +156,9 @@ class TheRow(Briefs):
             with self.subTest(line=line):
                 found = routine_briefs.counts(DAILY, f"---\n{line}\ntags: x\n---\nbody\n")
                 self.assertEqual(found["signal_topics"], topics)
+        block = "signal-topics:\n  # the routine's own\n  - mezmo\n\n  - agntcy\nquiet-topics:\n  - politics"
+        self.assertEqual(routine_briefs.counts(DAILY, f"---\n{block}\n---\nbody\n")["signal_topics"],
+                         ["mezmo", "agntcy"], "codex review: a comment or blank line in the list dropped topics")
         self.assertNotIn("signal_topics", routine_briefs.counts(DAILY, TEXT))
         self.assertNotIn("signal_topics", routine_briefs.counts(DAILY, "---\na: b\n---\nsignal-topics:\n  - x\n"))
 

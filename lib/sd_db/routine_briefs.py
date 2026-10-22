@@ -182,7 +182,7 @@ def signal_topics(frontmatter: list[str]) -> list[str] | None:
 
     The routines write a block list (`  - <slug>` lines). A flow list
     (`[a, b]`), one bare slug and an empty value are read too; a YAML
-    comment and quotes are dropped.
+    comment, a blank line and quotes are dropped.
     """
     for index, line in enumerate(frontmatter):
         found = SIGNAL_TOPICS.fullmatch(line)
@@ -196,6 +196,8 @@ def signal_topics(frontmatter: list[str]) -> list[str] | None:
         else:
             items = []
             for item in frontmatter[index + 1:]:
+                if not _uncommented(item):
+                    continue  # a blank or comment line sits inside a YAML list
                 listed = re.fullmatch(r"\s+- (.*)|- (.*)", item)
                 if listed is None:
                     break
