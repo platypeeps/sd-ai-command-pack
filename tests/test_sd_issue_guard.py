@@ -411,10 +411,13 @@ class TheGuardIsShipped(unittest.TestCase):
             ("bin/sd-issue-guard", "PreToolUse", ("Bash|mcp__github__issue_write",)),
             sd_install.HOOK_SPECS)
 
-    def test_the_pack_settings_deny_both_tools(self) -> None:
-        deny = json.loads(SETTINGS.read_text(encoding="utf-8"))["permissions"]["deny"]
-        self.assertIn("Bash(gh issue create:*)", deny)
-        self.assertIn("mcp__github__issue_write", deny)
+    def test_the_pack_settings_deny_gh_and_leave_issue_write_to_the_hook(self) -> None:
+        """sd:5721. A settings deny beats the hook's `ask`, so the operator could
+        never approve an external issue from a pack session."""
+        permissions = json.loads(SETTINGS.read_text(encoding="utf-8"))["permissions"]
+        self.assertIn("Bash(gh issue create:*)", permissions["deny"])
+        for rules in permissions.values():
+            self.assertNotIn("mcp__github__issue_write", rules)
 
 
 if __name__ == "__main__":
