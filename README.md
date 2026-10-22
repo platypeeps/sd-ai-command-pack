@@ -70,9 +70,10 @@ other halves are, is in [domain packs](docs/domain-packs.md).
 - four hook entries in `~/.claude/settings.json` — `SessionStart` for
   `sd-handoff-restore`, `PreToolUse` and `UserPromptSubmit` for
   `sd-skill-use`, and `PreToolUse` on `Bash` and `mcp__github__issue_write`
-  for `sd-issue-guard`, which denies filing a GitHub issue from a managed
-  repository and points to `sd task add`; with `repo.github_issues` on, it
-  lets an update of that repository's own issue through. `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
+  for `sd-issue-guard`, which decides by the target an `issue_write` call names: it
+  denies an issue in a managed repository and points to `sd task add`, and
+  asks the operator about an issue anywhere else; with `repo.github_issues`
+  on, it lets an update of a managed repository's own issue through. `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
   line describes it and does not govern it.
 - one line — `CLAUDE.local.md` — in the global git excludes
 

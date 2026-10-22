@@ -26,7 +26,6 @@
     ],
     "deny": [
       "Bash(gh issue create:*)",
-      "mcp__github__issue_write",
       "Read(//**/.env)",
       "Read(//**/.env.local)",
       "Read(//**/.env.*.local)",
