@@ -186,6 +186,50 @@ class Prune(lane_suite.Lane):
         self.assertEqual(git(self.repo, "rev-parse", "refs/heads/b1~1"), made[-1])
         self.assertEqual([row["branch"] for row in result["deleted"]], ["bundle"])
 
+    def test_a_branch_checked_out_after_the_check_stays(self) -> None:
+        _, head = self.landed_bundle()
+        held, reads = sd_lane.held_branches, []
+
+        def check_out_b1_then_read(main: pathlib.Path) -> dict[str, str]:
+            reads.append(main)
+            return {**held(main), **({"b1": "checked out in elsewhere"} if len(reads) == 2 else {})}
+        with mock.patch.object(sd_lane, "held_branches", check_out_b1_then_read):
+            result = sd_lane.prune_landed(self.repo, [head])
+        self.assertEqual({row["branch"]: row["reason"] for row in result["kept"]}["b1"], "checked out in elsewhere")
+        self.assertIn("b1", self.branches())
+
+    def test_a_failed_read_keeps_that_branch_as_unknown(self) -> None:
+        _, head = self.landed_bundle()
+        read = sd_lane.read_git
+
+        def merge_tree_fails_for_b1(tree: pathlib.Path, *args: str, **options: object) -> object:
+            if args[0] == "merge-tree" and args[-1] == git(self.repo, "rev-parse", "b1"):
+                raise sd_lane.LaneError("no answer", code=sd_lane.PUBLISH_UNKNOWN)
+            return read(tree, *args, **options)
+        with mock.patch.object(sd_lane, "read_git", merge_tree_fails_for_b1):
+            result = sd_lane.prune_landed(self.repo, [head])
+        self.assertEqual({row["branch"]: row["reason"] for row in result["kept"]}["b1"], "unknown: no answer")
+        self.assertEqual([row["branch"] for row in result["deleted"]], ["bundle"])
+
+    def test_a_run_killed_between_deletes_is_finished_by_the_next(self) -> None:
+        _, head = self.landed_bundle()
+        delete, calls = sd_lane.delete_branch, []
+
+        class Killed(BaseException):
+            pass
+
+        def killed_at_the_second(main: pathlib.Path, branch: str, tip: str) -> str | None:
+            calls.append(branch)
+            if len(calls) == 2:
+                raise Killed
+            return delete(main, branch, tip)
+        with mock.patch.object(sd_lane, "delete_branch", killed_at_the_second), self.assertRaises(Killed):
+            sd_lane.prune_landed(self.repo, [head])
+        self.assertEqual(self.branches(), ["bundle", "feature", "main"])
+        result = sd_lane.prune_landed(self.repo, [head])
+        self.assertEqual([row["branch"] for row in result["deleted"]], ["bundle"])
+        self.assertEqual(self.branches(), ["feature", "main"])
+
     def test_a_dry_run_deletes_nothing(self) -> None:
         _, head = self.landed_bundle()
         result = sd_lane.prune_landed(self.repo, [head], dry_run=True)
