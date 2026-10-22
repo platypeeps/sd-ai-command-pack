@@ -5,8 +5,10 @@ One brief is one row of kind `report`, `source` `brief`, `external_id` and
 `done`: the quiet-report rule keeps it off work views, and the Reports
 list and its verbs leave it alone (`reporting`). `body` is `{"text": <the
 whole file>}`; `fields.brief` holds what a page shows without reading the
-text: series, day, when it was first filed, words, a lead and the text's
-sha256. `sd_db.brief` is the session brief, a different thing.
+text: series, day, when it was first filed, words, a lead, the text's
+sha256, and `signal_topics`, the frontmatter's `signal-topics` slugs
+(sd:5798). A brief with no such key, or one filed before, has no
+`signal_topics`: not recorded, which is no empty list. `sd_db.brief` is the session brief, a different thing.
 
 **The row is the source of truth.** No file replaces a row that exists and
 differs. `add` takes one only with a flag: `extend` when the row's text is a
@@ -165,8 +167,49 @@ def counts(stem: str, text: str) -> dict[str, Any]:
     if end is None:
         raise BriefUnusable(f"{stem}: the text must open with frontmatter between two `---` lines")
     body = " ".join("\n".join(lines[end + 1:]).split())
+    topics = signal_topics(lines[1:end])
     return {"series": found[2], "day": day, "words": len(body.split()), "lead": body[:LEAD],
-            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest()}
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            **({} if topics is None else {"signal_topics": topics})}
+
+
+#: A frontmatter `signal-topics:` line, and the value after it.
+SIGNAL_TOPICS = re.compile(r"signal-topics:(.*)")
+
+
+def signal_topics(frontmatter: list[str]) -> list[str] | None:
+    """The `signal-topics` slugs of `frontmatter`'s lines, in order, once each; None with no such key.
+
+    The routines write a block list (`  - <slug>` lines). A flow list
+    (`[a, b]`), one bare slug and an empty value are read too; a YAML
+    comment, a blank line and quotes are dropped.
+    """
+    for index, line in enumerate(frontmatter):
+        found = SIGNAL_TOPICS.fullmatch(line)
+        if found is None:
+            continue
+        value = _uncommented(found[1])
+        if value.startswith("[") and value.endswith("]"):
+            items = value[1:-1].split(",")
+        elif value:
+            items = [value]
+        else:
+            items = []
+            for item in frontmatter[index + 1:]:
+                if not _uncommented(item):
+                    continue  # a blank or comment line sits inside a YAML list
+                listed = re.fullmatch(r"\s+- (.*)|- (.*)", item)
+                if listed is None:
+                    break
+                items.append(listed[1] if listed[1] is not None else listed[2])
+        slugs = (_uncommented(item).strip("'\"") for item in items)
+        return list(dict.fromkeys(slug for slug in slugs if slug))
+    return None
+
+
+def _uncommented(value: str) -> str:
+    """`value` without a YAML comment (` #` on) and surrounding spaces."""
+    return re.sub(r"(^|\s)#.*", "", value).strip()
 
 
 def add(connection: sqlite3.Connection, stem: str, text: str, *, repo: str, who: str,

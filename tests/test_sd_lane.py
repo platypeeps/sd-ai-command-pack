@@ -2160,6 +2160,70 @@ class ItemChecks(SharedQueue):
         self.assertEqual([row["status"] for row in self.entries()], ["failed"])
 
 
+class LineLimits(SharedQueue):
+    """sd:5793: enqueue refuses a title over 63 characters, or a body or commit line over 72.
+
+    Some repositories lint every commit line at 72; the squash subject is
+    the title and ` (#NNNNN)`. The refusal names each line before anything
+    is pushed or queued.
+    """
+
+    def refused(self, tree: pathlib.Path, title: str) -> sd_lane.LaneError:
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.enqueue_entry(tree, 1, title, self.body, self.environ, claim="deliver")
+        self.assertEqual((self.rows(), "push" in self.git_verbs, self.remote_tip(tree.name)), ([], False, None))
+        return refused.exception
+
+    def test_long_title_body_and_commit_lines_are_named_before_any_push(self) -> None:
+        tree, [first, _] = self.committed("topic", "s" * 73 + "\n\n" + "w" * 72 + "\n" + "b" * 80, "fine")
+        self.body.write_text("## Summary\n\n" + "x" * 75 + "\n", encoding="utf-8")
+        refused = self.refused(tree, "t" * 64)
+        self.assertEqual(refused.code, "line_too_long")
+        self.assertIn(f"the title is 64 characters (limit 63); body line 3 is 75 characters (limit 72); "
+                      f"commit {first[:12]} line 1 is 73 characters (limit 72); "
+                      f"commit {first[:12]} line 4 is 80 characters (limit 72); nothing was queued", str(refused))
+
+    def test_lines_at_the_limit_a_fence_and_a_bare_url_are_queued(self) -> None:
+        url = "https://example.test/" + "p" * 80
+        tree, _ = self.committed("topic", "s" * 72 + "\n\n" + url + "\n\n```\n" + "c" * 90 + "\n```")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "main moves")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(tree, "merge", "-q", "--no-ff", "-m", "m" * 72, "origin/main")
+        self.body.write_text("b" * 72 + f"\n{url}\n~~~\n" + "c" * 90 + "\n", encoding="utf-8")
+        entry = sd_lane.enqueue_entry(tree, 1, "t" * 63, self.body, self.environ, claim="deliver")
+        self.assertEqual((entry["status"], self.remote_tip("topic")), ("pending", entry["expected_head"]))
+
+    def test_a_merge_commit_is_a_branch_commit_too(self) -> None:
+        """Codex review: `--no-merges` let a 90-character merge subject through; only two exemptions exist."""
+        tree, _ = self.committed("topic", "fine")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "main moves")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(tree, "merge", "-q", "--no-ff", "-m", "m" * 90, "origin/main")
+        merge = git(tree, "rev-parse", "HEAD")
+        refused = self.refused(tree, "t")
+        self.assertIn(f"commit {merge[:12]} line 1 is 90 characters (limit 72)", str(refused))
+
+    def test_commits_main_already_has_are_not_the_branchs(self) -> None:
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "m" * 90)
+        git(self.repo, "push", "-q", "origin", "main")
+        tree, _ = self.committed("topic", "fine")
+        self.assertEqual(sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")["status"],
+                         "pending")
+
+    def test_an_unreadable_branch_range_is_unknown_and_queues_nothing(self) -> None:
+        """Failures: no local `origin/main` to count the branch's commits from is no pass."""
+        tree, _ = self.committed("topic", "fine")
+        git(self.repo, "update-ref", "-d", "refs/remotes/origin/main")
+        self.assertEqual(self.refused(tree, "t").code, sd_lane.PUBLISH_UNKNOWN)
+
+    def test_an_entry_already_queued_is_not_checked_again(self) -> None:
+        """Older state: an entry queued before the limit retries with its long title and body."""
+        tree, _ = self.committed("topic", "fine")
+        sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+        sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed", title="t" * 80, body="b" * 80))
+        self.assertEqual(sd_lane.retry(self.repo, 1, self.environ)["title"], "t" * 80)
+
+
 class ClaimAndLease(SharedQueue):
     def test_a_claim_that_lands_with_its_answer_lost_is_put_back_by_the_next_run(self) -> None:
         """Failure table, claim: the hub fails after the claim landed; no step starts, and reclaim puts it back."""

@@ -5,9 +5,10 @@ shell scripts kept in its scratchpad. The chain died with the session, and a
 second chain started beside it raced it. This keeps the chain in the hub
 database and runs it under one runner lock per repository:
 
-  enqueue  check the item as prepare would (sd:3473), publish the head, then
-           add a worktree, its item, branch and head, a title and the body
-           text to the repository's queue;
+  enqueue  check the item as prepare would (sd:3473), refuse a title over
+           63 characters or a body or commit line over 72 (sd:5793),
+           publish the head, then add a worktree, its item, branch and
+           head, a title and the body text to the repository's queue;
   list     print the queue, each body as its size;
   cancel   mark a pending entry cancelled, or release a stuck running one;
            `--expected-claim <holder token>:<step>` releases only the
@@ -565,7 +566,8 @@ def publish_git(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess[s
         return None
 
 
-def publish_head(root: pathlib.Path, branch: str, head: str) -> str | None:
+def publish_head(root: pathlib.Path, branch: str, head: str,
+                 check: Callable[[str], None] | None = None) -> str | None:
     """Put `head` on `origin/<branch>`; None once it is there, else `DEFAULT_BRANCH`, `HEAD_GONE` or `BRANCH_DIVERGED` (sd:3282).
 
     Another host runs an entry only from a commit on `origin`. The one push is
@@ -578,6 +580,8 @@ def publish_head(root: pathlib.Path, branch: str, head: str) -> str | None:
     there lands commits no pull request reviewed. The default branch is the
     `HEAD` symref `origin` advertises in the same read as the tip, never a
     local `origin/HEAD` or a guess; no symref is `PUBLISH_UNKNOWN`.
+    `check`, when given, reads that default branch's name before anything
+    is fetched or pushed, and refuses by raising.
     """
     if not branch:
         return DEFAULT_BRANCH
@@ -604,6 +608,8 @@ def publish_head(root: pathlib.Path, branch: str, head: str) -> str | None:
                         "Nothing was queued or pushed; retry when origin answers.", code=PUBLISH_UNKNOWN)
     if branch == default:
         return DEFAULT_BRANCH
+    if check is not None:
+        check(default)
     tip = next((name for name, *rest in listed if rest == [ref]), None)
     if tip == head:
         return None
@@ -619,9 +625,10 @@ def publish_head(root: pathlib.Path, branch: str, head: str) -> str | None:
     return None
 
 
-def require_published(root: pathlib.Path, branch: str, head: str, gone: str) -> None:
+def require_published(root: pathlib.Path, branch: str, head: str, gone: str,
+                      check: Callable[[str], None] | None = None) -> None:
     """`publish_head`, refusing a definite answer: `gone` says what to do when the head's commit is nowhere."""
-    found = publish_head(root, branch, head)
+    found = publish_head(root, branch, head, check)
     if found == DEFAULT_BRANCH:
         raise LaneError(f"{branch or 'a detached HEAD'} is not a feature branch: the lane publishes and prepares a "
                         "branch other than origin's default; nothing was queued or pushed.", code=DEFAULT_BRANCH)
@@ -659,9 +666,9 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     is refused when absent as prepare refuses it; it reaches prepare
     unchanged, as do `closes`, the other items a `--deliver` merge closes
     (sd:3704). The entry holds the body and acceptance texts, not their
-    paths. The item is checked as prepare checks it (`check_item`), then the
-    head is published (`publish_head`); any answer but published refuses,
-    and nothing is queued.
+    paths. The item is checked as prepare checks it (`check_item`), and the
+    lines as a commit lint would (`check_lines`), then the head is published
+    (`publish_head`); any answer but published refuses, and nothing is queued.
     """
     worktree = worktree.resolve()
     sd_lib.refuse_unmanaged(worktree, LaneError)  # its prepare would refuse; do not queue it
@@ -690,8 +697,31 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
              "acceptance": acceptance_file.read_text(encoding="utf-8") if acceptance_file else None,
              "authority": "manual" if manual else None, "claim": claim, "enqueued_on": this_host(),
              "worktree": str(worktree), "status": "pending", "enqueued_at": stamp_now()}
-    require_published(worktree, branch, head, f"{head} names no commit in {worktree}")
+    require_published(worktree, branch, head, f"{head} names no commit in {worktree}",
+                      lambda base: check_lines(worktree, title, body, base, head))
     return add_entry(queue, entry)
+
+
+def check_lines(worktree: pathlib.Path, title: str, body: str, base: str, head: str) -> None:
+    """Refuse a title, body line or commit line too long for a commit lint (sd:5793).
+
+    The commits are those `head` adds to `origin/<base>`, merges included:
+    only a fenced line or a bare URL is exempt. Only enqueue checks; an
+    entry already queued is not checked again (`retry`). A failed read is
+    an unknown answer, not a pass: nothing is queued.
+    """
+    import sd_ship_body  # noqa: PLC0415
+    from sd_ship_remote import Refusal  # noqa: PLC0415
+    raw = lane_git(worktree, "log", "--format=%H%x1f%B%x1e", f"refs/remotes/origin/{base}..{head}")
+    if raw is None:
+        raise LaneError(f"Cannot read the commits {head} adds to origin/{base}; fetch origin, then enqueue "
+                        "again. Nothing was queued or pushed.", code=PUBLISH_UNKNOWN)
+    commits = [(sha.strip(), message) for sha, _, message in
+               (chunk.strip("\n").partition("\x1f") for chunk in raw.split("\x1e")) if sha.strip()]
+    try:
+        sd_ship_body.refuse_long_lines(title, body, commits)
+    except Refusal as error:
+        raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
 
 
 def check_item(connection: Any, worktree: pathlib.Path, item: int, body: str, claim: str | None,
@@ -3197,8 +3227,10 @@ def add_lane_verbs(commands: Any) -> None:
     adder = verbs.add_parser("enqueue", help="queue this worktree's item for prepare and merge")
     adder.add_argument("--item", type=int, action="append", dest="items", required=True,
                        help="the claimed item; repeat it to name each other item a --deliver merge closes (sd:3704)")
-    adder.add_argument("--title", required=True)
-    adder.add_argument("--body-file", type=pathlib.Path, required=True)
+    adder.add_argument("--title", required=True, help="the squash subject; refused over 63 characters (sd:5793)")
+    adder.add_argument("--body-file", type=pathlib.Path, required=True,
+                       help="the body; refused with a line, or a branch commit line, over 72 characters, "
+                            "outside a code fence or a bare URL (sd:5793)")
     adder.add_argument("--expected-head", help="the head the worktree must still be at (default: HEAD now)")
     adder.add_argument("--manual", action="store_true",
                        help="authorize the runner to merge when repo.runner_merge is manual; auto needs no flag")

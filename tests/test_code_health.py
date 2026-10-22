@@ -1588,7 +1588,7 @@ UNSHIELDED = {
     "test_requirements_target.py": 1,
     "test_rule_registry.py": 1,
     "test_run_tests_split_fixtures.py": 3,
-    "test_sd_check.py": 8,
+    "test_sd_check.py": 7,
     "test_sd_check_scope.py": 1,
     "test_sd_ci.py": 3,
     "test_sd_codex.py": 1,

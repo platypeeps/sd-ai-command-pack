@@ -28,6 +28,8 @@ if str(REPO_ROOT / "bin") not in sys.path:
 
 import sd_lib  # noqa: E402
 
+from tests.clean_env import clean_environment  # noqa: E402
+
 PY = shlex.quote(sys.executable)
 
 
@@ -493,6 +495,41 @@ class TimeoutTests(CheckFixture):
 ORPHAN_CHECK = 'sleep 60 &\necho "$$ $!" > pids\nwait\n'
 
 
+#: `run_group`, or `sd-ship`'s `review_process`, as argv[2] names, in a process whose spawn is slowed after
+#: the fork, as a loaded machine deschedules it (sd:5792).
+SLOW_SPAWN = """import importlib.machinery, importlib.util, os, pathlib, subprocess, sys, time
+sys.path.insert(0, sys.argv[1])
+import sd_lib
+if sys.argv[2] == "review_process":
+    loader = importlib.machinery.SourceFileLoader("sd_ship_slow", sys.argv[1] + "/sd-ship")
+    ship = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(ship)
+real = subprocess.Popen._execute_child
+def slow(self, *args, **kwargs):
+    real(self, *args, **kwargs)
+    time.sleep(3)
+subprocess.Popen._execute_child = slow
+if sys.argv[2] == "review_process":
+    ship.review_process(pathlib.Path.cwd(), ["sh", "orphan.sh"], timeout=60)
+else:
+    sd_lib.run_group(["sh", "orphan.sh"], cwd=pathlib.Path("."), env=dict(os.environ), timeout=60)
+"""
+
+#: How long a test waits for a check to start or an ended group to go: a bound for a loaded machine.
+PROCESS_BOUND_SECONDS = 30
+
+
+def group_exists(pgid: int) -> bool:
+    """Whether any process, a zombie included, is still in group `pgid`."""
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
 def running(pid: int) -> bool:
     """Alive and not a zombie waiting for its parent to reap it."""
     state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
@@ -513,8 +550,8 @@ class ProcessGroupTests(CheckFixture):
     which processes a signal reaches.
     """
 
-    def orphan_repo(self) -> pathlib.Path:
-        root = self.make_repo()
+    def orphan_repo(self, name: str = "repo") -> pathlib.Path:
+        root = self.make_repo(name)
         (root / "orphan.sh").write_text(ORPHAN_CHECK, encoding="utf-8")
         self.declare(root, check="sh orphan.sh")
         return root
@@ -527,7 +564,7 @@ class ProcessGroupTests(CheckFixture):
             pass
 
     def started(self, pids: pathlib.Path) -> list[int]:
-        deadline = time.monotonic() + 10
+        deadline = time.monotonic() + PROCESS_BOUND_SECONDS
         while not (pids.is_file() and pids.read_text().strip()):
             self.assertLess(time.monotonic(), deadline, "the check never recorded its pids")
             time.sleep(0.05)
@@ -537,19 +574,25 @@ class ProcessGroupTests(CheckFixture):
         return found
 
     def survivors(self, pids: list[int]) -> list[int]:
-        """What is still running a moment later: a killed process can take a tick to die, an orphan never does."""
-        deadline = time.monotonic() + 5
-        alive = [pid for pid in pids if running(pid)]
-        while alive and time.monotonic() < deadline:
+        """What still runs once the check's group is gone, or at `PROCESS_BOUND_SECONDS` if it never goes.
+
+        The first pid leads the group. A killed process can take seconds to
+        die on a loaded machine, and a fixed 5 s wait read two dying ones as
+        left running (sd:5792); an orphan never dies, so it still fails.
+        """
+        deadline = time.monotonic() + PROCESS_BOUND_SECONDS
+        while group_exists(pids[0]) and time.monotonic() < deadline:
             time.sleep(0.1)
-            alive = [pid for pid in alive if running(pid)]
-        return alive
+        return [pid for pid in pids if running(pid)]
 
     def stopped(self, number: int) -> tuple[int, str, list[int]]:
         """Start `sd-check` on the orphan check, send `number` to it alone, as `pkill` does."""
         root = self.orphan_repo()
+        # No gate slot: with the operator's home the check queued behind real gates, and under load
+        # never wrote its pids (sd:5792). A slot is no part of which processes a signal reaches.
         runner = subprocess.Popen([sys.executable, str(SD_CHECK)], cwd=str(root), stdout=subprocess.DEVNULL,
-                                  stderr=subprocess.PIPE, text=True, preexec_fn=default_interrupt)
+                                  stderr=subprocess.PIPE, text=True, preexec_fn=default_interrupt,
+                                  env=clean_environment(HOME=str(self.home), SD_GATE_SLOTS="0"))
         self.addCleanup(self.kill, runner.pid)
         pids = self.started(root / "pids")
         runner.send_signal(number)
@@ -567,6 +610,25 @@ class ProcessGroupTests(CheckFixture):
         code, _, alive = self.stopped(signal.SIGTERM)
         self.assertEqual(code, -signal.SIGTERM)
         self.assertEqual(alive, [], "left running after sd-check was terminated")
+
+    def test_a_term_during_the_spawn_takes_the_check_with_it(self) -> None:
+        """sd:5792: SIGTERM landed while `Popen` was still returning, so no `finally` held the process.
+
+        Under load the check had started and written its pids before the
+        parent left `Popen`; `_Terminated` left the group running.
+        """
+        for spawner in ("run_group", "review_process"):
+            with self.subTest(spawner=spawner):
+                root = self.orphan_repo(spawner)
+                runner = subprocess.Popen([sys.executable, "-c", SLOW_SPAWN, str(REPO_ROOT / "bin"), spawner],
+                                          cwd=str(root), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                                          text=True, env=clean_environment())
+                self.addCleanup(self.kill, runner.pid)
+                pids = self.started(root / "pids")
+                runner.send_signal(signal.SIGTERM)
+                runner.communicate(timeout=30)
+                self.assertEqual(runner.returncode, -signal.SIGTERM)
+                self.assertEqual(self.survivors(pids), [], "left running after a SIGTERM during the spawn")
 
     def test_an_interrupted_run_takes_its_check_with_it(self) -> None:
         code, errors, alive = self.stopped(signal.SIGINT)
