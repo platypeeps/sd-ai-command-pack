@@ -2970,6 +2970,9 @@ def main(argv=None) -> int:
     try:
         sd_lib.enter_directory(args.chdir, error=Refusal)
     except Refusal as error:
+        if args.command == "lane":  # its verbs take no --json and answer as `lane_main` refuses (sd:5773)
+            print(json.dumps({"ok": False, **sd_lane.refusal(error)}, indent=2, sort_keys=True))
+            return 3
         result = failure(args.command, error)
         print(json.dumps(result, indent=2, sort_keys=True) if args.json else result)
         return 3

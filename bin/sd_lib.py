@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import datetime
+import functools
 import hashlib
 import json
 import os
@@ -3584,10 +3585,13 @@ class _Terminated(BaseException):
 _TERM_HELD = {"spawning": False, "pending": False}
 
 
-def _raise_terminated(number: int, frame: object) -> None:
+def _raise_terminated(number: int, frame: object, first: Callable[[], None] | None = None) -> None:
     import signal  # noqa: PLC0415 - only the group helpers need it
 
     signal.signal(signal.SIGTERM, signal.SIG_IGN)  # a second SIGTERM must not cut the group's end short
+    if first is not None:
+        with contextlib.suppress(Exception):  # the block still unwinds, and this process still ends
+            first()
     if _TERM_HELD["spawning"]:
         _TERM_HELD["pending"] = True
         return
@@ -3676,7 +3680,7 @@ def _end_group(process: subprocess.Popen, *, drain: bool = False) -> tuple[str, 
 
 
 @contextlib.contextmanager
-def term_ends_group() -> Iterator[None]:
+def term_ends_group(first: Callable[[], None] | None = None) -> Iterator[None]:
     """For the block, SIGTERM raises `_Terminated`, so the block ends the group it leads; then SIGTERM ends this process.
 
     A group of its own no longer receives what is sent to the caller's group:
@@ -3685,6 +3689,11 @@ def term_ends_group() -> Iterator[None]:
     (sd:3203). The block's handler for `_Terminated`, or a `finally`, ends the
     group. Only the default disposition is replaced: a caller that handles or
     ignores SIGTERM keeps that, and a thread cannot install a handler.
+
+    The block that installed the handler ends this process; a block inside it
+    passes `_Terminated` on, so the outer block's own cleanup runs too. `first`
+    runs as SIGTERM arrives, before anything unwinds: the lane runner TERMs its
+    speculative gate there, which a group ending first would leave running (sd:5776).
     """
     import signal  # noqa: PLC0415 - only the group helpers need it
     import threading  # noqa: PLC0415
@@ -3692,12 +3701,13 @@ def term_ends_group() -> Iterator[None]:
     owns_term = (threading.current_thread() is threading.main_thread()
                  and signal.getsignal(signal.SIGTERM) is signal.SIG_DFL)
     if owns_term:
-        signal.signal(signal.SIGTERM, _raise_terminated)
+        signal.signal(signal.SIGTERM, functools.partial(_raise_terminated, first=first))
     try:
         yield
     except _Terminated:
-        signal.signal(signal.SIGTERM, signal.SIG_DFL)
-        os.kill(os.getpid(), signal.SIGTERM)
+        if owns_term:
+            signal.signal(signal.SIGTERM, signal.SIG_DFL)
+            os.kill(os.getpid(), signal.SIGTERM)
         raise
     finally:
         if owns_term:

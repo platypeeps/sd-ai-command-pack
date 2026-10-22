@@ -243,13 +243,21 @@ class SdToday(Zone):
         self.assertEqual(text.splitlines()[2::2], [f"{heading} (0)" for heading in sd_views.HEADINGS.values()])
 
     def test_two_runs_of_the_command_print_the_same_bytes(self):
-        """The real clock runs here; every time printed is a stored one, so only a run across midnight moves."""
+        """The real clock runs here; every time printed is a stored one, so only a run across midnight moves.
+
+        The machine's load is printed live, so a shim pins it: two runs at load 95.0 and 94.3 differed (sd:5782).
+        """
         fill(self.connection)
+        shim = self.home / "shim"
+        shim.mkdir()
+        (shim / "sitecustomize.py").write_text("import os\nos.getloadavg = lambda: (1.0, 2.0, 3.0)\n",
+                                               encoding="utf-8")
         runs = [subprocess.run([sys.executable, str(ROOT / "bin" / "sd"), "today"], capture_output=True, text=True,
                                env=clean_environment(HOME=str(self.home), COLUMNS="100",
-                                                     SD_GATE_SLOTS_DIR=str(self.home)),
+                                                     SD_GATE_SLOTS_DIR=str(self.home), PYTHONPATH=str(shim)),
                                check=True).stdout for _ in range(2)]
         self.assertEqual(runs[0], runs[1])
+        self.assertIn(" · load 1.0/2.0/3.0, limit ", runs[0])
         self.assertEqual([line for line in runs[0].splitlines() if line.endswith(")") and "(" in line][:4],
                          ["Attention (1)", "Operations, this machine (0)", "Decisions (1)", "Landing now (2)"])
 
