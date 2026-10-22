@@ -822,10 +822,20 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
     alive. A holder on another machine counts as stuck on the operator's word.
     `expected_claim` binds the cancel to the running claim the caller read
     (`check_claim`), in the write's transaction.
+
+    With neither, a prepared entry whose work merged outside the lane is
+    cancelled (sd:5743); `merged_by_hand` reads the proof.
     """
     if expected_claim is not None and not all(expected_claim.partition(":")[::2]):
         raise LaneError(f"name the claim as <holder token>:<step>, as `sd-ship lane list` prints them, "
                         f"not {expected_claim!r}")
+    queue, receipts = queue_for(root, environ), []
+
+    def read_receipts(connection: Any) -> None:
+        import sd_ship_squash  # noqa: PLC0415
+        if stale_prepared(stored(connection, queue.repository), item):
+            receipts[:] = [receipt for receipt in sd_ship_squash.merged_receipts(connection, queue.repository)
+                           if receipt.get("item") == item and receipt.get("phase") == "merged"]
 
     def mark(entries: list[dict[str, Any]]) -> dict[str, Any]:
         check_revision(entries, expected_revision)
@@ -838,10 +848,47 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
                                 "it is not stuck, so it is not released", code="holder_alive")
             reclaim(running, released=True)
             return running
+        prepared = stale_prepared(entries, item)
+        if prepared:
+            for row in prepared:
+                merge = merged_by_hand(root, row, receipts)
+                row.update(status="cancelled", finished_at=stamp_now(),
+                           reason=f"cancelled by the operator on {this_host()}: its head merged at {merge}")
+            return prepared[-1]
         row = pending_entry(entries, item)
         row.update(status="cancelled", finished_at=stamp_now(), reason=f"cancelled by the operator on {this_host()}")
         return row
-    return update(queue_for(root, environ), mark)
+    return update(queue, mark, read_receipts)
+
+
+def stale_prepared(entries: list[dict[str, Any]], item: int) -> list[dict[str, Any]]:
+    """`item`'s prepared entries when it has no pending or running one, which `cancel` takes first."""
+    if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in entries):
+        return []
+    return [row for row in entries if row.get("item") == item and row.get("status") == "prepared"]
+
+
+def merged_by_hand(root: pathlib.Path, entry: dict[str, Any], receipts: list[dict[str, Any]]) -> str:
+    """The merge commit of a receipt whose head holds `entry`'s queued head, or a refusal (sd:5743).
+
+    A prepared entry stopped for want of merge authority; the operator then
+    merged it by hand, and the entry read `prepared` for ever. Only a
+    `merged` receipt of the entry's item, on any branch, proves the merge: an
+    entry imported from the file queue can name another branch than the one
+    merged, a dispatch may not have landed, and a later head that does not
+    hold the queued one is other work. A receipt that cannot be read proves
+    nothing, so it can only refuse; a git read that fails refuses
+    `PUBLISH_UNKNOWN`.
+    """
+    item, head = entry.get("item"), str(entry.get("expected_head") or "")
+    for receipt in receipts:
+        merged = str(receipt.get("head") or "")
+        if head and merged and (merged == head or read_git(root, "merge-base", "--is-ancestor", head, merged,
+                                                             ok=(0, 1)).returncode == 0):
+            return str(receipt.get("merge_commit") or merged)
+    raise LaneError(f"sd:{item}'s prepared entry {entry.get('id')} at {head or 'no head'} has no merged ship receipt "
+                    "that holds its head; merge it with `sd-ship merge --item`, or queue it again with "
+                    "`sd-ship lane retry --manual`")
 
 
 def enqueue_order(connection: Any, repository: str) -> dict[str, int]:
@@ -3009,7 +3056,8 @@ def add_lane_verbs(commands: Any) -> None:
                                                  f"and {SUPERSEDED} after a newer entry; a cancelled entry needs it, "
                                                  f"and refuses {HEAD_MOVED} when its branch moved and "
                                                  f"{ALREADY_MERGED} at a merged head (sd:3389)")
-    canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled, or release a stuck running one")
+    canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled, release a stuck running one, "
+                                                    "or clear a prepared one a ship receipt shows merged")
     canceller.add_argument("item", type=sd_notes.item_id, help=sd_notes.ITEM_HELP)
     canceller.add_argument("--expected-claim", metavar="TOKEN:STEP",
                            help=f"release only the running claim `lane list` printed, its holder.token and step; "

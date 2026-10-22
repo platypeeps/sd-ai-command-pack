@@ -1706,6 +1706,19 @@ class SharedQueue(Lane):
             heads.append(git(tree, "rev-parse", "HEAD"))
         return tree, heads
 
+    def merged_receipt(self, branch: str, item: int, head: str, phase: str = "merged") -> None:
+        """The ship receipt `sd-ship merge` leaves for `branch` and `item`, in the lane or by hand."""
+        import sd_db
+        from sd_db import ship
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            key = ship.receipt_key("example/pack", branch, item)
+            ship.save(connection, key, ship.read(connection, key)[0],
+                      {"repository": "example/pack", "branch": branch, "item": item, "phase": phase, "head": head,
+                       "merge_commit": "1" * 40})
+        finally:
+            connection.close()
+
     def rows(self) -> list[tuple[str, dict]]:
         import sd_db
         connection = sd_db.connect(home=self.tmp, write=False)
@@ -3486,19 +3499,6 @@ class RetryCancelled(SharedQueue):
         self.assertEqual(refused.exception.code, sd_lane.HEAD_MOVED)
         self.assertEqual((self.rows(), self.remote_tip("topic-1")), (before, head))
 
-    def merged_receipt(self, branch: str, item: int, head: str, phase: str = "merged") -> None:
-        """The ship receipt `sd-ship merge` leaves for `branch` and `item`, in the lane or by hand."""
-        import sd_db
-        from sd_db import ship
-        connection = sd_db.connect(home=self.tmp)
-        try:
-            key = ship.receipt_key("example/pack", branch, item)
-            ship.save(connection, key, ship.read(connection, key)[0],
-                      {"repository": "example/pack", "branch": branch, "item": item, "phase": phase, "head": head,
-                       "merge_commit": "1" * 40})
-        finally:
-            connection.close()
-
     def test_a_cancelled_entry_whose_head_already_merged_is_refused(self) -> None:
         """Failure table, read: `sd-ship` merged a head that holds the cancelled one; a retry would ship it twice."""
         tree, head = self.cancelled()
@@ -3592,6 +3592,80 @@ class RetryCancelled(SharedQueue):
         sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
         self.assertNotIn("push", self.git_verbs)
         self.assertEqual([row["status"] for row in self.entries()], ["cancelled", "pending"])
+
+
+class CancelMerged(SharedQueue):
+    """sd:5743. `lane cancel` clears a prepared entry whose head a ship receipt shows merged; nothing else changes."""
+
+    def prepared(self) -> str:
+        """Item 1 enqueued without merge authority from its own worktree, run to `prepared`; its queued head."""
+        tree, [head] = self.committed("topic-1", "work")
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
+        return head
+
+    def test_a_prepared_entry_whose_head_merged_by_hand_is_cancelled(self) -> None:
+        """hoa sd:3115: merged by a manual `sd-ship merge` on another branch than its imported entry names."""
+        head = self.prepared()
+        self.merged_receipt("brief-by-hand", 1, head)
+        cancelled = sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual((cancelled["status"], [row["status"] for row in self.entries()]), ("cancelled", ["cancelled"]))
+        self.assertIn(f"merged at {'1' * 40}", cancelled["reason"])
+        self.assertIn(sd_lane.this_host(), cancelled["reason"])
+
+    def test_a_prepared_entry_whose_catch_up_merged_is_cancelled(self) -> None:
+        """A receipt at a later head that holds the queued one, such as prepare's catch-up, is the same work landed."""
+        head = self.prepared()
+        tree = self.tmp / "topic-1"
+        git(tree, "commit", "-q", "--allow-empty", "-m", "catch-up")
+        self.merged_receipt("topic-1", 1, git(tree, "rev-parse", "HEAD"))
+        self.assertEqual(sd_lane.cancel(self.repo, 1, self.environ)["status"], "cancelled")
+        self.assertEqual(self.entries()[0]["expected_head"], head)
+
+    def test_a_prepared_entry_without_a_merged_receipt_holding_its_head_is_refused(self) -> None:
+        """Evidence: no receipt, a dispatch only, another item's receipt, and a merge of other work each refuse."""
+        head = self.prepared()
+        main = git(self.repo, "rev-parse", "main")
+        for receipt in ((), ("topic-1", 1, head, "merge_dispatch"), ("topic-1", 2, head), ("main", 1, main)):
+            if receipt:
+                self.merged_receipt(*receipt)
+            before = self.rows()
+            with self.assertRaises(sd_lane.LaneError) as refused:
+                sd_lane.cancel(self.repo, 1, self.environ)
+            self.assertIn("no merged ship receipt", str(refused.exception), receipt)
+            self.assertEqual(self.rows(), before, receipt)
+        # A merged head this checkout cannot read is unknown, not "not merged".
+        self.merged_receipt("other", 1, "2" * 40)
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(refused.exception.code, sd_lane.PUBLISH_UNKNOWN)
+        self.assertEqual(self.entries()[0]["status"], "prepared")
+
+    def test_an_unreadable_receipt_proves_no_merge_and_blocks_no_other_cancel(self) -> None:
+        """Failures: a receipt that cannot be read is no proof, so it refuses, and a pending cancel is as before."""
+        import sd_db
+        self.prepared()
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            connection.execute("INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', 'ship:bad', "
+                               "'2026-10-22T00:00:00Z', 'not json')")
+        finally:
+            connection.close()
+        with self.assertRaisesRegex(sd_lane.LaneError, "no merged ship receipt"):
+            sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(self.entries()[0]["status"], "prepared")
+        sd_lane.enqueue_entry(self.committed("topic-2", "work")[0], 2, "two", self.body, self.environ, claim="deliver")
+        self.assertEqual(sd_lane.cancel(self.repo, 2, self.environ)["status"], "cancelled")
+
+    def test_a_failed_entry_of_a_merged_item_keeps_its_refusal(self) -> None:
+        """Only a prepared entry is cleared; a failed one keeps the refusal it had."""
+        head = self.prepared()
+        sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed"))
+        self.merged_receipt("topic-1", 1, head)
+        with self.assertRaisesRegex(sd_lane.LaneError, "no pending entry"):
+            sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(self.entries()[0]["status"], "failed")
 
 
 class Importing(SharedQueue):
