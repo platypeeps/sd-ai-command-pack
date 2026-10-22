@@ -62,12 +62,13 @@ class OwnedLine:
 _FENCE_RE = re.compile(r"^ {0,3}(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
 
 
-def quoted_lines(body: str) -> set[int]:
+def quoted_lines(body: str, comments: bool = True) -> set[int]:
     """The 1-based numbers of the lines of `body` a fenced code block or an HTML comment holds.
 
     A fence closes on a line of the same character, at least as long, and
     nothing else; an unclosed fence runs to the end. A comment holds a line
     when it is open where the line starts. Inside a fence a comment is text.
+    With `comments` false only fences count, and a comment is text too.
     """
     quoted: set[int] = set()
     fence = ""
@@ -88,7 +89,7 @@ def quoted_lines(body: str) -> set[int]:
             fence = match["fence"]
             continue
         rest = line
-        while True:
+        while comments:
             if commented:
                 end = rest.find("-->")
                 if end < 0:
@@ -296,6 +297,47 @@ def refuse_left_open(connection, item: int, repo: str, names, title: str, body: 
 def published(body: str, item: int) -> str:
     """The body as `sd-ship` publishes it: normalized, then one `Work:` line."""
     return f"{body}\n\n{sd_lib.WORK_TRAILER} sd:{item}\n"
+
+
+#: The longest commit message or body line; some repositories lint it
+#: (operator ruling 2026-10-22, sd:5793).
+LINE_LIMIT = 72
+#: The longest title: the squash subject is the title and ` (#<number>)`,
+#: which `sd-ship merge` adds as GitHub does; five digits are budgeted.
+TITLE_LIMIT = LINE_LIMIT - len(" (#NNNNN)")
+#: A line that is one bare URL and nothing else, which no wrap can shorten.
+_BARE_URL = re.compile(r"[A-Za-z][A-Za-z0-9+.-]*://\S+")
+
+
+def long_lines(text: str) -> list[tuple[int, int]]:
+    """`(line number, length)` of each line of `text` over `LINE_LIMIT`, 1-based.
+
+    Two kinds of line are exempt, and nothing else: a line a fenced code
+    block holds, and a line that is one bare URL. An HTML comment is no
+    exemption: git and a commit lint read its lines.
+    """
+    fenced = quoted_lines(text, comments=False)
+    lines = (line.rstrip("\r") for line in text.split("\n"))
+    return [(number, len(line)) for number, line in enumerate(lines, start=1)
+            if len(line) > LINE_LIMIT and number not in fenced and not _BARE_URL.fullmatch(line)]
+
+
+def refuse_long_lines(title: str, body: str, commits) -> None:
+    """Refuse a title over `TITLE_LIMIT`, or a body or commit line over `LINE_LIMIT` (sd:5793).
+
+    `commits` is each `(sha, message)` the branch adds. The refusal names
+    every offending line: where it is, its length and the limit.
+    """
+    found = [f"the title is {len(title)} characters (limit {TITLE_LIMIT})"] if len(title) > TITLE_LIMIT else []
+    found += [f"body line {number} is {length} characters (limit {LINE_LIMIT})"
+              for number, length in long_lines(body)]
+    found += [f"commit {sha[:12]} line {number} is {length} characters (limit {LINE_LIMIT})"
+              for sha, message in commits for number, length in long_lines(message)]
+    if found:
+        raise Refusal("lines too long: " + "; ".join(found),
+                      code="line_too_long", boundary="input", state="operator_decision",
+                      next_action=f"Keep the title at {TITLE_LIMIT} characters or less, wrap the named "
+                                  f"body and commit lines at {LINE_LIMIT}, then enqueue again.")
 
 
 def failures(result) -> list[str]:

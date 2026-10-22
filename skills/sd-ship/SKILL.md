@@ -112,6 +112,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    Each later `--item` on `sd-ship lane enqueue` names a co-delivered item; each gets `Delivers:` and closes on the merge (sd:3704).
    A body `Closes:` line is refused, and the title and commit `Delivers:` lines close nothing.
    A delivering enqueue refuses a title or `## Summary` heading `<repo> sd:N` naming an open item of this repository missing from `--item` (sd:5375).
+   Enqueue refuses `line_too_long` for a title over 63 characters, or a body or branch commit line over 72, outside a code fence or a bare URL (sd:5793).
    An `--associate-only` claim closes nothing (sd:3365).
    A body `Refs: sd:N` line names a related or partial item; the merge leaves it open.
    Record the row only after the remote confirms the merge.
