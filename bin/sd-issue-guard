@@ -248,7 +248,7 @@ def decision(where: Path, payload: dict) -> tuple[str, str] | None:
     try:
         try:
             if target is None:
-                key = sd_db.repos.registered_for(connection, str(Path(root).resolve()), origin)
+                key = sd_db.repos.registered_for(connection, str(Path(str(root)).resolve()), origin)
                 row = sd_db.repos.row_for(connection, key)
             else:
                 row = row_named(connection, target, sd_db)
