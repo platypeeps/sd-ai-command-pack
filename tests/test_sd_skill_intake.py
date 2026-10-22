@@ -523,6 +523,24 @@ class TheRollback(RollbackCase):
             self.rollback()
         self.assertEqual(self.tree(), before)
 
+    def test_an_edit_after_a_stopped_rollback_is_still_refused(self) -> None:
+        report = self.rollback()
+        with mock.patch.object(intake, "_keep", side_effect=OSError("stopped")), self.assertRaises(OSError):
+            self.rollback(approve=report["revision"])
+        self.installed.joinpath("SKILL.md").write_text("edited by hand\n", encoding="utf-8")
+        with self.assertRaisesRegex(intake.IntakeError, "changed since the intake wrote it"):
+            self.rollback()
+        self.assertEqual(self.installed.joinpath("SKILL.md").read_text(), "edited by hand\n")
+
+    def test_a_file_put_where_a_removed_skill_was_is_refused(self) -> None:
+        self.intake(URL.format("tabulate"), approve=self.intake(URL.format("tabulate"))["revision"])
+        self.rolled_back("sd-tabulate")
+        destination = self.root / "contrib" / "sd-tabulate"
+        destination.write_text("put here by hand\n", encoding="utf-8")
+        with self.assertRaisesRegex(intake.IntakeError, "changed since the intake wrote it"):
+            self.rollback("sd-tabulate")
+        self.assertEqual(destination.read_text(), "put here by hand\n")
+
     def test_a_committed_pack_copy_is_refused_and_names_git_revert(self) -> None:
         self.pack_git("init", "-q", "-b", "main")
         self.pack_git("add", "contrib", "skills")

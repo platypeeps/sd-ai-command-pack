@@ -360,8 +360,13 @@ def locate(name: str, scope: str | None, root: pathlib.Path, home: pathlib.Path)
 
 
 def installed_digests(directory: pathlib.Path) -> dict[str, str]:
-    """Relative path to content digest for what is installed; a link is named, never followed."""
+    """Relative path to content digest for what is installed; a link is named, never followed.
 
+    A file or a link where the skill folder belongs is named too, so it never reads as nothing there.
+    """
+
+    if directory.is_symlink() or (_present(directory) and not directory.is_dir()):
+        return {".": "symlink" if directory.is_symlink() else "file"}
     if not directory.is_dir():
         return {}
     files = {}
@@ -499,7 +504,10 @@ def _keep(destination: pathlib.Path, stage: pathlib.Path) -> None:
     if _present(following):
         _discard(following)  # an earlier stop's partial write; the stage still holds its source
     following.mkdir(parents=True)
-    (following / "wrote.json").write_text(json.dumps(installed_digests(destination), sort_keys=True), encoding="utf-8")
+    # What the stage meant to put there, recorded before the swap: a recovery after a local edit keeps the edit visible.
+    planned = stage / "wrote.json"
+    wrote = planned.read_text(encoding="utf-8") if _present(planned) else json.dumps(installed_digests(destination))
+    (following / "wrote.json").write_text(wrote, encoding="utf-8")
     if _present(stage / "old"):
         os.replace(stage / "old", following / "skill")
     else:
@@ -530,12 +538,17 @@ def install(destination: pathlib.Path, files: dict[str, bytes]) -> None:
     stage = staging(destination)
     stage.mkdir(parents=True, exist_ok=True)
     _stage(stage, files)
+    _plan(stage, {name: hashlib.sha256(body).hexdigest() for name, body in files.items()})
     if not _present(destination):
         (stage / "absent").touch()
     _swap_out(destination, stage)
     _swap_in(destination, stage)
     _keep(destination, stage)
     _drop(stage)
+
+
+def _plan(stage: pathlib.Path, digests: dict[str, str]) -> None:
+    (stage / "wrote.json").write_text(json.dumps(digests, sort_keys=True), encoding="utf-8")
 
 
 def recover(roots: list[pathlib.Path]) -> list[str]:
@@ -669,6 +682,7 @@ def _roll(destination: pathlib.Path, restore: pathlib.Path | None) -> None:
     (stage / "rollback").touch()
     if restore is not None:
         shutil.copytree(restore, stage / "new", symlinks=True)
+    _plan(stage, installed_digests(stage / "new") if restore is not None else {})
     if not _present(destination):
         (stage / "absent").touch()
     _swap_out(destination, stage)
