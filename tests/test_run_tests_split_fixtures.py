@@ -310,12 +310,16 @@ class SplitModuleFixtures(unittest.TestCase):
 
     def test_the_run_ends_with_its_ten_slowest_shards(self) -> None:
         """sd:3487. The gate's own log says which shards dominate, slowest first,
-        indented so no `^shard` parse reads them as a shard's own end line."""
+        indented so no `^shard` parse reads them as a shard's own end line.
+
+        Under load a plain shard measured slower than the 2 s sleep and came first (sd:5789),
+        so `test_extra_0` sleeps 3 s to stand for it: the check is the order, not which shard leads.
+        """
         for index in range(9):
             (self.root / "tests" / f"test_extra_{index}.py").write_text(PLAIN)
-        (self.root / "tests" / "test_slow.py").write_text(
-            "import time\nimport unittest\n\n\nclass Slow(unittest.TestCase):\n"
-            "    def test_sleeps(self):\n        time.sleep(2)\n")
+        sleeper = "import time\nimport unittest\n\n\nclass Slow(unittest.TestCase):\n    def test_sleeps(self):\n"
+        (self.root / "tests" / "test_extra_0.py").write_text(sleeper + "        time.sleep(3)\n")
+        (self.root / "tests" / "test_slow.py").write_text(sleeper + "        time.sleep(2)\n")
         result = self.run_harness()
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("test runner: workers=2 shards=16", result.stdout)
@@ -324,7 +328,8 @@ class SplitModuleFixtures(unittest.TestCase):
         timed = [re.fullmatch(r"  shard (\S+): (\d+)s exit=(\d+)", line) for line in tail]
         self.assertTrue(all(timed), tail)
         self.assertEqual(len(timed), 10, tail)
-        self.assertEqual(timed[0].group(1) if timed[0] else None, "tests.test_slow", tail)
+        found = {match.group(1): int(match.group(2)) for match in timed if match}
+        self.assertGreaterEqual(found.get("tests.test_slow", 0), 2, tail)
         seconds = [int(match.group(2)) for match in timed if match]
         self.assertEqual(seconds, sorted(seconds, reverse=True), tail)
 
