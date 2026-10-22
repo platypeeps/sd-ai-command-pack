@@ -14,7 +14,8 @@ doors. Provenance stays where that tool already writes it, in the skill's own
 Installing writes `--approve REVISION` only, where the revision is the one the
 report printed. It binds the upstream commit, the fetched bytes, the target
 and the installed copy, so an approval of one report cannot install what a
-later fetch or a local edit changed.
+later fetch or a local edit changed. An install keeps the copy it replaced,
+or an `absent` marker, beside the root (`kept`), one per skill (system sd:5779).
 """
 
 from __future__ import annotations
@@ -467,11 +468,61 @@ def _drop(stage: pathlib.Path) -> None:
         if list(parent.iterdir()) != [top]:
             break
         top = parent
+    _discard(top)
+
+
+def _discard(top: pathlib.Path) -> None:
+    """Remove a folder of the intake's own: a stage, or a kept copy rotated out."""
+
     shutil.rmtree(top)  # the intake's own staging folder, never a work item (sd:3560)
 
 
+def kept(destination: pathlib.Path, suffix: str = "") -> pathlib.Path:
+    """The previous copy an install keeps (system sd:5779): `skill/`, or an `absent` marker, and `wrote.json`.
+
+    It sits in the staging folder, outside the skill roots, so `sd skill list`
+    never reads it. `~next` and `~prev` are the rotation's names: `~` is never
+    in a skill name.
+    """
+
+    return destination.parent.parent / STAGING / "kept" / destination.parent.name / (destination.name + suffix)
+
+
+def _keep(destination: pathlib.Path, stage: pathlib.Path) -> None:
+    """Write the new kept copy under its `~next` name, then rotate it in.
+
+    `wrote.json` records what the intake put at the destination, so a rollback
+    can tell a local edit since.
+    """
+
+    following = kept(destination, "~next")
+    if _present(following):
+        _discard(following)  # an earlier stop's partial write; the stage still holds its source
+    following.mkdir(parents=True)
+    (following / "wrote.json").write_text(json.dumps(installed_digests(destination), sort_keys=True), encoding="utf-8")
+    if _present(stage / "old"):
+        os.replace(stage / "old", following / "skill")
+    else:
+        (following / "absent").touch()
+    _settle(destination)
+
+
+def _settle(destination: pathlib.Path) -> None:
+    """Rename a written `~next` over the kept copy, through `~prev`; each stop leaves a state this finishes."""
+
+    current, following, previous = kept(destination), kept(destination, "~next"), kept(destination, "~prev")
+    if _present(following):
+        if _present(current):
+            if _present(previous):
+                _discard(previous)
+            os.replace(current, previous)
+        os.replace(following, current)
+    if _present(previous):
+        _discard(previous)
+
+
 def install(destination: pathlib.Path, files: dict[str, bytes]) -> None:
-    """Stage beside the root, move the old copy aside, move the new one in, drop the old.
+    """Stage beside the root, move the old copy aside, move the new one in, keep the old.
 
     A stop between any two steps leaves state `recover` finishes or undoes.
     """
@@ -479,8 +530,11 @@ def install(destination: pathlib.Path, files: dict[str, bytes]) -> None:
     stage = staging(destination)
     stage.mkdir(parents=True, exist_ok=True)
     _stage(stage, files)
+    if not _present(destination):
+        (stage / "absent").touch()
     _swap_out(destination, stage)
     _swap_in(destination, stage)
+    _keep(destination, stage)
     _drop(stage)
 
 
@@ -492,16 +546,23 @@ def recover(roots: list[pathlib.Path]) -> list[str]:
         base = root.parent / STAGING / root.name
         for stage in sorted(base.iterdir()) if base.is_dir() else []:
             destination = root / stage.name
-            if _present(stage / "old") and not _present(destination):
+            old, new = _present(stage / "old"), _present(stage / "new")
+            if old and not _present(destination):
                 os.replace(stage / "old", destination)
                 done.append(f"undid a stopped install of {destination}: the previous copy is back")
-            elif _present(stage / "old") and source_of(destination) is None:
+            elif old and source_of(destination) is None:
                 raise IntakeError(f"{destination} is not one this tool wrote, and the previous copy waits in "
                                   f"{stage / 'old'}; move one of them by hand")
-            elif _present(stage / "old"):
-                done.append(f"finished a stopped install of {destination}: dropped the previous copy")
-            elif (stage / "new").exists():
+            elif old or (_present(stage / "absent") and not new):
+                _keep(destination, stage)
+                done.append(f"finished a stopped install of {destination}: kept the previous copy")
+            elif new:
                 done.append(f"dropped an unfinished stage of {destination}")
+            elif _present(kept(destination, "~next")) or _present(kept(destination, "~prev")):
+                _settle(destination)
+                done.append(f"finished a stopped install of {destination}: kept the previous copy")
+            else:
+                done.append(f"dropped the empty stage of {destination}")
             _drop(stage)
     return done
 

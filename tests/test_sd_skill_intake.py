@@ -197,7 +197,7 @@ class TheApproval(IntakeCase):
         self.assertIn("name: sd-ledger", text)
         self.assertIn(f"from `{URL.format('ledger')}` at revision `{commit} (sha256:", text)
         self.assertEqual(intake.source_of(installed.parent), (URL.format("ledger"), commit))
-        self.assertFalse((self.root / intake.STAGING).exists())
+        self.assertFalse(intake.staging(installed.parent).exists())
 
     def test_user_scope_keeps_the_name_and_installs_without_the_executable_bit(self) -> None:
         (self.upstream / "skills" / "tabulate" / "scripts" / "table.py").chmod(0o755)
@@ -376,7 +376,7 @@ class TheSteps(IntakeCase):
         report = self.intake("sd-ledger")
         self.assertIn("dropped an unfinished stage", report["recovered"][0])
         self.assertEqual(self.installed.joinpath("SKILL.md").read_bytes(), self.before)
-        self.assertFalse((self.root / intake.STAGING).exists())
+        self.assertFalse(intake.staging(self.installed).exists())
 
     def test_a_stop_between_the_swaps_puts_the_old_copy_back(self) -> None:
         self.stopped_at("_swap_in")
@@ -384,15 +384,66 @@ class TheSteps(IntakeCase):
         report = self.intake("sd-ledger")
         self.assertIn("the previous copy is back", report["recovered"][0])
         self.assertEqual(self.installed.joinpath("SKILL.md").read_bytes(), self.before)
-        self.assertFalse((self.root / intake.STAGING).exists())
+        self.assertFalse(intake.staging(self.installed).exists())
 
     def test_a_stop_after_the_swap_keeps_the_new_copy(self) -> None:
         self.stopped_at("_drop")
         report = self.intake("sd-ledger")
-        self.assertIn("dropped the previous copy", report["recovered"][0])
+        self.assertIn("dropped the empty stage", report["recovered"][0])
+        self.assertEqual(intake.kept(self.installed).joinpath("skill", "SKILL.md").read_bytes(), self.before)
         self.assertIn("Second version.", self.installed.joinpath("SKILL.md").read_text())
         self.assertEqual(report["mode"], "unchanged")
-        self.assertFalse((self.root / intake.STAGING).exists())
+        self.assertFalse(intake.staging(self.installed).exists())
+
+    def test_a_re_import_keeps_the_previous_copy(self) -> None:
+        self.intake("sd-ledger", approve=self.intake("sd-ledger")["revision"])
+        kept = intake.kept(self.installed)
+        self.assertEqual(kept.joinpath("skill", "SKILL.md").read_bytes(), self.before)
+        self.assertEqual(json.loads(kept.joinpath("wrote.json").read_text()), intake.installed_digests(self.installed))
+        self.assertFalse(intake.staging(self.installed).exists())
+
+    def test_a_new_install_keeps_an_absent_marker(self) -> None:
+        kept = intake.kept(self.installed)
+        self.assertEqual(sorted(path.name for path in kept.iterdir()), ["absent", "wrote.json"])
+
+    def test_a_stop_before_the_keep_keeps_the_previous_copy(self) -> None:
+        self.stopped_at("_keep")
+        report = self.intake("sd-ledger")
+        self.assertIn("kept the previous copy", report["recovered"][0])
+        self.assertEqual(intake.kept(self.installed).joinpath("skill", "SKILL.md").read_bytes(), self.before)
+        self.assertFalse(intake.staging(self.installed).exists())
+
+    def test_a_stop_before_the_marker_of_a_new_install_writes_it(self) -> None:
+        report = self.intake(URL.format("tabulate"))
+        with mock.patch.object(intake, "_keep", side_effect=OSError("stopped")), self.assertRaises(OSError):
+            self.intake(URL.format("tabulate"), approve=report["revision"])
+        destination = self.root / "contrib" / "sd-tabulate"
+        self.assertFalse(intake.kept(destination).exists())
+        self.assertIn("kept the previous copy", self.intake("sd-tabulate")["recovered"][0])
+        self.assertTrue(intake.kept(destination).joinpath("absent").is_file())
+
+    def test_a_stop_in_the_kept_rotation_leaves_the_earlier_copy_then_finishes(self) -> None:
+        self.intake("sd-ledger", approve=self.intake("sd-ledger")["revision"])
+        kept = intake.kept(self.installed)
+        self.write(self.upstream / "skills" / "ledger", GOOD + "\nThird version.\n")
+        self.commit()
+        second = self.installed.joinpath("SKILL.md").read_bytes()
+        self.stopped_at("_settle")
+        self.assertEqual(kept.joinpath("skill", "SKILL.md").read_bytes(), self.before)
+        self.intake("sd-ledger")
+        self.assertEqual(kept.joinpath("skill", "SKILL.md").read_bytes(), second)
+        self.assertEqual(sorted(path.name for path in kept.parent.iterdir()), ["sd-ledger"])
+
+    def test_a_stop_between_the_kept_renames_finishes_the_newer_copy(self) -> None:
+        kept = intake.kept(self.installed)
+        newer = kept.with_name(kept.name + "~next")
+        os.replace(kept, kept.with_name(kept.name + "~prev"))
+        self.write(newer / "skill", "newer\n")
+        stage = intake.staging(self.installed)
+        stage.mkdir(parents=True)
+        self.intake("sd-ledger")
+        self.assertEqual(kept.joinpath("skill", "SKILL.md").read_text(), "newer\n")
+        self.assertEqual(sorted(path.name for path in kept.parent.iterdir()), ["sd-ledger"])
 
     def test_a_stopped_swap_of_a_relative_link_puts_the_link_back(self) -> None:
         skills = self.home / ".claude" / "skills"
