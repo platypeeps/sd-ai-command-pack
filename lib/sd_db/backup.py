@@ -830,8 +830,11 @@ def verify(copy: Path, *, run_id: str, expected: dict[str, int], checkpointed: b
 FINDER_METADATA = re.compile(r"\.DS_Store|\._.*")
 
 
-def _retention_inventory(directory: Path, *, moved: bool = False) -> dict[str, str | None]:
-    """Bind every entry, including empty directories, without following links."""
+def _retention_inventory(directory: Path, *, moved: bool = False, hashed: bool = True) -> dict[str, str | None]:
+    """Bind every entry, including empty directories, without following links.
+
+    Without `hashed` a file maps to "" instead of its hash: the listing alone.
+    """
     inventory: dict[str, str | None] = {}
     device = directory.stat().st_dev
     for path in sorted(directory.rglob("*")):
@@ -846,7 +849,7 @@ def _retention_inventory(directory: Path, *, moved: bool = False) -> dict[str, s
             continue
         name = path.relative_to(directory).as_posix()
         if stat.S_ISREG(details.st_mode):
-            inventory[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+            inventory[name] = hashlib.sha256(path.read_bytes()).hexdigest() if hashed else ""
         elif stat.S_ISDIR(details.st_mode):
             inventory[name] = None
         else:
@@ -869,7 +872,7 @@ def _record_backup(directory: Path, source: Path, run_id: str, counts: dict[str,
 
 
 def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = False,
-                  read_only: bool = False) -> tuple[int, int, str]:
+                  read_only: bool = False, owned_only: bool = False) -> tuple[int, int, str]:
     """The directory's identity when it is a verified backup; else `BackupError` saying why.
 
     `moved` accepts a copy away from where it was written, such as the hourly
@@ -881,6 +884,11 @@ def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = F
     `read_only` accepts a snapshot whose manifest says `checkpoint: false`,
     taken before `migrate` (`migration_backup`). Retention never passes it,
     so such a snapshot is still never owned.
+
+    `owned_only` is the age prune's question (sd:5682): is this ours to
+    delete, not does it restore. The manifest and the listing of names and
+    kinds must match; no file is hashed and the database is not verified, so
+    a copy over SMB costs a listing, not minutes.
     """
     try:
         if directory.is_symlink() or not directory.is_dir() or directory.parent.is_symlink():
@@ -913,10 +921,16 @@ def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = F
             raise BackupError("its manifest is not a backup manifest")
         if not moved and value.get("directory") != str(directory.resolve()):
             raise BackupError("its manifest records another directory")
-        if value["entries"] != _retention_inventory(directory, moved=moved):
+        if owned_only:
+            listed = {name: digest is None for name, digest in value["entries"].items()}
+            if listed != {name: digest is None
+                          for name, digest in _retention_inventory(directory, moved=moved, hashed=False).items()}:
+                raise BackupError("its files differ from its manifest")
+        elif value["entries"] != _retention_inventory(directory, moved=moved):
             raise BackupError("its files differ from its manifest")
         checkpointed = not (read_only and value.get("checkpoint") is False)
-        if verify(directory / database, run_id=run_id, expected=counts, checkpointed=checkpointed) != counts:
+        if not owned_only and verify(directory / database, run_id=run_id, expected=counts,
+                                     checkpointed=checkpointed) != counts:
             raise BackupError("its database holds other counts than its manifest")
         details = directory.stat()
         if (details.st_dev, details.st_ino) != (before.st_dev, before.st_ino):
@@ -1236,18 +1250,19 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
     runs reach further back, and one that ran twice an hour makes it fall
     short.
 
-    Only a directory whose day is past the window is verified -- the cheap
+    Only a directory whose day is past the window is checked -- the cheap
     name test first -- so an hourly run opens the few snapshots it may
-    delete, not the whole week. What it deletes is still only an unchanged,
-    verified owned backup, exactly as `prune` requires. Each is verified and
-    removed before the next is opened, oldest first: on the share one copy
-    takes long to hash, and a run the job's time bound stops still keeps what
-    it removed (fleet sd:5543).
+    delete, not the whole week. The check is ownership, not restorability
+    (sd:5682): the manifest and the listing must match (`owned_only`), but no
+    file is hashed and the database is not verified. Hashing each copy on the
+    share took minutes, so the job's bound removed 2 an hour while 24 aged
+    out. Each is checked and removed before the next is opened, oldest
+    first, so a run the bound stops keeps what it removed (fleet sd:5543).
 
     `moved` prunes copies away from where they were written, such as the
-    hourly mirror on a share (sd:4011): each is verified by its manifest's
-    hashes (`_check_backup`), and its checkpoint time must also lie past the
-    window, so a copy named for an older day than its data stays.
+    hourly mirror on a share (sd:4011): the manifest's path proves nothing
+    there, and its checkpoint time must also lie past the window, so a copy
+    named for an older day than its data stays.
 
     A copy whose checkpoint body is the bare timestamp of a build before
     sd:3578 is dated and pruned like any other (sd:4694). A directory with no
@@ -1302,7 +1317,7 @@ def prune_older(root: Path, days: int, *, now: datetime, moved: bool = False, dr
             return details.st_dev, details.st_ino, ""
         if moved and _taken_at(path) >= window:
             return None
-        return _check_backup(path, moved=moved)
+        return _check_backup(path, moved=moved, owned_only=True)
 
     def unchanged(path: Path) -> tuple[int, int, str] | None:
         """`identify` again just before the rename, with no second hash of a copy."""
