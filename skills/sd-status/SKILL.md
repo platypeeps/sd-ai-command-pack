@@ -34,7 +34,7 @@ document for it.
 
 Above them all sits the banner — two lines, `sd-status: <repo path>` and the
 `pack:` line naming the checkout these tools came from with its branch and
-head. It is a header rather than a section: it names where the report ran and
+head; a detached checkout prints `pinned`, its intended state. It is a header rather than a section: it names where the report ran and
 what ran it, and nothing under it is a finding. Count it and the report
 opens with eighteen top-level lines; the seventeen below are the sections.
 
