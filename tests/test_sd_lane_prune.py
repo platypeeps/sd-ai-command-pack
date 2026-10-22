@@ -243,6 +243,36 @@ class Prune(lane_suite.Lane):
         self.assertEqual({row["branch"]: row["reason"] for row in result["kept"]}["b1"], "checked out in elsewhere")
         self.assertIn("b1", self.branches())
 
+    def test_a_branch_checked_out_during_the_delete_is_put_back(self) -> None:
+        """Codex review, round 1: `update-ref -d` ignores worktrees, so a checkout between the fresh read and the
+        delete lost its branch; the read after the delete puts it back at its tip."""
+        made, head = self.landed_bundle()
+        held, reads = sd_lane.held_branches, []
+
+        def check_out_b1_during_its_delete(main: pathlib.Path) -> dict[str, str]:
+            reads.append(main)
+            return {**held(main), **({"b1": "checked out in elsewhere"} if len(reads) == 3 else {})}
+        with mock.patch.object(sd_lane, "held_branches", check_out_b1_during_its_delete):
+            result = sd_lane.prune_landed(self.repo, [head])
+        kept = {row["branch"]: row["reason"] for row in result["kept"]}
+        self.assertEqual(kept["b1"], "checked out in elsewhere during the delete; put back at its tip")
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/b1"), made[-1])
+
+    def test_a_failed_read_after_the_delete_puts_the_branch_back(self) -> None:
+        made, head = self.landed_bundle()
+        held, reads = sd_lane.held_branches, []
+
+        def fail_after_the_delete(main: pathlib.Path) -> dict[str, str]:
+            reads.append(main)
+            if len(reads) == 3:
+                raise sd_lane.LaneError("no answer", code=sd_lane.PUBLISH_UNKNOWN)
+            return held(main)
+        with mock.patch.object(sd_lane, "held_branches", fail_after_the_delete):
+            result = sd_lane.prune_landed(self.repo, [head])
+        kept = {row["branch"]: row["reason"] for row in result["kept"]}
+        self.assertEqual(kept["b1"], "unknown after the delete: no answer; put back at its tip")
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/b1"), made[-1])
+
     def test_a_failed_read_keeps_that_branch_as_unknown(self) -> None:
         _, head = self.landed_bundle()
         read = sd_lane.read_git

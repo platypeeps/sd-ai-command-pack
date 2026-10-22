@@ -2434,7 +2434,12 @@ def why_kept(main: pathlib.Path, branch: str, tip: str, base: tuple[str, str], h
 
 
 def delete_branch(main: pathlib.Path, branch: str, tip: str) -> str | None:
-    """`update-ref -d` of `branch` at `tip` after a fresh read of the worktrees; None once gone, else why it stays."""
+    """`update-ref -d` of `branch` at `tip` after a fresh read of the worktrees; None once gone, else why it stays.
+
+    `update-ref` ignores worktrees, and no lock keeps a checkout out between
+    the read and the delete, so a second read follows the delete: a branch
+    held by then, or a read that fails, is put back at `tip` (codex review).
+    """
     try:
         held = held_branches(main).get(branch)
     except LaneError as error:
@@ -2442,9 +2447,18 @@ def delete_branch(main: pathlib.Path, branch: str, tip: str) -> str | None:
     if held:
         return held
     done = publish_git(main, "update-ref", "-d", f"refs/heads/{branch}", tip)
-    if done is None:
-        return "the delete failed: no answer"
-    return None if done.returncode == 0 else f"the delete failed: {(done.stderr or done.stdout).strip()[-200:]}"
+    if done is None or done.returncode != 0:
+        return f"the delete failed: {(done.stderr or done.stdout).strip()[-200:] if done else 'no answer'}"
+    try:
+        held = held_branches(main).get(branch)
+    except LaneError as error:
+        held = f"unknown after the delete: {error}"
+    else:
+        held = held and f"{held} during the delete"
+    if not held:
+        return None
+    back = publish_git(main, "update-ref", f"refs/heads/{branch}", tip, "")
+    return f"{held}; {'put back at its tip' if back is not None and back.returncode == 0 else f'put it back: git branch {branch} {tip}'}"
 
 
 def prune_landed(main: pathlib.Path, heads: list[str], *, dry_run: bool = False) -> dict[str, Any]:
