@@ -420,13 +420,48 @@ class MovedCopies(Case):
         self.assertFalse(old.exists())
         self.assertTrue(young.exists())
 
+    def test_an_expired_copy_goes_on_its_manifest_without_a_hash_or_an_integrity_check(self):
+        # sd:5682: hashing and checking each 475 MB copy over SMB took 2-3 minutes, so the
+        # job's 300 s bound removed 2 an hour while 24 aged out a day. Its name dates it, its
+        # manifest and listing prove it is ours; its bytes are not read (narrows sd:4011).
+        old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
+        real = Path.read_bytes
+
+        def unread(path):
+            if path.name == "sd.db":
+                raise AssertionError(f"{path} was hashed")
+            return real(path)
+
+        with mock.patch.object(Path, "read_bytes", unread), \
+                mock.patch.object(backup, "verify", side_effect=AssertionError("integrity_check ran")):
+            self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [old])
+        self.assertFalse(old.exists())
+
+    def test_an_expired_local_snapshot_with_no_checkpoint_row_stays(self):
+        # sd:5694 lane review: without `verify`, the local prune read no checkpoint at all, so a
+        # snapshot taken read-only before `migrate`, or one whose row is gone, was deleted.
+        read_only = self.uncheckpointed(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
+        missing = self.uncheckpointed(self.snapshot(datetime(2026, 10, 2, 9, 0, tzinfo=UTC)), read_only=False)
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.local, 7, now=NOW, report=lines.append), [])
+
+        self.assertTrue((read_only / "sd.db").exists())
+        self.assertTrue((missing / "sd.db").exists())
+        self.assertEqual(lines, [
+            f"kept {missing}: its database holds no checkpoint row for its run",
+            f"kept 1 backup under {self.local}, named {read_only.name}: "
+            "it was taken read-only before `migrate`, so no checkpoint row dates it"])
+
     def test_a_copy_that_differs_from_its_manifest_stays(self):
-        # A partial or edited copy is not the backup its manifest describes.
+        # Retention reads no hash (sd:5682), but a truncated database holds no checkpoint row to date it.
         old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
         (old / "sd.db").write_bytes((old / "sd.db").read_bytes()[:4096])
+        lines: list[str] = []
 
-        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [])
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True, report=lines.append), [])
         self.assertTrue(old.exists())
+        self.assertEqual(lines, [f"kept {old}: its checkpoint time could not be read: database disk image is malformed"])
 
     def test_a_copy_named_for_an_old_day_but_taken_inside_the_window_stays(self):
         # Names restart on a promoted hub's empty root, so the name is not the age.
@@ -583,7 +618,7 @@ class MovedCopies(Case):
         self.assertEqual(sorted(self.nas.iterdir()), old)
         self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), old)
 
-    def test_each_copy_is_hashed_once_a_run(self):
+    def test_each_copy_is_listed_once_a_run(self):
         old = [self.mirror(self.snapshot(datetime(2026, 10, day, 9, 0, tzinfo=UTC))) for day in (1, 2)]
         real = backup._retention_inventory
         hashed = []
