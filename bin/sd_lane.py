@@ -1402,7 +1402,8 @@ class SpeculativeGate(threading.Thread):
         """End the gate's group, SIGTERM then SIGKILL, each followed by `CANCEL_SECONDS`; whether the gate ended."""
         for number in (signal.SIGTERM, signal.SIGKILL):
             self.signal_gate(number)
-            self.join(CANCEL_SECONDS)
+            with contextlib.suppress(RuntimeError):  # not started yet: `started` ends a group that starts later
+                self.join(CANCEL_SECONDS)
             if not self.is_alive():
                 return True
         return False
@@ -1498,7 +1499,9 @@ def predict(entry: dict[str, Any], following: dict[str, Any]) -> dict[str, Any]:
 
 
 def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = False) -> SpeculativeGate | None:
-    """Start the next entry's gate on `entry`'s predicted landing, or None.
+    """The next entry's gate on `entry`'s predicted landing, not yet started, or None.
+
+    The caller holds it before it starts it, so a SIGTERM during the start still ends it (sd:5776).
 
     An entry the runner may not merge (`merge_refusal`) stops prepared and
     never lands, so nothing follows it to predict. `busy` says an earlier
@@ -1551,7 +1554,6 @@ def speculate(entry: dict[str, Any], queue: Queue, gate: Gate, busy: bool = Fals
         log.write_text(json.dumps(result, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
         record_speculation({**plan, "log": str(log), "log_host": this_host(), **fields})
     thread = SpeculativeGate(run_gate, f"sd-lane-speculate-{following['item']}")
-    thread.start()
     return thread
 
 
@@ -2724,6 +2726,8 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                         speculate(entry, queue, gate, busy=True)  # notes the skip: one speculative gate at a time
                     else:
                         ahead = speculate(entry, queue, gate)
+                    if ahead is not None and ahead.ident is None:  # held before it starts: a TERM in its start ends it
+                        ahead.start()
                     row, stopped = run_entry(root, queue, entry, token, environ, ship, note or default_note)
                     if row is not None:
                         ran.append(row)

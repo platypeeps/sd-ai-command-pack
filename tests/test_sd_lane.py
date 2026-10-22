@@ -57,42 +57,39 @@ raise SystemExit(3)
 """
 
 
-#: A lane runner TERMed mid-prepare while its speculative gate runs (sd:5776). Prepare's child ignores
-#: SIGTERM, so its group ends only at `GROUP_CLEANUP_SECONDS`'s SIGKILL; the gate's child notes the TERM.
+#: A lane runner TERMed mid-prepare while its speculative gate runs (sd:5776). Every signal the runner sends a
+#: gate's group goes to `sent`, and prepare's end to `prepare-ended`, both on this process's monotonic clock.
 TERMED_RUNNER = """import json, os, pathlib, sys, time
 from unittest import mock
 sys.path.insert(0, {bin!r})
 import sd_lane, sd_lib
-sd_lib.GROUP_CLEANUP_SECONDS = 3
 repo, environ, marks = pathlib.Path(sys.argv[1]), json.loads(sys.argv[2]), pathlib.Path(sys.argv[3])
-GATE = ("import os, pathlib, signal, time\\n"
-        "def termed(*_):\\n"
-        "    pathlib.Path({{termed!r}}).write_text(str(time.time()))\\n"
-        "    os._exit(0)\\n"
-        "signal.signal(signal.SIGTERM, termed)\\n"
-        "pathlib.Path({{pid!r}}).write_text(str(os.getpid()))\\n"
-        "time.sleep(60)\\n").format(termed=str(marks / "gate-termed"), pid=str(marks / "gate.pid"))
-PREPARE = ("import os, pathlib, signal, time\\n"
-           "signal.signal(signal.SIGTERM, signal.SIG_IGN)\\n"
-           "pathlib.Path({{pid!r}}).write_text(str(os.getpid()))\\n"
-           "time.sleep(60)\\n").format(pid=str(marks / "prepare.pid"))
+CHILD = "import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)"
+end_group = sd_lane.end_group
+
+def noted(group, number):
+    with (marks / "sent").open("a") as handle:
+        handle.write(f"{{group}} {{number}} {{time.monotonic()}}\\n")
+    end_group(group, number)
 
 def gate(root, head, base):
-    code, _, _ = sd_lane.gate_run()([sys.executable, "-c", GATE], dict(os.environ), root, 120)
+    code, _, _ = sd_lane.gate_run()([sys.executable, "-c", CHILD, str(marks / "gate.pid")], dict(os.environ), root, 120)
     return {{"status": "failure", "summary": f"exit {{code}}"}}
 
 def ship(argv, log):
-    for _ in range(400):  # the gate's child runs before prepare starts
+    for _ in range(1200):  # the gate's child runs before prepare starts
         if (marks / "gate.pid").exists() and (marks / "gate.pid").read_text():
             break
         time.sleep(0.05)
     try:
-        sd_lib.run_group([sys.executable, "-c", PREPARE], cwd=repo, env=dict(os.environ), timeout=120)
+        sd_lib.run_group([sys.executable, "-c", CHILD, str(marks / "prepare.pid")], cwd=repo, env=dict(os.environ),
+                         timeout=120)
     finally:
-        (marks / "prepare-ended").write_text(str(time.time()))
+        (marks / "prepare-ended").write_text(str(time.monotonic()))
     return {{"ok": False, "error": "not reached"}}
 
-with mock.patch.object(sd_lane, "default_note", lambda *args, **kwargs: "written"), \\
+with mock.patch.object(sd_lane, "end_group", noted), \\
+        mock.patch.object(sd_lane, "default_note", lambda *args, **kwargs: "written"), \\
         mock.patch.object(sd_lane, "default_runner_merge", lambda root: "manual"), \\
         mock.patch("sd_db.database.served_by", lambda target, home=None: None, create=True):
     sd_lane.run_lane(repo, environ, ship, gate)
@@ -1374,22 +1371,27 @@ class Speculation(Lane):
         def pid_of(name: str) -> int | None:
             text = (marks / name).read_text() if (marks / name).exists() else ""
             return int(text) if text else None
+        pids: dict[str, int] = {}
         for name in ("gate.pid", "prepare.pid"):
             for _ in range(1200):  # bounded: a runner that never gets there fails on the read below
                 if pid_of(name) is not None or runner.poll() is not None:
                     break
                 time.sleep(0.05)
             child = pid_of(name)
-            self.assertIsNotNone(child, f"no {name}: {runner.stderr.read() if runner.poll() is not None else ''}")
+            if child is None:
+                self.fail(f"no {name}: {runner.stderr.read() if runner.poll() is not None else ''}")
+            pids[name] = child
             self.addCleanup(end_group, child)
         runner.send_signal(signal.SIGTERM)
         _, errors = runner.communicate(timeout=60)
         self.assertEqual(runner.returncode, -signal.SIGTERM, errors)
-        self.assertTrue((marks / "gate-termed").exists(), "the speculative gate's group never got SIGTERM")
-        self.assertLess(float((marks / "gate-termed").read_text()), float((marks / "prepare-ended").read_text()))
+        sent = [line.split() for line in (marks / "sent").read_text().splitlines()] if (marks / "sent").exists() else []
+        self.assertTrue(sent, "the runner never signalled the speculative gate's group")
+        self.assertEqual(sent[0][:2], [str(pids["gate.pid"]), str(int(signal.SIGTERM))])
+        self.assertLess(float(sent[0][2]), float((marks / "prepare-ended").read_text()), "TERM waited for prepare")
         for _ in range(100):
             try:
-                os.kill(pid_of("gate.pid"), 0)
+                os.kill(pids["gate.pid"], 0)
             except ProcessLookupError:
                 break
             time.sleep(0.05)
@@ -1397,6 +1399,36 @@ class Speculation(Lane):
             self.fail("the speculative gate's child outlived the runner")
         [speculation] = [entry["speculation"] for entry in self.entries() if "speculation" in entry]
         self.assertEqual((speculation["after"], speculation["status"]), (1, "cancelled"))
+
+
+    def test_an_interruption_while_the_gate_starts_still_ends_it(self) -> None:
+        """sd:5776, the step between the gate's start and the runner holding it: the run's cleanup ends it."""
+        self.queue_both()
+        marker, started = self.tmp / "gate-child.pid", []
+        start = sd_lane.SpeculativeGate.start
+
+        def endless(root: pathlib.Path, head: str, base: str) -> dict:
+            child = f"import os, pathlib, time; pathlib.Path({str(marker)!r}).write_text(str(os.getpid())); time.sleep(60)"
+            code, _, _ = sd_lane.gate_run()([sys.executable, "-c", child], dict(os.environ), root, 120)
+            return {"status": "failure", "summary": f"exit {code}"}
+
+        def start_then_interrupt(gate: sd_lane.SpeculativeGate) -> None:
+            start(gate)
+            started.append(gate)
+            for _ in range(1200):  # the gate's child runs before the interruption
+                if marker.exists() and marker.read_text():
+                    break
+                time.sleep(0.05)
+            raise KeyboardInterrupt
+        with mock.patch.object(sd_lane.SpeculativeGate, "start", start_then_interrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            sd_lane.run_lane(self.repo, self.environ, self.ship, endless)
+        self.addCleanup(end_group, int(marker.read_text()))
+        [gate] = started
+        self.assertTrue(gate.cancelled)
+        self.assertFalse(gate.is_alive())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(marker.read_text()), 0)
 
 
 class Landing(Lane):
@@ -4108,6 +4140,12 @@ class Bounds(unittest.TestCase):
         self.assertEqual(cancelled, [True])
         self.assertLess(time.monotonic() - started, sd_lane.CANCEL_SECONDS)
         self.assertNotEqual(answers[0][0], 0)
+
+    def test_a_gate_cancelled_before_it_starts_counts_as_ended(self) -> None:
+        """sd:5776: a SIGTERM can land between the runner holding the gate and its start; `join` would raise."""
+        gate = sd_lane.SpeculativeGate(lambda: None, "unstarted")
+        self.assertTrue(gate.cancel_gate())
+        self.assertTrue(gate.cancelled)
 
     def test_a_gate_child_that_ignores_sigterm_is_killed(self) -> None:
         """sd:3361, the SIGKILL step: a child that ignores SIGTERM is killed one bound later."""

@@ -2235,7 +2235,7 @@ class TermEndsGroupTests(unittest.TestCase):
                 "say('after the block')\n")
             child = subprocess.Popen([sys.executable, "-c", script], stderr=subprocess.PIPE, text=True)
             for _ in range(400):  # bounded: a child that never gets ready fails below
-                if said.exists() or child.poll() is not None:
+                if (said.exists() and said.read_text() == "ready\n") or child.poll() is not None:
                     break
                 time.sleep(0.05)
             child.send_signal(signal.SIGTERM)
