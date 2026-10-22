@@ -15,7 +15,8 @@ the operator's step, not this one.
 
 The look is the theme: `THEME` below, overridden key by key by the deck's own
 `theme` object. A `logo` is a PNG path,
-relative to the deck.json that names it.
+relative to the deck.json that names it; a deck naming none gets the pack's
+one copy of the Mezmo logo, `bin/fonts/mezmo-logo.png` (the pack's one binary-asset folder).
 """
 
 from __future__ import annotations
@@ -57,7 +58,7 @@ THEME: dict[str, Any] = {
         "planned": ["#E6E6E5", "#444444"],
         "owner": ["#FCE4AE", "#0A090C"],
     },
-    "logo": None,
+    "logo": str(Path(__file__).resolve().parent / "fonts" / "mezmo-logo.png"),
     "cta": None,
 }
 COLOUR = re.compile(r"#[0-9A-Fa-f]{6}")

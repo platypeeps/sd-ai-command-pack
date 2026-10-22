@@ -115,6 +115,14 @@ class TemplateDeck(unittest.TestCase):
         pictures = [s for s in Presentation(str(out)).slides[1].shapes if s.shape_type == 13]
         self.assertEqual(len(pictures), 1)
 
+    def test_a_deck_naming_no_logo_gets_the_pack_logo_on_every_page(self):
+        self.deck["theme"].pop("logo", None)
+        out = self.tmp / "out.pptx"
+        deck_mod.build(deck_mod.load_deck(self.write("deck.json", self.deck)), out)
+        for slide in Presentation(str(out)).slides:
+            self.assertEqual([s.shape_type for s in slide.shapes].count(13), 1)
+        self.assertTrue(Path(deck_mod.THEME["logo"]).is_file())
+
     def test_a_failed_save_keeps_the_old_file_and_leaves_no_partial(self):
         out = self.tmp / "deck.pptx"
         out.write_bytes(b"old")
