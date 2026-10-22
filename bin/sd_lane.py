@@ -2213,7 +2213,7 @@ def finish_entry(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[
 def read_git(tree: pathlib.Path, *args: str, ok: tuple[int, ...] = (0,),
              stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     """`git <args>` in `tree` for a runner decision; a failure raises `PUBLISH_UNKNOWN`, never a "no"."""
-    done = publish_git(tree, *args, stdin=stdin)
+    done = publish_git(tree, *args) if stdin is None else publish_git(tree, *args, stdin=stdin)
     if done is None or done.returncode not in ok:
         said = (done.stderr or done.stdout).strip()[-300:] if done is not None else "no answer"
         raise LaneError(f"git {args[0]} failed in {tree} ({said}); the entry is not skipped.", code=PUBLISH_UNKNOWN)
