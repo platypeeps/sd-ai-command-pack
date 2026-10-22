@@ -160,12 +160,11 @@ def target_of(payload: dict) -> tuple[str, str] | None:
 
 
 def row_named(connection, target: tuple[str, str], sd_db):
-    """The registered repository whose GitHub remote is `target`, or None."""
-    for row in sd_db.repos.registered(connection):
-        found = sd_db.repos.parse_remote(row["remote"])
-        if found.kind == "github" and (found.owner.lower(), found.name.lower()) == target:
-            return row
-    return None
+    """The registered repository whose GitHub remote is `target`, a managed one first; or None."""
+    rows = [row for row in sd_db.repos.registered(connection)
+            if (found := sd_db.repos.parse_remote(row["remote"])).kind == "github"
+            and (found.owner.lower(), found.name.lower()) == target]
+    return next((row for row in rows if row["managed"]), rows[0] if rows else None)
 
 
 def call_directory(payload: dict, environ: dict[str, str]) -> Path:

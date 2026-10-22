@@ -312,6 +312,20 @@ class AnExternalTargetAsksTheOperator(Fixture):
             connection.close()
         self.assert_denied(self.create("example", "other"))
 
+    def test_an_unmanaged_clone_of_a_managed_remote_does_not_hide_it(self) -> None:
+        clone = self.home / "a-clone"
+        clone.mkdir()
+        git(clone, "init", "-q")
+        git(clone, "remote", "add", "origin", ORIGIN)
+        connection = sd_db.connect(home=self.home)
+        try:
+            key = sd_db.add_repo(connection, clone, home=self.home)
+            sd_db.writes.upsert_repo(connection, key, managed=0)
+            connection.commit()
+        finally:
+            connection.close()
+        self.assert_denied(self.create("example", "managed"))
+
     def test_a_session_outside_any_managed_repository_asks_too(self) -> None:
         elsewhere = self.tmp / "elsewhere"
         elsewhere.mkdir()
