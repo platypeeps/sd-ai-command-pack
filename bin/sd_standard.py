@@ -288,6 +288,11 @@ def github_steps(call: sd_ci.Call, repo: dict, takes_issues: bool) -> list[Step]
         scanning_step(call, repo),
     ]
     protection, active = protection_steps(call, branch, f"{repo.get('html_url') or 'the repository'}/settings/branches")
+    # G9 waits on G1: workflows go off only once G1 makes sd/local-gate the required check, so a ruleset G1 leaves
+    # alone, or protection it could not read, holds them on with their checks still required.
+    if active or any(step.state == "unknown" for step in protection):
+        return steps + protection + [Step("G9", "github", "Actions", "skip", f"held until protection on {branch} "
+                                          "holds (G1); the workflows stay on")]
     return steps + protection + standard_actions(call, branch, private, active)
 
 
@@ -454,19 +459,24 @@ def build_plan(root: pathlib.Path, sources: Sources) -> Plan:
 def run_steps(plan: Plan) -> int:
     """Run every `change` step in order, each on its own; returns how many failed.
 
-    A failure stops nothing but `LAST`: the repository joins the lane only after every other step held.
+    A failure stops nothing but `LAST`, and G9 after a G1 failure: the repository joins the lane only after every other
+    step held, and its workflows go off only once protection requires sd/local-gate.
     """
-    failed = 0
+    failed, failed_keys = 0, set()
     for step in plan.steps:
         if step.state != "change" or step.write is None:
             continue
         if step.key in LAST and failed:
             step.result = "held: an earlier step failed, so the repository stays outside the lane; apply again"
             continue
+        if step.key == "G9" and "G1" in failed_keys:
+            step.result = "held: protection (G1) failed, so the workflows stay on while their checks are required; apply again"
+            continue
         try:
             step.write()
         except Exception as error:  # noqa: BLE001 - one step's failure is its own, never the run's
             failed += 1
+            failed_keys.add(step.key)
             step.result = f"failed: {error}"
         else:
             step.result = "changed"

@@ -244,6 +244,33 @@ class Standard(unittest.TestCase):
         self.run_verb(apply=True)
         self.assertFalse([entry for entry in self.github.writes if "/rulesets" in entry[1] or "/protection" in entry[1]])
 
+    # --- G9 waits on G1: workflows go off only once sd/local-gate is the required check ----------------
+
+    def actions_writes(self) -> list:
+        return [entry for entry in self.github.writes if entry[1].startswith("/actions")]
+
+    def test_a_ruleset_holds_actions_on(self) -> None:
+        ruleset = {"id": 7, "name": "guard", "target": "branch", "enforcement": "active",
+                   "source_type": "Repository", "source": "example/widget", "bypass_actors": [],
+                   "rules": [{"type": "required_status_checks", "parameters": {
+                       "required_status_checks": [{"context": "ci/test"}]}}]}
+        self.github = FakeGitHub(model(rulesets={"7": ruleset}))
+        self.assertEqual([step.state for step in self.plan().steps if step.key == "G9"], ["skip"])
+        self.run_verb(apply=True)
+        self.assertEqual(self.actions_writes(), [])
+
+    def test_unread_protection_holds_actions_on(self) -> None:
+        self.github = FakeGitHub(model(fail={"GET /branches/main/protection": (502, "Bad Gateway")}))
+        self.assertEqual([step.state for step in self.plan().steps if step.key == "G9"], ["skip"])
+
+    def test_a_failed_protection_write_holds_actions_on(self) -> None:
+        self.github = FakeGitHub(model(fail={"PUT /branches/main/protection": (422, "Validation Failed")}))
+        code, out = self.run_verb(apply=True)
+        self.assertEqual(code, sd_standard.EXIT_FAILED)
+        results = {step["key"]: step.get("result") for step in out["steps"] if step["key"] == "G9"}
+        self.assertTrue(results["G9"].startswith("held"), results)
+        self.assertEqual(self.actions_writes(), [])
+
     def test_open_issues_keep_issues_on(self) -> None:
         self.github = FakeGitHub(model(issues=[{"number": 3}, {"number": 4, "pull_request": {}}]))
         issues = [step for step in self.plan().steps if step.key == "G5"][0]
