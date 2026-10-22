@@ -16,6 +16,15 @@ provenance. No table is new:
   line per choice), plus one `Subject:` line and up to five `Evidence:` lines.
   The batch's questions are the header's count of question notes after it;
   a question added by hand later is not one of them.
+- The batch's optional **context** (purpose, rubric, what the labels feed)
+  rides the header as `Purpose:`, `Rubric:` and `Feeds:` lines. A question's
+  optional **recommendation** rides its note as two more evidence lines,
+  `Evidence: Recommended: <option>` and `Evidence: Recommended because:
+  <reason>`, so a reader older than system sd:5759 files it under evidence,
+  which a blind batch already hides, and never reads it as question text.
+  Whether the standing label agreed with it, and whether it was ruled before
+  the recommendation could be seen (blind or sealed, and the question's first
+  ruling), is read from the notes, never written.
 - A **label** is the Decisions ruling, `Ruling on note #N: <option>`, written
   with the question's resolution in one transaction; **undo** is a
   `Withdrawn: ruling #M on note #N` decision with the question reopened; a
@@ -71,8 +80,19 @@ EVIDENCE_LINES = 5
 SUBJECT_CHARS = 200
 NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
 SHA256 = re.compile(r"[0-9a-f]{64}")
-KEYS = frozenset({"schema", "queue", "batch", "title", "repo", "source", "mode", "limit", "seal", "questions"})
-QUESTION_KEYS = frozenset({"subject", "text", "evidence", "options"})
+KEYS = frozenset({"schema", "queue", "batch", "title", "repo", "source", "mode", "limit", "seal", "context",
+                  "questions"})
+QUESTION_KEYS = frozenset({"subject", "text", "evidence", "options", "recommendation"})
+#: A batch's context block (system sd:5759): each key's header tag, the line limit and the rubric's line count.
+CONTEXT_TAGS = {"purpose": "Purpose", "rubric": "Rubric", "feeds": "Feeds"}
+CONTEXT_CHARS = 400
+RUBRIC_LINES = 10
+#: A recommendation's two evidence-line prefixes and its reason's limit.
+RECOMMENDED = "Recommended: "
+BECAUSE = "Recommended because: "
+REASON_CHARS = 200
+#: The modes whose labeller sees no recommendation before ruling.
+BLIND = ("blind", "sealed")
 #: A question note's tagged lines; every other line is the question text.
 TAGGED = re.compile(r"^[ \t]*(Option|Subject|Evidence):[ \t]*(.*?)[ \t]*$")
 HEADER = "Review batch"
@@ -154,8 +174,37 @@ def _question(found: Any, where: str) -> dict:
     options = [_line(option, f"{where} option", limit=OPTION_CHARS) for option in options]
     if len(set(options)) != len(options):
         raise ReviewError(f"{where} repeats an option")
-    return {"subject": subject, "text": text, "options": options,
-            "evidence": [_line(line, f"{where} evidence") for line in evidence]}
+    evidence = [_line(line, f"{where} evidence") for line in evidence]
+    if any(line.startswith((RECOMMENDED, BECAUSE)) for line in evidence):
+        raise ReviewError(f"{where} evidence has a line that starts {RECOMMENDED.strip()} or {BECAUSE.strip()}; "
+                          f"a recommendation is its own key")
+    checked: dict[str, Any] = {"subject": subject, "text": text, "options": options, "evidence": evidence}
+    # Added only when given: a Kev import's digest is over these dicts, so a batch it filed before finds itself.
+    if "recommendation" in found:
+        checked["recommendation"] = _recommendation(found["recommendation"], options, where)
+    return checked
+
+
+def _recommendation(found: Any, options: list[str], where: str) -> dict:
+    if not isinstance(found, dict) or set(found) != {"option", "reason"}:
+        raise ReviewError(f"{where} recommendation must hold an option and a reason")
+    if found["option"] not in options:
+        raise ReviewError(f"{where} recommends {found['option']!r}, which is not one of its options")
+    return {"option": found["option"], "reason": _line(found["reason"], f"{where} reason", limit=REASON_CHARS)}
+
+
+def _context(found: Any) -> dict:
+    if not isinstance(found, dict) or not found or set(found) - set(CONTEXT_TAGS):
+        raise ReviewError(f"context must hold one or more of {', '.join(CONTEXT_TAGS)}")
+    rubric = found.get("rubric", [])
+    if not isinstance(rubric, list) or ("rubric" in found and not 1 <= len(rubric) <= RUBRIC_LINES):
+        raise ReviewError(f"context rubric must be a list of 1 to {RUBRIC_LINES} lines")
+
+    def line(name: str, value: Any) -> str | None:
+        return None if value is None else _line(value, f"context {name}", limit=CONTEXT_CHARS)
+
+    return {"purpose": line("purpose", found.get("purpose")),
+            "rubric": [line("rubric", entry) for entry in rubric], "feeds": line("feeds", found.get("feeds"))}
 
 
 def _checked(batch: Any) -> dict:
@@ -193,9 +242,10 @@ def _checked(batch: Any) -> dict:
     subjects = [found["subject"] for found in checked]
     if len(set(subjects)) != len(subjects):
         raise ReviewError("a subject appears twice; each is unique in its batch")
+    context = None if batch.get("context") is None else _context(batch["context"])
     return {"queue": _name(batch["queue"], "queue"), "batch": _name(batch["batch"], "batch"),
             "title": _line(batch["title"], "title"), "source": _line(batch["source"], "source"),
-            "mode": batch["mode"], "limit": limit or LIMIT, "repo": repo,
+            "mode": batch["mode"], "limit": limit or LIMIT, "repo": repo, "context": context,
             "seal": None if seal is None else {"sha256": seal["sha256"], "name": _line(seal["name"], "seal name")},
             "questions": checked}
 
@@ -210,12 +260,18 @@ def _header_body(found: dict, digest: str, count: int) -> str:
              f"Source: {found['source']}", f"Mode: {found['mode']}"]
     if found["seal"] is not None:
         lines.append(f"Seal: {found['seal']['sha256']} {found['seal']['name']}")
+    context = found.get("context") or {}
+    for key, tag in CONTEXT_TAGS.items():
+        values = context.get(key)
+        lines += [f"{tag}: {value}" for value in (values if isinstance(values, list) else [values]) if value]
     return "\n".join([*lines, f"Questions: {count}", f"Digest: {digest}"])
 
 
 def _question_body(found: dict) -> str:
+    advice = found.get("recommendation")
+    advised = [] if advice is None else [RECOMMENDED + advice["option"], BECAUSE + advice["reason"]]
     return "\n".join([found["text"], f"Subject: {found['subject']}",
-                      *(f"Evidence: {line}" for line in found["evidence"]),
+                      *(f"Evidence: {line}" for line in [*found["evidence"], *advised]),
                       *(f"Option: {option}" for option in found["options"])])
 
 
@@ -230,10 +286,14 @@ def _parse_header(body: str) -> dict | None:
     if not {"Queue", "Batch", "Schema", "Source", "Mode", "Questions", "Digest"} <= set(fields):
         return None
     seal, _, name = fields.get("Seal", "").partition(" ")
+    tagged = [line.split(": ", 1) for line in lines[1:] if ": " in line]
+    context = {key: [value for found, value in tagged if found == tag] for key, tag in CONTEXT_TAGS.items()}
     return {"queue": fields["Queue"], "batch": fields["Batch"], "schema": fields["Schema"],
             "source": fields["Source"], "mode": fields["Mode"], "seal": seal or None, "seal_name": name or None,
             "questions": int(fields["Questions"]) if fields["Questions"].isdigit() else -1,
-            "digest": fields["Digest"]}
+            "digest": fields["Digest"],
+            "context": {"purpose": next(iter(context["purpose"]), None), "rubric": context["rubric"],
+                        "feeds": next(iter(context["feeds"]), None)} if any(context.values()) else None}
 
 
 def _parse_question(note: dict) -> dict:
@@ -248,9 +308,17 @@ def _parse_question(note: dict) -> dict:
             evidence.append(tagged[2])
         elif subject is None:
             subject = tagged[2]
+    # The recommendation's evidence lines, when the first names an offered option; any other such line, as an
+    # older batch may hold, stays evidence.
+    advice = next((line for line in evidence if line.startswith(RECOMMENDED)), None)
+    recommendation = None
+    if advice is not None and advice[len(RECOMMENDED):] in options:
+        because = next((line for line in evidence if line.startswith(BECAUSE)), None)
+        recommendation = {"option": advice[len(RECOMMENDED):], "reason": because and because[len(BECAUSE):]}
+        evidence = [line for line in evidence if line not in (advice, because)]
     return {"note": note["id"], "subject": subject, "text": "\n".join(text).strip(), "evidence": evidence,
-            "options": options, "sha256": hashlib.sha256(note["body"].encode("utf-8")).hexdigest(),
-            "asked_at": note["timestamp"]}
+            "options": options, "recommendation": recommendation,
+            "sha256": hashlib.sha256(note["body"].encode("utf-8")).hexdigest(), "asked_at": note["timestamp"]}
 
 
 def _batch(row: dict, notes: list[dict]) -> dict:
@@ -315,6 +383,13 @@ def _batch(row: dict, notes: list[dict]) -> dict:
                         ruled_by=live and live["by"], ruled_at=live and live["at"], filed=live and live["filed"],
                         position=live and question["options"].index(live["option"]) + 1,
                         open=live is None and not question["expired"])
+        # Agreement (system sd:5759): None with no label or no recommendation. A label is blind only in a blind or
+        # sealed batch and only as the question's first ruling: once one lands the page shows the recommendation.
+        advice = question["recommendation"]
+        question.update(agreed=None, ruled_blind=None)
+        if advice is not None and live is not None:
+            question.update(agreed=live["option"] == advice["option"],
+                            ruled_blind=header["mode"] in BLIND and question["rulings"][0] is live)
     found = list(questions.values())
     return {"item": row, "ref": row["external_id"], "header": header, "questions": found, "closed": closed,
             "open": sum(question["open"] for question in found),
@@ -358,7 +433,7 @@ def _difference(filed: dict, found: dict) -> str:
     """The first field in which the filed batch and the file differ, as far as the store can tell."""
     header = filed["header"]
     given = {"schema": str(SCHEMA), "source": found["source"], "mode": found["mode"],
-             "seal": found["seal"] and found["seal"]["sha256"]}
+             "seal": found["seal"] and found["seal"]["sha256"], "context": found["context"]}
     for name, value in given.items():
         if header[name] != value:
             return f"{name} is {header[name]!r} in the header and {value!r} in the file"
@@ -367,8 +442,8 @@ def _difference(filed: dict, found: dict) -> str:
         other = questions.get(question["subject"])
         if other is None:
             return f"question {question['subject']} is not in the file"
-        for name in ("text", "evidence", "options"):
-            if question[name] != other[name]:
+        for name in ("text", "evidence", "options", "recommendation"):
+            if question[name] != other.get(name):
                 return f"question {question['subject']}: the {name} differ ({question[name]!r} filed)"
     return ("the title, repo, limit or a question that was not filed differs "
             f"(digest {header['digest']} filed)")
@@ -538,6 +613,13 @@ def _lines(found: dict, key: bytes | None, rows: dict[str, dict] | None, now: st
         "exported_by": f"sd-ai-command-pack@{_pack_commit()}",
         "exported_at": _moment(now).astimezone(UTC).isoformat(timespec="seconds"),
         "questions": len(questions), "labels": found["labels"], "open": found["open"],
+        "context": header["context"],
+        # The labels a recommendation stood beside, how many agreed, and how many of each were ruled blind.
+        "agreement": {"recommended": sum(question["agreed"] is not None for question in questions),
+                      "agreed": sum(question["agreed"] is True for question in questions),
+                      "ruled_blind": sum(question["ruled_blind"] is True for question in questions),
+                      "agreed_blind": sum(question["agreed"] is True and question["ruled_blind"] is True
+                                          for question in questions)},
     }
     if rows is not None and key is not None:
         subjects = {question["subject"] for question in questions}
@@ -549,7 +631,8 @@ def _lines(found: dict, key: bytes | None, rows: dict[str, dict] | None, now: st
                 "question_sha256": question["sha256"], "evidence": question["evidence"], "options": question["options"],
                 "label": question["label"], "position": question["position"], "ruling": question["ruling"],
                 "ruled_by": question["ruled_by"], "ruled_at": question["ruled_at"],
-                "expired": question["expired"],
+                "expired": question["expired"], "recommendation": question["recommendation"],
+                "agreed": question["agreed"], "ruled_blind": question["ruled_blind"],
                 "withdrawn": [{"ruling": held["ruling"], "option": held["option"], "withdrawal": held["withdrawal"],
                                "at": held["withdrawn_at"]}
                               for held in question["rulings"] if held["withdrawal"] is not None],

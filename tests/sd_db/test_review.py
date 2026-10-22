@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import sqlite3
 import subprocess
 import tempfile
@@ -387,6 +388,174 @@ class LabelAndWithdraw(ReviewCase):
         with self.assertRaisesRegex(review.ReviewError, "closed"):
             self.withdraw(item, ruled["ruling"]["id"])
         self.assertEqual(self.counts(), before)
+
+
+#: The question-note tags a pack before system sd:5759 reads; every other line is question text to it.
+OLD_TAGS = re.compile(r"^[ \t]*(Option|Subject|Evidence):[ \t]*(.*?)[ \t]*$")
+CONTEXT = {"purpose": "Calibrate the review-tier router.", "rubric": ["skip: docs only", "deep: touches state"],
+           "feeds": "jev-entry-2 training labels"}
+
+
+def advised(mode: str = "open", **changes) -> dict:
+    """A batch with a context block and a recommendation on its first question (system sd:5759)."""
+    changes.setdefault("context", CONTEXT)
+    found = batch(mode=mode, **changes)
+    found["questions"][0]["recommendation"] = {"option": "cheap", "reason": "a two-line diff"}
+    if mode == "sealed":
+        found["seal"] = {"sha256": hashlib.sha256(KEY_A).hexdigest(), "name": "key-C1.csv"}
+    return found
+
+
+class ContextAndRecommendation(ReviewCase):
+    """A batch's context block and a question's recommendation, and the agreement read from the notes (system sd:5759)."""
+
+    def test_the_context_files_in_the_header_and_reads_back(self):
+        item = self.file(advised())
+        self.assertEqual(review.read(self.db, item)["header"]["context"], CONTEXT)
+        header = self.db.execute("SELECT body FROM note WHERE item = ? AND kind = 'comment' ORDER BY id LIMIT 1",
+                                 (item,)).fetchone()[0]
+        self.assertIn("\nPurpose: Calibrate the review-tier router.\nRubric: skip: docs only\n"
+                      "Rubric: deep: touches state\nFeeds: jev-entry-2 training labels\n", header)
+        # A batch filed with none reads none.
+        self.assertIsNone(review.read(self.db, self.file(batch(batch="C2")))["header"]["context"])
+
+    def test_a_recommendation_reads_apart_from_the_evidence(self):
+        item = self.file(advised())
+        first, second = review.read(self.db, item)["questions"]
+        self.assertEqual(first["recommendation"], {"option": "cheap", "reason": "a two-line diff"})
+        self.assertEqual(first["evidence"], ["diff: git show 1a2b3c4"])
+        self.assertIsNone(second["recommendation"])
+
+    def test_an_older_reader_files_the_recommendation_under_evidence_never_the_text(self):
+        # A blind batch shows the text and options only, so an older reader must not read the recommendation as text.
+        item = self.file(advised(mode="blind"))
+        body = self.db.execute("SELECT body FROM note WHERE id = ?",
+                               (review.read(self.db, item)["questions"][0]["note"],)).fetchone()[0]
+        text = [line for line in body.splitlines() if not OLD_TAGS.match(line)]
+        self.assertEqual(text, ["Which review tier fits this change?"])
+        self.assertIn("Evidence: Recommended: cheap", body.splitlines())
+        self.assertIn("Evidence: Recommended because: a two-line diff", body.splitlines())
+
+    def test_an_old_evidence_line_that_names_no_option_stays_evidence(self):
+        item = self.file(batch())
+        note = review.read(self.db, item)["questions"][0]["note"]
+        self.db.execute("UPDATE note SET body = replace(body, 'Evidence: diff', 'Evidence: Recommended: later' || "
+                        "char(10) || 'Evidence: diff') WHERE id = ?", (note,))
+        found = review.read(self.db, item)["questions"][0]
+        self.assertIsNone(found["recommendation"])
+        self.assertEqual(found["evidence"], ["Recommended: later", "diff: git show 1a2b3c4"])
+
+    def test_a_bad_context_or_recommendation_is_refused_before_any_write(self):
+        def recommending(value):
+            found = batch()
+            found["questions"][0]["recommendation"] = value
+            return found
+
+        def evidence(line):
+            found = batch()
+            found["questions"][0]["evidence"] = [line]
+            return found
+
+        refused = {
+            "an empty context": batch(context={}),
+            "an unknown context key": batch(context={"purpose": "p", "owner": "o"}),
+            "a two-line purpose": batch(context={"purpose": "p\nq"}),
+            "a long purpose": batch(context={"purpose": "p" * (review.CONTEXT_CHARS + 1)}),
+            "a rubric that is text": batch(context={"rubric": "one"}),
+            "an empty rubric": batch(context={"rubric": []}),
+            "eleven rubric lines": batch(context={"rubric": ["r"] * (review.RUBRIC_LINES + 1)}),
+            "a context list": batch(context=["p"]),
+            "an option not offered": recommending({"option": "never", "reason": "r"}),
+            "no reason": recommending({"option": "cheap"}),
+            "a two-line reason": recommending({"option": "cheap", "reason": "r\ns"}),
+            "a long reason": recommending({"option": "cheap", "reason": "r" * (review.REASON_CHARS + 1)}),
+            "an unknown recommendation key": recommending({"option": "cheap", "reason": "r", "score": 1}),
+            "a recommendation as text": recommending("cheap"),
+            "evidence that poses as one": evidence("Recommended: cheap"),
+            "evidence that poses as its reason": evidence("Recommended because: small"),
+            # Extreme and nested input: each refuses and none truncates.
+            "a nested rubric line": batch(context={"rubric": [["r"]]}),
+            "an infinite purpose": batch(context={"purpose": float("inf")}),
+            "a zero feeds": batch(context={"feeds": 0}),
+            "a NUL in the purpose": batch(context={"purpose": "p\x00q"}),
+            "a lone surrogate in the reason": recommending({"option": "cheap", "reason": "\ud800"}),
+            "a null reason": recommending({"option": "cheap", "reason": None}),
+            "a nested option": recommending({"option": ["cheap"], "reason": "r"}),
+            "an empty reason": recommending({"option": "cheap", "reason": ""}),
+        }
+        before = self.counts()
+        for name, found in refused.items():
+            with self.subTest(name), self.assertRaises(review.ReviewError):
+                review.file(self.db, found, who="tester")
+        self.assertEqual(self.counts(), before)
+        # Each limit itself files, whole.
+        edge = batch(batch="edge", context={"purpose": "p" * review.CONTEXT_CHARS,
+                                            "rubric": ["r" * review.CONTEXT_CHARS] * review.RUBRIC_LINES})
+        edge["questions"][0]["recommendation"] = {"option": "deep", "reason": "w" * review.REASON_CHARS}
+        found = review.read(self.db, self.file(edge))
+        self.assertEqual(found["header"]["context"]["rubric"], ["r" * review.CONTEXT_CHARS] * review.RUBRIC_LINES)
+        self.assertEqual(found["questions"][0]["recommendation"]["reason"], "w" * review.REASON_CHARS)
+
+    def test_a_changed_recommendation_or_context_is_refused_naming_it(self):
+        self.file(advised())
+        changed = advised()
+        changed["questions"][0]["recommendation"]["option"] = "deep"
+        with self.assertRaisesRegex(review.ReviewError, r"src/one\.py: the recommendation differ"):
+            review.file(self.db, changed, who="tester")
+        with self.assertRaisesRegex(review.ReviewError, r"context is"):
+            review.file(self.db, advised(context={"purpose": "Another purpose."}), who="tester")
+
+    def test_a_kev_file_digests_as_before(self):
+        # A Kev batch filed before sd:5759 must find itself again: the import adds no key to its questions.
+        found = review.from_kev(kev_text([kev_line("span:a")]), batch="b", mode="blind", source="kev:t.jsonl")
+        self.assertEqual(set(found["questions"][0]), {"subject", "text", "evidence", "options"})
+        self.assertNotIn("context", found)
+
+    def test_an_open_ruling_agrees_but_is_never_blind(self):
+        item = self.file(advised())
+        self.rule(item, 0, "cheap")
+        self.rule(item, 1, "deep")
+        first, second = review.read(self.db, item)["questions"]
+        self.assertEqual((first["agreed"], first["ruled_blind"]), (True, False))
+        # No recommendation: nothing to agree with.
+        self.assertEqual((second["agreed"], second["ruled_blind"]), (None, None))
+
+    def test_a_blind_first_ruling_is_blind_and_a_ruling_after_an_undo_is_not(self):
+        for mode in ("blind", "sealed"):
+            with self.subTest(mode):
+                item = self.file(advised(mode=mode, batch=f"B-{mode}"))
+                found = review.read(self.db, item)["questions"][0]
+                self.assertEqual((found["agreed"], found["ruled_blind"]), (None, None))
+                ruled = self.rule(item, 0, "deep")
+                found = review.read(self.db, item)["questions"][0]
+                self.assertEqual((found["agreed"], found["ruled_blind"]), (False, True))
+                # The page shows the recommendation once a ruling lands, so a ruling after its undo saw it.
+                self.withdraw(item, ruled["ruling"]["id"])
+                self.rule(item, 0, "cheap")
+                found = review.read(self.db, item)["questions"][0]
+                self.assertEqual((found["agreed"], found["ruled_blind"]), (True, False))
+
+    def test_the_export_carries_the_context_each_recommendation_and_the_agreement(self):
+        found = advised(mode="blind")
+        found["questions"][1]["recommendation"] = {"option": "skip", "reason": "docs only"}
+        item = self.file(found)
+        self.rule(item, 0, "cheap")
+        self.rule(item, 1, "deep")
+        manifest, first, second = review.export(self.db, item, who="tester")
+        self.assertEqual(manifest["context"], CONTEXT)
+        self.assertEqual(manifest["agreement"], {"recommended": 2, "agreed": 1, "ruled_blind": 2, "agreed_blind": 1})
+        self.assertEqual((first["recommendation"], first["agreed"], first["ruled_blind"]),
+                         ({"option": "cheap", "reason": "a two-line diff"}, True, True))
+        self.assertEqual((second["agreed"], second["ruled_blind"]), (False, True))
+        self.assertEqual(first["evidence"], ["diff: git show 1a2b3c4"])
+
+    def test_a_batch_with_no_recommendation_exports_a_zero_agreement(self):
+        item = self.file(batch())
+        self.rule(item, 0, "cheap")
+        manifest, first, _ = review.export(self.db, item, who="tester")
+        self.assertEqual((manifest["context"], manifest["agreement"]),
+                         (None, {"recommended": 0, "agreed": 0, "ruled_blind": 0, "agreed_blind": 0}))
+        self.assertEqual((first["recommendation"], first["agreed"], first["ruled_blind"]), (None, None, None))
 
 
 class Export(ReviewCase):
