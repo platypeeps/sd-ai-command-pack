@@ -1214,6 +1214,42 @@ class Recurrence(unittest.TestCase):
         refused = self.call("task", "edit", item, "--recur-anchor", "completion", code=1)
         self.assertIn("recurrence_anchor needs a recurrence rule", refused.stderr)
 
+    def test_recur_lead_on_add_and_edit_and_cleared_with_the_rule(self):
+        # pack sd:5648.
+        state = self.add("Pay the dues", "--due", "2026-01-10", "--recur", "FREQ=MONTHLY", "--recur-lead", "3")
+        item = state["item"]["id"]
+        self.assertEqual(state["item"]["recurrence_lead"], 3)
+        edited = json.loads(self.call("task", "edit", item, "--recur-lead", "7", "--json").stdout)
+        self.assertEqual(edited["item"]["recurrence_lead"], 7)
+        shown = self.call("task", "edit", item, "--recur-lead", "5").stdout
+        self.assertIn("recurs FREQ=MONTHLY (schedule, shows 5d early)", shown)
+        cleared = json.loads(self.call("task", "edit", item, "--clear-recur", "--json").stdout)
+        self.assertEqual((cleared["item"]["recurrence"], cleared["item"]["recurrence_lead"]), (None, None))
+
+    def test_store_items_names_the_day_a_scheduled_occurrence_opens(self):
+        self.add("Renew the licence", "--due", "2099-01-10", "--recur", "FREQ=YEARLY", "--recur-lead", "3")
+        self.assertIn("recurs FREQ=YEARLY (schedule, shows 3d early) · opens 2099-01-07",
+                      self.call("store", "items").stdout)
+        rows = json.loads(self.call("store", "items", "--json").stdout)
+        self.assertEqual([(row["opens_on"], row["scheduled"]) for row in rows], [("2099-01-07", 1)])
+
+    def test_recur_lead_refusals(self):
+        before = json.loads(self.call("store", "items", "--json").stdout)
+        for arguments, code, message in (
+                (("--due", "2026-01-10", "--recur", "FREQ=WEEKLY", "--recur-lead", "-1"), 1,
+                 "recurrence_lead must be a whole number of days"),
+                (("--due", "2026-01-10", "--recur", "FREQ=WEEKLY", "--recur-lead", "1.5"), 2, "invalid int"),
+                (("--due", "2026-01-10", "--recur", "FREQ=WEEKLY", "--recur-lead", "soon"), 2, "invalid int"),
+                (("--due", "2026-01-10", "--recur-lead", "3"), 1, "recurrence_lead needs a recurrence rule")):
+            with self.subTest(arguments=arguments):
+                refused = self.call("task", "add", "Refused", *arguments, code=code)
+                self.assertIn(message, refused.stderr)
+                self.assertNotIn("Traceback", refused.stderr)
+        self.assertEqual(json.loads(self.call("store", "items", "--json").stdout), before)
+        plain = self.add("Plain", "--due", "2026-01-10")["item"]["id"]
+        refused = self.call("task", "edit", plain, "--recur-lead", "3", code=1)
+        self.assertIn("recurrence_lead needs a recurrence rule", refused.stderr)
+
     def test_completion_names_the_next_occurrence(self):
         item = self.add("Weekly filing", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY")["item"]["id"]
         completed = json.loads(self.call("task", "status", item, "done", "--json").stdout)

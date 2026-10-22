@@ -963,7 +963,7 @@ def run_fleet_stamp(args: argparse.Namespace) -> int:
 
 
 def register_fleet(groups: Any) -> None:
-    fleet = groups.add_parser("fleet", help="lay the runner_merge=auto fleet's shared files")
+    fleet = groups.add_parser("fleet", help="lay the runner_merge=auto fleet's shared files, or bring one repository to the managed standard")
     verbs = fleet.add_subparsers(dest="verb", required=True)
     stamper = verbs.add_parser(
         "stamp",
@@ -976,3 +976,6 @@ def register_fleet(groups: Any) -> None:
     stamper.add_argument("--pin", metavar="SHA", help="pin the route action here instead of the pack's origin/HEAD")
     stamper.add_argument("--json", action="store_true", help="emit one machine-readable object")
     stamper.set_defaults(handler=run_fleet_stamp)
+    import sd_standard  # noqa: PLC0415 - it imports this module, so it registers itself here
+
+    sd_standard.register_standard(verbs)

@@ -20,7 +20,13 @@ from . import repos
 from .database import transaction
 from .errors import SdDbError
 from .reads import BRIEF_KINDS, item_by_id, item_notes
-from .recurrence import ANCHORS, RecurrenceError, first_barren_start, next_after
+from .recurrence import (
+    ANCHORS,
+    MAX_LEAD_DAYS,
+    RecurrenceError,
+    first_barren_start,
+    next_after,
+)
 from .recurrence import parse as parse_rule
 from .writes import (
     STATUSES,
@@ -35,11 +41,12 @@ from .writes import (
 
 USER_FIELDS = frozenset({"title", "body", "priority", "due", "repo", "kind"})
 
-#: The recurrence columns migration 012 added (sd:1099). `edit_item` accepts
-#: them beside `USER_FIELDS` but they stay out of that set: the dashboard's
-#: details form offers exactly `USER_FIELDS`, its `ItemRepository` test holds
-#: the two equal, and the form has no recurrence control yet.
-RECURRENCE_FIELDS = frozenset({"recurrence", "recurrence_anchor"})
+#: The recurrence columns migrations 012 (sd:1099) and 041 (pack sd:5648)
+#: added. `edit_item` accepts them beside `USER_FIELDS` but they stay out of
+#: that set: the dashboard's details form offers exactly `USER_FIELDS`, its
+#: `ItemRepository` test holds the two equal, and the form has no recurrence
+#: control yet.
+RECURRENCE_FIELDS = frozenset({"recurrence", "recurrence_anchor", "recurrence_lead"})
 
 #: `branch`, which `edit_item` only clears (sd:2818): a stale name has no
 #: other way out. Setting one stays with `sd work register`,
@@ -274,6 +281,10 @@ def _fields(connection: sqlite3.Connection, changes: dict) -> dict:
     anchor = result.get("recurrence_anchor")
     if anchor is not None and anchor not in ANCHORS:
         raise WorkflowError(f"recurrence_anchor must be {' or '.join(ANCHORS)}, or null")
+    lead = result.get("recurrence_lead")
+    # `type is int`: a bool is an int to `isinstance`, and True is not a day count.
+    if lead is not None and (type(lead) is not int or not 0 <= lead <= MAX_LEAD_DAYS):
+        raise WorkflowError(f"recurrence_lead must be a whole number of days from 0 to {MAX_LEAD_DAYS}, or null")
     return result
 
 
@@ -290,11 +301,12 @@ def _recurring(kind: str, current: dict, values: dict) -> dict:
     rule = values.get("recurrence", current.get("recurrence"))
     anchor = values.get("recurrence_anchor", current.get("recurrence_anchor"))
     if rule is None:
-        if values.get("recurrence_anchor") is not None:
-            raise WorkflowError(
-                "recurrence_anchor needs a recurrence rule; set recurrence in the same write")
-        if "recurrence" in values and current.get("recurrence_anchor") is not None:
-            values["recurrence_anchor"] = None
+        for field in ("recurrence_anchor", "recurrence_lead"):
+            if values.get(field) is not None:
+                raise WorkflowError(
+                    f"{field} needs a recurrence rule; set recurrence in the same write")
+            if "recurrence" in values and current.get(field) is not None:
+                values[field] = None
         return values
     if anchor is None:
         values["recurrence_anchor"] = anchor = "schedule"
@@ -412,18 +424,20 @@ def capture_task(
     connection: sqlite3.Connection, *, title: str, body: str = "",
     priority: int | None = None, due: str | None = None, repo: str | None = None,
     recurrence: str | None = None, recurrence_anchor: str | None = None,
-    who: str,
+    recurrence_lead: int | None = None, who: str,
 ) -> dict:
     """Capture one local task, including its initial status history.
 
     `recurrence` is an RRULE in `sd_db.recurrence`'s subset and needs `due`;
-    `recurrence_anchor` defaults to `schedule` when a rule is given.
+    `recurrence_anchor` defaults to `schedule` when a rule is given, and
+    `recurrence_lead` is the days before `due` each later occurrence shows.
     """
     who = _text(who, "who")
     with transaction(connection):
         values = _fields(connection, {
             "title": title, "body": body, "priority": priority, "due": due, "repo": repo,
             "recurrence": recurrence, "recurrence_anchor": recurrence_anchor,
+            "recurrence_lead": recurrence_lead,
         })
         values = _recurring("task", {}, values)
         item = create_item(connection, kind="task", status="planning", session=who, **values)
@@ -773,14 +787,21 @@ def next_occurrence_due(row: dict, *, today: date | None = None) -> str | None:
         return None
 
 
+#: What a completion writes on the row it closes: every recurrence field, cleared.
+CLEARED = dict.fromkeys(sorted(RECURRENCE_FIELDS))
+
+
 def _next_occurrence(connection: sqlite3.Connection, row: dict, *, who: str) -> tuple[int | None, str | None]:
     """Create the row a completed recurring item owes, and move the rule to it.
 
     Called inside `change_status`'s transaction, after the completion. The
     new row copies what the obligation is -- kind, title, body, priority,
     repository -- and not what one instance of it carried: `branch`, `path`
-    and the producer-owned `fields`. Clearing the rule on the completed row
-    is what makes a reopen and a second completion spawn nothing.
+    and the producer-owned `fields`. The rule, its anchor and its lead move
+    together (pack sd:5648): the lead is copied as stored, since a read treats
+    a value `_fields` would refuse as open rather than hiding the row.
+    Clearing the rule on the completed row is what makes a reopen and a
+    second completion spawn nothing.
 
     `schedule` walks the series that starts at the completed row's `due` and
     takes the first occurrence after it. `completion` restarts the series at
@@ -809,7 +830,7 @@ def _next_occurrence(connection: sqlite3.Connection, row: dict, *, who: str) -> 
     except (RecurrenceError, ValueError) as error:
         searched = f", searched from {start.isoformat()}" if start is not None else ""
         reason = f"{error} ({anchor} anchor{searched})"
-        set_item_fields(connection, row["id"], recurrence=None, recurrence_anchor=None)
+        set_item_fields(connection, row["id"], **CLEARED)
         add_note(connection, row["id"], "comment",
                  f"Recurrence ended: {reason}. No next occurrence was created; completed by {who}",
                  session=who)
@@ -817,11 +838,12 @@ def _next_occurrence(connection: sqlite3.Connection, row: dict, *, who: str) -> 
     spawned = create_item(
         connection, kind=row["kind"], title=row["title"], status="planning",
         repo=row["repo"], priority=row["priority"], due=due,
-        recurrence=rule.text(), recurrence_anchor=anchor, session=who,
+        recurrence=rule.text(), recurrence_anchor=anchor,
+        recurrence_lead=row.get("recurrence_lead"), session=who,
     )
     if row["body"] is not None:
         set_item_fields(connection, spawned, body=row["body"])
-    set_item_fields(connection, row["id"], recurrence=None, recurrence_anchor=None)
+    set_item_fields(connection, row["id"], **CLEARED)
     add_note(connection, row["id"], "comment",
              f"Next occurrence: item {spawned}, due {due} ({rule.text()}, {anchor}-anchored) by {who}",
              session=who)

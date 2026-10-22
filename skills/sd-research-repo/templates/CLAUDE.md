@@ -13,6 +13,7 @@ shared template`, with the reason.
 | Path | Holds |
 |---|---|
 | `00-overview/` | `understanding.md`, `open-questions.md`, `next-research.md` — fixed names |
+| `05-architecture/` | `architecture.md` — one overview: an Archify diagram of the system or domain, its parts, and which stage covers each |
 | `10-sources/` | `registry.md` (what was read, when, status), `references.md` (link list) |
 | `20-map/` | `MAP-*.md` — structured ledgers, crosswalks, comparisons |
 | `30-brief/` | `BRIEF-*` argued positions · `REVIEW-*` assessments · `SUMMARY-*` condensations |

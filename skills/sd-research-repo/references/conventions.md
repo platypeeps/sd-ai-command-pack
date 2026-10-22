@@ -92,6 +92,7 @@ that cannot run has not passed.
 | Path | Holds |
 |---|---|
 | `00-overview/` | `understanding.md`, `open-questions.md`, `next-research.md` — fixed names |
+| `05-architecture/` | `architecture.md` — one overview: an Archify diagram of the system or domain, its parts, and which stage covers each |
 | `10-sources/` | `registry.md` (what was read, when, status), `references.md` (link list) |
 | `20-map/` | `MAP-*.md` — structured ledgers, crosswalks, comparisons |
 | `30-brief/` | `BRIEF-*` argued positions · `REVIEW-*` assessments · `SUMMARY-*` condensations |
@@ -118,6 +119,26 @@ Type prefixes carry meaning:
   up front.
 - `REVIEW-` assesses something someone else produced; `BRIEF-` argues a position
   of our own.
+
+### The architecture overview
+
+`05-architecture/architecture.md` is one document per project: the system or
+domain under study, its parts, how they connect, and which later stage covers
+each part. A newcomer reads it before the sources, to place every later
+document. Copy it from `skills/sd-research-repo/templates/05-architecture/architecture.md`.
+
+- Draw the diagram with Archify when it is available. Export it as SVG and
+  paste the `<svg>` into the template's `<div class="diagram">` block: a served
+  page loads no external image (see Publishing).
+- Without Archify, say so in Status and keep only the plain diagram in the
+  fenced `text` block. Keep that block for a document designated for Notion or
+  Drive too: the mirror imports the Markdown, not the rendered page.
+- Add it to `research.conf.py` like any other document, for example
+  `dict(src="05-architecture/architecture.md", out="architecture", title="Architecture — <project>")`.
+
+`sd-research-kit review` warns when the overview is missing or no `DOCS` entry
+renders it. It **does not fail**: every research repo predates the stage
+(pack sd:5660).
 
 ### Maps: stable row IDs and a gaps section
 
@@ -289,6 +310,10 @@ serves — the published form, not merely a local one. The content-only
 `build/artifact/` form is gone: nothing consumed it, and the dashboard folder's
 contract is that everything in it is published. Add or edit pages in
 `research.conf.py`, never by editing generated files.
+
+Each render also writes `docs/dashboard/research.json`: `PROJECT`, the sha256 of
+the `research.conf.py` it executed, and each document's string fields. The
+dashboard never executes the config, so it reads a computed one from there.
 
 Rendering ends by writing each document's Markdown into the Obsidian vault,
 registering `docs/dashboard/` with the dashboard, and queueing a sync for every

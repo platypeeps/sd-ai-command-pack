@@ -273,6 +273,8 @@ def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
         changes["recurrence"] = None
     if args.recur_anchor is not None:
         changes["recurrence_anchor"] = args.recur_anchor
+    if args.recur_lead is not None:
+        changes["recurrence_lead"] = args.recur_lead
     # Clear only: the nightly prune parks, and `edit_item` refuses a writing piece (sd:3007).
     if args.unpark:
         changes["parked_at"] = None
@@ -566,7 +568,9 @@ def _print_rows(rows: list[dict[str, Any]], *, moved: bool = False, today: str |
         if row.get("ref"):
             print(f"  ref: {row['ref']}")
         if row.get("recurrence"):
-            print(f"  recurs {row['recurrence']} ({row.get('recurrence_anchor')})")
+            lead = f", shows {row['recurrence_lead']}d early" if row.get("recurrence_lead") else ""
+            opens = f" · opens {row['opens_on']}" if row.get("scheduled") else ""
+            print(f"  recurs {row['recurrence']} ({row.get('recurrence_anchor')}{lead}){opens}")
 
 
 def _emit(value: Any, *, machine: bool, moved: bool = False, following: Any = None,
@@ -1066,7 +1070,8 @@ def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
         state = workflow.capture_task(
             connection, title=args.title, body=args.body or "", priority=args.priority,
             due=args.due, repo=_task_repo(args, connection, workflow),
-            recurrence=args.recur, recurrence_anchor=args.recur_anchor, who=who,
+            recurrence=args.recur, recurrence_anchor=args.recur_anchor,
+            recurrence_lead=args.recur_lead, who=who,
         )
         item = state["item"]["id"]
         if args.ref is not None:
@@ -1384,7 +1389,7 @@ def _bare(text: object) -> str:
 
 
 def _recurrence_flags(parser: argparse.ArgumentParser, *, clear: bool = False) -> None:
-    """`--recur` and `--recur-anchor`, the same on `add` and `edit` (sd:1428).
+    """`--recur`, `--recur-anchor` and `--recur-lead`, the same on `add` and `edit` (sd:1428).
 
     No `choices` and no grammar check: `sd_db.workflow` refuses a bad rule, a
     bad anchor, a rule with no due date and a kind that cannot recur, each by
@@ -1402,6 +1407,10 @@ def _recurrence_flags(parser: argparse.ArgumentParser, *, clear: bool = False) -
     parser.add_argument("--recur-anchor", metavar="ANCHOR",
                         help="schedule (default: the next due date follows the last one) or "
                              "completion (it follows the day the task was done)")
+    # `type=int` only parses: the range and the rule it needs are the library's (pack sd:5648).
+    parser.add_argument("--recur-lead", metavar="DAYS", type=int,
+                        help="show each next occurrence this many days before its due date "
+                             "(default 0: on the due date); needs a rule, and --clear-recur clears it")
 
 
 def _audit(parser: argparse.ArgumentParser) -> None:

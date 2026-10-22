@@ -16,7 +16,15 @@ import sqlite3
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
-from .reads import REVIEW_BATCH, _now, _parse, _unparked_clause, open_notes, today_items
+from .reads import (
+    REVIEW_BATCH,
+    _now,
+    _parse,
+    _unparked_clause,
+    open_notes,
+    scheduled_clause,
+    today_items,
+)
 from .reporting import _current_basis
 from .ship import this_host
 
@@ -305,17 +313,20 @@ def planned(connection: sqlite3.Connection, *, repos: Iterable[str] | None = Non
             now: str | None = None) -> list[dict]:
     """Open unparked items due after today, soonest first: `status`, `due`, `priority`.
 
-    Today's and overdue ones are `work`.
+    Today's and overdue ones are `work`. A scheduled occurrence of a recurring
+    series (`reads.opens_on_clause`) is in neither until its lead brings it
+    back (pack sd:5648).
     """
     where, values = _in("item.repo", _keep(repos))
     return [{"id": row["id"], "repo": row["repo"], "status": row["status"], "title": row["title"],
              "due": row["due"], "priority": row["priority"]} for row in connection.execute(
         f"""
         SELECT item.* FROM item
-         WHERE item.status != 'done' AND item.due > ? AND {_unparked_clause(connection)} AND {where}
+         WHERE item.status != 'done' AND item.due > ? AND {_unparked_clause(connection)}
+           AND NOT {scheduled_clause(connection, "?")} AND {where}
          ORDER BY item.due ASC, item.priority IS NULL, item.priority ASC, item.id ASC
         """,
-        (_now(now)[:10], *values),
+        (_now(now)[:10], _now(now)[:10], *values),
     )]
 
 

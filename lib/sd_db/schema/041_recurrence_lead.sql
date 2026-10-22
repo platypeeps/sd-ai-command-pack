@@ -1,0 +1,28 @@
+-- `item.recurrence_lead` (pack sd:5648): how many days before its `due` an
+-- open occurrence of a recurring series shows again. A completion spawns the
+-- next occurrence at once (012); until `due - recurrence_lead` that row is
+-- scheduled, and the reads that list work to do (`reads.backlog_items`,
+-- `today_items`, `today.planned`) mark it or leave it out. NULL is 0: the
+-- occurrence opens on its due date.
+--
+-- It is a recurrence field, as 012's pair: written only with a rule, cleared
+-- with the rule, and moved to the row a completion creates.
+--
+-- No CHECK, for 012's reason: SQLite cannot `ALTER` one on `item`, and the
+-- table cannot be rebuilt under its foreign keys. `workflow._fields` refuses
+-- anything but a whole number of days from 0 to `workflow.MAX_LEAD_DAYS`, and
+-- a read that meets another value treats the row as open, never hidden.
+--
+-- `ADD COLUMN`, as 012: SQLite adds a nullable column in place and moves no
+-- row. Every existing row reads NULL, so each series keeps opening on its due
+-- date until someone sets a lead.
+-- The reverse, run by hand with the runner, the dashboard and the serve agent
+-- stopped. It drops every lead, so each series opens on its due date again;
+-- take `bin/sd-db backup` first:
+--
+--   BEGIN;
+--   ALTER TABLE item DROP COLUMN recurrence_lead;
+--   PRAGMA user_version = 40;
+--   COMMIT;
+
+ALTER TABLE item ADD COLUMN recurrence_lead INTEGER;

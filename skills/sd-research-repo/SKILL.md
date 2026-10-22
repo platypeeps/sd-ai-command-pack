@@ -100,6 +100,13 @@ records the differences that are on purpose. Both are in
    An experiment's status brief keeps the six fixed sections of
    `references/conventions.md` **Status brief**, and its `30-brief/deck.json`
    changes with it; `sd-research-kit deck` lays that out as slides.
+   The project's architecture overview, `05-architecture/architecture.md`,
+   starts from `templates/05-architecture/architecture.md`: the system or domain
+   under study, its parts, how they connect, and which stage covers each part.
+   Draw its diagram with the Archify skill when it is available, and paste the
+   exported `<svg>` into the template's `diagram` block. If Archify is not
+   available, say so in Status and keep the plain diagram in the fenced `text`
+   block. Add the document to `research.conf.py` so `render` publishes it.
 4. Render, from inside the repo:
 
    ```bash

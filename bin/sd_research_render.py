@@ -42,10 +42,15 @@ Each DOCS entry:
                         document publishes to the dashboard and nowhere else;
                         with both, it has two mirrors rather than a choice.
 
-Writes one file per doc:
+Writes one file per doc, then one manifest:
 
     docs/dashboard/<out>.html   standalone — opens with file://, and is what the
                                 dashboard's Documents tab lists and serves
+    docs/dashboard/research.json
+                                PROJECT, the sha256 of the research.conf.py
+                                executed, and each doc's string fields: the
+                                dashboard reads a config it cannot read
+                                without running it from here
 
 `docs/dashboard/` is gitignored: it is regenerated on every commit, and the
 dashboard serves whatever it finds there.
@@ -59,6 +64,7 @@ Never hand-wrap HTML for publishing; that mismatch is what this exists to preven
 """
 
 import html
+import json
 import os
 import re
 import subprocess
@@ -72,7 +78,13 @@ except ImportError:
 
 from sd_lib import GIT_TIMEOUT_SECONDS
 from sd_research_fonts import FONTS_CSS
-from sd_research_publish import execute_conf, exit_status, project_label, publish
+from sd_research_publish import (
+    CONF_DIGEST,
+    execute_conf,
+    exit_status,
+    project_label,
+    publish,
+)
 from sd_research_tokens import THEME_JS, TOKENS_CSS
 
 CSS = TOKENS_CSS
@@ -243,6 +255,34 @@ def build_one(repo, cfg, project):
     return page
 
 
+#: The string fields of a DOCS entry the manifest carries; `links` is the one list.
+MANIFEST_FIELDS = ("src", "out", "title", "eyebrow", "stand")
+
+
+def write_manifest(repo, project, docs, digest):
+    """Write docs/dashboard/research.json atomically: the dashboard reads it
+    instead of executing research.conf.py, and a reader never sees half a file.
+
+    Strings only: a field that is not a string, and a link that is not a pair
+    of strings, is left out rather than coerced.
+    """
+    entries = []
+    for cfg in docs:
+        entry = {key: cfg[key] for key in MANIFEST_FIELDS if isinstance(cfg.get(key), str)}
+        entry["links"] = [[label, href] for label, href in
+                          (link for link in cfg.get("links", []) if isinstance(link, (list, tuple)) and len(link) == 2)
+                          if isinstance(label, str) and isinstance(href, str)]
+        entries.append(entry)
+    manifest = {"version": 1, "project": project, "conf_sha256": digest, "docs": entries}
+    path = os.path.join(repo, "docs", "dashboard", "research.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    partial = path + ".partial"
+    with open(partial, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n")
+    os.replace(partial, path)
+    return path
+
+
 def main() -> int:
     # R10-D6: the repository is the one the caller is standing in. The kit took
     # `render [repo_dir]` before it moved here, which is the shape that lets a
@@ -258,6 +298,9 @@ def main() -> int:
     print("%s  ->  docs/dashboard/" % os.path.basename(repo))
     for cfg in ns["DOCS"]:
         build_one(repo, cfg, badge)
+    # After the pages: a render stopped between them leaves the last manifest,
+    # whose digest the dashboard shows as an older render.
+    write_manifest(repo, badge, ns["DOCS"], ns[CONF_DIGEST])
 
     # Publication is the default, not a step the user asks for: a document
     # nobody can find was not delivered. Registration is idempotent and

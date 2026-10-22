@@ -20,6 +20,7 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import io
+import json
 import os
 import re
 import subprocess
@@ -126,6 +127,7 @@ class ReviewDocstringTests(unittest.TestCase):
         "template_drift": "`CLAUDE.md` has not drifted",
         "work_items": "work items under `docs/work/`",
         "map_ledgers": "stable row IDs and a gaps section",
+        "architecture_overview": "architecture overview under `05-architecture/`",
     }
 
     def test_the_docstring_names_every_check_review_runs(self) -> None:
@@ -1225,6 +1227,62 @@ class MapLedgerTests(unittest.TestCase):
         self.assertNotIn("20-map/", result.stdout)
 
 
+class ArchitectureOverviewTests(unittest.TestCase):
+    """pack sd:5660: the layout gains `05-architecture/`, one overview per project.
+
+    Every research repo predates the stage, so a missing or unrendered overview
+    warns and the exit stays 0.
+    """
+
+    DOC = "05-architecture/architecture.md"
+    OVERVIEW = REPO_ROOT / "skills" / "sd-research-repo" / "templates" / DOC
+
+    def review(self, *, overview: bool, configured: bool) -> subprocess.CompletedProcess:
+        with tempfile.TemporaryDirectory() as raw:
+            repo = Path(raw)
+            docs = (f"[{{'src': './{self.DOC}', 'out': 'architecture',"
+                    " 'title': 'Architecture'}]" if configured else "[]")
+            (repo / "research.conf.py").write_text(f'PROJECT = "probe"\nDOCS = {docs}\n')
+            (repo / "CLAUDE.md").write_text(TEMPLATE.read_text(encoding="utf-8"))
+            if overview:
+                (repo / "05-architecture").mkdir()
+                (repo / self.DOC).write_text(self.OVERVIEW.read_text(encoding="utf-8"))
+            return run("review", cwd=repo)
+
+    def test_a_repo_without_the_overview_warns_and_does_not_fail(self) -> None:
+        result = self.review(overview=False, configured=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"WARN {self.DOC}: missing", result.stdout)
+
+    def test_an_overview_the_config_does_not_render_warns(self) -> None:
+        result = self.review(overview=True, configured=False)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn(f"WARN {self.DOC}: not in research.conf.py DOCS", result.stdout)
+
+    def test_a_configured_overview_is_named_ok(self) -> None:
+        """A `./` spelling of the path is the same document."""
+
+        result = self.review(overview=True, configured=True)
+        self.assertIn(f"ok   {self.DOC}", result.stdout)
+        self.assertNotIn(f"WARN {self.DOC}", result.stdout)
+
+    def test_the_template_has_the_shape_review_checks(self) -> None:
+        load_publish()  # puts `bin/` on the path, so the class runs on its own
+        module = load_kit().load("sd_research_review")
+        text = self.OVERVIEW.read_text(encoding="utf-8")
+        self.assertTrue(module.provenance(text)[0], module.provenance(text))
+        self.assertTrue(module.status_section(text)[0], module.status_section(text))
+        self.assertIn("Archify", text)
+
+    def test_every_layout_table_names_the_stage(self) -> None:
+        conventions = REPO_ROOT / "skills" / "sd-research-repo" / "references" / "conventions.md"
+        for path in (TEMPLATE, conventions):
+            rows = [line for line in path.read_text(encoding="utf-8").splitlines()
+                    if line.startswith("| `05-architecture/`")]
+            self.assertEqual(len(rows), 1, path)
+            self.assertIn("`architecture.md`", rows[0], path)
+
+
 class InitHookInstallTests(unittest.TestCase):
     """`init-hook` installs one source under every trigger, or none at all.
 
@@ -1436,6 +1494,94 @@ class InitHookInstallTests(unittest.TestCase):
         self.assertEqual(digests, released)
         self.assertNotIn(hashlib.sha256(module.HOOK.encode("utf-8")).hexdigest(),
                          released, "the current body is listed as superseded")
+
+
+class RenderManifestTests(unittest.TestCase):
+    """`render` writes docs/dashboard/research.json (pack sd:5658).
+
+    The dashboard never executes research.conf.py, so a config that builds
+    DOCS with code is unreadable there; the manifest is what the render
+    executed, named by the sha256 of the bytes it ran.
+    """
+
+    CONF = (
+        'import pathlib\n'
+        'PROJECT = "Probe"\n'
+        'DOCS = [dict(src=name + ".md", out=name, title=name.title(), eyebrow=42,\n'
+        '             stand="One line.", links=[("Spec", "https://example.test/spec"), ("bad", 3)])\n'
+        '        for name in ("one", "two")]\n'
+    )
+
+    def setUp(self) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.repo = Path(temporary.name)
+        for name in ("one", "two"):
+            (self.repo / f"{name}.md").write_text("# T\n\nBody.\n", encoding="utf-8")
+        (self.repo / "research.conf.py").write_text(self.CONF, encoding="utf-8")
+        self.manifest = self.repo / "docs" / "dashboard" / "research.json"
+
+    def render(self):
+        """Run the real `render` in-process; publication is stubbed, so nothing leaves the directory."""
+
+        load_publish()
+
+        class Converter:
+            def __init__(self, **_options: object) -> None:
+                self.toc_tokens: list = []
+
+            def convert(self, _text: str) -> str:
+                return "<p>Body.</p>"
+
+        fake = types.ModuleType("markdown")
+        fake.Markdown = Converter  # type: ignore[attr-defined]
+        with unittest.mock.patch.dict(sys.modules, {"markdown": fake}):
+            render = load_kit().load("sd_research_render")
+        here = os.getcwd()
+        os.chdir(self.repo)
+        self.addCleanup(os.chdir, here)
+        clean = {k: v for k, v in os.environ.items() if k not in ("SD_RESEARCH_TRIGGER", "GIT_EXEC_PATH")}
+        with unittest.mock.patch.dict(os.environ, clean, clear=True), \
+                unittest.mock.patch.object(render, "publish", unittest.mock.Mock(return_value=[])), \
+                unittest.mock.patch("sys.stdout", io.StringIO()):
+            return render.main()
+
+    def test_render_writes_the_manifest_of_what_it_executed(self) -> None:
+        source = (self.repo / "research.conf.py").read_bytes()
+        self.assertEqual(self.render(), 0)
+        link = [["Spec", "https://example.test/spec"]]
+        self.assertEqual(json.loads(self.manifest.read_text(encoding="utf-8")), {
+            "version": 1, "project": "Probe", "conf_sha256": hashlib.sha256(source).hexdigest(),
+            "docs": [{"src": "one.md", "out": "one", "title": "One", "stand": "One line.", "links": link},
+                     {"src": "two.md", "out": "two", "title": "Two", "stand": "One line.", "links": link}]})
+        self.assertEqual(sorted(p.name for p in self.manifest.parent.iterdir()),
+                         ["one.html", "research.json", "two.html"])
+
+    def test_the_digest_is_of_the_bytes_executed_not_the_file_after(self) -> None:
+        """A config that rewrites itself while it runs: the manifest names what ran."""
+
+        conf = self.repo / "research.conf.py"
+        conf.write_text(self.CONF + 'pathlib.Path("research.conf.py").write_text("DOCS = []\\n")\n', encoding="utf-8")
+        executed = conf.read_bytes()
+        self.render()
+        digest = json.loads(self.manifest.read_text(encoding="utf-8"))["conf_sha256"]
+        self.assertEqual(digest, hashlib.sha256(executed).hexdigest())
+        self.assertNotEqual(digest, hashlib.sha256(conf.read_bytes()).hexdigest())
+
+    def test_a_render_stopped_before_the_manifest_leaves_the_last_one(self) -> None:
+        """Pages first, manifest last: a failed page keeps the older manifest,
+        whose digest the dashboard reads as an older render; the next render replaces it."""
+
+        self.manifest.parent.mkdir(parents=True)
+        self.manifest.write_text('{"version": 1, "conf_sha256": "old"}\n', encoding="utf-8")
+        (self.repo / "two.md").unlink()
+        with self.assertRaises(FileNotFoundError):
+            self.render()
+        self.assertEqual(json.loads(self.manifest.read_text(encoding="utf-8"))["conf_sha256"], "old")
+        (self.repo / "two.md").write_text("Body.\n", encoding="utf-8")
+        self.render()
+        self.assertNotEqual(json.loads(self.manifest.read_text(encoding="utf-8"))["conf_sha256"], "old")
+        self.assertFalse(list(self.manifest.parent.glob("*.partial")))
 
 
 class HookTriggerTests(unittest.TestCase):
