@@ -437,6 +437,22 @@ class MovedCopies(Case):
             self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [old])
         self.assertFalse(old.exists())
 
+    def test_an_expired_local_snapshot_with_no_checkpoint_row_stays(self):
+        # sd:5694 lane review: without `verify`, the local prune read no checkpoint at all, so a
+        # snapshot taken read-only before `migrate`, or one whose row is gone, was deleted.
+        read_only = self.uncheckpointed(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))
+        missing = self.uncheckpointed(self.snapshot(datetime(2026, 10, 2, 9, 0, tzinfo=UTC)), read_only=False)
+        lines: list[str] = []
+
+        self.assertEqual(prune_older(self.local, 7, now=NOW, report=lines.append), [])
+
+        self.assertTrue((read_only / "sd.db").exists())
+        self.assertTrue((missing / "sd.db").exists())
+        self.assertEqual(lines, [
+            f"kept {missing}: its database holds no checkpoint row for its run",
+            f"kept 1 backup under {self.local}, named {read_only.name}: "
+            "it was taken read-only before `migrate`, so no checkpoint row dates it"])
+
     def test_a_copy_that_differs_from_its_manifest_stays(self):
         # Retention reads no hash (sd:5682), but a truncated database holds no checkpoint row to date it.
         old = self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)))

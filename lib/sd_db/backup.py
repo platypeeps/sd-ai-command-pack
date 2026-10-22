@@ -887,8 +887,10 @@ def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = F
 
     `owned_only` is the age prune's question (sd:5682): is this ours to
     delete, not does it restore. The manifest and the listing of names and
-    kinds must match; no file is hashed and the database is not verified, so
-    a copy over SMB costs a listing, not minutes.
+    kinds must match, and the database must hold its run's checkpoint row
+    (`_checkpoint`, one row; a read-only snapshot is `Retained`). No file is
+    hashed and the database is not verified, so a copy over SMB costs a
+    listing and one read, not minutes.
     """
     try:
         if directory.is_symlink() or not directory.is_dir() or directory.parent.is_symlink():
@@ -929,8 +931,9 @@ def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = F
         elif value["entries"] != _retention_inventory(directory, moved=moved):
             raise BackupError("its files differ from its manifest")
         checkpointed = not (read_only and value.get("checkpoint") is False)
-        if not owned_only and verify(directory / database, run_id=run_id, expected=counts,
-                                     checkpointed=checkpointed) != counts:
+        if owned_only:
+            _checkpoint(directory)
+        elif verify(directory / database, run_id=run_id, expected=counts, checkpointed=checkpointed) != counts:
             raise BackupError("its database holds other counts than its manifest")
         details = directory.stat()
         if (details.st_dev, details.st_ino) != (before.st_dev, before.st_ino):
