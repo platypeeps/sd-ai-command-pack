@@ -239,7 +239,7 @@ an em dash, more than six cards (three beside a track) and text past its bound, 
 - `slides`: each has an `eyebrow` and a `title`, an optional `accent` (the title's tail, in the accent colour),
   an optional `track` of 2 to 5 stages (`done`, `now`, `next`), `cards` (`big`, `head`, `text`, `pill`, `tone`),
   a `foot` with an optional bold `foot_label`, and a `link` for the brief.
-- `theme`: overrides the builder's colours and font key by key, and adds a PNG `logo` (relative to the deck.json)
+- `theme`: overrides the builder's colours and font key by key, and can name a PNG `logo` (relative to the deck.json); without one the builder uses the pack's Mezmo logo, `bin/fonts/mezmo-logo.png`
   and the one `cta` (`text`, `url`).
   A deck for an audience with its own brand kit takes its colours, font, logo and call to action from that kit.
 
