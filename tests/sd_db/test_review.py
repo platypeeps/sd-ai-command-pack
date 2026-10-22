@@ -415,7 +415,7 @@ class ContextAndRecommendation(ReviewCase):
         header = self.db.execute("SELECT body FROM note WHERE item = ? AND kind = 'comment' ORDER BY id LIMIT 1",
                                  (item,)).fetchone()[0]
         self.assertIn("\nPurpose: Calibrate the review-tier router.\nRubric: skip: docs only\n"
-                      "Rubric: deep: touches state\nFeeds: jev-entry-2 training labels\n", header)
+                      "Rubric: deep: touches state\nFeeds: jev-entry-2 training labels\nRecommendations: 1\n", header)
         # A batch filed with none reads none.
         self.assertIsNone(review.read(self.db, self.file(batch(batch="C2")))["header"]["context"])
 
@@ -436,14 +436,19 @@ class ContextAndRecommendation(ReviewCase):
         self.assertIn("Evidence: Recommended: cheap", body.splitlines())
         self.assertIn("Evidence: Recommended because: a two-line diff", body.splitlines())
 
-    def test_an_old_evidence_line_that_names_no_option_stays_evidence(self):
-        item = self.file(batch())
-        note = review.read(self.db, item)["questions"][0]["note"]
-        self.db.execute("UPDATE note SET body = replace(body, 'Evidence: diff', 'Evidence: Recommended: later' || "
-                        "char(10) || 'Evidence: diff') WHERE id = ?", (note,))
-        found = review.read(self.db, item)["questions"][0]
-        self.assertIsNone(found["recommendation"])
-        self.assertEqual(found["evidence"], ["Recommended: later", "diff: git show 1a2b3c4"])
+    def test_a_batch_filed_before_keeps_its_recommended_evidence_and_files_again(self):
+        # A batch that recommends nothing writes the header and notes the version before sd:5759 wrote, which took any
+        # evidence line; its header has no Recommendations line, so those lines stay evidence (codex review).
+        legacy = batch()
+        legacy["questions"][0]["evidence"] = ["Recommended: cheap", "Recommended because: small", "diff: git show 1a2b3c4"]
+        first = review.file(self.db, legacy, who="tester")
+        found = review.read(self.db, first["item"])
+        self.assertIsNone(found["questions"][0]["recommendation"])
+        self.assertEqual(found["questions"][0]["evidence"], legacy["questions"][0]["evidence"])
+        self.assertNotIn("Recommendations:", self.db.execute(
+            "SELECT body FROM note WHERE item = ? AND kind = 'comment'", (first["item"],)).fetchone()[0])
+        again = review.file(self.db, legacy, who="tester")
+        self.assertEqual((again["item"], again["created"]), (first["item"], False))
 
     def test_a_bad_context_or_recommendation_is_refused_before_any_write(self):
         def recommending(value):
@@ -454,6 +459,7 @@ class ContextAndRecommendation(ReviewCase):
         def evidence(line):
             found = batch()
             found["questions"][0]["evidence"] = [line]
+            found["questions"][1]["recommendation"] = {"option": "skip", "reason": "docs only"}
             return found
 
         refused = {
@@ -475,6 +481,9 @@ class ContextAndRecommendation(ReviewCase):
             "evidence that poses as its reason": evidence("Recommended because: small"),
             # Extreme and nested input: each refuses and none truncates.
             "a nested rubric line": batch(context={"rubric": [["r"]]}),
+            "a null rubric line": batch(context={"rubric": [None]}),
+            "a null among rubric lines": batch(context={"rubric": ["r", None]}),
+            "a null purpose": batch(context={"purpose": None}),
             "an infinite purpose": batch(context={"purpose": float("inf")}),
             "a zero feeds": batch(context={"feeds": 0}),
             "a NUL in the purpose": batch(context={"purpose": "p\x00q"}),

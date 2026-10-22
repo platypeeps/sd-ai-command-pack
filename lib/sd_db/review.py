@@ -22,6 +22,8 @@ provenance. No table is new:
   `Evidence: Recommended: <option>` and `Evidence: Recommended because:
   <reason>`, so a reader older than system sd:5759 files it under evidence,
   which a blind batch already hides, and never reads it as question text.
+  The header's `Recommendations: <n>` line marks a batch filed that way; only
+  there are those lines read as one, so an older batch's evidence stays evidence.
   Whether the standing label agreed with it, and whether it was ruled before
   the recommendation could be seen (blind or sealed, and the question's first
   ruling), is read from the notes, never written.
@@ -175,9 +177,6 @@ def _question(found: Any, where: str) -> dict:
     if len(set(options)) != len(options):
         raise ReviewError(f"{where} repeats an option")
     evidence = [_line(line, f"{where} evidence") for line in evidence]
-    if any(line.startswith((RECOMMENDED, BECAUSE)) for line in evidence):
-        raise ReviewError(f"{where} evidence has a line that starts {RECOMMENDED.strip()} or {BECAUSE.strip()}; "
-                          f"a recommendation is its own key")
     checked: dict[str, Any] = {"subject": subject, "text": text, "options": options, "evidence": evidence}
     # Added only when given: a Kev import's digest is over these dicts, so a batch it filed before finds itself.
     if "recommendation" in found:
@@ -200,11 +199,12 @@ def _context(found: Any) -> dict:
     if not isinstance(rubric, list) or ("rubric" in found and not 1 <= len(rubric) <= RUBRIC_LINES):
         raise ReviewError(f"context rubric must be a list of 1 to {RUBRIC_LINES} lines")
 
-    def line(name: str, value: Any) -> str | None:
-        return None if value is None else _line(value, f"context {name}", limit=CONTEXT_CHARS)
+    def line(name: str, value: Any) -> str:
+        return _line(value, f"context {name}", limit=CONTEXT_CHARS)
 
-    return {"purpose": line("purpose", found.get("purpose")),
-            "rubric": [line("rubric", entry) for entry in rubric], "feeds": line("feeds", found.get("feeds"))}
+    return {"purpose": line("purpose", found["purpose"]) if "purpose" in found else None,
+            "rubric": [line("rubric", entry) for entry in rubric],
+            "feeds": line("feeds", found["feeds"]) if "feeds" in found else None}
 
 
 def _checked(batch: Any) -> dict:
@@ -239,6 +239,13 @@ def _checked(batch: Any) -> dict:
     if limit is None and len(questions) > LIMIT:
         raise ReviewError(f"{len(questions)} questions; a batch holds at most {LIMIT}, so split it or set a limit")
     checked = [_question(found, f"question {number}") for number, found in enumerate(questions, 1)]
+    # In a batch that recommends, those evidence lines are the recommendation's alone; a batch that does not keeps any
+    # evidence it had, so a batch filed before system sd:5759 files again unchanged.
+    if any("recommendation" in found for found in checked):
+        for number, found in enumerate(checked, 1):
+            if any(line.startswith((RECOMMENDED, BECAUSE)) for line in found["evidence"]):
+                raise ReviewError(f"question {number} evidence has a line that starts {RECOMMENDED.strip()} or "
+                                  f"{BECAUSE.strip()}; in a batch that recommends, a recommendation is its own key")
     subjects = [found["subject"] for found in checked]
     if len(set(subjects)) != len(subjects):
         raise ReviewError("a subject appears twice; each is unique in its batch")
@@ -255,7 +262,7 @@ def _digest(batch: dict) -> str:
                                      ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
-def _header_body(found: dict, digest: str, count: int) -> str:
+def _header_body(found: dict, digest: str, kept: list[dict]) -> str:
     lines = [HEADER, f"Queue: {found['queue']}", f"Batch: {found['batch']}", f"Schema: {SCHEMA}",
              f"Source: {found['source']}", f"Mode: {found['mode']}"]
     if found["seal"] is not None:
@@ -264,7 +271,10 @@ def _header_body(found: dict, digest: str, count: int) -> str:
     for key, tag in CONTEXT_TAGS.items():
         values = context.get(key)
         lines += [f"{tag}: {value}" for value in (values if isinstance(values, list) else [values]) if value]
-    return "\n".join([*lines, f"Questions: {count}", f"Digest: {digest}"])
+    advised = sum("recommendation" in question for question in kept)
+    if advised:
+        lines.append(f"Recommendations: {advised}")
+    return "\n".join([*lines, f"Questions: {len(kept)}", f"Digest: {digest}"])
 
 
 def _question_body(found: dict) -> str:
@@ -291,12 +301,12 @@ def _parse_header(body: str) -> dict | None:
     return {"queue": fields["Queue"], "batch": fields["Batch"], "schema": fields["Schema"],
             "source": fields["Source"], "mode": fields["Mode"], "seal": seal or None, "seal_name": name or None,
             "questions": int(fields["Questions"]) if fields["Questions"].isdigit() else -1,
-            "digest": fields["Digest"],
+            "digest": fields["Digest"], "recommendations": "Recommendations" in fields,
             "context": {"purpose": next(iter(context["purpose"]), None), "rubric": context["rubric"],
                         "feeds": next(iter(context["feeds"]), None)} if any(context.values()) else None}
 
 
-def _parse_question(note: dict) -> dict:
+def _parse_question(note: dict, advised: bool = False) -> dict:
     text, subject, evidence, options = [], None, [], []
     for line in note["body"].splitlines():
         tagged = TAGGED.match(line)
@@ -308,9 +318,8 @@ def _parse_question(note: dict) -> dict:
             evidence.append(tagged[2])
         elif subject is None:
             subject = tagged[2]
-    # The recommendation's evidence lines, when the first names an offered option; any other such line, as an
-    # older batch may hold, stays evidence.
-    advice = next((line for line in evidence if line.startswith(RECOMMENDED)), None)
+    # The recommendation's evidence lines, only in a batch the header marks, and when the first names an offered option.
+    advice = next((line for line in evidence if line.startswith(RECOMMENDED)), None) if advised else None
     recommendation = None
     if advice is not None and advice[len(RECOMMENDED):] in options:
         because = next((line for line in evidence if line.startswith(BECAUSE)), None)
@@ -333,7 +342,8 @@ def _batch(row: dict, notes: list[dict]) -> dict:
     if len(asked) < header["questions"] or header["questions"] < 0:
         raise ReviewError(f"sd:{row['id']}'s header counts {header['questions']} questions; "
                           f"{len(asked)} follow it")
-    questions = {note["id"]: {**_parse_question(note), "rulings": [], "comments": [], "late": [], "expired": False}
+    questions = {note["id"]: {**_parse_question(note, header["recommendations"]), "rulings": [], "comments": [], "late": [],
+                              "expired": False}
                  for note in asked[:header["questions"]]}
     # Every label is read from this note history up to the first close, never
     # from a question's `resolved_at`, which a writer may change after it: a
@@ -485,7 +495,7 @@ def file(connection: sqlite3.Connection, batch: Any, *, who: str, now: str | Non
         item = workflow.capture_task(connection, title=found["title"], repo=found["repo"], who=who,
                                      body=f"Review batch {ref}; its questions are the notes.")["item"]["id"]
         writes.set_item_fields(connection, item, source=REF_SOURCE, external_id=ref)
-        add_note(connection, item, "comment", _header_body(found, digest, len(kept)), session=who)
+        add_note(connection, item, "comment", _header_body(found, digest, kept), session=who)
         for question in kept:
             add_note(connection, item, "question", _question_body(question), session=who)
     return {"item": item, "ref": ref, "created": True, "filed": len(kept), "dropped": dropped}

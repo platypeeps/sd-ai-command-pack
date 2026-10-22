@@ -481,7 +481,8 @@ It resolves a batch's open questions as `Expired, not ruled` after 7 days.
 
 A batch file may carry `context` (`purpose`, `rubric` as a list of lines, `feeds`: what the labels feed), which the header holds as `Purpose:`, `Rubric:` and `Feeds:` lines.
 A question may carry `recommendation` (`option`, one of its options, and a one-line `reason`), which its note holds as two evidence lines, `Recommended:` and `Recommended because:`.
-An evidence line of the producer's own may not start with either.
+The header then holds `Recommendations: <n>`, and only such a batch reads those lines as one; in it, an evidence line of the producer's own may not start with either.
+A batch that recommends nothing keeps such evidence as evidence, as before.
 The dashboard shows a blind or sealed batch's recommendation only once its question is ruled (system sd:5759).
 The export's lines carry `recommendation`, `agreed` and `ruled_blind`; a label is ruled blind in a blind or sealed batch when it is its question's first ruling.
 The manifest carries `context` and `agreement`: how many labels had a recommendation, agreed with it, were ruled blind, and agreed blind.
