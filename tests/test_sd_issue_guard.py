@@ -287,13 +287,16 @@ class AnExternalTargetAsksTheOperator(Fixture):
     def test_filing_in_an_external_repository_asks(self) -> None:
         reason = self.assert_asked(self.create("mezmo", "aura"))
         self.assertIn("mezmo/aura", reason)
-        self.assert_asked(bash("gh issue create -R mezmo/aura --title x"))
-        self.assert_asked(bash("gh --repo=github.com/mezmo/aura issue create --title x"))
-        self.assert_asked(bash("GH_REPO=mezmo/aura gh issue create --title x"))
+
+    def test_gh_still_targets_the_checkout(self) -> None:
+        """The settings deny list refuses `gh issue create`; the guard keeps its checkout rule."""
+        for command in ("gh issue create -R mezmo/aura --title x",
+                        "GH_REPO=mezmo/aura gh issue create --title x"):
+            with self.subTest(command=command):
+                self.assert_denied(bash(command))
 
     def test_filing_in_the_managed_repository_by_name_is_denied(self) -> None:
         self.assert_denied(self.create("Example", "managed"))
-        self.assert_denied(bash("gh issue create -R example/managed --title x"))
 
     def test_filing_in_another_managed_repository_is_denied(self) -> None:
         other = self.home / "other"

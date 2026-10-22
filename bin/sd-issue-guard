@@ -27,9 +27,10 @@ so the common case costs the interpreter start and one tokenisation.
 `SD_ISSUE_GUARD=0` switches it off for a session that needs the old path.
 
 **The call's target decides, not the session's checkout (sd:5721).** The
-target is the `owner`/`repo` an `issue_write` call names, or the `-R`/`--repo`
-value or `GH_REPO` assignment of `gh issue create`; a call that names none targets the checkout it runs
-in. A managed target is denied as above. Any other target -- a repository the
+target is the `owner`/`repo` an `issue_write` call names; a call that names
+none, and every `gh issue create`, targets the checkout it runs in. `gh` gets no
+target parsing because the settings deny list refuses `gh issue create`
+everywhere: `issue_write` is the one route an external issue takes. A managed target is denied as above. Any other target -- a repository the
 operator does not manage, or one not registered at all -- gets `ask`: the
 harness prompts the operator, who decides each external issue on its own.
 
@@ -147,34 +148,15 @@ def files_from(payload: dict) -> bool:
     return isinstance(command, str) and files_an_issue(command)
 
 
-def repo_flag(command: str) -> str | None:
-    """The repository a `gh` command line names: `-R`, `--repo` or `GH_REPO`, or None."""
-    words = tokens(command) or []
-    for position, word in enumerate(words):
-        if word in VALUED_FLAGS and position + 1 < len(words):
-            return words[position + 1]
-        if word.startswith(("--repo=", "GH_REPO=")):
-            return word.split("=", 1)[1] or None
-    return None
-
-
-def target_of(payload: dict, sd_db) -> tuple[str, str] | None:
+def target_of(payload: dict) -> tuple[str, str] | None:
     """The GitHub `(owner, name)` the call aims at, lower-cased; None when it names none."""
     sent = payload.get("tool_input")
-    if not isinstance(sent, dict):
+    if payload.get("tool_name") != MCP_TOOL or not isinstance(sent, dict):
         return None
-    if payload.get("tool_name") == MCP_TOOL:
-        owner, name = sent.get("owner"), sent.get("repo")
-        if isinstance(owner, str) and isinstance(name, str) and owner and name and "/" not in owner + name:
-            return owner.lower(), name.lower()
-        return None
-    flag = repo_flag(sent.get("command") or "")
-    if not flag:
-        return None
-    if "://" not in flag:
-        flag = "https://" + (flag if flag.count("/") == 2 else "github.com/" + flag)
-    found = sd_db.repos.parse_remote(flag)
-    return (found.owner.lower(), found.name.lower()) if found.kind == "github" else None
+    owner, name = sent.get("owner"), sent.get("repo")
+    if isinstance(owner, str) and isinstance(name, str) and owner and name and "/" not in owner + name:
+        return owner.lower(), name.lower()
+    return None
 
 
 def row_named(connection, target: tuple[str, str], sd_db):
@@ -235,7 +217,7 @@ def decision(where: Path, payload: dict) -> tuple[str, str] | None:
         sd_db = sd_lib.import_sd_db().module
         if sd_db is None:
             return None
-        target = target_of(payload, sd_db)
+        target = target_of(payload)
         root = origin = None
         if target is None:
             root = sd_lib.git_output(["rev-parse", "--show-toplevel"], where)
