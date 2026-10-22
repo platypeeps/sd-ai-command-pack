@@ -108,6 +108,14 @@ class Fixture(unittest.TestCase):
         self.assertEqual(decision["permissionDecision"], "deny")
         return decision["permissionDecisionReason"]
 
+    def assert_asked(self, text: str, cwd: pathlib.Path | None = None) -> str:
+        code, printed = self.fire(text, cwd)
+        self.assertEqual(code, 0)
+        self.assertTrue(printed, f"no decision for {text}")
+        decision = json.loads(printed)["hookSpecificOutput"]
+        self.assertEqual(decision["permissionDecision"], "ask")
+        return decision["permissionDecisionReason"]
+
     def assert_silent(self, text: str, cwd: pathlib.Path | None = None) -> None:
         code, printed = self.fire(text, cwd)
         self.assertEqual((code, printed), (0, ""), text)
@@ -157,12 +165,12 @@ class AManagedRepositoryIsDenied(Fixture):
     def test_the_spellings_an_agent_actually_uses_are_denied(self) -> None:
         for command in (
             "gh issue new --title x",
-            "gh -R example/other issue create --title x",
-            "gh --repo=example/other issue create",
+            "gh -R example/managed issue create --title x",
+            "gh --repo=example/managed issue create",
             "cd src && gh issue create --title x",
             "git status; gh issue create",
             "GH_PAGER= gh issue create",
-            "env GH_REPO=example/x /opt/homebrew/bin/gh issue create",
+            "env GH_REPO=example/managed /opt/homebrew/bin/gh issue create",
             "rtk gh issue create --title x",
             "true\ngh issue create --title x",
         ):
@@ -229,12 +237,16 @@ class AManagedRepositoryWithGithubIssuesOn(Fixture):
         self.assertIn("sd task add", self.assert_denied(issue_write("create", title="x")))
         self.assert_denied(bash("gh issue create --title x"))
 
-    def test_an_update_aimed_elsewhere_or_at_nothing_is_denied(self) -> None:
-        for call in (issue_write(owner="example", repo="other"), issue_write(owner="someone"),
-                     issue_write(owner=None), issue_write(repo=None), issue_write(owner=3),
+    def test_an_update_aimed_at_nothing_is_denied(self) -> None:
+        for call in (issue_write(owner=None), issue_write(repo=None), issue_write(owner=3),
                      issue_write(owner="example/managed", repo="")):
             with self.subTest(call=call):
                 self.assert_denied(call)
+
+    def test_an_update_aimed_at_an_external_repository_asks(self) -> None:
+        for call in (issue_write(owner="example", repo="other"), issue_write(owner="someone")):
+            with self.subTest(call=call):
+                self.assert_asked(call)
 
     def test_a_missing_or_unknown_method_is_denied(self) -> None:
         for method in (None, "Update", "delete", "", 1, ["update"]):
@@ -257,6 +269,50 @@ class AManagedRepositoryWithGithubIssuesOn(Fixture):
         """Failures: once the row is managed, an unread setting is not a pass."""
         with mock.patch.object(sd_db.repos, "github_issues", side_effect=sd_db.errors.SchemaTooOld(34, 35)):
             self.assert_denied(issue_write())
+
+
+class AnExternalTargetAsksTheOperator(Fixture):
+    """sd:5721. The call's target decides, not the session's checkout: an issue
+    for a repository the operator does not manage is the operator's call, made
+    in the harness prompt one issue at a time; a managed target stays denied."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.register(managed=True)
+
+    def create(self, owner: str, repo: str) -> str:
+        return payload(tool_name="mcp__github__issue_write",
+                       tool_input={"method": "create", "owner": owner, "repo": repo, "title": "x"})
+
+    def test_filing_in_an_external_repository_asks(self) -> None:
+        reason = self.assert_asked(self.create("mezmo", "aura"))
+        self.assertIn("mezmo/aura", reason)
+        self.assert_asked(bash("gh issue create -R mezmo/aura --title x"))
+        self.assert_asked(bash("gh --repo=github.com/mezmo/aura issue create --title x"))
+        self.assert_asked(bash("GH_REPO=mezmo/aura gh issue create --title x"))
+
+    def test_filing_in_the_managed_repository_by_name_is_denied(self) -> None:
+        self.assert_denied(self.create("Example", "managed"))
+        self.assert_denied(bash("gh issue create -R example/managed --title x"))
+
+    def test_filing_in_another_managed_repository_is_denied(self) -> None:
+        other = self.home / "other"
+        other.mkdir()
+        git(other, "init", "-q")
+        git(other, "remote", "add", "origin", "git@github.com:example/other.git")
+        connection = sd_db.connect(home=self.home)
+        try:
+            key = sd_db.add_repo(connection, other, home=self.home)
+            sd_db.writes.upsert_repo(connection, key, managed=1)
+            connection.commit()
+        finally:
+            connection.close()
+        self.assert_denied(self.create("example", "other"))
+
+    def test_a_session_outside_any_managed_repository_asks_too(self) -> None:
+        elsewhere = self.tmp / "elsewhere"
+        elsewhere.mkdir()
+        self.assert_asked(self.create("mezmo", "aura"), cwd=elsewhere)
 
 
 class AManagedRepositoryOnAStoreBefore35(Fixture):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PreToolUse hook: in a managed repository, file work with sd, not a GitHub issue.
+"""PreToolUse hook: a managed repository's work goes to sd; an external issue is the operator's call.
 
 The operator's repositories track work in the sd workflow database, and their
 GitHub issues are switched off. An agent that reaches for `gh issue create`
@@ -26,6 +26,13 @@ read first and the database is opened only when the command files an issue,
 so the common case costs the interpreter start and one tokenisation.
 `SD_ISSUE_GUARD=0` switches it off for a session that needs the old path.
 
+**The call's target decides, not the session's checkout (sd:5721).** The
+target is the `owner`/`repo` an `issue_write` call names, or the `-R`/`--repo`
+value or `GH_REPO` assignment of `gh issue create`; a call that names none targets the checkout it runs
+in. A managed target is denied as above. Any other target -- a repository the
+operator does not manage, or one not registered at all -- gets `ask`: the
+harness prompts the operator, who decides each external issue on its own.
+
 One exception (sd:4827): a repository whose row has `github_issues` on takes
 issues from outside reporters, and an agent closes them when their sd items are
 done. There `mcp__github__issue_write` with `method: update` passes when its
@@ -49,6 +56,11 @@ from pathlib import Path
 
 HOOK_EVENT = "PreToolUse"
 MCP_TOOL = "mcp__github__issue_write"
+
+ASK = (
+    "{target} is not a repository the operator manages. Filing or changing an "
+    "issue there is the operator's decision, one issue at a time."
+)
 
 REASON = (
     "This repository tracks work in sd, not GitHub issues. Record the work "
@@ -135,6 +147,45 @@ def files_from(payload: dict) -> bool:
     return isinstance(command, str) and files_an_issue(command)
 
 
+def repo_flag(command: str) -> str | None:
+    """The repository a `gh` command line names: `-R`, `--repo` or `GH_REPO`, or None."""
+    words = tokens(command) or []
+    for position, word in enumerate(words):
+        if word in VALUED_FLAGS and position + 1 < len(words):
+            return words[position + 1]
+        if word.startswith(("--repo=", "GH_REPO=")):
+            return word.split("=", 1)[1] or None
+    return None
+
+
+def target_of(payload: dict, sd_db) -> tuple[str, str] | None:
+    """The GitHub `(owner, name)` the call aims at, lower-cased; None when it names none."""
+    sent = payload.get("tool_input")
+    if not isinstance(sent, dict):
+        return None
+    if payload.get("tool_name") == MCP_TOOL:
+        owner, name = sent.get("owner"), sent.get("repo")
+        if isinstance(owner, str) and isinstance(name, str) and owner and name and "/" not in owner + name:
+            return owner.lower(), name.lower()
+        return None
+    flag = repo_flag(sent.get("command") or "")
+    if not flag:
+        return None
+    if "://" not in flag:
+        flag = "https://" + (flag if flag.count("/") == 2 else "github.com/" + flag)
+    found = sd_db.repos.parse_remote(flag)
+    return (found.owner.lower(), found.name.lower()) if found.kind == "github" else None
+
+
+def row_named(connection, target: tuple[str, str], sd_db):
+    """The registered repository whose GitHub remote is `target`, or None."""
+    for row in sd_db.repos.registered(connection):
+        found = sd_db.repos.parse_remote(row["remote"])
+        if found.kind == "github" and (found.owner.lower(), found.name.lower()) == target:
+            return row
+    return None
+
+
 def call_directory(payload: dict, environ: dict[str, str]) -> Path:
     """Where the call runs: payload `.cwd`, then `$PWD`, then the launch dir.
 
@@ -164,9 +215,12 @@ def updates_own_issue(payload: dict, remote: str | None, sd_db) -> bool:
             and (owner.lower(), name.lower()) == (found.owner.lower(), found.name.lower()))
 
 
-def denied(where: Path, payload: dict) -> bool:
-    """Whether to deny the call: `where` is a checkout of a repository the operator manages,
-    and the call is not an update of that repository's own issue with `github_issues` on.
+def decision(where: Path, payload: dict) -> tuple[str, str] | None:
+    """`("deny", reason)`, `("ask", reason)` or None for a call that files or changes an issue.
+
+    Deny: the target is a repository the operator manages, and the call is not
+    an update of that repository's own issue with `github_issues` on. Ask: the
+    call names a target the operator does not manage.
 
     Every way of not knowing the repository is managed is False: no library,
     no database, no git, no row. The cost of a wrong False is an issue filed;
@@ -180,33 +234,41 @@ def denied(where: Path, payload: dict) -> bool:
 
         sd_db = sd_lib.import_sd_db().module
         if sd_db is None:
-            return False
-        root = sd_lib.git_output(["rev-parse", "--show-toplevel"], where)
-        if not root:
-            return False
-        origin = sd_lib.git_output(["remote", "get-url", "origin"], where)
+            return None
+        target = target_of(payload, sd_db)
+        root = origin = None
+        if target is None:
+            root = sd_lib.git_output(["rev-parse", "--show-toplevel"], where)
+            if not root:
+                return None
+            origin = sd_lib.git_output(["remote", "get-url", "origin"], where)
         connection = sd_db.connect(write=False)
     except Exception:  # noqa: BLE001 - not knowing is not a reason to deny
-        return False
+        return None
     try:
         try:
-            key = sd_db.repos.registered_for(connection, str(Path(root).resolve()), origin)
-            row = sd_db.repos.row_for(connection, key)
+            if target is None:
+                key = sd_db.repos.registered_for(connection, str(Path(root).resolve()), origin)
+                row = sd_db.repos.row_for(connection, key)
+            else:
+                row = row_named(connection, target, sd_db)
             if row is None or not row["managed"]:
-                return False
+                return None if target is None else ("ask", ASK.format(target="/".join(target)))
+            key = row["path"]
         except Exception:  # noqa: BLE001 - as above
-            return False
+            return None
         try:
-            return not (updates_own_issue(payload, row["remote"], sd_db)
-                        and sd_db.repos.github_issues(connection, key))
+            allowed = (updates_own_issue(payload, row["remote"], sd_db)
+                       and sd_db.repos.github_issues(connection, key))
         except Exception:  # noqa: BLE001 - an unread exception grants nothing
-            return True
+            allowed = False
+        return None if allowed else ("deny", REASON)
     finally:
         connection.close()
 
 
 def guard_call(stdin_text: str, environ: dict[str, str], out) -> int:
-    """Print a deny for an issue filed from a managed repository; else nothing."""
+    """Print a deny for a managed target, an ask for an external one; else nothing."""
     if environ.get("SD_ISSUE_GUARD") == "0":
         return 0
     try:
@@ -215,12 +277,15 @@ def guard_call(stdin_text: str, environ: dict[str, str], out) -> int:
         return 0
     if not isinstance(payload, dict) or payload.get("hook_event_name") != HOOK_EVENT:
         return 0
-    if not files_from(payload) or not denied(call_directory(payload, environ), payload):
+    if not files_from(payload):
+        return 0
+    found = decision(call_directory(payload, environ), payload)
+    if found is None:
         return 0
     out.write(json.dumps({"hookSpecificOutput": {
         "hookEventName": HOOK_EVENT,
-        "permissionDecision": "deny",
-        "permissionDecisionReason": REASON,
+        "permissionDecision": found[0],
+        "permissionDecisionReason": found[1],
     }}))
     return 0
 
