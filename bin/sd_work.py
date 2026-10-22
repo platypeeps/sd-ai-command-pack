@@ -1418,8 +1418,14 @@ def _audit(parser: argparse.ArgumentParser) -> None:
                         help="print the field-edit notes ('Updated priority by ...') a plain read folds into a count")
 
 
+#: What `--json` prints for one item: the id is `item.id`. A caller that read a top-level `id` printed
+#: `None`, took the add for a failure and filed the item again (sd:5742).
+ITEM_JSON_HELP = 'machine-readable: {"item": {"id": N, ...}, "notes": [...], "revision": ...}'
+
+
 def _output(parser: argparse.ArgumentParser, action: str, *, revision: bool = False) -> None:
-    parser.add_argument("--json", action="store_true", help="machine-readable")
+    single = action not in {"items", "today"}
+    parser.add_argument("--json", action="store_true", help=ITEM_JSON_HELP if single else "machine-readable")
     if revision:
         parser.add_argument("--if-revision", help="refuse if the item changed since this revision")
     parser.set_defaults(handler=run, work_action=action)

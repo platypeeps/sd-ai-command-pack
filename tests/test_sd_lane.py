@@ -57,6 +57,51 @@ raise SystemExit(3)
 """
 
 
+#: A lane runner TERMed mid-prepare while its speculative gate runs (sd:5776). Every signal the runner sends a
+#: gate's group goes to `sent`, and prepare's end to `prepare-ended`, both on this process's monotonic clock.
+TERMED_RUNNER = """import json, os, pathlib, sys, time
+from unittest import mock
+sys.path.insert(0, {bin!r})
+import sd_lane, sd_lib
+repo, environ, marks = pathlib.Path(sys.argv[1]), json.loads(sys.argv[2]), pathlib.Path(sys.argv[3])
+CHILD = "import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)"
+end_group = sd_lane.end_group
+
+def noted(group, number):
+    with (marks / "sent").open("a") as handle:
+        handle.write(f"{{group}} {{number}} {{time.monotonic()}}\\n")
+    end_group(group, number)
+
+def gate(root, head, base):
+    code, _, _ = sd_lane.gate_run()([sys.executable, "-c", CHILD, str(marks / "gate.pid")], dict(os.environ), root, 120)
+    return {{"status": "failure", "summary": f"exit {{code}}"}}
+
+def ship(argv, log):
+    for _ in range(1200):  # the gate's child runs before prepare starts
+        if (marks / "gate.pid").exists() and (marks / "gate.pid").read_text():
+            break
+        time.sleep(0.05)
+    try:
+        sd_lib.run_group([sys.executable, "-c", CHILD, str(marks / "prepare.pid")], cwd=repo, env=dict(os.environ),
+                         timeout=120)
+    finally:
+        (marks / "prepare-ended").write_text(str(time.monotonic()))
+    return {{"ok": False, "error": "not reached"}}
+
+with mock.patch.object(sd_lane, "end_group", noted), \\
+        mock.patch.object(sd_lane, "default_note", lambda *args, **kwargs: "written"), \\
+        mock.patch.object(sd_lane, "default_runner_merge", lambda root: "manual"), \\
+        mock.patch("sd_db.database.served_by", lambda target, home=None: None, create=True):
+    sd_lane.run_lane(repo, environ, ship, gate)
+"""
+
+
+def end_group(group: int) -> None:
+    """Kill a group a failed test left running; one already gone is fine."""
+    with contextlib.suppress(OSError):
+        os.killpg(group, signal.SIGKILL)
+
+
 class Lane(unittest.TestCase):
     #: `repo.runner_merge` for a suite with no database (sd:3132); None reads the suite's own database.
     runner_merge: str | None = "manual"
@@ -155,10 +200,20 @@ class QueueOutlivesTheProcess(Lane):
         super().setUp()
         self.register_items(7)
 
-    def sd_ship(self, cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
+    def sd_ship(self, cwd: pathlib.Path, *args: str, chdir: str | None = None) -> subprocess.CompletedProcess:
         env = {**os.environ, **self.environ}
-        return subprocess.run([sys.executable, str(REPO_ROOT / "bin/sd-ship"), "lane", *args], cwd=cwd, env=env,
-                              capture_output=True, text=True, timeout=120)
+        return subprocess.run([sys.executable, str(REPO_ROOT / "bin/sd-ship"), *(["-C", chdir] if chdir else []),
+                               "lane", *args], cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+
+    def test_a_c_that_names_a_file_refuses_each_lane_verb_without_a_traceback(self) -> None:
+        """sd:5773. `sd-ship -C <file> lane list` raised AttributeError: lane verbs take no --json."""
+        for verb in (["list"], ["cancel", "7"], ["retry", "7"], ["move", "7", "top"], ["hold", "7"], ["release", "7"],
+                     ["run"], ["prune"], ["prune", "--json"], ["watch", "--item", "7"],
+                     ["enqueue", "--item", "7", "--title", "t", "--body-file", str(self.body), "--deliver"]):
+            done = self.sd_ship(self.repo, *verb, chdir=str(self.body))
+            self.assertEqual((done.returncode, done.stderr), (3, ""), verb)
+            answer = json.loads(done.stdout)
+            self.assertEqual((answer["ok"], answer["error"]), (False, f"-C {self.body}: not a directory"), verb)
 
     def test_an_entry_one_process_enqueued_is_read_by_the_next(self) -> None:
         tree = self.worktree("topic")
@@ -1310,6 +1365,82 @@ class Speculation(Lane):
             os.kill(int(marker.read_text()), 0)
 
 
+    def test_a_sigterm_mid_prepare_ends_the_speculative_gate_first(self) -> None:
+        """sd:5776. A TERMed runner ended prepare's group, then TERMed itself again with the default action,
+        so `cancel_gate` never ran: the gate's `sd-check`, in a group of its own, ran on with ppid 1 and
+        held its slot. A real SIGTERM now reaches the gate's group before prepare's group ends."""
+        self.queue_both()
+        marks = self.tmp / "marks"
+        marks.mkdir()
+        script = self.tmp / "runner.py"
+        script.write_text(TERMED_RUNNER.format(bin=str(REPO_ROOT / "bin")), encoding="utf-8")
+        runner = subprocess.Popen([sys.executable, str(script), str(self.repo), json.dumps(self.environ), str(marks)],
+                                  env=dict(os.environ), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(runner.kill)
+
+        def pid_of(name: str) -> int | None:
+            text = (marks / name).read_text() if (marks / name).exists() else ""
+            return int(text) if text else None
+        pids: dict[str, int] = {}
+        for name in ("gate.pid", "prepare.pid"):
+            for _ in range(1200):  # bounded: a runner that never gets there fails on the read below
+                if pid_of(name) is not None or runner.poll() is not None:
+                    break
+                time.sleep(0.05)
+            child = pid_of(name)
+            if child is None:
+                self.fail(f"no {name}: {runner.stderr.read() if runner.poll() is not None else ''}")
+            pids[name] = child
+            self.addCleanup(end_group, child)
+        runner.send_signal(signal.SIGTERM)
+        _, errors = runner.communicate(timeout=60)
+        self.assertEqual(runner.returncode, -signal.SIGTERM, errors)
+        sent = [line.split() for line in (marks / "sent").read_text().splitlines()] if (marks / "sent").exists() else []
+        self.assertTrue(sent, "the runner never signalled the speculative gate's group")
+        self.assertEqual(sent[0][:2], [str(pids["gate.pid"]), str(int(signal.SIGTERM))])
+        self.assertLess(float(sent[0][2]), float((marks / "prepare-ended").read_text()), "TERM waited for prepare")
+        for _ in range(100):
+            try:
+                os.kill(pids["gate.pid"], 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            self.fail("the speculative gate's child outlived the runner")
+        [speculation] = [entry["speculation"] for entry in self.entries() if "speculation" in entry]
+        self.assertEqual((speculation["after"], speculation["status"]), (1, "cancelled"))
+
+
+    def test_an_interruption_while_the_gate_starts_still_ends_it(self) -> None:
+        """sd:5776, the step between the gate's start and the runner holding it: the run's cleanup ends it."""
+        self.queue_both()
+        marker, started = self.tmp / "gate-child.pid", []
+        start = sd_lane.SpeculativeGate.start
+
+        def endless(root: pathlib.Path, head: str, base: str) -> dict:
+            child = f"import os, pathlib, time; pathlib.Path({str(marker)!r}).write_text(str(os.getpid())); time.sleep(60)"
+            code, _, _ = sd_lane.gate_run()([sys.executable, "-c", child], dict(os.environ), root, 120)
+            return {"status": "failure", "summary": f"exit {code}"}
+
+        def start_then_interrupt(gate: sd_lane.SpeculativeGate) -> None:
+            start(gate)
+            started.append(gate)
+            for _ in range(1200):  # the gate's child runs before the interruption
+                if marker.exists() and marker.read_text():
+                    break
+                time.sleep(0.05)
+            raise KeyboardInterrupt
+        with mock.patch.object(sd_lane.SpeculativeGate, "start", start_then_interrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            sd_lane.run_lane(self.repo, self.environ, self.ship, endless)
+        self.addCleanup(end_group, int(marker.read_text()))
+        [gate] = started
+        self.assertTrue(gate.cancelled)
+        self.assertFalse(gate.is_alive())
+        with self.assertRaises(ProcessLookupError):
+            os.kill(int(marker.read_text()), 0)
+
+
 class Landing(Lane):
     """sd:2568: after a merge, clean up, note the item and fast-forward the main checkout."""
 
@@ -1705,6 +1836,19 @@ class SharedQueue(Lane):
             git(tree, "commit", "-q", "--allow-empty", "-m", message)
             heads.append(git(tree, "rev-parse", "HEAD"))
         return tree, heads
+
+    def merged_receipt(self, branch: str, item: int, head: str, phase: str = "merged") -> None:
+        """The ship receipt `sd-ship merge` leaves for `branch` and `item`, in the lane or by hand."""
+        import sd_db
+        from sd_db import ship
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            key = ship.receipt_key("example/pack", branch, item)
+            ship.save(connection, key, ship.read(connection, key)[0],
+                      {"repository": "example/pack", "branch": branch, "item": item, "phase": phase, "head": head,
+                       "merge_commit": "1" * 40})
+        finally:
+            connection.close()
 
     def rows(self) -> list[tuple[str, dict]]:
         import sd_db
@@ -3486,19 +3630,6 @@ class RetryCancelled(SharedQueue):
         self.assertEqual(refused.exception.code, sd_lane.HEAD_MOVED)
         self.assertEqual((self.rows(), self.remote_tip("topic-1")), (before, head))
 
-    def merged_receipt(self, branch: str, item: int, head: str, phase: str = "merged") -> None:
-        """The ship receipt `sd-ship merge` leaves for `branch` and `item`, in the lane or by hand."""
-        import sd_db
-        from sd_db import ship
-        connection = sd_db.connect(home=self.tmp)
-        try:
-            key = ship.receipt_key("example/pack", branch, item)
-            ship.save(connection, key, ship.read(connection, key)[0],
-                      {"repository": "example/pack", "branch": branch, "item": item, "phase": phase, "head": head,
-                       "merge_commit": "1" * 40})
-        finally:
-            connection.close()
-
     def test_a_cancelled_entry_whose_head_already_merged_is_refused(self) -> None:
         """Failure table, read: `sd-ship` merged a head that holds the cancelled one; a retry would ship it twice."""
         tree, head = self.cancelled()
@@ -3592,6 +3723,80 @@ class RetryCancelled(SharedQueue):
         sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
         self.assertNotIn("push", self.git_verbs)
         self.assertEqual([row["status"] for row in self.entries()], ["cancelled", "pending"])
+
+
+class CancelMerged(SharedQueue):
+    """sd:5743. `lane cancel` clears a prepared entry whose head a ship receipt shows merged; nothing else changes."""
+
+    def prepared(self) -> str:
+        """Item 1 enqueued without merge authority from its own worktree, run to `prepared`; its queued head."""
+        tree, [head] = self.committed("topic-1", "work")
+        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
+        return head
+
+    def test_a_prepared_entry_whose_head_merged_by_hand_is_cancelled(self) -> None:
+        """sd:5743: merged by a manual `sd-ship merge` on another branch than its imported entry names."""
+        head = self.prepared()
+        self.merged_receipt("brief-by-hand", 1, head)
+        cancelled = sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual((cancelled["status"], [row["status"] for row in self.entries()]), ("cancelled", ["cancelled"]))
+        self.assertIn(f"merged at {'1' * 40}", cancelled["reason"])
+        self.assertIn(sd_lane.this_host(), cancelled["reason"])
+
+    def test_a_prepared_entry_whose_catch_up_merged_is_cancelled(self) -> None:
+        """A receipt at a later head that holds the queued one, such as prepare's catch-up, is the same work landed."""
+        head = self.prepared()
+        tree = self.tmp / "topic-1"
+        git(tree, "commit", "-q", "--allow-empty", "-m", "catch-up")
+        self.merged_receipt("topic-1", 1, git(tree, "rev-parse", "HEAD"))
+        self.assertEqual(sd_lane.cancel(self.repo, 1, self.environ)["status"], "cancelled")
+        self.assertEqual(self.entries()[0]["expected_head"], head)
+
+    def test_a_prepared_entry_without_a_merged_receipt_holding_its_head_is_refused(self) -> None:
+        """Evidence: no receipt, a dispatch only, another item's receipt, and a merge of other work each refuse."""
+        head = self.prepared()
+        main = git(self.repo, "rev-parse", "main")
+        for receipt in ((), ("topic-1", 1, head, "merge_dispatch"), ("topic-1", 2, head), ("main", 1, main)):
+            if receipt:
+                self.merged_receipt(*receipt)
+            before = self.rows()
+            with self.assertRaises(sd_lane.LaneError) as refused:
+                sd_lane.cancel(self.repo, 1, self.environ)
+            self.assertIn("no merged ship receipt", str(refused.exception), receipt)
+            self.assertEqual(self.rows(), before, receipt)
+        # A merged head this checkout cannot read is unknown, not "not merged".
+        self.merged_receipt("other", 1, "2" * 40)
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(refused.exception.code, sd_lane.PUBLISH_UNKNOWN)
+        self.assertEqual(self.entries()[0]["status"], "prepared")
+
+    def test_an_unreadable_receipt_proves_no_merge_and_blocks_no_other_cancel(self) -> None:
+        """Failures: a receipt that cannot be read is no proof, so it refuses, and a pending cancel is as before."""
+        import sd_db
+        self.prepared()
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            connection.execute("INSERT INTO state(kind, key, timestamp, body) VALUES ('checkpoint', 'ship:bad', "
+                               "'2026-10-22T00:00:00Z', 'not json')")
+        finally:
+            connection.close()
+        with self.assertRaisesRegex(sd_lane.LaneError, "no merged ship receipt"):
+            sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(self.entries()[0]["status"], "prepared")
+        sd_lane.enqueue_entry(self.committed("topic-2", "work")[0], 2, "two", self.body, self.environ, claim="deliver")
+        self.assertEqual(sd_lane.cancel(self.repo, 2, self.environ)["status"], "cancelled")
+
+    def test_a_failed_entry_of_a_merged_item_keeps_its_refusal(self) -> None:
+        """Only a prepared entry is cleared; a failed one keeps the refusal it had."""
+        head = self.prepared()
+        sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed"))
+        self.merged_receipt("topic-1", 1, head)
+        with self.assertRaisesRegex(sd_lane.LaneError, "no pending entry"):
+            sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(self.entries()[0]["status"], "failed")
 
 
 class Importing(SharedQueue):
@@ -3985,6 +4190,163 @@ class HostedOrder(Lane):
         self.assertEqual(order, [later, self.repo])
 
 
+def thread_lane(run: Any) -> sd_lane.StartedLane:
+    """A lane run on a thread, so a suite's stub ships reach it; `run_hosted` runs a `child_lane` from the CLI."""
+    row: list[dict] = []
+
+    def work() -> None:
+        try:
+            row.append(run())
+        except sd_lane.LaneError as error:
+            row.append(sd_lane.refusal(error))
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    return sd_lane.StartedLane(lambda: None if thread.is_alive() else row[0])
+
+
+class HostedParallel(Lane):
+    """sd:5774. `lane run --hosted` ran its lanes one after another: a 4-entry lane held every other one 80 minutes."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.zeta = self.tmp / "zeta"
+        self.zeta.mkdir()
+        git(self.zeta, "init", "-q", "-b", "main")
+        git(self.zeta, "config", "user.email", "t@example.test")
+        git(self.zeta, "config", "user.name", "t")
+        git(self.zeta, "commit", "-q", "--allow-empty", "-m", "a")
+        origin = self.tmp / "zeta.git"
+        git(self.tmp, "init", "-q", "--bare", "-b", "main", str(origin))
+        git(self.zeta, "remote", "add", "origin", "https://github.com/example/zeta.git")
+        git(self.zeta, "config", f"url.{origin}.insteadOf", "https://github.com/example/zeta.git")
+        git(self.zeta, "push", "-q", "origin", "main")
+        self.zeta_feature = self.zeta.parent / "zeta-feature"
+        git(self.zeta, "worktree", "add", "-q", "-b", "zeta-feature", str(self.zeta_feature))
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            for path, remote in ((self.repo, "pack"), (self.zeta, "zeta")):
+                sd_db.upsert_repo(connection, str(path), remote=f"https://github.com/example/{remote}.git", managed=1)
+        finally:
+            connection.close()
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.zeta_feature, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        for name, value in (("START_POLL_SECONDS", 0.01), ("load_stop", lambda environ: None)):
+            patcher = mock.patch.object(sd_lane, name, value, create=True)  # create: the suite fails first, not its setUp
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.slots(free=True)
+
+    def slots(self, *, free: bool) -> None:
+        import sd_gate_slots
+        found = {"slots": 1, "holders": [] if free else [{"slot": 1}], "waiters": []}
+        patcher = mock.patch.object(sd_gate_slots, "machine_snapshot", lambda environ: found)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def threaded(self, ship: Any) -> Any:
+        return lambda checkout, budget: thread_lane(
+            lambda: sd_lane.run_lane(checkout, self.environ, ship, deadline=sd_lane.clock() + budget))
+
+    def statuses(self) -> list[str]:
+        return [sd_lane.read_queue(sd_lane.queue_for(root, self.environ))[0]["status"] for root in (self.repo, self.zeta)]
+
+    def test_two_lanes_with_work_run_at_once(self) -> None:
+        """Each prepare waits for the other at a barrier: one after another, the first breaks it and fails."""
+        barrier = threading.Barrier(2, timeout=20)
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            if argv[2] == "prepare":
+                barrier.wait()
+            return self.ship(argv, log)
+        answer = sd_lane.run_hosted(self.environ, ship, start=self.threaded(ship))
+        self.assertEqual(self.statuses(), ["merged", "merged"], answer)
+        self.assertEqual(sorted(row["path"] for row in answer["lanes"]), sorted([str(self.repo), str(self.zeta)]))
+
+    def test_no_free_gate_slot_defers_the_next_lane_until_one_ends(self) -> None:
+        """With every gate slot held, the second lane starts only once the first ended; unknown is no room too."""
+        self.slots(free=False)
+        seen: list[str] = []
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            if argv[2] == "prepare":
+                seen.append(f"start {argv[4]}")
+                time.sleep(0.3)
+                seen.append(f"end {argv[4]}")
+            return self.ship(argv, log)
+        sd_lane.run_hosted(self.environ, ship, start=self.threaded(ship))
+        self.assertEqual(seen, ["start 1", "end 1", "start 2", "end 2"])
+        self.assertEqual(self.statuses(), ["merged", "merged"])
+        import sd_gate_slots
+        with mock.patch.object(sd_gate_slots, "machine_snapshot", lambda environ: "no gate directory"):
+            self.assertIn("cannot read the gate slots", sd_lane.lane_room(self.environ))
+
+    def test_a_lane_waiting_past_the_budget_settles_and_claims_nothing(self) -> None:
+        """The budget ends while the second lane waits for room: it starts, claims nothing, and its entry stays."""
+        self.slots(free=False)
+        now = [0.0]
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            now[0] += sd_lane.RUN_BUDGET_SECONDS + 1
+            return self.ship(argv, log)
+        with mock.patch.object(sd_lane, "clock", lambda: now[0]):
+            answer = sd_lane.run_hosted(self.environ, ship, start=self.threaded(ship))
+        self.assertEqual(self.statuses(), ["merged", "pending"])
+        later = next(row for row in answer["lanes"] if row["path"] == str(self.zeta))
+        self.assertIn("budget", later["stopped"])
+
+    def test_a_busy_lane_is_skipped_and_the_other_runs(self) -> None:
+        lock = sd_lane.queue_for(self.zeta, self.environ).lock_file
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock, "a", encoding="utf-8") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            answer = sd_lane.run_hosted(self.environ, self.ship, start=self.threaded(self.ship))
+        self.assertEqual(self.statuses(), ["merged", "pending"])
+        self.assertIn("another runner holds", next(row for row in answer["lanes"] if row["path"] == str(self.zeta))["busy"])
+
+    def test_one_lanes_failure_leaves_the_other_merged(self) -> None:
+        """A hub fault in one lane is that lane's row; the other lane still merges."""
+        def start(checkout: pathlib.Path, budget: float) -> sd_lane.StartedLane:
+            if checkout == self.repo:
+                def down() -> dict:
+                    raise sd_lane.LaneError("the hub went away", code=sd_lane.HUB_UNAVAILABLE)
+                return thread_lane(down)
+            return self.threaded(self.ship)(checkout, budget)
+        answer = sd_lane.run_hosted(self.environ, self.ship, start=start)
+        self.assertEqual(self.statuses(), ["pending", "merged"])
+        failed = next(row for row in answer["lanes"] if row["path"] == str(self.repo))
+        self.assertEqual((failed["error"], failed["code"]), ("the hub went away", sd_lane.HUB_UNAVAILABLE))
+
+    def test_a_termed_parent_ends_its_children(self) -> None:
+        """An interruption while lanes run stops every lane still running; a child gets TERM, then KILL."""
+        stopped: list[pathlib.Path] = []
+
+        def hanging(checkout: pathlib.Path, budget: float) -> sd_lane.StartedLane:
+            def answer() -> dict | None:
+                if checkout == self.zeta:
+                    raise KeyboardInterrupt
+                return None
+            return sd_lane.StartedLane(answer, lambda: stopped.append(checkout))
+        order = [("a", self.repo), ("b", self.zeta)]
+        with self.assertRaises(KeyboardInterrupt):
+            sd_lane.run_parallel(order, hanging, sd_lane.clock() + 60, lambda: None)
+        self.assertEqual(stopped, [self.repo, self.zeta])
+        child = sd_lane.child_lane(self.repo, 60, argv=[sys.executable, "-c", "import time; time.sleep(60)"])
+        child.end()
+        self.assertIsNotNone(child.process.returncode)
+
+    def test_a_worker_child_runs_the_lane_and_answers_its_row(self) -> None:
+        """The CLI's lane: `sd-ship -C <checkout> lane run --budget`, whose answer is the row; no answer is an error."""
+        with mock.patch.dict(os.environ, self.environ):
+            child = sd_lane.child_lane(self.zeta, 0)
+            child.process.wait(120)
+            row = child.answer()
+            self.assertEqual((row["ran"], "budget" in row["stopped"]), ([], True), row)
+            broken = sd_lane.child_lane(self.zeta, 0, argv=[sys.executable, "-c", "print('half')"])
+            broken.process.wait(60)
+        self.assertIn("exited 0 without an answer: half", broken.answer()["error"])
+
+
 class Bounds(unittest.TestCase):
     def test_an_entry_started_inside_the_budget_ends_before_the_job_limit(self) -> None:
         """sd:3481. The longest entry seen took 64.3 minutes; the lane-run job TERMs its runner at 120."""
@@ -4019,6 +4381,12 @@ class Bounds(unittest.TestCase):
         self.assertEqual(cancelled, [True])
         self.assertLess(time.monotonic() - started, sd_lane.CANCEL_SECONDS)
         self.assertNotEqual(answers[0][0], 0)
+
+    def test_a_gate_cancelled_before_it_starts_counts_as_ended(self) -> None:
+        """sd:5776: a SIGTERM can land between the runner holding the gate and its start; `join` would raise."""
+        gate = sd_lane.SpeculativeGate(lambda: None, "unstarted")
+        self.assertTrue(gate.cancel_gate())
+        self.assertTrue(gate.cancelled)
 
     def test_a_gate_child_that_ignores_sigterm_is_killed(self) -> None:
         """sd:3361, the SIGKILL step: a child that ignores SIGTERM is killed one bound later."""

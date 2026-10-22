@@ -923,6 +923,15 @@ class TaskCLI(unittest.TestCase):
         self.assertIn("--belongs-to: cannot expand ~sd-no-such-user-1000/x", refused.stderr)
         self.assertNotIn("Traceback", refused.stderr)
 
+    def test_json_help_names_where_the_item_id_is(self):
+        """sd:5742: a caller read `.get('id')` off `task add --json`, printed `None` and filed the item twice."""
+        filed = json.loads(self.call("task", "add", "Shape", "--json").stdout)
+        self.assertNotIn("id", filed)
+        self.assertIsInstance(filed["item"]["id"], int)
+        for verb in (("task", "add"), ("task", "edit"), ("task", "show"), ("task", "status")):
+            said = " ".join(self.call(*verb, "--help").stdout.split())
+            self.assertIn('{"item": {"id": N, ...}, "notes": [...], "revision": ...}', said, verb)
+
     def test_here_help_names_the_registration_the_refusal_needs(self):
         """sd:1000 (6b9855085e9c): the help said any checkout; the refusal needs a registered one."""
         said = " ".join(self.call("task", "add", "--help").stdout.split())

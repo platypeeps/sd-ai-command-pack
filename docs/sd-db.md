@@ -195,6 +195,7 @@ The hub's lock file sits beside the database; a satellite host's sits under `$XD
 
 The machine that hosts a repository gates and merges it, and no request crosses a machine.
 Schedule `sd-ship lane run --hosted` on every machine: it runs each lane the machine hosts.
+Each lane runs in its own child; up to three run at once while the gate has a free slot and load is under its limit.
 [WORKFLOW.md § Parallel work](../WORKFLOW.md#parallel-work) covers the lane from the ship side.
 
 ## Channels
@@ -478,6 +479,14 @@ Approve through `rule`, which the dashboard's Review page calls, files that task
 The ruling then reads `Ruling on note #N: Approve -> sd:<task>`, and `apply` finds the ref and files nothing more.
 If the ref already names a task, as after a withdrawn approval, the ruling names it instead; a withdrawal leaves the task and ends `; sd:<task> stays filed`.
 It resolves a batch's open questions as `Expired, not ruled` after 7 days.
+
+A batch file may carry `context` (`purpose`, `rubric` as a list of lines, `feeds`: what the labels feed), which the header holds as `Purpose:`, `Rubric:` and `Feeds:` lines.
+A question may carry `recommendation` (`option`, one of its options, and a one-line `reason`), which its note holds as two evidence lines, `Recommended:` and `Recommended because:`.
+The header then holds `Recommendations: <n>`, and only such a batch reads those lines as one; in it, an evidence line of the producer's own may not start with either.
+A batch that recommends nothing keeps such evidence as evidence, as before.
+The dashboard shows a blind or sealed batch's recommendation only once its question is ruled (system sd:5759).
+The export's lines carry `recommendation`, `agreed` and `ruled_blind`; a label is ruled blind in a blind or sealed batch when it is its question's first ruling.
+The manifest carries `context` and `agreement`: how many labels had a recommendation, agreed with it, were ruled blind, and agreed blind.
 
 `file --kev` reads the JSONL Kev's label review reads (sd:4789) and files it under queue `kev`, title `Label: <batch>`.
 Each line is one question: its `id` is the subject, and its options are the option keys, then `(drop)`.
