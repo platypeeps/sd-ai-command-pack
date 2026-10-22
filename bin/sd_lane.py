@@ -829,7 +829,8 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
     if expected_claim is not None and not all(expected_claim.partition(":")[::2]):
         raise LaneError(f"name the claim as <holder token>:<step>, as `sd-ship lane list` prints them, "
                         f"not {expected_claim!r}")
-    queue, receipts = queue_for(root, environ), []
+    queue = queue_for(root, environ)
+    receipts: list[dict[str, Any]] = []
 
     def read_receipts(connection: Any) -> None:
         import sd_ship_squash  # noqa: PLC0415
