@@ -2874,8 +2874,8 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
 
 
 def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = default_gate,
-               note: Note | None = None) -> dict[str, Any]:
-    """`lane run --hosted`: `run_lane` for each repository this machine hosts, one after another (sd:3003).
+               note: Note | None = None, start: Start | None = None) -> dict[str, Any]:
+    """`lane run --hosted`: `run_lane` for each repository this machine hosts (sd:3003), side by side (sd:5774).
 
     The same job runs on every machine. Its lanes are the managed `repo` rows,
     in path order, whose checkout is on this disk and whose lane host is this
@@ -2886,6 +2886,8 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     its dead holders reclaimed under its runner lock (sd:3282). The lanes share
     one run budget, `RUN_BUDGET_SECONDS` from the start (sd:3287), and the
     lane that waited longest runs first (`longest_waiting_first`, sd:3481).
+    `start` starts each lane (`run_parallel`): the CLI passes `child_lane`; by
+    default a lane runs here, to its end, before the next starts.
     """
     deadline = clock() + RUN_BUDGET_SECONDS
     imported = sd_lib.import_sd_db()
@@ -2927,12 +2929,146 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
             settled = refusal(error)
         if settled:
             lanes.append({"path": path, "settled": settled})
-    for path, checkout in longest_waiting_first(hosted, environ):
-        try:
-            lanes.append({"path": path, **run_lane(checkout, environ, ship, gate, note, deadline)})
-        except (LaneError, sd_lib.ConfigError, OSError) as error:
-            lanes.append({"path": path, **refusal(error)})
+    def inline(checkout: pathlib.Path, budget: float) -> StartedLane:
+        return inline_lane(lambda: run_lane(checkout, environ, ship, gate, note, clock() + budget))
+    order = longest_waiting_first(hosted, environ)
+    lanes += run_parallel(order, start or inline, deadline, functools.partial(lane_room, environ))
     return {"lanes": lanes}
+
+
+#: How a hosted run starts one lane: `(checkout, seconds left of the run's budget)` to a started lane (sd:5774).
+Start = Callable[[pathlib.Path, float], "StartedLane"]
+#: The most lanes one hosted run runs at once (sd:5774); the gate's free slots and load limit decide below it.
+MAX_PARALLEL_LANES = 3
+#: How often a hosted run looks again for a finished lane or for room to start the next.
+START_POLL_SECONDS = 5.0
+#: How long a TERMed hosted run waits for each lane child it TERMs before it kills it.
+CHILD_STOP_SECONDS = 30
+
+
+@dataclasses.dataclass
+class StartedLane:
+    """A started lane: `answer()` is its row once it ended, else None; `end()` ends it early (sd:5774)."""
+
+    answer: Callable[[], dict[str, Any] | None]
+    end: Callable[[], None] = lambda: None
+    process: subprocess.Popen[str] | None = None
+
+
+def inline_lane(run: Callable[[], dict[str, Any]]) -> StartedLane:
+    """A lane run here, to its end, when it starts: the hosted run as it was before sd:5774."""
+    try:
+        row = run()
+    except (LaneError, sd_lib.ConfigError, OSError) as error:
+        row = refusal(error)
+    return StartedLane(lambda: row)
+
+
+def child_lane(checkout: pathlib.Path, budget: float, argv: list[str] | None = None) -> StartedLane:
+    """`sd-ship -C <checkout> lane run --budget <seconds>` as a child (sd:5774).
+
+    A child, not a thread: `run_lane` ends its `sd-ship` groups on SIGTERM
+    through `sd_lib.term_ends_group`, and only a main thread can install that
+    handler. The child stays in this process's group, so a kill of the job's
+    group reaches it; its answer goes to a file, which no pipe limit blocks.
+    """
+    out, err = tempfile.TemporaryFile("w+"), tempfile.TemporaryFile("w+")
+    argv = argv or [sys.executable, str(BIN / "sd-ship"), "-C", str(checkout), "lane", "run",
+                    "--budget", str(max(0, int(budget)))]
+    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=dict(os.environ))
+    return StartedLane(functools.partial(child_answer, process, out, err), functools.partial(end_child, process, out, err),
+                       process)
+
+
+def child_answer(process: subprocess.Popen[str], out: Any, err: Any) -> dict[str, Any] | None:
+    """A lane child's row once it exited, else None; an exit without a JSON answer is an error row."""
+    code = process.poll()
+    if code is None:
+        return None
+    with out, err:
+        out.seek(0)
+        err.seek(0)
+        said, errors = out.read(), err.read()
+    try:
+        answer = json.loads(said)
+    except ValueError:
+        answer = None
+    if not isinstance(answer, dict) or code not in (0, 3):
+        return {"error": f"the lane child exited {code} without an answer: {(errors or said).strip()[-600:]}"}
+    answer.pop("ok", None)
+    return answer
+
+
+def end_child(process: subprocess.Popen[str], out: Any, err: Any) -> None:
+    """TERM a lane child still running, then KILL it after `CHILD_STOP_SECONDS`; its answer is not read."""
+    with out, err:
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(CHILD_STOP_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+def lane_room(environ: dict[str, str]) -> str | None:
+    """Why a second lane may not start now, or None: a free gate slot nobody waits for, and load under the limit.
+
+    A gate status or load that cannot be read is no room: unknown is not idle.
+    """
+    loaded = load_stop(environ)
+    if loaded is not None:
+        return loaded
+    import sd_gate_slots  # noqa: PLC0415 -- stdlib only, and only the hosted run reads it
+    found = sd_gate_slots.machine_snapshot(environ)
+    if isinstance(found, str):
+        return f"cannot read the gate slots ({found})"
+    taken = len(found["holders"]) + len(found["waiters"])
+    if found["slots"] and taken >= found["slots"]:
+        return f"{taken} gates hold or wait for the {found['slots']} slots"
+    return None
+
+
+def run_parallel(order: list[tuple[str, pathlib.Path]], start: Start, deadline: float,
+                 room: Callable[[], str | None]) -> list[dict[str, Any]]:
+    """Start each lane of `order` in turn, as room allows; each lane's row, in `order` (sd:5774).
+
+    A lane starts at once while no lane runs, as one after another did, or
+    once the run's budget is spent, since it then only settles its checkout
+    and claims nothing. Otherwise it waits for `room` and for fewer than
+    `MAX_PARALLEL_LANES` running. A lane's refusal is its own row. When this
+    run ends early, a TERM among them, every lane still running is stopped.
+    """
+    rows: list[dict[str, Any] | None] = [None] * len(order)
+    running: dict[int, StartedLane] = {}
+    with sd_lib.term_ends_group():
+        try:
+            for index, (_, checkout) in enumerate(order):
+                while True:
+                    collect_ended(running, rows)
+                    if len(running) < MAX_PARALLEL_LANES and (
+                            not running or clock() >= deadline or room() is None):
+                        break
+                    time.sleep(START_POLL_SECONDS)
+                running[index] = start(checkout, max(0.0, deadline - clock()))
+            while running:
+                collect_ended(running, rows)
+                if running:
+                    time.sleep(START_POLL_SECONDS)
+        finally:
+            for lane in running.values():
+                lane.end()
+    return [{"path": path, **(row or {})} for (path, _), row in zip(order, rows, strict=True)]
+
+
+def collect_ended(running: dict[int, StartedLane], rows: list[dict[str, Any] | None]) -> None:
+    """Move each ended lane's row from `running` into `rows`."""
+    for index, lane in list(running.items()):
+        row = lane.answer()
+        if row is not None:
+            rows[index] = row
+            del running[index]
 
 
 def longest_waiting_first(hosted: list[tuple[str, pathlib.Path]],
@@ -3076,7 +3212,10 @@ def add_lane_verbs(commands: Any) -> None:
                                                         "this revision, checked in the write's transaction")
     runner = verbs.add_parser("run", help="drain the queue in order; exits at once if another runner holds the lane")
     runner.add_argument("--hosted", action="store_true",
-                        help="run the lane of each repository this machine hosts, one after another (sd:3003)")
+                        help="run the lane of each repository this machine hosts (sd:3003), each in its own child, "
+                             "several at once while the gate has a free slot and load is under its limit (sd:5774)")
+    runner.add_argument("--budget", type=float, metavar="SECONDS",
+                        help="claim no entry after this many seconds; a hosted run passes what is left of its own")
     pruner = verbs.add_parser("prune", help="delete each local branch no worktree holds whose changes are on origin's "
                                             "default branch or in a merged lane head's tree; remote branches and "
                                             "worktrees stay (sd:5700)")
@@ -3096,7 +3235,7 @@ def lane_main(args: Any) -> int:
         if args.lane_command == "watch" and not getattr(args, "items", None):
             return watch(lane_root(environ), once=args.once)
         if args.lane_command == "run" and args.hosted:  # from any folder: it reads the repo table, not the cwd
-            return succeed(run_hosted(environ))
+            return succeed(run_hosted(environ, start=child_lane))
         root = sd_lib.repo_root(None)  # a git that gave no answer says why, as a ConfigError (sd:2986)
         if root is None:
             raise LaneError("cwd is not inside a Git repository")
@@ -3129,7 +3268,7 @@ def lane_main(args: Any) -> int:
             result = set_hold(root, args.item, environ, held=args.lane_command == "hold",
                               expected_revision=args.expected_revision)
         else:
-            result = run_lane(root, environ)
+            result = run_lane(root, environ, deadline=None if args.budget is None else clock() + args.budget)
     except (LaneError, sd_lib.ConfigError, OSError) as error:
         print(json.dumps({"ok": False, **refusal(error)}, indent=2, sort_keys=True))
         return 3

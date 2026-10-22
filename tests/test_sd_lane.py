@@ -4069,6 +4069,163 @@ class HostedOrder(Lane):
         self.assertEqual(order, [later, self.repo])
 
 
+def thread_lane(run: Any) -> sd_lane.StartedLane:
+    """A lane run on a thread, so a suite's stub ships reach it; `run_hosted` runs a `child_lane` from the CLI."""
+    row: list[dict] = []
+
+    def work() -> None:
+        try:
+            row.append(run())
+        except sd_lane.LaneError as error:
+            row.append(sd_lane.refusal(error))
+    thread = threading.Thread(target=work, daemon=True)
+    thread.start()
+    return sd_lane.StartedLane(lambda: None if thread.is_alive() else row[0])
+
+
+class HostedParallel(Lane):
+    """sd:5774. `lane run --hosted` ran its lanes one after another: a 4-entry lane held every other one 80 minutes."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.zeta = self.tmp / "zeta"
+        self.zeta.mkdir()
+        git(self.zeta, "init", "-q", "-b", "main")
+        git(self.zeta, "config", "user.email", "t@example.test")
+        git(self.zeta, "config", "user.name", "t")
+        git(self.zeta, "commit", "-q", "--allow-empty", "-m", "a")
+        origin = self.tmp / "zeta.git"
+        git(self.tmp, "init", "-q", "--bare", "-b", "main", str(origin))
+        git(self.zeta, "remote", "add", "origin", "https://github.com/example/zeta.git")
+        git(self.zeta, "config", f"url.{origin}.insteadOf", "https://github.com/example/zeta.git")
+        git(self.zeta, "push", "-q", "origin", "main")
+        self.zeta_feature = self.zeta.parent / "zeta-feature"
+        git(self.zeta, "worktree", "add", "-q", "-b", "zeta-feature", str(self.zeta_feature))
+        import sd_db
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            for path, remote in ((self.repo, "pack"), (self.zeta, "zeta")):
+                sd_db.upsert_repo(connection, str(path), remote=f"https://github.com/example/{remote}.git", managed=1)
+        finally:
+            connection.close()
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.zeta_feature, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        for name, value in (("START_POLL_SECONDS", 0.01), ("load_stop", lambda environ: None)):
+            patcher = mock.patch.object(sd_lane, name, value, create=True)  # create: the suite fails first, not its setUp
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.slots(free=True)
+
+    def slots(self, *, free: bool) -> None:
+        import sd_gate_slots
+        found = {"slots": 1, "holders": [] if free else [{"slot": 1}], "waiters": []}
+        patcher = mock.patch.object(sd_gate_slots, "machine_snapshot", lambda environ: found)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def threaded(self, ship: Any) -> Any:
+        return lambda checkout, budget: thread_lane(
+            lambda: sd_lane.run_lane(checkout, self.environ, ship, deadline=sd_lane.clock() + budget))
+
+    def statuses(self) -> list[str]:
+        return [sd_lane.read_queue(sd_lane.queue_for(root, self.environ))[0]["status"] for root in (self.repo, self.zeta)]
+
+    def test_two_lanes_with_work_run_at_once(self) -> None:
+        """Each prepare waits for the other at a barrier: one after another, the first breaks it and fails."""
+        barrier = threading.Barrier(2, timeout=20)
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            if argv[2] == "prepare":
+                barrier.wait()
+            return self.ship(argv, log)
+        answer = sd_lane.run_hosted(self.environ, ship, start=self.threaded(ship))
+        self.assertEqual(self.statuses(), ["merged", "merged"], answer)
+        self.assertEqual(sorted(row["path"] for row in answer["lanes"]), sorted([str(self.repo), str(self.zeta)]))
+
+    def test_no_free_gate_slot_defers_the_next_lane_until_one_ends(self) -> None:
+        """With every gate slot held, the second lane starts only once the first ended; unknown is no room too."""
+        self.slots(free=False)
+        seen: list[str] = []
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            if argv[2] == "prepare":
+                seen.append(f"start {argv[4]}")
+                time.sleep(0.3)
+                seen.append(f"end {argv[4]}")
+            return self.ship(argv, log)
+        sd_lane.run_hosted(self.environ, ship, start=self.threaded(ship))
+        self.assertEqual(seen, ["start 1", "end 1", "start 2", "end 2"])
+        self.assertEqual(self.statuses(), ["merged", "merged"])
+        import sd_gate_slots
+        with mock.patch.object(sd_gate_slots, "machine_snapshot", lambda environ: "no gate directory"):
+            self.assertIn("cannot read the gate slots", sd_lane.lane_room(self.environ))
+
+    def test_a_lane_waiting_past_the_budget_settles_and_claims_nothing(self) -> None:
+        """The budget ends while the second lane waits for room: it starts, claims nothing, and its entry stays."""
+        self.slots(free=False)
+        now = [0.0]
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            now[0] += sd_lane.RUN_BUDGET_SECONDS + 1
+            return self.ship(argv, log)
+        with mock.patch.object(sd_lane, "clock", lambda: now[0]):
+            answer = sd_lane.run_hosted(self.environ, ship, start=self.threaded(ship))
+        self.assertEqual(self.statuses(), ["merged", "pending"])
+        later = next(row for row in answer["lanes"] if row["path"] == str(self.zeta))
+        self.assertIn("budget", later["stopped"])
+
+    def test_a_busy_lane_is_skipped_and_the_other_runs(self) -> None:
+        lock = sd_lane.queue_for(self.zeta, self.environ).lock_file
+        lock.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock, "a", encoding="utf-8") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            answer = sd_lane.run_hosted(self.environ, self.ship, start=self.threaded(self.ship))
+        self.assertEqual(self.statuses(), ["merged", "pending"])
+        self.assertIn("another runner holds", next(row for row in answer["lanes"] if row["path"] == str(self.zeta))["busy"])
+
+    def test_one_lanes_failure_leaves_the_other_merged(self) -> None:
+        """A hub fault in one lane is that lane's row; the other lane still merges."""
+        def start(checkout: pathlib.Path, budget: float) -> sd_lane.StartedLane:
+            if checkout == self.repo:
+                def down() -> dict:
+                    raise sd_lane.LaneError("the hub went away", code=sd_lane.HUB_UNAVAILABLE)
+                return thread_lane(down)
+            return self.threaded(self.ship)(checkout, budget)
+        answer = sd_lane.run_hosted(self.environ, self.ship, start=start)
+        self.assertEqual(self.statuses(), ["pending", "merged"])
+        failed = next(row for row in answer["lanes"] if row["path"] == str(self.repo))
+        self.assertEqual((failed["error"], failed["code"]), ("the hub went away", sd_lane.HUB_UNAVAILABLE))
+
+    def test_a_termed_parent_ends_its_children(self) -> None:
+        """An interruption while lanes run stops every lane still running; a child gets TERM, then KILL."""
+        stopped: list[pathlib.Path] = []
+
+        def hanging(checkout: pathlib.Path, budget: float) -> sd_lane.StartedLane:
+            def answer() -> dict | None:
+                if checkout == self.zeta:
+                    raise KeyboardInterrupt
+                return None
+            return sd_lane.StartedLane(answer, lambda: stopped.append(checkout))
+        order = [("a", self.repo), ("b", self.zeta)]
+        with self.assertRaises(KeyboardInterrupt):
+            sd_lane.run_parallel(order, hanging, sd_lane.clock() + 60, lambda: None)
+        self.assertEqual(stopped, [self.repo, self.zeta])
+        child = sd_lane.child_lane(self.repo, 60, argv=[sys.executable, "-c", "import time; time.sleep(60)"])
+        child.end()
+        self.assertIsNotNone(child.process.returncode)
+
+    def test_a_worker_child_runs_the_lane_and_answers_its_row(self) -> None:
+        """The CLI's lane: `sd-ship -C <checkout> lane run --budget`, whose answer is the row; no answer is an error."""
+        with mock.patch.dict(os.environ, self.environ):
+            child = sd_lane.child_lane(self.zeta, 0)
+            child.process.wait(120)
+            row = child.answer()
+            self.assertEqual((row["ran"], "budget" in row["stopped"]), ([], True), row)
+            broken = sd_lane.child_lane(self.zeta, 0, argv=[sys.executable, "-c", "print('half')"])
+            broken.process.wait(60)
+        self.assertIn("exited 0 without an answer: half", broken.answer()["error"])
+
+
 class Bounds(unittest.TestCase):
     def test_an_entry_started_inside_the_budget_ends_before_the_job_limit(self) -> None:
         """sd:3481. The longest entry seen took 64.3 minutes; the lane-run job TERMs its runner at 120."""
