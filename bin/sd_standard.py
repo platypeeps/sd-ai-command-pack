@@ -299,7 +299,7 @@ def open_stamp_item(connection: Any, path: str) -> int | None:
 
     # Every stored form of the path, as repos.row_for probes: an item written before 014 holds the absolute one.
     probe = paths.keys(path)
-    found = connection.execute(f"SELECT id FROM item WHERE repo IN ({paths.placeholders(probe)}) AND title = ? AND status != 'done' "
+    found = connection.execute(f"SELECT id FROM item WHERE repo IN ({paths.placeholders(probe)}) AND title = ? AND status != 'done' "  # nosec B608 - only ? placeholders are interpolated
                                "ORDER BY id", (*probe, STAMP_TITLE)).fetchone()
     return int(found[0]) if found else None
 
@@ -406,7 +406,7 @@ def used_before(connection: Any, path: str) -> bool:
 
     probe, marks = paths.keys(path), paths.placeholders(paths.keys(path))
     found = connection.execute(
-        f"SELECT 1 FROM runner_run WHERE repo IN ({marks}) UNION ALL SELECT 1 FROM note JOIN item ON item.id = note.item "
+        f"SELECT 1 FROM runner_run WHERE repo IN ({marks}) UNION ALL SELECT 1 FROM note JOIN item ON item.id = note.item "  # nosec B608 - only ? placeholders are interpolated
         f"WHERE item.repo IN ({marks}) AND note.kind = 'status_change' AND note.body LIKE '%by sd-ship%' LIMIT 1",
         (*probe, *probe)).fetchone()
     return found is not None
