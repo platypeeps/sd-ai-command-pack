@@ -11,6 +11,7 @@ import json
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -2205,6 +2206,42 @@ class RunGroupTimeoutTests(unittest.TestCase):
                 cwd=pathlib.Path("."), env={"PATH": "/usr/bin:/bin"}, timeout=2)
         self.assertLess(time.monotonic() - started, 2 + 3 * sd_lib.GROUP_CLEANUP_SECONDS)
         self.assertEqual(raised.exception.stdout, "before the hang\n")
+
+
+class TermEndsGroupTests(unittest.TestCase):
+    """sd:5776: SIGTERM inside nested blocks unwinds to the block that holds it, which then ends the process."""
+
+    def test_the_outer_block_runs_first_and_its_cleanup_then_the_process_ends_on_sigterm(self) -> None:
+        with tempfile.TemporaryDirectory() as scratch:
+            said = pathlib.Path(scratch) / "said"
+            script = (
+                "import pathlib, sys, time\n"
+                f"sys.path.insert(0, {str(REPO_ROOT / 'bin')!r})\n"
+                "import sd_lib\n"
+                f"said = pathlib.Path({str(said)!r})\n"
+                "def say(text):\n"
+                "    with said.open('a') as handle:\n"
+                "        handle.write(text + '\\n')\n"
+                "with sd_lib.term_ends_group(first=lambda: say('first')):\n"
+                "    try:\n"
+                "        with sd_lib.term_ends_group():\n"
+                "            try:\n"
+                "                say('ready')\n"
+                "                time.sleep(30)\n"
+                "            finally:\n"
+                "                say('inner cleanup')\n"
+                "    finally:\n"
+                "        say('outer cleanup')\n"
+                "say('after the block')\n")
+            child = subprocess.Popen([sys.executable, "-c", script], stderr=subprocess.PIPE, text=True)
+            for _ in range(400):  # bounded: a child that never gets ready fails below
+                if (said.exists() and said.read_text() == "ready\n") or child.poll() is not None:
+                    break
+                time.sleep(0.05)
+            child.send_signal(signal.SIGTERM)
+            _, errors = child.communicate(timeout=30)
+            self.assertEqual(child.returncode, -signal.SIGTERM, errors)
+            self.assertEqual(said.read_text().splitlines(), ["ready", "first", "inner cleanup", "outer cleanup"])
 
 
 class SiblingTests(unittest.TestCase):
