@@ -155,10 +155,20 @@ class QueueOutlivesTheProcess(Lane):
         super().setUp()
         self.register_items(7)
 
-    def sd_ship(self, cwd: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
+    def sd_ship(self, cwd: pathlib.Path, *args: str, chdir: str | None = None) -> subprocess.CompletedProcess:
         env = {**os.environ, **self.environ}
-        return subprocess.run([sys.executable, str(REPO_ROOT / "bin/sd-ship"), "lane", *args], cwd=cwd, env=env,
-                              capture_output=True, text=True, timeout=120)
+        return subprocess.run([sys.executable, str(REPO_ROOT / "bin/sd-ship"), *(["-C", chdir] if chdir else []),
+                               "lane", *args], cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
+
+    def test_a_c_that_names_a_file_refuses_each_lane_verb_without_a_traceback(self) -> None:
+        """sd:5773. `sd-ship -C <file> lane list` raised AttributeError: lane verbs take no --json."""
+        for verb in (["list"], ["cancel", "7"], ["retry", "7"], ["move", "7", "top"], ["hold", "7"], ["release", "7"],
+                     ["run"], ["prune"], ["prune", "--json"], ["watch", "--item", "7"],
+                     ["enqueue", "--item", "7", "--title", "t", "--body-file", str(self.body), "--deliver"]):
+            done = self.sd_ship(self.repo, *verb, chdir=str(self.body))
+            self.assertEqual((done.returncode, done.stderr), (3, ""), verb)
+            answer = json.loads(done.stdout)
+            self.assertEqual((answer["ok"], answer["error"]), (False, f"-C {self.body}: not a directory"), verb)
 
     def test_an_entry_one_process_enqueued_is_read_by_the_next(self) -> None:
         tree = self.worktree("topic")
