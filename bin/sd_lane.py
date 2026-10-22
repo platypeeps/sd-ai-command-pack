@@ -2952,7 +2952,7 @@ class StartedLane:
 
     answer: Callable[[], dict[str, Any] | None]
     end: Callable[[], None] = lambda: None
-    process: subprocess.Popen[str] | None = None
+    process: subprocess.Popen[bytes] | None = None
 
 
 def inline_lane(run: Callable[[], dict[str, Any]]) -> StartedLane:
@@ -2980,7 +2980,7 @@ def child_lane(checkout: pathlib.Path, budget: float, argv: list[str] | None = N
                        process)
 
 
-def child_answer(process: subprocess.Popen[str], out: Any, err: Any) -> dict[str, Any] | None:
+def child_answer(process: subprocess.Popen[bytes], out: Any, err: Any) -> dict[str, Any] | None:
     """A lane child's row once it exited, else None; an exit without a JSON answer is an error row."""
     code = process.poll()
     if code is None:
@@ -2999,7 +2999,7 @@ def child_answer(process: subprocess.Popen[str], out: Any, err: Any) -> dict[str
     return answer
 
 
-def end_child(process: subprocess.Popen[str], out: Any, err: Any) -> None:
+def end_child(process: subprocess.Popen[bytes], out: Any, err: Any) -> None:
     """TERM a lane child still running, then KILL it after `CHILD_STOP_SECONDS`; its answer is not read."""
     with out, err:
         if process.poll() is not None:
