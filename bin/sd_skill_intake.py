@@ -662,7 +662,7 @@ def _committed(root: pathlib.Path, destination: pathlib.Path) -> str | None:
         return None
     relative = destination.relative_to(root).as_posix()
     try:
-        if not _git(root, "ls-files", "--", relative).strip() or _git(root, "status", "--porcelain", "--", relative).strip():
+        if not _git(root, "ls-files", "--deduplicate", "--", relative).strip() or _git(root, "status", "--porcelain", "--", relative).strip():
             return None
         return _git(root, "log", "-1", "--format=%h", "--", relative).strip() or None
     except IntakeError as error:
