@@ -822,10 +822,21 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
     alive. A holder on another machine counts as stuck on the operator's word.
     `expected_claim` binds the cancel to the running claim the caller read
     (`check_claim`), in the write's transaction.
+
+    With neither, a prepared entry whose work merged outside the lane is
+    cancelled (sd:5743); `merged_by_hand` reads the proof.
     """
     if expected_claim is not None and not all(expected_claim.partition(":")[::2]):
         raise LaneError(f"name the claim as <holder token>:<step>, as `sd-ship lane list` prints them, "
                         f"not {expected_claim!r}")
+    queue = queue_for(root, environ)
+    receipts: list[dict[str, Any]] = []
+
+    def read_receipts(connection: Any) -> None:
+        import sd_ship_squash  # noqa: PLC0415
+        if stale_prepared(stored(connection, queue.repository), item):
+            receipts[:] = [receipt for receipt in sd_ship_squash.merged_receipts(connection, queue.repository)
+                           if receipt.get("item") == item and receipt.get("phase") == "merged"]
 
     def mark(entries: list[dict[str, Any]]) -> dict[str, Any]:
         check_revision(entries, expected_revision)
@@ -838,10 +849,47 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
                                 "it is not stuck, so it is not released", code="holder_alive")
             reclaim(running, released=True)
             return running
+        prepared = stale_prepared(entries, item)
+        if prepared:
+            for row in prepared:
+                merge = merged_by_hand(root, row, receipts)
+                row.update(status="cancelled", finished_at=stamp_now(),
+                           reason=f"cancelled by the operator on {this_host()}: its head merged at {merge}")
+            return prepared[-1]
         row = pending_entry(entries, item)
         row.update(status="cancelled", finished_at=stamp_now(), reason=f"cancelled by the operator on {this_host()}")
         return row
-    return update(queue_for(root, environ), mark)
+    return update(queue, mark, read_receipts)
+
+
+def stale_prepared(entries: list[dict[str, Any]], item: int) -> list[dict[str, Any]]:
+    """`item`'s prepared entries when it has no pending or running one, which `cancel` takes first."""
+    if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in entries):
+        return []
+    return [row for row in entries if row.get("item") == item and row.get("status") == "prepared"]
+
+
+def merged_by_hand(root: pathlib.Path, entry: dict[str, Any], receipts: list[dict[str, Any]]) -> str:
+    """The merge commit of a receipt whose head holds `entry`'s queued head, or a refusal (sd:5743).
+
+    A prepared entry stopped for want of merge authority; the operator then
+    merged it by hand, and the entry read `prepared` for ever. Only a
+    `merged` receipt of the entry's item, on any branch, proves the merge: an
+    entry imported from the file queue can name another branch than the one
+    merged, a dispatch may not have landed, and a later head that does not
+    hold the queued one is other work. A receipt that cannot be read proves
+    nothing, so it can only refuse; a git read that fails refuses
+    `PUBLISH_UNKNOWN`.
+    """
+    item, head = entry.get("item"), str(entry.get("expected_head") or "")
+    for receipt in receipts:
+        merged = str(receipt.get("head") or "")
+        if head and merged and (merged == head or read_git(root, "merge-base", "--is-ancestor", head, merged,
+                                                             ok=(0, 1)).returncode == 0):
+            return str(receipt.get("merge_commit") or merged)
+    raise LaneError(f"sd:{item}'s prepared entry {entry.get('id')} at {head or 'no head'} has no merged ship receipt "
+                    "that holds its head; merge it with `sd-ship merge --item`, or queue it again with "
+                    "`sd-ship lane retry --manual`")
 
 
 def enqueue_order(connection: Any, repository: str) -> dict[str, int]:
@@ -2826,8 +2874,8 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
 
 
 def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = default_gate,
-               note: Note | None = None) -> dict[str, Any]:
-    """`lane run --hosted`: `run_lane` for each repository this machine hosts, one after another (sd:3003).
+               note: Note | None = None, start: Start | None = None) -> dict[str, Any]:
+    """`lane run --hosted`: `run_lane` for each repository this machine hosts (sd:3003), side by side (sd:5774).
 
     The same job runs on every machine. Its lanes are the managed `repo` rows,
     in path order, whose checkout is on this disk and whose lane host is this
@@ -2838,6 +2886,8 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     its dead holders reclaimed under its runner lock (sd:3282). The lanes share
     one run budget, `RUN_BUDGET_SECONDS` from the start (sd:3287), and the
     lane that waited longest runs first (`longest_waiting_first`, sd:3481).
+    `start` starts each lane (`run_parallel`): the CLI passes `child_lane`; by
+    default a lane runs here, to its end, before the next starts.
     """
     deadline = clock() + RUN_BUDGET_SECONDS
     imported = sd_lib.import_sd_db()
@@ -2879,12 +2929,146 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
             settled = refusal(error)
         if settled:
             lanes.append({"path": path, "settled": settled})
-    for path, checkout in longest_waiting_first(hosted, environ):
-        try:
-            lanes.append({"path": path, **run_lane(checkout, environ, ship, gate, note, deadline)})
-        except (LaneError, sd_lib.ConfigError, OSError) as error:
-            lanes.append({"path": path, **refusal(error)})
+    def inline(checkout: pathlib.Path, budget: float) -> StartedLane:
+        return inline_lane(lambda: run_lane(checkout, environ, ship, gate, note, clock() + budget))
+    order = longest_waiting_first(hosted, environ)
+    lanes += run_parallel(order, start or inline, deadline, functools.partial(lane_room, environ))
     return {"lanes": lanes}
+
+
+#: How a hosted run starts one lane: `(checkout, seconds left of the run's budget)` to a started lane (sd:5774).
+Start = Callable[[pathlib.Path, float], "StartedLane"]
+#: The most lanes one hosted run runs at once (sd:5774); the gate's free slots and load limit decide below it.
+MAX_PARALLEL_LANES = 3
+#: How often a hosted run looks again for a finished lane or for room to start the next.
+START_POLL_SECONDS = 5.0
+#: How long a TERMed hosted run waits for each lane child it TERMs before it kills it.
+CHILD_STOP_SECONDS = 30
+
+
+@dataclasses.dataclass
+class StartedLane:
+    """A started lane: `answer()` is its row once it ended, else None; `end()` ends it early (sd:5774)."""
+
+    answer: Callable[[], dict[str, Any] | None]
+    end: Callable[[], None] = lambda: None
+    process: subprocess.Popen[bytes] | None = None
+
+
+def inline_lane(run: Callable[[], dict[str, Any]]) -> StartedLane:
+    """A lane run here, to its end, when it starts: the hosted run as it was before sd:5774."""
+    try:
+        row = run()
+    except (LaneError, sd_lib.ConfigError, OSError) as error:
+        row = refusal(error)
+    return StartedLane(lambda: row)
+
+
+def child_lane(checkout: pathlib.Path, budget: float, argv: list[str] | None = None) -> StartedLane:
+    """`sd-ship -C <checkout> lane run --budget <seconds>` as a child (sd:5774).
+
+    A child, not a thread: `run_lane` ends its `sd-ship` groups on SIGTERM
+    through `sd_lib.term_ends_group`, and only a main thread can install that
+    handler. The child stays in this process's group, so a kill of the job's
+    group reaches it; its answer goes to a file, which no pipe limit blocks.
+    """
+    out, err = tempfile.TemporaryFile("w+"), tempfile.TemporaryFile("w+")
+    argv = argv or [sys.executable, str(BIN / "sd-ship"), "-C", str(checkout), "lane", "run",
+                    "--budget", str(max(0, int(budget)))]
+    process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=dict(os.environ))
+    return StartedLane(functools.partial(child_answer, process, out, err), functools.partial(end_child, process, out, err),
+                       process)
+
+
+def child_answer(process: subprocess.Popen[bytes], out: Any, err: Any) -> dict[str, Any] | None:
+    """A lane child's row once it exited, else None; an exit without a JSON answer is an error row."""
+    code = process.poll()
+    if code is None:
+        return None
+    with out, err:
+        out.seek(0)
+        err.seek(0)
+        said, errors = out.read(), err.read()
+    try:
+        answer = json.loads(said)
+    except ValueError:
+        answer = None
+    if not isinstance(answer, dict) or code not in (0, 3):
+        return {"error": f"the lane child exited {code} without an answer: {(errors or said).strip()[-600:]}"}
+    answer.pop("ok", None)
+    return answer
+
+
+def end_child(process: subprocess.Popen[bytes], out: Any, err: Any) -> None:
+    """TERM a lane child still running, then KILL it after `CHILD_STOP_SECONDS`; its answer is not read."""
+    with out, err:
+        if process.poll() is not None:
+            return
+        process.terminate()
+        try:
+            process.wait(CHILD_STOP_SECONDS)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+
+def lane_room(environ: dict[str, str]) -> str | None:
+    """Why a second lane may not start now, or None: a free gate slot nobody waits for, and load under the limit.
+
+    A gate status or load that cannot be read is no room: unknown is not idle.
+    """
+    loaded = load_stop(environ)
+    if loaded is not None:
+        return loaded
+    import sd_gate_slots  # noqa: PLC0415 -- stdlib only, and only the hosted run reads it
+    found = sd_gate_slots.machine_snapshot(environ)
+    if isinstance(found, str):
+        return f"cannot read the gate slots ({found})"
+    taken = len(found["holders"]) + len(found["waiters"])
+    if found["slots"] and taken >= found["slots"]:
+        return f"{taken} gates hold or wait for the {found['slots']} slots"
+    return None
+
+
+def run_parallel(order: list[tuple[str, pathlib.Path]], start: Start, deadline: float,
+                 room: Callable[[], str | None]) -> list[dict[str, Any]]:
+    """Start each lane of `order` in turn, as room allows; each lane's row, in `order` (sd:5774).
+
+    A lane starts at once while no lane runs, as one after another did, or
+    once the run's budget is spent, since it then only settles its checkout
+    and claims nothing. Otherwise it waits for `room` and for fewer than
+    `MAX_PARALLEL_LANES` running. A lane's refusal is its own row. When this
+    run ends early, a TERM among them, every lane still running is stopped.
+    """
+    rows: list[dict[str, Any] | None] = [None] * len(order)
+    running: dict[int, StartedLane] = {}
+    with sd_lib.term_ends_group():
+        try:
+            for index, (_, checkout) in enumerate(order):
+                while True:
+                    collect_ended(running, rows)
+                    if len(running) < MAX_PARALLEL_LANES and (
+                            not running or clock() >= deadline or room() is None):
+                        break
+                    time.sleep(START_POLL_SECONDS)
+                running[index] = start(checkout, max(0.0, deadline - clock()))
+            while running:
+                collect_ended(running, rows)
+                if running:
+                    time.sleep(START_POLL_SECONDS)
+        finally:
+            for lane in running.values():
+                lane.end()
+    return [{"path": path, **(row or {})} for (path, _), row in zip(order, rows, strict=True)]
+
+
+def collect_ended(running: dict[int, StartedLane], rows: list[dict[str, Any] | None]) -> None:
+    """Move each ended lane's row from `running` into `rows`."""
+    for index, lane in list(running.items()):
+        row = lane.answer()
+        if row is not None:
+            rows[index] = row
+            del running[index]
 
 
 def longest_waiting_first(hosted: list[tuple[str, pathlib.Path]],
@@ -3009,7 +3193,8 @@ def add_lane_verbs(commands: Any) -> None:
                                                  f"and {SUPERSEDED} after a newer entry; a cancelled entry needs it, "
                                                  f"and refuses {HEAD_MOVED} when its branch moved and "
                                                  f"{ALREADY_MERGED} at a merged head (sd:3389)")
-    canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled, or release a stuck running one")
+    canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled, release a stuck running one, "
+                                                    "or clear a prepared one a ship receipt shows merged")
     canceller.add_argument("item", type=sd_notes.item_id, help=sd_notes.ITEM_HELP)
     canceller.add_argument("--expected-claim", metavar="TOKEN:STEP",
                            help=f"release only the running claim `lane list` printed, its holder.token and step; "
@@ -3027,7 +3212,10 @@ def add_lane_verbs(commands: Any) -> None:
                                                         "this revision, checked in the write's transaction")
     runner = verbs.add_parser("run", help="drain the queue in order; exits at once if another runner holds the lane")
     runner.add_argument("--hosted", action="store_true",
-                        help="run the lane of each repository this machine hosts, one after another (sd:3003)")
+                        help="run the lane of each repository this machine hosts (sd:3003), each in its own child, "
+                             "several at once while the gate has a free slot and load is under its limit (sd:5774)")
+    runner.add_argument("--budget", type=float, metavar="SECONDS",
+                        help="claim no entry after this many seconds; a hosted run passes what is left of its own")
     pruner = verbs.add_parser("prune", help="delete each local branch no worktree holds whose changes are on origin's "
                                             "default branch or in a merged lane head's tree; remote branches and "
                                             "worktrees stay (sd:5700)")
@@ -3047,7 +3235,7 @@ def lane_main(args: Any) -> int:
         if args.lane_command == "watch" and not getattr(args, "items", None):
             return watch(lane_root(environ), once=args.once)
         if args.lane_command == "run" and args.hosted:  # from any folder: it reads the repo table, not the cwd
-            return succeed(run_hosted(environ))
+            return succeed(run_hosted(environ, start=child_lane))
         root = sd_lib.repo_root(None)  # a git that gave no answer says why, as a ConfigError (sd:2986)
         if root is None:
             raise LaneError("cwd is not inside a Git repository")
@@ -3080,7 +3268,7 @@ def lane_main(args: Any) -> int:
             result = set_hold(root, args.item, environ, held=args.lane_command == "hold",
                               expected_revision=args.expected_revision)
         else:
-            result = run_lane(root, environ)
+            result = run_lane(root, environ, deadline=None if args.budget is None else clock() + args.budget)
     except (LaneError, sd_lib.ConfigError, OSError) as error:
         print(json.dumps({"ok": False, **refusal(error)}, indent=2, sort_keys=True))
         return 3

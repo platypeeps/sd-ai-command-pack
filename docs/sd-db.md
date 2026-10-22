@@ -195,6 +195,7 @@ The hub's lock file sits beside the database; a satellite host's sits under `$XD
 
 The machine that hosts a repository gates and merges it, and no request crosses a machine.
 Schedule `sd-ship lane run --hosted` on every machine: it runs each lane the machine hosts.
+Each lane runs in its own child; up to three run at once while the gate has a free slot and load is under its limit.
 [WORKFLOW.md § Parallel work](../WORKFLOW.md#parallel-work) covers the lane from the ship side.
 
 ## Channels
