@@ -244,6 +244,7 @@ an em dash, more than six cards (three beside a track) and text past its bound, 
   A deck for an audience with its own brand kit takes its colours, font, logo and call to action from that kit.
 
 Building writes a file and nothing else: importing it into Slides is the operator's step.
+Update the existing deck and pages in place, so the brief's `Deck` row and every shared link stay current; create a new one only when none exists.
 
 ## Documents
 
