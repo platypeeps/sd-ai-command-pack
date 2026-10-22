@@ -557,10 +557,10 @@ def shown(row: Any) -> Any:
     return {**{key: value for key, value in row.items() if key not in ("body", "acceptance")}, **texts}
 
 
-def publish_git(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess[str] | None:
+def publish_git(root: pathlib.Path, *args: str, stdin: str | None = None) -> subprocess.CompletedProcess[str] | None:
     try:
         return subprocess.run(["git", *args], cwd=root, capture_output=True, text=True, timeout=PUBLISH_SECONDS,
-                              check=False, env=sd_lib.without_fsmonitor(os.environ))
+                              check=False, env=sd_lib.without_fsmonitor(os.environ), input=stdin)
     except (OSError, subprocess.SubprocessError):
         return None
 
@@ -2210,9 +2210,10 @@ def finish_entry(queue: Queue, entry: dict[str, Any], token: str, outcome: dict[
     runner_write(queue, mark_finished)
 
 
-def read_git(tree: pathlib.Path, *args: str, ok: tuple[int, ...] = (0,)) -> subprocess.CompletedProcess[str]:
+def read_git(tree: pathlib.Path, *args: str, ok: tuple[int, ...] = (0,),
+             stdin: str | None = None) -> subprocess.CompletedProcess[str]:
     """`git <args>` in `tree` for a runner decision; a failure raises `PUBLISH_UNKNOWN`, never a "no"."""
-    done = publish_git(tree, *args)
+    done = publish_git(tree, *args, stdin=stdin)
     if done is None or done.returncode not in ok:
         said = (done.stderr or done.stdout).strip()[-300:] if done is not None else "no answer"
         raise LaneError(f"git {args[0]} failed in {tree} ({said}); the entry is not skipped.", code=PUBLISH_UNKNOWN)
@@ -2369,7 +2370,7 @@ def unlanded(main: pathlib.Path, tip: str, base: str, heads: list[tuple[str, int
 
     None is left when merging `tip` into `base` changes nothing. Otherwise a
     commit is proven when it is an ancestor of a merged lane head, or, not a
-    merge, the same patch as one of its commits (`git cherry`): a squashed
+    merge, the same patch as one of its commits (`patch_ids`): a squashed
     bundle lands its builders' commits under other ids. A merge that is no
     head's ancestor needs a tree that is the clean merge of its two parents,
     so a conflict fix or an edit in it is never lost. `heads` are
@@ -2386,9 +2387,23 @@ def unlanded(main: pathlib.Path, tip: str, base: str, heads: list[tuple[str, int
     for head in asked:
         if not left:
             break
-        unproven = {line[2:] for line in read_git(main, "cherry", head, tip).stdout.splitlines() if line.startswith("+ ")}
-        left = [commit for commit in left if commit in unproven]
+        ahead = set(read_git(main, "rev-list", "--no-merges", tip, f"^{head}").stdout.split())
+        mine, theirs = patch_ids(main, tip, f"^{head}"), set(patch_ids(main, head, f"^{tip}", f"^{base}").values())
+        left = [commit for commit in left if commit in ahead and mine.get(commit) not in theirs]
     return left + [fields[0] for fields in commits if len(fields) > 3 and not merge_landed(main, fields, asked)]
+
+
+def patch_ids(main: pathlib.Path, *revisions: str) -> dict[str, str]:
+    """Each non-merge commit `git log <revisions>` lists that changes something, by its patch id.
+
+    Whitespace and binary content count (`--verbatim`, `--binary`): `git
+    cherry` ignores whitespace, so `"ab"` matched a landed `"a b"` (codex
+    review, sd:5700). Line numbers do not, so a pick onto another base matches.
+    """
+    patches = read_git(main, "log", "--no-merges", "-p", "--binary", "--full-index", "--no-renames", "--no-color",
+                       "--no-ext-diff", "--no-textconv", "--format=commit %H", *revisions, "--").stdout
+    found = read_git(main, "patch-id", "--verbatim", stdin=patches).stdout.split()
+    return dict(zip(found[1::2], found[::2], strict=True))
 
 
 def merge_landed(main: pathlib.Path, fields: list[str], heads: list[str]) -> bool:

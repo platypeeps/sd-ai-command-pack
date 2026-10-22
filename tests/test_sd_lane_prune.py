@@ -84,6 +84,36 @@ class Prune(lane_suite.Lane):
         self.assertEqual(kept["b1"], f"2 commits not proven landed: {made[0][:12]}, {made[1][:12]}")
         self.assertIn("b1", self.branches())
 
+    def lands_one_then_writes_another(self, landed: bytes, other: bytes) -> tuple[str, str]:
+        """`b1` adds `one` as `landed` and lands in a squashed bundle; `other` adds it as `other`, off main."""
+        tree = self.worktree("b1")
+        (tree / "one").write_bytes(landed)
+        git(tree, "add", "one")
+        git(tree, "commit", "-q", "-m", "one")
+        git(self.repo, "worktree", "remove", str(tree))
+        head = self.bundle(git(self.repo, "rev-parse", "b1"))
+        tree = self.worktree("other")
+        (tree / "one").write_bytes(other)
+        git(tree, "add", "one")
+        git(tree, "commit", "-q", "-m", "one")
+        git(self.repo, "worktree", "remove", str(tree))
+        self.squash_lands(head)
+        return head, git(self.repo, "rev-parse", "other")
+
+    def test_a_commit_that_differs_only_in_whitespace_is_not_the_same_patch(self) -> None:
+        """Codex review: `git cherry` ignores whitespace, so `"ab"` read as the landed `"a b"` and was deleted."""
+        head, other = self.lands_one_then_writes_another(b'value = "a b"\n', b'value = "ab"\n')
+        result = sd_lane.prune_landed(self.repo, [head])
+        kept = {row["branch"]: row["reason"] for row in result["kept"]}
+        self.assertEqual(kept.get("other"), f"1 commit not proven landed: {other[:12]}")
+        self.assertEqual([row["branch"] for row in result["deleted"]], ["b1", "bundle"])
+
+    def test_a_commit_with_other_binary_content_is_not_the_same_patch(self) -> None:
+        head, other = self.lands_one_then_writes_another(b"\x00landed", b"\x00other")
+        result = sd_lane.prune_landed(self.repo, [head])
+        kept = {row["branch"]: row["reason"] for row in result["kept"]}
+        self.assertEqual(kept.get("other"), f"1 commit not proven landed: {other[:12]}")
+
     def test_a_branch_with_a_commit_past_the_merged_head_stays_with_its_reason(self) -> None:
         made = self.builder("b1", "one", "two")
         tree = self.worktree("b2")
