@@ -423,7 +423,7 @@ The merge lane:
 - **Metadata that orders landings** (a session number, a ledger entry, a changelog position) is allocated when the work lands, never when the branch is cut.
   An item id is not that kind of metadata. Run `sd-ship prepare` and `merge` back to back for one item (sd:2339).
 - **After a lane merge, clean up once the builder has stopped.** The runner deletes the remote branch and each local branch proven landed (sd:5700), and notes the item with the command that removes the worktree.
-  A branch is proven landed when no worktree holds it and its commits are on origin's default branch or in a merged lane head, by id or by patch.
+  A branch is proven landed when no worktree holds it and merging it into origin's default branch, or into a merged lane head from where it forked, changes nothing: content, not history, since a bundle may revert a commit before its squash.
   It never removes a worktree: a live builder holds it open, and a removal loses its writes. Remove the clean worktree and its build output by hand; keep unpushed unmerged work.
   `sd-ship lane prune [--dry-run] [--json]` deletes the older proven-landed branches of one repository and names each kept branch with its reason.
 - **Each lane runs on its lane host** (`repo.lane_host`; NULL is the hub, sd:3003). Off that host the ship verbs refuse `lane_elsewhere`.

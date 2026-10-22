@@ -21,6 +21,8 @@ from tests.clean_env import clean_environment
 
 sd_lane = lane_suite.sd_lane
 git = lane_suite.git
+#: The reason a branch with work on it stays (sd:5700).
+NOT_HELD = "not on origin/main, and no merged lane head holds its changes"
 
 
 class Prune(lane_suite.Lane):
@@ -70,7 +72,7 @@ class Prune(lane_suite.Lane):
         self.squash_lands(head)
         return made, head
 
-    def test_a_squashed_bundles_builder_branch_goes_by_patch(self) -> None:
+    def test_a_squashed_bundles_builder_branch_goes_by_content(self) -> None:
         made, head = self.landed_bundle()
         self.assertNotEqual(git(self.repo, "rev-parse", "bundle~1"), made[0])  # other ids, the same patches
         result = sd_lane.prune_landed(self.repo, [head])
@@ -81,7 +83,7 @@ class Prune(lane_suite.Lane):
         made, _ = self.landed_bundle()
         result = sd_lane.prune_landed(self.repo, [])
         kept = {row["branch"]: row["reason"] for row in result["kept"]}
-        self.assertEqual(kept["b1"], f"2 commits not proven landed: {made[0][:12]}, {made[1][:12]}")
+        self.assertEqual(kept["b1"], f"2 commits {NOT_HELD}")
         self.assertIn("b1", self.branches())
 
     def lands_one_then_writes_another(self, landed: bytes, other: bytes) -> tuple[str, str]:
@@ -105,14 +107,58 @@ class Prune(lane_suite.Lane):
         head, other = self.lands_one_then_writes_another(b'value = "a b"\n', b'value = "ab"\n')
         result = sd_lane.prune_landed(self.repo, [head])
         kept = {row["branch"]: row["reason"] for row in result["kept"]}
-        self.assertEqual(kept.get("other"), f"1 commit not proven landed: {other[:12]}")
+        self.assertEqual(kept.get("other"), f"1 commit {NOT_HELD}")
         self.assertEqual([row["branch"] for row in result["deleted"]], ["b1", "bundle"])
 
     def test_a_commit_with_other_binary_content_is_not_the_same_patch(self) -> None:
         head, other = self.lands_one_then_writes_another(b"\x00landed", b"\x00other")
         result = sd_lane.prune_landed(self.repo, [head])
         kept = {row["branch"]: row["reason"] for row in result["kept"]}
-        self.assertEqual(kept.get("other"), f"1 commit not proven landed: {other[:12]}")
+        self.assertEqual(kept.get("other"), f"1 commit {NOT_HELD}")
+
+    def reverted_bundle(self, start: str, *picks: str) -> str:
+        """A bundle off `start` that picks `picks`, reverts its last commit and adds an unrelated `two`; it lands."""
+        tree = self.tmp / "bundle"
+        git(self.repo, "worktree", "add", "-q", "-b", "bundle", str(tree), start)
+        if picks:
+            git(tree, "cherry-pick", "-x", *picks)
+        git(tree, "revert", "--no-edit", "HEAD")
+        self.commit(tree, "two", "two\n")
+        head = git(tree, "rev-parse", "HEAD")
+        git(self.repo, "worktree", "remove", str(tree))
+        git(self.repo, "merge", "-q", "--squash", head)
+        git(self.repo, "commit", "-q", "-m", "squashed bundle")
+        git(self.repo, "push", "-q", "origin", "main")
+        return head
+
+    def test_a_commit_the_bundle_picked_then_reverted_is_not_landed(self) -> None:
+        """Lane review round 1: the pick's patch is in the bundle's history, but the squash never landed it."""
+        [one] = self.builder("b1", "one")
+        head = self.reverted_bundle("main", one)
+        self.assertFalse((self.repo / "one").exists())
+        result = sd_lane.prune_landed(self.repo, [head])
+        self.assertIn("b1", {row["branch"] for row in result["kept"]})
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/b1"), one)
+
+    def test_a_commit_the_bundle_holds_by_ancestry_then_reverted_is_not_landed(self) -> None:
+        """Lane review round 1: the builder commit is the bundle's ancestor, but the squash never landed it."""
+        [one] = self.builder("b1", "one")
+        head = self.reverted_bundle("b1")
+        self.assertFalse((self.repo / "one").exists())
+        result = sd_lane.prune_landed(self.repo, [head])
+        self.assertIn("b1", {row["branch"] for row in result["kept"]})
+        self.assertEqual(git(self.repo, "rev-parse", "refs/heads/b1"), one)
+
+    def test_a_git_that_cannot_merge_from_a_base_proves_only_by_a_no_op_merge(self) -> None:
+        """Before git 2.40 `merge-tree` has no `--merge-base`: a squashed builder branch stays, a merged one goes."""
+        _, head = self.landed_bundle()
+        git(self.repo, "branch", "merged-by-fast-forward", "main")
+        with mock.patch.object(sd_lane, "merges_from_a_base", lambda main, commit: False):
+            result = sd_lane.prune_landed(self.repo, [head])
+        kept = {row["branch"]: row["reason"] for row in result["kept"]}
+        self.assertEqual(kept["b1"], f"2 commits {NOT_HELD}; this git has no merge-tree --merge-base, so only a "
+                                     "no-op merge proves it")
+        self.assertEqual([row["branch"] for row in result["deleted"]], ["merged-by-fast-forward"])
 
     def test_a_branch_with_a_commit_past_the_merged_head_stays_with_its_reason(self) -> None:
         made = self.builder("b1", "one", "two")
@@ -124,7 +170,7 @@ class Prune(lane_suite.Lane):
         self.squash_lands(head)
         result = sd_lane.prune_landed(self.repo, [head])
         kept = {row["branch"]: row for row in result["kept"]}
-        self.assertEqual(kept["b2"]["reason"], f"1 commit not proven landed: {extra[:12]}")
+        self.assertEqual(kept["b2"]["reason"], f"3 commits {NOT_HELD}")
         self.assertEqual(git(self.repo, "rev-parse", "refs/heads/b2"), extra)
 
     def test_a_merge_with_an_edit_of_its_own_stays(self) -> None:
@@ -140,11 +186,10 @@ class Prune(lane_suite.Lane):
         (tree / "evil").write_text("an edit in the merge\n", encoding="utf-8")
         git(tree, "add", "evil")
         git(tree, "commit", "-q", "-m", "merge main")
-        merge = git(tree, "rev-parse", "HEAD")
         git(self.repo, "worktree", "remove", str(tree))
         result = sd_lane.prune_landed(self.repo, [head])
         kept = {row["branch"]: row["reason"] for row in result["kept"]}
-        self.assertEqual(kept["b1"], f"1 commit not proven landed: {merge[:12]}")
+        self.assertEqual(kept["b1"], f"2 commits {NOT_HELD}")
 
     def test_a_branch_a_worktree_has_checked_out_stays(self) -> None:
         made, head = self.landed_bundle()
@@ -276,14 +321,14 @@ class Prune(lane_suite.Lane):
         result = json.loads(said.getvalue())
         self.assertEqual([row["branch"] for row in result["deleted"]], ["b1", "bundle"])
         kept = {row["branch"]: row["reason"] for row in result["kept"]}
-        self.assertEqual(kept["unlanded"], f"1 commit not proven landed: {unlanded[:12]}")
+        self.assertEqual(kept["unlanded"], f"1 commit {NOT_HELD}")
         self.assertEqual(kept["feature"], f"checked out in {self.feature}")
         said = io.StringIO()
         with contextlib.redirect_stdout(said):
             sd_lane.lane_prune(self.repo, self.environ, dry_run=True, as_json=False)
         self.assertEqual(said.getvalue().splitlines(),
                          [f"kept feature: checked out in {self.feature}",
-                          f"kept unlanded: 1 commit not proven landed: {unlanded[:12]}"])
+                          f"kept unlanded: 1 commit {NOT_HELD}"])
 
     def test_the_verb_parses(self) -> None:
         parser = argparse.ArgumentParser()
