@@ -403,8 +403,8 @@ def _lines(name: str, data: bytes | None) -> list[str]:
     return text.splitlines(keepends=True)
 
 
-def installed_diff(directory: pathlib.Path, files: dict[str, bytes]) -> list[str]:
-    """Installed against upstream, file by file, Provenance left out of both sides."""
+def installed_diff(directory: pathlib.Path, files: dict[str, bytes], theirs: str = "upstream") -> list[str]:
+    """Installed against upstream, or the kept copy, file by file, Provenance left out of both sides."""
 
     names = sorted(set(installed_digests(directory)) | set(files))
     out: list[str] = []
@@ -412,7 +412,7 @@ def installed_diff(directory: pathlib.Path, files: dict[str, bytes]) -> list[str
         path = directory / name
         installed = path.read_bytes() if path.is_file() and not path.is_symlink() else None
         out += difflib.unified_diff(_lines(name, installed), _lines(name, files.get(name)),
-                                    f"installed/{name}", f"upstream/{name}")
+                                    f"installed/{name}", f"{theirs}/{name}")
     return [_printable(line.rstrip("\n")) for line in out]
 
 
@@ -547,15 +547,19 @@ def recover(roots: list[pathlib.Path]) -> list[str]:
         for stage in sorted(base.iterdir()) if base.is_dir() else []:
             destination = root / stage.name
             old, new = _present(stage / "old"), _present(stage / "new")
-            if old and not _present(destination):
+            # A rollback restores a copy this tool kept, its own or one written by hand before;
+            # a rollback that removes the skill swaps nothing in.
+            rollback = _present(stage / "rollback")
+            what = "rollback" if rollback else "install"
+            if old and not _present(destination) and (new or not rollback):
                 os.replace(stage / "old", destination)
-                done.append(f"undid a stopped install of {destination}: the previous copy is back")
-            elif old and source_of(destination) is None:
+                done.append(f"undid a stopped {what} of {destination}: the previous copy is back")
+            elif old and not rollback and source_of(destination) is None:
                 raise IntakeError(f"{destination} is not one this tool wrote, and the previous copy waits in "
                                   f"{stage / 'old'}; move one of them by hand")
             elif old or (_present(stage / "absent") and not new):
                 _keep(destination, stage)
-                done.append(f"finished a stopped install of {destination}: kept the previous copy")
+                done.append(f"finished a stopped {what} of {destination}: kept the previous copy")
             elif new:
                 done.append(f"dropped an unfinished stage of {destination}")
             elif _present(kept(destination, "~next")) or _present(kept(destination, "~prev")):
@@ -565,6 +569,177 @@ def recover(roots: list[pathlib.Path]) -> list[str]:
                 done.append(f"dropped the empty stage of {destination}")
             _drop(stage)
     return done
+
+
+# --------------------------------------------------------------------------
+# Roll back to the kept copy, and the pack skills an import informed (system sd:5779)
+# --------------------------------------------------------------------------
+
+#: A repository a Lineage or Provenance section names, as prose writes it.
+MENTION_RE = re.compile(r"github\.com/([A-Za-z0-9][A-Za-z0-9-]{0,38})/([A-Za-z0-9._-]{1,100})")
+INFORMING = ("## Lineage", ADOPT.PROVENANCE_HEADING)
+
+
+def _informing(text: str) -> str:
+    """The text of the skill's `## Lineage` and `## Provenance` sections."""
+
+    out, inside = [], False
+    for line in text.splitlines():
+        if line.startswith(("# ", "## ")):
+            inside = line.rstrip() in INFORMING
+        elif inside:
+            out.append(line)
+    return "\n".join(out)
+
+
+def informed(url: str | None, root: pathlib.Path, skip: set[str]) -> list[dict[str, Any]]:
+    """Each pack skill whose Lineage or Provenance names the repository of `url`, with the commits that added it.
+
+    A failed `git log` leaves `commits` None and says why in `unknown`: never "no commit".
+    """
+
+    repo = repo_of(url) if url else None
+    if repo is None:
+        return []
+    wanted = repo.removeprefix(GITHUB).lower()
+    rows = []
+    for directory in (root / "skills", root / "contrib"):
+        for path in sorted(directory.glob(f"*/{SKILL_FILE}")) if directory.is_dir() else []:
+            if path.parent.name in skip:
+                continue
+            names = sorted({f"github.com/{found[1]}/{found[2].rstrip('.').removesuffix('.git')}"
+                            for found in MENTION_RE.finditer(_informing(path.read_text(encoding="utf-8", errors="replace")))
+                            if f"{found[1]}/{found[2].rstrip('.').removesuffix('.git')}".lower() == wanted})
+            if not names:
+                continue
+            relative = path.relative_to(root).as_posix()
+            try:
+                commits, unknown = _git(root, "log", "--format=%h", "-S", names[0], "--", relative).split(), None
+            except IntakeError as error:
+                commits, unknown = None, str(error)
+            rows.append({"skill": path.parent.name, "path": relative, "names": names[0], "commits": commits,
+                         "unknown": unknown})
+    return rows
+
+
+def _informed_text(rows: list[dict[str, Any]]) -> list[str]:
+    if not rows:
+        return ["informed: none"]
+    return ["informed:"] + [f"  {row['skill']} ({row['path']}) names {row['names']}: "
+                            + (f"unknown: {row['unknown']}" if row["commits"] is None
+                               else ", ".join(row["commits"]) or "no commit adds it") for row in rows]
+
+
+def _held(name: str, scope: str | None, root: pathlib.Path, home: pathlib.Path) -> tuple[str, pathlib.Path]:
+    """`(scope, destination)` of the skill with a kept copy."""
+
+    if not ADOPT.SAFE_NAME_RE.match(name):
+        raise IntakeError(f"--rollback takes the name of an installed skill, not {_printable(name)!r}")
+    for each in ([scope] if scope else ["pack", "user"]):
+        for directory in scope_roots(each, root, home):
+            if _present(kept(directory / name)):
+                return each, directory / name
+    raise IntakeError(f"no kept copy of {name}: only an install by `{TOOL}` keeps one; nothing to roll back")
+
+
+def _committed(root: pathlib.Path, destination: pathlib.Path) -> str | None:
+    """The commit that holds a pack skill git tracks and the tree leaves clean; else None. A failed git raises."""
+
+    if not any((each / ".git").exists() for each in (root, *root.parents)):
+        return None
+    relative = destination.relative_to(root).as_posix()
+    try:
+        if not _git(root, "ls-files", "--", relative).strip() or _git(root, "status", "--porcelain", "--", relative).strip():
+            return None
+        return _git(root, "log", "-1", "--format=%h", "--", relative).strip() or None
+    except IntakeError as error:
+        raise IntakeError(f"cannot tell whether git holds {destination}: {error}; nothing written") from error
+
+
+def _files(folder: pathlib.Path) -> dict[str, bytes]:
+    return {path.relative_to(folder).as_posix(): path.read_bytes()
+            for path in sorted(folder.rglob("*")) if path.is_file() and not path.is_symlink()}
+
+
+def _roll(destination: pathlib.Path, restore: pathlib.Path | None) -> None:
+    """The install's steps, from the kept copy: the replaced copy becomes the kept one."""
+
+    stage = staging(destination)
+    stage.mkdir(parents=True, exist_ok=True)
+    (stage / "rollback").touch()
+    if restore is not None:
+        shutil.copytree(restore, stage / "new", symlinks=True)
+    if not _present(destination):
+        (stage / "absent").touch()
+    _swap_out(destination, stage)
+    if restore is not None:
+        _swap_in(destination, stage)
+    _keep(destination, stage)
+    _drop(stage)
+
+
+def rollback(name: str, *, scope: str | None, approve: str | None, root: pathlib.Path,
+             home: pathlib.Path) -> dict[str, Any]:
+    """Report the swap of an installed skill with its kept copy; with `approve`, make it.
+
+    Refused when the installed copy changed since the intake wrote it, and for a
+    pack skill git holds clean: the lane moves the pack, through `git revert`.
+    """
+
+    recovered = recover(scope_roots("pack", root, home) + scope_roots("user", root, home))
+    scope, destination = _held(name, scope, root, home)
+    entry = kept(destination)
+    try:
+        wrote = json.loads((entry / "wrote.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise IntakeError(f"cannot read {entry / 'wrote.json'}: {error}; nothing written") from error
+    now = installed_digests(destination)
+    changed = sorted(path for path in set(wrote) | set(now) if wrote.get(path) != now.get(path))
+    if changed:
+        raise IntakeError(f"{destination} changed since the intake wrote it ({', '.join(map(_printable, changed))}): "
+                          "a local edit; nothing written")
+    held = _committed(root, destination) if scope == "pack" else None
+    if held:
+        raise IntakeError(f"{destination} is committed in the pack at {held}; revert it through the lane: "
+                          f"git revert {held}; nothing written")
+    restore = entry / "skill" if _present(entry / "skill") else None
+    installed, held_copy = source_of(destination), source_of(restore) if restore else None
+    source = installed or held_copy
+    report = {"skill": name, "scope": scope, "destination": str(destination), "kept": str(entry),
+              "mode": "rollback" if restore else "remove",
+              "installed_commit": installed[1] if installed else None, "kept_commit": held_copy[1] if held_copy else None,
+              "diff": installed_diff(destination, _files(restore) if restore else {}, "kept"),
+              "informed": informed(source[0] if source else None, root, {name}),
+              "revision": hashlib.sha256(json.dumps({"rollback": str(destination), "installed": now,
+                                                     "kept": installed_digests(entry)}, sort_keys=True).encode()).hexdigest()[:16],
+              "recovered": recovered, "rolled_back": False}
+    if approve is None:
+        return report
+    if approve != report["revision"]:
+        raise IntakeError(f"approved revision {approve} is not this report's {report['revision']}: "
+                          "the installed or the kept copy changed; nothing written")
+    _roll(destination, restore)
+    report["rolled_back"] = True
+    return report
+
+
+def rollback_text(report: dict[str, Any]) -> str:
+    out = [f"skill: {report['skill']} ({report['scope']}) -> {report['destination']}", f"kept: {report['kept']}"]
+    out += [f"recovered: {line}" for line in report["recovered"]]
+    out.append("mode: remove: the intake installed this skill new; a rollback removes it" if report["mode"] == "remove"
+               else f"mode: rollback: restores the kept copy (commit {report['kept_commit'] or 'not recorded'})")
+    out += _informed_text(report["informed"])
+    shown = report["diff"][:DIFF_LINES]
+    out += ["diff:", *shown] if shown else ["diff: none"]
+    if len(report["diff"]) > DIFF_LINES:
+        out.append(f"... {len(report['diff']) - DIFF_LINES} more diff lines; --json holds them all")
+    out.append(f"revision: {report['revision']}")
+    if report["rolled_back"]:
+        out.append(f"rolled back: {report['destination']}; the replaced copy is kept, so a second rollback undoes this")
+    else:
+        out.append(f"approve: sd skill intake {report['skill']} --rollback --scope {report['scope']} "
+                   f"--approve {report['revision']}")
+    return _printable("\n".join(out))
 
 
 # --------------------------------------------------------------------------
@@ -605,7 +780,9 @@ def evaluate(source: str, scope: str | None, root: pathlib.Path, home: pathlib.P
         url, scope = source, scope or "pack"
     else:
         scope, _directory, url = locate(source, scope, root, home)
-    return judge(fetch_skill(url), scope, root, home, today, recovered)
+    report = judge(fetch_skill(url), scope, root, home, today, recovered)
+    report["informed"] = informed(url, root, {report["skill"]})
+    return report
 
 
 def judge(candidate: dict[str, Any], scope: str, root: pathlib.Path, home: pathlib.Path, today: str,
@@ -669,6 +846,7 @@ def report_text(report: dict[str, Any]) -> str:
             for f in report["risk"]]
     out.append("match: " + (", ".join(f"{m['skill']} {m['overlap']}" for m in report["match"]) or "none"))
     out.append(f"value: {report['value']['instruction_lines']} instruction lines, novelty {report['value']['novelty']}")
+    out += _informed_text(report.get("informed", []))
     out.append(f"verdict: {report['verdict']['action']} ({report['verdict']['reason']})")
     shown = report["diff"][:DIFF_LINES]
     out += ["diff:", *shown] if shown else ["diff: none"]
@@ -688,6 +866,10 @@ def report_text(report: dict[str, Any]) -> str:
 
 
 def run_intake(args: argparse.Namespace, root: pathlib.Path, home: pathlib.Path) -> int:
+    if getattr(args, "rollback", False):
+        report = rollback(args.source, scope=args.scope, approve=args.approve, root=root, home=home)
+        print(json.dumps(report, ensure_ascii=False) if args.json else rollback_text(report))
+        return 0
     report = intake(args.source, scope=args.scope, approve=args.approve, root=root, home=home,
                     today=datetime.date.today().isoformat())
     print(json.dumps(report, ensure_ascii=False) if args.json else report_text(report))

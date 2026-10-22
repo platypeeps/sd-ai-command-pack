@@ -18,6 +18,7 @@ import contextlib
 import io
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -454,6 +455,149 @@ class TheSteps(IntakeCase):
         self.assertEqual(os.readlink(skills / "linked"), "../../../agents/linked")
 
 
+class RollbackCase(IntakeCase):
+    """`sd-ledger` installed, then re-imported: the kept copy is the first install."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.intake(URL.format("ledger"), approve=self.intake(URL.format("ledger"))["revision"])
+        self.installed = self.root / "contrib" / "sd-ledger"
+        self.first = self.installed.joinpath("SKILL.md").read_bytes()
+        self.write(self.upstream / "skills" / "ledger", GOOD + "\nSecond version.\n")
+        self.commit()
+        self.intake("sd-ledger", approve=self.intake("sd-ledger")["revision"])
+        self.second = self.installed.joinpath("SKILL.md").read_bytes()
+
+    def rollback(self, name: str = "sd-ledger", **options):
+        options.setdefault("scope", None)
+        options.setdefault("approve", None)
+        return intake.rollback(name, root=self.root, home=self.home, **options)
+
+    def rolled_back(self, name: str = "sd-ledger") -> dict:
+        return self.rollback(name, approve=self.rollback(name)["revision"])
+
+    def pack_git(self, *args: str) -> str:
+        done = subprocess.run(["git", "-C", str(self.root), "-c", "user.name=t", "-c", "user.email=t@example.test",
+                               *args], capture_output=True, text=True, env=clean_environment(), check=True)
+        return done.stdout.strip()
+
+
+class TheRollback(RollbackCase):
+    """`--rollback` swaps the installed copy with the kept one, on the approval of its report (system sd:5779)."""
+
+    def test_a_rollback_reports_first_then_restores_the_previous_copy_byte_for_byte(self) -> None:
+        before = self.tree()
+        report = self.rollback()
+        self.assertEqual((report["mode"], report["rolled_back"]), ("rollback", False))
+        self.assertIn("-Second version.", report["diff"])
+        self.assertEqual(self.tree(), before)
+        self.assertTrue(self.rollback(approve=report["revision"])["rolled_back"])
+        self.assertEqual(self.installed.joinpath("SKILL.md").read_bytes(), self.first)
+        self.assertEqual(intake.kept(self.installed).joinpath("skill", "SKILL.md").read_bytes(), self.second)
+
+    def test_a_second_rollback_is_the_undo(self) -> None:
+        self.rolled_back()
+        self.rolled_back()
+        self.assertEqual(self.installed.joinpath("SKILL.md").read_bytes(), self.second)
+
+    def test_a_rollback_of_a_new_install_removes_it_and_a_second_brings_it_back(self) -> None:
+        self.intake(URL.format("tabulate"), approve=self.intake(URL.format("tabulate"))["revision"])
+        destination = self.root / "contrib" / "sd-tabulate"
+        installed = destination.joinpath("SKILL.md").read_bytes()
+        self.assertEqual(self.rollback("sd-tabulate")["mode"], "remove")
+        self.rolled_back("sd-tabulate")
+        self.assertFalse(destination.exists())
+        self.rolled_back("sd-tabulate")
+        self.assertEqual(destination.joinpath("SKILL.md").read_bytes(), installed)
+
+    def test_an_approval_of_another_revision_writes_nothing(self) -> None:
+        before = self.tree()
+        with self.assertRaisesRegex(intake.IntakeError, "nothing written"):
+            self.rollback(approve="0" * 16)
+        self.assertEqual(self.tree(), before)
+
+    def test_a_locally_edited_copy_is_refused(self) -> None:
+        self.installed.joinpath("SKILL.md").write_text("edited by hand\n", encoding="utf-8")
+        before = self.tree()
+        with self.assertRaisesRegex(intake.IntakeError, r"changed since the intake wrote it \(SKILL.md\)"):
+            self.rollback()
+        self.assertEqual(self.tree(), before)
+
+    def test_a_committed_pack_copy_is_refused_and_names_git_revert(self) -> None:
+        self.pack_git("init", "-q", "-b", "main")
+        self.pack_git("add", "contrib", "skills")
+        self.pack_git("commit", "-qm", "import")
+        commit = self.pack_git("log", "-1", "--format=%h")
+        before = self.tree()
+        with self.assertRaisesRegex(intake.IntakeError, f"git revert {commit}"):
+            self.rollback()
+        self.assertEqual(self.tree(), before)
+
+    def test_a_skill_with_no_kept_copy_is_refused(self) -> None:
+        with self.assertRaisesRegex(intake.IntakeError, "no kept copy of sd-plan"):
+            self.rollback("sd-plan")
+
+    def test_a_stop_between_the_swaps_puts_the_installed_copy_back(self) -> None:
+        report = self.rollback()
+        with mock.patch.object(intake, "_swap_in", side_effect=OSError("stopped")), self.assertRaises(OSError):
+            self.rollback(approve=report["revision"])
+        self.assertIn("the previous copy is back", self.rollback()["recovered"][0])
+        self.assertEqual(self.installed.joinpath("SKILL.md").read_bytes(), self.second)
+
+    def test_a_stop_after_the_swap_of_a_hand_written_kept_copy_keeps_it(self) -> None:
+        intake.kept(self.installed).joinpath("skill", "SKILL.md").write_text("written by hand\n", encoding="utf-8")
+        report = self.rollback()
+        with mock.patch.object(intake, "_keep", side_effect=OSError("stopped")), self.assertRaises(OSError):
+            self.rollback(approve=report["revision"])
+        self.assertIn("kept the previous copy", self.rollback()["recovered"][0])
+        self.assertEqual(self.installed.joinpath("SKILL.md").read_text(), "written by hand\n")
+        self.assertEqual(intake.kept(self.installed).joinpath("skill", "SKILL.md").read_bytes(), self.second)
+
+    def test_a_stopped_rollback_that_removes_finishes_the_removal(self) -> None:
+        self.intake(URL.format("tabulate"), approve=self.intake(URL.format("tabulate"))["revision"])
+        destination = self.root / "contrib" / "sd-tabulate"
+        report = self.rollback("sd-tabulate")
+        with mock.patch.object(intake, "_keep", side_effect=OSError("stopped")), self.assertRaises(OSError):
+            self.rollback("sd-tabulate", approve=report["revision"])
+        self.assertIn("kept the previous copy", self.rollback("sd-tabulate")["recovered"][0])
+        self.assertFalse(destination.exists())
+        self.assertTrue(intake.kept(destination).joinpath("skill", "SKILL.md").is_file())
+
+
+class TheInformedSkills(RollbackCase):
+    """Both reports list the pack skills whose Lineage or Provenance names the import's repository."""
+
+    LINEAGE = "\n## Lineage\n\nThe ledger steps are adapted from `github.com/example/skills` (MIT).\n"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.write(self.root / "skills" / "sd-adapted",
+                   skill_text("sd-adapted", "Adapted from outside.") + self.LINEAGE)
+        self.write(self.root / "skills" / "sd-other", skill_text("sd-other", "Adapted from elsewhere.")
+                   + self.LINEAGE.replace("example/skills", "example/other"))
+
+    def test_both_reports_list_a_skill_whose_lineage_names_the_repository_with_its_commit(self) -> None:
+        self.pack_git("init", "-q", "-b", "main")
+        self.pack_git("add", "skills")
+        self.pack_git("commit", "-qm", "adapt")
+        commit = self.pack_git("log", "-1", "--format=%h")
+        found = {"skill": "sd-adapted", "path": "skills/sd-adapted/SKILL.md", "names": "github.com/example/skills",
+                 "commits": [commit], "unknown": None}
+        # The re-imported sd-ledger names the repository in its Provenance; git does not hold it yet.
+        self.assertEqual(self.intake(URL.format("tabulate"))["informed"],
+                         [found, {"skill": "sd-ledger", "path": "contrib/sd-ledger/SKILL.md",
+                                  "names": "github.com/example/skills", "commits": [], "unknown": None}])
+        self.assertEqual(self.rollback()["informed"], [found])
+        self.assertIn(f"sd-adapted (skills/sd-adapted/SKILL.md) names github.com/example/skills: {commit}",
+                      intake.rollback_text(self.rollback()))
+
+    def test_a_failed_git_log_reads_unknown_not_none(self) -> None:
+        row = self.rollback()["informed"][0]
+        self.assertEqual((row["skill"], row["commits"]), ("sd-adapted", None))
+        self.assertIn("git log failed", row["unknown"])
+        self.assertIn("unknown: git log failed", intake.report_text(self.intake(URL.format("tabulate"))))
+
+
 class TheVerb(IntakeCase):
     """`sd skill intake` is a verb of `sd skill`, not a new command."""
 
@@ -493,6 +637,24 @@ class TheVerb(IntakeCase):
                               capture_output=True, text=True, env=clean_environment(), check=False)
         self.assertEqual(done.returncode, 0, done.stderr)
         self.assertIn("--approve REVISION", done.stdout)
+        self.assertIn("--rollback", done.stdout)
+
+    def test_rollback_prints_its_approval_and_then_rolls_back(self) -> None:
+        self.run_verb(URL.format("ledger"), "--approve", self.intake(URL.format("ledger"))["revision"])
+        code, output = self.run_verb("sd-ledger", "--rollback")
+        self.assertEqual(code, 0)
+        self.assertIn("mode: remove", output)
+        found = re.search(r"approve: sd skill intake sd-ledger --rollback --scope pack --approve ([0-9a-f]{16})", output)
+        self.assertIsNotNone(found, output)
+        code, output = self.run_verb("sd-ledger", "--rollback", "--approve", found[1], "--json")
+        self.assertTrue(json.loads(output)["rolled_back"])
+        self.assertFalse((self.root / "contrib" / "sd-ledger").exists())
+
+    def test_rollback_takes_a_skill_name_only(self) -> None:
+        with self.assertRaisesRegex(sd_skill.SkillRefusal, "name"):
+            self.run_verb(URL.format("ledger"), "--rollback")
+        with self.assertRaisesRegex(sd_skill.SkillRefusal, "--rollback takes the name"):
+            self.run_verb("--rollback", "--tracked")
 
 
 class TrackedCase(IntakeCase):
