@@ -1658,7 +1658,8 @@ def fast_forward(main: pathlib.Path, environ: dict[str, str], own_lock: pathlib.
 
 def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str], note: Note,
          own_lock: pathlib.Path, root: pathlib.Path) -> dict[str, Any]:
-    """After a merge: delete the remote branch, note the item with the removal and recover commands, fast-forward.
+    """After a merge: delete the remote branch and the landed local ones, note the item with the removal and
+    recover commands, fast-forward.
 
     `root` is the repository the lane runs for. `sd-ship merge` keeps the
     worktree it runs in (sd:3477), but an older one removed it (sd:3006), and
@@ -1669,9 +1670,10 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
     gone = not worktree.is_dir()
     main = sd_lib.main_worktree_root(root if gone else worktree).resolve()
     head, merged = outcome.get("head"), str(outcome.get("merge_commit") or "")
+    pruned = prune_after_merge(main, [str(head or entry.get("expected_head") or "")])  # the head that merged
     if gone:  # the merge removed the worktree with its branches; nothing is left to clean
         branch, tip = "", None
-        cleanup, remove = f"Cleanup: worktree {worktree} was already removed by the merge", None
+        cleanup, remove = f"Cleanup: worktree {worktree} was already removed by the merge{pruned}", None
         fields: dict[str, Any] = {"cleanup": cleanup, "remove": remove}
         body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {cleanup}."
         return land_note(fields, body, entry, environ, note, own_lock, main)
@@ -1680,6 +1682,7 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
     kept, where = entry.get("builder_worktree"), f" on {entry.get('builder_host')}"
     if entry.get("lane_worktree") and kept:  # the builder's own worktree, on the host that enqueued it (sd:3283)
         cleanup, remove = f"{cleanup}; the builder worktree {kept} stays{where}", f"git -C {kept} worktree remove {kept}"
+    cleanup += pruned
     fields = {"cleanup": cleanup, "remove": remove}
     body = f"Landed: merged at {merged[:12]} (head {str(head)[:12]}). {cleanup}."
     if branch and tip:
@@ -1687,6 +1690,19 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
     if remove:
         body += f" Remove{where if entry.get('lane_worktree') else ''}: {remove}"  # last and bare, so it copies whole
     return land_note(fields, body, entry, environ, note, own_lock, main)
+
+
+def prune_after_merge(main: pathlib.Path, heads: list[str]) -> str:
+    """`prune_landed` against the merged head (sd:5700): `; deleted ...` for the branches that went, else ''.
+
+    A read that fails deletes nothing and says so; the merge stands either way.
+    """
+    try:
+        pruned = prune_landed(main, heads)
+    except LaneError as error:
+        return f"; local branches kept: {error}"[:600]
+    gone = [f"{row['branch']} at {row['tip']}" for row in pruned["deleted"]]
+    return f"; deleted the landed local branches {', '.join(gone)}" if gone else ""
 
 
 def land_note(fields: dict[str, Any], body: str, entry: dict[str, Any], environ: dict[str, str], note: Note,
@@ -2253,17 +2269,22 @@ def clean_merge(tree: pathlib.Path, commit: str, first: str, second: str) -> boo
 def landed(tree: pathlib.Path, commit: str, default: list[str]) -> bool:
     """Whether `commit` is on `origin`'s default branch; `default` keeps its tip, read once per check."""
     if not default:
-        listed = [line.split("\t") for line in read_git(tree, "ls-remote", "--symref", "origin", "HEAD").stdout.splitlines()]
-        name = next((ref.removeprefix("ref: refs/heads/") for ref, *rest in listed
-                     if rest == ["HEAD"] and ref.startswith("ref: refs/heads/")), None)
-        tip = next((ref for ref, *rest in listed if rest == ["HEAD"] and not ref.startswith("ref: ")), None)
-        if not name or not tip:
-            raise LaneError(f"origin advertised no default branch to {tree}; the entry is not skipped.",
-                            code=PUBLISH_UNKNOWN)
-        if read_git(tree, "rev-parse", "--verify", "--quiet", f"{tip}^{{commit}}", ok=(0, 1)).returncode != 0:
-            read_git(tree, "fetch", "-q", "--no-tags", "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}")
-        default.append(tip)
+        default.append(origin_default(tree)[1])
     return read_git(tree, "merge-base", "--is-ancestor", commit, default[0], ok=(0, 1)).returncode == 0
+
+
+def origin_default(tree: pathlib.Path) -> tuple[str, str]:
+    """The default branch `origin` advertises and its tip, fetched when missing here; no answer raises `PUBLISH_UNKNOWN`."""
+    listed = [line.split("\t") for line in read_git(tree, "ls-remote", "--symref", "origin", "HEAD").stdout.splitlines()]
+    name = next((ref.removeprefix("ref: refs/heads/") for ref, *rest in listed
+                 if rest == ["HEAD"] and ref.startswith("ref: refs/heads/")), None)
+    tip = next((ref for ref, *rest in listed if rest == ["HEAD"] and not ref.startswith("ref: ")), None)
+    if not name or not tip:
+        raise LaneError(f"origin advertised no default branch to {tree}; the entry is not skipped.",
+                        code=PUBLISH_UNKNOWN)
+    if read_git(tree, "rev-parse", "--verify", "--quiet", f"{tip}^{{commit}}", ok=(0, 1)).returncode != 0:
+        read_git(tree, "fetch", "-q", "--no-tags", "origin", f"+refs/heads/{name}:refs/remotes/origin/{name}")
+    return name, tip
 
 
 def caught_up(worktree: pathlib.Path, expected: str) -> str:
@@ -2319,6 +2340,149 @@ def worktrees(main: pathlib.Path) -> list[tuple[pathlib.Path, str]]:
         elif line.startswith("branch refs/heads/") and found:
             found[-1] = (found[-1][0], line.removeprefix("branch refs/heads/"))
     return found
+
+
+def held_branches(main: pathlib.Path) -> dict[str, str]:
+    """Each local branch a worktree holds, with where: checked out, or being rebased or bisected (sd:5700).
+
+    `git worktree list` shows a rebase or a bisect as a detached HEAD, so the
+    state files of every worktree's git directory name those branches, as
+    `git branch -D` reads them. A read that fails raises `PUBLISH_UNKNOWN`.
+    """
+    held = {branch: f"checked out in {tree}" for tree, branch in worktrees(main) if branch}
+    common = main / read_git(main, "rev-parse", "--git-common-dir").stdout.strip()
+    for gitdir in [common, *sorted(common.glob("worktrees/*"))]:
+        for state in ("rebase-merge/head-name", "rebase-apply/head-name", "BISECT_START"):
+            try:
+                name = (gitdir / state).read_text(encoding="utf-8").strip().removeprefix("refs/heads/")
+            except FileNotFoundError:
+                continue
+            except OSError as error:
+                raise LaneError(f"cannot read {gitdir / state}: {error}", code=PUBLISH_UNKNOWN) from None
+            if name:
+                held.setdefault(name, f"being rebased or bisected in {gitdir}")
+    return held
+
+
+def unlanded(main: pathlib.Path, tip: str, base: tuple[str, str], heads: list[tuple[str, int]] | None) -> str | None:
+    """Why `tip` is not proven landed on `base`, origin's default branch as (name, tip), or None (sd:5700).
+
+    The proof is content, never history: a commit in a merged head's history
+    may have been reverted before its squash, so it never landed (lane review
+    round 1). `tip` is landed when merging it into `base` changes nothing, or
+    when merging it into a merged lane head `H` from where it left `base`
+    (`merge-tree --merge-base`) is clean and leaves `H`'s tree as it was: the
+    squash landed that tree. `heads` are `(commit, committer time)`; one older
+    than `tip`'s oldest commit off `base` is not asked. None for `heads`
+    means this git cannot merge from a given base, so only the first proof
+    runs. A read that fails raises `PUBLISH_UNKNOWN`.
+    """
+    name, commit = base
+    if same_tree(main, read_git(main, "merge-tree", "--write-tree", "--allow-unrelated-histories", commit, tip,
+                                ok=(0, 1)), commit):
+        return None
+    times = read_git(main, "log", "--format=%ct", f"{commit}..{tip}").stdout.split()
+    fork = read_git(main, "merge-base", commit, tip, ok=(0, 1)).stdout.strip()
+    for head in [head for head, when in heads or [] if when >= min(map(int, times), default=0)] if fork else []:
+        if same_tree(main, read_git(main, "merge-tree", "--write-tree", f"--merge-base={fork}", head, tip,
+                                    ok=(0, 1)), head):
+            return None
+    why = f"{len(times)} commit{'s' if len(times) != 1 else ''} not on origin/{name}, and no merged lane head holds its changes"
+    return why if heads is not None else f"{why}; this git has no merge-tree --merge-base, so only a no-op merge proves it"
+
+
+def same_tree(main: pathlib.Path, merged: subprocess.CompletedProcess[str], commit: str) -> bool:
+    """Whether `merge-tree --write-tree` answered a clean merge whose tree is `commit`'s."""
+    return merged.returncode == 0 and merged.stdout.split()[:1] == [read_git(main, "rev-parse", f"{commit}^{{tree}}").stdout.strip()]
+
+
+def merges_from_a_base(main: pathlib.Path, commit: str) -> bool:
+    """Whether this git's `merge-tree` merges from a given base (git 2.40): `commit` with itself, tried once."""
+    done = publish_git(main, "merge-tree", "--write-tree", f"--merge-base={commit}", commit, commit)
+    return done is not None and done.returncode == 0
+
+
+def local_branches(main: pathlib.Path, default: str) -> dict[str, str]:
+    """Each local branch but `default`, with its tip; a symbolic one is left out."""
+    branches = {}
+    for line in read_git(main, "for-each-ref", "--format=%(refname) %(objectname) %(symref)", "refs/heads").stdout.splitlines():
+        ref, tip, *symref = line.split()
+        if not symref and ref != f"refs/heads/{default}":
+            branches[ref.removeprefix("refs/heads/")] = tip
+    return branches
+
+
+def known_heads(main: pathlib.Path, heads: list[str]) -> list[tuple[str, int]]:
+    """Each of `heads` that names a commit here, with its committer time."""
+    known = []
+    for head in dict.fromkeys(head for head in heads if head):
+        found = read_git(main, "log", "-1", "--format=%H %ct", f"{head}^{{commit}}", "--", ok=(0, 128)).stdout.split()
+        if len(found) == 2:
+            known.append((found[0], int(found[1])))
+    return known
+
+
+def why_kept(main: pathlib.Path, branch: str, tip: str, base: tuple[str, str], heads: list[tuple[str, int]] | None,
+             held: dict[str, str]) -> str | None:
+    """Why `branch` at `tip` stays, or None when it is proven landed; a read that fails says unknown."""
+    if branch in held:
+        return held[branch]
+    try:
+        return unlanded(main, tip, base, heads)
+    except LaneError as error:
+        return f"unknown: {error}"
+
+
+def delete_branch(main: pathlib.Path, branch: str, tip: str) -> str | None:
+    """`update-ref -d` of `branch` at `tip` after a fresh read of the worktrees; None once gone, else why it stays.
+
+    `update-ref` ignores worktrees, and no lock keeps a checkout out between
+    the read and the delete, so a second read follows the delete: a branch
+    held by then, or a read that fails, is put back at `tip` (codex review).
+    """
+    try:
+        held = held_branches(main).get(branch)
+    except LaneError as error:
+        return f"unknown: {error}"
+    if held:
+        return held
+    done = publish_git(main, "update-ref", "-d", f"refs/heads/{branch}", tip)
+    if done is None or done.returncode != 0:
+        return f"the delete failed: {(done.stderr or done.stdout).strip()[-200:] if done else 'no answer'}"
+    try:
+        held = held_branches(main).get(branch)
+    except LaneError as error:
+        held = f"unknown after the delete: {error}"
+    else:
+        held = held and f"{held} during the delete"
+    if not held:
+        return None
+    back = publish_git(main, "update-ref", f"refs/heads/{branch}", tip, "")
+    return f"{held}; {'put back at its tip' if back is not None and back.returncode == 0 else f'put it back: git branch {branch} {tip}'}"
+
+
+def prune_landed(main: pathlib.Path, heads: list[str], *, dry_run: bool = False) -> dict[str, Any]:
+    """Delete each local branch of `main`'s repository that is proven landed; what went, and what stayed and why.
+
+    `heads` are the merged lane heads; one missing here is left out. A branch
+    that a worktree holds, or whose content `unlanded` cannot prove, stays,
+    and `origin`'s default branch is never a candidate. Each delete is
+    `update-ref -d` with the tip read before the check, after a fresh read of
+    the worktrees, so a branch that moved or was checked out meanwhile stays.
+    A read that fails for one branch keeps it; one that fails for all raises
+    `PUBLISH_UNKNOWN`. Remote branches and worktrees are never touched.
+    """
+    default, base = origin_default(main)
+    branches, held = local_branches(main, default), held_branches(main)
+    known = known_heads(main, heads) if merges_from_a_base(main, base) else None
+    reasons = {branch: why_kept(main, branch, tip, (default, base), known, held) for branch, tip in sorted(branches.items())}
+    landed_now = [{"branch": branch, "tip": branches[branch]} for branch, why in reasons.items() if why is None]
+    if not dry_run:
+        reasons.update({row["branch"]: delete_branch(main, row["branch"], row["tip"]) for row in landed_now})
+    deleted = [] if dry_run else [row for row in landed_now if reasons[row["branch"]] is None]
+    kept = [{"branch": branch, "tip": branches[branch], "reason": why} for branch, why in reasons.items() if why]
+    return {"base": f"origin/{default} {base}", "dry_run": dry_run, "landed": landed_now, "deleted": deleted,
+            "kept": kept}
 
 
 def drop_lane_worktree(main: pathlib.Path, tree: pathlib.Path, branch: str | None, *, made: bool = False,
@@ -2864,6 +3028,11 @@ def add_lane_verbs(commands: Any) -> None:
     runner = verbs.add_parser("run", help="drain the queue in order; exits at once if another runner holds the lane")
     runner.add_argument("--hosted", action="store_true",
                         help="run the lane of each repository this machine hosts, one after another (sd:3003)")
+    pruner = verbs.add_parser("prune", help="delete each local branch no worktree holds whose changes are on origin's "
+                                            "default branch or in a merged lane head's tree; remote branches and "
+                                            "worktrees stay (sd:5700)")
+    pruner.add_argument("--dry-run", action="store_true", help="report what would go; delete nothing")
+    pruner.add_argument("--json", action="store_true", help="print one JSON object")
     watcher = verbs.add_parser("watch", help="print each gate end a log under the lane root records, once")
     watcher.add_argument("--once", action="store_true", help="scan once and exit")
     watcher.add_argument("--item", type=int, action="append", dest="items",
@@ -2884,6 +3053,8 @@ def lane_main(args: Any) -> int:
             raise LaneError("cwd is not inside a Git repository")
         if args.lane_command == "watch":
             return watch_items(queue_for(root, environ), args.items)
+        if args.lane_command == "prune":
+            return lane_prune(root, environ, dry_run=args.dry_run, as_json=args.json)
         imported = {} if args.lane_command == "run" else import_file_queue(root, queue_for(root, environ))
         if args.lane_command == "enqueue":
             result: Any = enqueue_entry(root, args.items[0], args.title, args.body_file, environ,
@@ -2914,6 +3085,23 @@ def lane_main(args: Any) -> int:
         print(json.dumps({"ok": False, **refusal(error)}, indent=2, sort_keys=True))
         return 3
     return succeed(shown(result))
+
+
+def lane_prune(root: pathlib.Path, environ: dict[str, str], *, dry_run: bool, as_json: bool) -> int:
+    """`lane prune`: `prune_landed` against every merged lane head of the repository; a hub that does not answer
+    refuses, so nothing goes on a partial list."""
+    queue = queue_for(root, environ)
+    entries = on_hub(queue, lambda connection: stored(connection, queue.repository))
+    heads = [str(row.get("head") or row.get("expected_head") or "") for row in entries if row.get("status") == "merged"]
+    result = prune_landed(sd_lib.main_worktree_root(root).resolve(), heads, dry_run=dry_run)
+    if as_json:
+        return succeed(result)
+    verb = "would delete" if dry_run else "deleted"
+    for row in result["landed"] if dry_run else result["deleted"]:
+        print(f"{verb} {row['branch']} at {row['tip']}")
+    for row in result["kept"]:
+        print(f"kept {row['branch']}: {row['reason']}")
+    return 0
 
 
 def item_rounds(entries: list[dict[str, Any]], order: dict[str, int]) -> dict[str, int]:
