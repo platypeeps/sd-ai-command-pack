@@ -3606,7 +3606,7 @@ class CancelMerged(SharedQueue):
         return head
 
     def test_a_prepared_entry_whose_head_merged_by_hand_is_cancelled(self) -> None:
-        """hoa sd:3115: merged by a manual `sd-ship merge` on another branch than its imported entry names."""
+        """sd:5743: merged by a manual `sd-ship merge` on another branch than its imported entry names."""
         head = self.prepared()
         self.merged_receipt("brief-by-hand", 1, head)
         cancelled = sd_lane.cancel(self.repo, 1, self.environ)
