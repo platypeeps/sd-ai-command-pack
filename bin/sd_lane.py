@@ -1383,7 +1383,7 @@ class SpeculativeGate(threading.Thread):
         super().__init__(target=target, name=name)
         self.cancelled = False
         self.group: int | None = None
-        self.guard = threading.Lock()
+        self.guard = threading.RLock()  # `signal_gate` may run in a SIGTERM handler while this thread holds it
 
     def started(self, group: int | None) -> None:
         with self.guard:
@@ -1391,13 +1391,17 @@ class SpeculativeGate(threading.Thread):
             if self.cancelled and group is not None:
                 end_group(group, signal.SIGTERM)
 
+    def signal_gate(self, number: int) -> None:
+        """Mark the gate cancelled and send `number` to its group, if one runs."""
+        with self.guard:
+            self.cancelled = True
+            if self.group is not None:
+                end_group(self.group, number)
+
     def cancel_gate(self) -> bool:
         """End the gate's group, SIGTERM then SIGKILL, each followed by `CANCEL_SECONDS`; whether the gate ended."""
         for number in (signal.SIGTERM, signal.SIGKILL):
-            with self.guard:
-                self.cancelled = True
-                if self.group is not None:
-                    end_group(self.group, number)
+            self.signal_gate(number)
             self.join(CANCEL_SECONDS)
             if not self.is_alive():
                 return True
@@ -2686,7 +2690,9 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
     `RUN_BUDGET_SECONDS` from now, it claims no next entry and says so in
     `stopped`; an entry it started still finishes (sd:3287). A stopped run
     cancels its speculative gate (`SpeculativeGate.cancel_gate`) rather than wait
-    on it, and says how that went in `speculative_gate` (sd:3361). A run that
+    on it, and says how that went in `speculative_gate` (sd:3361). So does a
+    run that ends on SIGTERM or an exception; the TERM reaches the gate's group
+    as it arrives, before prepare's group ends (sd:5776). A run that
     merged runs `post_merge` once its runner lock is released (sd:3566).
     """
     refuse_elsewhere(root, environ)
@@ -2704,37 +2710,54 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
         answer: dict[str, Any] = {"ran": ran, **settle_checkout(root, queue)}
         ahead: SpeculativeGate | None = None
         deadline = clock() + RUN_BUDGET_SECONDS if deadline is None else deadline
-        while True:
-            if clock() >= deadline:
-                answer["stopped"] = "the run spent its budget; the next run takes the pending entries"
-                break
-            loaded = load_stop(environ)
-            if loaded is not None:
-                answer["stopped"] = loaded
-                break
-            token = secrets.token_hex(16)
+
+        def term_gate() -> None:
+            if ahead is not None:
+                ahead.signal_gate(signal.SIGTERM)
+        with sd_lib.term_ends_group(first=term_gate):
             try:
-                entry = claim_entry(queue, token)
-            except Stop as error:  # the claim may have landed unseen
-                answer["stopped"], entry = record_hub_stop(queue, token, error), None
-            except LaneError as error:  # moved, unknown or busy
-                answer["stopped"], entry = str(error), None
-            if entry is None:
-                break
-            if ahead is not None and ahead.is_alive():
-                speculate(entry, queue, gate, busy=True)  # notes the skip: one speculative gate at a time
-            else:
-                ahead = speculate(entry, queue, gate)
-            row, stopped = run_entry(root, queue, entry, token, environ, ship, note or default_note)
-            if row is not None:
-                ran.append(row)
-            if stopped is not None:
-                answer["stopped"] = stopped
-                break
-            if ahead is not None and row is not None and row.get("status") == "merged":
-                ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
-        answer = finish_speculation(ahead, answer)
+                while True:
+                    entry, token = next_claim(queue, environ, deadline, answer)
+                    if entry is None:
+                        break
+                    if ahead is not None and ahead.is_alive():
+                        speculate(entry, queue, gate, busy=True)  # notes the skip: one speculative gate at a time
+                    else:
+                        ahead = speculate(entry, queue, gate)
+                    row, stopped = run_entry(root, queue, entry, token, environ, ship, note or default_note)
+                    if row is not None:
+                        ran.append(row)
+                    if stopped is not None:
+                        answer["stopped"] = stopped
+                        break
+                    if ahead is not None and row is not None and row.get("status") == "merged":
+                        ahead.join(PREPARE_SECONDS)  # the next prepare reads its receipt
+                answer = finish_speculation(ahead, answer)
+            except BaseException:  # a SIGTERM among them: no speculative gate outlives the run (sd:5776)
+                if ahead is not None:
+                    ahead.cancel_gate()
+                raise
     return post_merge(root, queue, environ, answer)
+
+
+def next_claim(queue: Queue, environ: dict[str, str], deadline: float,
+               answer: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    """The entry `run_lane` claims next and its token, or None, with why the run stops in `answer` when it does."""
+    if clock() >= deadline:
+        answer["stopped"] = "the run spent its budget; the next run takes the pending entries"
+        return None, ""
+    loaded = load_stop(environ)
+    if loaded is not None:
+        answer["stopped"] = loaded
+        return None, ""
+    token = secrets.token_hex(16)
+    try:
+        return claim_entry(queue, token), token
+    except Stop as error:  # the claim may have landed unseen
+        answer["stopped"] = record_hub_stop(queue, token, error)
+    except LaneError as error:  # moved, unknown or busy
+        answer["stopped"] = str(error)
+    return None, token
 
 
 def finish_speculation(ahead: SpeculativeGate | None, answer: dict[str, Any]) -> dict[str, Any]:
