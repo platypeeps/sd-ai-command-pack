@@ -139,6 +139,37 @@ class TheRow(Briefs):
         self.assertEqual(row["body"], {"text": TEXT})
         self.assertEqual(self.notes(), [("status_change", "opened as done")])
 
+    def test_signal_topics_are_copied_into_the_rows_fields(self):
+        """sd:5798: a page lists briefs per topic from `fields.brief`, without parsing the text."""
+        text = TEXT.replace("related:", "signal-topics:\n  - observability\n  - ai-tooling # a note\n"
+                                        "  - observability\nquiet-topics:\n  - politics\nrelated:")
+        self.add(text)
+        self.assertEqual(self.row()["fields"]["brief"]["signal_topics"], ["observability", "ai-tooling"])
+        self.assertEqual(rows(self.db)[0]["brief"]["signal_topics"], ["observability", "ai-tooling"])
+        self.add(text + FINDINGS, mode="extend")
+        self.assertEqual(self.row()["fields"]["brief"]["signal_topics"], ["observability", "ai-tooling"])
+
+    def test_each_spelling_of_signal_topics_is_read_and_none_is_not_recorded(self):
+        """A brief that names no `signal-topics` key keeps no field: not recorded, never an empty list."""
+        for line, topics in (("signal-topics: [mezmo, 'agntcy', \"politics\"]", ["mezmo", "agntcy", "politics"]),
+                             ("signal-topics: []", []), ("signal-topics:", []), ("signal-topics: mezmo", ["mezmo"])):
+            with self.subTest(line=line):
+                found = routine_briefs.counts(DAILY, f"---\n{line}\ntags: x\n---\nbody\n")
+                self.assertEqual(found["signal_topics"], topics)
+        self.assertNotIn("signal_topics", routine_briefs.counts(DAILY, TEXT))
+        self.assertNotIn("signal_topics", routine_briefs.counts(DAILY, "---\na: b\n---\nsignal-topics:\n  - x\n"))
+
+    def test_a_row_filed_before_topics_were_copied_keeps_no_field(self):
+        """Older state: no backfill; the same bytes again are `unchanged`, so readers still see not recorded."""
+        text = TEXT.replace("related:", "signal-topics:\n  - mezmo\nrelated:")
+        self.add(text)
+        fields = self.row()["fields"]
+        del fields["brief"]["signal_topics"]
+        self.db.execute("UPDATE item SET fields = ? WHERE id = ?", (json.dumps(fields), self.row()["id"]))
+        self.db.commit()
+        self.assertEqual(self.add(text)["result"], "unchanged")
+        self.assertNotIn("signal_topics", self.row()["fields"]["brief"])
+
     def test_the_same_bytes_print_unchanged_and_write_nothing(self):
         self.add()
         before = workflow.item_state(self.db, self.row()["id"])["revision"]
