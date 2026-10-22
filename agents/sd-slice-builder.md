@@ -39,7 +39,7 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
 3. Write a test that fails on `origin/main` before each fix, then make it pass. Quote both lines in the report.
    No skipped tests.
 4. Commit one item per commit. Add no attribution lines: no Co-Authored-By, session or generated-with lines.
-   Wrap commit and PR body lines at 72 characters and keep the title at 63 or less: enqueue refuses longer ones.
+   Wrap commit and PR body lines at 72 characters, merge subjects too, and keep the title at 63 or less: enqueue refuses longer ones.
    Follow the repository's `CLAUDE.md` for any trailer it requires.
 5. Run the focused tests for the files you touched in the machine gate queue, in turn with lane gates:
    `sd gate run --max-wait 240 --label '<branch> tests' -- <test command>`. It waits in arrival order while every gate slot is held.

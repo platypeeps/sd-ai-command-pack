@@ -2039,15 +2039,25 @@ class LineLimits(SharedQueue):
                       f"commit {first[:12]} line 1 is 73 characters (limit 72); "
                       f"commit {first[:12]} line 4 is 80 characters (limit 72); nothing was queued", str(refused))
 
-    def test_lines_at_the_limit_a_fence_a_bare_url_and_a_merge_are_queued(self) -> None:
+    def test_lines_at_the_limit_a_fence_and_a_bare_url_are_queued(self) -> None:
         url = "https://example.test/" + "p" * 80
         tree, _ = self.committed("topic", "s" * 72 + "\n\n" + url + "\n\n```\n" + "c" * 90 + "\n```")
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "main moves")
         git(self.repo, "push", "-q", "origin", "main")
-        git(tree, "merge", "-q", "--no-ff", "-m", "m" * 90, "origin/main")
+        git(tree, "merge", "-q", "--no-ff", "-m", "m" * 72, "origin/main")
         self.body.write_text("b" * 72 + f"\n{url}\n~~~\n" + "c" * 90 + "\n", encoding="utf-8")
         entry = sd_lane.enqueue_entry(tree, 1, "t" * 63, self.body, self.environ, claim="deliver")
         self.assertEqual((entry["status"], self.remote_tip("topic")), ("pending", entry["expected_head"]))
+
+    def test_a_merge_commit_is_a_branch_commit_too(self) -> None:
+        """Codex review: `--no-merges` let a 90-character merge subject through; only two exemptions exist."""
+        tree, _ = self.committed("topic", "fine")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "main moves")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(tree, "merge", "-q", "--no-ff", "-m", "m" * 90, "origin/main")
+        merge = git(tree, "rev-parse", "HEAD")
+        refused = self.refused(tree, "t")
+        self.assertIn(f"commit {merge[:12]} line 1 is 90 characters (limit 72)", str(refused))
 
     def test_commits_main_already_has_are_not_the_branchs(self) -> None:
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "m" * 90)

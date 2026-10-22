@@ -705,14 +705,14 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
 def check_lines(worktree: pathlib.Path, title: str, body: str, base: str, head: str) -> None:
     """Refuse a title, body line or commit line too long for a commit lint (sd:5793).
 
-    The commits are those `head` adds to `origin/<base>`, merges aside: git,
-    not the builder, writes a merge's message. Only enqueue checks;
-    an entry already queued is not checked again (`retry`). A failed read is
+    The commits are those `head` adds to `origin/<base>`, merges included:
+    only a fenced line or a bare URL is exempt. Only enqueue checks; an
+    entry already queued is not checked again (`retry`). A failed read is
     an unknown answer, not a pass: nothing is queued.
     """
     import sd_ship_body  # noqa: PLC0415
     from sd_ship_remote import Refusal  # noqa: PLC0415
-    raw = lane_git(worktree, "log", "--no-merges", "--format=%H%x1f%B%x1e", f"refs/remotes/origin/{base}..{head}")
+    raw = lane_git(worktree, "log", "--format=%H%x1f%B%x1e", f"refs/remotes/origin/{base}..{head}")
     if raw is None:
         raise LaneError(f"Cannot read the commits {head} adds to origin/{base}; fetch origin, then enqueue "
                         "again. Nothing was queued or pushed.", code=PUBLISH_UNKNOWN)
