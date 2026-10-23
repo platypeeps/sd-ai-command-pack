@@ -48,7 +48,9 @@ Writes one file per doc, then one manifest:
                                 dashboard's Documents tab lists and serves
     docs/dashboard/research.json
                                 PROJECT, the sha256 of the research.conf.py
-                                executed, and each doc's string fields: the
+                                executed, each doc's string fields, and
+                                a true or false per destination it
+                                designates (`notion`, `drive`): the
                                 dashboard reads a config it cannot read
                                 without running it from here
 
@@ -80,6 +82,7 @@ from sd_lib import GIT_TIMEOUT_SECONDS
 from sd_research_fonts import FONTS_CSS
 from sd_research_publish import (
     CONF_DIGEST,
+    DESTINATIONS,
     execute_conf,
     exit_status,
     project_label,
@@ -350,7 +353,10 @@ def write_manifest(repo, project, docs, digest):
     instead of executing research.conf.py, and a reader never sees half a file.
 
     Strings only: a field that is not a string, and a link that is not a pair
-    of strings, is left out rather than coerced.
+    of strings, is left out rather than coerced. Then one flag per
+    destination in `DESTINATIONS`: whether the document designates it, read
+    as `publish` reads it (True or a dict), so a designation a config sets
+    in a loop reaches the dashboard too (pack sd:5936).
     """
     entries = []
     for cfg in docs:
@@ -358,6 +364,8 @@ def write_manifest(repo, project, docs, digest):
         entry["links"] = [[label, href] for label, href in
                           (link for link in cfg.get("links", []) if isinstance(link, (list, tuple)) and len(link) == 2)
                           if isinstance(label, str) and isinstance(href, str)]
+        entry.update({dest.name: cfg.get(dest.name) is True or isinstance(cfg.get(dest.name), dict)
+                      for dest in DESTINATIONS})
         entries.append(entry)
     manifest = {"version": 1, "project": project, "conf_sha256": digest, "docs": entries}
     path = os.path.join(repo, "docs", "dashboard", "research.json")

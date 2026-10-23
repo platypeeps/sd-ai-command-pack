@@ -318,8 +318,10 @@ contract is that everything in it is published. Add or edit pages in
 `research.conf.py`, never by editing generated files.
 
 Each render also writes `docs/dashboard/research.json`: `PROJECT`, the sha256 of
-the `research.conf.py` it executed, and each document's string fields. The
-dashboard never executes the config, so it reads a computed one from there.
+the `research.conf.py` it executed, each document's string fields, and a
+`notion` and a `drive` flag saying whether the document designates that
+destination. The dashboard never executes the config, so it reads a computed
+one from there, designations set in a loop included.
 
 Rendering ends by writing each document's Markdown into the Obsidian vault,
 registering `docs/dashboard/` with the dashboard, and queueing a sync for every

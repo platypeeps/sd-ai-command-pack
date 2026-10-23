@@ -1640,10 +1640,25 @@ class RenderManifestTests(unittest.TestCase):
         link = [["Spec", "https://example.test/spec"]]
         self.assertEqual(json.loads(self.manifest.read_text(encoding="utf-8")), {
             "version": 1, "project": "Probe", "conf_sha256": hashlib.sha256(source).hexdigest(),
-            "docs": [{"src": "one.md", "out": "one", "title": "One", "stand": "One line.", "links": link},
-                     {"src": "two.md", "out": "two", "title": "Two", "stand": "One line.", "links": link}]})
+            "docs": [{"src": "one.md", "out": "one", "title": "One", "stand": "One line.", "links": link,
+                      "notion": False, "drive": False},
+                     {"src": "two.md", "out": "two", "title": "Two", "stand": "One line.", "links": link,
+                      "notion": False, "drive": False}]})
         self.assertEqual(sorted(p.name for p in self.manifest.parent.iterdir()),
                          ["one.html", "research.json", "two.html"])
+
+    def test_a_designation_set_in_a_loop_is_a_flag_per_destination(self) -> None:
+        """pack sd:5936: the dashboard reads designations here, never by running the config (system sd:5898).
+
+        A destination is designated as `publish` reads it: `True` or a dict,
+        an empty one too. None, False and a value it refuses are not.
+        """
+        (self.repo / "research.conf.py").write_text(
+            self.CONF + 'for _doc in DOCS:\n    _doc["notion"] = dict()\n'
+            'DOCS[1]["drive"] = True\nDOCS[0]["drive"] = "a folder"\n', encoding="utf-8")
+        self.assertEqual(self.render(), 0)
+        docs = json.loads(self.manifest.read_text(encoding="utf-8"))["docs"]
+        self.assertEqual([(doc["notion"], doc["drive"]) for doc in docs], [(True, False), (True, True)])
 
     def test_the_digest_is_of_the_bytes_executed_not_the_file_after(self) -> None:
         """A config that rewrites itself while it runs: the manifest names what ran."""
