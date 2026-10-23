@@ -36,6 +36,7 @@ from .writes import (
     refuse_base_status,
     resolve_note,
     set_item_fields,
+    stamp,
     transition,
 )
 
@@ -54,9 +55,10 @@ RECURRENCE_FIELDS = frozenset({"recurrence", "recurrence_anchor", "recurrence_le
 #: `RECURRENCE_FIELDS`.
 BRANCH_FIELDS = frozenset({"branch"})
 
-#: `parked_at`, which `edit_item` only clears (sd:3007): the nightly prune
-#: parks an untouched P4 item, and this is its way back. A writing piece
-#: parks and revives through `sd writing park`, which also moves its file.
+#: `parked_at`: the nightly prune parks an untouched P4 item and `edit_item`
+#: clears it (sd:3007); `edit_item` also parks by hand, given an aware
+#: timestamp (sd:5905). A writing piece parks and revives through
+#: `sd writing park`, which also moves its file.
 PARK_FIELDS = frozenset({"parked_at"})
 
 #: The item kinds a person may set by hand: the five the pack's `sd task add`
@@ -245,7 +247,10 @@ def _fields(connection: sqlite3.Connection, changes: dict) -> dict:
     if result.get("branch") is not None:
         raise WorkflowError("branch can only be cleared here; registering the work folder sets one")
     if result.get("parked_at") is not None:
-        raise WorkflowError("parked_at can only be cleared here; the nightly prune parks")
+        try:
+            result["parked_at"] = stamp(result["parked_at"])
+        except SdDbError as error:
+            raise WorkflowError(f"parked_at must be an aware timestamp or null: {error}") from None
     if "title" in result:
         result["title"] = _text(result["title"], "title")
     if "body" in result:
@@ -547,7 +552,7 @@ def edit_item(
         row = state["item"]
         reclassify = (isinstance(changes, dict) and "kind" in changes
                       and set(changes) <= {"kind", "repo"} and changes.get("repo") is None)
-        # An unpark alone touches no detail, so any kind takes it.
+        # A park or an unpark alone touches no detail, so any kind takes it.
         unpark = isinstance(changes, dict) and set(changes) == PARK_FIELDS
         move = isinstance(changes, dict) and set(changes) == {"repo"} and row["kind"] == "idea"
         if row["kind"] not in DETAIL_KINDS and not reclassify and not unpark and not move:
@@ -557,7 +562,9 @@ def edit_item(
                                 f"so the repository stays")
         values = _fields(connection, changes)
         if "parked_at" in values and row["piece"]:
-            raise WorkflowError("a writing piece revives through its own park control, which moves its file")
+            raise WorkflowError("a writing piece parks and revives through its own park control, "
+                                "which moves its file")
+        values = _park(item, row, values)
         if "body" in values and row["kind"] not in ("task", "followup"):
             raise WorkflowError("body text can only be edited here for task and followup items")
         if "repo" in values and row["kind"] == "work" and values["repo"] != row["repo"]:
@@ -581,7 +588,7 @@ def edit_item(
             if "kind" in changed:
                 lines.append(f"Changed kind {row['kind']} -> {changed['kind']} by {who}")
             if "parked_at" in changed:
-                lines.append(f"Unparked by {who}")
+                lines.append(f"{'Unparked' if changed['parked_at'] is None else 'Parked'} by {who}")
             fields = sorted(set(changed) - {"kind", "parked_at"})
             if fields:
                 lines.append(f"Updated {', '.join(fields)} by {who}")
@@ -589,9 +596,24 @@ def edit_item(
         return item_state(connection, item)
 
 
+def _park(item: int, row: Any, values: dict) -> dict:
+    """`values` with a park refused on a done item and dropped on a parked one (sd:5905).
+
+    A parked item keeps its first stamp: a second park is a no-op, so it
+    writes no note and the revision holds.
+    """
+    if values.get("parked_at") is None:
+        return values
+    if row["status"] == "done":
+        raise WorkflowError(f"item {item} is done; only an open item parks")
+    if row["parked_at"]:
+        return {key: value for key, value in values.items() if key != "parked_at"}
+    return values
+
+
 #: One line of the audit comment `edit_item` writes. The name is one token: a
 #: person's comment that starts "Updated priority by hand, ..." is not one.
-AUDIT_LINE = re.compile(r"(?:Updated [a-z_]+(?:, [a-z_]+)*|Changed kind \S+ -> \S+|Unparked) by \S+")
+AUDIT_LINE = re.compile(r"(?:Updated [a-z_]+(?:, [a-z_]+)*|Changed kind \S+ -> \S+|Unparked|Parked) by \S+")
 
 
 def is_audit_note(note: Any) -> bool:

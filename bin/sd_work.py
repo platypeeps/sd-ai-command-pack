@@ -275,13 +275,34 @@ def _edit_changes(args: argparse.Namespace) -> dict[str, Any]:
         changes["recurrence_anchor"] = args.recur_anchor
     if args.recur_lead is not None:
         changes["recurrence_lead"] = args.recur_lead
-    # Clear only: the nightly prune parks, and `edit_item` refuses a writing piece (sd:3007).
+    # `edit_item` refuses a writing piece and a done item, and leaves a parked
+    # item's first stamp alone (sd:3007, sd:5905).
     if args.unpark:
         changes["parked_at"] = None
+    if args.park:
+        changes["parked_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")
     if not changes and not getattr(args, "experiment", None):
         raise WorkRefusal(f"edit requires a field to change; name one, such as "
                           f"`sd task edit {args.item} --due YYYY-MM-DD`; `sd task edit --help` lists them")
     return changes
+
+
+def _edit(workflow: Any, args: argparse.Namespace, connection: Any, who: str,
+          revision: str | None) -> tuple[dict, bool]:
+    """`edit` through `edit_item`: the result, and whether the row's checkout moved."""
+    changes = _edit_changes(args)
+    if "kind" in changes:
+        _kinds(workflow)
+    moved = "repo" in changes
+    before = workflow.item_state(connection, args.item)["item"] if args.park else None
+    result = workflow.edit_item(
+        connection, args.item, changes, who=who, expected_revision=revision)
+    if before and before["parked_at"] and not args.json:
+        # `edit_item` keeps a parked item's first stamp (sd:5905).
+        print(f"already parked since {before['parked_at']}; not parked again")
+    if moved:
+        _repo_landed(args, changes["repo"], result)
+    return result, moved
 
 
 def _designate(sd_db: Any, args: argparse.Namespace, connection: Any, who: str,
@@ -1289,14 +1310,7 @@ def run(args: argparse.Namespace) -> int:
         elif action == "edit" and getattr(args, "experiment", None):
             result = _designate(sd_db, args, connection, who, revision)
         elif action == "edit":
-            changes = _edit_changes(args)
-            if "kind" in changes:
-                _kinds(workflow)
-            moved = "repo" in changes
-            result = workflow.edit_item(
-                connection, args.item, changes, who=who, expected_revision=revision)
-            if moved:
-                _repo_landed(args, changes["repo"], result)
+            result, moved = _edit(workflow, args, connection, who, revision)
         elif action == "status":
             result, following = _change_status(workflow, connection, args, who)
         elif action == "note":
@@ -1659,7 +1673,7 @@ def register(groups: Any, store: Any) -> None:
     priority.add_argument("--priority", type=int, choices=range(1, 5))
     priority.add_argument("--clear-priority", action="store_true")
     due = edit.add_mutually_exclusive_group()
-    due.add_argument("--due", help="YYYY-MM-DD; to defer the item, set a later date; there is no park verb")
+    due.add_argument("--due", help="YYYY-MM-DD; to defer the item, set a later date, or park it with --park")
     due.add_argument("--clear-due", action="store_true")
     edit.add_argument("--clear-branch", action="store_true",
                       help="clear a stale branch name; `sd work register` records one")
@@ -1678,8 +1692,13 @@ def register(groups: Any, store: Any) -> None:
                        "the same command")
     kind.choices = LibraryKinds()  # after add_argument: see `LibraryKinds`
     _recurrence_flags(edit, clear=True)
-    edit.add_argument("--unpark", action="store_true",
-                      help="bring back an item the nightly prune parked; a writing piece "
+    park = edit.add_mutually_exclusive_group()
+    park.add_argument("--park", action="store_true",
+                      help="park an open item now, as the nightly prune parks an untouched P4 "
+                           "one: it leaves Today and the backlog; a writing piece parks with "
+                           "`sd writing park`")
+    park.add_argument("--unpark", action="store_true",
+                      help="bring back a parked item; a writing piece "
                            "revives with `sd writing park --revive`")
     edit.add_argument("--experiment", action="append", metavar="yes|of:M|row:ID|new|off",
                       help="project the item into the team experiments databases: yes as an experiment, "
