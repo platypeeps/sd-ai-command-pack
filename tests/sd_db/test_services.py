@@ -199,6 +199,31 @@ class Services(unittest.TestCase):
             if row["label"] != self.label:
                 self.assertTrue(all(not value["allowed"] for value in row["capabilities"].values()))
 
+    def test_keepalive_after_a_failure_only_is_not_a_service(self):
+        # sd:5880. `{SuccessfulExit: false}` reruns a job only after a non-zero
+        # exit, so a login job that exits 0 is done, not an idle service. Every
+        # other KeepAlive key keeps the job up in some condition, as does a
+        # SuccessfulExit false beside any other key.
+        cases = (({"SuccessfulExit": False}, "startup"),
+                 ({"SuccessfulExit": False, "StartInterval": 3600}, "scheduled"),
+                 ({"SuccessfulExit": True}, "service"),
+                 ({"SuccessfulExit": False, "Crashed": True}, "service"),
+                 ({"Crashed": True}, "service"),
+                 ({"Crashed": False}, "service"),
+                 ({"NetworkState": True}, "service"),
+                 ({"PathState": {"/tmp/example": True}}, "service"),
+                 ({"OtherJobEnabled": {"com.example.other": True}}, "service"))
+        for keepalive, category in cases:
+            interval = keepalive.pop("StartInterval", None)
+            with self.subTest(keepalive=keepalive):
+                label = "com.example.prune"
+                config = {"Label": label, "ProgramArguments": [str(self.program)],
+                          "RunAtLoad": True, "KeepAlive": keepalive}
+                if interval:
+                    config["StartInterval"] = interval
+                (self.agents / (label + ".plist")).write_bytes(plistlib.dumps(config))
+                self.assertEqual(self.backend._installed("user:" + label)["category"], category)
+
     def test_inventory_inspects_services_in_parallel_in_order_and_isolates_failures(self):
         # sd:5005. Every print waits on one barrier, so a serial inventory breaks it
         # at its timeout rather than hanging. `broken` fails its read and `gone`
