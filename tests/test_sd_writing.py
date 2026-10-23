@@ -377,6 +377,23 @@ class WritingReview(unittest.TestCase):
                     self.call("adversarial", "--piece", "2026/a")
         self.recorded.assert_not_called()
 
+    def test_a_prompt_and_codex_errors_go_as_utf_8_under_any_locale(self):
+        """sd:5801: on `run_group` the prompt went in the locale's encoding, and a C locale refused it."""
+        self.stub("codex", 'cat > "$STUBS/codex.stdin"\nprintf "r\\303\\251sum\\303\\251\\n" >&2\nexit 3\n')
+        script = ("import sys\n"
+                  f"sys.path.insert(0, {str(ROOT / 'bin')!r})\n"
+                  "import sd_writing\n"
+                  "try:\n"
+                  "    sd_writing._codex('.', 'caf\\u00e9', model=None, timeout=30)\n"
+                  "except sd_writing.WorkRefusal as refusal:\n"
+                  "    print(refusal)\n")
+        ran = subprocess.run([sys.executable, "-c", script], capture_output=True, cwd=self.tmp,
+                             env={**os.environ, "PYTHONUTF8": "0", "LC_ALL": "C", "LANG": "C"})
+        # Decoded as UTF-8, then escaped by an ASCII stderr: one `\xe9` per character, not two bytes.
+        self.assertEqual(ran.stderr.decode().splitlines()[-1:], ["r\\xe9sum\\xe9"])
+        self.assertEqual((ran.returncode, ran.stdout), (0, b"codex exited 3\n"))
+        self.assertEqual((self.stubs / "codex.stdin").read_bytes(), "caf\u00e9".encode())
+
     def test_a_codex_past_its_timeout_is_stopped(self):
         self.stub("codex", "cat >/dev/null\nsleep 30\n")
         with self.assertRaisesRegex(cli.WorkRefusal, "--timeout 1"):

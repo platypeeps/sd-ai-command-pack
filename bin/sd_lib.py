@@ -3715,7 +3715,7 @@ def term_ends_group(first: Callable[[], None] | None = None) -> Iterator[None]:
 
 
 def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeout: float,
-              input_text: str | None = None,
+              input_text: str | None = None, encoding: str | None = None,
               started: Callable[[int | None], None] | None = None) -> subprocess.CompletedProcess:
     """Run `argv` as the leader of a process group, and end the whole group.
 
@@ -3729,11 +3729,11 @@ def run_group(argv: list[str], *, cwd: pathlib.Path, env: dict[str, str], timeou
     Raises `GroupTimeout` at the deadline, carrying what the group wrote, and
     what `Popen` raises when `argv[0]` cannot start. `started` hears the
     group's id once it runs, and None before the group is ended, so a caller
-    can end it early (sd:3361).
+    can end it early (sd:3361). `encoding` is the streams' text encoding; None is the locale's.
     """
     with term_ends_group():
         process = spawn_group(
-            list(argv), cwd=str(cwd), env=dict(env), text=True,
+            list(argv), cwd=str(cwd), env=dict(env), text=True, encoding=encoding,
             stdin=subprocess.DEVNULL if input_text is None else subprocess.PIPE,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         timed_out = False

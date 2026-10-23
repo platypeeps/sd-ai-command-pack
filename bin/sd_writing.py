@@ -86,7 +86,7 @@ def _codex(root: str, prompt: str, *, model: str | None, timeout: int) -> str:
                    "-o", str(out), "-"]
         try:
             ran = sd_lib.run_group(command, cwd=Path.cwd(), env=dict(os.environ), timeout=timeout,
-                                   input_text=prompt)
+                                   input_text=prompt, encoding="utf-8")
         except sd_lib.GroupTimeout:
             raise WorkRefusal(f"codex exceeded --timeout {timeout}s; rerun or raise the limit") from None
         except OSError as error:
