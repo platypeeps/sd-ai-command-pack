@@ -406,8 +406,9 @@ and a request queued from it is stale text a drain could publish before the
 pull's own render queues the current one.
 
 A render with `SD_MIRROR_DRY_RUN=1` prints each request it would queue, as
-`mirror: would queue ...`, and writes no request and no receipt. The local
-copies are still written.
+`mirror: would queue ...`, and writes no request and no receipt. It writes
+no vault copy either, and prints `obsidian: would write ...` for each
+(sd:5897). Only the render's own `docs/dashboard/` output is written.
 
 One queue carries every destination, and `bin/sd-status` reports a pending
 request as `mirror-sync-pending`. A document designated for two places is two

@@ -383,8 +383,9 @@ PUBLISH_FROM_WORKTREE = "SD_PUBLISH_FROM_WORKTREE"
 SKIP_MIRROR = "SD_SKIP_MIRROR"
 
 #: The switch that reports what a render would queue and writes no request
-#: and no receipt (sd:3515). The local copies are still written: they are
-#: what a render is for, and none of them leaves the machine.
+#: and no receipt (sd:3515). It writes no vault copy either and says what it
+#: would write (sd:5897): a dry run writes nothing outside the render's own
+#: `docs/dashboard/` output.
 MIRROR_DRY_RUN = "SD_MIRROR_DRY_RUN"
 
 
@@ -962,17 +963,13 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]],
             "",
         ])
         target = folder / (out + ".md")
-        owner = vault_owner(target)
-        if owner is None:
-            reports.append("obsidian: cannot read %s to see whose copy it is; left alone" % target)
+        refused = vault_refusal(target, checkout, takeover)
+        if refused:
+            reports.append(refused)
             continue
-        if owner and owner != checkout:
-            reports.append("obsidian: %s.md in %s belongs to %s; left alone. Rename one "
-                           "checkout, or delete that copy to move it here" % (out, folder, owner))
-            continue
-        if not owner and not takeover and (target.exists() or target.is_symlink()):
-            reports.append("obsidian: %s names no checkout, so this tool did not write it; left "
-                           "alone. Move that note, or rename the document" % target)
+        if ENVIRON.get(MIRROR_DRY_RUN):
+            # A dry run writes nothing, the vault copy included (sd:5897).
+            reports.append("obsidian: would write %s.md to %s (%s)" % (out, folder, MIRROR_DRY_RUN))
             continue
         try:
             folder.mkdir(parents=True, exist_ok=True)
@@ -986,6 +983,25 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]],
     if written:
         reports.append("obsidian: wrote %d document(s) to %s" % (written, folder))
     return reports + left_behind(repo, folder)
+
+
+def vault_refusal(target: Path, checkout: str, takeover: bool) -> str:
+    """Why the vault copy at `target` is left alone, or "" to write it.
+
+    A copy another checkout wrote is that checkout's; one that names no
+    checkout is the operator's unless `takeover` says the folder is this
+    tool's own; one that cannot be read is nobody's to overwrite.
+    """
+    owner = vault_owner(target)
+    if owner is None:
+        return "obsidian: cannot read %s to see whose copy it is; left alone" % target
+    if owner and owner != checkout:
+        return ("obsidian: %s in %s belongs to %s; left alone. Rename one checkout, or "
+                "delete that copy to move it here" % (target.name, target.parent, owner))
+    if not owner and not takeover and (target.exists() or target.is_symlink()):
+        return ("obsidian: %s names no checkout, so this tool did not write it; left alone. "
+                "Move that note, or rename the document" % target)
+    return ""
 
 
 def ignore_dashboard(repo: Path) -> str:
@@ -1463,7 +1479,7 @@ def load_record(path: Path) -> dict[str, Any]:
 
 
 def already_queued(path: Path, receipt: Path, wanted: str,
-                   identity: dict[str, Any]) -> str:
+                   identity: dict[str, Any], located: bool = True) -> str:
     """`pending` when the request at `path` already asks for exactly this,
     `delivered` when nothing is pending and the destination already holds
     it, or `""` when the request must be written.
@@ -1491,6 +1507,12 @@ def already_queued(path: Path, receipt: Path, wanted: str,
     fingerprint: a readable file naming the same identity and the same
     content is already asking for exactly this. A truncated or hand-edited
     file is not a request anyone will drain, and is rewritten.
+
+    A receipt that names no URL is not a delivery when the request names no
+    page or file either (`located` false): nothing says where a copy went,
+    so a drain that acknowledged without `--url` left the document
+    "designated, no copy yet" for good (sd:5897). It is queued again, and
+    the next drain records where it wrote.
     """
     if path.exists():
         pending = load_record(path)
@@ -1499,7 +1521,8 @@ def already_queued(path: Path, receipt: Path, wanted: str,
         if any(pending.get(field) != value for field, value in identity.items()):
             return ""
         return "pending"
-    if load_record(receipt).get("delivered") == wanted:
+    record = load_record(receipt)
+    if record.get("delivered") == wanted and (located or record.get("url")):
         return "delivered"
     return ""
 
@@ -2141,7 +2164,8 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
             what = BY_NAME[target["destination"]].what
             identity = mirror_identity(request, target, what)
             digest = mirror_fingerprint(request, target, what)
-            state = "" if force else already_queued(path, receipts() / name, digest, identity)
+            state = "" if force else already_queued(path, receipts() / name, digest, identity,
+                                                    bool(request[what]))
             if state == "pending":
                 reports.append("mirror: %s: already queued -> %s (unchanged since %s)"
                                % (out, target["target"], rev[:12]))

@@ -1214,10 +1214,12 @@ class ReceiptFixture(Fixture):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
-    def drain(self, name: str = "my-research.a.notion.json") -> str:
-        """What a drain does at its end: acknowledge the generation it read."""
+    def drain(self, name: str = "my-research.a.notion.json",
+              url: str = "https://example.test/page") -> str:
+        """What a drain does at its end: acknowledge the generation it read,
+        with the URL its write landed at (contract step 6)."""
         fingerprint = json.loads((PUBLISH.QUEUE / name).read_text())["fingerprint"]
-        return PUBLISH.mirror_delivered(name, fingerprint)[1]
+        return PUBLISH.mirror_delivered(name, fingerprint, url)[1]
 
 
 class ReceiptTests(ReceiptFixture):
@@ -1762,6 +1764,18 @@ class MirrorDryRunTests(ReceiptFixture):
         self.assertTrue(any("would queue a" in line for line in said), said)
         self.assertEqual(path.read_bytes(), before)
 
+    def test_a_dry_run_writes_no_vault_copy_and_says_what_it_would(self) -> None:
+        """sd:5897: a dry run wrote the Obsidian copies ("obsidian: wrote 2
+        document(s)"). It writes nothing and names each copy instead."""
+        self.source("first\n")
+        docs = [dict(src="10-x/a.md", out="a", title="A", obsidian={})]
+        said = PUBLISH.write_obsidian(self.repo, docs)
+        self.assertFalse((self.briefs() / "a.md").exists(), said)
+        self.assertFalse(self.briefs().exists(), "the dry run made the vault folder")
+        self.assertTrue(any(line.startswith("obsidian: would write a.md to ") and PUBLISH.MIRROR_DRY_RUN in line
+                            for line in said), said)
+        self.assertFalse(any("wrote" in line for line in said), said)
+
 
 class MirrorHoldTests(ReceiptFixture):
     """A render told to hold its mirrors queues nothing, and says why.
@@ -2003,6 +2017,27 @@ class RevertTests(ReceiptFixture):
         self.assertTrue(any("unchanged" in line for line in said), said)
         self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
 
+    def test_a_delivery_that_names_no_copy_is_queued_again(self) -> None:
+        """sd:5897: a drain that acknowledged without `--url` left a receipt
+        naming no copy, and a designation naming no page gave no other one.
+        Read as delivered, the document was never queued again and the
+        dashboard said "designated, no copy yet" for good."""
+        self.source("body\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain(url="")
+        said = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue(any("queued a" in line for line in said), said)
+        self.assertTrue((PUBLISH.QUEUE / self.NAME).is_file(), said)
+
+    def test_a_designated_page_stands_in_for_the_receipts_url(self) -> None:
+        """The designation names the copy, so the receipt need not."""
+        self.source("body\n")
+        doc = [dict(src="10-x/a.md", out="a", title="A", notion=dict(page="0" * 32))]
+        PUBLISH.enqueue(self.repo, doc)
+        self.drain(url="")
+        said = PUBLISH.enqueue(self.repo, doc)
+        self.assertTrue(any("unchanged" in line for line in said), said)
+
     def test_a_return_to_the_delivered_text_says_so(self) -> None:
         """sd:1991's second render: the stale checkout queued old text, and the
         pull's render asked for exactly what the receipt says was delivered.
@@ -2072,7 +2107,7 @@ class MutableSourceTests(ReceiptFixture):
         request = json.loads((PUBLISH.QUEUE / self.NAME).read_text())  # drain step 1
         self.source("B\n")  # edited under the queued request, with no render
         remote = self.published(request).strip()  # drain step 3
-        PUBLISH.mirror_delivered(self.NAME, request["fingerprint"])[1]  # drain step 6
+        PUBLISH.mirror_delivered(self.NAME, request["fingerprint"], "https://example.test/a")[1]  # drain step 6
         self.source("A\n")  # the edit reverted
         PUBLISH.enqueue(self.repo, self.doc())
         queued = (PUBLISH.QUEUE / self.NAME).is_file()
@@ -2930,7 +2965,7 @@ class ChannelsTests(Fixture):
         name = "my-research.b.drive.json"
         doc = [dict(src="10-x/b.md", out="b", title="B", drive=dict())]
         self.publish(doc)
-        status, _ = PUBLISH.mirror_delivered(name, self.queued()[name]["fingerprint"])
+        status, _ = PUBLISH.mirror_delivered(name, self.queued()[name]["fingerprint"], "https://example.test/b")
         self.assertEqual(status, 0)
         self.row({"notion": {}})
         self.publish(doc)

@@ -54,8 +54,8 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                 copies, register with the dashboard, queue outward mirrors
                 for the documents that changed since they were last queued
                 (SD_MIRROR_REQUEUE=1 queues every designated document;
-                SD_MIRROR_DRY_RUN=1 prints what it would queue and queues
-                nothing). From
+                SD_MIRROR_DRY_RUN=1 prints what it would queue or write
+                to the vault, and does neither). From
                 a linked worktree: docs/dashboard/ only, no vault copy and no
                 mirror, unless SD_PUBLISH_FROM_WORKTREE=1 is set; off the
                 default branch, no mirror under the same switch
