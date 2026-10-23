@@ -25,6 +25,7 @@ from sd_db.workflow import (
     capture_task,
     change_status,
     edit_item,
+    is_audit_note,
     item_state,
     resolve_item_note,
     schema_kinds,
@@ -467,7 +468,7 @@ class BranchClearing(WorkflowCase):
 
 
 class Unparking(WorkflowCase):
-    """sd:3007: `edit_item` clears `parked_at`, which the nightly prune sets, and sets none."""
+    """sd:3007: `edit_item` clears `parked_at`, which the nightly prune sets."""
 
     def parked(self, piece=None, **columns):
         item = create_item(self.db, title="Old idea", priority=4, **{"kind": "task", **columns})
@@ -498,13 +499,60 @@ class Unparking(WorkflowCase):
             edit_item(self.db, state["item"]["id"], {"parked_at": None}, who="operator")
         self.assertEqual(item_state(self.db, state["item"]["id"]), state)
 
-    def test_a_park_value_is_refused_and_an_unparked_item_is_left_alone(self):
-        state = self.parked()
-        with self.assertRaisesRegex(WorkflowError, "parked_at can only be cleared here"):
-            edit_item(self.db, state["item"]["id"], {"parked_at": "2026-10-10"}, who="operator")
-        self.assertEqual(item_state(self.db, state["item"]["id"]), state)
+    def test_an_unparked_item_is_left_alone(self):
         open_item = item_state(self.db, create_item(self.db, kind="task", title="Open"))
         self.assertEqual(edit_item(self.db, open_item["item"]["id"], {"parked_at": None}, who="operator"), open_item)
+
+
+class Parking(WorkflowCase):
+    """sd:5905: `edit_item` parks an item by hand when given an aware
+    timestamp, which the dashboard's Park control and `sd task edit --park`
+    send; the nightly prune is no longer the only parker."""
+
+    def test_a_park_is_written_in_one_shape_and_noted(self):
+        state = item_state(self.db, create_item(self.db, kind="task", title="Later"))
+        item = state["item"]["id"]
+        with self.assertRaises(StaleItem):
+            edit_item(self.db, item, {"parked_at": "2026-10-23T18:00:00Z"}, who="operator",
+                      expected_revision="0" * 64)
+        parked = edit_item(self.db, item, {"parked_at": "2026-10-23T18:00:00Z"}, who="operator",
+                           expected_revision=state["revision"])
+        self.assertEqual(parked["item"]["parked_at"], "2026-10-23T18:00:00+00:00")
+        self.assertEqual(parked["notes"][-1]["body"], "Parked by operator")
+        self.assertTrue(is_audit_note(parked["notes"][-1]))
+
+    def test_a_value_that_is_not_an_aware_timestamp_is_refused(self):
+        state = item_state(self.db, create_item(self.db, kind="task", title="Later"))
+        for value in ("2026-10-10", "2026-10-10T08:00:00", "soon", True, 1):
+            with self.subTest(value=value), self.assertRaisesRegex(WorkflowError, "parked_at"):
+                edit_item(self.db, state["item"]["id"], {"parked_at": value}, who="operator")
+        self.assertEqual(item_state(self.db, state["item"]["id"]), state)
+
+    def test_a_done_item_is_refused(self):
+        item = create_item(self.db, kind="task", title="Shipped")
+        self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (item,))
+        self.db.commit()
+        state = item_state(self.db, item)
+        with self.assertRaisesRegex(WorkflowError, "is done"):
+            edit_item(self.db, item, {"parked_at": "2026-10-23T18:00:00+00:00"}, who="operator")
+        self.assertEqual(item_state(self.db, item), state)
+
+    def test_an_already_parked_item_keeps_its_stamp_and_gets_no_note(self):
+        item = create_item(self.db, kind="task", title="Old idea", priority=4)
+        set_item_fields(self.db, item, parked_at="2026-10-09T08:10:00+00:00")
+        self.db.commit()
+        state = item_state(self.db, item)
+        self.assertEqual(edit_item(self.db, item, {"parked_at": "2026-10-23T18:00:00+00:00"},
+                                   who="operator"), state)
+
+    def test_a_writing_piece_parks_through_its_own_control(self):
+        item = create_item(self.db, kind="idea", title="Draft")
+        set_item_fields(self.db, item, piece="drafts/draft.md")
+        self.db.commit()
+        state = item_state(self.db, item)
+        with self.assertRaisesRegex(WorkflowError, "its own park control"):
+            edit_item(self.db, item, {"parked_at": "2026-10-23T18:00:00+00:00"}, who="operator")
+        self.assertEqual(item_state(self.db, item), state)
 
 class KindEditing(WorkflowCase):
     """sd:743 -- a row's kind changes through `edit_item`, attributed and noted."""

@@ -383,8 +383,9 @@ PUBLISH_FROM_WORKTREE = "SD_PUBLISH_FROM_WORKTREE"
 SKIP_MIRROR = "SD_SKIP_MIRROR"
 
 #: The switch that reports what a render would queue and writes no request
-#: and no receipt (sd:3515). The local copies are still written: they are
-#: what a render is for, and none of them leaves the machine.
+#: and no receipt (sd:3515). It writes no vault copy either and says what it
+#: would write (sd:5897): a dry run writes nothing outside the render's own
+#: `docs/dashboard/` output.
 MIRROR_DRY_RUN = "SD_MIRROR_DRY_RUN"
 
 
@@ -962,17 +963,13 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]],
             "",
         ])
         target = folder / (out + ".md")
-        owner = vault_owner(target)
-        if owner is None:
-            reports.append("obsidian: cannot read %s to see whose copy it is; left alone" % target)
+        refused = vault_refusal(target, checkout, takeover)
+        if refused:
+            reports.append(refused)
             continue
-        if owner and owner != checkout:
-            reports.append("obsidian: %s.md in %s belongs to %s; left alone. Rename one "
-                           "checkout, or delete that copy to move it here" % (out, folder, owner))
-            continue
-        if not owner and not takeover and (target.exists() or target.is_symlink()):
-            reports.append("obsidian: %s names no checkout, so this tool did not write it; left "
-                           "alone. Move that note, or rename the document" % target)
+        if ENVIRON.get(MIRROR_DRY_RUN):
+            # A dry run writes nothing, the vault copy included (sd:5897).
+            reports.append("obsidian: would write %s.md to %s (%s)" % (out, folder, MIRROR_DRY_RUN))
             continue
         try:
             folder.mkdir(parents=True, exist_ok=True)
@@ -986,6 +983,25 @@ def write_obsidian(repo: Path, docs: list[dict[str, Any]],
     if written:
         reports.append("obsidian: wrote %d document(s) to %s" % (written, folder))
     return reports + left_behind(repo, folder)
+
+
+def vault_refusal(target: Path, checkout: str, takeover: bool) -> str:
+    """Why the vault copy at `target` is left alone, or "" to write it.
+
+    A copy another checkout wrote is that checkout's; one that names no
+    checkout is the operator's unless `takeover` says the folder is this
+    tool's own; one that cannot be read is nobody's to overwrite.
+    """
+    owner = vault_owner(target)
+    if owner is None:
+        return "obsidian: cannot read %s to see whose copy it is; left alone" % target
+    if owner and owner != checkout:
+        return ("obsidian: %s in %s belongs to %s; left alone. Rename one checkout, or "
+                "delete that copy to move it here" % (target.name, target.parent, owner))
+    if not owner and not takeover and (target.exists() or target.is_symlink()):
+        return ("obsidian: %s names no checkout, so this tool did not write it; left alone. "
+                "Move that note, or rename the document" % target)
+    return ""
 
 
 def ignore_dashboard(repo: Path) -> str:
@@ -1267,6 +1283,185 @@ def source_text(path: Path) -> str:
         return ""
 
 
+#: A fence opener at any indent; its closer is the same character, at least
+#: as many times.
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+LIST_ITEM = re.compile(r"^\s*([-*+]|\d{1,9}[.)])(\s+|$)")
+RULE = re.compile(r"^\s*(=+|-+|(\*\s*){3,}|(_\s*){3,}|(-\s*){3,})\s*$")
+
+
+class BlockKind(NamedTuple):
+    """A kind of block, read on the text after a line's indent and list
+    markers, with an example the tests put at every position (sd:5889)."""
+
+    name: str
+    pattern: re.Pattern[str]
+    example: str
+
+
+#: Every block that is its own line, so nothing joins onto it. A list item
+#: is not one: its text is a paragraph that may wrap. Indented code is not
+#: read here, since it depends on the indent the other kinds strip.
+BLOCK_KINDS = (
+    BlockKind("ATX heading", re.compile(r"#{1,6}(\s|$)"), "# Heading"),
+    BlockKind("setext underline", re.compile(r"=+\s*$"), "==="),
+    BlockKind("rule, asterisks", RULE, "* * *"),
+    BlockKind("rule, underscores", RULE, "___"),
+    BlockKind("rule, hyphens", RULE, "---"),
+    BlockKind("quote", re.compile(r">"), "> quoted"),
+    BlockKind("table row", re.compile(r".*\|"), "| a | b |"),
+    BlockKind("link definition", re.compile(r"\[[^\]]+\]:"), "[ref]: https://example.test/"),
+    BlockKind("backtick fence", FENCE, "```python"),
+    BlockKind("tilde fence", FENCE, "~~~"),
+    BlockKind("HTML pre", re.compile(r"<"), "<pre>"),
+    BlockKind("HTML comment", re.compile(r"<"), "<!-- note"),
+    BlockKind("HTML processing instruction", re.compile(r"<"), "<?x"),
+    BlockKind("HTML declaration", re.compile(r"<"), "<!X"),
+    BlockKind("HTML CDATA", re.compile(r"<"), "<![CDATA["),
+    BlockKind("HTML block tag", re.compile(r"<"), "<div>"),
+    BlockKind("HTML other tag", re.compile(r"<"), "<span>"),
+)
+#: Indented code, raw until the next blank line like HTML; it cannot
+#: interrupt a paragraph.
+CODE = re.compile(r"^(    |\t)")
+#: The HTML blocks a blank line does not end, each with the text that does:
+#: CommonMark's types 1 to 5 (sd:5889).
+HTML_RUNS = (
+    (re.compile(r"<(pre|script|style|textarea)(\s|>|$)", re.I),
+     re.compile(r"</(pre|script|style|textarea)>", re.I)),
+    (re.compile(r"<!--"), re.compile(r"-->")),
+    (re.compile(r"<\?"), re.compile(r"\?>")),
+    (re.compile(r"<![A-Za-z]"), re.compile(r">")),
+    (re.compile(r"<!\[CDATA\["), re.compile(r"\]\]>")),
+)
+#: Two trailing spaces or a backslash: a line break the author asked for.
+HARD_BREAK = re.compile(r"(  |\\)\r?$")
+
+
+def front_matter_end(lines: list[str]) -> int:
+    """How many leading lines are YAML front matter, fences included; 0 for none."""
+    if lines[0].strip() != "---":
+        return 0
+    return next((i + 1 for i in range(1, len(lines)) if lines[i].strip() in ("---", "...")), 0)
+
+
+def opens(text: str, code: bool) -> tuple[re.Pattern[str] | None, bool] | None:
+    """`(closer, raw)` for the block `text` opens, or None when it opens none.
+
+    `closer` ends a fence, or an HTML block a blank line does not end, on
+    the line it is found in; it is None for such a block closed on its own
+    line. `raw` is any other HTML block, or indented code where `code`
+    allows it, which a blank line ends. A fence opens at any indent, since
+    inside a list item one sits deeper than three spaces.
+    """
+    body = text.lstrip()
+    fence = FENCE.match(text)
+    if fence:
+        mark = fence.group(1)
+        return re.compile(r"^\s*%s{%d,}\s*$" % (re.escape(mark[0]), len(mark))), False
+    for start, end in HTML_RUNS:
+        found = start.match(body)
+        if found:
+            return (None if end.search(body, found.end()) else end), False
+    if body.startswith("<") or (code and CODE.match(text)):
+        return None, True
+    return None
+
+
+def verbatim(line: str, closer: re.Pattern[str] | None, raw: bool,
+             code: bool) -> tuple[re.Pattern[str] | None, bool] | None:
+    """`(closer, raw)` after `line` when it is copied as it stands, else None.
+
+    `closer` ends the open fence or HTML block, and the line it is found
+    in is the block's last; `raw` is a block a blank line ends.
+    """
+    if closer:
+        return (None if closer.search(line) else closer), False
+    if not line.strip() or raw:
+        return None, raw and bool(line.strip())
+    return opens(line, code)
+
+
+def item_text(line: str) -> str:
+    """What follows `line`'s list markers, nested ones too; "" for no item.
+
+    Five or more spaces after a marker open indented code (sd:5889), so
+    the text keeps four of them for `opens` to read.
+    """
+    text = line
+    while (item := LIST_ITEM.match(text)) and not RULE.match(text):
+        rest = text[item.end():]
+        if len(item.group(2)) > 4 and rest:
+            return "    " + rest
+        text = rest
+    return "" if text is line else text
+
+
+def starts_block(line: str) -> bool:
+    """Whether `line` opens a block, whatever its indent: one of
+    `BLOCK_KINDS`, or a list item."""
+    body = line.lstrip()
+    return bool(LIST_ITEM.match(line)) or any(kind.pattern.match(body) for kind in BLOCK_KINDS)
+
+
+def wrap_column(line: str) -> int | None:
+    """The indent a soft-wrapped line after `line` must have to join it.
+
+    A list item's content column, or a paragraph line's own indent. None
+    when nothing may join `line`: it is a block other than a list item, or
+    it ends in a hard break, which is checked on the line as written.
+    """
+    if HARD_BREAK.search(line) or "|" in line or RULE.match(line):
+        return None
+    item = LIST_ITEM.match(line)
+    if item:
+        # The item's text is read as a line start: `- # Heading` takes
+        # no continuation (sd:5889).
+        inner = item_text(line)
+        return None if inner and starts_block(inner) else item.end()
+    return None if starts_block(line) else len(line) - len(line.lstrip())
+
+
+def soft_wraps_joined(text: str) -> str:
+    """`text` with each soft-wrapped paragraph or list item on one line.
+
+    Markdown reads a single newline inside a paragraph as a space, but a
+    Notion write keeps it as a `<br />`, so a source wrapped at 100 columns
+    arrived as broken lines (sd:5872). Fenced code, YAML front matter,
+    HTML, indented code, headings, quotes, tables, rules and definitions
+    are kept line for line, at the top level and inside a list item, as is
+    a hard break. A line joins only a paragraph or list item whose text
+    starts at the line's own indent. Where a line's kind is in doubt it is
+    kept, which costs a `<br />` and never a changed meaning.
+    """
+    lines = text.split("\n")
+    start = front_matter_end(lines)
+    out = lines[:start]
+    closer: re.Pattern[str] | None = None
+    raw = False
+    column: int | None = None
+    for line in lines[start:]:
+        kept = verbatim(line, closer, raw, column is None)
+        if kept:
+            out.append(line)
+            closer, raw = kept
+            column = None
+            continue
+        body = line.lstrip()
+        if column == len(line) - len(body) and not starts_block(line):
+            # Kept as written after its indent, so a hard break it ends in stays.
+            out[-1] = out[-1].rstrip() + " " + body
+            column = None if HARD_BREAK.search(line) else column
+            continue
+        out.append(line)
+        # A list item's text can itself open a block (sd:5889).
+        inner = item_text(line)
+        kept = opens(inner, True) if inner else None
+        closer, raw = kept or (None, False)
+        column = None if kept else wrap_column(line)
+    return "\n".join(out)
+
+
 def load_record(path: Path) -> dict[str, Any]:
     """The object at `path`, or `{}` for anything that is not one.
 
@@ -1284,7 +1479,7 @@ def load_record(path: Path) -> dict[str, Any]:
 
 
 def already_queued(path: Path, receipt: Path, wanted: str,
-                   identity: dict[str, Any]) -> str:
+                   identity: dict[str, Any], located: bool = True) -> str:
     """`pending` when the request at `path` already asks for exactly this,
     `delivered` when nothing is pending and the destination already holds
     it, or `""` when the request must be written.
@@ -1312,6 +1507,12 @@ def already_queued(path: Path, receipt: Path, wanted: str,
     fingerprint: a readable file naming the same identity and the same
     content is already asking for exactly this. A truncated or hand-edited
     file is not a request anyone will drain, and is rewritten.
+
+    A receipt that names no URL is not a delivery when the request names no
+    page or file either (`located` false): nothing says where a copy went,
+    so a drain that acknowledged without `--url` left the document
+    "designated, no copy yet" for good (sd:5897). It is queued again, and
+    the next drain records where it wrote.
     """
     if path.exists():
         pending = load_record(path)
@@ -1320,7 +1521,8 @@ def already_queued(path: Path, receipt: Path, wanted: str,
         if any(pending.get(field) != value for field, value in identity.items()):
             return ""
         return "pending"
-    if load_record(receipt).get("delivered") == wanted:
+    record = load_record(receipt)
+    if record.get("delivered") == wanted and (located or record.get("url")):
         return "delivered"
     return ""
 
@@ -1962,7 +2164,8 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
             what = BY_NAME[target["destination"]].what
             identity = mirror_identity(request, target, what)
             digest = mirror_fingerprint(request, target, what)
-            state = "" if force else already_queued(path, receipts() / name, digest, identity)
+            state = "" if force else already_queued(path, receipts() / name, digest, identity,
+                                                    bool(request[what]))
             if state == "pending":
                 reports.append("mirror: %s: already queued -> %s (unchanged since %s)"
                                % (out, target["target"], rev[:12]))
@@ -2038,8 +2241,10 @@ def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, An
         "markdown": str(vault / (out + ".md")) if vault else "",
         # What the drain mirrors, read once here. The three paths
         # above say where it came from and where the copies sit;
-        # none of them is what gets published.
-        "content": cfg["content"] if brief else source_text(repo / src) if src else "",
+        # none of them is what gets published. Joined here, once, for
+        # every destination and so for the fingerprint too (sd:5872).
+        "content": soft_wraps_joined(
+            cfg["content"] if brief else source_text(repo / src) if src else ""),
     }
     request.update(target)
     request.update(designated_item(cfg)[0])

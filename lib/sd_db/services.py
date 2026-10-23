@@ -114,7 +114,11 @@ class ServiceBackend:
             if type(installed["_disabled"]) is not bool:
                 raise WorkflowError("installed disabled setting is unsupported")
             keepalive = config.get("KeepAlive")
-            long_running = keepalive is True or (isinstance(keepalive, dict) and bool(keepalive))
+            # `{SuccessfulExit: false}` alone reruns a job only after a failed
+            # exit: a run-once job, not a service (sd:5880). Every other
+            # KeepAlive key keeps the job up while its condition holds.
+            after_failure = keepalive == {"SuccessfulExit": False} and keepalive["SuccessfulExit"] is False
+            long_running = keepalive is True or (isinstance(keepalive, dict) and bool(keepalive) and not after_failure)
             long_running = long_running or any(isinstance(config.get(key), dict) and bool(config[key]) for key in ("Sockets", "MachServices"))
             scheduled = any(config.get(key) for key in ("StartInterval", "StartCalendarInterval", "WatchPaths", "QueueDirectories"))
             installed["category"] = "service" if long_running else "scheduled" if scheduled else "startup"

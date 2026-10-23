@@ -622,6 +622,23 @@ class TaskCLI(unittest.TestCase):
             "expected_revision": state["revision"]})
         self.assertIn("--unpark", self.call("task", "edit", "--help").stdout)
 
+    def test_edit_park_parks_once_and_refuses_unpark_and_a_done_item(self):
+        """sd:5905. `--park` stamps `parked_at` now, the reverse of `--unpark`."""
+        item = json.loads(self.call("task", "add", "Not now", "--json").stdout)["item"]["id"]
+        parked = json.loads(self.call("task", "edit", item, "--park", "--json").stdout)
+        self.assertRegex(parked["item"]["parked_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$")
+        self.assertEqual(parked["notes"][-1]["body"], f"Parked by {getpass.getuser()}")
+        again = self.call("task", "edit", item, "--park").stdout
+        self.assertIn(f"already parked since {parked['item']['parked_at']}; not parked again", again)
+        self.assertEqual(json.loads(self.call("task", "show", item, "--json").stdout)["revision"],
+                         parked["revision"])
+        self.assertIn("not allowed with argument",
+                      self.call("task", "edit", item, "--park", "--unpark", code=2).stderr)
+        done = json.loads(self.call("task", "add", "Shipped", "--json").stdout)["item"]["id"]
+        self.call("task", "status", done, "done")
+        self.assertIn("is done", self.call("task", "edit", done, "--park", code=1).stderr)
+        self.assertIn("--park", self.call("task", "edit", "--help").stdout)
+
     def test_edit_moves_a_followup_and_changes_its_details(self):
         """sd:809. `edit_item` edits a followup's title, body, priority, due
         date and repository, as it does a task's. Before sd:809 it refused
@@ -968,11 +985,11 @@ class TaskCLI(unittest.TestCase):
                       self.call("task", "edit", state["item"]["id"], code=1).stderr)
 
     def test_help_says_how_to_defer_close_a_report_and_what_each_note_kind_is(self):
-        """sd:5065: no park verb exists, a report is closed elsewhere, and a note kind needs a meaning."""
+        """sd:5065: how to defer, a report is closed elsewhere, and a note kind needs a meaning."""
         def said(*verb):
             return " ".join(self.call(*verb, "--help").stdout.split()).replace("- ", "-")
 
-        self.assertIn("to defer the item, set a later date; there is no park verb", said("task", "edit"))
+        self.assertIn("to defer the item, set a later date, or park it with --park", said("task", "edit"))
         self.assertIn("`report`, a scheduled job's run, closes with `sd reports acknowledge N`",
                       said("store", "items"))
         self.assertIn("`skill-review`, a skill catalogue review the runner works", said("store", "items"))
@@ -1717,7 +1734,8 @@ class FieldEditsFold(unittest.TestCase):
     def test_the_predicate_reads_what_edit_item_writes(self):
         audit = workflow.is_audit_note
         for body in ("Updated priority by operator", "Updated due, title by dashboard",
-                     "Changed kind task -> followup by operator\nUpdated repo by operator", "Unparked by operator"):
+                     "Changed kind task -> followup by operator\nUpdated repo by operator", "Unparked by operator",
+                     "Parked by operator"):
             self.assertTrue(audit({"kind": "comment", "body": body}), body)
         for note in ({"kind": "comment", "body": "Updated priority by hand, a person wrote this"},
                      {"kind": "decision", "body": "Updated priority by operator"},

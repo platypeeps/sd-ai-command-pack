@@ -406,8 +406,9 @@ and a request queued from it is stale text a drain could publish before the
 pull's own render queues the current one.
 
 A render with `SD_MIRROR_DRY_RUN=1` prints each request it would queue, as
-`mirror: would queue ...`, and writes no request and no receipt. The local
-copies are still written.
+`mirror: would queue ...`, and writes no request and no receipt. It writes
+no vault copy either, and prints `obsidian: would write ...` for each
+(sd:5897). Only the render's own `docs/dashboard/` output is written.
 
 One queue carries every destination, and `bin/sd-status` reports a pending
 request as `mirror-sync-pending`. A document designated for two places is two
@@ -528,7 +529,10 @@ Draining is six steps per request, and the order matters:
    `source`, which may have moved on since -- a drain that reads the path
    publishes what nobody queued and acknowledges a fingerprint of something
    else. `source` and `markdown` say where the text came from and where the
-   vault copy sits.
+   vault copy sits. The render puts each soft-wrapped paragraph and list
+   item of `content` on one line, since a Notion write turns a single
+   newline into a `<br />` (sd:5872); write the lines as they stand and
+   do not re-wrap them.
 
    **The pointer line links `source_url`, verbatim.** Where it is `null` or
    absent, the pointer names the `source` path. Never compose a GitHub URL

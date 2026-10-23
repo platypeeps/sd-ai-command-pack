@@ -7000,13 +7000,12 @@ class DeclaredGapCase(unittest.TestCase):
             return saved(method, path, body)
         double._route = route
         refusal = self.refuse("default branch advanced after the readiness check", "base_moved")
-        # A reviewed branch takes the newer base by a merge, never a rebase,
-        # as WORKFLOW.md says (sd:2034).
+        # A reviewed branch takes the newer base by a merge, never a rebase
+        # (sd:2034). The policy text is pinned in test_sd_ship_skill.py, so
+        # a policy edit does not run this module's shards (sd:5836).
         said = f"{refusal}\n{refusal.workflow['next_action']}"
         self.assertIn("git merge origin/main", said)
         self.assertNotIn("rebase", said)
-        self.assertIn("take a newer default branch with `git merge origin/<base>`, never a rebase",
-                      " ".join((ROOT / "WORKFLOW.md").read_text().split()))
 
     def test_the_single_event_form_is_read(self):
         """Codex on the verification pass: `on: pull_request` returned no

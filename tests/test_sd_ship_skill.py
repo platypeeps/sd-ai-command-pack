@@ -48,6 +48,7 @@ prose around them, because those two tokens are what a rewrite has to keep.
 
 from __future__ import annotations
 
+import importlib.util
 import pathlib
 import re
 import shlex
@@ -1056,6 +1057,30 @@ class AStandingRejection(unittest.TestCase):
         reference = (REPO_ROOT / "skills/sd-ship/references/adjudication.md").read_text(encoding="utf-8")
         self.assertNotIn(self.RULE, reference, "one statement of the rule; the reference cross-references it")
         self.assertIn("before the next fix is pushed (`skills/sd-ship/SKILL.md`", reference)
+
+
+class TheMergeNotRebasePin(unittest.TestCase):
+    """sd:2034: a reviewed branch takes the newer base by a merge.
+
+    The pin lives here, not in `tests/test_sd_ship.py`: the fast path picks
+    every module that names a changed file, so a pin there ran all of that
+    module's shards for a policy edit (sd:5836).
+    """
+
+    def test_the_policy_says_merge_never_rebase(self) -> None:
+        self.assertIn("take a newer default branch with `git merge origin/<base>`, never a rebase",
+                      " ".join(WORKFLOW.read_text(encoding="utf-8").split()))
+
+    def test_a_policy_edit_selects_no_sd_ship_shard(self) -> None:
+        path = REPO_ROOT / ".github/scripts/select-tests.py"
+        spec = importlib.util.spec_from_file_location("select_tests", path)
+        assert spec is not None and spec.loader is not None
+        selector = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(selector)
+        selection, reason = selector.select(REPO_ROOT, [WORKFLOW.name])
+        self.assertIsNotNone(selection, reason)
+        self.assertIn("tests.test_sd_ship_skill", selection)
+        self.assertNotIn("tests.test_sd_ship", selection)
 
 
 if __name__ == "__main__":

@@ -329,13 +329,15 @@ class ParkedAndArchivedReaders(unittest.TestCase):
 #: well, so the bound now separates the pattern from a flag that is gone
 #: rather than from a live one -- which is why the control below keeps
 #: asserting it: an unbounded `--park` would match the old spelling wherever
-#: history still writes it, and report the wrong flag as uncut.
+#: history still writes it, and report the wrong flag as uncut. The pattern
+#: also needs `sd-handoff` or `Lane B` on the line: `sd task edit --park`
+#: (sd:5905) is a different, live flag that parks a work item by hand.
 PROSE_SYMBOLS = (
     ("record_load", r"record_load"),
     ("carrier_branches", r"carrier_branches"),
     ("--stash-ref", r"--stash-ref"),
     ("--push", r"--push"),
-    ("--park", r"--park([^a-z]|$)"),
+    ("--park", r"(sd-handoff|Lane B).*--park([^a-z]|$)|--park([^a-z]|$).*(sd-handoff|Lane B)"),
     ("argument-vocabulary", r"argument-vocabulary"),
     ("Standing rule", r"[Ss]tanding rule"),
     ("five gates", r"five gates"),
@@ -406,9 +408,11 @@ class ProseSymbolsAndFlags(unittest.TestCase):
         nothing. `--parked` is itself cut now, but `CHANGELOG.md` and the
         archived items still write it, so the bound is still load-bearing."""
         pattern = dict(PROSE_SYMBOLS)["--park"]
-        self.assertIsNotNone(re.search(pattern, "the design has `--park`"))
+        self.assertIsNotNone(re.search(pattern, "Lane B has `--park`"))
         self.assertIsNotNone(re.search(pattern, "sd-handoff --park"))
-        self.assertIsNone(re.search(pattern, "sd-status --parked"))
+        self.assertIsNotNone(re.search(pattern, "--park, as sd-handoff spells it"))
+        self.assertIsNone(re.search(pattern, "sd-handoff --parked"))
+        self.assertIsNone(re.search(pattern, "sd task edit ID --park"))
 
     def test_a_held_symbol_stays_in_the_files_that_hold_it(self) -> None:
         for symbol, files in HELD_SYMBOLS.items():

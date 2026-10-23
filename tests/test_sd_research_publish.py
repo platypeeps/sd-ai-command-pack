@@ -1214,10 +1214,12 @@ class ReceiptFixture(Fixture):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
-    def drain(self, name: str = "my-research.a.notion.json") -> str:
-        """What a drain does at its end: acknowledge the generation it read."""
+    def drain(self, name: str = "my-research.a.notion.json",
+              url: str = "https://example.test/page") -> str:
+        """What a drain does at its end: acknowledge the generation it read,
+        with the URL its write landed at (contract step 6)."""
         fingerprint = json.loads((PUBLISH.QUEUE / name).read_text())["fingerprint"]
-        return PUBLISH.mirror_delivered(name, fingerprint)[1]
+        return PUBLISH.mirror_delivered(name, fingerprint, url)[1]
 
 
 class ReceiptTests(ReceiptFixture):
@@ -1762,6 +1764,18 @@ class MirrorDryRunTests(ReceiptFixture):
         self.assertTrue(any("would queue a" in line for line in said), said)
         self.assertEqual(path.read_bytes(), before)
 
+    def test_a_dry_run_writes_no_vault_copy_and_says_what_it_would(self) -> None:
+        """sd:5897: a dry run wrote the Obsidian copies ("obsidian: wrote 2
+        document(s)"). It writes nothing and names each copy instead."""
+        self.source("first\n")
+        docs = [dict(src="10-x/a.md", out="a", title="A", obsidian={})]
+        said = PUBLISH.write_obsidian(self.repo, docs)
+        self.assertFalse((self.briefs() / "a.md").exists(), said)
+        self.assertFalse(self.briefs().exists(), "the dry run made the vault folder")
+        self.assertTrue(any(line.startswith("obsidian: would write a.md to ") and PUBLISH.MIRROR_DRY_RUN in line
+                            for line in said), said)
+        self.assertFalse(any("wrote" in line for line in said), said)
+
 
 class MirrorHoldTests(ReceiptFixture):
     """A render told to hold its mirrors queues nothing, and says why.
@@ -2003,6 +2017,27 @@ class RevertTests(ReceiptFixture):
         self.assertTrue(any("unchanged" in line for line in said), said)
         self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")), [])
 
+    def test_a_delivery_that_names_no_copy_is_queued_again(self) -> None:
+        """sd:5897: a drain that acknowledged without `--url` left a receipt
+        naming no copy, and a designation naming no page gave no other one.
+        Read as delivered, the document was never queued again and the
+        dashboard said "designated, no copy yet" for good."""
+        self.source("body\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain(url="")
+        said = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue(any("queued a" in line for line in said), said)
+        self.assertTrue((PUBLISH.QUEUE / self.NAME).is_file(), said)
+
+    def test_a_designated_page_stands_in_for_the_receipts_url(self) -> None:
+        """The designation names the copy, so the receipt need not."""
+        self.source("body\n")
+        doc = [dict(src="10-x/a.md", out="a", title="A", notion=dict(page="0" * 32))]
+        PUBLISH.enqueue(self.repo, doc)
+        self.drain(url="")
+        said = PUBLISH.enqueue(self.repo, doc)
+        self.assertTrue(any("unchanged" in line for line in said), said)
+
     def test_a_return_to_the_delivered_text_says_so(self) -> None:
         """sd:1991's second render: the stale checkout queued old text, and the
         pull's render asked for exactly what the receipt says was delivered.
@@ -2072,7 +2107,7 @@ class MutableSourceTests(ReceiptFixture):
         request = json.loads((PUBLISH.QUEUE / self.NAME).read_text())  # drain step 1
         self.source("B\n")  # edited under the queued request, with no render
         remote = self.published(request).strip()  # drain step 3
-        PUBLISH.mirror_delivered(self.NAME, request["fingerprint"])[1]  # drain step 6
+        PUBLISH.mirror_delivered(self.NAME, request["fingerprint"], "https://example.test/a")[1]  # drain step 6
         self.source("A\n")  # the edit reverted
         PUBLISH.enqueue(self.repo, self.doc())
         queued = (PUBLISH.QUEUE / self.NAME).is_file()
@@ -2095,6 +2130,143 @@ class MutableSourceTests(ReceiptFixture):
         self.assertNotEqual(
             PUBLISH.mirror_fingerprint(dict(request, content="B\n"), targets[0], what),
             request["fingerprint"], "the fingerprint ignores the content")
+
+
+class SoftWrapTests(ReceiptFixture):
+    """sd:5872: the request's `content` holds each paragraph on one line.
+
+    A Notion write keeps a single newline as a `<br />`, so a source
+    hard-wrapped at 100 columns arrived as broken lines (aaif-sources,
+    2026-10-23). Markdown reads that newline as a space, so joining the
+    lines changes nothing a Markdown reader sees.
+    """
+
+    NAME = "my-research.a.notion.json"
+
+    def joined(self, text: str) -> str:
+        return PUBLISH.soft_wraps_joined(text)
+
+    def test_the_queued_content_has_its_paragraphs_joined(self) -> None:
+        self.source("# A\n\nOne line\nwraps here\nand here.\n\nNext paragraph.\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        request = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertEqual(request["content"],
+                         "# A\n\nOne line wraps here and here.\n\nNext paragraph.\n")
+
+    def test_a_wrapped_list_item_stays_one_item(self) -> None:
+        self.assertEqual(self.joined("- one\n  wraps\n- two\n  1. nested\n     too\n"),
+                         "- one wraps\n- two\n  1. nested too\n")
+
+    def test_block_structure_is_left_as_it_is(self) -> None:
+        text = ("---\ntitle: x\ndate: y\n---\n\n"
+                "## Heading\nUnder it\n\n"
+                "Setext\n------\n\n"
+                "> quoted\n> lines\n\n"
+                "| a | b |\n| --- | --- |\n| 1 | 2 |\n\n"
+                "[a]: https://example.test/a\n[b]: https://example.test/b\n\n"
+                "<details>\n<summary>s</summary>\nraw\n</details>\n\n"
+                "    indented\n    code\n\n"
+                "Text\n***\n")
+        self.assertEqual(self.joined(text), text)
+
+    def test_fenced_code_is_left_as_it_is(self) -> None:
+        text = "Prose\n````sh\necho a\n```\necho b\n````\nafter\nmore\n~~~\nx\ny\n~~~\n"
+        self.assertEqual(self.joined(text),
+                         "Prose\n````sh\necho a\n```\necho b\n````\nafter more\n~~~\nx\ny\n~~~\n")
+        self.assertEqual(self.joined("```\nnever\nclosed\n"), "```\nnever\nclosed\n")
+
+    def test_an_explicit_hard_break_is_kept(self) -> None:
+        self.assertEqual(self.joined("two spaces  \nnext\nbackslash\\\nlast\n"),
+                         "two spaces  \nnext backslash\\\nlast\n")
+
+    def test_a_paragraph_ending_the_file_without_a_newline(self) -> None:
+        self.assertEqual(self.joined("a\nb"), "a b")
+        self.assertEqual(self.joined(""), "")
+
+    #: (case, before, after): every kind of line the join must decide on, at
+    #: the top level and nested under a list item. `None` means unchanged.
+    #: The lead's review of 306c7f537 found the nested fence and the hard
+    #: break on a continuation line; the rest are the same class.
+    CASES = (
+        ("paragraph", "a\nb\n", "a b\n"),
+        ("backtick fence", "a\n```\nx\ny\n```\nb\nc\n", "a\n```\nx\ny\n```\nb c\n"),
+        ("tilde fence", "a\n~~~sh\nx\ny\n~~~\n", None),
+        ("fence at indent 2", "a\n  ```\n  x\n  y\n  ```\n", None),
+        ("indented code", "a\n\n    x\n    y\n", None),
+        ("heading", "a\n# h\nb\n", None),
+        ("quote", "a\n> q\n> r\n", None),
+        ("table", "a | b\n--- | ---\n1 | 2\n", None),
+        ("rule", "a\n***\nb\n", None),
+        ("setext underline", "a\nb\n---\n", "a b\n---\n"),
+        ("html", "<div>\na\nb\n</div>\n", None),
+        ("link definitions", "[a]: https://example.test/a\n[b]: https://example.test/b\n", None),
+        ("front matter", "---\nk: v\nl: w\n---\na\nb\n", "---\nk: v\nl: w\n---\na b\n"),
+        ("hard break, spaces", "a  \nb\n", None),
+        ("hard break, spaces, continuation", "a\nb  \nc\n", "a b  \nc\n"),
+        ("hard break, backslash, continuation", "a\nb\\\nc\n", "a b\\\nc\n"),
+        ("deeper indent", "a\n  b\n", None),
+        ("list items", "- a\n  b\n- c\n", "- a b\n- c\n"),
+        ("lazy continuation", "- a\nb\n", None),
+        ("nested: fence at indent 4", "- item\n    ```python\n    x = 1\n    y = 2\n    ```\n", None),
+        ("nested: fence at indent 2", "- item\n  ```\n  x\n  y\n  ```\n", None),
+        ("nested: tilde fence", "- item\n  ~~~\n  x\n  ~~~\n", None),
+        ("nested: indented code", "- item\n\n      x\n      y\n", None),
+        ("nested: heading", "- item\n  # h\n", None),
+        ("nested: heading at indent 4", "- item\n    # h\n", None),
+        ("nested: quote", "- item\n  > q\n  > r\n", None),
+        ("nested: table", "- item\n  | a |\n  | - |\n", None),
+        ("nested: rule", "- item\n  ***\n", None),
+        ("nested: html", "- item\n  <div>\n  x\n  y\n", None),
+        ("nested: link definitions", "- item\n  [a]: https://example.test/a\n  [b]: https://example.test/b\n", None),
+        ("nested: hard break, spaces", "- a\n  b  \n  c\n", "- a b  \n  c\n"),
+        ("nested: hard break, backslash", "- a\\\n  b\n", None),
+        ("nested: paragraph after a blank", "- a\n\n  b\n  c\n", "- a\n\n  b c\n"),
+        ("nested: list item", "- a\n  - b\n    c\n", "- a\n  - b c\n"),
+        ("nested: ordered item", "- a\n  1. b\n     c\n", "- a\n  1. b c\n"),
+        # sd:5889: a block that opens on the list marker's own line, and an
+        # HTML block that a blank line does not end.
+        ("item opening a fence", "- ```python\n  x = 1\n  y = 2\n  ```\n", None),
+        ("ordered item opening a fence", "1. ~~~\n   x\n   y\n   ~~~\n", None),
+        ("item opening html", "- <div>\n  x\n  y\n", None),
+        ("item opening indented code", "-     a\n      b\n", None),
+        ("item opening pre", "- <pre>\n\n  x\n  y\n  </pre>\n", None),
+        ("nested: item opening a fence", "- a\n  - ```\n    x\n    y\n    ```\n", None),
+        ("nested: ordered item opening html", "- a\n  1. <div>\n     x\n     y\n", None),
+        ("nested: item opening indented code", "- a\n  -     b\n        c\n", None),
+        ("pre", "<pre>\n\na\nb\n</pre>\nc\nd\n", "<pre>\n\na\nb\n</pre>\nc d\n"),
+        ("script", "<script>\n\na\nb\n</script>\n", None),
+        ("style, upper case", '<STYLE type="x">\n\na\nb\n</style>\n', None),
+        ("textarea", "<textarea>\n\na\nb\n</textarea>\n", None),
+        ("html comment", "<!--\n\na\nb\n-->\nc\nd\n", "<!--\n\na\nb\n-->\nc d\n"),
+        ("one-line html comment", "<!-- x -->\na\nb\n", "<!-- x -->\na b\n"),
+        ("processing instruction", "<?x\n\na\nb\n?>\n", None),
+        ("declaration", "<!X\n\na\nb\n>\n", None),
+        ("cdata", "<![CDATA[\n\na\nb\n]]>\n", None),
+        ("nested: pre", "- a\n  <pre>\n\n  x\n  y\n  </pre>\n", None),
+        ("nested: html comment", "- a\n  <!--\n\n  x\n  y\n  -->\n", None),
+    )
+
+    def test_each_kind_of_line_at_the_top_and_nested(self) -> None:
+        for case, before, after in self.CASES:
+            with self.subTest(case=case):
+                self.assertEqual(self.joined(before), before if after is None else after)
+
+    #: Where a block can start, with the indent its item's text sits at.
+    POSITIONS = (("line start", "", ""), ("after '- '", "- ", "  "),
+                 ("after '1. '", "1. ", "   "), ("nested after '  - '", "  - ", "    "))
+
+    def test_no_block_kind_takes_a_continuation_at_any_position(self) -> None:
+        """Generated from the module's own `BLOCK_KINDS`, so a kind added there
+        is tested at every position. Round 3 of the lead's review found
+        `- # Heading` taking its item's next line (sd:5889)."""
+        kinds = [(kind.name, kind.example) for kind in PUBLISH.BLOCK_KINDS]
+        for kind in PUBLISH.BLOCK_KINDS:
+            self.assertTrue(kind.pattern.match(kind.example), kind.name)
+        for name, example in kinds + [("indented code", "    code")]:
+            for where, marker, indent in self.POSITIONS:
+                text = f"{marker}{example}\n{indent}paragraph\n{indent}wraps\n"
+                with self.subTest(kind=name, where=where):
+                    self.assertEqual(self.joined(text).split("\n")[0], marker + example)
 
 
 class SourceUrlTests(Fixture):
@@ -2793,7 +2965,7 @@ class ChannelsTests(Fixture):
         name = "my-research.b.drive.json"
         doc = [dict(src="10-x/b.md", out="b", title="B", drive=dict())]
         self.publish(doc)
-        status, _ = PUBLISH.mirror_delivered(name, self.queued()[name]["fingerprint"])
+        status, _ = PUBLISH.mirror_delivered(name, self.queued()[name]["fingerprint"], "https://example.test/b")
         self.assertEqual(status, 0)
         self.row({"notion": {}})
         self.publish(doc)
