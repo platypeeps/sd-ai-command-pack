@@ -361,7 +361,7 @@ Four roles share the work:
 
 - **The lead plans and lands.** One lead session per machine plans, starts builders, runs the merge lane and records state in `sd task note`.
 - **A builder writes code in its own worktree.** It runs only the suites its change touches, never `make check`,
-  and ends with commits, a pull-request body file and a report. The lead runs the one full gate before it enqueues.
+  and ends with commits, a pull-request body file and a report. The lane's prepare runs the one full gate (system sd:5800).
 - **A reader is read-only and unlimited.** Investigation, review, planning and audits fan out across readers; a reader needs no worktree.
 - **An integrator is a builder that merges several builders' work** on one branch, so the lane lands one pull request, not several that conflict.
 
@@ -387,11 +387,13 @@ Workers:
 
 Gates and reviews:
 
-- **Shift lane failures left: review and gate before enqueue (sd:5617).** 17 of 40 prepares on 2026-10-20 and 21 were redone:
+- **Shift lane failures left: review and test before enqueue (sd:5617).** 17 of 40 prepares on 2026-10-20 and 21 were redone:
   10 review blocks, 3 gate failures after review and 3 conflicts with main, all visible before enqueue.
   The builder runs one read-only `codex exec` review of its branch, fixes the blocking findings, then merges `origin/main`
-  (the `sd-slice-builder` flow, steps 6 and 7). After its report, the lead runs `sd gate check --base main` in its worktree
-  and enqueues only a pass, which prepare reuses at the same head. A failure goes back to the builder, not into the lane.
+  (the `sd-slice-builder` flow, steps 6 and 7). After its report, the lead runs the tests the change touches
+  (`make check CHANGED=<paths>`, or a repo's `make test SUITE=<name>`) and enqueues on a pass; the lane's prepare gate is
+  the one full run (system sd:5800). A pre-enqueue pass is reused only when main has not moved, so it doubled gate load;
+  3 of the 17 redone prepares were gate failures. A failure goes back to the builder, not into the lane.
 
 - **Iterate on the fast path; gate once before the push.** `make check CHANGED="<paths>"` runs the tests those paths need.
   Only the full gate counts as evidence.

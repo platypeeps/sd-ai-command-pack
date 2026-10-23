@@ -184,11 +184,54 @@ class SummaryHeadingTests(unittest.TestCase):
         self.assertEqual(sd_ship_body.referenced_ids("Refs: <!-- sd:2 --> sd:3\nRefs: sd:4 <!-- sd:5\n"), {3, 4})
 
 
+class LineLengthTests(unittest.TestCase):
+    """sd:5793: every commit and body line stays at 72, since some repositories lint it."""
+
+    def refused(self, title: str = "t", body: str = "", commits=()) -> str:
+        with self.assertRaises(ship.Refusal) as caught:
+            sd_ship_body.refuse_long_lines(title, body, commits)
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "line_too_long")
+        return str(caught.exception)
+
+    def test_the_limits_count_githubs_squash_suffix(self) -> None:
+        self.assertEqual((sd_ship_body.LINE_LIMIT, sd_ship_body.TITLE_LIMIT), (72, 63))
+        sd_ship_body.refuse_long_lines("x" * 63, "y" * 72 + "\n", [("a" * 40, "z" * 72 + "\n\n" + "w" * 72)])
+        self.assertIn("the title is 64 characters (limit 63)", self.refused("x" * 64))
+
+    def test_each_long_line_is_named_with_its_place_length_and_limit(self) -> None:
+        body = "## Summary\n\n" + "b" * 73 + "\nshort\n" + "c" * 80 + "\r\n"
+        commits = [("1" * 40, "s" * 74 + "\n\nfine\n" + "d" * 90 + "\n"), ("2" * 40, "ok\n")]
+        message = self.refused("t" * 70, body, commits)
+        self.assertIn("the title is 70 characters (limit 63); body line 3 is 73 characters (limit 72); "
+                      "body line 5 is 80 characters (limit 72); commit 111111111111 line 1 is 74 characters "
+                      "(limit 72); commit 111111111111 line 4 is 90 characters (limit 72)", message)
+        self.assertNotIn("222222222222", message)
+
+    def test_only_a_fenced_line_or_one_bare_url_is_exempt(self) -> None:
+        url = "https://example.test/" + "p" * 80
+        long = "x" * 73
+        self.assertEqual(sd_ship_body.long_lines(f"```text\n{long}\n```\n{url}\n~~~\n{long}\n"), [])
+        for line in (f" {url}", f"See {url}", f"<{url}>", f"- {url}", f"<!-- {long} -->", f"    {long}",
+                     f"`{long}`", "example.test/" + "p" * 70):
+            with self.subTest(line=line):
+                self.assertEqual(sd_ship_body.long_lines(f"<!--\n{line}\n-->\n"), [(2, len(line))])
+
+    def test_the_lines_sd_ship_writes_itself_fit(self) -> None:
+        """`Work:` in the body; `Item:`, `Delivers:`, `Reviewed-base:` in the squash; GitHub's ids are SHA-1."""
+        written = sd_ship_body.published("Words.", 9_999_999) + "".join(
+            f"{key} sd:9999999\n" for key in sd_lib.OWNED_TRAILERS) + f"{sd_lib.REVIEWED_BASE_TRAILER} {'f' * 40}\n"
+        self.assertEqual(sd_ship_body.long_lines(written), [])
+
+
 class TemplateTests(unittest.TestCase):
     def test_the_template_writes_no_owned_trailer_outside_a_comment(self) -> None:
         text = re.sub(r"<!--.*?-->", "", TEMPLATE.read_text(encoding="utf-8"), flags=re.DOTALL)
         self.assertEqual([], [line.text for line in sd_ship_body.owned_lines(text)])
         self.assertIn("Refs: sd:<other>", text)
+
+    def test_a_body_from_the_template_passes_the_enqueue_line_check(self) -> None:
+        """sd:5793: an HTML comment is no exemption, and the squash carries the body's comments."""
+        self.assertEqual(sd_ship_body.long_lines(TEMPLATE.read_text(encoding="utf-8")), [])
 
 
 class PrepareTests(unittest.TestCase):
