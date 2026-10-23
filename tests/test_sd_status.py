@@ -3022,6 +3022,26 @@ class ViewsTests(InventoryFixture):
         self.assertIn("\n  Landing now (0)\n", text)
         self.assertNotIn("Free in ~/repos/example.test/lib", text)
 
+    def test_an_undated_item_in_progress_shows_in_the_work_table(self) -> None:
+        """pack sd:5933: no other table lists an item in progress with no due date."""
+        import sd_db
+
+        key, made = self.fill()
+        connection = sd_db.connect(home=self.home)
+        try:
+            with connection:
+                for repo in (key, "~/repos/example.test/lib"):
+                    connection.execute("UPDATE item SET status = 'in_progress' WHERE id = ?", (made[repo],))
+        finally:
+            connection.close()
+        section = status.views_section(self.repo, {"HOME": str(self.home)})
+        stream = io.StringIO()
+        status._render_views(section, stream.write, width=100)
+        text = stream.getvalue()
+        self.assertIn("\n  Work (1)\n", text)
+        self.assertRegex(text, rf"\n  #{made[key]} +\S+ +in_progress +- +- +Free in ")
+        self.assertNotIn(f"#{made['~/repos/example.test/lib']} ", text)
+
     def test_a_companion_the_setting_row_lists_joins_the_views_labelled(self) -> None:
         """The system repository lists the pack too: one `sd.status_companions` row, no path in the code."""
         import sd_db
@@ -4486,9 +4506,10 @@ class ReportSectionTests(InventoryFixture):
 
     def filled(self) -> dict[str, Any]:
         """A row in every section the inventory does not feed, for `report(shown=...)`."""
-        found = {"summary": {"landing": 0, "delivered": 0, "planned_this_week": 0, "blocked": 0, "unscheduled": 0},
+        found = {"summary": {"landing": 0, "delivered": 0, "planned_this_week": 0, "blocked": 0, "unscheduled": 0,
+                             "work": 0},
                  "landing": {"entries": [], "gate": None}, "delivered": [], "planned": [], "blocked": [],
-                 "unscheduled": []}
+                 "unscheduled": [], "work": []}
         url = "https://github.com/example/widget/pull/2"
         return {
             "views": {"available": True, "reason": "", "repos": [str(self.repo)], "companions_error": "",

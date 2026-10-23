@@ -154,7 +154,7 @@ Work across the shared database (2)
   ----  ---------
   app   this repo
   lib   companion
-  2 landing · 1 delivered · 1 planned this week · 1 blocked · 8 unscheduled
+  2 landing · 1 delivered · 1 planned this week · 1 blocked · 8 unscheduled · 1 work
 
   Landing now (2)
   ID   Repo  State    Position  Title             When
@@ -187,6 +187,11 @@ Work across the shared database (2)
   #6  lib   planning  P1        Owed work number 4  5 d ago
   #9  lib   planning  P1        Owed work number 7  5 d ago
   … 3 more
+
+  Work (1)
+  ID   Repo  State        Due              Priority  Title             When
+  ---  ----  -----------  ---------------  --------  ----------------  -------
+  #15  app   in_progress  2026-09-01 late  -         Rotate the token  3 h ago
 """
 
 

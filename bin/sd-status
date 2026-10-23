@@ -1417,7 +1417,8 @@ def _item_statuses(connection: Any, items: list[Any]) -> dict[Any, str]:
 
 
 #: The sections `sd today` shows that `sd-status` shows for its repository, in `sd_db.today.ORDER` (sd:5098).
-VIEW_KEYS = ("landing", "delivered", "planned", "blocked", "unscheduled")
+#: `work` is the one table that lists an item in progress with no due date (pack sd:5933).
+VIEW_KEYS = ("landing", "delivered", "planned", "blocked", "unscheduled", "work")
 
 
 def companions(repo: str, value: str | None) -> list[str]:

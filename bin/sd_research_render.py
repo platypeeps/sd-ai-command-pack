@@ -48,7 +48,9 @@ Writes one file per doc, then one manifest:
                                 dashboard's Documents tab lists and serves
     docs/dashboard/research.json
                                 PROJECT, the sha256 of the research.conf.py
-                                executed, and each doc's string fields: the
+                                executed, each doc's string fields, and
+                                a true or false per destination it
+                                designates (`notion`, `drive`): the
                                 dashboard reads a config it cannot read
                                 without running it from here
 
@@ -80,6 +82,7 @@ from sd_lib import GIT_TIMEOUT_SECONDS
 from sd_research_fonts import FONTS_CSS
 from sd_research_publish import (
     CONF_DIGEST,
+    DESTINATIONS,
     execute_conf,
     exit_status,
     project_label,
@@ -130,6 +133,92 @@ def drop_sections(md, titles):
     return md
 
 
+#: The class an embedded Archify diagram's rules are scoped to (pack sd:5918).
+ARCHIFY = "archify-diagram"
+ARCHIFY_SVG_RE = re.compile(r"<svg\b[^>]*archify-diagram-title[^>]*>.*?</svg>", re.S)
+#: The page's theme when the reader picked none: "system", or no theme.js.
+PAGE_UNPICKED = ':root:not([data-theme="dark"]):not([data-theme="light"])'
+
+
+def css_blocks(css):
+    """Each top-level `prelude { body }` of `css`, braces matched."""
+    at = 0
+    while (start := css.find("{", at)) >= 0:
+        depth, close = 1, start + 1
+        while depth and close < len(css):
+            depth += {"{": 1, "}": -1}.get(css[close], 0)
+            close += 1
+        yield css[at:start].strip(), css[start + 1:close - 1]
+        at = close
+
+
+def scope_selector(prelude, scope):
+    """`prelude` under `scope`, or None for a rule meant for the host page (`:root`, `[data-…]`)."""
+    parts, depth, last = [], 0, 0
+    for index, char in enumerate(prelude + ","):
+        depth += {"(": 1, "[": 1, ")": -1, "]": -1}.get(char, 0)
+        if char == "," and not depth:
+            parts.append(prelude[last:index].strip())
+            last = index + 1
+    scoped = []
+    for part in parts:
+        if part in (":root", "svg"):
+            scoped.append(scope)
+        elif re.match(r"svg(?![\w-])", part):
+            scoped.append(scope + part[3:])
+        elif part.startswith((":root", "[data-")):
+            return None
+        else:
+            scoped.append(scope + " " + part)
+    return ", ".join(dict.fromkeys(scoped))  # `:root, svg` is the one element
+
+
+def scope_rules(css, scope):
+    """Archify's rules, every selector under `scope` and each theme following the page's."""
+    rules = []
+    for prelude, body in css_blocks(css):
+        if prelude.startswith(("@keyframes", "@font-face")):
+            rules.append("%s {%s}" % (prelude, body))
+            continue
+        if prelude.startswith("@media"):
+            light = prelude.startswith("@media (prefers-color-scheme: light)")
+            inner = scope_rules(body, "%s %s" % (PAGE_UNPICKED, scope) if light else scope)
+            if inner:
+                rules.append("%s {%s}" % (prelude, inner))
+            continue
+        theme = re.fullmatch(r'svg\[data-theme="(\w+)"\]', prelude)
+        selector = '[data-theme="%s"] %s' % (theme.group(1), scope) if theme else scope_selector(prelude, scope)
+        if selector:
+            rules.append("%s {%s}" % (selector, body))
+    return "\n".join(rules)
+
+
+def scope_archify(text):
+    """Scope each Archify SVG export in `text` to its own element (pack sd:5918).
+
+    Archify's export styles `:root`, `svg` and `[data-theme]` for the whole
+    page, so a pasted one would restyle the research page. Its rules move
+    under `.archify-diagram`, its light and dark sets follow the page's theme
+    control, and its trailing whitespace and blank lines go: its `@keyframes`
+    lines end in a space. An SVG that carries the class already is left alone.
+    """
+    def scope_one(match):
+        svg = match.group(0)
+        tag = svg[:svg.index(">") + 1]
+        styled = re.search(r"<style>(.*?)</style>", svg, re.S)
+        if re.search(r'\sclass="[^"]*\b%s\b' % ARCHIFY, tag) or not styled:
+            return svg
+        selector = "." + ARCHIFY
+        css = scope_rules(styled.group(1).replace("&gt;", ">"), selector)
+        css += "\n%s {max-width:100%%;height:auto;display:block;margin:0 auto}" % selector
+        svg = svg[:styled.start()] + "<style>" + css.replace(">", "&gt;") + "</style>" + svg[styled.end():]
+        svg = svg.replace("<svg ", '<svg class="%s" ' % ARCHIFY, 1)
+        svg = re.sub(r'\s(?:tabindex|data-theme)="[^"]*"|\sstyle=""', "", svg)
+        return "\n".join(line.rstrip() for line in svg.splitlines() if line.strip())
+
+    return ARCHIFY_SVG_RE.sub(scope_one, text)
+
+
 def doc_version(repo, src):
     """Created date, version, updated date — from git history of the file.
     v1.0 is the first commit. Falls back to mtime where there is no git."""
@@ -157,7 +246,7 @@ def build_one(repo, cfg, project):
         body_md = raw.split("\n---\n", 1)[1]
     else:
         body_md = re.sub(r"\A\s*#\s[^\n]*\n", "", raw)
-    body_md = drop_sections(loosen_lists(body_md), cfg.get("skip", []))
+    body_md = drop_sections(loosen_lists(scope_archify(body_md)), cfg.get("skip", []))
 
     mdx = markdown.Markdown(extensions=["tables", "fenced_code", "toc", "sane_lists", "attr_list"])
     body = mdx.convert(body_md)
@@ -264,7 +353,10 @@ def write_manifest(repo, project, docs, digest):
     instead of executing research.conf.py, and a reader never sees half a file.
 
     Strings only: a field that is not a string, and a link that is not a pair
-    of strings, is left out rather than coerced.
+    of strings, is left out rather than coerced. Then one flag per
+    destination in `DESTINATIONS`: whether the document designates it, read
+    as `publish` reads it (True or a dict), so a designation a config sets
+    in a loop reaches the dashboard too (pack sd:5936).
     """
     entries = []
     for cfg in docs:
@@ -272,6 +364,8 @@ def write_manifest(repo, project, docs, digest):
         entry["links"] = [[label, href] for label, href in
                           (link for link in cfg.get("links", []) if isinstance(link, (list, tuple)) and len(link) == 2)
                           if isinstance(label, str) and isinstance(href, str)]
+        entry.update({dest.name: cfg.get(dest.name) is True or isinstance(cfg.get(dest.name), dict)
+                      for dest in DESTINATIONS})
         entries.append(entry)
     manifest = {"version": 1, "project": project, "conf_sha256": digest, "docs": entries}
     path = os.path.join(repo, "docs", "dashboard", "research.json")

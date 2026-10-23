@@ -12,7 +12,8 @@ One or two sentences: the system or domain under study, where its boundary is, a
 
 <div class="diagram">
 <!-- Archify: draw the parts and their connections with the archify skill, export the diagram as SVG,
-     and paste its <svg> element here in place of this comment. The served page loads no external image. -->
+     and paste its <svg> element here in place of this comment, trailing whitespace stripped. The served
+     page loads no external image; render scopes the diagram's styles to it. -->
 </div>
 
 ```text

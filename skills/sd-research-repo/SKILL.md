@@ -104,9 +104,10 @@ records the differences that are on purpose. Both are in
    starts from `templates/05-architecture/architecture.md`: the system or domain
    under study, its parts, how they connect, and which stage covers each part.
    Draw its diagram with the Archify skill when it is available, and paste the
-   exported `<svg>` into the template's `diagram` block. If Archify is not
-   available, say so in Status and keep the plain diagram in the fenced `text`
-   block. Add the document to `research.conf.py` so `render` publishes it.
+   exported `<svg>` into the template's `diagram` block, its trailing
+   whitespace stripped; `render` scopes its styles to the diagram. If Archify
+   is not available, say so in Status and keep the plain diagram in the fenced
+   `text` block. Add the document to `research.conf.py` so `render` publishes it.
 4. Render, from inside the repo:
 
    ```bash
