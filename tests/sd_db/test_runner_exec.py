@@ -47,9 +47,10 @@ def group_program(pids):
     """A command that starts a child in its group, records both pids at `pids`, and sleeps.
 
     Both outlast `GUARD_SECONDS` many times over, so only a kill ends them in a test.
+    The child holds no output pipe: a run reads the output until every writer closes it.
     """
     return (f"#!{sys.executable}\nimport os,subprocess,time\n"
-            "child = subprocess.Popen(['/bin/sleep', '600'])\n"
+            "child = subprocess.Popen(['/bin/sleep', '600'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
             f"open({str(pids) + '.tmp'!r}, 'w').write('%d %d' % (os.getpid(), child.pid))\n"
             f"os.replace({str(pids) + '.tmp'!r}, {str(pids)!r})\n"
             "os.write(1, b'ready\\n')\ntime.sleep(600)\n")
@@ -452,6 +453,16 @@ class Palette(PaletteFixture):
             with self.assertRaisesRegex(workflow.WorkflowError, "exceeded its time limit"):
                 runner_exec.run_process(value, cwd=self.repo, home=self.root, timeout=1, own_group=True)
             self.assertEqual(self.survivors(self.recorded(pids)), [], "a child outlived the time limit")
+
+    @hub_only
+    def test_a_child_left_by_a_finished_command_ends_with_its_group(self):
+        """The command's exit closes the run; the watcher then ends what it left in the group (sd:5808)."""
+        pids = self.root / "pids"
+        self.program.write_text(group_program(pids).replace("time.sleep(600)", "os._exit(0)"))
+        value = self.prepare()["execution"]
+        result = runner_exec.run_process(value, cwd=self.repo, home=self.root, timeout=GUARD_SECONDS, own_group=True)
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(self.survivors(self.recorded(pids)), [], "a child outlived its command's run")
 
     @hub_only
     def test_time_limit_survives_a_group_that_exited_before_its_kill(self):
