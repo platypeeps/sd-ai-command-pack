@@ -351,6 +351,15 @@ class TheReimport(IntakeCase):
             self.intake("sd-ledger", approve=report["revision"])
         self.assertIn("local note", self.installed.read_text())
 
+    def test_a_chmod_after_the_report_voids_the_approval(self) -> None:
+        self.write(self.upstream / "skills" / "ledger", GOOD + "\nNew upstream step.\n")
+        self.commit()
+        report = self.intake("sd-ledger")
+        self.installed.chmod(0o755)
+        with self.assertRaisesRegex(intake.IntakeError, "changed"):
+            self.intake("sd-ledger", approve=report["revision"])
+        self.assertEqual(self.installed.stat().st_mode & 0o777, 0o755)
+
     def test_a_name_with_no_recorded_source_is_refused(self) -> None:
         with self.assertRaisesRegex(intake.IntakeError, "no installed skill sd-plan"):
             self.intake("sd-plan")
@@ -514,6 +523,14 @@ class TheRollback(RollbackCase):
         before = self.tree()
         with self.assertRaisesRegex(intake.IntakeError, "nothing written"):
             self.rollback(approve="0" * 16)
+        self.assertEqual(self.tree(), before)
+
+    def test_a_kept_copy_chmodded_after_the_report_voids_the_approval(self) -> None:
+        report = self.rollback()
+        intake.kept(self.installed).joinpath("skill", "SKILL.md").chmod(0o755)
+        before = self.tree()
+        with self.assertRaisesRegex(intake.IntakeError, "nothing written"):
+            self.rollback(approve=report["revision"])
         self.assertEqual(self.tree(), before)
 
     def test_a_locally_edited_copy_is_refused(self) -> None:
