@@ -3146,8 +3146,8 @@ def run_parallel(order: list[tuple[str, pathlib.Path]], start: Start, deadline: 
     Then, inside the budget, every `RESCAN_SECONDS` and once no lane runs,
     `pending` names each idle lane with an entry its last worker did not
     see at its start; such a lane starts again on the same terms (sd:5809).
-    An entry a worker left pending starts none, so the run ends once no
-    lane runs and none got new work.
+    An entry a worker left pending starts none, so the run ends once a scan
+    read after the last lane ended finds no new work.
     """
     rows: list[list[dict[str, Any]]] = [[] for _ in order]
     running: dict[int, StartedLane] = {}
@@ -3160,12 +3160,14 @@ def run_parallel(order: list[tuple[str, pathlib.Path]], start: Start, deadline: 
         seen[index] = ids
         running[index] = start(order[index][1], max(0.0, deadline - clock()))
 
-    def start_late_lanes() -> None:
+    def start_late_lanes() -> bool:
         found = pending({checkout: seen[index] for index, (_, checkout) in enumerate(order) if index not in running})
+        started = False
         for index, (_, checkout) in enumerate(order):
             if checkout in found and lane_fits():
                 begin_lane(index, found[checkout])
-                collect_ended(running, rows)  # a lane run inline has ended already
+                started = True
+        return started
     with sd_lib.term_ends_group():
         try:
             for index, (_, checkout) in enumerate(order):
@@ -3178,10 +3180,11 @@ def run_parallel(order: list[tuple[str, pathlib.Path]], start: Start, deadline: 
             scanned = -math.inf
             while True:
                 collect_ended(running, rows)
-                if clock() < deadline and (not running or time.monotonic() - scanned >= RESCAN_SECONDS):
+                idle, started = not running, False
+                if clock() < deadline and (idle or time.monotonic() - scanned >= RESCAN_SECONDS):
                     scanned = time.monotonic()
-                    start_late_lanes()
-                if not running:
+                    started = start_late_lanes()
+                if idle and not started:  # a scan read every lane after the last one ended
                     break
                 time.sleep(START_POLL_SECONDS)
         finally:

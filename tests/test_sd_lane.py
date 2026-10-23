@@ -4367,6 +4367,28 @@ class HostedParallel(Lane):
             sd_lane.run_hosted(self.environ, self.ship, start=start)
         self.assertEqual(sorted(starts), sorted([self.repo, self.zeta]))
 
+    def test_a_lane_that_ends_after_the_last_scan_read_is_read_again(self) -> None:
+        """A scan that read A running, then saw A and B end, ended the run: A's new entry waited for a later run."""
+        a, b = self.tmp / "a", self.tmp / "b"
+        queues: dict[pathlib.Path, frozenset[str]] = {a: frozenset(), b: frozenset()}
+        starts: list[str] = []
+
+        def start(checkout: pathlib.Path, budget: float) -> sd_lane.StartedLane:
+            starts.append(checkout.name)
+            if starts == ["a"]:
+                return sd_lane.StartedLane(lambda: {"ran": []} if starts.count("b") == 2 else None)
+            if starts == ["a", "b"]:
+                queues[b] = frozenset({"x"})  # enqueued once B's first worker read its queue
+            elif starts == ["a", "b", "b"]:
+                queues[a] = frozenset({"y"})  # enqueued after A's worker last read its queue
+            return sd_lane.StartedLane(lambda: {"ran": []})
+
+        def pending(seen: dict[pathlib.Path, frozenset[str]]) -> dict[pathlib.Path, frozenset[str]]:
+            return {lane: queues[lane] for lane, ids in seen.items() if queues[lane] - ids}
+        with mock.patch.object(sd_lane, "RESCAN_SECONDS", 0.0, create=True):
+            sd_lane.run_parallel([("a", a), ("b", b)], start, sd_lane.clock() + 60, lambda: None, pending)
+        self.assertEqual(starts, ["a", "b", "b", "a"])
+
     def test_no_free_gate_slot_defers_the_next_lane_until_one_ends(self) -> None:
         """With every gate slot held, the second lane starts only once the first ended; unknown is no room too."""
         self.slots(free=False)
