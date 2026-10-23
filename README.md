@@ -47,6 +47,12 @@ the `skills` CLI's `~/.agents/.skill-lock.json`, and the GitHub origin of any
 git checkout a user skill links into. `--refresh <repo URL>` judges each skill
 there and lists the new and changed ones, each with its approval line; it
 installs nothing. `--untrack` stops tracking, and installed skills stay.
+An install keeps the copy it replaced. `sd skill intake <name> --rollback`
+shows the swap back to that copy, and `--approve` makes it; a second
+rollback undoes the first. It refuses a locally edited copy, and a pack
+skill git already holds: revert that commit through the lane. The intake
+report and the rollback report list the pack skills whose Lineage or
+Provenance names the same repository, with the commits that added it.
 
 A repository can extend the framework from the other side. `sd plugin add`
 registers a **domain pack** — its own manifest, its own `<prefix>-*` skills, its

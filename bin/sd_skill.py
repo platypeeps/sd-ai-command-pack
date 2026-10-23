@@ -88,6 +88,8 @@ def skill_intake(args: argparse.Namespace) -> int:
     listing = [name for name in ("tracked", "track", "untrack", "refresh") if getattr(args, name)]
     if len(listing) + bool(args.source) != 1:
         raise SkillRefusal("give one of a source, --tracked, --track URL, --untrack URL or --refresh URL")
+    if args.rollback and (listing or args.source.startswith("https://")):
+        raise SkillRefusal("--rollback takes the name of an installed skill, as the report printed it")
     if listing and args.approve:
         raise SkillRefusal("--approve installs one skill: give its URL, as the refresh printed it")
     if listing and args.scope and not args.track:
@@ -134,6 +136,9 @@ def register_extra(verbs: Any) -> None:
                         help="pack: contrib/ with the sd- prefix (default for a URL); user: ~/.claude/skills")
     intake.add_argument("--approve", metavar="REVISION",
                         help="install the revision the report printed; without it nothing is installed")
+    intake.add_argument("--rollback", action="store_true",
+                        help="swap an installed skill with the copy its last install replaced; "
+                             "with --approve REVISION it writes")
     intake.add_argument("--json", action="store_true")
     intake.set_defaults(handler=skill_intake)
     for parser in (review, applying):
