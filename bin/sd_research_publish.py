@@ -1279,6 +1279,16 @@ RULE = re.compile(r"^\s*(=+|-+|(\*\s*){3,}|(_\s*){3,}|(-\s*){3,})\s*$")
 #: Indented code, raw until the next blank line like HTML; it cannot
 #: interrupt a paragraph.
 CODE = re.compile(r"^(    |\t)")
+#: The HTML blocks a blank line does not end, each with the text that does:
+#: CommonMark's types 1 to 5 (sd:5889).
+HTML_RUNS = (
+    (re.compile(r"<(pre|script|style|textarea)(\s|>|$)", re.I),
+     re.compile(r"</(pre|script|style|textarea)>", re.I)),
+    (re.compile(r"<!--"), re.compile(r"-->")),
+    (re.compile(r"<\?"), re.compile(r"\?>")),
+    (re.compile(r"<![A-Za-z]"), re.compile(r">")),
+    (re.compile(r"<!\[CDATA\["), re.compile(r"\]\]>")),
+)
 #: Two trailing spaces or a backslash: a line break the author asked for.
 HARD_BREAK = re.compile(r"(  |\\)\r?$")
 
@@ -1290,23 +1300,56 @@ def front_matter_end(lines: list[str]) -> int:
     return next((i + 1 for i in range(1, len(lines)) if lines[i].strip() in ("---", "...")), 0)
 
 
-def verbatim(line: str, fence: re.Pattern[str] | None,
-             raw: bool) -> tuple[re.Pattern[str] | None, bool] | None:
-    """`(fence, raw)` after `line` when it is copied as it stands, else None.
+def opens(text: str, code: bool) -> tuple[re.Pattern[str] | None, bool] | None:
+    """`(closer, raw)` for the block `text` opens, or None when it opens none.
 
-    `fence` is the open fence's closer; `raw` is an HTML or indented code
-    block, which a blank line ends. A fence opener at any indent starts a
-    fence, since inside a list item one sits deeper than three spaces.
+    `closer` ends a fence, or an HTML block a blank line does not end, on
+    the line it is found in; it is None for such a block closed on its own
+    line. `raw` is any other HTML block, or indented code where `code`
+    allows it, which a blank line ends. A fence opens at any indent, since
+    inside a list item one sits deeper than three spaces.
     """
+    body = text.lstrip()
+    fence = FENCE.match(text)
     if fence:
-        return (None if fence.match(line) else fence), False
+        mark = fence.group(1)
+        return re.compile(r"^\s*%s{%d,}\s*$" % (re.escape(mark[0]), len(mark))), False
+    for start, end in HTML_RUNS:
+        found = start.match(body)
+        if found:
+            return (None if end.search(body, found.end()) else end), False
+    if body.startswith("<") or (code and CODE.match(text)):
+        return None, True
+    return None
+
+
+def verbatim(line: str, closer: re.Pattern[str] | None, raw: bool,
+             code: bool) -> tuple[re.Pattern[str] | None, bool] | None:
+    """`(closer, raw)` after `line` when it is copied as it stands, else None.
+
+    `closer` ends the open fence or HTML block, and the line it is found
+    in is the block's last; `raw` is a block a blank line ends.
+    """
+    if closer:
+        return (None if closer.search(line) else closer), False
     if not line.strip() or raw:
         return None, raw and bool(line.strip())
-    opener = FENCE.match(line)
-    if not opener:
-        return None
-    mark = opener.group(1)
-    return re.compile(r"^\s*%s{%d,}\s*$" % (re.escape(mark[0]), len(mark))), False
+    return opens(line, code)
+
+
+def item_text(line: str) -> str:
+    """What follows `line`'s list markers, nested ones too; "" for no item.
+
+    Five or more spaces after a marker open indented code (sd:5889), so
+    the text keeps four of them for `opens` to read.
+    """
+    text = line
+    while (item := LIST_ITEM.match(text)) and not RULE.match(text):
+        rest = text[item.end():]
+        if len(item.group(2)) > 4 and rest:
+            return "    " + rest
+        text = rest
+    return "" if text is line else text
 
 
 def starts_block(line: str) -> bool:
@@ -1344,14 +1387,14 @@ def soft_wraps_joined(text: str) -> str:
     lines = text.split("\n")
     start = front_matter_end(lines)
     out = lines[:start]
-    fence: re.Pattern[str] | None = None
+    closer: re.Pattern[str] | None = None
     raw = False
     column: int | None = None
     for line in lines[start:]:
-        kept = verbatim(line, fence, raw)
+        kept = verbatim(line, closer, raw, column is None)
         if kept:
             out.append(line)
-            fence, raw = kept
+            closer, raw = kept
             column = None
             continue
         body = line.lstrip()
@@ -1361,8 +1404,11 @@ def soft_wraps_joined(text: str) -> str:
             column = None if HARD_BREAK.search(line) else column
             continue
         out.append(line)
-        raw = body.startswith("<") or bool(CODE.match(line) and column is None)
-        column = None if raw else wrap_column(line)
+        # A list item's text can itself open a block (sd:5889).
+        inner = item_text(line)
+        kept = opens(inner, True) if inner else None
+        closer, raw = kept or (None, False)
+        column = None if kept else wrap_column(line)
     return "\n".join(out)
 
 

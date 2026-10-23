@@ -2188,6 +2188,27 @@ class SoftWrapTests(ReceiptFixture):
         ("nested: paragraph after a blank", "- a\n\n  b\n  c\n", "- a\n\n  b c\n"),
         ("nested: list item", "- a\n  - b\n    c\n", "- a\n  - b c\n"),
         ("nested: ordered item", "- a\n  1. b\n     c\n", "- a\n  1. b c\n"),
+        # sd:5889: a block that opens on the list marker's own line, and an
+        # HTML block that a blank line does not end.
+        ("item opening a fence", "- ```python\n  x = 1\n  y = 2\n  ```\n", None),
+        ("ordered item opening a fence", "1. ~~~\n   x\n   y\n   ~~~\n", None),
+        ("item opening html", "- <div>\n  x\n  y\n", None),
+        ("item opening indented code", "-     a\n      b\n", None),
+        ("item opening pre", "- <pre>\n\n  x\n  y\n  </pre>\n", None),
+        ("nested: item opening a fence", "- a\n  - ```\n    x\n    y\n    ```\n", None),
+        ("nested: ordered item opening html", "- a\n  1. <div>\n     x\n     y\n", None),
+        ("nested: item opening indented code", "- a\n  -     b\n        c\n", None),
+        ("pre", "<pre>\n\na\nb\n</pre>\nc\nd\n", "<pre>\n\na\nb\n</pre>\nc d\n"),
+        ("script", "<script>\n\na\nb\n</script>\n", None),
+        ("style, upper case", '<STYLE type="x">\n\na\nb\n</style>\n', None),
+        ("textarea", "<textarea>\n\na\nb\n</textarea>\n", None),
+        ("html comment", "<!--\n\na\nb\n-->\nc\nd\n", "<!--\n\na\nb\n-->\nc d\n"),
+        ("one-line html comment", "<!-- x -->\na\nb\n", "<!-- x -->\na b\n"),
+        ("processing instruction", "<?x\n\na\nb\n?>\n", None),
+        ("declaration", "<!X\n\na\nb\n>\n", None),
+        ("cdata", "<![CDATA[\n\na\nb\n]]>\n", None),
+        ("nested: pre", "- a\n  <pre>\n\n  x\n  y\n  </pre>\n", None),
+        ("nested: html comment", "- a\n  <!--\n\n  x\n  y\n  -->\n", None),
     )
 
     def test_each_kind_of_line_at_the_top_and_nested(self) -> None:
