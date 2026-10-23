@@ -168,12 +168,16 @@ def _run_follow(path: Path, env: dict[str, str], timeout: float) -> tuple[int, s
     so each is trapped to kill the group and then re-delivered so `sd` dies
     as the operator asked. `SIGKILL` cannot be trapped; repo-sync's intent
     marker and stale-lock sweep finish or undo a follow orphaned that way.
+    The traps go in before the spawn: a signal while `Popen` is still
+    returning, its group already running, waits for the group (sd:5801).
     """
-    process = subprocess.Popen(["sh", str(path), "follow"], env=env, stdin=subprocess.DEVNULL,
-                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                               start_new_session=True)
+    process = None
+    held = []
 
     def terminate(signum, _frame):
+        if process is None:
+            held.append(signum)
+            return
         _kill_group(process)
         signal.signal(signum, signal.SIG_DFL)
         os.kill(os.getpid(), signum)
@@ -185,6 +189,16 @@ def _run_follow(path: Path, env: dict[str, str], timeout: float) -> tuple[int, s
                 installed[sig] = signal.signal(sig, terminate)
             except (OSError, ValueError):  # a platform without the signal
                 pass
+    try:
+        process = subprocess.Popen(["sh", str(path), "follow"], env=env, stdin=subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                   start_new_session=True)
+    except BaseException:
+        for sig, handler in installed.items():
+            signal.signal(sig, handler)
+        raise
+    if held:
+        terminate(held[0], None)
     try:
         output, _ = process.communicate(timeout=timeout)
         return process.returncode, output, False
