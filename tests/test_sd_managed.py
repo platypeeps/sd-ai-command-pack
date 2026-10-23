@@ -95,9 +95,10 @@ class ADirectCall(Fixture):
 
 
 class TheDirectCommands(Fixture):
-    """sd:2566. sd-ship, sd-review, sd-check and sd-status refuse an unmanaged
+    """sd:2566. sd-ship, sd-check and sd-status refuse an unmanaged
     checkout before any network call, check or write; `--explain` and
-    `--dry-run` included. A checkout with no row proceeds without a word."""
+    `--dry-run` included. sd-review runs there (pack sd:5953). A checkout
+    with no row proceeds without a word."""
 
     COMMANDS = {
         "sd-ship": ["observe", "--item", "1", "--json"],
@@ -113,16 +114,36 @@ class TheDirectCommands(Fixture):
     def test_each_refuses_an_unmanaged_checkout_naming_the_flag(self) -> None:
         root = self.checkout("theirs")
         self.register(root, managed=0)
-        for name in self.COMMANDS:
+        for name in ("sd-ship", "sd-check", "sd-status"):
             with self.subTest(name):
                 done = self.run_command(name, root)
-                self.assertEqual(done.returncode, {"sd-ship": 3, "sd-review": 3, "sd-check": 2, "sd-status": 2}[name],
+                self.assertEqual(done.returncode, {"sd-ship": 3, "sd-check": 2, "sd-status": 2}[name],
                                  done.stdout + done.stderr)
                 said = done.stdout + done.stderr
                 self.assertIn("repo.managed = no", said)
                 self.assertIn("bin/sd-db repo managed ~/theirs yes", said)
         refused = json.loads(self.run_command("sd-ship", root).stdout)
         self.assertEqual(refused["workflow"]["blocker"]["code"], "unmanaged_repository")
+
+    def test_sd_review_reviews_an_unmanaged_checkout_and_sd_ship_still_refuses(self) -> None:
+        """pack sd:5953: sd-review reads a diff and writes no repository file."""
+        root = self.checkout("theirs")
+        self.register(root, managed=0)
+        git = ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@example.test"]
+        for step in (["checkout", "-q", "-b", "main"], ["commit", "-q", "--allow-empty", "-m", "base"],
+                     ["checkout", "-q", "-b", "work"]):
+            subprocess.run([*git, *step], check=True)  # nosec B603 B607
+        (root / "a.txt").write_text("a\n")
+        subprocess.run([*git, "add", "a.txt"], check=True)  # nosec B603 B607
+        subprocess.run([*git, "commit", "-q", "-m", "change"], check=True)  # nosec B603 B607
+        done = self.run_command("sd-review", root)
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+        self.assertNotIn("repo.managed", done.stdout + done.stderr)
+        self.assertEqual(json.loads(done.stdout)["scope"], "branch")
+        self.assertEqual(subprocess.run([*git, "status", "--porcelain"], capture_output=True, text=True,  # nosec B603 B607
+                                        check=True).stdout, "", "the review wrote into the checkout")
+        self.assertIn("repo.managed = no", (refused := self.run_command("sd-ship", root)).stdout)
+        self.assertEqual(refused.returncode, 3)
 
     def test_each_passes_a_managed_checkout_and_one_with_no_row_in_silence(self) -> None:
         mine, unregistered = self.checkout("mine"), self.checkout("unregistered")
