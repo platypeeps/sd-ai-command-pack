@@ -2148,6 +2148,53 @@ class SoftWrapTests(ReceiptFixture):
         self.assertEqual(self.joined("a\nb"), "a b")
         self.assertEqual(self.joined(""), "")
 
+    #: (case, before, after): every kind of line the join must decide on, at
+    #: the top level and nested under a list item. `None` means unchanged.
+    #: The lead's review of 306c7f537 found the nested fence and the hard
+    #: break on a continuation line; the rest are the same class.
+    CASES = (
+        ("paragraph", "a\nb\n", "a b\n"),
+        ("backtick fence", "a\n```\nx\ny\n```\nb\nc\n", "a\n```\nx\ny\n```\nb c\n"),
+        ("tilde fence", "a\n~~~sh\nx\ny\n~~~\n", None),
+        ("fence at indent 2", "a\n  ```\n  x\n  y\n  ```\n", None),
+        ("indented code", "a\n\n    x\n    y\n", None),
+        ("heading", "a\n# h\nb\n", None),
+        ("quote", "a\n> q\n> r\n", None),
+        ("table", "a | b\n--- | ---\n1 | 2\n", None),
+        ("rule", "a\n***\nb\n", None),
+        ("setext underline", "a\nb\n---\n", "a b\n---\n"),
+        ("html", "<div>\na\nb\n</div>\n", None),
+        ("link definitions", "[a]: https://example.test/a\n[b]: https://example.test/b\n", None),
+        ("front matter", "---\nk: v\nl: w\n---\na\nb\n", "---\nk: v\nl: w\n---\na b\n"),
+        ("hard break, spaces", "a  \nb\n", None),
+        ("hard break, spaces, continuation", "a\nb  \nc\n", "a b  \nc\n"),
+        ("hard break, backslash, continuation", "a\nb\\\nc\n", "a b\\\nc\n"),
+        ("deeper indent", "a\n  b\n", None),
+        ("list items", "- a\n  b\n- c\n", "- a b\n- c\n"),
+        ("lazy continuation", "- a\nb\n", None),
+        ("nested: fence at indent 4", "- item\n    ```python\n    x = 1\n    y = 2\n    ```\n", None),
+        ("nested: fence at indent 2", "- item\n  ```\n  x\n  y\n  ```\n", None),
+        ("nested: tilde fence", "- item\n  ~~~\n  x\n  ~~~\n", None),
+        ("nested: indented code", "- item\n\n      x\n      y\n", None),
+        ("nested: heading", "- item\n  # h\n", None),
+        ("nested: heading at indent 4", "- item\n    # h\n", None),
+        ("nested: quote", "- item\n  > q\n  > r\n", None),
+        ("nested: table", "- item\n  | a |\n  | - |\n", None),
+        ("nested: rule", "- item\n  ***\n", None),
+        ("nested: html", "- item\n  <div>\n  x\n  y\n", None),
+        ("nested: link definitions", "- item\n  [a]: https://example.test/a\n  [b]: https://example.test/b\n", None),
+        ("nested: hard break, spaces", "- a\n  b  \n  c\n", "- a b  \n  c\n"),
+        ("nested: hard break, backslash", "- a\\\n  b\n", None),
+        ("nested: paragraph after a blank", "- a\n\n  b\n  c\n", "- a\n\n  b c\n"),
+        ("nested: list item", "- a\n  - b\n    c\n", "- a\n  - b c\n"),
+        ("nested: ordered item", "- a\n  1. b\n     c\n", "- a\n  1. b c\n"),
+    )
+
+    def test_each_kind_of_line_at_the_top_and_nested(self) -> None:
+        for case, before, after in self.CASES:
+            with self.subTest(case=case):
+                self.assertEqual(self.joined(before), before if after is None else after)
+
 
 class SourceUrlTests(Fixture):
     """A request carries the GitHub URL of its source, read from `origin`.

@@ -1267,17 +1267,17 @@ def source_text(path: Path) -> str:
         return ""
 
 
-#: A fence opener; its closer is the same character, at least as many times.
-FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-#: A line that is a block of its own: a heading, a quote, a list item, a rule
-#: or setext underline, HTML, or a link or footnote definition. A table row
-#: is any line holding a `|`. None of these joins the line before it.
-BLOCK = re.compile(r"^ {0,3}(#{1,6}(\s|$)|>|<|\[[^\]]+\]:)|^\s*([-*+]|\d{1,9}[.)])(\s|$)")
-LIST_ITEM = re.compile(r"^\s*([-*+]|\d{1,9}[.)])(\s|$)")
-RULE = re.compile(r"^ {0,3}(=+|-+|(\*\s*){3,}|(_\s*){3,}|(-\s*){3,})\s*$")
-#: Raw until the next blank line: HTML, and indented code, which cannot
+#: A fence opener at any indent; its closer is the same character, at least
+#: as many times.
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
+#: After its indent, a line that is a block of its own: a heading, a quote,
+#: HTML, a link or footnote definition, or a list item. A table row is any
+#: line holding a `|`, and `RULE` is a rule or setext underline.
+BLOCK = re.compile(r"^(#{1,6}(\s|$)|>|<|\[[^\]]+\]:|([-*+]|\d{1,9}[.)])(\s|$))")
+LIST_ITEM = re.compile(r"^\s*([-*+]|\d{1,9}[.)])(\s+|$)")
+RULE = re.compile(r"^\s*(=+|-+|(\*\s*){3,}|(_\s*){3,}|(-\s*){3,})\s*$")
+#: Indented code, raw until the next blank line like HTML; it cannot
 #: interrupt a paragraph.
-HTML = re.compile(r"^ {0,3}<")
 CODE = re.compile(r"^(    |\t)")
 #: Two trailing spaces or a backslash: a line break the author asked for.
 HARD_BREAK = re.compile(r"(  |\\)\r?$")
@@ -1295,7 +1295,8 @@ def verbatim(line: str, fence: re.Pattern[str] | None,
     """`(fence, raw)` after `line` when it is copied as it stands, else None.
 
     `fence` is the open fence's closer; `raw` is an HTML or indented code
-    block, which a blank line ends. A fence opener starts a fence.
+    block, which a blank line ends. A fence opener at any indent starts a
+    fence, since inside a list item one sits deeper than three spaces.
     """
     if fence:
         return (None if fence.match(line) else fence), False
@@ -1305,7 +1306,27 @@ def verbatim(line: str, fence: re.Pattern[str] | None,
     if not opener:
         return None
     mark = opener.group(1)
-    return re.compile(r"^ {0,3}%s{%d,}\s*$" % (re.escape(mark[0]), len(mark))), False
+    return re.compile(r"^\s*%s{%d,}\s*$" % (re.escape(mark[0]), len(mark))), False
+
+
+def starts_block(line: str) -> bool:
+    """Whether `line` is a block of its own, whatever its indent."""
+    return "|" in line or bool(BLOCK.match(line.lstrip()) or RULE.match(line))
+
+
+def wrap_column(line: str) -> int | None:
+    """The indent a soft-wrapped line after `line` must have to join it.
+
+    A list item's content column, or a paragraph line's own indent. None
+    when nothing may join `line`: it is a block other than a list item, or
+    it ends in a hard break, which is checked on the line as written.
+    """
+    if HARD_BREAK.search(line) or "|" in line or RULE.match(line):
+        return None
+    item = LIST_ITEM.match(line)
+    if item:
+        return item.end()
+    return None if starts_block(line) else len(line) - len(line.lstrip())
 
 
 def soft_wraps_joined(text: str) -> str:
@@ -1315,31 +1336,33 @@ def soft_wraps_joined(text: str) -> str:
     Notion write keeps it as a `<br />`, so a source wrapped at 100 columns
     arrived as broken lines (sd:5872). Fenced code, YAML front matter,
     HTML, indented code, headings, quotes, tables, rules and definitions
-    are kept line for line, as is a hard break. Where a line's kind is in
-    doubt it is kept, which costs a `<br />` and never a changed meaning.
+    are kept line for line, at the top level and inside a list item, as is
+    a hard break. A line joins only a paragraph or list item whose text
+    starts at the line's own indent. Where a line's kind is in doubt it is
+    kept, which costs a `<br />` and never a changed meaning.
     """
     lines = text.split("\n")
     start = front_matter_end(lines)
     out = lines[:start]
     fence: re.Pattern[str] | None = None
-    raw = prose = False
+    raw = False
+    column: int | None = None
     for line in lines[start:]:
         kept = verbatim(line, fence, raw)
         if kept:
             out.append(line)
             fence, raw = kept
-            prose = False
+            column = None
             continue
-        table = "|" in line
-        block = table or bool(BLOCK.match(line) or RULE.match(line))
-        if prose and not block:
-            out[-1] = out[-1].rstrip() + " " + line.strip()
-        else:
-            out.append(line)
-            raw = bool(HTML.match(line) or (CODE.match(line) and not prose))
-        item = bool(LIST_ITEM.match(line)) and not RULE.match(line)
-        prose = (not raw and not table and (item or not block)
-                 and not HARD_BREAK.search(out[-1]))
+        body = line.lstrip()
+        if column == len(line) - len(body) and not starts_block(line):
+            # Kept as written after its indent, so a hard break it ends in stays.
+            out[-1] = out[-1].rstrip() + " " + body
+            column = None if HARD_BREAK.search(line) else column
+            continue
+        out.append(line)
+        raw = body.startswith("<") or bool(CODE.match(line) and column is None)
+        column = None if raw else wrap_column(line)
     return "\n".join(out)
 
 
