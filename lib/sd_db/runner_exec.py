@@ -1,5 +1,6 @@
 """Finite command authorization and write-ahead execution records for the palette."""
 
+import contextlib
 import hashlib
 import json
 import os
@@ -9,6 +10,7 @@ import selectors
 import signal
 import stat
 import subprocess
+import sys
 import time
 import uuid
 from pathlib import Path
@@ -21,6 +23,8 @@ from .yaml_lite import load
 
 MAX_CATALOG = 65536
 MAX_OUTPUT = 2 * 1024 * 1024
+#: How long the run waits for its group's watcher to end once the run is over; it ends at once unless the machine stalls.
+WATCHER_REAP_SECONDS = 10
 SCREENS = {"today", "backlog", "item", "writing", "skills", "operations"}
 #: The one native operation left. Cancel, resume and restore went with the runner service they drove (sd:3041).
 OPERATIONS = {"requeue": ("supervisor", ["sd", "runner", "requeue", "{assignment}"])}
@@ -509,14 +513,28 @@ def open_output(value):
     return os.fdopen(fd, "wb", buffering=0)
 
 
+#: The leader of an own-group command's group (sd:5808). It reads the caller's pipe until EOF, which comes
+#: when the caller closes it after the run or dies by any signal, SIGKILL too, and then ends the group.
+WATCHER = "import os, signal, sys\nos.read(int(sys.argv[1]), 1)\nos.killpg(0, signal.SIGKILL)\n"
+
+
 def run_process(value, *, cwd, home=None, timeout=300, own_group=False):
-    """Called only after authority/ownership checks; output is durable and bounded."""
+    """Called only after authority/ownership checks; output is durable and bounded.
+
+    With `own_group` the command joins a group that `WATCHER` leads, so the
+    time limit ends its children too, and so does the caller's death. The
+    dashboard calls this from a request thread, which can install no signal
+    handler, and launchd's stop is a SIGTERM it does not trap (sd:5808).
+    """
     plan = process_plan(value, home=home, cwd=cwd)
-    with open_output(value) as output:
+    with open_output(value) as output, contextlib.ExitStack() as stack:
         # Recheck after filesystem preparation, at the last point before dispatch.
         verify_descriptor(value)
+        group = None
+        if own_group:
+            group = stack.enter_context(_watched_group(plan["environment"]))
         process = subprocess.Popen(plan["argv"], cwd=cwd, env=plan["environment"], stdin=subprocess.DEVNULL,
-                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=own_group)
+                                   stdout=subprocess.PIPE, stderr=subprocess.STDOUT, process_group=group)
         written = 0
         deadline = time.monotonic() + timeout
         with process.stdout, selectors.DefaultSelector() as selector:
@@ -524,14 +542,14 @@ def run_process(value, *, cwd, home=None, timeout=300, own_group=False):
             # EOF can precede process exit; the deadline still owns that wait.
             while selector.get_map() or process.poll() is None:
                 if time.monotonic() > deadline:
-                    if own_group:
+                    if group is not None:
                         # The command can exit between poll() and this signal. macOS answers
                         # EPERM for a group whose only member is an unreaped leader, and ESRCH
                         # once it is reaped; both mean nothing is left to kill (sd:2338). A
                         # live leader that changed credentials answers EPERM too, and waiting
                         # on it would outlast the deadline, so only an exited one passes.
                         try:
-                            os.killpg(process.pid, signal.SIGKILL)
+                            os.killpg(group, signal.SIGKILL)
                         except (PermissionError, ProcessLookupError) as error:
                             if process.poll() is None:
                                 raise workflow.WorkflowError("command exceeded its time limit and refused the kill; "
@@ -567,6 +585,30 @@ def run_process(value, *, cwd, home=None, timeout=300, own_group=False):
     finally:
         os.close(directory)
     return {"exit_code": exit_code, "output_path": plan["output_path"]}
+
+
+@contextlib.contextmanager
+def _watched_group(environment):
+    """A `WATCHER` leading a new group in this session; yields its id, and ends and reaps it on the way out.
+
+    A new group, not a session: a process joins a group only in its own session.
+    """
+    read, write = os.pipe()  # not inheritable: the command never holds the write end
+    try:
+        watcher = subprocess.Popen([sys.executable, "-I", "-c", WATCHER, str(read)], env=environment,
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                   pass_fds=(read,), process_group=0)
+    except BaseException:
+        os.close(write)
+        raise
+    finally:
+        os.close(read)
+    try:
+        yield watcher.pid
+    finally:
+        os.close(write)  # EOF: the watcher ends what is left of the group, itself last
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            watcher.wait(timeout=WATCHER_REAP_SECONDS)
 
 
 def execution_digest(value):

@@ -33,6 +33,39 @@ from sd_db.writes import (
 # How long a fixture command may run before the suite stops it itself.
 GUARD_SECONDS = 60
 
+LIB = Path(__file__).resolve().parents[2] / "lib"
+
+#: A dashboard, as far as the palette goes: a process that runs one own-group command (sd:5808).
+DASHBOARD = ("import json, sys\n"
+             f"sys.path.insert(0, {str(LIB)!r})\n"
+             "from sd_db import runner_exec\n"
+             "runner_exec.run_process(json.loads(sys.argv[1]), cwd=sys.argv[2], home=sys.argv[3],"
+             " timeout=60, own_group=True)\n")
+
+
+def group_program(pids):
+    """A command that starts a child in its group, records both pids at `pids`, and sleeps.
+
+    Both outlast `GUARD_SECONDS` many times over, so only a kill ends them in a test.
+    """
+    return (f"#!{sys.executable}\nimport os,subprocess,time\n"
+            "child = subprocess.Popen(['/bin/sleep', '600'])\n"
+            f"open({str(pids) + '.tmp'!r}, 'w').write('%d %d' % (os.getpid(), child.pid))\n"
+            f"os.replace({str(pids) + '.tmp'!r}, {str(pids)!r})\n"
+            "os.write(1, b'ready\\n')\ntime.sleep(600)\n")
+
+
+def end(pid):
+    """SIGKILL `pid` if it still runs."""
+    if running(pid):
+        os.kill(pid, signal.SIGKILL)
+
+
+def running(pid):
+    """Alive and not a zombie waiting for its parent to reap it."""
+    state = subprocess.run(["ps", "-o", "stat=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
 
 class PaletteFixture(unittest.TestCase):
     """The store, the repository, the item and the one-entry catalog.
@@ -311,7 +344,8 @@ class Palette(PaletteFixture):
                 if process.poll() is None:
                     process.kill()
                 process.wait(timeout=2)
-                process.stdout.close()
+                if process.stdout is not None:  # an own-group command's watcher has none (sd:5808)
+                    process.stdout.close()
 
     @contextmanager
     def expires_once_ready(self, value):
@@ -339,8 +373,8 @@ class Palette(PaletteFixture):
         with self.owned_process() as processes:
             result = runner_exec.run_process(value, cwd=self.repo, home=self.root, timeout=GUARD_SECONDS)
             self.assertEqual(result["exit_code"], 7)
-            self.assertEqual(processes[0].returncode, 7)
-            self.assertTrue(processes[0].stdout.closed)
+            self.assertEqual(processes[-1].returncode, 7)
+            self.assertTrue(processes[-1].stdout.closed)
         self.assertEqual(Path(value["output_path"]).read_bytes(), b"ready\n")
         self.assertEqual(runner_exec.process_result(value)["exit_code"], 7)
 
@@ -362,12 +396,62 @@ class Palette(PaletteFixture):
                                                     timeout=1, own_group=own_group)
                         # The limit stopped it, not the guard and not the sleep.
                         self.assertLess(time.monotonic() - started, GUARD_SECONDS)
-                        self.assertEqual(processes[0].returncode, -signal.SIGKILL)
-                        self.assertTrue(processes[0].stdout.closed)
+                        self.assertEqual(processes[-1].returncode, -signal.SIGKILL)
+                        self.assertTrue(processes[-1].stdout.closed)
                     output = Path(value["output_path"])
                     self.assertIn(b"ready\n", output.read_bytes())
                     self.assertIn(b"Command time limit exceeded", output.read_bytes())
                     self.assertFalse(output.with_suffix(".receipt.json").exists())
+
+    def recorded(self, pids):
+        """The pids `group_program` wrote, each killed at cleanup; waits for the command to start, bounded."""
+        deadline = time.monotonic() + GUARD_SECONDS
+        while not pids.exists():
+            self.assertLess(time.monotonic(), deadline, "the command never recorded its pids")
+            time.sleep(0.05)
+        found = [int(word) for word in pids.read_text().split()]
+        for pid in found:
+            self.addCleanup(end, pid)
+        return found
+
+    def survivors(self, pids):
+        """Which of `pids` still run once each has had `GUARD_SECONDS` to end."""
+        deadline = time.monotonic() + GUARD_SECONDS
+        while any(running(pid) for pid in pids) and time.monotonic() < deadline:
+            time.sleep(0.1)
+        return [pid for pid in pids if running(pid)]
+
+    @hub_only
+    def test_a_killed_dashboard_takes_its_command_group_with_it(self):
+        """sd:5808: the command ran in a session of its own from a request thread, which can hold no handler.
+
+        launchd stops the dashboard with SIGTERM, which it does not trap, and
+        its group kill missed the command's session: the command and its
+        children ran on past their time limit. SIGKILL is the same.
+        """
+        for number in (signal.SIGTERM, signal.SIGKILL):
+            with self.subTest(signal=number.name):
+                pids = self.root / f"pids-{number.name}"
+                self.program.write_text(group_program(pids))
+                value = self.prepare()["execution"]
+                dashboard = subprocess.Popen([sys.executable, "-c", DASHBOARD, json.dumps(value), str(self.repo),
+                                              str(self.root)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self.addCleanup(lambda dashboard=dashboard: dashboard.poll() is None and dashboard.kill())
+                found = self.recorded(pids)
+                dashboard.send_signal(number)
+                self.assertEqual(dashboard.wait(timeout=GUARD_SECONDS), -number)
+                self.assertEqual(self.survivors(found), [], "the command's group outlived the dashboard")
+
+    @hub_only
+    def test_time_limit_ends_the_commands_whole_group(self):
+        """The time limit ends the command's children too, not only the command (sd:5808 keeps it)."""
+        pids = self.root / "pids"
+        self.program.write_text(group_program(pids))
+        value = self.prepare()["execution"]
+        with self.owned_process(), self.expires_once_ready(value):
+            with self.assertRaisesRegex(workflow.WorkflowError, "exceeded its time limit"):
+                runner_exec.run_process(value, cwd=self.repo, home=self.root, timeout=1, own_group=True)
+            self.assertEqual(self.survivors(self.recorded(pids)), [], "a child outlived the time limit")
 
     @hub_only
     def test_time_limit_survives_a_group_that_exited_before_its_kill(self):
@@ -389,14 +473,14 @@ class Palette(PaletteFixture):
                         # Exited, not reaped: the leader is a zombie when EPERM answers.
                         os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)
                     else:
-                        processes[0].wait()
+                        processes[-1].wait()
                     raise error
 
                 with self.owned_process() as processes, self.expires_once_ready(value), \
                         patch.object(runner_exec.os, "killpg", side_effect=exited_first):
                     with self.assertRaisesRegex(workflow.WorkflowError, "exceeded its time limit; inspect"):
                         runner_exec.run_process(value, cwd=self.repo, home=self.root, timeout=1, own_group=True)
-                    self.assertEqual(processes[0].returncode, -signal.SIGKILL)
+                    self.assertEqual(processes[-1].returncode, -signal.SIGKILL)
                 self.assertIn(b"Command time limit exceeded", Path(value["output_path"]).read_bytes())
 
     @hub_only
@@ -409,7 +493,8 @@ class Palette(PaletteFixture):
                 patch.object(runner_exec.os, "killpg", side_effect=PermissionError(1, "Operation not permitted")):
             with self.assertRaisesRegex(workflow.WorkflowError, "refused the kill"):
                 runner_exec.run_process(value, cwd=self.repo, home=self.root, timeout=1, own_group=True)
-            self.assertIsNone(processes[0].poll())
+            # The run did not wait on it; the group's watcher, which the patch does not reach, ends it after (sd:5808).
+            self.assertEqual(processes[-1].wait(timeout=GUARD_SECONDS), -signal.SIGKILL)
         self.assertLess(time.monotonic() - started, GUARD_SECONDS)
 
     @hub_only
