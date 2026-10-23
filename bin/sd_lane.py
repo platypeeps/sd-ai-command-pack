@@ -162,9 +162,10 @@ pending at its place, with `moved_off`, and the run stops; a merge that
 answers `lane_elsewhere` counts as the same move. Such a put-back moves
 `expected_head` only to a catch-up merge prepare pushed
 (`pushed_catch_up`). The same scheduled job runs on every machine: `lane
-run --hosted` runs each lane this machine hosts, one after another, and
-skips one whose runner is busy; for every other checkout here it imports
-the file queue and reclaims. The lane host gates and merges on its own
+run --hosted` runs each lane this machine hosts, side by side, and
+skips one whose runner is busy; a lane that gets work while the run lasts
+starts then (sd:5809). For every other checkout here it imports the file
+queue and reclaims. The lane host gates and merges on its own
 machine; the entry's commits reach it through `origin`.
 
 A hub fault is retried (sd:3239). A hub upgrade broke a satellite's sessions
@@ -203,6 +204,7 @@ import fcntl
 import functools
 import hashlib
 import json
+import math
 import os
 import pathlib
 import re
@@ -2944,7 +2946,9 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     one run budget, `RUN_BUDGET_SECONDS` from the start (sd:3287), and the
     lane that waited longest runs first (`longest_waiting_first`, sd:3481).
     `start` starts each lane (`run_parallel`): the CLI passes `child_lane`; by
-    default a lane runs here, to its end, before the next starts.
+    default a lane runs here, to its end, before the next starts. While the
+    run lasts, a lane whose worker ended and that got new work starts again
+    (`new_work`, sd:5809), rather than wait for a later scheduled run.
     """
     deadline = clock() + RUN_BUDGET_SECONDS
     imported = sd_lib.import_sd_db()
@@ -2989,8 +2993,46 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     def inline(checkout: pathlib.Path, budget: float) -> StartedLane:
         return inline_lane(lambda: run_lane(checkout, environ, ship, gate, note, clock() + budget))
     order = longest_waiting_first(hosted, environ)
-    lanes += run_parallel(order, start or inline, deadline, functools.partial(lane_room, environ))
+    lanes += run_parallel(order, start or inline, deadline, functools.partial(lane_room, environ),
+                          functools.partial(new_work, environ))
     return {"lanes": lanes}
+
+
+def new_work(environ: dict[str, str],
+             seen: dict[pathlib.Path, frozenset[str]]) -> dict[pathlib.Path, frozenset[str]]:
+    """Each lane of `seen` with a runnable entry not in its set and its runner lock free: its runnable ids (sd:5809).
+
+    One hub transaction reads every lane. A lane whose queue cannot be read,
+    or whose runner lock another runner holds, is left out: unknown is no
+    new work, and that runner drains the lane itself.
+    """
+    queues: dict[pathlib.Path, Queue] = {}
+    for checkout in seen:
+        try:
+            queues[checkout] = queue_for(checkout, environ)
+        except (LaneError, sd_lib.ConfigError, OSError):
+            continue
+    if not queues:
+        return {}
+
+    def runnable_by_lane(connection: Any) -> dict[pathlib.Path, frozenset[str]]:
+        return {checkout: frozenset(str(row["id"]) for row in stored(connection, queue.repository) if runnable(row))
+                for checkout, queue in queues.items()}
+    try:
+        ids = on_hub(next(iter(queues.values())), runnable_by_lane)
+    except LaneError:
+        return {}
+    found: dict[pathlib.Path, frozenset[str]] = {}
+    for checkout, runnable_ids in ids.items():
+        if not runnable_ids - seen[checkout]:
+            continue
+        try:
+            with runner_lock(queues[checkout]) as locked:
+                if locked:
+                    found[checkout] = runnable_ids
+        except OSError:
+            continue
+    return found
 
 
 #: How a hosted run starts one lane: `(checkout, seconds left of the run's budget)` to a started lane (sd:5774).
@@ -3001,6 +3043,10 @@ MAX_PARALLEL_LANES = 3
 START_POLL_SECONDS = 5.0
 #: How long a TERMed hosted run waits for each lane child it TERMs before it kills it.
 CHILD_STOP_SECONDS = 30
+#: How often a hosted run reads its idle lanes' queues for new work while a lane runs (sd:5809); one hub read each.
+RESCAN_SECONDS = 30.0
+#: Lane to its runnable entry ids, to the lanes with new work among them (`new_work`).
+Pending = Callable[[dict[pathlib.Path, frozenset[str]]], dict[pathlib.Path, frozenset[str]]]
 
 
 @dataclasses.dataclass
@@ -3088,43 +3134,68 @@ def lane_room(environ: dict[str, str]) -> str | None:
 
 
 def run_parallel(order: list[tuple[str, pathlib.Path]], start: Start, deadline: float,
-                 room: Callable[[], str | None]) -> list[dict[str, Any]]:
-    """Start each lane of `order` in turn, as room allows; each lane's row, in `order` (sd:5774).
+                 room: Callable[[], str | None], pending: Pending = lambda seen: {}) -> list[dict[str, Any]]:
+    """Start each lane of `order` in turn, as room allows; each lane run's row, in `order` (sd:5774).
 
     A lane starts at once while no lane runs, as one after another did, or
     once the run's budget is spent, since it then only settles its checkout
     and claims nothing. Otherwise it waits for `room` and for fewer than
     `MAX_PARALLEL_LANES` running. A lane's refusal is its own row. When this
     run ends early, a TERM among them, every lane still running is stopped.
+
+    Then, inside the budget, every `RESCAN_SECONDS` and once no lane runs,
+    `pending` names each idle lane with an entry its last worker did not
+    see at its start; such a lane starts again on the same terms (sd:5809).
+    An entry a worker left pending starts none, so the run ends once no
+    lane runs and none got new work.
     """
-    rows: list[dict[str, Any] | None] = [None] * len(order)
+    rows: list[list[dict[str, Any]]] = [[] for _ in order]
     running: dict[int, StartedLane] = {}
+    seen: dict[int, frozenset[str]] = {}
+
+    def lane_fits() -> bool:
+        return len(running) < MAX_PARALLEL_LANES and (not running or clock() >= deadline or room() is None)
+
+    def begin_lane(index: int, ids: frozenset[str]) -> None:
+        seen[index] = ids
+        running[index] = start(order[index][1], max(0.0, deadline - clock()))
+
+    def start_late_lanes() -> None:
+        found = pending({checkout: seen[index] for index, (_, checkout) in enumerate(order) if index not in running})
+        for index, (_, checkout) in enumerate(order):
+            if checkout in found and lane_fits():
+                begin_lane(index, found[checkout])
+                collect_ended(running, rows)  # a lane run inline has ended already
     with sd_lib.term_ends_group():
         try:
             for index, (_, checkout) in enumerate(order):
                 while True:
                     collect_ended(running, rows)
-                    if len(running) < MAX_PARALLEL_LANES and (
-                            not running or clock() >= deadline or room() is None):
+                    if lane_fits():
                         break
                     time.sleep(START_POLL_SECONDS)
-                running[index] = start(checkout, max(0.0, deadline - clock()))
-            while running:
+                begin_lane(index, pending({checkout: frozenset()}).get(checkout, frozenset()))
+            scanned = -math.inf
+            while True:
                 collect_ended(running, rows)
-                if running:
-                    time.sleep(START_POLL_SECONDS)
+                if clock() < deadline and (not running or time.monotonic() - scanned >= RESCAN_SECONDS):
+                    scanned = time.monotonic()
+                    start_late_lanes()
+                if not running:
+                    break
+                time.sleep(START_POLL_SECONDS)
         finally:
             for lane in running.values():
                 lane.end()
-    return [{"path": path, **(row or {})} for (path, _), row in zip(order, rows, strict=True)]
+    return [{"path": path, **row} for (path, _), runs in zip(order, rows, strict=True) for row in (runs or [{}])]
 
 
-def collect_ended(running: dict[int, StartedLane], rows: list[dict[str, Any] | None]) -> None:
-    """Move each ended lane's row from `running` into `rows`."""
+def collect_ended(running: dict[int, StartedLane], rows: list[list[dict[str, Any]]]) -> None:
+    """Move each ended lane's row from `running` onto its lane's rows."""
     for index, lane in list(running.items()):
         row = lane.answer()
         if row is not None:
-            rows[index] = row
+            rows[index].append(row)
             del running[index]
 
 

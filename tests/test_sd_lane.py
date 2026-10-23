@@ -4327,6 +4327,46 @@ class HostedParallel(Lane):
         self.assertEqual(self.statuses(), ["merged", "merged"], answer)
         self.assertEqual(sorted(row["path"] for row in answer["lanes"]), sorted([str(self.repo), str(self.zeta)]))
 
+    def test_a_lane_that_gets_work_while_another_runs_starts_before_it_ends(self) -> None:
+        """sd:5809. An empty lane's worker ends at once; its later entry waited for the whole run, then a slot."""
+        sd_lane.cancel(self.zeta, 2, self.environ)
+        late = threading.Event()
+        seen: list[str] = []
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            if argv[2] == "prepare":
+                seen.append(f"start {argv[4]}")
+                if argv[4] == "1":
+                    sd_lane.enqueue_entry(self.zeta_feature, 3, "three", self.body, self.environ, manual=True,
+                                          claim="deliver")
+                    late.wait(5)
+                else:
+                    late.set()
+                seen.append(f"end {argv[4]}")
+            return self.ship(argv, log)
+        with mock.patch.object(sd_lane, "RESCAN_SECONDS", 0.01, create=True):
+            answer = sd_lane.run_hosted(self.environ, ship, start=self.threaded(ship))
+        self.assertEqual(seen, ["start 1", "start 3", "end 3", "end 1"], answer)
+        zeta = [[ran["item"] for ran in row["ran"]] for row in answer["lanes"] if row["path"] == str(self.zeta)]
+        self.assertEqual(zeta, [[], [3]], answer)
+
+    def test_work_a_lane_had_when_its_worker_started_starts_no_second_worker(self) -> None:
+        """An entry its worker left pending is no new work: the run ends once the other lane does, no restart loop."""
+        ended = threading.Event()
+        starts: list[pathlib.Path] = []
+
+        def start(checkout: pathlib.Path, budget: float) -> sd_lane.StartedLane:
+            starts.append(checkout)
+            if checkout == self.zeta:
+                return sd_lane.StartedLane(lambda: {"ran": [], "stopped": "load"})  # its entry stays pending
+            return sd_lane.StartedLane(lambda: {"ran": []} if ended.is_set() else None)
+        timer = threading.Timer(0.3, ended.set)
+        timer.start()
+        self.addCleanup(timer.cancel)
+        with mock.patch.object(sd_lane, "RESCAN_SECONDS", 0.01, create=True):
+            sd_lane.run_hosted(self.environ, self.ship, start=start)
+        self.assertEqual(sorted(starts), sorted([self.repo, self.zeta]))
+
     def test_no_free_gate_slot_defers_the_next_lane_until_one_ends(self) -> None:
         """With every gate slot held, the second lane starts only once the first ended; unknown is no room too."""
         self.slots(free=False)
@@ -4366,7 +4406,9 @@ class HostedParallel(Lane):
             fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
             answer = sd_lane.run_hosted(self.environ, self.ship, start=self.threaded(self.ship))
         self.assertEqual(self.statuses(), ["merged", "pending"])
-        self.assertIn("another runner holds", next(row for row in answer["lanes"] if row["path"] == str(self.zeta))["busy"])
+        zeta = [row for row in answer["lanes"] if row["path"] == str(self.zeta)]
+        self.assertEqual(len(zeta), 1, "a held lock starts no second worker")
+        self.assertIn("another runner holds", zeta[0]["busy"])
 
     def test_one_lanes_failure_leaves_the_other_merged(self) -> None:
         """A hub fault in one lane is that lane's row; the other lane still merges."""
