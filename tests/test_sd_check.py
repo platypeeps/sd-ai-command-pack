@@ -495,10 +495,12 @@ class TimeoutTests(CheckFixture):
 ORPHAN_CHECK = 'sleep 60 &\necho "$$ $!" > pids\nwait\n'
 
 
-#: `run_group`, or `sd-ship`'s `review_process`, as argv[2] names, in a process whose spawn is slowed after
-#: the fork, as a loaded machine deschedules it (sd:5792).
+#: The group spawn argv[2] names, in a process whose spawn is slowed after the fork, as a loaded
+#: machine deschedules it: `run_group`, `sd-ship`'s `review_process` (sd:5792), `sd writing`'s codex,
+#: `sd gate run` and `sd`'s follow (sd:5801). Each runs `orphan.sh`; the codex stub execs it.
 SLOW_SPAWN = """import importlib.machinery, importlib.util, os, pathlib, subprocess, sys, time
 sys.path.insert(0, sys.argv[1])
+sys.path.insert(0, str(pathlib.Path(sys.argv[1]).parent / "lib"))
 import sd_lib
 if sys.argv[2] == "review_process":
     loader = importlib.machinery.SourceFileLoader("sd_ship_slow", sys.argv[1] + "/sd-ship")
@@ -511,9 +513,23 @@ def slow(self, *args, **kwargs):
 subprocess.Popen._execute_child = slow
 if sys.argv[2] == "review_process":
     ship.review_process(pathlib.Path.cwd(), ["sh", "orphan.sh"], timeout=60)
+elif sys.argv[2] == "codex":
+    import sd_writing
+    os.environ["PATH"] = os.getcwd() + os.pathsep + os.environ["PATH"]
+    sd_writing._codex(os.getcwd(), "prompt", model=None, timeout=60)
+elif sys.argv[2] == "run_gated":
+    import sd_gate_slots
+    sys.exit(sd_gate_slots.run_gated(["sh", "orphan.sh"], dict(os.environ), slots=0,
+                                     rule=sd_gate_slots.LoadRule(0, 0, "off"), stream=sys.stderr))
+elif sys.argv[2] == "follow":
+    from sd_db import follow
+    follow._run_follow(pathlib.Path("orphan.sh"), dict(os.environ), 60)
 else:
     sd_lib.run_group(["sh", "orphan.sh"], cwd=pathlib.Path("."), env=dict(os.environ), timeout=60)
 """
+
+#: How a spawner's process ends on SIGTERM: `sd gate run` forwards it to the command and exits 128 + 15.
+SPAWN_TERM_EXIT = {"run_gated": 128 + signal.SIGTERM}
 
 #: How long a test waits for a check to start or an ended group to go: a bound for a loaded machine.
 PROCESS_BOUND_SECONDS = 30
@@ -615,20 +631,25 @@ class ProcessGroupTests(CheckFixture):
         """sd:5792: SIGTERM landed while `Popen` was still returning, so no `finally` held the process.
 
         Under load the check had started and written its pids before the
-        parent left `Popen`; `_Terminated` left the group running.
+        parent left `Popen`; `_Terminated` left the group running. sd:5801:
+        `sd writing`'s codex, `sd gate run` and `sd`'s follow spawned their
+        groups outside `spawn_group`, with no handler yet to end them.
         """
-        for spawner in ("run_group", "review_process"):
+        for spawner in ("run_group", "review_process", "codex", "run_gated", "follow"):
             with self.subTest(spawner=spawner):
                 root = self.orphan_repo(spawner)
+                (root / "codex").write_text("#!/bin/sh\nexec sh orphan.sh\n", encoding="utf-8")
+                (root / "codex").chmod(0o755)
                 runner = subprocess.Popen([sys.executable, "-c", SLOW_SPAWN, str(REPO_ROOT / "bin"), spawner],
-                                          cwd=str(root), stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-                                          text=True, env=clean_environment())
+                                          cwd=str(root), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                          env=clean_environment())
                 self.addCleanup(self.kill, runner.pid)
                 pids = self.started(root / "pids")
                 runner.send_signal(signal.SIGTERM)
-                runner.communicate(timeout=30)
-                self.assertEqual(runner.returncode, -signal.SIGTERM)
+                # Not `communicate`: a group `sd gate run` leaves behind holds its streams open.
+                runner.wait(timeout=PROCESS_BOUND_SECONDS)
                 self.assertEqual(self.survivors(pids), [], "left running after a SIGTERM during the spawn")
+                self.assertEqual(runner.returncode, SPAWN_TERM_EXIT.get(spawner, -signal.SIGTERM))
 
     def test_an_interrupted_run_takes_its_check_with_it(self) -> None:
         code, errors, alive = self.stopped(signal.SIGINT)
