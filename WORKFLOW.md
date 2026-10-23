@@ -389,8 +389,12 @@ Gates and reviews:
 
 - **Shift lane failures left: review and test before enqueue (sd:5617).** 17 of 40 prepares on 2026-10-20 and 21 were redone:
   10 review blocks, 3 gate failures after review and 3 conflicts with main, all visible before enqueue.
-  The builder runs one read-only `codex exec` review of its branch, fixes the blocking findings, then merges `origin/main`
-  (the `sd-slice-builder` flow, steps 6 and 7). After its report, the lead runs the tests the change touches
+  The builder merges `origin/main` and reports, with no review of its own (the `sd-slice-builder` flow, step 6).
+  The lead runs `sd-review -C <worktree> --scope branch` in the background, with no time cap (system sd:5825):
+  a builder may run only foreground commands under 10 minutes, and design reviews overran that cap.
+  The lead sends blocking findings to the idle builder, which fixes them fail-first; the lead reviews again.
+  `sd-review` records no pass the lane reuses, so the lane reviews the branch once more at prepare.
+  Then the lead runs the tests the change touches
   (`make check CHANGED=<paths>`, or a repo's `make test SUITE=<name>`) and enqueues on a pass; the lane's prepare gate is
   the one full run (system sd:5800). A pre-enqueue pass is reused only when main has not moved, so it doubled gate load;
   3 of the 17 redone prepares were gate failures. A failure goes back to the builder, not into the lane.

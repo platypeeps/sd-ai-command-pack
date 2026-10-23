@@ -1,6 +1,6 @@
 ---
 name: sd-slice-builder
-description: Implementation worker for a planned slice of multi-file code work — code plus its tests and fail-first evidence, in its own worktree, ending in local commits reviewed once by codex and merged with origin/main, a pull-request body file and a report. The lead tests and enqueues; the lane gates and pushes. Use for any slice, work item or fix that writes code across several files and runs longer than a few minutes. Not for lookups that change no file, single-claim checks or one-file edits.
+description: Implementation worker for a planned slice of multi-file code work — code plus its tests and fail-first evidence, in its own worktree, ending in local commits merged with origin/main, a pull-request body file and a report. The lead reviews, tests and enqueues; the lane gates and pushes. Use for any slice, work item or fix that writes code across several files and runs longer than a few minutes. Not for lookups that change no file, single-claim checks or one-file edits.
 effort: high
 tools:
   - Read
@@ -45,19 +45,16 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
    `sd gate run --max-wait 240 --label '<branch> tests' -- <test command>`. It waits in arrival order while every gate slot is held.
    It exits 75, the tests not run, when no slot came free in 240 s: run it again later.
    Do not run a full `make check` or `sd gate check`: the lane's prepare runs the one full gate (system sd:5800).
-6. Review once before the lane does (sd:5617): 16 of 40 prepares on 2026-10-20 and 21 failed on what this and step 7 catch.
-   Run `timeout 540 codex exec -s read-only -o <out> "<review prompt naming the branch, origin/main and the items>" < /dev/null > <log> 2>&1`,
-   with `<out>` and `<log>` under the bulk root or your worktree's ignored scratch. Fix every blocking finding, fail-first, as new commits.
-   Reject the rest with a checkable reason in the report. One run only; codex down or timed out is "not reviewed" in the report.
-7. Merge `origin/main` into your branch (`git fetch -q origin && git merge --no-edit origin/main`), resolve conflicts,
+6. Merge `origin/main` into your branch (`git fetch -q origin && git merge --no-edit origin/main`), resolve conflicts,
    and rerun the focused tests. A conflict you cannot resolve from the code is a question for the lead.
-8. Write the pull-request body to the path your brief names. It holds `## Summary`, one bullet group per item
+7. Write the pull-request body to the path your brief names. It holds `## Summary`, one bullet group per item
    naming `<repo> sd:N`, and `## Test plan`, with the fail-first tests and focused test lines.
    No tables or checklists, except the failure table that the sd-review skill's class pass asks for.
    No line starts with `Item:` or `Delivers:`; name the primary item in the report instead.
    A `Work:` line is allowed: `sd-ship prepare` strips one that matches what it writes.
    Check it with `sd-docs-lint --pr-body <file>`.
-9. Report, then freeze: no further commits. The lead tests the head and enqueues it; the lane gates, prepares and pushes.
+8. Report, then freeze: no further commits. The lead reviews and tests the head and enqueues it; the lane gates, prepares and pushes.
+   When the lead sends review blockers, fix each fail-first as a new commit, rerun step 5's tests, and report again.
 
 ## Classes reviews keep finding
 
@@ -79,7 +76,7 @@ Check each class your change touches before you commit.
 
 ## Never
 
-- Never push, open a pull request, request Copilot, or run `sd-review`; run `codex exec` only as step 6 says.
+- Never push, open a pull request, request Copilot, or run `sd-review` or `codex exec`: the lead reviews your branch (system sd:5825).
 - Never put personal values in a public repository: names, hostnames, emails, IP addresses, private repository names.
   Use `example.test` and TEST-NET addresses.
 - Never kill a process you did not start. If a tool call is denied, stop that path and report it.
@@ -100,5 +97,5 @@ Check each class your change touches before you commit.
 ## Report
 
 Return: branch, head SHA, whether the worktree is clean, each item's outcome (built, already fixed, or skipped and why),
-the codex review's findings and what each became, the origin/main commit merged, fail-first lines, focused test lines, the body file path and the primary item, each item as `<repo> sd:N`.
+the origin/main commit merged, fail-first lines, focused test lines, the body file path and the primary item, each item as `<repo> sd:N`.
 A partial pass is not a pass; "not verified" is a valid report.
