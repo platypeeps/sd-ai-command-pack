@@ -130,6 +130,92 @@ def drop_sections(md, titles):
     return md
 
 
+#: The class an embedded Archify diagram's rules are scoped to (pack sd:5918).
+ARCHIFY = "archify-diagram"
+ARCHIFY_SVG_RE = re.compile(r"<svg\b[^>]*archify-diagram-title[^>]*>.*?</svg>", re.S)
+#: The page's theme when the reader picked none: "system", or no theme.js.
+PAGE_UNPICKED = ':root:not([data-theme="dark"]):not([data-theme="light"])'
+
+
+def css_blocks(css):
+    """Each top-level `prelude { body }` of `css`, braces matched."""
+    at = 0
+    while (start := css.find("{", at)) >= 0:
+        depth, close = 1, start + 1
+        while depth and close < len(css):
+            depth += {"{": 1, "}": -1}.get(css[close], 0)
+            close += 1
+        yield css[at:start].strip(), css[start + 1:close - 1]
+        at = close
+
+
+def scope_selector(prelude, scope):
+    """`prelude` under `scope`, or None for a rule meant for the host page (`:root`, `[data-…]`)."""
+    parts, depth, last = [], 0, 0
+    for index, char in enumerate(prelude + ","):
+        depth += {"(": 1, "[": 1, ")": -1, "]": -1}.get(char, 0)
+        if char == "," and not depth:
+            parts.append(prelude[last:index].strip())
+            last = index + 1
+    scoped = []
+    for part in parts:
+        if part in (":root", "svg"):
+            scoped.append(scope)
+        elif re.match(r"svg(?![\w-])", part):
+            scoped.append(scope + part[3:])
+        elif part.startswith((":root", "[data-")):
+            return None
+        else:
+            scoped.append(scope + " " + part)
+    return ", ".join(dict.fromkeys(scoped))  # `:root, svg` is the one element
+
+
+def scope_rules(css, scope):
+    """Archify's rules, every selector under `scope` and each theme following the page's."""
+    rules = []
+    for prelude, body in css_blocks(css):
+        if prelude.startswith(("@keyframes", "@font-face")):
+            rules.append("%s {%s}" % (prelude, body))
+            continue
+        if prelude.startswith("@media"):
+            light = prelude.startswith("@media (prefers-color-scheme: light)")
+            inner = scope_rules(body, "%s %s" % (PAGE_UNPICKED, scope) if light else scope)
+            if inner:
+                rules.append("%s {%s}" % (prelude, inner))
+            continue
+        theme = re.fullmatch(r'svg\[data-theme="(\w+)"\]', prelude)
+        selector = '[data-theme="%s"] %s' % (theme.group(1), scope) if theme else scope_selector(prelude, scope)
+        if selector:
+            rules.append("%s {%s}" % (selector, body))
+    return "\n".join(rules)
+
+
+def scope_archify(text):
+    """Scope each Archify SVG export in `text` to its own element (pack sd:5918).
+
+    Archify's export styles `:root`, `svg` and `[data-theme]` for the whole
+    page, so a pasted one would restyle the research page. Its rules move
+    under `.archify-diagram`, its light and dark sets follow the page's theme
+    control, and its trailing whitespace and blank lines go: its `@keyframes`
+    lines end in a space. An SVG that carries the class already is left alone.
+    """
+    def scope_one(match):
+        svg = match.group(0)
+        tag = svg[:svg.index(">") + 1]
+        styled = re.search(r"<style>(.*?)</style>", svg, re.S)
+        if re.search(r'\sclass="[^"]*\b%s\b' % ARCHIFY, tag) or not styled:
+            return svg
+        selector = "." + ARCHIFY
+        css = scope_rules(styled.group(1).replace("&gt;", ">"), selector)
+        css += "\n%s {max-width:100%%;height:auto;display:block;margin:0 auto}" % selector
+        svg = svg[:styled.start()] + "<style>" + css.replace(">", "&gt;") + "</style>" + svg[styled.end():]
+        svg = svg.replace("<svg ", '<svg class="%s" ' % ARCHIFY, 1)
+        svg = re.sub(r'\s(?:tabindex|data-theme)="[^"]*"|\sstyle=""', "", svg)
+        return "\n".join(line.rstrip() for line in svg.splitlines() if line.strip())
+
+    return ARCHIFY_SVG_RE.sub(scope_one, text)
+
+
 def doc_version(repo, src):
     """Created date, version, updated date — from git history of the file.
     v1.0 is the first commit. Falls back to mtime where there is no git."""
@@ -157,7 +243,7 @@ def build_one(repo, cfg, project):
         body_md = raw.split("\n---\n", 1)[1]
     else:
         body_md = re.sub(r"\A\s*#\s[^\n]*\n", "", raw)
-    body_md = drop_sections(loosen_lists(body_md), cfg.get("skip", []))
+    body_md = drop_sections(loosen_lists(scope_archify(body_md)), cfg.get("skip", []))
 
     mdx = markdown.Markdown(extensions=["tables", "fenced_code", "toc", "sane_lists", "attr_list"])
     body = mdx.convert(body_md)

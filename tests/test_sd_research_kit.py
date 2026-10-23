@@ -1283,6 +1283,94 @@ class ArchitectureOverviewTests(unittest.TestCase):
             self.assertIn("`architecture.md`", rows[0], path)
 
 
+#: A synthetic Archify SVG export, in its shape: page-wide `:root`, `svg` and
+#: `[data-theme]` rules, and `@keyframes` lines that end in a space.
+ARCHIFY_EXPORT = (
+    '<svg viewBox="0 0 10 10" role="img" aria-labelledby="archify-diagram-title archify-diagram-description"'
+    ' data-preset="classic" data-theme="dark" tabindex="0" style="" xmlns="http://www.w3.org/2000/svg">'
+    "<style>@font-face { font-family: 'Mono'; src: local('Mono'); }\n"
+    "svg { font-family: 'Mono'; }\n"
+    ':root, [data-theme="dark"] { --bg: #000; }\n'
+    '[data-theme="light"] { --bg: #fff; }\n'
+    "@keyframes archify-flow { \n  0% { opacity: 0; } \n  100% { opacity: 1; }\n}\n"
+    "svg .s-x { color: var(--bg); }\n"
+    "svg .sigil &gt; * { fill: none; }\n"
+    'svg[data-preset="blueprint"] .c-grid, .c-lane { opacity: 0.5; }\n'
+    ".c-grid { stroke: var(--bg); }\n"
+    ":root, svg { --bg: #000; }\n"
+    "@media (prefers-color-scheme: light) { :root, svg { --bg: #fff; } }\n"
+    'svg[data-theme="light"] { --bg: #fff; }\n'
+    'svg[data-theme="dark"] { --bg: #000; }\n'
+    '</style>\n\n<title id="archify-diagram-title">Parts</title>'
+    '<rect class="c-grid" tabindex="0"/>  \n</svg>')
+
+
+class ArchifyEmbedTests(unittest.TestCase):
+    """pack sd:5918: render scopes an embedded Archify SVG to the diagram.
+
+    Archify's export styles `:root`, `svg` and `[data-theme]` for the whole
+    page, and its `@keyframes` lines end in a space.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        load_publish()
+        seen = cls.seen = []
+
+        class Converter:
+            def __init__(self, **_options: object) -> None:
+                self.toc_tokens: list = []
+
+            def convert(self, text: str) -> str:
+                seen.append(text)
+                return text
+
+        fake = types.ModuleType("markdown")
+        fake.Markdown = Converter  # type: ignore[attr-defined]
+        with unittest.mock.patch.dict(sys.modules, {"markdown": fake}):
+            cls.render = load_kit().load("sd_research_render")
+
+    def page(self, svg: str) -> str:
+        with tempfile.TemporaryDirectory() as tmp:
+            doc = "# Overview\n\nFrom a probe.\n\n---\n\n## 1. Diagram\n\n<div class=\"diagram\">\n%s\n</div>\n" % svg
+            (Path(tmp) / "doc.md").write_text(doc, encoding="utf-8")
+            with unittest.mock.patch("sys.stdout", io.StringIO()):
+                self.render.build_one(tmp, dict(src="doc.md", out="doc", title="Overview"), "TEST")
+        return self.seen[-1]
+
+    def embedded(self, text: str) -> tuple[str, str]:
+        svg = re.search(r"<svg\b.*?</svg>", text, re.S).group(0)
+        return svg, re.search(r"<style>(.*?)</style>", svg, re.S).group(1)
+
+    def test_every_rule_is_scoped_to_the_diagram(self) -> None:
+        svg, css = self.embedded(self.page(ARCHIFY_EXPORT))
+        preludes = [prelude for prelude, _ in self.render.css_blocks(css)]
+        loose = [p for p in preludes if not p.startswith("@")
+                 and not all(re.match(r'(\[data-theme="\w+"\] )?\.archify-diagram\b', part.strip())
+                             for part in p.split(","))]
+        self.assertEqual(loose, [])
+        self.assertIn('[data-theme="light"] .archify-diagram {', css)
+        self.assertIn('@media (prefers-color-scheme: light) {:root:not([data-theme="dark"])'
+                      ':not([data-theme="light"]) .archify-diagram {', css)
+        self.assertIn('.archify-diagram[data-preset="blueprint"] .c-grid, .archify-diagram .c-lane {', css)
+        self.assertIn(".archify-diagram .sigil &gt; * {", css)
+        self.assertTrue(svg.startswith('<svg class="archify-diagram" viewBox='), svg[:80])
+        self.assertNotRegex(svg, r'\s(data-theme|tabindex)="|\sstyle=""')
+
+    def test_no_line_ends_in_whitespace_and_none_is_blank(self) -> None:
+        svg, _ = self.embedded(self.page(ARCHIFY_EXPORT))
+        self.assertIn("@keyframes archify-flow {", svg)
+        self.assertEqual([line for line in svg.splitlines() if line != line.rstrip() or not line.strip()], [])
+
+    def test_a_scoped_svg_is_left_as_it_is(self) -> None:
+        once = self.embedded(self.page(ARCHIFY_EXPORT))[0]
+        self.assertEqual(self.render.scope_archify(once), once)
+
+    def test_an_svg_that_is_not_archifys_is_left_as_it_is(self) -> None:
+        other = '<svg viewBox="0 0 1 1"><style>svg { fill: red; }  \n</style></svg>'
+        self.assertEqual(self.render.scope_archify(other), other)
+
+
 class InitHookInstallTests(unittest.TestCase):
     """`init-hook` installs one source under every trigger, or none at all.
 
