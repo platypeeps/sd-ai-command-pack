@@ -541,6 +541,43 @@ class TheRollback(RollbackCase):
             self.rollback("sd-tabulate")
         self.assertEqual(destination.read_text(), "put here by hand\n")
 
+    def assert_refused(self, name: str = "sd-ledger") -> None:
+        before = self.tree()
+        with self.assertRaisesRegex(intake.IntakeError, "changed since the intake wrote it"):
+            self.rollback(name)
+        self.assertEqual(self.tree(), before)
+
+    def test_a_chmodded_script_is_refused(self) -> None:
+        self.intake(URL.format("tabulate"), approve=self.intake(URL.format("tabulate"))["revision"])
+        (self.root / "contrib" / "sd-tabulate" / "scripts" / "table.py").chmod(0o755)
+        self.assert_refused("sd-tabulate")
+
+    def test_a_chmodded_skill_folder_is_refused(self) -> None:
+        self.installed.chmod(0o700)
+        self.assert_refused()
+
+    def test_a_retargeted_link_is_refused(self) -> None:
+        intake.kept(self.installed).joinpath("skill", "guide.md").symlink_to("SKILL.md")
+        self.rolled_back()
+        self.assertEqual(os.readlink(self.installed / "guide.md"), "SKILL.md")
+        self.rollback()  # unchanged: the plan names the link as it landed
+        (self.installed / "guide.md").unlink()
+        (self.installed / "guide.md").symlink_to("../sd-plan/SKILL.md")
+        self.assert_refused()
+
+    def test_an_empty_folder_or_a_fifo_added_is_refused(self) -> None:
+        (self.installed / "notes").mkdir()
+        self.assert_refused()
+        (self.installed / "notes").rmdir()
+        os.mkfifo(self.installed / "pipe")
+        self.assert_refused()
+
+    def test_an_empty_folder_put_where_a_removed_skill_was_is_refused(self) -> None:
+        self.intake(URL.format("tabulate"), approve=self.intake(URL.format("tabulate"))["revision"])
+        self.rolled_back("sd-tabulate")
+        (self.root / "contrib" / "sd-tabulate").mkdir()
+        self.assert_refused("sd-tabulate")
+
     def test_a_committed_pack_copy_is_refused_and_names_git_revert(self) -> None:
         self.pack_git("init", "-q", "-b", "main")
         self.pack_git("add", "contrib", "skills")

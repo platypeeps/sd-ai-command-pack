@@ -30,6 +30,7 @@ import os
 import pathlib
 import re
 import shutil
+import stat
 import subprocess
 import tempfile
 import unicodedata
@@ -360,23 +361,32 @@ def locate(name: str, scope: str | None, root: pathlib.Path, home: pathlib.Path)
 
 
 def installed_digests(directory: pathlib.Path) -> dict[str, str]:
-    """Relative path to content digest for what is installed; a link is named, never followed.
+    """Relative path to what makes it the same, for every path installed, the skill folder (`.`) too.
 
-    A file or a link where the skill folder belongs is named too, so it never reads as nothing there.
+    A link is named with its target, never followed; owner, times and extended attributes are left out.
     """
 
-    if directory.is_symlink() or (_present(directory) and not directory.is_dir()):
-        return {".": "symlink" if directory.is_symlink() else "file"}
-    if not directory.is_dir():
+    if not _present(directory):
         return {}
-    files = {}
-    for path in sorted(directory.rglob("*")):
-        relative = path.relative_to(directory).as_posix()
-        if path.is_symlink():
-            files[relative] = "symlink"
-        elif path.is_file():
-            files[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
-    return files
+    entries = {".": _entry(directory)}
+    if directory.is_dir() and not directory.is_symlink():
+        for path in sorted(directory.rglob("*")):
+            entries[path.relative_to(directory).as_posix()] = _entry(path)
+    return entries
+
+
+def _entry(path: pathlib.Path) -> str:
+    """One path's type, mode bits, and content digest or link target."""
+
+    status = path.lstat()
+    if stat.S_ISLNK(status.st_mode):
+        return f"symlink {os.readlink(path)}"
+    mode = f"{stat.S_IMODE(status.st_mode):o}"
+    if stat.S_ISDIR(status.st_mode):
+        return f"dir {mode}"
+    if stat.S_ISREG(status.st_mode):
+        return f"file {mode} {hashlib.sha256(path.read_bytes()).hexdigest()}"
+    return f"other {stat.S_IFMT(status.st_mode):o} {mode}"
 
 
 def transform(candidate: dict[str, Any], claimed: str, target: str, today: str) -> dict[str, bytes]:
@@ -538,7 +548,7 @@ def install(destination: pathlib.Path, files: dict[str, bytes]) -> None:
     stage = staging(destination)
     stage.mkdir(parents=True, exist_ok=True)
     _stage(stage, files)
-    _plan(stage, {name: hashlib.sha256(body).hexdigest() for name, body in files.items()})
+    _plan(stage, installed_digests(stage / "new"))
     if not _present(destination):
         (stage / "absent").touch()
     _swap_out(destination, stage)
