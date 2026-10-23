@@ -3908,6 +3908,15 @@ class CancelEnded(SharedQueue):
         self.assertEqual(sd_lane.cancel(self.repo, 1, self.environ)["status"], "cancelled")
         self.assertEqual(self.landing(), [])
 
+    def test_a_failed_entry_under_a_cancelled_retry_is_cancelled(self) -> None:
+        """A retry cancelled while pending sits above the failure; Landing skips it and shows the failure."""
+        self.ended("failed", "cancelled")
+        self.assertEqual(self.landing(), [1])
+        cancelled = sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertIn("it was failed: failed 0", cancelled["reason"])
+        self.assertEqual([row["status"] for row in self.entries()], ["cancelled", "cancelled"])
+        self.assertEqual(self.landing(), [])
+
     def test_a_failed_entry_before_a_merge_or_a_prepared_one_stays(self) -> None:
         """History before the item's newest merged or prepared entry is not rewritten; prepared keeps its proof."""
         self.ended("failed", "merged", "skipped")

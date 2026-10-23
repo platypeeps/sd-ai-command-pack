@@ -919,14 +919,15 @@ def stale_prepared(entries: list[dict[str, Any]], item: int) -> list[dict[str, A
 def stale_ended(entries: list[dict[str, Any]], item: int, order: dict[str, int]) -> list[dict[str, Any]]:
     """`item`'s failed and skipped entries newer than its newest merged or prepared one, newest first (pack sd:5838).
 
-    Only when its newest entry by `order` (`enqueue_order`) is failed or
-    skipped and none is pending or running. Landing shows an item's newest
-    entry that is not cancelled, so an older failed one would take the
-    place of the one cancelled; one before a merge or a prepared entry is
+    Only when its newest entry by `order` (`enqueue_order`) that is not
+    cancelled is failed or skipped, and none is pending or running.
+    Landing reads the same newest entry: it skips cancelled ones, such as
+    a retry cancelled while pending, so an older failed one would take the
+    place of the one cancelled. One before a merge or a prepared entry is
     history and stays.
     """
-    mine = sorted((row for row in entries if row.get("item") == item), key=lambda row: order.get(row["id"], 0),
-                  reverse=True)
+    mine = sorted((row for row in entries if row.get("item") == item and row.get("status") != "cancelled"),
+                  key=lambda row: order.get(row["id"], 0), reverse=True)
     if (not mine or mine[0].get("status") not in ("failed", "skipped")
             or any(row.get("status") in ("pending", "running") for row in mine)):
         return []
@@ -934,8 +935,7 @@ def stale_ended(entries: list[dict[str, Any]], item: int, order: dict[str, int])
     for row in mine:
         if row.get("status") in ("merged", "prepared"):
             break
-        if row.get("status") != "cancelled":
-            ended.append(row)
+        ended.append(row)
     return ended
 
 
