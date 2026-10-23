@@ -3853,14 +3853,87 @@ class CancelMerged(SharedQueue):
         sd_lane.enqueue_entry(self.committed("topic-2", "work")[0], 2, "two", self.body, self.environ, claim="deliver")
         self.assertEqual(sd_lane.cancel(self.repo, 2, self.environ)["status"], "cancelled")
 
-    def test_a_failed_entry_of_a_merged_item_keeps_its_refusal(self) -> None:
-        """Only a prepared entry is cleared; a failed one keeps the refusal it had."""
-        head = self.prepared()
-        sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed"))
-        self.merged_receipt("topic-1", 1, head)
+
+
+class CancelEnded(SharedQueue):
+    """pack sd:5838. `lane cancel` clears an item's newest failed or skipped entries, so Landing drops the item."""
+
+    def ended(self, *statuses: str) -> None:
+        """Item 1 enqueued once per status, each entry ended at its status before the next enqueue."""
+        tree, _ = self.committed("topic-1", "work")
+        for index, status in enumerate(statuses):
+            sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+            sd_lane.update(self.store(), lambda rows, status=status, index=index: rows[-1].update(
+                status=status, reason=f"{status} {index}", finished_at="2026-10-22T00:00:00Z"))
+
+    def landing(self) -> list[int]:
+        import sd_db
+        from sd_db import today
+        connection = sd_db.connect(home=self.tmp, write=False)
+        try:
+            return [entry["id"] for entry in today.landing(connection)["entries"]]
+        finally:
+            connection.close()
+
+    def test_a_failed_entry_is_cancelled_and_leaves_landing(self) -> None:
+        """Every failed entry since the item's last merge goes, else the older one would show in Landing."""
+        self.ended("failed", "failed")
+        self.assertEqual(self.landing(), [1])
+        cancelled = sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual((cancelled["status"], [row["status"] for row in self.entries()]),
+                         ("cancelled", ["cancelled", "cancelled"]))
+        self.assertIn(sd_lane.this_host(), cancelled["reason"])
+        self.assertIn("it was failed: failed 1", cancelled["reason"])  # the failure stays readable
+        self.assertEqual(self.landing(), [])
+
+    def test_a_fault_between_two_cancelled_rows_lands_neither(self) -> None:
+        """Steps: the rows are one hub transaction; a fault after the first leaves both failed, and a rerun ends it."""
+        self.ended("failed", "failed")
+        real, written = sd_lane.store, []
+
+        def store(connection: Any, repository: str, entry: dict) -> None:
+            if written:
+                raise sqlite3.OperationalError("the hub went away")
+            written.append(entry["id"])
+            real(connection, repository, entry)
+        with mock.patch.object(sd_lane, "store", store), self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual((refused.exception.code, len(written), [row["status"] for row in self.entries()]),
+                         (sd_lane.HUB_UNAVAILABLE, 1, ["failed", "failed"]))
+        sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(self.landing(), [])
+
+    def test_a_skipped_entry_is_cancelled(self) -> None:
+        self.ended("skipped")
+        self.assertEqual(sd_lane.cancel(self.repo, 1, self.environ)["status"], "cancelled")
+        self.assertEqual(self.landing(), [])
+
+    def test_a_failed_entry_before_a_merge_or_a_prepared_one_stays(self) -> None:
+        """History before the item's newest merged or prepared entry is not rewritten; prepared keeps its proof."""
+        self.ended("failed", "merged", "skipped")
+        sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual([row["status"] for row in self.entries()], ["failed", "merged", "cancelled"])
+        self.assertEqual(self.landing(), [])
+
+    def test_a_failed_entry_after_a_prepared_one_is_cancelled_alone(self) -> None:
+        self.ended("prepared", "failed")
+        sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared", "cancelled"])
+
+    def test_an_item_with_only_merged_or_cancelled_entries_is_refused(self) -> None:
+        self.ended("merged", "cancelled")
+        before = self.rows()
         with self.assertRaisesRegex(sd_lane.LaneError, "no pending entry"):
             sd_lane.cancel(self.repo, 1, self.environ)
-        self.assertEqual(self.entries()[0]["status"], "failed")
+        self.assertEqual(self.rows(), before)
+
+    def test_a_bound_cancel_of_a_failed_entry_is_refused(self) -> None:
+        """`--expected-claim` names a running claim; a failed entry has none, so it refuses as before (sd:3330)."""
+        self.ended("failed")
+        before = self.rows()
+        with self.assertRaises(sd_lane.LaneError) as stale:
+            sd_lane.cancel(self.repo, 1, self.environ, expected_claim="seen:prepare")
+        self.assertEqual((stale.exception.code, self.rows()), (sd_lane.STALE_CLAIM, before))
 
 
 class Importing(SharedQueue):
