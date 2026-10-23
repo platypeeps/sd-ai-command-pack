@@ -8,7 +8,6 @@ import getpass
 import json
 import os
 import re
-import signal
 import subprocess
 import sys
 import tempfile
@@ -77,7 +76,8 @@ def _render(brief: dict) -> str:
 def _codex(root: str, prompt: str, *, model: str | None, timeout: int) -> str:
     """Run codex read-only in `root` with the prompt on stdin; return its final message.
 
-    codex runs in a session of its own, so a timeout stops the sandbox and the
+    codex runs in a group of its own (`sd_lib.run_group`), so a timeout or a
+    SIGTERM, even one during the spawn (sd:5801), stops the sandbox and the
     reviewer under the launcher, not only the launcher.
     """
     with tempfile.TemporaryDirectory(prefix="sd-writing-adversarial-") as scratch:
@@ -85,23 +85,15 @@ def _codex(root: str, prompt: str, *, model: str | None, timeout: int) -> str:
         command = ["codex", "exec", *(["-m", model] if model else []), "-s", "read-only", "-C", root,
                    "-o", str(out), "-"]
         try:
-            process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE, text=True, encoding="utf-8", start_new_session=True)
+            ran = sd_lib.run_group(command, cwd=Path.cwd(), env=dict(os.environ), timeout=timeout,
+                                   input_text=prompt)
+        except sd_lib.GroupTimeout:
+            raise WorkRefusal(f"codex exceeded --timeout {timeout}s; rerun or raise the limit") from None
         except OSError as error:
             raise WorkRefusal(f"cannot run codex ({error}); report the adversarial gate as skipped, never as passed") from None
-        try:
-            _, error_text = process.communicate(prompt, timeout=timeout)
-        except subprocess.TimeoutExpired:
-            for stop in (signal.SIGTERM, signal.SIGKILL):
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(process.pid, stop)
-                with contextlib.suppress(subprocess.TimeoutExpired):
-                    process.communicate(timeout=2)
-                    break
-            raise WorkRefusal(f"codex exceeded --timeout {timeout}s; rerun or raise the limit") from None
-        if process.returncode:
-            sys.stderr.write(error_text[-2000:])
-            raise WorkRefusal(f"codex exited {process.returncode}")
+        if ran.returncode:
+            sys.stderr.write(ran.stderr[-2000:])
+            raise WorkRefusal(f"codex exited {ran.returncode}")
         report = out.read_text(encoding="utf-8") if out.is_file() else ""
         if not report.strip():
             raise WorkRefusal("codex produced no final message; nothing written")

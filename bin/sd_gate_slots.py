@@ -810,22 +810,30 @@ def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int,
         return RUN_NO_SLOT
     forwarded = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
     previous = {}
+    child = None
+    held: list[int] = []
+
+    def forward(signum: int, _frame: object) -> None:
+        if child is None:
+            # Still inside `Popen`, whose group may already run: send it once `child` is known (sd:5801).
+            held.append(signum)
+            return
+        try:
+            os.killpg(child.pid, signum)
+        except (ProcessLookupError, PermissionError):
+            # A group that already exited: macOS answers EPERM, not only ESRCH (sd:2402).
+            pass
+
     try:
+        for signum in forwarded:
+            previous[signum] = signal.signal(signum, forward)
         try:
             child = subprocess.Popen(list(command), env=holder_environment(environ, slots), process_group=0)
         except OSError as error:
             stream.write(f"error: cannot run {command[0]}: {error}\n")
             return RUN_NOT_FOUND
-
-        def forward(signum: int, _frame: object) -> None:
-            try:
-                os.killpg(child.pid, signum)
-            except (ProcessLookupError, PermissionError):
-                # A group that already exited: macOS answers EPERM, not only ESRCH (sd:2402).
-                pass
-
-        for signum in forwarded:
-            previous[signum] = signal.signal(signum, forward)
+        for signum in held:
+            forward(signum, None)
         code = child.wait()
     finally:
         for signum, handler in previous.items():
