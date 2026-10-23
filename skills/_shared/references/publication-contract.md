@@ -528,7 +528,10 @@ Draining is six steps per request, and the order matters:
    `source`, which may have moved on since -- a drain that reads the path
    publishes what nobody queued and acknowledges a fingerprint of something
    else. `source` and `markdown` say where the text came from and where the
-   vault copy sits.
+   vault copy sits. The render puts each soft-wrapped paragraph and list
+   item of `content` on one line, since a Notion write turns a single
+   newline into a `<br />` (sd:5872); write the lines as they stand and
+   do not re-wrap them.
 
    **The pointer line links `source_url`, verbatim.** Where it is `null` or
    absent, the pointer names the `source` path. Never compose a GitHub URL

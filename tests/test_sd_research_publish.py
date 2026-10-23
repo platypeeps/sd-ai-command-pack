@@ -2097,6 +2097,58 @@ class MutableSourceTests(ReceiptFixture):
             request["fingerprint"], "the fingerprint ignores the content")
 
 
+class SoftWrapTests(ReceiptFixture):
+    """sd:5872: the request's `content` holds each paragraph on one line.
+
+    A Notion write keeps a single newline as a `<br />`, so a source
+    hard-wrapped at 100 columns arrived as broken lines (aaif-sources,
+    2026-10-23). Markdown reads that newline as a space, so joining the
+    lines changes nothing a Markdown reader sees.
+    """
+
+    NAME = "my-research.a.notion.json"
+
+    def joined(self, text: str) -> str:
+        return PUBLISH.soft_wraps_joined(text)
+
+    def test_the_queued_content_has_its_paragraphs_joined(self) -> None:
+        self.source("# A\n\nOne line\nwraps here\nand here.\n\nNext paragraph.\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        request = json.loads((PUBLISH.QUEUE / self.NAME).read_text())
+        self.assertEqual(request["content"],
+                         "# A\n\nOne line wraps here and here.\n\nNext paragraph.\n")
+
+    def test_a_wrapped_list_item_stays_one_item(self) -> None:
+        self.assertEqual(self.joined("- one\n  wraps\n- two\n  1. nested\n     too\n"),
+                         "- one wraps\n- two\n  1. nested too\n")
+
+    def test_block_structure_is_left_as_it_is(self) -> None:
+        text = ("---\ntitle: x\ndate: y\n---\n\n"
+                "## Heading\nUnder it\n\n"
+                "Setext\n------\n\n"
+                "> quoted\n> lines\n\n"
+                "| a | b |\n| --- | --- |\n| 1 | 2 |\n\n"
+                "[a]: https://example.test/a\n[b]: https://example.test/b\n\n"
+                "<details>\n<summary>s</summary>\nraw\n</details>\n\n"
+                "    indented\n    code\n\n"
+                "Text\n***\n")
+        self.assertEqual(self.joined(text), text)
+
+    def test_fenced_code_is_left_as_it_is(self) -> None:
+        text = "Prose\n````sh\necho a\n```\necho b\n````\nafter\nmore\n~~~\nx\ny\n~~~\n"
+        self.assertEqual(self.joined(text),
+                         "Prose\n````sh\necho a\n```\necho b\n````\nafter more\n~~~\nx\ny\n~~~\n")
+        self.assertEqual(self.joined("```\nnever\nclosed\n"), "```\nnever\nclosed\n")
+
+    def test_an_explicit_hard_break_is_kept(self) -> None:
+        self.assertEqual(self.joined("two spaces  \nnext\nbackslash\\\nlast\n"),
+                         "two spaces  \nnext backslash\\\nlast\n")
+
+    def test_a_paragraph_ending_the_file_without_a_newline(self) -> None:
+        self.assertEqual(self.joined("a\nb"), "a b")
+        self.assertEqual(self.joined(""), "")
+
+
 class SourceUrlTests(Fixture):
     """A request carries the GitHub URL of its source, read from `origin`.
 

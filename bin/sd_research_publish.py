@@ -1267,6 +1267,82 @@ def source_text(path: Path) -> str:
         return ""
 
 
+#: A fence opener; its closer is the same character, at least as many times.
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+#: A line that is a block of its own: a heading, a quote, a list item, a rule
+#: or setext underline, HTML, or a link or footnote definition. A table row
+#: is any line holding a `|`. None of these joins the line before it.
+BLOCK = re.compile(r"^ {0,3}(#{1,6}(\s|$)|>|<|\[[^\]]+\]:)|^\s*([-*+]|\d{1,9}[.)])(\s|$)")
+LIST_ITEM = re.compile(r"^\s*([-*+]|\d{1,9}[.)])(\s|$)")
+RULE = re.compile(r"^ {0,3}(=+|-+|(\*\s*){3,}|(_\s*){3,}|(-\s*){3,})\s*$")
+#: Raw until the next blank line: HTML, and indented code, which cannot
+#: interrupt a paragraph.
+HTML = re.compile(r"^ {0,3}<")
+CODE = re.compile(r"^(    |\t)")
+#: Two trailing spaces or a backslash: a line break the author asked for.
+HARD_BREAK = re.compile(r"(  |\\)\r?$")
+
+
+def front_matter_end(lines: list[str]) -> int:
+    """How many leading lines are YAML front matter, fences included; 0 for none."""
+    if lines[0].strip() != "---":
+        return 0
+    return next((i + 1 for i in range(1, len(lines)) if lines[i].strip() in ("---", "...")), 0)
+
+
+def verbatim(line: str, fence: re.Pattern[str] | None,
+             raw: bool) -> tuple[re.Pattern[str] | None, bool] | None:
+    """`(fence, raw)` after `line` when it is copied as it stands, else None.
+
+    `fence` is the open fence's closer; `raw` is an HTML or indented code
+    block, which a blank line ends. A fence opener starts a fence.
+    """
+    if fence:
+        return (None if fence.match(line) else fence), False
+    if not line.strip() or raw:
+        return None, raw and bool(line.strip())
+    opener = FENCE.match(line)
+    if not opener:
+        return None
+    mark = opener.group(1)
+    return re.compile(r"^ {0,3}%s{%d,}\s*$" % (re.escape(mark[0]), len(mark))), False
+
+
+def soft_wraps_joined(text: str) -> str:
+    """`text` with each soft-wrapped paragraph or list item on one line.
+
+    Markdown reads a single newline inside a paragraph as a space, but a
+    Notion write keeps it as a `<br />`, so a source wrapped at 100 columns
+    arrived as broken lines (sd:5872). Fenced code, YAML front matter,
+    HTML, indented code, headings, quotes, tables, rules and definitions
+    are kept line for line, as is a hard break. Where a line's kind is in
+    doubt it is kept, which costs a `<br />` and never a changed meaning.
+    """
+    lines = text.split("\n")
+    start = front_matter_end(lines)
+    out = lines[:start]
+    fence: re.Pattern[str] | None = None
+    raw = prose = False
+    for line in lines[start:]:
+        kept = verbatim(line, fence, raw)
+        if kept:
+            out.append(line)
+            fence, raw = kept
+            prose = False
+            continue
+        table = "|" in line
+        block = table or bool(BLOCK.match(line) or RULE.match(line))
+        if prose and not block:
+            out[-1] = out[-1].rstrip() + " " + line.strip()
+        else:
+            out.append(line)
+            raw = bool(HTML.match(line) or (CODE.match(line) and not prose))
+        item = bool(LIST_ITEM.match(line)) and not RULE.match(line)
+        prose = (not raw and not table and (item or not block)
+                 and not HARD_BREAK.search(out[-1]))
+    return "\n".join(out)
+
+
 def load_record(path: Path) -> dict[str, Any]:
     """The object at `path`, or `{}` for anything that is not one.
 
@@ -2038,8 +2114,10 @@ def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, An
         "markdown": str(vault / (out + ".md")) if vault else "",
         # What the drain mirrors, read once here. The three paths
         # above say where it came from and where the copies sit;
-        # none of them is what gets published.
-        "content": cfg["content"] if brief else source_text(repo / src) if src else "",
+        # none of them is what gets published. Joined here, once, for
+        # every destination and so for the fingerprint too (sd:5872).
+        "content": soft_wraps_joined(
+            cfg["content"] if brief else source_text(repo / src) if src else ""),
     }
     request.update(target)
     request.update(designated_item(cfg)[0])

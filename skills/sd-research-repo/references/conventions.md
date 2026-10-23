@@ -602,7 +602,8 @@ under the page `space_id` names and never search by name; with `name`, a lookup
 that finds nothing is a failure to report, not a folder to create. Where it
 names a `subfolder`, the document goes in that page under the container, which
 the drain creates when it is missing. The source for every mirror is the
-request's `content`, the Markdown as it stood when the request was queued:
+request's `content`, the Markdown as it stood when the request was queued,
+each soft-wrapped paragraph joined onto one line (sd:5872):
 never the rendered HTML, and never the file the request's path names, which
 may have changed since. One request file per document per destination, so a
 re-render replaces the pending request rather than queueing a second one; a
