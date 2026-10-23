@@ -1270,12 +1270,41 @@ def source_text(path: Path) -> str:
 #: A fence opener at any indent; its closer is the same character, at least
 #: as many times.
 FENCE = re.compile(r"^\s*(`{3,}|~{3,})")
-#: After its indent, a line that is a block of its own: a heading, a quote,
-#: HTML, a link or footnote definition, or a list item. A table row is any
-#: line holding a `|`, and `RULE` is a rule or setext underline.
-BLOCK = re.compile(r"^(#{1,6}(\s|$)|>|<|\[[^\]]+\]:|([-*+]|\d{1,9}[.)])(\s|$))")
 LIST_ITEM = re.compile(r"^\s*([-*+]|\d{1,9}[.)])(\s+|$)")
 RULE = re.compile(r"^\s*(=+|-+|(\*\s*){3,}|(_\s*){3,}|(-\s*){3,})\s*$")
+
+
+class BlockKind(NamedTuple):
+    """A kind of block, read on the text after a line's indent and list
+    markers, with an example the tests put at every position (sd:5889)."""
+
+    name: str
+    pattern: re.Pattern[str]
+    example: str
+
+
+#: Every block that is its own line, so nothing joins onto it. A list item
+#: is not one: its text is a paragraph that may wrap. Indented code is not
+#: read here, since it depends on the indent the other kinds strip.
+BLOCK_KINDS = (
+    BlockKind("ATX heading", re.compile(r"#{1,6}(\s|$)"), "# Heading"),
+    BlockKind("setext underline", re.compile(r"=+\s*$"), "==="),
+    BlockKind("rule, asterisks", RULE, "* * *"),
+    BlockKind("rule, underscores", RULE, "___"),
+    BlockKind("rule, hyphens", RULE, "---"),
+    BlockKind("quote", re.compile(r">"), "> quoted"),
+    BlockKind("table row", re.compile(r".*\|"), "| a | b |"),
+    BlockKind("link definition", re.compile(r"\[[^\]]+\]:"), "[ref]: https://example.test/"),
+    BlockKind("backtick fence", FENCE, "```python"),
+    BlockKind("tilde fence", FENCE, "~~~"),
+    BlockKind("HTML pre", re.compile(r"<"), "<pre>"),
+    BlockKind("HTML comment", re.compile(r"<"), "<!-- note"),
+    BlockKind("HTML processing instruction", re.compile(r"<"), "<?x"),
+    BlockKind("HTML declaration", re.compile(r"<"), "<!X"),
+    BlockKind("HTML CDATA", re.compile(r"<"), "<![CDATA["),
+    BlockKind("HTML block tag", re.compile(r"<"), "<div>"),
+    BlockKind("HTML other tag", re.compile(r"<"), "<span>"),
+)
 #: Indented code, raw until the next blank line like HTML; it cannot
 #: interrupt a paragraph.
 CODE = re.compile(r"^(    |\t)")
@@ -1353,8 +1382,10 @@ def item_text(line: str) -> str:
 
 
 def starts_block(line: str) -> bool:
-    """Whether `line` is a block of its own, whatever its indent."""
-    return "|" in line or bool(BLOCK.match(line.lstrip()) or RULE.match(line))
+    """Whether `line` opens a block, whatever its indent: one of
+    `BLOCK_KINDS`, or a list item."""
+    body = line.lstrip()
+    return bool(LIST_ITEM.match(line)) or any(kind.pattern.match(body) for kind in BLOCK_KINDS)
 
 
 def wrap_column(line: str) -> int | None:
@@ -1368,7 +1399,10 @@ def wrap_column(line: str) -> int | None:
         return None
     item = LIST_ITEM.match(line)
     if item:
-        return item.end()
+        # The item's text is read as a line start: `- # Heading` takes
+        # no continuation (sd:5889).
+        inner = item_text(line)
+        return None if inner and starts_block(inner) else item.end()
     return None if starts_block(line) else len(line) - len(line.lstrip())
 
 

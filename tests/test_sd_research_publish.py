@@ -2216,6 +2216,23 @@ class SoftWrapTests(ReceiptFixture):
             with self.subTest(case=case):
                 self.assertEqual(self.joined(before), before if after is None else after)
 
+    #: Where a block can start, with the indent its item's text sits at.
+    POSITIONS = (("line start", "", ""), ("after '- '", "- ", "  "),
+                 ("after '1. '", "1. ", "   "), ("nested after '  - '", "  - ", "    "))
+
+    def test_no_block_kind_takes_a_continuation_at_any_position(self) -> None:
+        """Generated from the module's own `BLOCK_KINDS`, so a kind added there
+        is tested at every position. Round 3 of the lead's review found
+        `- # Heading` taking its item's next line (sd:5889)."""
+        kinds = [(kind.name, kind.example) for kind in PUBLISH.BLOCK_KINDS]
+        for kind in PUBLISH.BLOCK_KINDS:
+            self.assertTrue(kind.pattern.match(kind.example), kind.name)
+        for name, example in kinds + [("indented code", "    code")]:
+            for where, marker, indent in self.POSITIONS:
+                text = f"{marker}{example}\n{indent}paragraph\n{indent}wraps\n"
+                with self.subTest(kind=name, where=where):
+                    self.assertEqual(self.joined(text).split("\n")[0], marker + example)
+
 
 class SourceUrlTests(Fixture):
     """A request carries the GitHub URL of its source, read from `origin`.
