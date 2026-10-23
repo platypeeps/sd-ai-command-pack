@@ -832,8 +832,8 @@ def run_gated(command: Sequence[str], environ: Mapping[str, str], *, slots: int,
         except OSError as error:
             stream.write(f"error: cannot run {command[0]}: {error}\n")
             return RUN_NOT_FOUND
-        for signum in held:
-            forward(signum, None)
+        for number in held:
+            forward(number, None)
         code = child.wait()
     finally:
         for signum, handler in previous.items():
