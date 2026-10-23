@@ -422,6 +422,7 @@ The merge lane:
   A hand-run prepare-and-merge chain jumps the queue and leaves no log. Verbs: `enqueue|list|retry|cancel|move|hold|release|run|watch|prune`.
 - **`lane retry <item>` queues a failed, skipped or prepared entry again** at its head; a cancelled one needs `--expected-head`.
 - **`lane cancel <item>` clears a prepared entry merged by hand** (sd:5743), once a `merged` ship receipt of the item holds its head.
+  It also clears the item's newest failed or skipped entries, back to its last merged or prepared one (pack sd:5838): their work landed in another bundle.
 - **Keep one `sd-ship lane watch --item A --item B ...` naming every item the lead has in that lane.**
   Restart it after each enqueue, after an sd outage and after any exit whose output lacks `ok: true`:
   a bare `lane watch` never exits, and a hub build mismatch ends a watch with `ok: false` (`hub_unavailable`).

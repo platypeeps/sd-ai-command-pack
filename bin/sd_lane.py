@@ -10,7 +10,10 @@ database and runs it under one runner lock per repository:
            publish the head, then add a worktree, its item, branch and
            head, a title and the body text to the repository's queue;
   list     print the queue, each body as its size;
-  cancel   mark a pending entry cancelled, or release a stuck running one;
+  cancel   mark a pending entry cancelled, or release a stuck running one,
+           or clear a prepared entry merged by hand (sd:5743) or the
+           failed and skipped entries since the item's last merge
+           (pack sd:5838);
            `--expected-claim <holder token>:<step>` releases only the
            running claim the caller read (sd:3330);
   retry    queue the item's last failed, skipped or prepared entry again, at
@@ -856,16 +859,21 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
     (`check_claim`), in the write's transaction.
 
     With neither, a prepared entry whose work merged outside the lane is
-    cancelled (sd:5743); `merged_by_hand` reads the proof.
+    cancelled (sd:5743); `merged_by_hand` reads the proof. An item whose
+    newest entry failed or was skipped has those entries cancelled
+    (`stale_ended`, pack sd:5838): its work landed in another item's bundle,
+    and Landing showed it for ever.
     """
     if expected_claim is not None and not all(expected_claim.partition(":")[::2]):
         raise LaneError(f"name the claim as <holder token>:<step>, as `sd-ship lane list` prints them, "
                         f"not {expected_claim!r}")
     queue = queue_for(root, environ)
     receipts: list[dict[str, Any]] = []
+    order: dict[str, int] = {}
 
-    def read_receipts(connection: Any) -> None:
+    def read_first(connection: Any) -> None:
         import sd_ship_squash  # noqa: PLC0415
+        order.update(enqueue_order(connection, queue.repository))
         if stale_prepared(stored(connection, queue.repository), item):
             receipts[:] = [receipt for receipt in sd_ship_squash.merged_receipts(connection, queue.repository)
                            if receipt.get("item") == item and receipt.get("phase") == "merged"]
@@ -881,6 +889,13 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
                                 "it is not stuck, so it is not released", code="holder_alive")
             reclaim(running, released=True)
             return running
+        ended = stale_ended(entries, item, order)
+        for row in ended:
+            row.update(status="cancelled", finished_at=stamp_now(),
+                       reason=f"cancelled by the operator on {this_host()}; it was {row.get('status')}: "
+                              f"{row.get('reason') or 'no reason kept'}")
+        if ended:
+            return ended[0]
         prepared = stale_prepared(entries, item)
         if prepared:
             for row in prepared:
@@ -891,7 +906,7 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
         row = pending_entry(entries, item)
         row.update(status="cancelled", finished_at=stamp_now(), reason=f"cancelled by the operator on {this_host()}")
         return row
-    return update(queue, mark, read_receipts)
+    return update(queue, mark, read_first)
 
 
 def stale_prepared(entries: list[dict[str, Any]], item: int) -> list[dict[str, Any]]:
@@ -899,6 +914,29 @@ def stale_prepared(entries: list[dict[str, Any]], item: int) -> list[dict[str, A
     if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in entries):
         return []
     return [row for row in entries if row.get("item") == item and row.get("status") == "prepared"]
+
+
+def stale_ended(entries: list[dict[str, Any]], item: int, order: dict[str, int]) -> list[dict[str, Any]]:
+    """`item`'s failed and skipped entries newer than its newest merged or prepared one, newest first (pack sd:5838).
+
+    Only when its newest entry by `order` (`enqueue_order`) that is not
+    cancelled is failed or skipped, and none is pending or running.
+    Landing reads the same newest entry: it skips cancelled ones, such as
+    a retry cancelled while pending, so an older failed one would take the
+    place of the one cancelled. One before a merge or a prepared entry is
+    history and stays.
+    """
+    mine = sorted((row for row in entries if row.get("item") == item and row.get("status") != "cancelled"),
+                  key=lambda row: order.get(row["id"], 0), reverse=True)
+    if (not mine or mine[0].get("status") not in ("failed", "skipped")
+            or any(row.get("status") in ("pending", "running") for row in mine)):
+        return []
+    ended = []
+    for row in mine:
+        if row.get("status") in ("merged", "prepared"):
+            break
+        ended.append(row)
+    return ended
 
 
 def merged_by_hand(root: pathlib.Path, entry: dict[str, Any], receipts: list[dict[str, Any]]) -> str:
@@ -3327,7 +3365,8 @@ def add_lane_verbs(commands: Any) -> None:
                                                  f"and refuses {HEAD_MOVED} when its branch moved and "
                                                  f"{ALREADY_MERGED} at a merged head (sd:3389)")
     canceller = verbs.add_parser("cancel", help="mark a pending entry cancelled, release a stuck running one, "
-                                                    "or clear a prepared one a ship receipt shows merged")
+                                                    "clear a prepared one a ship receipt shows merged, or clear "
+                                                    "the newest failed or skipped ones")
     canceller.add_argument("item", type=sd_notes.item_id, help=sd_notes.ITEM_HELP)
     canceller.add_argument("--expected-claim", metavar="TOKEN:STEP",
                            help=f"release only the running claim `lane list` printed, its holder.token and step; "
