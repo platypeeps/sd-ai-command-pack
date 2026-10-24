@@ -2291,10 +2291,10 @@ class CitedCloses(SharedQueue):
     """sd:5999, operator ruling 2026-10-24 (grill Q20): the merge closes every item a merged commit delivers.
 
     Enqueue adds to the closing set each open item of this repository that
-    a branch commit's subject names, or that a `Lane review fix, <repo>
-    sd:N` line of the body or a commit names. Only those forms: prose that
-    names an item closes nothing. System sd:5939 shipped in #505 and stayed
-    in_progress.
+    a branch commit's `Closes: sd:N` trailer names, or that a `Lane review
+    fix, <repo> sd:N` line of the body or a commit names. Only those forms
+    (lane review round 5 ruling): a subject or prose closes nothing. System
+    sd:5939 shipped in #505 and stayed in_progress.
     """
 
     checks_item = True
@@ -2326,8 +2326,8 @@ class CitedCloses(SharedQueue):
         body = (f"## Summary\n\nKeeps the sd:{c} guard.\n\nLane review fix, pack sd:{b}: the read is unknown.\n"
                 f"```\nLane review fix, pack sd:{d}: an example\n```\n<!--\nLane review fix, pack sd:{d}\n-->\n"
                 f"Refs: sd:{f}\n")
-        entry = self.enqueue(body, f"fix(lane): the slice (pack sd:{a})",
-                             f"fix: names a done one (sd:{self.done}), a foreign one (sd:{self.foreign}) and sd:{f}",
+        entry = self.enqueue(body, f"fix(lane): the slice (pack sd:{d})\n\nCloses: sd:{a}",
+                             f"fix: a done one and a foreign one\n\nCloses: sd:{self.done}\nCloses: sd:{self.foreign}",
                              f"fix: a review fix\n\nLane review fix, pack sd:{e}: one more.\nAlso keeps sd:{c}.")
         self.assertEqual(entry["closes"], [a, b, e])
         self.calls.clear()
@@ -2340,14 +2340,14 @@ class CitedCloses(SharedQueue):
         """Lane review of sd:5999, operator ruling: a reader sees every close by citation, so a wrong one is one reopen."""
         a, b, c, *_ = self.open
         entry = self.enqueue(f"## Summary\n\nWords.\n\nLane review fix, pack sd:{b}: x.\n\nRefs: sd:{c}\n",
-                             f"fix(lane): the slice (pack sd:{a})", f"fix: needs sd:{c} first")
+                             f"fix(lane): the slice\n\nCloses: sd:{a}", f"fix: first part (sd:{c})")
         sha = self.entries()[-1]["expected_head"]
         first = git(self.repo, "rev-parse", f"{sha}~1")
         self.assertEqual(entry["closes"], [a, b])
-        self.assertEqual(entry["cited"], [{"item": a, "source": f"subject of commit {first[:12]}"},
+        self.assertEqual(entry["cited"], [{"item": a, "source": f"Closes trailer of commit {first[:12]}"},
                                           {"item": b, "source": "review fix line in the body"}])
         self.assertEqual(entry["body"], f"## Summary\n\nWords.\n\nLane review fix, pack sd:{b}: x.\n\n"
-                                        f"## Closed by citation\n\n- pack sd:{a}: subject of commit {first[:12]}\n"
+                                        f"## Closed by citation\n\n- pack sd:{a}: Closes trailer of commit {first[:12]}\n"
                                         f"- pack sd:{b}: review fix line in the body\n\nRefs: sd:{c}\n")
         bodies: list[str] = []
 
@@ -2360,9 +2360,15 @@ class CitedCloses(SharedQueue):
         self.assertEqual(bodies, [entry["body"]])
         cited = {item: body for item, body, _ in self.notes if item in (a, b)}
         self.assertEqual(sorted(cited), [a, b])
-        self.assertIn(f"Closed by citation at merge merged-{self.own}: the subject of commit {first[:12]} cites it",
+        self.assertIn(f"Closed by citation at merge merged-{self.own}: the Closes trailer of commit {first[:12]} cites it",
                       cited[a])
         self.assertIn(f"sd task status {b} in_progress", cited[b])
+
+    def test_only_a_closes_trailer_closes_and_a_subject_does_not(self) -> None:
+        """Lane review of sd:5999, round 5 ruling: no word list catches every way to say partial."""
+        a, b, *_ = self.open
+        entry = self.enqueue("Words.\n", f"fix: first part (sd:{a})", f"fix: the rest\n\nCloses: sd:{b}")
+        self.assertEqual(entry["closes"], [b])
 
     def test_a_commit_the_branch_reverts_closes_nothing(self) -> None:
         """Lane review of sd:5999, round 2: `git revert` undoes the work its commit cites."""
@@ -2370,7 +2376,7 @@ class CitedCloses(SharedQueue):
         tree, _ = self.committed("topic-revert")
         (tree / "work.txt").write_text("work\n", encoding="utf-8")
         git(tree, "add", "work.txt")
-        git(tree, "commit", "-q", "-m", f"fix: implement (pack sd:{a})\n\nLane review fix, pack sd:{b}: y.")
+        git(tree, "commit", "-q", "-m", f"fix: implement\n\nLane review fix, pack sd:{b}: y.\n\nCloses: sd:{a}")
         git(tree, "revert", "--no-edit", "HEAD")
         self.body.write_text("Words.\n", encoding="utf-8")
         entry = sd_lane.enqueue_entry(tree, self.own, "fix: a slice", self.body, self.environ, claim="deliver")
@@ -2383,9 +2389,9 @@ class CitedCloses(SharedQueue):
         git(tree, "switch", "-q", "-c", "side")
         (tree / "side.txt").write_text("side\n", encoding="utf-8")
         git(tree, "add", "side.txt")
-        git(tree, "commit", "-q", "-m", f"fix: implement (pack sd:{a})\n\nLane review fix, pack sd:{b}: y.")
+        git(tree, "commit", "-q", "-m", f"fix: implement\n\nLane review fix, pack sd:{b}: y.\n\nCloses: sd:{a}")
         git(tree, "switch", "-q", "topic-merge")
-        git(tree, "commit", "-q", "--allow-empty", "-m", f"fix: mainline (pack sd:{c})")
+        git(tree, "commit", "-q", "--allow-empty", "-m", f"fix: mainline\n\nCloses: sd:{c}")
         git(tree, "merge", "-q", "--no-ff", "--no-edit", "side")
         git(tree, "revert", "--no-edit", "-m", "1", "HEAD")
         self.body.write_text("Words.\n", encoding="utf-8")
@@ -2399,21 +2405,21 @@ class CitedCloses(SharedQueue):
         for number in (a, b, c):
             (tree / f"{number}.txt").write_text("work\n", encoding="utf-8")
             git(tree, "add", f"{number}.txt")
-            git(tree, "commit", "-q", "-m", f"fix: implement (pack sd:{number})")
+            git(tree, "commit", "-q", "-m", f"fix: implement\n\nCloses: sd:{number}")
         git(tree, "revert", "--no-edit", "HEAD~2..HEAD")
         self.body.write_text("Words.\n", encoding="utf-8")
         entry = sd_lane.enqueue_entry(tree, self.own, "fix: a slice", self.body, self.environ, claim="deliver")
         self.assertEqual(entry["closes"], [a])
 
     def test_an_associate_only_claim_closes_nothing_it_cites(self) -> None:
-        entry = self.enqueue("Words.\n", f"fix: the slice (sd:{self.open[0]})", claim="associate-only")
+        entry = self.enqueue("Words.\n", f"fix: the slice\n\nCloses: sd:{self.open[0]}", claim="associate-only")
         self.assertEqual(entry["closes"], [])
 
     def test_a_failed_hub_read_queues_and_pushes_nothing(self) -> None:
         """Failures: the cited items' read did not answer; that is no "nothing to close"."""
         unanswered = mock.patch.object(sd_lane, "cited_closes", side_effect=sqlite3.OperationalError("disk I/O error"))
         with unanswered, self.assertRaises(sd_lane.LaneError) as refused:
-            self.enqueue("Words.\n", f"fix: the slice (sd:{self.open[0]})")
+            self.enqueue("Words.\n", f"fix: the slice\n\nCloses: sd:{self.open[0]}")
         self.assertEqual((refused.exception.code, self.rows(), "push" in self.git_verbs),
                          (sd_lane.HUB_UNAVAILABLE, [], False))
 

@@ -224,31 +224,27 @@ class LineLengthTests(unittest.TestCase):
 
 
 class CitedIdTests(unittest.TestCase):
-    """sd:5999: a commit subject or a `Lane review fix, <repo> sd:N` line cites an item; prose does not."""
+    """sd:5999: a `Closes: sd:N` trailer or a `Lane review fix, <repo> sd:N` line cites an item; nothing else does."""
 
-    def test_only_subjects_and_review_fix_lines_cite(self) -> None:
-        commits = [("a" * 40, "fix: one (pack sd:2)\r\n\nKeeps the sd:3 guard.\r\nLane review fix, pack sd:4: x\r\n"),
-                   ("b" * 40, "chore: none\n\n  Lane review fix, pack sd:5: indented\n")]
+    def test_only_closes_trailers_and_review_fix_lines_cite(self) -> None:
+        commits = [("a" * 40, "fix: one (pack sd:2)\r\n\nKeeps the sd:3 guard.\r\nLane review fix, pack sd:4: x\r\n"
+                              "\r\nCloses: sd:9\r\nRefs: sd:3\r\n"),
+                   ("b" * 40, "chore: none\n\n  Lane review fix, pack sd:5: indented\nCloses: sd:10\n\nWords."),
+                   ("c" * 40, "Closes: sd:11")]
         body = "Lane review fix, system sd:6: y\nSee Lane review fix, pack sd:7.\n~~~\nLane review fix, pack sd:8\n~~~\n"
-        self.assertEqual(sd_ship_body.cited_ids(body, commits), (2, 6, 4))
+        self.assertEqual(sd_ship_body.cited_ids(body, commits), (9, 6, 4))
 
-    def test_a_subject_of_partial_work_a_dependency_or_a_revert_cites_nothing(self) -> None:
-        """Lane review of sd:5999, operator ruling: such a subject does not deliver the item it names."""
-        for subject in ("revert: fix one (sd:2)", 'Revert "fix: one (sd:2)"', "feat: part of sd:2",
-                        "fix: Part Of sd:2", "fix: partial sd:2", "fix: partially lands sd:2",
-                        "chore: needs sd:2 first", "fix: NEEDS sd:2", "fix: after sd:2 lands"):
-            with self.subTest(subject=subject):
-                self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, f"{subject}\n\nBody.\n")]), ())
-        for subject in ("fix: one (pack sd:2)", "fix: the aftermath (sd:2)", "feat: departial (sd:2)"):
-            with self.subTest(subject=subject):
-                self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, subject)]), (2,))
-        self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, "revert: x\n\nLane review fix, pack sd:3: y")]),
-                         (3,))
+    def test_a_subject_never_cites_and_a_closes_trailer_does(self) -> None:
+        """Lane review of sd:5999, round 5 ruling: no word list catches every way to say partial."""
+        self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, "fix: first part (sd:42)")]), ())
+        self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, "fix: first part (sd:42)\n\nWords.\n")]), ())
+        self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, "fix: the rest\n\nWords.\n\nCloses: sd:42\n")]),
+                         (42,))
 
     def test_a_commit_the_branch_reverts_cites_nothing(self) -> None:
         """Lane review of sd:5999, round 2: the revert undoes the work, so its commit closes nothing."""
         done, undone, again = "a" * 40, "b" * 40, "c" * 40
-        work = (done, "fix: implement (sd:2)\n\nLane review fix, pack sd:3: y.\n")
+        work = (done, "fix: implement\n\nLane review fix, pack sd:3: y.\n\nCloses: sd:2\n")
         revert = (undone, f'Revert "fix: implement (sd:2)"\n\nThis reverts commit {done}.\n')
         self.assertEqual(sd_ship_body.cited_ids("", [revert, work]), ())
         # Commits come newest first. A revert of the revert restores the work, and its citation.
@@ -262,8 +258,9 @@ class CitedIdTests(unittest.TestCase):
         """Lane review of sd:5999, round 3: `git revert -m 1 <merge>` undoes each commit the merge brought in."""
         base, side, main, merge, undo, again = (c * 40 for c in "abcdef")
         commits = [(undo, f'Revert "Merge"\n\nThis reverts commit {merge}, reversing\nchanges made to {main}.\n'),
-                   (merge, "Merge branch 'side'"), (main, "fix: mainline (sd:4)"),
-                   (side, "fix: implement (sd:2)\n\nLane review fix, pack sd:3: y.\n"), (base, "fix: base (sd:5)")]
+                   (merge, "Merge branch 'side'"), (main, "fix: mainline\n\nCloses: sd:4"),
+                   (side, "fix: implement\n\nLane review fix, pack sd:3: y.\n\nCloses: sd:2\n"),
+                   (base, "fix: base\n\nCloses: sd:5")]
         parents = {undo: (merge,), merge: (main, side), main: (base,), side: (base,), base: ()}
         self.assertEqual(sd_ship_body.cited_ids("", commits, parents), (4, 5))
         # A revert of the merge's revert brings the work back, and its citations.

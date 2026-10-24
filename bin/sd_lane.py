@@ -792,7 +792,7 @@ def cited_closes(connection: Any, item: int, body: str, commits: list[tuple[str,
                  ) -> tuple[list[dict[str, Any]], str]:
     """The open items of `item`'s repository its commits or body cite, beyond `closes`, and that repository's name (sd:5999).
 
-    Each `{"item", "source"}`: a branch commit's subject, or a `Lane review
+    Each `{"item", "source"}`: a branch commit's `Closes: sd:N` trailer, or a `Lane review
     fix, <repo> sd:N` line (`sd_ship_body.cited_sources`). The merge closes
     each as it closes a later `--item`, and the lane notes each
     (`note_cited`). An item with no repository row adds nothing:

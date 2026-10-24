@@ -268,8 +268,8 @@ def referenced_ids(body: str) -> set[int]:
 _REVIEW_FIX = re.compile(r"^Lane review fix, [A-Za-z0-9_.-]+ sd:([0-9]+)\b")
 
 
-#: A subject that does not deliver what it names: a revert, partial work or a dependency (sd:5999 lane review).
-_NOT_DELIVERY = re.compile(r"^revert|\b(?:part of\b|partial|needs\b|after\b)", re.IGNORECASE)
+#: A `Closes: sd:<n>` line, as `sd_lib._closes` reads it in a commit's trailer block.
+_CLOSES = re.compile(rf"^{re.escape(sd_lib.CLOSES_TRAILER)} sd:([0-9]+)[ \t]*$")
 
 
 #: The line `git revert` writes into a revert's message, with the mainline parent when it reverts a merge.
@@ -313,22 +313,22 @@ def kept_commits(commits, parents=None) -> list:
 def cited_sources(body: str, commits, parents=None) -> dict[int, str]:
     """The ids a merge delivers by citation (operator ruling 2026-10-24, sd:5999), each with what cites it first.
 
-    Each `sd:<n>` the subject of a branch commit names, and each `Lane
-    review fix, <repo> sd:<n>` line of `body` or of a commit message.
-    `commits` is each `(sha, message)` the branch adds. Only those forms:
-    prose such as "keeps the sd:<n> guard" cites nothing, and a line a
-    fenced code block or an HTML comment holds is an example. A subject
-    that starts "revert", or says "part of", "partial", "needs" or "after",
-    cites nothing: it names work it does not deliver whole. A commit a
-    later branch commit reverts cites nothing either (`kept_commits`).
+    Each `Closes: sd:<n>` line in the trailer block, the last paragraph,
+    of a branch commit, and each `Lane review fix, <repo> sd:<n>` line of
+    `body` or of a commit message. `commits` is each `(sha, message)` the
+    branch adds. Only those forms (lane review, round 5 ruling): a subject
+    or prose such as "first part of sd:<n>" cites nothing, since no word
+    list catches every way to say partial, and a line a fenced code block
+    or an HTML comment holds is an example. A commit a later branch commit
+    reverts cites nothing either (`kept_commits`).
     """
     commits = kept_commits(commits, parents)
     found: dict[int, str] = {}
     for sha, message in commits:
-        subject = message.split("\n", 1)[0]
-        if not _NOT_DELIVERY.search(subject):
-            for number in title_ids(subject):
-                found.setdefault(number, f"subject of commit {sha[:12]}")
+        paragraphs = message.replace("\r\n", "\n").rstrip().split("\n\n")
+        for line in paragraphs[-1].splitlines() if len(paragraphs) > 1 else ():
+            if match := _CLOSES.match(line):
+                found.setdefault(int(match[1]), f"Closes trailer of commit {sha[:12]}")
     for text, where in ((body, "the body"), *((message, f"commit {sha[:12]}") for sha, message in commits)):
         quoted = quoted_lines(text)
         for number, line in enumerate(text.split("\n"), start=1):
