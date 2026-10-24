@@ -377,6 +377,7 @@ Workers:
 - **No worker fails silently.** Every worker gets a budget and reports the moment its last step ends, pass or fail.
   No report by the deadline is a failure, and so is a worker gone idle without one. Do not poll; do not assume success.
   Cancel a silent writer and confirm it stopped before starting a replacement; if you cannot confirm, escalate.
+  Then write one `sd task note` on each of its items: what stopped, its head and what is left (pack sd:5963).
   Only a read-only worker may be replaced on the deadline alone.
 - **Fan out only when the targets are independent, share no mutable state, and are cheap to verify.**
 - **Batch a repository's ready items into one pull request by default**, one commit per row; rows that change the same files always group.
