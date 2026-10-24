@@ -20,8 +20,10 @@ database and runs it under one runner lock per repository:
   retry    queue the item's last failed, skipped or prepared entry again, at
            its head with its texts; `--manual` grants the merge (sd:3254);
            `--expected-head` refuses, in the write's transaction, a last
-           entry at another head (sd:3268); a cancelled one needs it, and
-           refuses a moved branch, a newer entry or a merged head (sd:3389);
+           entry at another head (sd:3268); each refuses a head its
+           worktree here or `origin/<branch>` moved past, as enqueue does
+           (sd:6057); a cancelled one needs `--expected-head`, and refuses
+           any move of the branch, a newer entry or a merged head (sd:3389);
   move     put a pending entry up, down, on top or at a position (sd:2584);
   hold     keep a pending entry in place but skip it; `release` ends that;
            these four take `--expected-revision`, the `revision` `list`
@@ -762,7 +764,7 @@ def tip_past(worktree: pathlib.Path, branch: str, tip: str, head: str) -> None:
     if not catch_up_of(worktree, tip, head):
         raise LaneError(f"origin/{branch} is at {tip}, past {head} and not prepare's catch-up of it, so the lane "
                         "would skip the entry as head_moved; nothing was queued or pushed. Merge "
-                        f"origin/{branch} into {worktree}, then enqueue again.", code=HEAD_MOVED)
+                        f"origin/{branch} into the branch's worktree, then enqueue from there.", code=HEAD_MOVED)
 
 
 def check_docs(worktree: pathlib.Path, body: str, base: str) -> None:
@@ -1088,7 +1090,8 @@ def branch_unmoved(root: pathlib.Path, cancelled: dict[str, Any]) -> None:
     A moved branch is scope the caller did not see: enqueue it from its
     worktree. `origin/<branch>` must be the head, prepare's catch-up of it, or
     gone (the publish puts the head back); this host's worktree, while on the
-    branch, the head or its catch-up. A read that fails raises `PUBLISH_UNKNOWN`.
+    branch, the head or its catch-up (`worktree_unmoved`). A read that fails
+    raises `PUBLISH_UNKNOWN`.
     """
     item, branch, head = cancelled.get("item"), str(cancelled["branch"]), str(cancelled["expected_head"])
     tip = (read_git(root, "ls-remote", "origin", f"refs/heads/{branch}").stdout.split() or [""])[0]
@@ -1098,12 +1101,23 @@ def branch_unmoved(root: pathlib.Path, cancelled: dict[str, Any]) -> None:
         if not catch_up_of(root, tip, head):
             raise LaneError(f"origin/{branch} is at {tip}, not sd:{item}'s cancelled head {head} or its catch-up; "
                             "nothing was queued. Enqueue the new head from its worktree.", code=HEAD_MOVED)
-    worktree = pathlib.Path(str(cancelled.get("worktree")))
-    if (cancelled.get("enqueued_on") == this_host() and worktree.is_dir()
+    worktree_unmoved(cancelled)
+
+
+def worktree_unmoved(last: dict[str, Any]) -> None:
+    """Refuse `HEAD_MOVED` when `last`'s worktree here moved on its branch past its head (sd:3389, sd:6057).
+
+    The runner's own-worktree rule (`checkout_for`) would skip the entry; a
+    worktree on another host, gone, or on another branch is not read. A
+    read that fails raises `PUBLISH_UNKNOWN`.
+    """
+    item, branch, head = last.get("item"), str(last["branch"]), str(last["expected_head"])
+    worktree = pathlib.Path(str(last.get("worktree")))
+    if (last.get("enqueued_on") == this_host() and worktree.is_dir()
             and read_git(worktree, "branch", "--show-current").stdout.strip() == branch
             and not at_head(worktree, head)):
-        raise LaneError(f"{worktree} moved on {branch} from sd:{item}'s cancelled head {head}; nothing was "
-                        "queued. Enqueue the new head from that worktree.", code=HEAD_MOVED)
+        raise LaneError(f"{worktree} moved on {branch} from sd:{item}'s {last.get('status')} head {head}; "
+                        "nothing was queued. Enqueue the new head from that worktree.", code=HEAD_MOVED)
 
 
 def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: bool = False,
@@ -1125,11 +1139,15 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     is made again: another head refuses `STALE_HEAD`, a newer entry
     `SUPERSEDED` (`check_successor`).
 
-    A cancelled last entry (sd:3389) needs `expected_head`, and is refused
-    before the publish by `branch_unmoved` and `check_unmerged`. The new
-    entry joins the queue last, as any enqueue does. A branch that moves
-    after `branch_unmoved` read it leaves the entry pending; the runner's
-    head check (`checkout_for`) then skips it `HEAD_MOVED`.
+    What enqueue refuses as a moved head (sd:5989), retry refuses too, before
+    the publish (sd:6057): a worktree here that moved past the head
+    (`worktree_unmoved`), and an `origin/<branch>` past it that is not
+    prepare's catch-up (`tip_past`). The runner would skip either.
+    A cancelled last entry (sd:3389) also needs `expected_head`, and is
+    refused by `branch_unmoved`, for any move of the branch, and
+    `check_unmerged`. The new entry joins the queue last, as any enqueue
+    does. A branch that moves after these reads leaves the entry pending;
+    the runner's head check (`checkout_for`) then skips it `HEAD_MOVED`.
     """
     def newest_at_expected_head(connection: Any) -> dict[str, Any]:
         latest = newest_entry(connection, queue.repository, item)
@@ -1161,6 +1179,8 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     if cancelled:
         branch_unmoved(root, last)
         check_unmerged(root, queue, last)
+    else:
+        worktree_unmoved(last)
     on_hub(queue, lambda connection: check_item(connection, root, item, last["body"], last.get("claim"),
                                                 tuple(last.get("closes") or ()), str(last.get("title") or "")))
     worktree, head = pathlib.Path(str(last.get("worktree"))), last["expected_head"]
@@ -1168,7 +1188,8 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
         head = caught_up(worktree, head)
     require_published(root, last["branch"], head,
               f"sd:{item}'s head {head} is not on `origin` or in this checkout; run the retry on "
-              f"{last.get('enqueued_on')}, or enqueue again from a worktree that has it")
+              f"{last.get('enqueued_on')}, or enqueue again from a worktree that has it",
+              None, lambda tip: tip_past(root, last["branch"], tip, head))
     keep = ("repository", "item", "branch", "title", "body", "acceptance", "claim", "closes", "enqueued_on", "worktree")
     entry = {**{key: last.get(key) for key in keep}, "id": entry_id(), "expected_head": head,
              "authority": "manual" if manual or last.get("authority") == "manual" else None,
