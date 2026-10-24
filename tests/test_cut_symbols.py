@@ -68,7 +68,8 @@ from tests.governed import GOVERNED  # noqa: E402
 #: for. `lib/` and `tests/sd_db/` hold `sd_db` as copied from the system
 #: checkout (sd:3278): the symbols here were cut from the pack's commands, and
 #: the library names its own `--push`, `cron-jobs.sh` and protection gaps.
-EXCLUDED = ("tests/test_cut_symbols.py", "lib", "tests/sd_db")
+#: `dashboard/` came from the system checkout the same way (sd:5987).
+EXCLUDED = ("tests/test_cut_symbols.py", "lib", "tests/sd_db", "dashboard")
 
 
 def governed_grep(pattern: str) -> list[str]:
@@ -144,12 +145,11 @@ class SweepCut(unittest.TestCase):
 #: The pack dashboard, cut at sd:719 step 7, and what went before it. The
 #: package `dashboard/` and its CLI `bin/sd-dashboard` left the tree in one
 #: commit with the ceilings on them; the tracker index and its clients went at
-#: step 4, and their test modules with them. Directories are pathspecs here,
-#: so a file restored anywhere under `dashboard/` surfaces, not only one the
-#: list happens to name. Asserted from the index and the filesystem, never
-#: from a string the author already knew: a file restored on its own is red.
+#: step 4, and their test modules with them. `dashboard/` is back since
+#: sd:5987, as the system checkout's dashboard moved here, so only the old CLI
+#: and test modules stay listed. Asserted from the index and the filesystem,
+#: never from a string the author already knew: a file restored is red.
 RETIRED_DASHBOARD = (
-    "dashboard",
     "bin/sd-dashboard",
     "bin/sd-trackers",
     "tests/test_sd_dashboard.py",
@@ -165,7 +165,7 @@ RETIRED_DASHBOARD = (
 
 
 class DashboardCut(unittest.TestCase):
-    """sd:719 step 7: `dashboard/` and `bin/sd-dashboard` are not in the tree.
+    """sd:719 step 7: the old pack dashboard's CLI and tests are not in the tree.
 
     The census `tests/test_sd_dashboard.py` kept until step 7 asserted each
     retired module by name while the package still stood; with the package

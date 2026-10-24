@@ -121,6 +121,8 @@ run_log="$work_dir/unittest-output.log"
 # The `tests/sd_db` shards get neither (sd:3323): that suite runs nothing in
 # `[run] include`, and its stubs run `env python3`, which may lack coverage. The
 # hook then writes its warning into the stub's stderr, which those tests compare.
+# The `dashboard/tests` shards get neither for the same reason (sd:5987), and
+# a PYTHONPATH naming the dashboard package, the library and their helpers.
 unhooked_pythonpath="${PYTHONPATH:-}"
 export SD_COVERAGE_PROCESS_START="$REPO_ROOT/.coveragerc"
 export COVERAGE_FILE="$work_dir/.coverage"
@@ -180,12 +182,13 @@ fi
 
 # Largest test file first (size approximates runtime) to shorten the tail.
 # `tests/sd_db/` is the library's own suite, moved from system with `lib/`
-# (sd:3323); its modules run as shards like the rest.
+# (sd:3323), and `dashboard/tests/` the dashboard's, moved the same way
+# (sd:5987); their modules run as shards like the rest.
 modules=()
 while IFS= read -r path; do
   path="${path%.py}"
   modules+=("${path//\//.}")
-done < <(ls -S tests/test_*.py tests/sd_db/test_*.py 2>/dev/null)
+done < <(ls -S tests/test_*.py tests/sd_db/test_*.py dashboard/tests/test_*.py 2>/dev/null)
 
 if [ "${#modules[@]}" -eq 0 ]; then
   printf '%s\n' "error: no test modules found under tests/" >&2
@@ -644,13 +647,17 @@ set -m
       unset SD_COVERAGE_PROCESS_START
       if [ -n "$4" ]; then export PYTHONPATH="$4"; else unset PYTHONPATH; fi
       ;;
+    dashboard.tests.*)
+      unset SD_COVERAGE_PROCESS_START
+      export PYTHONPATH="$5/dashboard:$5/lib:$5/dashboard/tests${4:+:$4}"
+      ;;
   esac
   printf "shard %s: start\n" "$3" > "$2/$3.log" || exit 1
   "$1" -m coverage run --parallel-mode -m unittest $ids >> "$2/$3.log" 2>&1
   status=$?
   printf "\nshard %s: %ss exit=%s\n" "$3" "$((SECONDS - started))" "$status" >> "$2/$3.log" || exit 1
   exit "$status"
-' _ "$PYTHON_BIN" "$work_dir" {} "$unhooked_pythonpath" < "$shard_file" 9>&- &
+' _ "$PYTHON_BIN" "$work_dir" {} "$unhooked_pythonpath" "$REPO_ROOT" < "$shard_file" 9>&- &
 shard_pgid=$!
 if [ "$gate_ppid" != "1" ]; then
   watchdog 9>&- &

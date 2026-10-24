@@ -12,7 +12,8 @@ Every doubt resolves to running more, never less:
 * A path the full suite must answer for selects `full`: the `Makefile`,
   anything under `.github/`, the Python and dependency configuration, the
   installer (its coverage gate needs the whole suite), and anything under
-  `tests/` that is not a test module, such as the coverage `sitecustomize`.
+  `tests/` or `dashboard/tests/` that is not a test module, such as the
+  coverage `sitecustomize`.
 * A path no test module names selects `full`. So does a path outside the
   checkout, a directory, and a path that names more than half the modules
   outside the always-run set: that file is shared, and a fast path that runs
@@ -118,12 +119,25 @@ def always_run(modules: dict[str, str]) -> frozenset[str]:
                      if ALWAYS_RUN_PATTERN.search(text))
 
 
+#: Folders whose `test_*.py` files are modules this script selects from:
+#: the pack's own, and the dashboard's, moved here from system (sd:5987).
+TEST_DIRS = ("tests", "dashboard/tests")
+
+
+def module_name(rel: str) -> str:
+    """The unittest name of the module at forward-slash path `rel`."""
+
+    return rel.removesuffix(".py").replace("/", ".")
+
+
 def test_modules(root: pathlib.Path) -> dict[str, str]:
-    """Every `tests/test_*.py` module name, with its source."""
+    """Every `test_*.py` module name in `TEST_DIRS`, with its source."""
 
     return {
-        f"tests.{path.stem}": path.read_text(encoding="utf-8", errors="replace")
-        for path in sorted((root / "tests").glob("test_*.py"))
+        module_name(path.relative_to(root).as_posix()):
+            path.read_text(encoding="utf-8", errors="replace")
+        for folder in TEST_DIRS
+        for path in sorted((root / folder).glob("test_*.py"))
     }
 
 
@@ -172,15 +186,17 @@ def full_reason(root: pathlib.Path, rel: str | None, raw: str) -> str | None:
         return f"{rel} is a path the full suite answers for"
     if (root / rel).is_dir():
         return f"{rel} is a directory"
-    if rel.startswith("tests/") and not re.fullmatch(r"tests/test_[^/]*\.py", rel):
-        return f"{rel} is under tests/ and is not a test module"
+    for folder in TEST_DIRS:
+        if rel.startswith(f"{folder}/") and not re.fullmatch(
+                rf"{re.escape(folder)}/test_[^/]*\.py", rel):
+            return f"{rel} is under {folder}/ and is not a test module"
     return None
 
 
 def modules_for(root: pathlib.Path, rel: str, modules: dict[str, str]) -> set[str]:
     """The test modules naming `rel` or a module importing it; a test module is its own."""
 
-    own = {f"tests.{pathlib.PurePosixPath(rel).stem}"} & set(modules) if rel.startswith("tests/") else set()
+    own = {module_name(rel)} & set(modules)
     names = names_for(rel)
     if rel.startswith(tuple(f"{tree}/" for tree in IMPORTING_TREES)):
         for importer in importers(root, rel):

@@ -33,6 +33,9 @@ extend-exclude = [
     ".ruff_cache",
     ".sd-ai-command-pack",
     ".venv",
+    # The dashboard, as copied from the system checkout (sd:5987), where
+    # nothing ran ruff: 276 findings, left for a lint pass of their own.
+    "dashboard",
     "node_modules",
 ]
 
