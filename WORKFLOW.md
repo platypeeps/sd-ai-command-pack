@@ -56,7 +56,7 @@ These run without being asked.
 
 - No pack command runs in a checkout whose `repo.managed` is no (sd:1620, sd:2566).
   `sd-ship`, `sd-check`, `sd-status` and `sd-ship lane enqueue` refuse there, dry runs included.
-  `sd-review` runs there: it reads a diff and writes no repository file (sd:5953).
+  `sd-review` runs there, review only: it reads a diff, and its gate check does not run (sd:5953).
   The refusal names the remedy: `bin/sd-db repo managed <path> yes`.
   A checkout with no row proceeds; only a row marked unmanaged refuses.
 - `sd-status` reports. It never writes.

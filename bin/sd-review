@@ -2110,9 +2110,14 @@ def review(
         ]
         return result
 
+    # pack sd:5953: every gate road (sd-check, the worktree gate, a receipt)
+    # refuses an unmanaged repository, so there the review runs alone and its
+    # check is not run, never passed.
+    unmanaged = sd_lib.unmanaged(root, warn=False, database=getattr(args, "database", None))
     # Legacy runner rows lack before-check/runtime identity and never grant reuse.
     # Read first: a receipt at this head stands for the gate whatever the review says.
-    reused = (sd_check_receipts.reuse_checked_result(root, env, getattr(args, "database", None)) if getattr(args, "reuse_check", False) else None)
+    reused = (sd_check_receipts.reuse_checked_result(root, env, getattr(args, "database", None))
+              if getattr(args, "reuse_check", False) and not unmanaged else None)
     if not (slot := sd_lib.review_slot(result, env, root, SETUP_TIMEOUT_SECONDS)):
         return result
 
@@ -2144,6 +2149,9 @@ def review(
     if reused is not None or result["status"] not in GATED_STATUSES:
         result["check"] = reused or {"status": NOT_RUN_CHECK, "exit_code": None,
                                      "reason": f"the review is {result['status']}; the gate runs on a head it does not block"}
+        return result
+    if unmanaged:
+        result["check"] = {"status": NOT_RUN_CHECK, "exit_code": None, "reason": f"{unmanaged}; review only"}
         return result
     gate_branch = getattr(args, "gate_check", None)
     result["check"] = (run_gate_check(root, runner, env, check_seconds, gate_branch, args, subject.head)
