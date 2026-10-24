@@ -621,6 +621,21 @@ class GapVocabularyTests(unittest.TestCase):
             "(pack only, system only) gap ids",
         )
 
+    def test_the_dashboard_draws_a_column_for_each_gap_id(self) -> None:
+        """sd:6072. `GAPS` in the dashboard's protection screen, read with `ast` so nothing is imported."""
+        screen = BIN.parent / "dashboard" / "sd_dashboard" / "protection_screen.py"
+        columns = next(
+            ast.literal_eval(node.value)
+            for node in ast.parse(screen.read_text(encoding="utf-8"), filename=str(screen)).body
+            if isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "GAPS" for t in node.targets)
+        )
+        pack = set(status.ACKNOWLEDGEABLE_GAPS) - {"unprotected"}
+        ours = {gap for gap, _ in columns}
+        self.assertEqual(
+            (sorted(pack - ours), sorted(ours - pack)), ([], []),
+            "(pack only, dashboard only) gap ids: ACKNOWLEDGEABLE_GAPS owns them",
+        )
+
     def test_the_systems_merge_flags_are_the_ones_sd_status_reports(self) -> None:
         import sd_db.protection as system  # noqa: PLC0415 - provisioned by `make setup`
 
