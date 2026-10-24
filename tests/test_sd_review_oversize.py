@@ -497,3 +497,16 @@ class DeletedMaterialTests(ReviewFixture):
         self.assertNotIn("row 0000001", material)
         self.assertIn("+value = 2", material)
         self.assertEqual(sum(row["bytes"] for row in inventory), len(material.encode()))
+
+    def test_deleted_paths_are_summarized_so_material_readers_report_partial(self):
+        root, base = self.deleting_branch()
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        _material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        manifest = sd_review.sd_review_material.input_manifest(inventory, "prompt", {"fixture": "overhead"},
+                                                               sd_review.MAX_OUTPUT_BYTES)
+        self.assertEqual(manifest["omitted_paths"], ["big/blob.bin", "big/notes.txt"])
+        self.assertEqual(manifest["partial_providers"], ["fixture"])
+        native = sd_review.sd_review_material.input_manifest(inventory, "prompt", {"codex": None},
+                                                             sd_review.MAX_OUTPUT_BYTES)
+        self.assertEqual(native["partial_providers"], [])
+        self.assertEqual(native["status"], "within_limit")
