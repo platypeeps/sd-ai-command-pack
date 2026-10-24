@@ -107,6 +107,8 @@ class Lane(unittest.TestCase):
     runner_merge: str | None = "manual"
     #: Whether enqueue and retry read the item in the suite's database (sd:3473); most suites queue items it lacks.
     checks_item = False
+    #: Whether enqueue runs prepare's docs lint (sd:5989); most suites queue trees the lint never sees.
+    lints_docs = False
 
     def setUp(self) -> None:
         tmp = tempfile.TemporaryDirectory()
@@ -147,6 +149,10 @@ class Lane(unittest.TestCase):
             self.addCleanup(patcher.stop)
         if not self.checks_item:
             patcher = mock.patch.object(sd_lane, "check_item", lambda *args: None)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        if not self.lints_docs:
+            patcher = mock.patch.object(sd_lane, "check_docs", lambda *args: None)
             patcher.start()
             self.addCleanup(patcher.stop)
         # And each runs as the hub would, which hosts every lane whose `repo.lane_host` is NULL (sd:3003).
@@ -195,13 +201,19 @@ class Lane(unittest.TestCase):
 
 class QueueOutlivesTheProcess(Lane):
     checks_item = True  # the verbs run in a child process, which no patch here reaches
+    lints_docs = True
 
     def setUp(self) -> None:
         super().setUp()
         self.register_items(7)
+        # The child's docs lint reads the privacy patterns (sd:5989): this fixture's, never the operator's.
+        self.config = self.tmp / "config"
+        self.config.mkdir()
+        (self.config / "privacy-patterns").write_text("secret-host\\.example\\.test\n", encoding="utf-8")
 
     def sd_ship(self, cwd: pathlib.Path, *args: str, chdir: str | None = None) -> subprocess.CompletedProcess:
-        env = {**os.environ, **self.environ}
+        env = {**os.environ, **self.environ, "XDG_CONFIG_HOME": str(self.tmp / "xdg"),
+               "SYSTEM_TOOLS_CONFIG": str(self.config), "JEV_SD_DOCS_LINT": "0"}
         return subprocess.run([sys.executable, str(REPO_ROOT / "bin/sd-ship"), *(["-C", chdir] if chdir else []),
                                "lane", *args], cwd=cwd, env=env, capture_output=True, text=True, timeout=120)
 
@@ -1559,11 +1571,11 @@ class Landing(Lane):
 
     def test_a_remote_branch_that_moved_is_not_deleted(self) -> None:
         tree, head = self.topic()
+        self.merge_lands(tree, 1, head)  # enqueue refuses an origin/topic already past the head (sd:5989)
         other = self.tmp / "other"
         subprocess.run(["git", "clone", "-q", "-b", "topic", str(self.origin), str(other)], check=True)
         git(other, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x")
         git(other, "push", "-q", "origin", "topic")
-        self.merge_lands(tree, 1, head)
         self.drain()
         self.assertEqual(self.remote_branches(), ["main", "topic"])
         self.assertIn("origin/topic kept: it is at", self.entries()[0]["cleanup"])
@@ -1956,11 +1968,14 @@ class Publishing(SharedQueue):
         self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("topic"), "push" in self.git_verbs),
                          (sd_lane.PUBLISH_UNKNOWN, [], None, False))
 
-    def test_enqueue_publishes_the_expected_head_and_not_the_branch_tip(self) -> None:
-        """Failure table, enqueue: the tip moved past `--expected-head`; the explicit refspec publishes that head."""
+    def test_the_publish_pushes_the_named_head_and_not_the_branch_tip(self) -> None:
+        """Failure table, publish: the tip moved past the head; the explicit refspec publishes that head.
+
+        Enqueue refuses such a head (`EnqueuePrechecks`); retry still publishes one.
+        """
         tree, [older, tip] = self.committed("topic", "one", "two")
-        entry = sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver", expected_head=older)
-        self.assertEqual((entry["expected_head"], self.remote_tip("topic")), (older, older))
+        self.assertIsNone(sd_lane.publish_head(tree, "topic", older))
+        self.assertEqual(self.remote_tip("topic"), older)
         self.assertNotEqual(tip, older)
 
     def test_a_rerun_after_a_kill_between_push_and_row_writes_one_entry_and_pushes_nothing(self) -> None:
@@ -1990,6 +2005,115 @@ class Publishing(SharedQueue):
         with self.assertRaisesRegex(sd_lane.LaneError, "already queued"):
             sd_lane.enqueue_entry(self.feature, 1, "t", self.body, self.environ, claim="deliver")
         self.assertEqual(len(self.entries()), 1)
+
+
+class EnqueuePrechecks(SharedQueue):
+    """sd:5989. Enqueue refuses, in seconds, what the lane would skip or fail before its review.
+
+    system sd:5921 failed three lane runs in one night: a head the worktree
+    had moved past, which the lane skipped `head_moved`, then a docs lint
+    failure, each read only once the entry reached the queue's head. Enqueue
+    now runs the head check and prepare's docs lint first; nothing is pushed
+    or queued when either refuses. Tests stay in the lane's gate.
+    """
+
+    lints_docs = True
+
+    def setUp(self) -> None:
+        super().setUp()
+        # The lint reads the privacy patterns and the item rows under `HOME`: this fixture's, never the operator's.
+        patterns = self.tmp / "config" / "privacy-patterns"
+        patterns.parent.mkdir()
+        patterns.write_text("secret-host\\.example\\.test\n", encoding="utf-8")
+        patcher = mock.patch.dict(os.environ, {"HOME": str(self.tmp), "XDG_CONFIG_HOME": str(self.tmp / "xdg"),
+                                               "SYSTEM_TOOLS_CONFIG": str(patterns.parent), "JEV_SD_DOCS_LINT": "0"})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        (self.repo / "docs/work").mkdir(parents=True)
+        (self.repo / "docs/work/README.md").write_text("# Work\n", encoding="utf-8")
+        git(self.repo, "add", "docs/work/README.md")
+        git(self.repo, "commit", "-q", "-m", "work root")
+        git(self.repo, "push", "-q", "origin", "main")
+
+    def refused(self, tree: pathlib.Path, **extra: Any) -> sd_lane.LaneError:
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver", **extra)
+        self.assertEqual((self.rows(), "push" in self.git_verbs), ([], False))
+        return refused.exception
+
+    def test_an_expected_head_the_worktree_moved_past_is_refused_before_any_push(self) -> None:
+        """The lane skips this entry `head_moved` on this host; enqueue says so first."""
+        tree, [older, tip] = self.committed("topic", "one", "two")
+        refused = self.refused(tree, expected_head=older)
+        self.assertEqual(refused.code, sd_lane.HEAD_MOVED)
+        self.assertIn(f"{tree} is at {tip}, not the head {older}", str(refused))
+        self.assertIn("nothing was queued or pushed", str(refused))
+        self.assertIsNone(self.remote_tip("topic"))
+
+    def test_an_expected_head_the_worktree_caught_up_from_is_queued(self) -> None:
+        """Prepare's catch-up merge of the head is a head the lane runs (`at_head`)."""
+        tree, [head] = self.committed("topic", "work")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "main moves")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "origin/main")
+        entry = sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver", expected_head=head)
+        self.assertEqual((entry["status"], entry["expected_head"]), ("pending", head))
+
+    def test_an_origin_branch_past_the_head_is_refused_before_any_push(self) -> None:
+        """Another host's lane would skip it `head_moved`, and this host's prepare could not push."""
+        tree, [head, ahead] = self.committed("topic", "one", "two")
+        git(tree, "push", "-q", "origin", f"{ahead}:refs/heads/topic")
+        git(tree, "reset", "-q", "--hard", head)
+        refused = self.refused(tree)
+        self.assertEqual(refused.code, sd_lane.HEAD_MOVED)
+        self.assertIn(f"origin/topic is at {ahead}, past {head}", str(refused))
+        self.assertEqual(self.remote_tip("topic"), ahead)
+
+    def test_an_origin_branch_at_the_heads_catch_up_is_queued(self) -> None:
+        """The lane pushed its catch-up of the head; that tip is the head's, not another change."""
+        tree, [head] = self.committed("topic", "work")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "main moves")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "origin/main")
+        caught_up = git(tree, "rev-parse", "HEAD")
+        git(tree, "push", "-q", "origin", "HEAD:refs/heads/topic")
+        git(tree, "reset", "-q", "--hard", head)
+        entry = sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+        self.assertEqual((entry["expected_head"], self.remote_tip("topic")), (head, caught_up))
+
+    def test_a_docs_lint_failure_the_branch_adds_is_refused_before_any_push(self) -> None:
+        tree = self.worktree("topic")
+        (tree / "docs/work/not-dated").mkdir(parents=True)
+        (tree / "docs/work/not-dated/design.md").write_text("---\nitem: sd:1\n---\n\n# Design\n", encoding="utf-8")
+        git(tree, "add", "docs/work/not-dated/design.md")
+        git(tree, "commit", "-q", "-m", "a work item off the shape")
+        refused = self.refused(tree)
+        self.assertEqual(refused.code, "docs_lint_failed")
+        self.assertIn("sd-docs-lint: 1 failure(s) this branch introduces", str(refused))
+        self.assertIn("FAIL docs/work/not-dated", str(refused))
+        self.assertIn("nothing was queued or pushed", str(refused))
+        self.assertIsNone(self.remote_tip("topic"))
+
+    def test_a_body_the_privacy_rule_refuses_is_refused_before_any_push(self) -> None:
+        tree, _ = self.committed("topic", "work")
+        self.body.write_text("Ran on secret-host.example.test\n", encoding="utf-8")
+        self.assertEqual(self.refused(tree).code, "docs_lint_failed")
+
+    def test_a_lint_that_cannot_run_is_unknown_and_queues_nothing(self) -> None:
+        """Failures: a lint that did not finish is no pass."""
+        tree, _ = self.committed("topic", "work")
+        import sd_ship_body
+        from sd_ship_remote import Refusal
+        stopped = Refusal("sd-docs-lint could not finish: timed out", code="command_unavailable")
+        with mock.patch.object(sd_ship_body, "completed_process", side_effect=stopped):
+            refused = self.refused(tree)
+        self.assertEqual(refused.code, "command_unavailable")
+        self.assertIsNone(self.remote_tip("topic"))
+
+    def test_a_clean_branch_is_linted_and_queued(self) -> None:
+        tree, [head] = self.committed("topic", "work")
+        entry = sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+        self.assertEqual((entry["status"], self.remote_tip("topic")), ("pending", head))
 
 
 class ItemChecks(SharedQueue):

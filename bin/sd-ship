@@ -1447,21 +1447,7 @@ class Ship(SharedReview):
         # to satisfy the rest. The claim-support reading is off: it is advisory,
         # takes minutes through the local Kev, and this call reruns on the base
         # (sd:2762). An author's own run keeps it.
-        lint = ["env", "JEV_SD_DOCS_LINT=0", sys.executable, str(BIN / "sd-docs-lint")]
-        if not (self.root / "docs/work").is_dir():
-            lint.append("--body-only")
-        lint_warnings: list[str] = []
-        with tempfile.TemporaryDirectory(prefix="sd-ship-lint-") as directory:
-            body_path = pathlib.Path(directory) / "pr-body.md"
-            body_path.write_text(body, encoding="utf-8")
-            try:
-                run(self.root, [*lint, "--pr-body", str(body_path)], timeout=300)
-            except Refusal as refusal:
-                # Failed: run it again in full and gate only on what the
-                # branch introduces, not on what origin/<base> carries (sd:1646).
-                if refusal.workflow["blocker"]["code"] != "command_failed":
-                    raise
-                lint_warnings = sd_ship_body.lint_against_base(self.root, [*lint, "--pr-body", str(body_path)], base)
+        lint_warnings = sd_ship_body.docs_lint(self.root, body, base)
         # Before the review, so a duplicate is named before it costs a pass (sd:1151).
         claims = [] if self.args.no_item else self.claim_lines(base, head)
         for line in claims:

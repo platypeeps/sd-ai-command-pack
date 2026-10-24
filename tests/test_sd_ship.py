@@ -1331,13 +1331,13 @@ roles:
         # the rule reported itself not run on every prepare.
         (self.root / "docs/work").mkdir(parents=True)
         calls = []
-        original = ship.run
+        original = ship.sd_ship_body.completed_process
 
         def recording(root, argv, **kwargs):
             calls.append(argv)
             return original(root, argv, **kwargs)
 
-        with patch.object(ship, "run", recording):
+        with patch.object(ship.sd_ship_body, "completed_process", recording):
             self.assertEqual(self.prepare()["phase"], "ready_to_send")
         lint = [argv for argv in calls if any(str(word).endswith("sd-docs-lint") for word in argv)]
         self.assertEqual(len(lint), 1, calls)

@@ -33,13 +33,13 @@ class ScopeLintCase(unittest.TestCase):
 
     def lint_calls(self, *extra: str) -> list[list[str]]:
         calls: list[list[str]] = []
-        original = ship.run
+        original = ship.sd_ship_body.completed_process
 
         def recording(root, argv, **kwargs):
             calls.append([str(word) for word in argv])
             return original(root, argv, **kwargs)
 
-        with patch.object(ship, "run", recording):
+        with patch.object(ship.sd_ship_body, "completed_process", recording):
             self.assertEqual(self.prepare(*extra)["phase"], "ready_to_send")
         return [argv for argv in calls if any(word.endswith("sd-docs-lint") for word in argv)]
 
