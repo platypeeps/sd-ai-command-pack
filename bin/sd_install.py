@@ -64,9 +64,11 @@ RECEIPT_SCHEMA = 1
 # every tool call. UserPromptSubmit has nothing to match on, and the empty
 # matcher is how that is spelled. `bin/sd-issue-guard` names the two tools
 # that file a GitHub issue; it reads a `Bash` command before anything else and
-# is silent outside a managed repository (sd:2256).
+# is silent outside a managed repository (sd:2256). `bin/sd-session-trail`
+# takes the `compact` start the restore hook leaves out (sd:6023).
 HOOK_SPECS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("bin/sd-handoff-restore", "SessionStart", ("startup", "clear")),
+    ("bin/sd-session-trail", "SessionStart", ("compact",)),
     ("bin/sd-skill-use", "PreToolUse", ("Skill|Read",)),
     ("bin/sd-skill-use", "UserPromptSubmit", ("",)),
     ("bin/sd-issue-guard", "PreToolUse", ("Bash|mcp__github__issue_write",)),

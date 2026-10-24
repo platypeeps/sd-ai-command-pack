@@ -1443,6 +1443,22 @@ def status_change_notes(connection: sqlite3.Connection, *, since: str, until: st
 __all__ += ["status_change_notes"]
 
 
+def session_trail(connection: sqlite3.Connection, session: str, *, limit: int) -> list[sqlite3.Row]:
+    """The items `session` filed and the decisions and questions it wrote, newest first, at most `limit` (sd:6023).
+
+    A filed item is its `opened as` status note. Behind `bin/sd-session-trail`, the compact hook.
+    """
+    return connection.execute(
+        "SELECT note.id, note.item, note.timestamp, note.kind, note.body, note.resolved_at, item.title, item.repo"
+        " FROM note JOIN item ON item.id = note.item WHERE note.session = ?"
+        " AND (note.kind IN ('decision', 'question')"
+        " OR (note.kind = 'status_change' AND substr(note.body, 1, 10) = 'opened as '))"
+        " ORDER BY note.id DESC LIMIT ?", (session, limit)).fetchall()
+
+
+__all__ += ["session_trail"]
+
+
 #: The lane's key prefix, `sd_lane.KEY_PREFIX`; `;` is the character after `:`, so the two bound one index range.
 LANE_KEYS = ("lane:v1:", "lane:v1;")
 
