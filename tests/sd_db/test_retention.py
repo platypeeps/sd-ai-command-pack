@@ -685,6 +685,7 @@ class EveryCheckpointWriter(unittest.TestCase):
     ROOT = Path(__file__).resolve().parents[2]
     WRITE = re.compile(r"record_state\(\s*\w+,\s*[\"']checkpoint[\"']|VALUES\s*\(\s*'checkpoint'|\b(?:ship|store)\.save\(")
     WRITERS = {
+        "bin/sd-review": ("review:",),
         "bin/sd-ship": ("ship:",),
         "bin/sd_check_receipts.py": ("sd-check-receipt:",),
         "bin/sd_gate_receipts.py": ("sd-gate-receipt:",),

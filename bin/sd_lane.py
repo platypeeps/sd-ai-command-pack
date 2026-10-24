@@ -7,7 +7,8 @@ database and runs it under one runner lock per repository:
 
   enqueue  check the item as prepare would (sd:3473), refuse a title over
            63 characters or a body or commit line over 72 (sd:5793),
-           publish the head, then add a worktree, its item, branch and
+           a head the lane would skip as moved, or a docs lint failure
+           (sd:5989), publish the head, then add a worktree, its item, branch and
            head, a title and the body text to the repository's queue;
   list     print the queue, each body as its size;
   cancel   mark a pending entry cancelled, or release a stuck running one,
@@ -576,7 +577,8 @@ def publish_git(root: pathlib.Path, *args: str) -> subprocess.CompletedProcess[s
 
 
 def publish_head(root: pathlib.Path, branch: str, head: str,
-                 check: Callable[[str], None] | None = None) -> str | None:
+                 check: Callable[[str], None] | None = None,
+                 ahead: Callable[[str], str | None] = lambda tip: None) -> str | None:
     """Put `head` on `origin/<branch>`; None once it is there, else `DEFAULT_BRANCH`, `HEAD_GONE` or `BRANCH_DIVERGED` (sd:3282).
 
     Another host runs an entry only from a commit on `origin`. The one push is
@@ -590,7 +592,10 @@ def publish_head(root: pathlib.Path, branch: str, head: str,
     `HEAD` symref `origin` advertises in the same read as the tip, never a
     local `origin/HEAD` or a guess; no symref is `PUBLISH_UNKNOWN`.
     `check`, when given, reads that default branch's name before anything
-    is fetched or pushed, and refuses by raising.
+    is fetched or pushed, and refuses by raising. `ahead(tip)` answers for
+    a tip that holds `head` and more, or refuses by raising; by default it
+    is published. Enqueue refuses one that is not prepare's catch-up of
+    `head` (`tip_past`, sd:5989).
     """
     if not branch:
         return DEFAULT_BRANCH
@@ -627,7 +632,7 @@ def publish_head(root: pathlib.Path, branch: str, head: str,
     if not has(head):
         return HEAD_GONE
     if tip and descends(tip, head):
-        return None
+        return ahead(tip)
     if tip and not descends(head, tip):
         return BRANCH_DIVERGED
     answer("push", "-q", "origin", f"{head}:{ref}")
@@ -635,9 +640,10 @@ def publish_head(root: pathlib.Path, branch: str, head: str,
 
 
 def require_published(root: pathlib.Path, branch: str, head: str, gone: str,
-                      check: Callable[[str], None] | None = None) -> None:
+                      check: Callable[[str], None] | None = None,
+                      ahead: Callable[[str], str | None] = lambda tip: None) -> None:
     """`publish_head`, refusing a definite answer: `gone` says what to do when the head's commit is nowhere."""
-    found = publish_head(root, branch, head, check)
+    found = publish_head(root, branch, head, check, ahead)
     if found == DEFAULT_BRANCH:
         raise LaneError(f"{branch or 'a detached HEAD'} is not a feature branch: the lane publishes and prepares a "
                         "branch other than origin's default; nothing was queued or pushed.", code=DEFAULT_BRANCH)
@@ -678,6 +684,11 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     paths. The item is checked as prepare checks it (`check_item`), and the
     lines as a commit lint would (`check_lines`), then the head is published
     (`publish_head`); any answer but published refuses, and nothing is queued.
+
+    What the lane would skip or fail before its review refuses here, in
+    seconds (sd:5989): a head the worktree is not at (`at_head`), an
+    `origin/<branch>` past the head (`tip_past`), and prepare's docs lint
+    (`check_docs`). Tests stay in the lane's gate.
     """
     worktree = worktree.resolve()
     sd_lib.refuse_unmanaged(worktree, LaneError)  # its prepare would refuse; do not queue it
@@ -694,6 +705,11 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     branch = lane_git(worktree, "branch", "--show-current")
     if not branch:
         raise LaneError(f"{worktree} has no branch checked out; the lane publishes and prepares a branch")
+    if expected_head and not at_head(worktree, head):  # the lane's own-worktree rule (`checkout_for`) would skip it
+        current = read_git(worktree, "rev-parse", "HEAD").stdout.strip()
+        raise LaneError(f"{worktree} is at {current}, not the head {head}, so the lane would skip the entry as "
+                        "head_moved; nothing was queued or pushed. Enqueue again without --expected-head to "
+                        "queue the worktree's head.", code=HEAD_MOVED)
     queue = queue_for(worktree, environ)
     # Read first: a hub that does not answer, or an item already queued, refuses before anything is pushed.
     if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in read_queue(queue)):
@@ -706,8 +722,11 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
              "acceptance": acceptance_file.read_text(encoding="utf-8") if acceptance_file else None,
              "authority": "manual" if manual else None, "claim": claim, "enqueued_on": this_host(),
              "worktree": str(worktree), "status": "pending", "enqueued_at": stamp_now()}
-    require_published(worktree, branch, head, f"{head} names no commit in {worktree}",
-                      lambda base: check_lines(worktree, title, body, base, head))
+    def refuse_before_push(base: str) -> None:
+        check_lines(worktree, title, body, base, head)
+        check_docs(worktree, body, base)
+    require_published(worktree, branch, head, f"{head} names no commit in {worktree}", refuse_before_push,
+                      lambda tip: tip_past(worktree, branch, tip, head))
     return add_entry(queue, entry)
 
 
@@ -731,6 +750,36 @@ def check_lines(worktree: pathlib.Path, title: str, body: str, base: str, head: 
         sd_ship_body.refuse_long_lines(title, body, commits)
     except Refusal as error:
         raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
+
+
+def tip_past(worktree: pathlib.Path, branch: str, tip: str, head: str) -> None:
+    """Refuse `HEAD_MOVED` for an `origin/<branch>` tip past `head`, unless it is prepare's catch-up of it (sd:5989).
+
+    The lane runs such an entry nowhere: another host's lane worktree skips
+    it (`lane_tree`), and this host's prepare cannot push the head over it.
+    A read that fails raises `PUBLISH_UNKNOWN`.
+    """
+    if not catch_up_of(worktree, tip, head):
+        raise LaneError(f"origin/{branch} is at {tip}, past {head} and not prepare's catch-up of it, so the lane "
+                        "would skip the entry as head_moved; nothing was queued or pushed. Merge "
+                        f"origin/{branch} into {worktree}, then enqueue again.", code=HEAD_MOVED)
+
+
+def check_docs(worktree: pathlib.Path, body: str, base: str) -> None:
+    """Refuse what prepare's docs lint refuses, before anything is pushed or queued (sd:5989).
+
+    The lint prepare runs (`sd_ship_body.docs_lint`): `sd-docs-lint` from
+    the worktree's root, with no `--work-dir` and the body as `--pr-body`,
+    so only a failure the branch introduces refuses. A lint that cannot
+    finish is an unknown answer, not a pass: nothing is queued.
+    """
+    import sd_ship_body  # noqa: PLC0415
+    from sd_ship_remote import Refusal  # noqa: PLC0415
+    try:
+        sd_ship_body.docs_lint(worktree, body, base)
+    except Refusal as error:
+        raise LaneError(f"{error}\nnothing was queued or pushed. Fix what the lint names, commit, then enqueue "
+                        "again.", code=error.workflow["blocker"]["code"]) from None
 
 
 def check_item(connection: Any, worktree: pathlib.Path, item: int, body: str, claim: str | None,
