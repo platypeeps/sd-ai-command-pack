@@ -46,8 +46,8 @@ CHECKOUT = HERE.parent
 CONVENTIONS = CHECKOUT / "skills" / "sd-research-repo" / "references" / "conventions.md"
 
 USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pins|
-                          init-hook|init-claude-md|conventions|delivered|project|
-                          deck
+                          init-hook|init-claude-md|conventions|delivered|upload|
+                          project|deck
 
   render        render research.conf.py into docs/dashboard/, with the
                 manifest research.json, write the vault
@@ -73,6 +73,11 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                 that generation. --url records where the mirror landed, with
                 the item= the document names. The one verb with arguments:
                 it acts on the machine's queue, not on a checkout
+  upload <request file name> <upload_url> <authorization>
+                the drain's image step: send the request's Archify PNG to the
+                upload notion-create-file-upload opened, and print the
+                <image> line that replaces the request's {{archify-image}}
+                marker. Acts on the machine's queue, not on a checkout
   project [--plan <request> --live <file>|--missing] [--writing <request>]
                 queue one notion-row request per item designated with
                 `sd task edit N --experiment`, for the items whose row would
@@ -113,8 +118,8 @@ USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pi
                 resolves markdown
 
 Every verb acts on the current working directory. There is no repo argument;
-`delivered`, `project --plan` and `project --writing` name a request in the
-machine's queue, which is not a repository.
+`delivered`, `upload`, `project --plan` and `project --writing` name a request
+in the machine's queue, which is not a repository.
 """
 
 
@@ -198,6 +203,9 @@ def main(argv: list[str]) -> int:
         # Before the no-argument guard: R10-D6 bars a checkout argument, and
         # a request name is not one. See `sd_research_publish.delivered_main`.
         return int(load("sd_research_publish").delivered_main(rest))
+    if verb == "upload":
+        # Like `delivered`: a request name, and Notion's upload, not a checkout.
+        return int(load("sd_research_publish").upload_main(rest))
     if verb == "project":
         # Like `delivered`, it acts on the machine's queue and the workflow
         # database, never on a checkout, so its arguments are not R10-D6's.

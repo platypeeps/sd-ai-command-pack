@@ -439,7 +439,9 @@ Draining is six steps per request, and the order matters:
    `private` or `team`, how its container was resolved — `resolve: "id"` with
    the folder's page id in `space_id`, or `resolve: "name"` with the folder's
    name in `space` — and `subfolder`, the page under that container the
-   document belongs in.
+   document belongs in. A Notion request whose document holds an Archify
+   diagram also names its `image`: the PNG to upload in place of the
+   `{{archify-image}}` line its `content` holds.
 2. Check the document's handling restrictions first. One that may not be shared
    externally is not mirrored to a shared destination, and designating it did
    not lift that. Report it and leave the request in place. Then read the
@@ -467,7 +469,8 @@ Draining is six steps per request, and the order matters:
      container and not in the container itself; create it when it is missing,
      the way a Drive drain creates `Briefs/<repo>`. Honour `scope` either way:
      a `private` request goes to your private space and never to the team
-     space, whatever the folder is called.
+     space, whatever the folder is called. A request with an `image` places
+     it as "A Notion request with an image" says, below.
    - `drive` — the Google Workspace connector, as a native Google Doc. Not an
      uploaded `.md` or `.html` file: the point of the mirror is that someone can
      read and comment on it in place. Import the Markdown so headings, tables
@@ -637,11 +640,28 @@ Draining is six steps per request, and the order matters:
    `unchanged`. A field a person holds keeps the item queued: each
    `project` queues it again, so the next drain sees a hand-back.
 
+**A Notion request with an image (sd:6066).** The page shows the Archify
+diagram as an image, and no other diagram: the render put the
+`{{archify-image}}` line where the document's `diagram` div was, dropped the
+plain `text` block after it, and drew the SVG as the PNG `image.path` names.
+Drive and the served page keep the document as written. On every write of
+the page, a redrain included, upload the image again: call
+`notion-create-file-upload` with a `.png` filename, then run
+`sd-research-kit upload <request file name> <upload_url> <authorization>`
+with the `upload_url` and the `authorization` header it returned. It sends
+the request's own PNG to that address only, and prints the line to write,
+`<image source="file-upload://<id>">caption</image>`. Write `content` with
+that line in place of the `{{archify-image}}` line. An upload that exits
+non-zero is a failure, not a missing image: leave the request, and never
+write the page with the marker in it or the image left out. An upload
+Notion never saw attached expires on its own.
+
 **What each failure leaves behind.** This is stated, not implied, because a
 procedure whose failure mode is the bug it prevents is not a fix.
 
 | Interrupted after | State | What the next drain does |
 | --- | --- | --- |
+| an image's upload, before the page write | an unattached upload, which Notion expires | uploads again and writes the page |
 | step 3, before step 4 | a created page, its id recorded nowhere | adopts it by title under step 3 and carries on |
 | step 4, before step 5 | id in the request, not in the designation | updates that page, retries step 5 |
 | step 5, before step 6 | id recorded in both | updates that page, runs step 6 |

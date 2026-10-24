@@ -17,7 +17,8 @@ One or two sentences: the system or domain under study, where its boundary is, a
 </div>
 
 ```text
-Without Archify, or for a Notion or Drive mirror: a plain diagram of the same parts.
+Without Archify, or for a Drive mirror: a plain diagram of the same parts.
+A Notion mirror shows the Archify image in place of this block.
 
   [ Client ] --HTTP--> [ Gateway ] --queue--> [ Worker ] --SQL--> [ Store ]
 ```
