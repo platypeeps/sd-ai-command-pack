@@ -634,7 +634,8 @@ class Runner(Lane):
         self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": work, "merge_commit": "landed-0"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         entry = self.entries()[0]
-        self.assertEqual((entry["status"], self.notes), ("failed", []))
+        landings = [body for _, body, _ in self.notes if body.startswith("Landed")]
+        self.assertEqual((entry["status"], landings), ("failed", []))
         self.assertIn(f"merge of {work}, not this entry's head {caught}", entry["reason"])
 
     def test_a_reconciled_merge_whose_claim_was_released_lands_nothing(self) -> None:
@@ -658,7 +659,8 @@ class Runner(Lane):
         self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": earlier, "merge_commit": "landed-0"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         entry = self.entries()[0]
-        self.assertEqual((entry["status"], entry.get("merge_commit"), self.notes), ("failed", None, []))
+        landings = [body for _, body, _ in self.notes if body.startswith("Landed")]
+        self.assertEqual((entry["status"], entry.get("merge_commit"), landings), ("failed", None, []))
         self.assertIn(f"merge of {earlier}, not this entry's head", entry["reason"])
 
     def test_the_lane_retries_an_incomplete_review_only_once(self) -> None:
@@ -4073,6 +4075,15 @@ class Importing(SharedQueue):
         self.assertEqual([row.get("code") for row in self.entries()], [sd_lane.HEAD_GONE, sd_lane.BRANCH_DIVERGED, None])
         self.assertEqual((self.file.exists(), self.remote_tip("live")), (False, live_head))
 
+    def test_an_entry_the_import_fails_notes_its_item_and_one_failed_before_does_not(self) -> None:
+        """pack sd:5963: the import's own failure is new; one the file already held was the older runner's."""
+        self.write_file(self.old(1, None), self.old(2, self.repo, status="failed"))
+        report = self.import_now()
+        self.assertEqual(self.statuses(), [(1, "failed"), (2, "failed")])
+        self.assertEqual(([item for item, _, _ in self.notes], report["noted"]), ([1], [{"sd:1": "written"}]))
+        self.assertIn("in the lane at", self.notes[0][1])
+        self.assertIn(": no branch and no worktree to read one from", self.notes[0][1])
+
     def test_a_pending_entry_on_the_default_branch_imports_skipped_without_a_push(self) -> None:
         """Failure table, import publish: an older version queued a main checkout ahead of origin; nothing is pushed."""
         before = self.remote_tip("main")
@@ -4628,6 +4639,99 @@ class Bounds(unittest.TestCase):
         finally:
             release.set()
             gate.join(10)
+
+
+class FailureNotes(SharedQueue):
+    """pack sd:5963: an entry that ends failed or skipped notes each item it carries; the entry holds the state."""
+
+    def lane_notes(self) -> list[tuple[int, str]]:
+        return [(item, body) for item, body, _ in self.notes if body.startswith("Lane ")]
+
+    def test_a_failed_prepare_notes_each_item_with_its_step_reason_and_head(self) -> None:
+        head = sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver",
+                                     closes=(2,))["expected_head"]
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding\nmore"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        body = f"Lane failed in prepare at {head[:12]}: a blocking finding"
+        [entry] = self.entries()
+        self.assertEqual((self.lane_notes(), set(self.note_kinds)), ([(1, body), (2, body)], {"comment"}))
+        self.assertEqual((entry["status"], entry["note"]), ("failed", {"sd:1": "written", "sd:2": "written"}))
+
+    def test_a_skip_notes_its_item(self) -> None:
+        tree = self.worktree("topic")
+        head = sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")["expected_head"]
+        git(tree, "commit", "-q", "--allow-empty", "-m", "moved")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [(item, body)] = self.lane_notes()
+        self.assertEqual((self.entries()[0]["status"], item), ("skipped", 1))
+        self.assertTrue(body.startswith(f"Lane skipped in prepare at {head[:12]}: {tree} moved on topic"), body)
+
+    def test_a_note_that_fails_is_reported_and_the_entry_still_fails(self) -> None:
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+
+        def broken(item: int, body: str, main: pathlib.Path) -> str:
+            raise RuntimeError("the hub refused the note")
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship, note=broken)
+        [entry] = self.entries()
+        self.assertEqual((entry["status"], entry["reason"], "stopped" in answer),
+                         ("failed", "a blocking finding", False))
+        self.assertEqual(entry["note"], {"sd:1": "failed: RuntimeError: the hub refused the note"})
+
+    def test_a_merge_failure_notes_its_item(self) -> None:
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "merge")] = {"ok": False, "phase": "merging", "error": "the merge was refused"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.lane_notes(), [(1, "Lane failed in merge at head-1: the merge was refused")])
+
+    def test_a_dead_runner_at_merge_notes_its_item_once(self) -> None:
+        """Steps: the runner died with the entry at merge; the reclaim fails it and notes it, and no later run does."""
+        head = sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")["expected_head"]
+        entry = sd_lane.claim_entry(self.store(), "dead")
+        sd_lane.advance(self.store(), entry, "dead")
+        self.make_dead()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [(item, body)] = self.lane_notes()
+        self.assertEqual((answer["reclaimed"][0]["status"], item), ("failed", 1))
+        self.assertTrue(body.startswith(f"Lane failed in runner at {head[:12]}: runner pid "), body)
+        self.assertEqual(answer["noted"], [{"sd:1": "written"}])
+
+    def test_an_operator_release_at_merge_notes_its_item(self) -> None:
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        entry = sd_lane.claim_entry(self.store(), "stuck")
+        sd_lane.advance(self.store(), entry, "stuck")
+        sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(host="build-2"))
+        released = sd_lane.cancel(self.repo, 1, self.environ)
+        [(item, body)] = self.lane_notes()
+        self.assertEqual((released["status"], released["note"], item), ("failed", {"sd:1": "written"}, 1))
+        self.assertIn("the operator released it from build-2", body)
+
+    def test_a_failure_whose_finish_write_fails_is_noted_once(self) -> None:
+        """Steps: the note lands, the finish write does not; the next run applies the record and notes nothing."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        with self.failing_store(lambda entry: entry.get("status") == "failed"):
+            answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((answer["ran"][0]["recorded"], len(self.lane_notes())), (False, 1))
+        self.make_dead()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.entries()[0]["status"], len(self.lane_notes())), ("failed", 1))
+
+    def test_a_failure_an_older_version_recorded_is_noted_when_applied(self) -> None:
+        """Older state: a hub-stop record from before sd:5963 holds a failure no note was written for."""
+        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        with self.failing_store(lambda entry: entry.get("status") == "failed"):
+            sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [record] = (self.store().lane / "queue").glob("hub-stop-*.json")
+        older = json.loads(record.read_text(encoding="utf-8"))
+        del older["outcome"]["note"]
+        record.write_text(json.dumps(older), encoding="utf-8")
+        self.notes.clear()
+        self.make_dead()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([item for item, _ in self.lane_notes()], [1])
 
 
 if __name__ == "__main__":
