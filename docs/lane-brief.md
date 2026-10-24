@@ -15,6 +15,12 @@ Related pages: [`review-learnings.md`](review-learnings.md) for what reviews
 have taught this repository, [`workflow-controls.md`](workflow-controls.md)
 for the controls a run passes through.
 
+## Which items
+
+Fill a brief from `ready` items first, ranked by value per hour: they need no further question.
+Put one repository's ready items in one brief; there is no intake cap.
+[WORKFLOW.md § Parallel work](../WORKFLOW.md#parallel-work) holds the rule.
+
 ## The template
 
 > You are lane `<lane>` in the **<pack|system>** repository, `<checkout path>`.
