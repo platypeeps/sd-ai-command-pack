@@ -290,7 +290,7 @@ class ConventionalTitleTests(unittest.TestCase):
             for title in (f"{kind}: a summary", f"{kind}(lane): a summary", f"{kind}(machine-setup)!: a summary",
                           f"{kind}!: a summary"):
                 with self.subTest(title=title):
-                    sd_ship_body.refuse_unconventional_title(title)
+                    self.assertIsNone(sd_ship_body.refuse_unconventional_title(title))
 
     def test_anything_else_is_refused(self) -> None:
         for title in ("A plain title", "Fix: capital type", "fix:no space", "fix: ", "fix(): empty scope",
