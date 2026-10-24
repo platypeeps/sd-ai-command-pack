@@ -2980,15 +2980,22 @@ def unknown_checkout(queue: Queue, entry: dict[str, Any], token: str,
 def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token: str, environ: dict[str, str],
                  ship: Ship, note: Note, tree: pathlib.Path | None,
                  found: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
-    """`run_entry` in `tree`, or the skip `found` holds when there is none."""
-    outcome = found
+    """`run_entry` in `tree`, or the skip `found` holds when there is none.
+
+    `stage` follows `advance`, so a raise after the before-merge write names
+    merge in the note and the finish record, not the claim's prepare (sd:5968).
+    """
+    outcome, stage = found, {"step": entry.get("step") or "prepare"}
+
+    def advanced() -> None:
+        advance(queue, local, token)
+        stage["step"] = "merge"
     try:
         if tree is not None:
             built = {"lane_worktree": True, "builder_worktree": entry.get("worktree"),
                      "builder_host": entry.get("enqueued_on")}
             local = {**entry, "worktree": str(tree), **(built if found.get("made") else {})}
-            outcome = process(local, queue, ship, functools.partial(advance, queue, local, token),
-                              functools.partial(renew, queue, local, token))
+            outcome = process(local, queue, ship, advanced, functools.partial(renew, queue, local, token))
             if outcome.get("moved"):
                 put_back(queue, entry, token, pushed_catch_up(tree, str(entry.get("branch") or ""),
                                                               entry["expected_head"]),
@@ -3008,9 +3015,9 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
     except LaneError as error:
         if error.code == PUBLISH_UNKNOWN:  # the head check had no answer; prepare has not started
             return unknown_checkout(queue, entry, token, error)
-        outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
+        outcome = {"status": "failed", **stage, "reason": f"{type(error).__name__}: {error}"[:600]}
     except Exception as error:  # a broken entry is marked; the next one still runs
-        outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
+        outcome = {"status": "failed", **stage, "reason": f"{type(error).__name__}: {error}"[:600]}
     noted = note_ended({**entry, **outcome}, root, note)  # before the finish write, so a hub stop keeps it
     if noted:
         outcome["note"] = noted

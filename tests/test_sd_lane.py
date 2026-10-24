@@ -4684,6 +4684,24 @@ class FailureNotes(SharedQueue):
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual(self.lane_notes(), [(1, "Lane failed in merge at head-1: the merge was refused")])
 
+    def test_an_exception_in_the_merge_step_notes_merge(self) -> None:
+        """pack sd:5968: a raise after `advance` names merge in the note and the finish record, not prepare."""
+        for error in (OSError("the merge log did not write"), sd_lane.LaneError("the merge read failed")):
+            with self.subTest(error=type(error).__name__):
+                self.notes.clear()
+                sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+
+                def ship(argv: list[str], log: pathlib.Path, error: Exception = error) -> dict:
+                    if argv[2] == "merge":
+                        raise error
+                    return self.ship(argv, log)
+                sd_lane.run_lane(self.repo, self.environ, ship)
+                entry = self.entries()[-1]
+                [(item, body)] = self.lane_notes()
+                self.assertEqual((entry["status"], entry["step"], item), ("failed", "merge", 1))
+                self.assertTrue(body.startswith(f"Lane failed in merge at {entry['expected_head'][:12]}: "
+                                                f"{type(error).__name__}: "), body)
+
     def test_a_dead_runner_at_merge_notes_its_item_once(self) -> None:
         """Steps: the runner died with the entry at merge; the reclaim fails it and notes it, and no later run does."""
         head = sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")["expected_head"]
