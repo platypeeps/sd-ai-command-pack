@@ -249,6 +249,8 @@ class IdempotencyTests(InstallerHarness):
 
         `compact` would consume the packet into the dying session and the
         `/clear` that follows -- the entire gesture -- would find nothing.
+        `compact` goes to `sd-session-trail`, which claims nothing: it reads
+        the session's own rows back (sd:6023).
 
         The next two rows are one file on two events, and that is also
         design: `PreToolUse` sees a skill invoked or its `SKILL.md` read,
@@ -261,6 +263,7 @@ class IdempotencyTests(InstallerHarness):
             sd_install.HOOK_SPECS,
             (
                 ("bin/sd-handoff-restore", "SessionStart", ("startup", "clear")),
+                ("bin/sd-session-trail", "SessionStart", ("compact",)),
                 ("bin/sd-skill-use", "PreToolUse", ("Skill|Read",)),
                 ("bin/sd-skill-use", "UserPromptSubmit", ("",)),
                 ("bin/sd-issue-guard", "PreToolUse",

@@ -429,13 +429,14 @@ def capture_task(
     connection: sqlite3.Connection, *, title: str, body: str = "",
     priority: int | None = None, due: str | None = None, repo: str | None = None,
     recurrence: str | None = None, recurrence_anchor: str | None = None,
-    recurrence_lead: int | None = None, who: str,
+    recurrence_lead: int | None = None, who: str, session: str | None = None,
 ) -> dict:
     """Capture one local task, including its initial status history.
 
     `recurrence` is an RRULE in `sd_db.recurrence`'s subset and needs `due`;
     `recurrence_anchor` defaults to `schedule` when a rule is given, and
     `recurrence_lead` is the days before `due` each later occurrence shows.
+    `session` is the opening note's session, `who` when not given (sd:6023).
     """
     who = _text(who, "who")
     with transaction(connection):
@@ -445,7 +446,7 @@ def capture_task(
             "recurrence_lead": recurrence_lead,
         })
         values = _recurring("task", {}, values)
-        item = create_item(connection, kind="task", status="planning", session=who, **values)
+        item = create_item(connection, kind="task", status="planning", session=session or who, **values)
         return item_state(connection, item)
 
 
@@ -876,16 +877,19 @@ def _next_occurrence(connection: sqlite3.Connection, row: dict, *, who: str) -> 
 
 def add_item_note(
     connection: sqlite3.Connection, item: int, *, body: str, kind: str = "comment",
-    who: str, expected_revision: str | None = None,
+    who: str, expected_revision: str | None = None, session: str | None = None,
 ) -> dict:
-    """Add a human note; status and execution history have their own writers."""
+    """Add a human note; status and execution history have their own writers.
+
+    `session` is the note's session, `who` when not given (sd:6023).
+    """
     who = _text(who, "who")
     body = _text(body, "body")
     if kind not in NOTE_KINDS:
         raise WorkflowError(f"note kind must be one of {', '.join(NOTE_KINDS)}")
     with transaction(connection):
         _checked_state(connection, item, expected_revision)
-        note = add_note(connection, item, kind, body, session=who)
+        note = add_note(connection, item, kind, body, session=session or who)
         state = item_state(connection, item)
         state["note"] = next(row for row in state["notes"] if row["id"] == note)
         return state

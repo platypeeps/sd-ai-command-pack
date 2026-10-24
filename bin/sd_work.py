@@ -1092,7 +1092,7 @@ def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
             connection, title=args.title, body=args.body or "", priority=args.priority,
             due=args.due, repo=_task_repo(args, connection, workflow),
             recurrence=args.recur, recurrence_anchor=args.recur_anchor,
-            recurrence_lead=args.recur_lead, who=who,
+            recurrence_lead=args.recur_lead, who=who, session=_session(who),
         )
         item = state["item"]["id"]
         if args.ref is not None:
@@ -1189,6 +1189,18 @@ def _note_text(args: argparse.Namespace) -> str:
     return args.text if args.text is not None else args.body
 
 
+#: Claude Code sets it to the session's id in every Bash call and hook (sd:6023).
+SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+
+
+def _session(who: str) -> str:
+    """The session a note records: the harness session id when set, else `who` (sd:6023).
+
+    `bin/sd-session-trail` reads a session's own notes back by it after a compact.
+    """
+    return os.environ.get(SESSION_ENV) or who
+
+
 def _note(workflow: Any, connection: Any, args: argparse.Namespace, who: str, revision: str | None) -> dict:
     body = _note_text(args)
     if getattr(args, "option", None) is not None and args.answers is None:
@@ -1197,7 +1209,7 @@ def _note(workflow: Any, connection: Any, args: argparse.Namespace, who: str, re
     if args.answers is not None:
         return _answer(workflow, connection, args, body, who, revision)
     return workflow.add_item_note(connection, args.item, body=body, kind=args.kind, who=who,
-                                  expected_revision=revision)
+                                  expected_revision=revision, session=_session(who))
 
 
 def _answer(workflow: Any, connection: Any, args: argparse.Namespace, body: str, who: str,
@@ -1232,7 +1244,7 @@ def _answer(workflow: Any, connection: Any, args: argparse.Namespace, body: str,
             raise WorkRefusal(f"sd:{args.item} is not a review batch, so --option rules nothing: drop it")
         ruled = workflow.add_item_note(connection, args.item, kind="decision", who=who,
                                        body=f"Ruling on note #{args.answers}: {body}",
-                                       expected_revision=revision)
+                                       expected_revision=revision, session=_session(who))
         state = workflow.resolve_item_note(connection, args.answers, who=who,
                                            expected_revision=ruled["revision"])
         state["note"] = ruled["note"]
