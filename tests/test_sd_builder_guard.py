@@ -87,6 +87,24 @@ class Decisions(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIsNone(self.decision(bash(command, timeout=600000)))
 
+    def test_git_stash_is_denied_with_its_reason(self) -> None:
+        for command in ("git stash", "git stash push -m wip", "git stash pop", "git stash drop",
+                        "git -C /tmp/wt stash", "git -c core.pager=cat stash apply",
+                        "/usr/bin/git stash", "cd /tmp/wt && git stash", "make; git stash",
+                        "GIT_DIR=x git stash", "rtk git stash", "rtk proxy git stash",
+                        "git --git-dir=/tmp/wt/.git stash clear", "git stash -q"):
+            with self.subTest(command=command):
+                self.assertDenied(bash(command, timeout=600000),
+                                  "git stash in a shared worktree hid or dropped "
+                                  "another writer's work")
+
+    def test_read_only_stash_and_other_git_pass(self) -> None:
+        for command in ("git stash list", "git -C /tmp/wt stash show -p", "git status",
+                        "git log --grep stash", "echo git stash", "git commit -m 'git stash'",
+                        "grep -n stash notes.txt", "git -C stash status"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decision(bash(command, timeout=600000)))
+
     def test_other_tools_pass(self) -> None:
         payload = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Read",
                               "tool_input": {"file_path": "/tmp/x"}})

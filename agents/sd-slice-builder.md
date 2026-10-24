@@ -96,7 +96,7 @@ Check each class your change touches before you commit.
   The lane runs the full gate. Never use Bash `run_in_background`, `Monitor` or a wrapped `sleep` to wait:
   a background exit did not wake idle builders, and they sat about 4 hours unreported.
 - Give every Bash call `timeout: 600000`. The `sd-builder-guard` hook denies a background call, a shorter timeout,
-  a leading `sleep` and `Monitor`.
+  a leading `sleep`, `Monitor` and `git stash` other than `stash list` and `stash show`.
 
 ## Report
 

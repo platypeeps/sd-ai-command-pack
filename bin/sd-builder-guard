@@ -11,6 +11,9 @@ for builders only and the lead's own background watches keep working.
   means the 120 s default): denied, naming the two fields to re-run with.
 - Bash whose command starts with `sleep`: denied.
 - Any tool whose name holds `Monitor`: denied.
+- Bash that runs `git stash` anywhere on the line, `git -C <dir> stash` too:
+  denied with its reason (sd:5985). The read-only `stash list` and `stash
+  show` pass. The rule moved here from prose after it kept breaking.
 
 It denies rather than rewriting the input with `updatedInput`. Every matching
 PreToolUse hook runs in parallel and the last `updatedInput` to arrive wins, so
@@ -25,7 +28,9 @@ hook must not stop a builder.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shlex
 import sys
 
 TIMEOUT_MS = 600000
@@ -41,7 +46,65 @@ WAIT = (
     f"the command itself in the foreground with timeout {TIMEOUT_MS}."
 )
 
+STASH = (
+    "A builder never runs git stash: git stash in a shared worktree hid or "
+    "dropped another writer's work. Commit the work on your branch instead; "
+    "git stash list and git stash show still pass."
+)
+
 SLEEP = re.compile(r"\s*sleep(\s|;|&|\||$)")
+
+#: The characters that separate commands, as `bin/sd-issue-guard` reads them.
+PUNCTUATION = ";&|()\n"
+
+#: Words that run the command after them. `rtk` is the token-saving proxy,
+#: and `rtk proxy` runs the next word bare.
+WRAPPERS = frozenset({"env", "command", "exec", "nohup", "sudo", "time", "rtk", "proxy"})
+
+#: `git` global options that take the next word as their value.
+GIT_VALUED = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace",
+                        "--config-env", "--super-prefix"})
+
+STASH_READS = frozenset({"list", "show"})
+
+
+def stashes(command: str) -> bool:
+    """Whether a shell line runs `git stash` other than its read-only verbs.
+
+    `git` counts in command position: first in a segment, after `VAR=value`
+    words and `WRAPPERS`. A quoted string that mentions it is one word and
+    never matches. A line the lexer cannot read passes, as the shell
+    refuses it too.
+    """
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=PUNCTUATION)
+    lexer.whitespace = " \t\r"
+    lexer.whitespace_split = True
+    try:
+        words = list(lexer)
+    except ValueError:
+        return False
+    at_start = True
+    position = 0
+    while position < len(words):
+        word = words[position]
+        position += 1
+        if not word.strip(PUNCTUATION):
+            at_start = True
+            continue
+        if not at_start:
+            continue
+        if "=" in word and word.split("=", 1)[0].isidentifier() or word in WRAPPERS:
+            continue
+        at_start = False
+        if os.path.basename(word) != "git":
+            continue
+        while position < len(words) and words[position].startswith("-"):
+            position += 2 if words[position] in GIT_VALUED else 1
+        if position < len(words) and words[position] == "stash":
+            verb = words[position + 1] if position + 1 < len(words) else ""
+            if verb not in STASH_READS:
+                return True
+    return False
 
 
 def reason(payload: dict) -> str | None:
@@ -54,6 +117,8 @@ def reason(payload: dict) -> str | None:
     tool_input = payload["tool_input"]
     if SLEEP.match(tool_input["command"]):
         return WAIT
+    if stashes(tool_input["command"]):
+        return STASH
     timeout = tool_input.get("timeout")
     if tool_input.get("run_in_background") or not isinstance(timeout, (int, float)) or timeout < TIMEOUT_MS:
         return FOREGROUND
