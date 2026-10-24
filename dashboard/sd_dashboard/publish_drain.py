@@ -191,9 +191,11 @@ def start(connection, checkout: Path, out: str, *, brief: bool = False, now: dat
         handle.write(run_id)
         handle.flush()
         try:
+            from . import runner_environment
             runner = spawn([sys.executable, str(Path(__file__).resolve()), "run", str(record), str(handle.fileno())],
                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                           pass_fds=(handle.fileno(),), start_new_session=True, cwd=str(state))
+                           pass_fds=(handle.fileno(),), start_new_session=True, cwd=str(state),
+                           env=runner_environment())
         except OSError as problem:
             _write(record, {**document, "state": "failed", "reason": f"the runner did not start: {problem}",
                             "finished": _iso(datetime.datetime.now(datetime.timezone.utc))})

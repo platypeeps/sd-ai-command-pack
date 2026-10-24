@@ -598,7 +598,8 @@ def start(connection, kind: str, target, *, base=None, item=None, body=None, pr=
         handle.truncate()
         handle.write(run_id)
         handle.flush()
-        environment = {**os.environ}
+        from . import runner_environment
+        environment = runner_environment()
         # Jev ordering sends each finding's text to a third party; a review of private items keeps it off unless
         # the server was started with the switch set (local-adversarial-gate/README.md, "What leaves the machine").
         environment.setdefault("JEV_ADVERSARIAL_GATE", "0")

@@ -283,6 +283,15 @@ class TheDraft(FilingCase):
         for key in ("context", "claude", "guard", "pid", "server"):
             self.assertNotIn(key, run)
 
+    def test_the_detached_runner_finds_the_packs_sd_db_with_no_pythonpath(self):
+        """sd:5987 lane review: the LaunchAgent's server sets no `PYTHONPATH` and the runtime has no installed
+        `sd_db`, so a runner started as a file finds the pack's library only through the environment it is given."""
+        self.enable()
+        with patch.dict(os.environ):
+            os.environ.pop("PYTHONPATH", None)
+            run = self.drafted(self.task())
+        self.assertEqual(run["state"], "ready", run)
+
     def test_another_registered_repository_goes_by_its_full_and_its_bare_name(self):
         self.enable()
         (self.double / "reply").write_text("Title: Export fails\n\nIt also breaks secret-plans and example/secret-plans.\n")

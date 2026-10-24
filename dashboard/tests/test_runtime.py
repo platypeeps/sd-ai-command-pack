@@ -1212,5 +1212,41 @@ class ServedCommit(unittest.TestCase):
         self.assertIn(f"it serves {'a' * 40} and its build changed on disk", str(refusal.exception))
 
 
+
+class DetachedRunners(unittest.TestCase):
+    """sd:5987 lane review: every runner the server starts as a file or with `-m` imports with no `PYTHONPATH` of
+    its own and no installed `sd_db`, given `runner_environment()`, as the LaunchAgent's server starts it. A usage
+    line on stderr means the module imported; a missing `sd_db` stops it before then."""
+
+    FILES = ("issue_filing", "adversarial", "publish_drain", "research_deck")
+    MODULES = ("hoa_download", "research_experiments", "realm_sweep")
+
+    def clean(self, home):
+        from sd_dashboard import runner_environment
+
+        return runner_environment({"HOME": home, "PATH": "/usr/bin:/bin"})
+
+    def test_the_environment_names_the_packs_library_and_nothing_else(self):
+        from sd_dashboard import pack_library
+
+        with tempfile.TemporaryDirectory() as home:
+            found = subprocess.run([sys.executable, "-c", "import sd_db; print(sd_db.__file__)"], cwd=home,
+                                   env=self.clean(home), capture_output=True, text=True, timeout=60)
+            self.assertEqual(found.returncode, 0, found.stderr)
+            self.assertEqual(Path(found.stdout.strip()).parent.parent, pack_library())
+            self.assertEqual(self.clean(home)["PYTHONPATH"], str(pack_library()))
+
+    def test_every_runner_imports_in_the_environment_it_is_given(self):
+        with tempfile.TemporaryDirectory() as home:
+            starts = [([sys.executable, str(runtime.HERE / "sd_dashboard" / f"{name}.py")], home) for name in self.FILES]
+            starts += [([sys.executable, "-m", f"sd_dashboard.{name}"], str(runtime.HERE)) for name in self.MODULES]
+            for argv, place in starts:
+                with self.subTest(runner=argv[-1]):
+                    done = subprocess.run(argv, cwd=place, env=self.clean(home), capture_output=True, text=True,
+                                          timeout=60)
+                    self.assertNotIn("ModuleNotFoundError", done.stderr)
+                    self.assertIn("usage:", done.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

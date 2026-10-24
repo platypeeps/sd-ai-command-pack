@@ -15,10 +15,11 @@ it adds no asset pipeline and changes nothing about how `static/` is served.
 from __future__ import annotations
 
 import importlib
+import os
 import sys
 from pathlib import Path
 
-__all__ = ["PACK_MODULES", "__version__", "pack_bin", "pack_library", "pack_module"]
+__all__ = ["PACK_MODULES", "__version__", "pack_bin", "pack_library", "pack_module", "runner_environment"]
 
 __version__ = "0.1.0"
 
@@ -39,6 +40,15 @@ def pack_library():
     `__main__`.
     """
     return Path(__file__).resolve().parents[2] / "lib"
+
+
+def runner_environment(environ=None) -> dict:
+    """`environ`, the server's by default, with `pack_library()` as the whole `PYTHONPATH` (sd:5987).
+
+    A runner the server starts as a file or with `-m` gets none of `bootstrap.py`'s `sys.path`, and the
+    runtime interpreter has no installed `sd_db`; every such start passes this as its environment.
+    """
+    return {**(os.environ if environ is None else environ), "PYTHONPATH": str(pack_library())}
 
 
 def pack_bin(library_root=None) -> Path:
