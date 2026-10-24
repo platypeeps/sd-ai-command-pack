@@ -264,6 +264,16 @@ class SliceBuilderDecisionNote(unittest.TestCase):
         self.assertNotIn("Decision needed", body)
 
 
+class SliceBuilderClaimsItems(unittest.TestCase):
+    """sd:5961. Items read `planning` while builders worked them: only the
+    retired runner's assignment claim moved one to `in_progress`. A builder
+    claims each item it takes, with the existing status verb."""
+
+    def test_the_slice_builder_moves_each_item_it_takes_to_in_progress(self) -> None:
+        _, body = (AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8").split("\n---\n", 1)
+        self.assertIn("sd task status N in_progress --reason", body)
+
+
 class SliceBuilderTestPause(unittest.TestCase):
     """sd:3173. Lane gates timed out while builders ran their focused tests beside them;
     run through `sd gate run`, a builder's tests wait in the machine gate queue.
