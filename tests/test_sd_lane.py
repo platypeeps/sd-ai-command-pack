@@ -2287,6 +2287,68 @@ class ItemChecks(SharedQueue):
         self.assertEqual([row["status"] for row in self.entries()], ["failed"])
 
 
+class CitedCloses(SharedQueue):
+    """sd:5999, operator ruling 2026-10-24 (grill Q20): the merge closes every item a merged commit delivers.
+
+    Enqueue adds to the closing set each open item of this repository that
+    a branch commit's subject names, or that a `Lane review fix, <repo>
+    sd:N` line of the body or a commit names. Only those forms: prose that
+    names an item closes nothing. System sd:5939 shipped in #505 and stayed
+    in_progress.
+    """
+
+    checks_item = True
+
+    def setUp(self) -> None:
+        super().setUp()
+        [self.own] = self.register_items(1)
+        import sd_db
+        other = self.tmp / "other"
+        other.mkdir()
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            sd_db.upsert_repo(connection, str(other), remote="https://github.com/example/other.git", managed=1)
+            self.foreign = sd_db.create_item(connection, kind="task", title="theirs", status="in_progress",
+                                             repo=str(other))
+            self.open = [sd_db.create_item(connection, kind="task", title=f"cited {n}", status="in_progress",
+                                           repo=str(self.repo)) for n in range(6)]
+            self.done = sd_db.create_item(connection, kind="task", title="done", status="done", repo=str(self.repo))
+        finally:
+            connection.close()
+
+    def enqueue(self, body: str, *subjects: str, claim: str = "deliver") -> dict:
+        tree, _ = self.committed(f"topic-{len(self.entries())}", *subjects)
+        self.body.write_text(body, encoding="utf-8")
+        return sd_lane.enqueue_entry(tree, self.own, "fix: a slice", self.body, self.environ, claim=claim)
+
+    def test_cited_open_items_join_the_closing_set_and_prose_does_not(self) -> None:
+        a, b, c, d, e, f = self.open
+        body = (f"## Summary\n\nKeeps the sd:{c} guard.\n\nLane review fix, pack sd:{b}: the read is unknown.\n"
+                f"```\nLane review fix, pack sd:{d}: an example\n```\n<!--\nLane review fix, pack sd:{d}\n-->\n"
+                f"Refs: sd:{f}\n")
+        entry = self.enqueue(body, f"fix(lane): the slice (pack sd:{a})",
+                             f"fix: names a done one (sd:{self.done}), a foreign one (sd:{self.foreign}) and sd:{f}",
+                             f"fix: a review fix\n\nLane review fix, pack sd:{e}: one more.\nAlso keeps sd:{c}.")
+        self.assertEqual(entry["closes"], [a, b, e])
+        self.calls.clear()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [prepare] = [call for call in self.calls if call[2] == "prepare"]
+        self.assertEqual([prepare[i + 1] for i, part in enumerate(prepare) if part == "--item"],
+                         [str(self.own), str(a), str(b), str(e)])
+
+    def test_an_associate_only_claim_closes_nothing_it_cites(self) -> None:
+        entry = self.enqueue("Words.\n", f"fix: part of it (sd:{self.open[0]})", claim="associate-only")
+        self.assertEqual(entry["closes"], [])
+
+    def test_a_failed_hub_read_queues_and_pushes_nothing(self) -> None:
+        """Failures: the cited items' read did not answer; that is no "nothing to close"."""
+        unanswered = mock.patch.object(sd_lane, "cited_closes", side_effect=sqlite3.OperationalError("disk I/O error"))
+        with unanswered, self.assertRaises(sd_lane.LaneError) as refused:
+            self.enqueue("Words.\n", f"fix: the slice (sd:{self.open[0]})")
+        self.assertEqual((refused.exception.code, self.rows(), "push" in self.git_verbs),
+                         (sd_lane.HUB_UNAVAILABLE, [], False))
+
+
 class LineLimits(SharedQueue):
     """sd:5793: enqueue refuses a title over 63 characters, or a body or commit line over 72.
 

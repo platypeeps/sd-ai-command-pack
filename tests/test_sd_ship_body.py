@@ -223,6 +223,16 @@ class LineLengthTests(unittest.TestCase):
         self.assertEqual(sd_ship_body.long_lines(written), [])
 
 
+class CitedIdTests(unittest.TestCase):
+    """sd:5999: a commit subject or a `Lane review fix, <repo> sd:N` line cites an item; prose does not."""
+
+    def test_only_subjects_and_review_fix_lines_cite(self) -> None:
+        commits = [("a" * 40, "fix: one (pack sd:2)\r\n\nKeeps the sd:3 guard.\r\nLane review fix, pack sd:4: x\r\n"),
+                   ("b" * 40, "chore: none\n\n  Lane review fix, pack sd:5: indented\n")]
+        body = "Lane review fix, system sd:6: y\nSee Lane review fix, pack sd:7.\n~~~\nLane review fix, pack sd:8\n~~~\n"
+        self.assertEqual(sd_ship_body.cited_ids(body, commits), (2, 6, 4))
+
+
 class ConventionalTitleTests(unittest.TestCase):
     """sd:6059: the title is the squash subject, so it is a Conventional Commits header."""
 

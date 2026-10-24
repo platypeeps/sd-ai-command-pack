@@ -264,6 +264,46 @@ def referenced_ids(body: str) -> set[int]:
             for number in _TITLE_ID.findall(re.sub(r"<!--.*?(?:-->|$)", "", match[1]))}
 
 
+#: A `Lane review fix, <repo> sd:<n>` line: a fix the lane's review asked for, and the item it delivers (sd:5999).
+_REVIEW_FIX = re.compile(r"^Lane review fix, [A-Za-z0-9_.-]+ sd:([0-9]+)\b")
+
+
+def cited_ids(body: str, commits) -> tuple[int, ...]:
+    """The ids a merge delivers by citation (operator ruling 2026-10-24, sd:5999), in order, once.
+
+    Each `sd:<n>` the subject of a branch commit names, and each `Lane
+    review fix, <repo> sd:<n>` line of `body` or of a commit message.
+    `commits` is each `(sha, message)` the branch adds. Only those forms:
+    prose such as "keeps the sd:<n> guard" cites nothing, and a line a
+    fenced code block or an HTML comment holds is an example.
+    """
+    found = [number for _, message in commits for number in title_ids(message.split("\n", 1)[0])]
+    for text in (body, *(message for _, message in commits)):
+        quoted = quoted_lines(text)
+        found += [int(match[1]) for number, line in enumerate(text.split("\n"), start=1)
+                  if number not in quoted and (match := _REVIEW_FIX.match(line.rstrip("\r")))]
+    return tuple(dict.fromkeys(found))
+
+
+def open_cited(connection, item: int, repo: str, cited, named, body: str) -> tuple[int, ...]:
+    """Of `cited`, the items a merge of `item` should close beyond `named`, its later `--item` list (sd:5999).
+
+    An item counts when it belongs to `repo`, is a kind a merge closes, and
+    is open, as `refuse_left_open` reads them; a `Refs:` line of `body`
+    keeps one open.
+    """
+    left = referenced_ids(body) | {item, *named}
+    kept = []
+    for number in cited:
+        if number in left:
+            continue
+        row = connection.execute("SELECT repo, kind, status FROM item WHERE id = ?", (number,)).fetchone()
+        if row is not None and row["repo"] == repo and row["kind"] in _CLOSABLE_KINDS \
+                and row["status"] in _OPEN_STATUSES:
+            kept.append(number)
+    return tuple(kept)
+
+
 def refuse_left_open(connection, item: int, repo: str, names, title: str, body: str, named, deliver: bool) -> None:
     """Refuse a delivering entry whose title or Summary headings name an open item missing from --item (sd:5375).
 

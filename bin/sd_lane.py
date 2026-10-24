@@ -692,6 +692,10 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     seconds (sd:5989): a head the worktree is not at (`at_head`), an
     `origin/<branch>` past the head (`tip_past`), and prepare's docs lint
     (`check_docs`). Tests stay in the lane's gate.
+
+    A delivering entry's `closes` also takes each open item of this
+    repository its branch commits or body cite (`cited_closes`, sd:5999),
+    read before the push; a read that fails queues and pushes nothing.
     """
     worktree = worktree.resolve()
     sd_lib.refuse_unmanaged(worktree, LaneError)  # its prepare would refuse; do not queue it
@@ -728,6 +732,10 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     def refuse_before_push(base: str) -> None:
         check_lines(worktree, title, body, base, head)
         check_docs(worktree, body, base)
+        if claim == "deliver":  # an associate-only claim closes nothing (sd:3365)
+            commits = branch_commits(worktree, base, head)
+            cited = on_hub(queue, lambda connection: cited_closes(connection, item, body, commits, closes))
+            entry["closes"] = [*closes, *cited]
     require_published(worktree, branch, head, f"{head} names no commit in {worktree}", refuse_before_push,
                       lambda tip: tip_past(worktree, branch, tip, head))
     return add_entry(queue, entry)
@@ -744,17 +752,39 @@ def check_lines(worktree: pathlib.Path, title: str, body: str, base: str, head: 
     """
     import sd_ship_body  # noqa: PLC0415
     from sd_ship_remote import Refusal  # noqa: PLC0415
-    raw = lane_git(worktree, "log", "--format=%H%x1f%B%x1e", f"refs/remotes/origin/{base}..{head}")
-    if raw is None:
-        raise LaneError(f"Cannot read the commits {head} adds to origin/{base}; fetch origin, then enqueue "
-                        "again. Nothing was queued or pushed.", code=PUBLISH_UNKNOWN)
-    commits = [(sha.strip(), message) for sha, _, message in
-               (chunk.strip("\n").partition("\x1f") for chunk in raw.split("\x1e")) if sha.strip()]
+    commits = branch_commits(worktree, base, head)
     try:
         sd_ship_body.refuse_long_lines(title, body, commits)
         sd_ship_body.refuse_unconventional_title(title)
     except Refusal as error:
         raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
+
+
+def branch_commits(worktree: pathlib.Path, base: str, head: str) -> list[tuple[str, str]]:
+    """Each `(sha, message)` `head` adds to `origin/<base>`, merges included; a failed read raises `PUBLISH_UNKNOWN`."""
+    raw = lane_git(worktree, "log", "--format=%H%x1f%B%x1e", f"refs/remotes/origin/{base}..{head}")
+    if raw is None:
+        raise LaneError(f"Cannot read the commits {head} adds to origin/{base}; fetch origin, then enqueue "
+                        "again. Nothing was queued or pushed.", code=PUBLISH_UNKNOWN)
+    return [(sha.strip(), message) for sha, _, message in
+            (chunk.strip("\n").partition("\x1f") for chunk in raw.split("\x1e")) if sha.strip()]
+
+
+def cited_closes(connection: Any, item: int, body: str, commits: list[tuple[str, str]],
+                 closes: tuple[int, ...]) -> list[int]:
+    """The open items of `item`'s repository its commits or body cite, beyond `closes` (sd:5999).
+
+    A branch commit's subject, or a `Lane review fix, <repo> sd:N` line
+    (`sd_ship_body.cited_ids`); the merge closes each as it closes a later
+    `--item`, with a note naming the merge commit. An item with no
+    repository row adds nothing: `check_item` refuses it first.
+    """
+    import sd_ship_body  # noqa: PLC0415
+    row = connection.execute("SELECT repo FROM item WHERE id = ?", (item,)).fetchone()
+    if row is None or not row["repo"]:
+        return []
+    return list(sd_ship_body.open_cited(connection, item, row["repo"], sd_ship_body.cited_ids(body, commits),
+                                        closes, body))
 
 
 def tip_past(worktree: pathlib.Path, branch: str, tip: str, head: str) -> None:
