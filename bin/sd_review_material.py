@@ -43,7 +43,8 @@ def untracked(root: pathlib.Path) -> list[str]:
 # screenshot overruns the limit. UTF-8 (a `-diff` file) and BOM-marked UTF-16 go as text; anything else
 # stays base64, so the size check refuses honestly. Not media: zip, gzip (can carry source), ICO (weak magic).
 BINARY_MARKER = re.compile(r"(?m)^Binary files .* differ\n?")
-SUMMARY = re.compile(r"(?m)^(?:\[(?:binary, not sent|renamed)\] |deleted file mode )")  # a patch prefixes content lines; -D (sd:6088) sends a deletion as its header
+SUMMARY = re.compile(r"(?m)^\[(?:binary, not sent|renamed)\] ")  # a patch prefixes content lines
+DELETED = re.compile(r"(?m)^deleted file mode ")  # sd:6088: with -D this header is all a deletion sends
 RENAMED = re.compile(r'(?m)^\[renamed\] ("(?:[^"\\]|\\.)*") -> "(?:[^"\\]|\\.)*"; unchanged lines not sent$')
 MEDIA_MAGIC = (b"\x89PNG\r\n\x1a\n", b"\xff\xd8\xff", b"GIF87a", b"GIF89a", b"wOFF", b"wOF2", b"%PDF-")
 
@@ -87,17 +88,25 @@ def file_material(root: pathlib.Path, name: str, change: str) -> tuple[str, bool
     return f"\n--- {json.dumps(name)} ---\n{content}", media
 
 
-def collect_review_material(root: pathlib.Path, subject: Any) -> tuple[str, list[dict[str, Any]]]:
-    """One entry per literal path; renames retain deletion and addition sides."""
+def collect_review_material(root: pathlib.Path, subject: Any, limit: int = 2_000_000) -> tuple[str, list[dict[str, Any]]]:
+    """One entry per literal path; renames retain deletion and addition sides.
+
+    sd:6088: material over `limit` (sd-review's MAX_OUTPUT_BYTES) is collected again with deleted files
+    as their header only, and each such path is summarized; material within the limit sends deleted text."""
+    material, inventory = _collect(root, subject, False)
+    return (material, inventory) if len(material.encode("utf-8")) <= limit else _collect(root, subject, True)
+
+
+def _collect(root: pathlib.Path, subject: Any, drop_deleted: bool) -> tuple[str, list[dict[str, Any]]]:
     extra = set(untracked(root)) if subject.scope == "worktree" else set()
-    patches = {} if subject.scope == "planning" else tracked_material(root, subject)
+    patches = {} if subject.scope == "planning" else tracked_material(root, subject, drop_deleted)
     parts: list[str] = []
     inventory: list[dict[str, Any]] = []
     for name in subject.paths:
         if subject.scope == "planning" or name in extra:
             part, summarized = file_material(root, name, "current" if subject.scope == "planning" else "added (untracked)")
         else:
-            part, summarized = patches[name], bool(SUMMARY.search(patches[name]))
+            part, summarized = patches[name], bool(SUMMARY.search(patches[name]) or drop_deleted and DELETED.search(patches[name]))
         part = ("\n" if parts else "") + part
         parts.append(part)
         inventory.append({"path": name, "bytes": len(part.encode("utf-8")),
@@ -106,8 +115,8 @@ def collect_review_material(root: pathlib.Path, subject: Any) -> tuple[str, list
     return "".join(parts), inventory
 
 
-def tracked_material(root: pathlib.Path, subject: Any) -> dict[str, str]:
-    common = ["--no-ext-diff", "--no-textconv", "--no-color", "--submodule=short", "--irreversible-delete", subject.base,
+def tracked_material(root: pathlib.Path, subject: Any, drop_deleted: bool = False) -> dict[str, str]:
+    common = ["--no-ext-diff", "--no-textconv", "--no-color", "--submodule=short", *(["--irreversible-delete"] if drop_deleted else []), subject.base,
               *([] if subject.head == "worktree" else [subject.head]), "--"]
     args = ["--no-renames", *common]
     names = list(filter(None, read_git_material(root, ["diff", "--name-only", "-z", *args]).split("\0")))

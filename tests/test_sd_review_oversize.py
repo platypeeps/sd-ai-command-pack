@@ -510,3 +510,23 @@ class DeletedMaterialTests(ReviewFixture):
                                                              sd_review.MAX_OUTPUT_BYTES)
         self.assertEqual(native["partial_providers"], [])
         self.assertEqual(native["status"], "within_limit")
+
+    def test_deletion_within_the_limit_is_sent_whole_and_not_omitted(self):
+        root = self.make_repo()
+        (root / "old.py").write_text("gone = 1\n")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "old")
+        base = self.git(root, "rev-parse", "HEAD").strip()
+        self.git(root, "rm", "--quiet", "old.py")
+        self.git(root, "commit", "--quiet", "-m", "drop")
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        self.assertIn("-gone = 1", material)
+        manifest = sd_review.sd_review_material.input_manifest(inventory, "prompt", {"fixture": "overhead"},
+                                                               sd_review.MAX_OUTPUT_BYTES)
+        self.assertEqual(manifest["omitted_paths"], [])
+
+    def test_material_limit_default_matches_the_review_limit(self):
+        default = sd_review.sd_review_material.collect_review_material.__defaults__
+        self.assertEqual(default, (sd_review.MAX_OUTPUT_BYTES,))
+
