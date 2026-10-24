@@ -384,6 +384,11 @@ Workers:
 - **Batch a repository's ready items into one pull request by default**, one commit per row; rows that change the same files always group.
   Keep a group near 300 changed lines. Name every grouped row in the pull request. Where goldens exist, bless them once per bundle.
   A change that moves state in steps still gets its own pull request.
+- **Repository work uses the existing `ready` status (pack sd:6000).** A second status would split one queue in two.
+  A ruling with a clear spec moves its item to `ready`: nothing is left to ask before a build.
+  The lane brief and "pick up open items" take `ready` items first: a builder can finish them without a question.
+  Rank `ready` items by value per hour: one developer's hours are the budget.
+  No intake cap: the ranking orders the work, and a cap would only hide rows (grill Q45; Q1 ruled no rate limit).
 - **Large uncommitted data goes under `sd.bulk_storage_root`**, as `<root>/<repository>/`. Build output and owner-sensitive data stay on the system disk.
 - **Test one version per language, the latest stable (Python 3.15, Node 26); no version matrices.**
 

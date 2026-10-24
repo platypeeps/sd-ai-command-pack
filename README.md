@@ -73,9 +73,11 @@ other halves are, is in [domain packs](docs/domain-packs.md).
   `bin/`, so the commands resolve from any directory; `--bin-dir DIR` puts them
   elsewhere. The installer never edits `PATH`: `--user` warns when the link
   directory is not on it, and `--status` says how many commands resolve.
-- four hook entries in `~/.claude/settings.json` — `SessionStart` for
-  `sd-handoff-restore`, `PreToolUse` and `UserPromptSubmit` for
-  `sd-skill-use`, and `PreToolUse` on `Bash` and `mcp__github__issue_write`
+- five hook entries in `~/.claude/settings.json` — `SessionStart` for
+  `sd-handoff-restore` (`startup`, `clear`) and `sd-session-trail`
+  (`compact`, which prints the items, decisions and questions the session
+  wrote, read back by its `CLAUDE_CODE_SESSION_ID`), `PreToolUse` and
+  `UserPromptSubmit` for `sd-skill-use`, and `PreToolUse` on `Bash` and `mcp__github__issue_write`
   for `sd-issue-guard`, which decides by the target an `issue_write` call names: it
   denies an issue in a managed repository and points to `sd task add`, and
   asks the operator about an issue anywhere else; with `repo.github_issues`

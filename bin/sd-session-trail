@@ -1,0 +1,102 @@
+#!/usr/bin/env python3
+"""SessionStart hook: after a compact, print this session's own sd trail.
+
+A compacted session loses what it filed and ruled. The rows keep it: `sd task
+add` and `sd task note` record the harness session id (`CLAUDE_CODE_SESSION_ID`)
+as the note's session (sd:6023). This hook reads those rows back by that id --
+the items the session filed and the decisions and questions it wrote, newest
+first, at most `LIMIT` -- so the session continues from the database and needs
+no handoff file.
+
+Register on the `compact` matcher only. `bin/sd-handoff-restore` owns `startup`
+and `clear`, and a fresh session has no trail of its own.
+
+The id is the payload's `session_id`, else the environment's. With neither, or
+no `sd_db` on the machine, it prints nothing. A failed read is unknown, not an
+empty trail, so it prints one line that says so. It exits 0 whatever happens:
+a hook never breaks a session.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+HOOK_EVENT = "SessionStart"
+SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+
+#: Entries shown; the rest are one `sd task show <item>` away.
+LIMIT = 10
+
+#: Characters of a note's first line shown.
+WIDTH = 160
+
+
+def session_of(payload: dict, environ: dict[str, str]) -> str:
+    found = payload.get("session_id")
+    return found if isinstance(found, str) and found else environ.get(SESSION_ENV, "")
+
+
+def trail_entry(row, item_ref) -> str:
+    ref = item_ref(row["item"], row["repo"])
+    if row["kind"] == "status_change":
+        return f"- filed {ref} {row['timestamp'][:10]}: {row['title']}"
+    first = str(row["body"]).strip().partition("\n")[0]
+    if len(first) > WIDTH:
+        first = first[:WIDTH - 3] + "..."
+    state = ", resolved" if row["kind"] == "question" and row["resolved_at"] else ""
+    return f"- {row['kind']} #{row['id']} on {ref} {row['timestamp'][:10]}{state}: {first}"
+
+
+def trail(session: str) -> str:
+    """The trail as text, a line naming a failed read, or "" for nothing to say."""
+    try:
+        import sd_lib  # noqa: PLC0415 - this file's own bin/, imported once a session id is known
+
+        sd_db = sd_lib.import_sd_db().module
+    except Exception:  # noqa: BLE001 - no library is the supported pre-install state
+        return ""
+    if sd_db is None:
+        return ""
+    try:
+        connection = sd_db.connect(write=False)
+        try:
+            rows = sd_db.reads.session_trail(connection, session, limit=LIMIT + 1)
+        finally:
+            connection.close()
+        lines = [trail_entry(row, sd_db.repos.item_ref) for row in rows[:LIMIT]]
+    except Exception as error:  # noqa: BLE001 - unknown is said, never shown as an empty trail
+        return f"sd-session-trail could not read this session's trail ({type(error).__name__}: {error})."
+    if not lines:
+        return ""
+    head = f"This session's sd trail (session {session}): items it filed, decisions and questions, newest first."
+    tail = (["Older entries not shown; `sd task show <item>` lists an item's notes."]
+            if len(rows) > LIMIT else [])
+    return "\n".join([head, *lines, *tail])
+
+
+def replay(stdin_text: str, environ: dict[str, str], out) -> int:
+    try:
+        payload = json.loads(stdin_text) if stdin_text.strip() else {}
+    except ValueError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    session = session_of(payload, environ)
+    text = trail(session) if session else ""
+    if text:
+        print(json.dumps({"hookSpecificOutput": {"hookEventName": HOOK_EVENT, "additionalContext": text}}),
+              file=out)
+    return 0
+
+
+def hook_main() -> int:
+    try:
+        return replay(sys.stdin.read(), dict(os.environ), sys.stdout)
+    except BaseException:  # noqa: BLE001 - a hook never breaks session startup
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(hook_main())
