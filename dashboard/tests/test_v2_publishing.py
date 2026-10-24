@@ -1134,6 +1134,27 @@ esac
         self.assertIn("An unticked destination moves its copy to the trash", prompt)
         self.assertNotIn("Never delete, move, trash or share a page or file", prompt)
 
+    def test_an_image_request_adds_the_upload_tool_and_names_the_step(self):
+        """sd:6066: a request with an Archify image gets Notion's file upload and the kit's `upload`, and no more."""
+        (self.queue / "lab.plan.notion.json").write_text(json.dumps({
+            "repo": str(self.checkout), "fingerprint": "i1", "content": "{{archify-image}}\n",
+            "image": {"marker": "{{archify-image}}", "path": "/x.png", "sha256": "ab", "caption": "C"}}), encoding="utf-8")
+        status, run = publish_drain.start(None, self.checkout, "plan", spawn=self.spawn)
+        document = json.loads((publish_drain.state_dir() / "runs" / f"{run['id']}.json").read_text(encoding="utf-8"))
+        allowed = document["allowed"].split(",")
+        self.assertIn("mcp__notion__notion-create-file-upload", allowed)
+        self.assertEqual([tool for tool in allowed if tool.startswith("Bash(")][-1], f"Bash({publish_drain_kit()} upload *)")
+        prompt = Path(document["prompt"]).read_text(encoding="utf-8")
+        self.assertIn(f"{publish_drain_kit()} upload <request file name> <upload_url> <authorization>", prompt)
+        self.assertIn("{{archify-image}}", prompt)
+
+    def test_a_request_with_no_image_gets_no_upload_tool(self):
+        self.request()
+        status, run = publish_drain.start(None, self.checkout, "plan", spawn=self.spawn)
+        document = json.loads((publish_drain.state_dir() / "runs" / f"{run['id']}.json").read_text(encoding="utf-8"))
+        self.assertNotIn("upload", document["allowed"])
+        self.assertNotIn("archify-image", Path(document["prompt"]).read_text(encoding="utf-8"))
+
     def test_a_trashed_request_reads_done(self):
         self.trash_request()
         code, document = self.ran("trash")
