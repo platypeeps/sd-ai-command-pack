@@ -107,7 +107,7 @@ def collect_review_material(root: pathlib.Path, subject: Any) -> tuple[str, list
 
 
 def tracked_material(root: pathlib.Path, subject: Any) -> dict[str, str]:
-    common = ["--no-ext-diff", "--no-textconv", "--no-color", "--submodule=short", subject.base,
+    common = ["--no-ext-diff", "--no-textconv", "--no-color", "--submodule=short", "--irreversible-delete", subject.base,
               *([] if subject.head == "worktree" else [subject.head]), "--"]
     args = ["--no-renames", *common]
     names = list(filter(None, read_git_material(root, ["diff", "--name-only", "-z", *args]).split("\0")))
