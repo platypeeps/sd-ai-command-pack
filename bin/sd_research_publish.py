@@ -37,10 +37,15 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import hashlib
+import html
 import json
 import os
 import re
+import shutil
+import subprocess
 import sys
+import tempfile
+import urllib.request
 import uuid
 from collections.abc import Iterator, Mapping
 from pathlib import Path
@@ -1264,6 +1269,10 @@ def mirror_fingerprint(request: dict[str, Any], target: dict[str, str], what: st
     # what it was before the field joined it.
     if request.get("item") is not None:
         named.update(item=request["item"])
+    # The Archify diagram the Notion page shows (sd:6066): `content` holds
+    # only its marker, so a changed drawing changes the digest here.
+    if request.get("image"):
+        named.update(image=request["image"].get("sha256"))
     digest = hashlib.sha256(json.dumps(named, sort_keys=True).encode("utf-8"))
     digest.update(str(request.get("content", "")).encode("utf-8"))
     return digest.hexdigest()
@@ -1730,7 +1739,7 @@ TRASH = "trash"
 #: What a trash request drops from the mirror request it replaces: the text
 #: and the paths a mirror reads. The container stays, for a drain that finds
 #: the copy by its pointer.
-TRASH_DROPS = ("content", "rendered", "markdown", "revision", "fingerprint", "action")
+TRASH_DROPS = ("content", "image", "rendered", "markdown", "revision", "fingerprint", "action")
 
 
 def enqueue_trash(repo: Path, document: str, destination: str, *, designated: str = "",
@@ -2166,13 +2175,8 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
             digest = mirror_fingerprint(request, target, what)
             state = "" if force else already_queued(path, receipts() / name, digest, identity,
                                                     bool(request[what]))
-            if state == "pending":
-                reports.append("mirror: %s: already queued -> %s (unchanged since %s)"
-                               % (out, target["target"], rev[:12]))
-                continue
-            if state == "delivered":
-                reports.append("mirror: %s: unchanged since it was last mirrored; "
-                               "not queued again" % out)
+            if state:
+                reports.append(unchanged_report(state, out, target["target"], rev))
                 continue
             # The designation is the answer where it gives one; the queue records
             # what a drain did, and never overrides what the document says.
@@ -2184,14 +2188,43 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
                 reports.append(queued_report(out, target["target"], what, carried, reverted,
                                              "would queue") + " (%s)" % MIRROR_DRY_RUN)
                 continue
-            # The generation this request is: what `mirror_delivered()` acknowledges.
-            request["fingerprint"] = digest
-            path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+            failed = drawn(request)
+            if failed:
+                reports.append("mirror: %s: %s; not queued" % (out, failed))
+                continue
+            write_request(path, request, digest)
             reports += record_queued(name, dict(
                 queued=digest, revision=rev, repo=str(home), document=out,
                 destination=target["destination"], identity=identity if isinstance(cfg.get("content"), str) else None))
             reports.append(queued_report(out, target["target"], what, carried, reverted))
     return reports
+
+
+def unchanged_report(state: str, out: str, target: str, rev: str) -> str:
+    """What `enqueue` says of a document `already_queued` found `pending` or `delivered`."""
+    if state == "pending":
+        return "mirror: %s: already queued -> %s (unchanged since %s)" % (out, target, rev[:12])
+    return "mirror: %s: unchanged since it was last mirrored; not queued again" % out
+
+
+def drawn(request: dict[str, Any]) -> str:
+    """Take the SVG off the request's `image` and draw its PNG if it is not
+    there yet: "" when the request may be written, else why not (sd:6066).
+
+    Drawn before the request is written, so no request names a PNG that is
+    not there; a failed draw leaves the slot as it was.
+    """
+    image = request.get("image")
+    if not image:
+        return ""
+    svg, png = image.pop("svg"), Path(image["path"])
+    return "" if png.is_file() else render_png(svg, png)
+
+
+def write_request(path: Path, request: dict[str, Any], digest: str) -> None:
+    """Write `request` as the generation `digest`: what `mirror_delivered()` acknowledges."""
+    request["fingerprint"] = digest
+    path.write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
 
 
 def stale_requests(home: Path, channels: dict[str, dict[str, str]] | None) -> list[str]:
@@ -2243,12 +2276,204 @@ def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, An
         # above say where it came from and where the copies sit;
         # none of them is what gets published. Joined here, once, for
         # every destination and so for the fingerprint too (sd:5872).
-        "content": soft_wraps_joined(
-            cfg["content"] if brief else source_text(repo / src) if src else ""),
+        "content": cfg["content"] if brief else source_text(repo / src) if src else "",
     }
+    # A Notion page shows the Archify diagram as an image, and only it
+    # (sd:6066): Drive and the served page keep the text as written.
+    if not brief and target.get("destination") == "notion":
+        request["content"], image = notion_diagram(request["content"])
+        if image:
+            request["image"] = image
+    request["content"] = soft_wraps_joined(request["content"])
     request.update(target)
     request.update(designated_item(cfg)[0])
     return request
+
+
+#: The line a Notion request's `content` holds where the Archify diagram was:
+#: the drain replaces it with the image line `upload` prints (sd:6066).
+IMAGE_MARKER = "{{archify-image}}"
+#: The 05-architecture template's diagram: the `diagram` div, then the plain
+#: diagram in the fenced `text` block right after it, if one is there.
+ARCHIFY_DIAGRAM = re.compile(
+    r'^<div class="diagram">[ \t]*\n(?P<body>.*?)\n</div>[ \t]*$'
+    r'(?P<plain>(?:\n[ \t]*)*\n```text[ \t]*\n.*?\n```[ \t]*$)?', re.M | re.S)
+SVG = re.compile(r"<svg\b.*</svg>", re.S)
+SVG_TITLE = re.compile(r"<title\b[^>]*>(.*?)</title>", re.S)
+
+
+def images() -> Path:
+    """Where `enqueue` keeps the PNG of each Notion request's diagram.
+
+    Beside the queue, as `receipts()` is, and named by the SVG's digest: a
+    PNG never changes once written, so a pending request's image is the one
+    it was queued with, whatever a later render writes.
+    """
+    return QUEUE.with_name(QUEUE.name + "-images")
+
+
+def notion_diagram(text: str) -> tuple[str, dict[str, str]]:
+    """`text` for a Notion page, and the image to upload, or `{}`.
+
+    The first `diagram` div that holds an `<svg>` becomes `IMAGE_MARKER`,
+    and the plain `text` block right after it goes: Notion drops an inline
+    SVG, and the operator ruled the image the page's one diagram (sd:6066).
+    A div with no SVG, the template's comment, leaves the text as it is, so
+    a document drawn without Archify keeps its plain diagram.
+    """
+    for match in ARCHIFY_DIAGRAM.finditer(text):
+        svg = SVG.search(match["body"])
+        if not svg:
+            continue
+        digest = hashlib.sha256(svg.group(0).encode("utf-8")).hexdigest()
+        title = SVG_TITLE.search(svg.group(0))
+        caption = " ".join(html.unescape(title.group(1)).split()) if title else ""
+        image = {"marker": IMAGE_MARKER, "sha256": digest, "path": str(images() / ("%s.png" % digest[:32])),
+                 "caption": caption or "Architecture diagram (Archify)", "svg": svg.group(0)}
+        return text[:match.start()] + IMAGE_MARKER + text[match.end():], image
+    return text, {}
+
+
+def chrome() -> str:
+    """The browser `render_png` runs, or "": Chrome draws the SVG the way the
+    served page does; librsvg missed its CSS variables and drew it black."""
+    for name in ("google-chrome", "chromium", "chromium-browser"):
+        found = shutil.which(name)
+        if found:
+            return found
+    app = Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
+    return str(app) if app.is_file() else ""
+
+
+def svg_size(svg: str) -> tuple[int, int] | None:
+    """The SVG's width and height in pixels, from its attributes or its viewBox."""
+    tag = svg[:svg.find(">") + 1]
+    width, height = (re.search(r'\s%s="([0-9.]+)(?:px)?"' % name, tag) for name in ("width", "height"))
+    if width and height:
+        return round(float(width.group(1))), round(float(height.group(1)))
+    box = re.search(r'\sviewBox="\s*[-0-9.]+[\s,]+[-0-9.]+[\s,]+([0-9.]+)[\s,]+([0-9.]+)\s*"', tag)
+    return (round(float(box.group(1))), round(float(box.group(2)))) if box else None
+
+
+def light_svg(svg: str) -> str:
+    """`svg` with the light theme on its own tag: an Archify export keeps
+    `data-theme="dark"` there, and its `svg[data-theme="dark"]` rules beat
+    the page's light theme, drawing dark labels on a white page."""
+    end = svg.find(">") + 1
+    tag = re.sub(r'\sdata-theme="[^"]*"', "", svg[:end])
+    return tag.replace("<svg", '<svg data-theme="light"', 1) + svg[end:]
+
+
+def render_png(svg: str, png: Path) -> str:
+    """Draw `svg` into `png` at twice its size, in the light theme: "" when
+    done, else why not. The PNG lands whole or not at all."""
+    size = svg_size(svg)
+    if not size or not all(size):
+        return "the Archify SVG names no size (width and height, or a viewBox)"
+    browser = chrome()
+    if not browser:
+        return "no Chrome found to draw the Archify diagram as a PNG"
+    page = ('<!doctype html><html data-theme="light"><head><meta charset="utf-8"><style>'
+            "html,body{margin:0;background:#fff}svg{display:block}</style></head><body>%s</body></html>"
+            % light_svg(svg))
+    with tempfile.TemporaryDirectory() as scratch:
+        work = Path(scratch)
+        (work / "page.html").write_text(page, encoding="utf-8")
+        shot = work / "shot.png"
+        try:
+            ran = subprocess.run(
+                [browser, "--headless=new", "--disable-gpu", "--hide-scrollbars", "--no-first-run",
+                 "--no-default-browser-check", "--user-data-dir=%s" % (work / "profile"),
+                 "--force-device-scale-factor=2", "--window-size=%d,%d" % size,
+                 "--screenshot=%s" % shot, (work / "page.html").as_uri()],
+                stdin=subprocess.DEVNULL, capture_output=True, timeout=120, check=False)
+        except (OSError, subprocess.TimeoutExpired) as problem:
+            return "Chrome did not draw the Archify diagram: %s" % problem
+        try:
+            data = shot.read_bytes()
+        except OSError:
+            data = b""
+        if not data.startswith(b"\x89PNG"):
+            return "Chrome wrote no PNG of the Archify diagram (exit %d)" % ran.returncode
+        png.parent.mkdir(parents=True, exist_ok=True)
+        partial = png.with_name(png.name + ".partial")
+        partial.write_bytes(data)
+        os.replace(partial, png)
+    return ""
+
+
+#: Where Notion's `notion-create-file-upload` says to send the bytes.
+NOTION_UPLOAD = re.compile(r"/v1/(?:mcp/)?file_uploads/([0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?"
+                           r"[0-9a-f]{4}-?[0-9a-f]{12})/send")
+
+
+def upload_image(name: str, url: str, authorization: str, *,
+                 opener: Any = None) -> tuple[int, str]:
+    """Send request `name`'s PNG to the upload Notion opened at `url`:
+    `(0, image line)`, `(1, reason)` for a send that failed, or `(2, reason)`
+    for one refused before anything was sent.
+
+    The file is the request's own image, in `images()`, never a path the
+    request was edited to name; the address is Notion's upload endpoint, and
+    the answer must say that upload holds the file. Anything else is a
+    failure, not an image: the drain leaves the request (sd:6066).
+    """
+    opener = opener or urllib.request.urlopen
+    parts = urlsplit(url)
+    sent_to = NOTION_UPLOAD.fullmatch(parts.path)
+    if parts.scheme != "https" or parts.netloc != "api.notion.com" or not sent_to or parts.query:
+        return 2, "upload: %r is not a Notion file upload address" % url
+    if not authorization.strip() or any(ch in authorization for ch in "\r\n"):
+        return 2, "upload: the authorization is empty or spans lines"
+    request = load_record(QUEUE / name)
+    data, refused = upload_file(name, request.get("image"))
+    if refused:
+        return 2, refused
+    image = request["image"]
+    boundary = uuid.uuid4().hex
+    body = ('--%s\r\nContent-Disposition: form-data; name="file"; filename="%s.png"\r\n'
+            "Content-Type: image/png\r\n\r\n" % (boundary, request.get("document") or "diagram")).encode("utf-8")
+    body += data + ("\r\n--%s--\r\n" % boundary).encode("utf-8")
+    send = urllib.request.Request(url, data=body, method="POST", headers={
+        "Authorization": authorization.strip(), "Content-Type": "multipart/form-data; boundary=%s" % boundary})
+    try:
+        with contextlib.closing(opener(send, timeout=60)) as answer:
+            said = json.loads(answer.read().decode("utf-8"))
+    except (OSError, ValueError) as problem:
+        return 1, "upload: the send to Notion failed (%s); the request stays" % problem
+    upload_id = str(said.get("file_upload_id", "")) if isinstance(said, dict) else ""
+    if said.get("status") != "uploaded" or upload_id.replace("-", "") != sent_to.group(1).replace("-", ""):
+        return 1, "upload: Notion did not confirm upload %s (%r); the request stays" % (sent_to.group(1), said)
+    caption = html.escape(str(image.get("caption") or ""), quote=False)
+    return 0, '<image source="file-upload://%s">%s</image>' % (upload_id, caption)
+
+
+def upload_file(name: str, image: Any) -> tuple[bytes, str]:
+    """The PNG request `name`'s `image` names, or why it is not sent: only
+    a PNG in `images()`, never a path the request was edited to name."""
+    if not isinstance(image, dict) or not isinstance(image.get("path"), str):
+        return b"", "upload: %s names no image to upload" % name
+    png = Path(image["path"])
+    if png.parent.resolve() != images().resolve() or png.suffix != ".png":
+        return b"", "upload: %s names an image outside %s" % (name, images())
+    try:
+        data = png.read_bytes()
+    except OSError as problem:
+        return b"", "upload: %s cannot be read (%s); render again" % (png, problem)
+    if not data.startswith(b"\x89PNG"):
+        return b"", "upload: %s is not a PNG; render again" % png
+    return data, ""
+
+
+def upload_main(argv: list[str]) -> int:
+    """The `upload` verb: `<request file name> <upload_url> <authorization>`."""
+    if len(argv) != 3 or not all(argv):
+        print("usage: sd-research-kit upload <request file name> <upload_url> <authorization>",
+              file=sys.stderr)
+        return 2
+    status, said = upload_image(Path(argv[0]).name, argv[1], argv[2])
+    print(said, file=sys.stdout if status == 0 else sys.stderr)
+    return status
 
 
 def designated_item(cfg: dict[str, Any]) -> tuple[dict[str, int], list[str]]:

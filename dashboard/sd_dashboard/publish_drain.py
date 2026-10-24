@@ -22,6 +22,11 @@ A trash request (an untick, sd:5489) adds two tools for that run only: Notion's 
 `update_drive_file`, both of which move one copy to the trash, recoverably. The prompt then names the contract's trash
 rule in place of "never trash". A drain with no trash request gets neither.
 
+An image request (sd:6066), a Notion request whose `image` names the PNG of its Archify diagram, adds Notion's
+`notion-create-file-upload` and the kit's `upload`, which sends that PNG to the upload Notion opened; the prompt names the
+step that puts the image line `upload` prints in place of the request's marker. A drain with no image request gets
+neither.
+
 The outcome is read from the queue, not from the model: a request whose receipt says its fingerprint was delivered is
 `delivered`, with the receipt's URL; any other is `left`, and the run is `failed`. A request left behind is the safe
 state the contract's failure table recovers from at the next drain.
@@ -60,6 +65,8 @@ DRIVE = ("search_drive_files", "list_drive_items", "get_doc_content", "create_dr
          "create_doc", "batch_update_doc", "modify_doc_text", "insert_doc_elements")
 #: What a trash request adds, for that drain only (sd:5489): each moves one copy to the trash, where it can be restored.
 TRASH_TOOLS = ("mcp__notion__notion-delete-pages", "mcp__workspace-mcp__update_drive_file")
+#: What an image request adds, for that drain only (sd:6066): an upload Notion opens; the kit's `upload` sends the PNG.
+IMAGE_TOOLS = ("mcp__notion__notion-create-file-upload",)
 #: `SHELL_ENV` (claude_env) sources ~/.config/shell/env.sh and maps its CUSTOM_ token (sd:5791).
 CLAUDE = (SHELL_ENV + 'ulimit -S -n 65536 2>/dev/null; '
           'exec "${CLAUDE_BIN:-$(command -v claude || echo "$HOME/.local/bin/claude")}" -p --model sonnet '
@@ -80,12 +87,17 @@ Requests, one JSON file each:
 - Step 4: write the id into the request file above.
 - Step 5: {step5}
 - Step 6: run `{kit} delivered <request file name> <fingerprint> --url <url>`.
-
+{image}
 Write only in the container the request resolves to. {never} A request you cannot finish stays in the queue as it is.
 End with one line per request: `<request file name>: delivered <url>`, `<request file name>: trashed` or
 `<request file name>: left: <reason>`.
 """
 NEVER = "Never delete, move, trash or share a page or file, and change no permission."
+#: For a drain that holds an image request (sd:6066): the contract's image step, with the kit's verb spelled out.
+IMAGE = ("- Step 3, the image: a request with `image` follows the contract's \"A Notion request with an image\": call "
+         "`notion-create-file-upload`, run `{kit} upload <request file name> <upload_url> <authorization>` with the "
+         "URL and the authorization header it returned, and write the content with the line `upload` printed in place "
+         "of the line `{marker}`. An upload that fails leaves the request; never write the page with the marker in it.\n")
 #: For a drain that holds a trash request: the contract's section, and nothing beyond the one copy.
 NEVER_BUT_TRASH = ("A request with `action: \"trash\"` follows the contract's section \"An unticked destination moves its copy "
                    "to the trash\" in place of steps 3 to 5, and step 6 without `--url`. Trash only the one copy each such "
@@ -107,13 +119,14 @@ def _write(path: Path, document: dict) -> None:
     os.replace(partial, path)
 
 
-def allowed(queue: Path, checkout: Path | None, sd_db: str, kit: str, trash: bool = False) -> str:
-    """The `--allowedTools` value: the MCP allowlist (with `TRASH_TOOLS` when `trash`), Read, Edit on the queue and the conf
-    (None for a brief), and the two commands."""
+def allowed(queue: Path, checkout: Path | None, sd_db: str, kit: str, trash: bool = False, image: bool = False) -> str:
+    """The `--allowedTools` value: the MCP allowlist (with `TRASH_TOOLS` when `trash`, `IMAGE_TOOLS` when `image`), Read,
+    Edit on the queue and the conf (None for a brief), and the two commands, with `upload` when `image`."""
     tools = [f"mcp__notion__{name}" for name in NOTION] + [f"mcp__workspace-mcp__{name}" for name in DRIVE]
     tools += list(TRASH_TOOLS) if trash else []
+    tools += list(IMAGE_TOOLS) if image else []
     tools += ["Read", f"Edit(/{queue}/**)", *([f"Edit(/{checkout / 'research.conf.py'})"] if checkout else []),
-              f"Bash({sd_db} repo channels *)", f"Bash({kit} delivered *)"]
+              f"Bash({sd_db} repo channels *)", f"Bash({kit} delivered *)", *([f"Bash({kit} upload *)"] if image else [])]
     # Comma-separated: a Bash rule holds spaces, and claude reads the list by commas as well as spaces.
     return ",".join(tools)
 
@@ -137,7 +150,8 @@ def _requests(queue: Path, checkout: Path, out: str) -> list[dict]:
         record = publishing._record(path)
         if record and publishing._same(record.get("repo"), checkout):
             found.append({"name": path.name, "path": str(path), "channel": channel,
-                          "fingerprint": record.get("fingerprint"), "trash": record.get("action") == publishing.TRASH})
+                          "fingerprint": record.get("fingerprint"), "trash": record.get("action") == publishing.TRASH,
+                          "image": isinstance(record.get("image"), dict)})
     return found
 
 
@@ -174,15 +188,18 @@ def start(connection, checkout: Path, out: str, *, brief: bool = False, now: dat
         contract = bin_dir.parent / "skills" / "_shared" / "references" / "publication-contract.md"
         prompt = runs / f"{run_id}.prompt.md"
         trash = any(r["trash"] for r in requests)
+        image = any(r.get("image") for r in requests)
         prompt.write_text(PROMPT.format(
             contract=contract,
             requests="\n".join(f"- {r['path']}" for r in requests), sd_db=sd_db, checkout=checkout, kit=script,
             step5=STEP5_BRIEF if brief else STEP5_DOC.format(conf=checkout / "research.conf.py"),
-            never=NEVER_BUT_TRASH if trash else NEVER), encoding="utf-8")
+            never=NEVER_BUT_TRASH if trash else NEVER,
+            image=IMAGE.format(kit=script, marker=kit.IMAGE_MARKER) if image else ""), encoding="utf-8")
         document = {"id": run_id, "state": "queued", "reason": None, "checkout": str(checkout), "out": out,
                     "queue": str(queue), "receipts": str(kit.receipts()), "references": str(contract.parent),
                     "requests": requests, "results": None, "prompt": str(prompt),
-                    "allowed": allowed(queue, None if brief else checkout, sd_db, script, trash), "servers": servers(),
+                    "allowed": allowed(queue, None if brief else checkout, sd_db, script, trash, image),
+                    "servers": servers(),
                     "timeout": DRAIN_SECONDS,
                     "started": _iso(now), "finished": None, "pid": None}
         _write(record, document)

@@ -31,6 +31,8 @@ import unittest
 import unittest.mock
 from pathlib import Path
 
+from tests.clean_env import clean_environment
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BIN = REPO_ROOT / "bin"
 
@@ -3304,6 +3306,275 @@ class BriefTests(Fixture):
         self.fields({"publish": {"notion": {}}})
         PUBLISH.enqueue_briefs(self.connection)
         self.assertEqual(list(PUBLISH.QUEUE.glob("*.json")) if PUBLISH.QUEUE.exists() else [], [])
+
+
+#: An Archify diagram as the 05-architecture template holds it: the SVG in
+#: the `diagram` div, then the plain diagram in a fenced `text` block.
+ARCHIFY = (
+    "# Architecture\n\n## 2. At a glance\n\n"
+    '<div class="diagram">\n'
+    '<svg id="d" viewBox="0 0 40 20" width="40" height="20" xmlns="http://www.w3.org/2000/svg">'
+    '<title id="archify-diagram-title">Gateway &amp; worker</title><rect width="40" height="20"/>\n'
+    "      </svg>\n"
+    "</div>\n\n"
+    "```text\n[ Client ] --> [ Gateway ]\n```\n\n"
+    "Green arrows are the request path.\n\n## 3. Parts\n")
+
+#: The first bytes of every PNG file.
+PNG = b"\x89PNG\r\n\x1a\n" + b"stub image"
+
+
+class ArchifyImageTests(ReceiptFixture):
+    """sd:6066: a Notion mirror shows the Archify image, and only it.
+
+    The request carried the raw `<svg>`, which Notion drops, and the plain
+    `text` diagram, so the page showed ASCII art; a hand-uploaded image was
+    wiped by the next drain, whose content had no image. The Notion request
+    now carries a marker where the diagram was and the PNG to upload in its
+    place; Drive and the served page keep what they had.
+    """
+
+    NAME = "my-research.a.notion.json"
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.rendered: list[str] = []
+
+        def render(svg: str, png: Path) -> str:
+            self.rendered.append(svg)
+            png.parent.mkdir(parents=True, exist_ok=True)
+            png.write_bytes(PNG)
+            return ""
+
+        self.enterContext(unittest.mock.patch.object(PUBLISH, "render_png", render))
+
+    def request(self, name: str = NAME) -> dict:
+        return json.loads((PUBLISH.QUEUE / name).read_text())
+
+    def test_a_notion_request_carries_the_image_in_place_of_both_diagrams(self) -> None:
+        self.source(ARCHIFY)
+        PUBLISH.enqueue(self.repo, self.doc())
+        request = self.request()
+        self.assertNotIn("<svg", request["content"])
+        self.assertNotIn("```text", request["content"])
+        self.assertIn("\n\n%s\n\nGreen arrows" % PUBLISH.IMAGE_MARKER, request["content"])
+        image = request["image"]
+        self.assertEqual(image["caption"], "Gateway & worker")
+        self.assertEqual(Path(image["path"]).parent, PUBLISH.images())
+        self.assertEqual(Path(image["path"]).read_bytes(), PNG)
+        self.assertEqual(len(self.rendered), 1)
+        self.assertTrue(self.rendered[0].startswith("<svg") and self.rendered[0].endswith("</svg>"))
+
+    def test_a_drive_request_keeps_the_plain_diagram(self) -> None:
+        self.source(ARCHIFY)
+        PUBLISH.enqueue(self.repo, [dict(src="10-x/a.md", out="a", title="A", drive=dict())])
+        request = self.request("my-research.a.drive.json")
+        self.assertIn("```text", request["content"])
+        self.assertNotIn("image", request)
+        self.assertEqual(self.rendered, [])
+
+    def test_a_document_without_an_svg_keeps_its_plain_diagram(self) -> None:
+        self.source(ARCHIFY.replace(ARCHIFY[ARCHIFY.index("<svg"):ARCHIFY.index("</div>")], "<!-- Archify -->\n"))
+        PUBLISH.enqueue(self.repo, self.doc())
+        request = self.request()
+        self.assertIn("```text", request["content"])
+        self.assertNotIn("image", request)
+
+    def test_a_changed_diagram_queues_again(self) -> None:
+        self.source(ARCHIFY)
+        PUBLISH.enqueue(self.repo, self.doc())
+        first = self.request()
+        self.drain()
+        self.source(ARCHIFY.replace('height="20"/>', 'height="10"/>'))
+        reports = PUBLISH.enqueue(self.repo, self.doc())
+        second = self.request()
+        self.assertEqual(first["content"], second["content"])
+        self.assertNotEqual(first["fingerprint"], second["fingerprint"], reports)
+        self.assertNotEqual(first["image"]["path"], second["image"]["path"])
+
+    def test_a_re_render_keeps_the_image_on_the_request(self) -> None:
+        """A redrain writes the request's content again: the image must be on it."""
+        self.source(ARCHIFY)
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.drain()
+        reports = PUBLISH.enqueue(self.repo, self.doc(title="A2"))
+        self.assertTrue(any("queued a" in line for line in reports), reports)
+        self.assertIn(PUBLISH.IMAGE_MARKER, self.request()["content"])
+        self.assertTrue(Path(self.request()["image"]["path"]).is_file())
+        # The PNG of an unchanged SVG is already there: drawn once, never redrawn.
+        self.assertEqual(len(self.rendered), 1)
+        self.assertNotIn("svg", self.request()["image"])
+
+    def test_a_failed_render_queues_nothing_and_says_why(self) -> None:
+        self.source(ARCHIFY)
+        with unittest.mock.patch.object(PUBLISH, "render_png", lambda svg, png: "no Chrome found"):
+            reports = PUBLISH.enqueue(self.repo, self.doc())
+        self.assertFalse((PUBLISH.QUEUE / self.NAME).exists())
+        self.assertTrue(any("no Chrome found" in line and "not queued" in line for line in reports), reports)
+        self.assertFalse(PUBLISH.images().exists() and list(PUBLISH.images().iterdir()))
+
+    def test_a_dry_run_renders_nothing(self) -> None:
+        self.source(ARCHIFY)
+        with unittest.mock.patch.dict(PUBLISH.ENVIRON, {PUBLISH.MIRROR_DRY_RUN: "1"}):
+            PUBLISH.enqueue(self.repo, self.doc())
+        self.assertEqual(self.rendered, [])
+
+    def test_a_trash_request_drops_the_image(self) -> None:
+        self.source(ARCHIFY)
+        PUBLISH.enqueue(self.repo, self.doc())
+        state, _ = PUBLISH.enqueue_trash(self.repo, "a", "notion", designated="p1")
+        self.assertEqual(state, "queued")
+        self.assertNotIn("image", self.request())
+
+
+class UploadTests(ArchifyImageTests):
+    """sd:6066: `upload` sends a request's PNG to the upload Notion opened."""
+
+    URL = "https://api.notion.com/v1/mcp/file_uploads/402f52b1-5782-81d9-a476-00b2b0e0dd93/send"
+
+    def queued(self) -> None:
+        self.source(ARCHIFY)
+        PUBLISH.enqueue(self.repo, self.doc())
+
+    def opener(self, answer: dict | Exception):
+        sent: list = []
+
+        def urlopen(request, timeout):
+            sent.append(request)
+            if isinstance(answer, Exception):
+                raise answer
+            return io.BytesIO(json.dumps(answer).encode("utf-8"))
+
+        return sent, urlopen
+
+    def uploaded(self, **fields) -> dict:
+        return {"file_upload_id": "402f52b1-5782-81d9-a476-00b2b0e0dd93", "status": "uploaded", **fields}
+
+    def test_upload_sends_the_png_and_prints_the_image_line(self) -> None:
+        self.queued()
+        sent, urlopen = self.opener(self.uploaded())
+        status, said = PUBLISH.upload_image(self.NAME, self.URL, "Bearer t0k", opener=urlopen)
+        self.assertEqual(status, 0, said)
+        self.assertEqual(said, '<image source="file-upload://402f52b1-5782-81d9-a476-00b2b0e0dd93">'
+                               'Gateway &amp; worker</image>')
+        [request] = sent
+        self.assertEqual((request.full_url, request.get_method()), (self.URL, "POST"))
+        self.assertEqual(request.get_header("Authorization"), "Bearer t0k")
+        self.assertIn(b'name="file"', request.data)
+        self.assertIn(b"Content-Type: image/png", request.data)
+        self.assertIn(PNG, request.data)
+
+    def test_upload_refuses_a_url_off_notion(self) -> None:
+        self.queued()
+        for url in ("https://example.test/v1/mcp/file_uploads/402f52b1-5782-81d9-a476-00b2b0e0dd93/send",
+                    "http://api.notion.com/v1/mcp/file_uploads/402f52b1-5782-81d9-a476-00b2b0e0dd93/send",
+                    "https://api.notion.com/v1/pages/402f52b1-5782-81d9-a476-00b2b0e0dd93"):
+            with self.subTest(url=url):
+                sent, urlopen = self.opener(self.uploaded())
+                status, said = PUBLISH.upload_image(self.NAME, url, "Bearer t0k", opener=urlopen)
+                self.assertEqual((status, sent), (2, []), said)
+
+    def test_upload_refuses_an_image_outside_the_images_folder(self) -> None:
+        """The drain may edit a request: the file sent is the kit's own PNG, never another path."""
+        self.queued()
+        elsewhere = self.root / "secret.png"
+        elsewhere.write_bytes(PNG)
+        request = self.request()
+        request["image"]["path"] = str(elsewhere)
+        (PUBLISH.QUEUE / self.NAME).write_text(json.dumps(request), encoding="utf-8")
+        sent, urlopen = self.opener(self.uploaded())
+        status, said = PUBLISH.upload_image(self.NAME, self.URL, "Bearer t0k", opener=urlopen)
+        self.assertEqual((status, sent), (2, []), said)
+
+    def test_upload_of_a_request_with_no_image_is_refused(self) -> None:
+        self.source("# A\n")
+        PUBLISH.enqueue(self.repo, self.doc())
+        sent, urlopen = self.opener(self.uploaded())
+        status, said = PUBLISH.upload_image(self.NAME, self.URL, "Bearer t0k", opener=urlopen)
+        self.assertEqual((status, sent), (2, []), said)
+
+    def test_a_failed_send_or_an_unconfirmed_answer_is_a_failure(self) -> None:
+        self.queued()
+        for answer in (OSError("connection reset"), self.uploaded(status="pending"),
+                       self.uploaded(file_upload_id="11111111-2222-3333-4444-555555555555")):
+            with self.subTest(answer=answer):
+                _, urlopen = self.opener(answer)
+                status, said = PUBLISH.upload_image(self.NAME, self.URL, "Bearer t0k", opener=urlopen)
+                self.assertEqual(status, 1, said)
+                self.assertNotIn("file-upload://", said)
+
+    def test_the_verb_prints_the_line_and_refuses_bad_usage(self) -> None:
+        self.queued()
+        _, urlopen = self.opener(self.uploaded())
+        out = io.StringIO()
+        with unittest.mock.patch.object(PUBLISH.urllib.request, "urlopen", urlopen), \
+                contextlib.redirect_stdout(out):
+            self.assertEqual(PUBLISH.upload_main([self.NAME, self.URL, "Bearer t0k"]), 0)
+        self.assertIn("file-upload://", out.getvalue())
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(PUBLISH.upload_main([self.NAME, self.URL]), 2)
+
+    def test_the_kit_routes_the_verb(self) -> None:
+        said = subprocess.run([sys.executable, str(BIN / "sd-research-kit"), "upload", self.NAME],
+                              capture_output=True, text=True, check=False, env=clean_environment())
+        self.assertEqual(said.returncode, 2, said.stderr)
+        self.assertIn("usage: sd-research-kit upload", said.stderr)
+
+
+class RenderPngTests(unittest.TestCase):
+    """`render_png` reports a missing browser or a failed run; it never leaves a partial PNG."""
+
+    def setUp(self) -> None:
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        self.png = self.root / "images" / "x.png"
+        self.svg = '<svg viewBox="0 0 40 20" xmlns="http://www.w3.org/2000/svg"></svg>'
+
+    def browser(self, body: str) -> str:
+        fake = self.root / "chrome"
+        fake.write_text("#!/bin/sh\n" + body, encoding="utf-8")
+        fake.chmod(0o755)
+        return str(fake)
+
+    def test_no_browser_is_a_reason(self) -> None:
+        with unittest.mock.patch.object(PUBLISH, "chrome", lambda: ""):
+            self.assertIn("Chrome", PUBLISH.render_png(self.svg, self.png))
+        self.assertFalse(self.png.exists())
+
+    def test_the_screenshot_lands_whole(self) -> None:
+        script = ('for a; do case "$a" in --screenshot=*) printf \'\\211PNG\\r\\n\\032\\nx\' > "${a#--screenshot=}";; '
+                  '--window-size=*) echo "$a" > "%s";; esac; done\n' % (self.root / "size"))
+        with unittest.mock.patch.object(PUBLISH, "chrome", lambda: self.browser(script)):
+            self.assertEqual(PUBLISH.render_png(self.svg, self.png), "")
+        self.assertTrue(self.png.read_bytes().startswith(b"\x89PNG"))
+        self.assertEqual((self.root / "size").read_text().strip(), "--window-size=40,20")
+
+    def test_a_dark_export_is_drawn_in_the_light_theme(self) -> None:
+        """An Archify export keeps `data-theme="dark"` on its svg, and its
+        `svg[data-theme="dark"]` rules beat the page's light theme: dark
+        labels on a white page. The svg itself must carry the light theme."""
+        dark = ('<svg viewBox="0 0 10 10" aria-labelledby="archify-diagram-title" data-preset="classic" '
+                'data-theme="dark" xmlns="http://www.w3.org/2000/svg"><style>'
+                'svg[data-theme="light"] { --bg: #fff; }\nsvg[data-theme="dark"] { --bg: #000; }</style>'
+                '<title id="archify-diagram-title">Parts</title></svg>')
+        script = ('for a; do case "$a" in --screenshot=*) printf \'\\211PNG\\r\\n\\032\\nx\' > "${a#--screenshot=}";; '
+                  'file://*) cp "${a#file://}" "%s";; esac; done\n' % (self.root / "page.html"))
+        with unittest.mock.patch.object(PUBLISH, "chrome", lambda: self.browser(script)):
+            self.assertEqual(PUBLISH.render_png(dark, self.png), "")
+        page = (self.root / "page.html").read_text(encoding="utf-8")
+        tag = page[page.index("<svg"):page.index(">", page.index("<svg")) + 1]
+        self.assertIn('data-theme="light"', tag)
+        self.assertNotIn('data-theme="dark"', tag)
+
+    def test_a_browser_that_writes_no_png_is_a_reason(self) -> None:
+        with unittest.mock.patch.object(PUBLISH, "chrome", lambda: self.browser("exit 0\n")):
+            self.assertTrue(PUBLISH.render_png(self.svg, self.png))
+        self.assertFalse(self.png.exists())
+
+    def test_an_svg_with_no_size_is_a_reason(self) -> None:
+        with unittest.mock.patch.object(PUBLISH, "chrome", lambda: self.browser("exit 0\n")):
+            self.assertIn("size", PUBLISH.render_png("<svg></svg>", self.png))
 
 
 if __name__ == "__main__":

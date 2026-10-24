@@ -136,8 +136,12 @@ document. Copy it from `skills/sd-research-repo/templates/05-architecture/archit
   Strip it from the pasted source too (`sed -i '' 's/[[:space:]]*$//'`): the
   `@keyframes` lines end in a space, which fails a whitespace check.
 - Without Archify, say so in Status and keep only the plain diagram in the
-  fenced `text` block. Keep that block for a document designated for Notion or
-  Drive too: the mirror imports the Markdown, not the rendered page.
+  fenced `text` block. Keep that block for a document designated for Drive too:
+  the mirror imports the Markdown, not the rendered page.
+- A Notion mirror shows the Archify diagram as an image and drops the `text`
+  block right after it (sd:6066): `render` draws the SVG as a PNG with Chrome
+  and the drain uploads it. Without Chrome the Notion request is not queued,
+  and `render` says why.
 - Add it to `research.conf.py` like any other document, for example
   `dict(src="05-architecture/architecture.md", out="architecture", title="Architecture — <project>")`.
 

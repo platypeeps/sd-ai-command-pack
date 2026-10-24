@@ -107,7 +107,8 @@ records the differences that are on purpose. Both are in
    exported `<svg>` into the template's `diagram` block, its trailing
    whitespace stripped; `render` scopes its styles to the diagram. If Archify
    is not available, say so in Status and keep the plain diagram in the fenced
-   `text` block. Add the document to `research.conf.py` so `render` publishes it.
+   `text` block. A Notion mirror shows the Archify image in place of both.
+   Add the document to `research.conf.py` so `render` publishes it.
 4. Render, from inside the repo:
 
    ```bash
