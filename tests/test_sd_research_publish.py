@@ -3550,6 +3550,23 @@ class RenderPngTests(unittest.TestCase):
         self.assertTrue(self.png.read_bytes().startswith(b"\x89PNG"))
         self.assertEqual((self.root / "size").read_text().strip(), "--window-size=40,20")
 
+    def test_a_dark_export_is_drawn_in_the_light_theme(self) -> None:
+        """An Archify export keeps `data-theme="dark"` on its svg, and its
+        `svg[data-theme="dark"]` rules beat the page's light theme: dark
+        labels on a white page. The svg itself must carry the light theme."""
+        dark = ('<svg viewBox="0 0 10 10" aria-labelledby="archify-diagram-title" data-preset="classic" '
+                'data-theme="dark" xmlns="http://www.w3.org/2000/svg"><style>'
+                'svg[data-theme="light"] { --bg: #fff; }\nsvg[data-theme="dark"] { --bg: #000; }</style>'
+                '<title id="archify-diagram-title">Parts</title></svg>')
+        script = ('for a; do case "$a" in --screenshot=*) printf \'\\211PNG\\r\\n\\032\\nx\' > "${a#--screenshot=}";; '
+                  'file://*) cp "${a#file://}" "%s";; esac; done\n' % (self.root / "page.html"))
+        with unittest.mock.patch.object(PUBLISH, "chrome", lambda: self.browser(script)):
+            self.assertEqual(PUBLISH.render_png(dark, self.png), "")
+        page = (self.root / "page.html").read_text(encoding="utf-8")
+        tag = page[page.index("<svg"):page.index(">", page.index("<svg")) + 1]
+        self.assertIn('data-theme="light"', tag)
+        self.assertNotIn('data-theme="dark"', tag)
+
     def test_a_browser_that_writes_no_png_is_a_reason(self) -> None:
         with unittest.mock.patch.object(PUBLISH, "chrome", lambda: self.browser("exit 0\n")):
             self.assertTrue(PUBLISH.render_png(self.svg, self.png))

@@ -2355,6 +2355,15 @@ def svg_size(svg: str) -> tuple[int, int] | None:
     return (round(float(box.group(1))), round(float(box.group(2)))) if box else None
 
 
+def light_svg(svg: str) -> str:
+    """`svg` with the light theme on its own tag: an Archify export keeps
+    `data-theme="dark"` there, and its `svg[data-theme="dark"]` rules beat
+    the page's light theme, drawing dark labels on a white page."""
+    end = svg.find(">") + 1
+    tag = re.sub(r'\sdata-theme="[^"]*"', "", svg[:end])
+    return tag.replace("<svg", '<svg data-theme="light"', 1) + svg[end:]
+
+
 def render_png(svg: str, png: Path) -> str:
     """Draw `svg` into `png` at twice its size, in the light theme: "" when
     done, else why not. The PNG lands whole or not at all."""
@@ -2365,7 +2374,8 @@ def render_png(svg: str, png: Path) -> str:
     if not browser:
         return "no Chrome found to draw the Archify diagram as a PNG"
     page = ('<!doctype html><html data-theme="light"><head><meta charset="utf-8"><style>'
-            "html,body{margin:0;background:#fff}svg{display:block}</style></head><body>%s</body></html>" % svg)
+            "html,body{margin:0;background:#fff}svg{display:block}</style></head><body>%s</body></html>"
+            % light_svg(svg))
     with tempfile.TemporaryDirectory() as scratch:
         work = Path(scratch)
         (work / "page.html").write_text(page, encoding="utf-8")
