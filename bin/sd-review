@@ -16,6 +16,7 @@ import os
 import pathlib
 import re
 import shlex
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -1192,24 +1193,18 @@ def open_ledger(env: Mapping[str, str], database: pathlib.Path | None, registry:
 
 
 def capped_bills(registry: sd_registry.Registry, ledger: Ledger, *, read_only: bool = False) -> dict[str, str]:
-    """Report capped exposure. Read-only callers never sweep orphan reservations."""
+    """Report capped exposure. Read-only callers never sweep orphan reservations.
+    A ledger that does not open or answer, as one locked past its busy timeout (pack sd:5955), refuses every capped bill."""
     try:
-        connection = ledger.connection(write=not read_only)
-    except Refusal as error:
-        return {name: str(error) for name in sorted(ledger.capped)}
-    rows = ledger.library.ledger
-    with contextlib.closing(connection):
-        if not read_only:
-            rows.release_orphans(connection)
-        month = ledger.library.writes.now()[:7]
-        lines = {}
-        for name, bill in registry.bills.items():
-            if bill.cap_usd_month is None:
-                continue
-            spent = rows.exposure(connection, bill=name, month=month)
-            if spent >= bill.cap_usd_month:
-                lines[name] = f"${spent:.2f} of its ${bill.cap_usd_month:.2f} cap for {month} is spent or held"
-    return lines
+        with contextlib.closing(ledger.connection(write=not read_only)) as connection:
+            if not read_only:
+                ledger.library.ledger.release_orphans(connection)
+            month = ledger.library.writes.now()[:7]
+            spent = {name: (ledger.library.ledger.exposure(connection, bill=name, month=month), bill.cap_usd_month)
+                     for name, bill in registry.bills.items() if bill.cap_usd_month is not None}
+    except (Refusal, sqlite3.Error) as error:
+        return {name: str(error) if isinstance(error, Refusal) else f"the sd database did not answer: {error}" for name in sorted(ledger.capped)}
+    return {name: f"${used:.2f} of its ${cap:.2f} cap for {month} is spent or held" for name, (used, cap) in spent.items() if used >= cap}
 
 
 def _wire(client: sd_registry.Client, provider: sd_registry.Provider, prompt: str, environ: Mapping[str, str]) -> Any:
@@ -1246,6 +1241,8 @@ def charged_call(
             )
         except (calls.CallRefused, ledger.library.LedgerRefused, sd_registry.RegistryError) as error:
             return _outcome(provider.name, REFUSED, str(error))
+        except sqlite3.Error as error:  # pack sd:5955: a locked ledger is a fault, never a traceback
+            return _outcome(provider.name, REFUSED, f"the sd database did not answer: {error}")
     receipt = {"call_id": result.call_id, "outcome": result.outcome, "bound_usd": result.bound,
                "usd": result.usd, "reason": result.reason}
     if result.http_status is None:
@@ -2110,9 +2107,10 @@ def review(
         ]
         return result
 
+    unmanaged = sd_lib.unmanaged(root, warn=False, database=getattr(args, "database", None))  # sd:5953: every gate road refuses it
     # Legacy runner rows lack before-check/runtime identity and never grant reuse.
     # Read first: a receipt at this head stands for the gate whatever the review says.
-    reused = (sd_check_receipts.reuse_checked_result(root, env, getattr(args, "database", None)) if getattr(args, "reuse_check", False) else None)
+    reused = (sd_check_receipts.reuse_checked_result(root, env, getattr(args, "database", None)) if getattr(args, "reuse_check", False) and not unmanaged else None)
     if not (slot := sd_lib.review_slot(result, env, root, SETUP_TIMEOUT_SECONDS)):
         return result
 
@@ -2141,9 +2139,9 @@ def review(
     # Shadow only (sd:2092): Jev's kind for each finding goes to its ledger and
     # is never read back, for a public repository only. `bin/sd_jev.py` says what is sent.
     sd_jev.jev_triage(result["findings"], env, root)
-    if reused is not None or result["status"] not in GATED_STATUSES:
-        result["check"] = reused or {"status": NOT_RUN_CHECK, "exit_code": None,
-                                     "reason": f"the review is {result['status']}; the gate runs on a head it does not block"}
+    if reused is not None or result["status"] not in GATED_STATUSES or unmanaged:
+        result["check"] = reused or {"status": NOT_RUN_CHECK, "exit_code": None, "reason": f"{unmanaged}; review only" if unmanaged
+                                     else f"the review is {result['status']}; the gate runs on a head it does not block"}
         return result
     gate_branch = getattr(args, "gate_check", None)
     result["check"] = (run_gate_check(root, runner, env, check_seconds, gate_branch, args, subject.head)
@@ -2521,7 +2519,6 @@ def main(argv: list[str] | None = None) -> int:
         root = sd_lib.repo_root(None)
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
-        sd_lib.refuse_unmanaged(root, Refusal, args.database)
         result = review(root, args, subprocess_runner, os.environ)
     except (UsageError, PolicyError, sd_lib.ConfigError, sd_registry.RegistryError) as error:
         print(f"sd-review: error: {error}", file=sys.stderr)

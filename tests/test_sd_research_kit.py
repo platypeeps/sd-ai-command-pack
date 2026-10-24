@@ -1370,6 +1370,24 @@ class ArchifyEmbedTests(unittest.TestCase):
         other = '<svg viewBox="0 0 1 1"><style>svg { fill: red; }  \n</style></svg>'
         self.assertEqual(self.render.scope_archify(other), other)
 
+    def test_a_comment_before_a_selector_is_no_part_of_it(self) -> None:
+        """pack sd:5944: `/* Font */ svg` scoped as a descendant missed the root."""
+        css = self.render.scope_rules("/* Font */ svg { font: serif; }", ".archify-diagram")
+        self.assertEqual(css, ".archify-diagram { font: serif; }")
+
+    def test_a_comment_before_an_at_rule_is_no_part_of_it(self) -> None:
+        """pack sd:5944: `/* Theme */ @media` was scoped as a selector."""
+        css = self.render.scope_rules(
+            "/* Theme */ @media (prefers-color-scheme: light) {svg {fill: black}}", ".archify-diagram")
+        self.assertEqual(css, '@media (prefers-color-scheme: light) {%s .archify-diagram {fill: black}}'
+                         % self.render.PAGE_UNPICKED)
+
+    def test_a_brace_in_a_comment_or_a_string_opens_no_block(self) -> None:
+        """pack sd:5944: blocks match braces outside comments and strings."""
+        css = '/* { */ svg { content: "}"; } .c-a { fill: red; /* } */ }'
+        self.assertEqual(list(self.render.css_blocks(css)),
+                         [("svg", ' content: "}"; '), (".c-a", " fill: red; /* } */ ")])
+
 
 class InitHookInstallTests(unittest.TestCase):
     """`init-hook` installs one source under every trigger, or none at all.

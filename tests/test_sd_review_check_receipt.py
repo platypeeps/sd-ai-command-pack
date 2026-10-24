@@ -37,7 +37,7 @@ class TheRunnersCheckIsAReceiptTests(ReviewFixture):
         initialise(database)
         connection = connect(database)
         repo = str(root)
-        upsert_repo(connection, repo, remote="git@github.com:fixture/repo.git")
+        upsert_repo(connection, repo, remote="git@github.com:fixture/repo.git", managed=1)  # pack sd:5953
         item = create_item(connection, kind="task", title="receipt", repo=repo, branch="main")
         assignment = create_assignment(connection, role="author", status="queued", item=item)
         run = claim(
