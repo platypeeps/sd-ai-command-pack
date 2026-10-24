@@ -245,6 +245,19 @@ class CitedIdTests(unittest.TestCase):
         self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, "revert: x\n\nLane review fix, pack sd:3: y")]),
                          (3,))
 
+    def test_a_commit_the_branch_reverts_cites_nothing(self) -> None:
+        """Lane review of sd:5999, round 2: the revert undoes the work, so its commit closes nothing."""
+        done, undone, again = "a" * 40, "b" * 40, "c" * 40
+        work = (done, "fix: implement (sd:2)\n\nLane review fix, pack sd:3: y.\n")
+        revert = (undone, f'Revert "fix: implement (sd:2)"\n\nThis reverts commit {done}.\n')
+        self.assertEqual(sd_ship_body.cited_ids("", [revert, work]), ())
+        # Commits come newest first. A revert of the revert restores the work, and its citation.
+        restore = (again, f'Revert "Revert ..."\n\nThis reverts commit {undone}.\n')
+        self.assertEqual(sd_ship_body.cited_ids("", [restore, revert, work]), (2, 3))
+        # A revert of a commit outside the branch drops nothing the branch adds.
+        elsewhere = ("d" * 40, f'Revert "fix: x"\n\nThis reverts commit {"e" * 40}.\n')
+        self.assertEqual(sd_ship_body.cited_ids("", [elsewhere, work]), (2, 3))
+
 
 class ConventionalTitleTests(unittest.TestCase):
     """sd:6059: the title is the squash subject, so it is a Conventional Commits header."""

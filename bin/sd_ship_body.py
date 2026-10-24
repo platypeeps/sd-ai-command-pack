@@ -272,6 +272,25 @@ _REVIEW_FIX = re.compile(r"^Lane review fix, [A-Za-z0-9_.-]+ sd:([0-9]+)\b")
 _NOT_DELIVERY = re.compile(r"^revert|\b(?:part of\b|partial|needs\b|after\b)", re.IGNORECASE)
 
 
+#: The line `git revert` writes into a revert's message.
+_REVERTS = re.compile(r"^This reverts commit ([0-9a-f]{7,40})\b", re.MULTILINE)
+
+
+def kept_commits(commits) -> list:
+    """`commits`, newest first, less each one a later commit of them reverts (sd:5999 lane review, round 2).
+
+    A revert that is itself reverted undoes nothing, so its target stays.
+    """
+    undone: list[str] = []
+    kept = []
+    for sha, message in commits:
+        if any(sha.startswith(prefix) for prefix in undone):
+            continue
+        undone += _REVERTS.findall(message)
+        kept.append((sha, message))
+    return kept
+
+
 def cited_sources(body: str, commits) -> dict[int, str]:
     """The ids a merge delivers by citation (operator ruling 2026-10-24, sd:5999), each with what cites it first.
 
@@ -281,8 +300,10 @@ def cited_sources(body: str, commits) -> dict[int, str]:
     prose such as "keeps the sd:<n> guard" cites nothing, and a line a
     fenced code block or an HTML comment holds is an example. A subject
     that starts "revert", or says "part of", "partial", "needs" or "after",
-    cites nothing: it names work it does not deliver whole.
+    cites nothing: it names work it does not deliver whole. A commit a
+    later branch commit reverts cites nothing either (`kept_commits`).
     """
+    commits = kept_commits(commits)
     found: dict[int, str] = {}
     for sha, message in commits:
         subject = message.split("\n", 1)[0]
