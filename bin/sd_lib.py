@@ -89,6 +89,27 @@ def copilot_automatic(policy: str | None, tier: str, depth: int) -> bool:
     if policy == "always":
         return depth > 0
     return False
+
+
+def lead_review_key(repository: str, branch: str) -> str:
+    """The `checkpoint` key of the clean branch review `sd-review` records and lane prepare reads (sd:5988)."""
+    return f"review:v1:{repository}:{branch}"
+
+
+def lead_review_binding(root: pathlib.Path) -> dict | None:
+    """What a recorded lead review is bound to, or None when a part does not read (sd:5988).
+
+    This pack's committed `bin/` tree and `root`'s review policy. Lane prepare
+    reviews in full when its own differs, so any committed change to the
+    tools counts: the conservative reading.
+    """
+    tools = git_output(["rev-parse", "HEAD:bin"], pathlib.Path(__file__).resolve().parent)
+    try:
+        declaration = repo_declaration(root, "review")
+    except DatabaseUnreadable:
+        return None
+    return {"tools": tools, "local": local_policy_digest(local_block_path(root)),
+            "review_declaration": declaration} if tools else None
 #: A Notion id, dashed or not: what each publish setting names (sd:5141).
 NOTION_ID = r"[0-9a-fA-F]{8}-?(?:[0-9a-fA-F]{4}-?){3}[0-9a-fA-F]{12}"
 #: A folder setting: the page id, or a page URL whose path ends in it.

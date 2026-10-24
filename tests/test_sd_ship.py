@@ -4575,6 +4575,155 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "no completed local review receipt"):
             self.operation().check_review(_git(self.root, "rev-parse", "HEAD"))
 
+    LEAD_KEY = "review:v1:fixture/repo:tiered"
+
+    def lead_review(self, *extra: str) -> dict:
+        """sd:5988. `sd-review --scope branch` of the checkout, as the lead runs it before enqueue."""
+        done = subprocess.run([sys.executable, str(ROOT / "bin/sd-review"), "--scope", "branch", "--json", *extra],
+                              cwd=self.root, capture_output=True, text=True, timeout=300, check=False,
+                              env=clean_environment(HOME=os.environ["HOME"], XDG_CONFIG_HOME=os.environ["XDG_CONFIG_HOME"]))
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return json.loads(done.stdout)
+
+    def lead_record(self) -> dict | None:
+        row = self.connection.execute("SELECT body FROM state WHERE id = (SELECT MAX(id) FROM state "
+                                      "WHERE kind = 'checkpoint' AND key = ?)", (self.LEAD_KEY,)).fetchone()
+        return json.loads(row["body"]) if row else None
+
+    def rewrite_lead_record(self, **changes) -> None:
+        from sd_db.writes import record_state
+        record_state(self.connection, "checkpoint", key=self.LEAD_KEY, body={**self.lead_record(), **changes})
+
+    def lead_reviewed_branch(self) -> pathlib.Path:
+        calls = self.tiered_branch({"src.py": "value = 2\n"})
+        self.assertEqual(self.lead_review()["status"], "clean")
+        self.assertEqual(self.lead_record()["head"], _git(self.root, "rev-parse", "HEAD"))
+        calls.unlink()
+        return calls
+
+    def assert_full_review(self, calls: pathlib.Path, why: str) -> None:
+        with contextlib.redirect_stderr(io.StringIO()) as said:
+            result = self.prepare()
+        self.assertNotIn("review_skipped", result)
+        self.assertIn(f"lead review not reused: {why}", said.getvalue())
+        self.assertTrue(calls.exists(), "no reader reviewed a head the lead's pass does not cover")
+        [reviewed] = self.operation().state["passes"]
+        self.assertIsNone(reviewed["base"], "a lead pass the lane did not reuse is no base for a delta")
+
+    def test_a_lead_review_of_the_head_stands_for_the_lane_review(self):
+        calls = self.lead_reviewed_branch()
+        head = _git(self.root, "rev-parse", "HEAD")
+        with contextlib.redirect_stderr(io.StringIO()) as said:
+            result = self.prepare()
+        self.assertEqual(result["review_skipped"], "lead-review")
+        self.assertIn(f"lead review reused: the clean pass of {head[:12]} covers it", said.getvalue())
+        self.assertIn("review skipped: lead-review", said.getvalue())
+        self.assertFalse(calls.exists(), "a reader was called for a head the lead's pass covers")
+        state = self.operation().state
+        self.assertEqual(state.get("passes") or [], [])
+        self.assertEqual(state["review_skipped"]["check"]["status"], "pass")
+        self.assertEqual(state["review_skipped"]["lead_review"]["head"], head)
+        self.assertIsNone(self.operation().check_review(head))
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(self.prepare()["review_skipped"], "lead-review")
+        self.assertEqual(self.operation().state["review_skipped"]["recorded_at"], state["review_skipped"]["recorded_at"],
+                         "the gate ran twice at one head")
+
+    def test_a_clean_catch_up_merge_after_the_lead_review_is_carried(self):
+        calls = self.lead_reviewed_branch()
+        reviewed = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "far work\n\nAuthored-with: human", files={"far/data.txt": "far\n"})
+        _git(self.root, "fetch", "-q", "origin")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main\n\nAuthored-with: human", "origin/main")
+        head = _git(self.root, "rev-parse", "HEAD")
+        with contextlib.redirect_stderr(io.StringIO()) as said:
+            result = self.prepare()
+        self.assertEqual(result["review_skipped"], "lead-review")
+        self.assertIn(f"lead review reused: the clean pass of {reviewed[:12]} covers it; {head[:12]} only merges "
+                      "origin/main since", said.getvalue())
+        self.assertFalse(calls.exists(), "a reader was called for a clean catch-up of a reviewed head")
+
+    def test_a_code_commit_after_the_lead_review_gets_a_full_review(self):
+        calls = self.lead_reviewed_branch()
+        (self.root / "src.py").write_text("value = 3\n")
+        _git(self.root, "commit", "-qam", "code\n\nAuthored-with: human")
+        self.assert_full_review(calls, "it changed more than a clean merge of origin/main")
+
+    def test_a_catch_up_merge_near_the_branch_gets_a_full_review(self):
+        calls = self.lead_reviewed_branch()
+        self.remote.commit_on("main", "near work\n\nAuthored-with: human", files={"other.py": "near = 1\n"})
+        _git(self.root, "fetch", "-q", "origin")
+        _git(self.root, "merge", "-q", "--no-ff", "-m", "Merge origin/main\n\nAuthored-with: human", "origin/main")
+        self.assert_full_review(calls, "it changed more than a clean merge of origin/main")
+
+    def test_a_lead_review_under_other_review_tools_gets_a_full_review(self):
+        calls = self.lead_reviewed_branch()
+        self.rewrite_lead_record(binding={**self.lead_record()["binding"], "tools": "0" * 40})
+        self.assert_full_review(calls, "the review tools or policy changed since")
+
+    def test_a_lead_review_that_wanted_copilot_gets_the_lane_review(self):
+        calls = self.lead_reviewed_branch()
+        self.rewrite_lead_record(copilot_automatic=True)
+        self.assert_full_review(calls, "it selects an automatic Copilot review")
+
+    def assert_other_subject(self, why: str, **changes) -> None:
+        calls = self.lead_reviewed_branch()
+        self.rewrite_lead_record(**changes)
+        self.assert_full_review(calls, why)
+
+    def test_a_lead_record_naming_another_branch_is_not_reused(self):
+        self.assert_other_subject("it names another subject", branch="elsewhere")
+
+    def test_a_lead_record_naming_another_repository_is_not_reused(self):
+        self.assert_other_subject("it names another subject", repository="fixture/other")
+
+    def test_a_lead_record_that_is_not_clean_is_not_reused(self):
+        self.assert_other_subject("it names another subject", status="advisory")
+
+    def test_a_lead_record_of_a_commit_git_cannot_find_is_not_reused(self):
+        self.assert_other_subject("git could not compare", head="f" * 40)
+
+    def test_no_lead_review_is_logged_and_reviewed_in_full(self):
+        calls = self.tiered_branch({"src.py": "value = 2\n"})
+        with contextlib.redirect_stderr(io.StringIO()) as said:
+            self.prepare()
+        self.assertIn("lead review not reused: none recorded for tiered; full review", said.getvalue())
+        self.assertTrue(calls.exists())
+
+    def test_a_lead_record_that_does_not_read_is_unknown_and_reviewed_in_full(self):
+        import sd_ship_review
+
+        class Broken:
+            def execute(self, *args):
+                raise sqlite3.OperationalError("database is locked")
+
+        self.assertEqual(sd_ship_review.lead_review(Broken(), self.root, "fixture/repo", "tiered", "0" * 40, "main", {}),
+                         (None, "the record did not read (database is locked)"))
+
+    def test_only_a_plain_clean_branch_review_is_recorded(self):
+        self.tiered_branch({"src.py": "value = 2\n"})
+        for extra in (["--provider", "reviewer"], ["--draft"]):
+            with self.subTest(extra=extra):
+                self.lead_review(*extra)
+                self.assertIsNone(self.lead_record())
+        review = ship.sd_lib.sibling("sd_review_lead_record", "sd-review")
+        args = review.build_parser().parse_args(["--scope", "branch"])
+        head = _git(self.root, "rev-parse", "HEAD")
+        result = {"status": "advisory", "requested_reviews": 1, "completed_reviews": 1,
+                  "subject": {"base": head, "head": head}}
+        review.record_lead_review(self.root, args, result, dict(os.environ))
+        self.assertIsNone(self.lead_record(), "an advisory pass was recorded")
+        moved = {**result, "status": "clean", "subject": {"base": head, "head": "0" * 40}}
+        with contextlib.redirect_stderr(io.StringIO()) as said:
+            review.record_lead_review(self.root, args, moved, dict(os.environ))
+        self.assertIsNone(self.lead_record(), "a pass of a head HEAD moved from was recorded")
+        self.assertIn("not recorded for lane prepare: Refusal: HEAD moved", said.getvalue())
+        with patch.object(review.sd_lib, "import_sd_db", side_effect=OSError("disk full")), \
+                contextlib.redirect_stderr(io.StringIO()) as said:
+            review.record_lead_review(self.root, args, {**result, "status": "clean"}, dict(os.environ))
+        self.assertIn("sd-review: the clean pass was not recorded for lane prepare: OSError: disk full",
+                      said.getvalue())
+
     def assert_tier_reviews(self, files: dict[str, str], policy: str | None = None) -> None:
         calls = self.tiered_branch(files, policy=policy)
         with contextlib.redirect_stderr(io.StringIO()):

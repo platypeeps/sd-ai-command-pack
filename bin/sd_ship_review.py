@@ -245,6 +245,45 @@ def carry_forward(root: pathlib.Path, reviewed: str, head: str, base_ref: str) -
     return {"from": reviewed, "to": head, "patch_id": before, "merges": merges}
 
 
+def lead_review(connection: Any, root: pathlib.Path, repository: str, branch: str, head: str, base: str,
+                binding: dict | None) -> tuple[dict | None, str]:
+    """sd:5988. The clean `sd-review --scope branch` pass recorded for `branch` that covers `head`, and why.
+
+    It covers `head` when it reviewed `head`, or when `carry_forward` carries
+    it across clean merges of `origin/<base>` alone. A record of another
+    subject, of other review tools, or one that selected an automatic Copilot
+    review (which only a lane pass requests) covers nothing. A read or a git
+    that cannot answer is unknown, never a cover: the lane reviews in full.
+    """
+    try:
+        row = connection.execute("SELECT body FROM state WHERE id = (SELECT MAX(id) FROM state "
+                                 "WHERE kind = 'checkpoint' AND key = ?)",
+                                 (sd_lib.lead_review_key(repository, branch),)).fetchone()
+        record = json.loads(row["body"]) if row else None
+    except Exception as error:  # unknown, so the full review runs
+        return None, f"the record did not read ({error})"
+    if record is None:
+        return None, f"none recorded for {branch}"
+    reviewed = record.get("head") if isinstance(record, dict) else None
+    if (not isinstance(reviewed, str) or record.get("status") != "clean"
+            or (record.get("repository"), record.get("branch")) != (repository, branch)):
+        return None, "it names another subject"
+    if binding is None or record.get("binding") != binding:
+        return None, "the review tools or policy changed since, or do not read"
+    if record.get("copilot_automatic") is not False:
+        return None, "it selects an automatic Copilot review"
+    if reviewed == head:
+        return record, f"the clean pass of {head[:12]} covers it"
+    try:
+        carried = carry_forward(root, reviewed, head, f"refs/remotes/origin/{base}")
+    except Refusal:
+        return None, f"git could not compare {reviewed[:12]} with {head[:12]}"
+    if carried is None:
+        return None, f"it changed more than a clean merge of origin/{base} since {reviewed[:12]}"
+    return ({**record, "carry_forward": carried},
+            f"the clean pass of {reviewed[:12]} covers it; {head[:12]} only merges origin/{base} since")
+
+
 #: How much younger than its reserved pass a process may read and still be its reviewer: `ps` rounds to seconds.
 REVIEWER_AGE_SLACK_SECONDS = 5
 #: How long past its execution watchdog a reserved pass still reads live: the watchdog's cleanup and the result's save.

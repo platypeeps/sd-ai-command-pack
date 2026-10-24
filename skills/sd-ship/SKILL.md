@@ -68,6 +68,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    The warning refuses nothing; read it before the review spends a pass.
    Use `sd-review --scope branch --challenge` for the *code, before merge* point.
    A branch of only plain prose (not `skills/`, `bin/`, `tests/`, hooks, `docs/work/`, any dot-path or agent-instruction file such as `AGENTS.md`) or only `.sd-pack-rev` gets the gate alone; prepare says `review skipped: docs-only` or `pin-bump` (sd:2998).
+   A code branch whose head a clean plain `sd-review --scope branch` reviewed, or reached since by clean far merges of `origin/main`, gets the gate alone; prepare says `lead review reused` or why not (sd:5988).
    Read its cap on that row in the sd-ai-command-pack checkout's `.claude/rules/sd-planning-adversarial-review.md`.
    Run `sd-docs-lint` against the built PR body.
    With no work root, use `--body-only`; do not create planning files to satisfy tree checks.

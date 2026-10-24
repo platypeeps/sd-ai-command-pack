@@ -47,6 +47,7 @@ from sd_ship_review import (
     dropped_catch_up,
     failing_check_tails,
     is_ancestor,
+    lead_review,
     named_commits,
     restart_reason,
 )
@@ -1212,7 +1213,8 @@ class Ship(SharedReview):
         return {"tier": tier, "reason": reason, "base": fork}
 
     def gate_only(self, head: str) -> bool:
-        """Run the gate alone for a branch `review_tier` calls docs-only or a pin bump (sd:2998).
+        """Run the gate alone for a branch `review_tier` calls docs-only or a pin bump (sd:2998),
+        or one the lead's recorded clean branch review covers (`lead_reviewed`, sd:5988).
 
         Only before any review pass and with no review flag: a branch already
         reviewed keeps verifying its fixes. The record is `review_skipped` in
@@ -1226,7 +1228,7 @@ class Ship(SharedReview):
         if skipped.get("head") == head and (skipped.get("check") or {}).get("status") == "pass":
             return True
         tiered = self.review_tier(head)
-        if tiered["tier"] == "code":
+        if tiered["tier"] == "code" and not (tiered := self.lead_reviewed(head, tiered)):
             return False
         base = self.gate_check_base()
         check = adjudicated_check(self.root, head, base, self.database if base else None,
@@ -1243,6 +1245,20 @@ class Ship(SharedReview):
         print(f"sd-ship: review skipped: {tiered['tier']} ({tiered['reason']}); the gate passed at {head[:12]}, "
               "no provider called", file=sys.stderr)
         return True
+
+    def lead_reviewed(self, head: str, tiered: dict) -> dict:
+        """sd:5988. A code branch's tier as `lead-review` when the lead's clean pass covers `head`, else `{}`.
+
+        Says which path prepare takes. The gate still runs: the record stands
+        for the review, not for the gate.
+        """
+        record, why = lead_review(self.connection, self.root, self.repository, self.branch, head,
+                                  self.state["base"], sd_lib.lead_review_binding(self.root))
+        if record is None:
+            print(f"sd-ship: lead review not reused: {why}; full review", file=sys.stderr)
+            return {}
+        print(f"sd-ship: lead review reused: {why}", file=sys.stderr)
+        return {**tiered, "tier": "lead-review", "reason": why, "lead_review": record}
 
     def stable_copilot_material(self, number: int, pull: dict, head: str,
                                 *, required: bool) -> tuple[list, list] | None:
