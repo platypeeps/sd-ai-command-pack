@@ -424,6 +424,31 @@ class TheBoundaries(LedgerFixture):
         self.assertEqual((charged.backend, charged.status, charged.detail), ("paid", sd_review.REFUSED, capped["paid"]))
         self.assertEqual(client.sent, [])
 
+    def test_a_locked_database_refuses_the_charged_calls_and_raises_nothing(self) -> None:
+        """pack sd:5955. Another writer held the shared database past the
+        connection's busy timeout; `release_orphans` ended the run in a
+        traceback. A locked ledger is a fault: the capped bill and both
+        charged calls refuse, naming it, and nothing is sent."""
+        self.seed()
+        registry = sd_review.sd_registry.read_file(self.registry_path)
+        ledger = sd_review.open_ledger(self.environment(), self.database, registry)
+        holder = sqlite3.connect(self.database, isolation_level=None)
+        self.addCleanup(holder.close)
+        holder.execute("BEGIN IMMEDIATE")
+        brief = mock.patch.object(ledger.library, "connect",
+                                  lambda *a, real=ledger.library.connect, **k: real(*a, **{**k, "busy_timeout": 50}))
+        client = FakeClient(default=usage_answer())
+        env = self.environment(REMOTE_KEY="fixture")
+        with brief:
+            capped = sd_review.capped_bills(registry, ledger)
+            self.assertEqual(list(capped), ["paid"])
+            self.assertIn("database is locked", capped["paid"])
+            for name in ("paid", "free"):
+                charged = sd_review.charged_call(ledger, registry.providers[name], "prompt", env, 5, client, self.root)
+                self.assertEqual((charged.backend, charged.status), (name, sd_review.REFUSED))
+                self.assertIn("database is locked", charged.detail)
+        self.assertEqual(client.sent, [])
+
     def test_a_library_older_than_calls_is_a_fault_not_a_crash(self) -> None:
         """The pack's provisioned copy may predate sd:234's 8b: a library
         without `sd_db.calls` names itself and the capped bill is refused."""

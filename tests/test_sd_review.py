@@ -860,6 +860,30 @@ class PipelineTests(ReviewFixture):
         sd_review.render(result, stream)
         self.assertIn("check: not run -- the review is blocking", stream.getvalue())
 
+    def test_an_unmanaged_repository_gets_the_review_and_no_gate(self) -> None:
+        """pack sd:5953. Every gate road refuses an unmanaged repository: sd-check,
+        the worktree gate and a receipt. The review runs alone; the check is not
+        run, never passed, and the report says why."""
+        root = self.make_repo()
+        self.prepare(root)
+        why = sd_review.sd_lib.unmanaged_text("~/theirs")
+        refusal = sd_review.Completed(2, "", f"sd-check: error: {why}")
+        receipt = {"status": "pass", "exit_code": 0, "detail": "", "checks": [], "source": "receipt"}
+        for road in ({}, {"gate_check": "main"}, {"reuse_check": True}):
+            with self.subTest(**road), \
+                    unittest.mock.patch.object(sd_review.sd_lib, "unmanaged", return_value=why), \
+                    unittest.mock.patch.object(sd_review.sd_check_receipts, "reuse_checked_result",
+                                               return_value=receipt) as reuse:
+                runner = FakeRunner({"sd-check": refusal, "codex": sd_review.Completed(0, '{"findings": []}', "")})
+                result = self.run_review(root, runner, **road)
+                self.assertEqual(result["status"], "clean", result["check"])
+                self.assertNotIn("sd-check", self.programs(runner))
+                reuse.assert_not_called()
+                self.assertEqual(result["check"]["status"], "not_run")
+                stream = io.StringIO()
+                sd_review.render(result, stream)
+                self.assertIn(f"check: not run -- {why}; review only", stream.getvalue())
+
     # sd:1343 -- a worktree of this pack has no .venv, and `make check` died
     # on the toolchain before any reviewer ran. The receipt has to say what is
     # missing, not just that the gate failed -- and no more than it can prove.

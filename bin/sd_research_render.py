@@ -138,18 +138,32 @@ ARCHIFY = "archify-diagram"
 ARCHIFY_SVG_RE = re.compile(r"<svg\b[^>]*archify-diagram-title[^>]*>.*?</svg>", re.S)
 #: The page's theme when the reader picked none: "system", or no theme.js.
 PAGE_UNPICKED = ':root:not([data-theme="dark"]):not([data-theme="light"])'
+#: A comment, a string or a brace: the tokens css_blocks matches blocks by.
+CSS_TOKEN_RE = re.compile(r"""/\*.*?(?:\*/|\Z)|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[{}]""", re.S)
 
 
 def css_blocks(css):
-    """Each top-level `prelude { body }` of `css`, braces matched."""
-    at = 0
-    while (start := css.find("{", at)) >= 0:
-        depth, close = 1, start + 1
-        while depth and close < len(css):
-            depth += {"{": 1, "}": -1}.get(css[close], 0)
-            close += 1
-        yield css[at:start].strip(), css[start + 1:close - 1]
-        at = close
+    """Each top-level `prelude { body }` of `css`, braces matched (pack sd:5944).
+
+    A brace in a comment or a string counts for nothing, and a comment
+    leaves the prelude: `/* Font */ svg` is the selector `svg`.
+    """
+    depth, at, start, prelude = 0, 0, 0, ""
+    for token in CSS_TOKEN_RE.finditer(css):
+        kind = token.group(0)
+        if kind == "{":
+            if not depth:
+                prelude, start = prelude + css[at:token.start()], token.end()
+            depth += 1
+        elif kind == "}" and depth:
+            depth -= 1
+            if not depth:
+                yield prelude.strip(), css[start:token.start()]
+                prelude, at = "", token.end()
+        elif kind.startswith("/*") and not depth:
+            prelude, at = prelude + css[at:token.start()], token.end()
+    if depth:
+        yield prelude.strip(), css[start:]
 
 
 def scope_selector(prelude, scope):
