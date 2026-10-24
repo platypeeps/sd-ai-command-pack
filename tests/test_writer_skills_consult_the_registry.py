@@ -58,7 +58,6 @@ WRITER_SKILLS = (
     "sd-humanizer",
     "sd-plan",
     "sd-spec",
-    "sd-technical-editor",
 )
 
 #: The skills `WRITES_A_FILE` also matches, with the sentence it matched and

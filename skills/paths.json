@@ -16,8 +16,6 @@
     "research": {
       "summary": "sources to brief to handoff",
       "skills": [
-        "sd-brief",
-        "sd-digest",
         "sd-fact-check",
         "sd-handoff",
         "sd-research",
@@ -41,16 +39,10 @@
     "act": {
       "summary": "brief to draft to send",
       "skills": [
-        "sd-author",
-        "sd-decide",
         "sd-diagram",
-        "sd-explain",
         "sd-humanizer",
         "sd-presentation",
-        "sd-proposal",
-        "sd-prose-lint",
-        "sd-publish",
-        "sd-technical-editor"
+        "sd-publish"
       ]
     }
   }
