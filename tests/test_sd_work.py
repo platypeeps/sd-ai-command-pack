@@ -270,6 +270,19 @@ class TaskCLI(unittest.TestCase):
             self.assertEqual(sd_db.reads.open_followups(connection), [])
         self.assertNotIn("advisory", self.call("task", "note", item, "--body", "Again").stderr)
 
+    def test_add_and_note_record_the_harness_session_id(self):
+        """pack sd:6023: add, note and an answer record `CLAUDE_CODE_SESSION_ID`; unset, the user as before."""
+        session = {**self.environment, "CLAUDE_CODE_SESSION_ID": "session-under-test"}
+        item = json.loads(self.call("task", "add", "Filed by a session", "--json", env=session).stdout)["item"]["id"]
+        asked = json.loads(self.call("task", "note", item, "Which?", "--kind", "question", "--json",
+                                     env=session).stdout)["note"]["id"]
+        self.call("task", "note", item, "This one", "--kind", "decision", "--answers", asked, env=session)
+        bare = {key: value for key, value in self.environment.items() if key != "CLAUDE_CODE_SESSION_ID"}
+        state = json.loads(self.call("task", "note", item, "Plain", "--json", env=bare).stdout)
+        self.assertEqual([(note["kind"], note["session"]) for note in state["notes"]],
+                         [("status_change", "session-under-test"), ("question", "session-under-test"),
+                          ("decision", "session-under-test"), ("comment", getpass.getuser())])
+
     def done_item(self, *merge_note):
         """A task closed by hand, optionally carrying a merge comment first."""
         item = json.loads(self.call("task", "add", "Delivered twice", "--json").stdout)["item"]["id"]
