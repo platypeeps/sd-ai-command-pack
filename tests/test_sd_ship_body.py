@@ -258,6 +258,18 @@ class CitedIdTests(unittest.TestCase):
         elsewhere = ("d" * 40, f'Revert "fix: x"\n\nThis reverts commit {"e" * 40}.\n')
         self.assertEqual(sd_ship_body.cited_ids("", [elsewhere, work]), (2, 3))
 
+    def test_a_merge_the_branch_reverts_cites_nothing_it_brought_in(self) -> None:
+        """Lane review of sd:5999, round 3: `git revert -m 1 <merge>` undoes each commit the merge brought in."""
+        base, side, main, merge, undo, again = (c * 40 for c in "abcdef")
+        commits = [(undo, f'Revert "Merge"\n\nThis reverts commit {merge}, reversing\nchanges made to {main}.\n'),
+                   (merge, "Merge branch 'side'"), (main, "fix: mainline (sd:4)"),
+                   (side, "fix: implement (sd:2)\n\nLane review fix, pack sd:3: y.\n"), (base, "fix: base (sd:5)")]
+        parents = {undo: (merge,), merge: (main, side), main: (base,), side: (base,), base: ()}
+        self.assertEqual(sd_ship_body.cited_ids("", commits, parents), (4, 5))
+        # A revert of the merge's revert brings the work back, and its citations.
+        restore = (again, f'Revert "Revert"\n\nThis reverts commit {undo}.\n')
+        self.assertEqual(sd_ship_body.cited_ids("", [restore, *commits], {again: (undo,), **parents}), (4, 2, 5, 3))
+
 
 class ConventionalTitleTests(unittest.TestCase):
     """sd:6059: the title is the squash subject, so it is a Conventional Commits header."""

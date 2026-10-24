@@ -272,26 +272,45 @@ _REVIEW_FIX = re.compile(r"^Lane review fix, [A-Za-z0-9_.-]+ sd:([0-9]+)\b")
 _NOT_DELIVERY = re.compile(r"^revert|\b(?:part of\b|partial|needs\b|after\b)", re.IGNORECASE)
 
 
-#: The line `git revert` writes into a revert's message.
-_REVERTS = re.compile(r"^This reverts commit ([0-9a-f]{7,40})\b", re.MULTILINE)
+#: The line `git revert` writes into a revert's message, with the mainline parent when it reverts a merge.
+_REVERTS = re.compile(r"^This reverts commit ([0-9a-f]{7,40})\b(?:, reversing\s+changes made to ([0-9a-f]{7,40}))?",
+                      re.MULTILINE)
 
 
-def kept_commits(commits) -> list:
-    """`commits`, newest first, less each one a later commit of them reverts (sd:5999 lane review, round 2).
+def kept_commits(commits, parents=None) -> list:
+    """`commits`, newest first, less each one a later commit of them reverts (sd:5999 lane review, rounds 2 and 3).
 
-    A revert that is itself reverted undoes nothing, so its target stays.
+    A revert of a merge also undoes each commit the merge brought in over
+    the mainline parent its message names, read from `parents` (sha to
+    parent shas, the range's `git rev-list --parents`). A revert that is
+    itself reverted undoes nothing, so its target stays.
     """
-    undone: list[str] = []
+    parents = parents or {}
+
+    def full(prefix: str) -> str:
+        return next((sha for sha, _ in commits if sha.startswith(prefix)), prefix)
+
+    def ancestors(start: str) -> set[str]:
+        seen, todo = set(), [start]
+        while todo:
+            sha = todo.pop()
+            if sha not in seen:
+                seen.add(sha)
+                todo += parents.get(sha, ())
+        return seen
+
+    undone: set[str] = set()
     kept = []
     for sha, message in commits:
-        if any(sha.startswith(prefix) for prefix in undone):
+        if sha in undone:
             continue
-        undone += _REVERTS.findall(message)
+        for target, mainline in _REVERTS.findall(message):
+            undone |= ancestors(full(target)) - ancestors(full(mainline)) if mainline else {full(target)}
         kept.append((sha, message))
     return kept
 
 
-def cited_sources(body: str, commits) -> dict[int, str]:
+def cited_sources(body: str, commits, parents=None) -> dict[int, str]:
     """The ids a merge delivers by citation (operator ruling 2026-10-24, sd:5999), each with what cites it first.
 
     Each `sd:<n>` the subject of a branch commit names, and each `Lane
@@ -303,7 +322,7 @@ def cited_sources(body: str, commits) -> dict[int, str]:
     cites nothing: it names work it does not deliver whole. A commit a
     later branch commit reverts cites nothing either (`kept_commits`).
     """
-    commits = kept_commits(commits)
+    commits = kept_commits(commits, parents)
     found: dict[int, str] = {}
     for sha, message in commits:
         subject = message.split("\n", 1)[0]
@@ -318,9 +337,9 @@ def cited_sources(body: str, commits) -> dict[int, str]:
     return found
 
 
-def cited_ids(body: str, commits) -> tuple[int, ...]:
+def cited_ids(body: str, commits, parents=None) -> tuple[int, ...]:
     """The ids `cited_sources` finds, in order."""
-    return tuple(cited_sources(body, commits))
+    return tuple(cited_sources(body, commits, parents))
 
 
 #: A trailer line, as a body's last paragraph holds them.

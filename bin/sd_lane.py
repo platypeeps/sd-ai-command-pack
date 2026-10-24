@@ -734,8 +734,9 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
         check_lines(worktree, title, body, base, head)
         check_docs(worktree, body, base)
         if claim == "deliver":  # an associate-only claim closes nothing (sd:3365)
-            commits = branch_commits(worktree, base, head)
-            cited, repo = on_hub(queue, lambda connection: cited_closes(connection, item, body, commits, closes))
+            commits, parents = branch_commits(worktree, base, head), branch_parents(worktree, base, head)
+            cited, repo = on_hub(queue, lambda connection: cited_closes(connection, item, body, commits, closes,
+                                                                        parents))
             entry["closes"] = [*closes, *(row["item"] for row in cited)]
             if cited:  # listed where a reader sees it (sd:5999 lane review)
                 import sd_ship_body  # noqa: PLC0415
@@ -767,8 +768,9 @@ def check_lines(worktree: pathlib.Path, title: str, body: str, base: str, head: 
 
 
 def branch_commits(worktree: pathlib.Path, base: str, head: str) -> list[tuple[str, str]]:
-    """Each `(sha, message)` `head` adds to `origin/<base>`, merges included; a failed read raises `PUBLISH_UNKNOWN`."""
-    raw = lane_git(worktree, "log", "--format=%H%x1f%B%x1e", f"refs/remotes/origin/{base}..{head}")
+    """Each `(sha, message)` `head` adds to `origin/<base>`, merges included, newest first, each child before its
+    parents; a failed read raises `PUBLISH_UNKNOWN`."""
+    raw = lane_git(worktree, "log", "--topo-order", "--format=%H%x1f%B%x1e", f"refs/remotes/origin/{base}..{head}")
     if raw is None:
         raise LaneError(f"Cannot read the commits {head} adds to origin/{base}; fetch origin, then enqueue "
                         "again. Nothing was queued or pushed.", code=PUBLISH_UNKNOWN)
@@ -776,8 +778,18 @@ def branch_commits(worktree: pathlib.Path, base: str, head: str) -> list[tuple[s
             (chunk.strip("\n").partition("\x1f") for chunk in raw.split("\x1e")) if sha.strip()]
 
 
+def branch_parents(worktree: pathlib.Path, base: str, head: str) -> dict[str, tuple[str, ...]]:
+    """Each commit `head` adds to `origin/<base>`, with its parents; a failed read raises `PUBLISH_UNKNOWN`."""
+    raw = lane_git(worktree, "rev-list", "--parents", f"refs/remotes/origin/{base}..{head}")
+    if raw is None:
+        raise LaneError(f"Cannot read the commits {head} adds to origin/{base}; fetch origin, then enqueue "
+                        "again. Nothing was queued or pushed.", code=PUBLISH_UNKNOWN)
+    return {sha: tuple(rest) for sha, *rest in (line.split() for line in raw.splitlines() if line.strip())}
+
+
 def cited_closes(connection: Any, item: int, body: str, commits: list[tuple[str, str]],
-                 closes: tuple[int, ...]) -> tuple[list[dict[str, Any]], str]:
+                 closes: tuple[int, ...], parents: dict[str, tuple[str, ...]] | None = None
+                 ) -> tuple[list[dict[str, Any]], str]:
     """The open items of `item`'s repository its commits or body cite, beyond `closes`, and that repository's name (sd:5999).
 
     Each `{"item", "source"}`: a branch commit's subject, or a `Lane review
@@ -790,7 +802,7 @@ def cited_closes(connection: Any, item: int, body: str, commits: list[tuple[str,
     row = connection.execute("SELECT repo FROM item WHERE id = ?", (item,)).fetchone()
     if row is None or not row["repo"]:
         return [], ""
-    sources = sd_ship_body.cited_sources(body, commits)
+    sources = sd_ship_body.cited_sources(body, commits, parents)
     kept = sd_ship_body.open_cited(connection, item, row["repo"], tuple(sources), closes, body)
     return [{"item": number, "source": sources[number]} for number in kept], pathlib.Path(row["repo"]).name
 

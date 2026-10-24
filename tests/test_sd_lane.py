@@ -2376,6 +2376,35 @@ class CitedCloses(SharedQueue):
         entry = sd_lane.enqueue_entry(tree, self.own, "fix: a slice", self.body, self.environ, claim="deliver")
         self.assertEqual((entry["closes"], "cited" in entry), ([], False))
 
+    def test_a_merge_the_branch_reverts_closes_nothing_it_brought_in(self) -> None:
+        """Lane review of sd:5999, round 3: `git revert -m 1` of a merge undoes the commits it brought in."""
+        a, b, c, *_ = self.open
+        tree, _ = self.committed("topic-merge")
+        git(tree, "switch", "-q", "-c", "side")
+        (tree / "side.txt").write_text("side\n", encoding="utf-8")
+        git(tree, "add", "side.txt")
+        git(tree, "commit", "-q", "-m", f"fix: implement (pack sd:{a})\n\nLane review fix, pack sd:{b}: y.")
+        git(tree, "switch", "-q", "topic-merge")
+        git(tree, "commit", "-q", "--allow-empty", "-m", f"fix: mainline (pack sd:{c})")
+        git(tree, "merge", "-q", "--no-ff", "--no-edit", "side")
+        git(tree, "revert", "--no-edit", "-m", "1", "HEAD")
+        self.body.write_text("Words.\n", encoding="utf-8")
+        entry = sd_lane.enqueue_entry(tree, self.own, "fix: a slice", self.body, self.environ, claim="deliver")
+        self.assertEqual(entry["closes"], [c])
+
+    def test_a_range_the_branch_reverts_closes_nothing(self) -> None:
+        """Lane review of sd:5999, round 3: `git revert A..B` writes one revert per commit, each naming it."""
+        a, b, c, *_ = self.open
+        tree, _ = self.committed("topic-range")
+        for number in (a, b, c):
+            (tree / f"{number}.txt").write_text("work\n", encoding="utf-8")
+            git(tree, "add", f"{number}.txt")
+            git(tree, "commit", "-q", "-m", f"fix: implement (pack sd:{number})")
+        git(tree, "revert", "--no-edit", "HEAD~2..HEAD")
+        self.body.write_text("Words.\n", encoding="utf-8")
+        entry = sd_lane.enqueue_entry(tree, self.own, "fix: a slice", self.body, self.environ, claim="deliver")
+        self.assertEqual(entry["closes"], [a])
+
     def test_an_associate_only_claim_closes_nothing_it_cites(self) -> None:
         entry = self.enqueue("Words.\n", f"fix: the slice (sd:{self.open[0]})", claim="associate-only")
         self.assertEqual(entry["closes"], [])
