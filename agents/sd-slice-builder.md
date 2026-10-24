@@ -36,6 +36,8 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
    An item already fixed: say so with evidence. One that needs an operator decision or is bigger than one slice:
    record the question with `sd task note N $'<question>\nOption: <a>\nOption: <b>' --kind question` and skip it.
    Each `Option:` line becomes a dashboard button.
+   Claim each item you take before you write code, so it does not read `planning` while you work it:
+   `sd task status N in_progress --reason '<branch> in <worktree>'`. An item you skip keeps its status.
 3. Write a test that fails on `origin/main` before each fix, then make it pass. Quote both lines in the report.
    No skipped tests.
 4. Commit one item per commit. Add no attribution lines: no Co-Authored-By, session or generated-with lines.
