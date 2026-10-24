@@ -68,6 +68,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    The warning refuses nothing; read it before the review spends a pass.
    Use `sd-review --scope branch --challenge` for the *code, before merge* point.
    A branch of only plain prose (not `skills/`, `bin/`, `tests/`, hooks, `docs/work/`, any dot-path or agent-instruction file such as `AGENTS.md`) or only `.sd-pack-rev` gets the gate alone; prepare says `review skipped: docs-only` or `pin-bump` (sd:2998).
+   A code branch whose head a clean plain `sd-review --scope branch` reviewed, or reached since by clean far merges of `origin/main`, gets the gate alone; prepare says `lead review reused` or why not (sd:5988).
    Read its cap on that row in the sd-ai-command-pack checkout's `.claude/rules/sd-planning-adversarial-review.md`.
    Run `sd-docs-lint` against the built PR body.
    With no work root, use `--body-only`; do not create planning files to satisfy tree checks.
@@ -113,6 +114,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    A body `Closes:` line is refused, and the title and commit `Delivers:` lines close nothing.
    A delivering enqueue refuses a title or `## Summary` heading `<repo> sd:N` naming an open item of this repository missing from `--item` (sd:5375).
    Enqueue refuses `line_too_long` for a title over 63 characters, or a body or branch commit line over 72, outside a code fence or a bare URL (sd:5793).
+   Enqueue refuses `head_moved` for a head the worktree or `origin/<branch>` moved past, and a docs lint failure the branch adds, before it pushes (sd:5989).
    An `--associate-only` claim closes nothing (sd:3365).
    A body `Refs: sd:N` line names a related or partial item; the merge leaves it open.
    Record the row only after the remote confirms the merge.

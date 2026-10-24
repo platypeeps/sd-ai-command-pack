@@ -2520,6 +2520,7 @@ def main(argv: list[str] | None = None) -> int:
         if root is None:
             raise UsageError(f"{pathlib.Path.cwd()} is not inside a git repository")
         result = review(root, args, subprocess_runner, os.environ)
+        record_lead_review(root, args, result, os.environ)
     except (UsageError, PolicyError, sd_lib.ConfigError, sd_registry.RegistryError) as error:
         print(f"sd-review: error: {error}", file=sys.stderr)
         return EXIT_USAGE
@@ -2534,6 +2535,43 @@ def main(argv: list[str] | None = None) -> int:
     if args.explain or args.dry_run:
         return EXIT_OK
     return STATUS_EXIT.get(str(result["status"]), EXIT_OK)
+
+
+#: What makes a run other than a plain branch review of HEAD: a fix verification,
+#: another subject, one named reader, or a pass sd-ship dispatched for its receipt.
+UNRECORDED_OPTIONS = ("base", "verify_report", "resume_report", "item", "draft", "lens", "provider",
+                      "expected_timing", "reuse_check", "preflight", "explain", "dry_run")
+
+
+def record_lead_review(root: pathlib.Path, args: argparse.Namespace, result: dict[str, Any],
+                       env: Mapping[str, str]) -> None:
+    """Record a clean plain `--scope branch` review of HEAD, so lane prepare can skip its own (sd:5988).
+
+    Only a pass with every reviewer it asked for, while HEAD is still its head.
+    A record that cannot be written is said on stderr; the exit code stands.
+    """
+    if (args.scope != "branch" or result.get("status") != "clean"
+            or any(getattr(args, name, None) for name in UNRECORDED_OPTIONS)
+            or not 1 <= result.get("requested_reviews", 0) <= result.get("completed_reviews", 0)):
+        return
+    head = result["subject"]["head"]
+    try:
+        owner, name, current = sd_lib.github_head(root) or ("", "", "")
+        branch = sd_lib.git_output(["symbolic-ref", "--quiet", "--short", "HEAD"], root)
+        binding, library = sd_lib.lead_review_binding(root), sd_lib.import_sd_db().module
+        if current != head or not branch or binding is None or library is None:
+            raise Refusal("HEAD moved, is on no branch or no GitHub origin, or the binding or database does not read")
+        copilot = (result.get("remote_reviews") or {}).get("copilot") or {}
+        with contextlib.closing(library.connect(args.database or library.default_path(env.get("HOME")))) as connection:
+            library.record_state(connection, "checkpoint", key=sd_lib.lead_review_key(f"{owner}/{name}", branch), body={
+                "repository": f"{owner}/{name}", "branch": branch, "head": head, "base": result["subject"]["base"],
+                "status": "clean", "binding": binding, "reviewed_by": result.get("reviewed_by", []),
+                "challenge": bool(args.challenge), "copilot_automatic": copilot.get("automatic")})
+    except Exception as error:  # any failure: the review stands, and the lane reviews in full
+        print(f"sd-review: the clean pass was not recorded for lane prepare: {type(error).__name__}: {error}",
+              file=sys.stderr)
+        return
+    print(f"sd-review: recorded the clean pass of {head[:12]} on {branch} for lane prepare (sd:5988)", file=sys.stderr)
 
 
 def _validate_copilot_policy(policy: dict[str, Any], source: str) -> dict[str, Any]:

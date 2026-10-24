@@ -31,10 +31,13 @@ from __future__ import annotations
 import dataclasses
 import pathlib
 import re
+import sys
 import tempfile
 
 import sd_lib
 from sd_ship_remote import Refusal, completed_process
+
+BIN = pathlib.Path(__file__).resolve().parent
 
 #: The canonical spelling of each owned key, by its case-folded name.
 _CANONICAL = {key.rstrip(":").lower(): key for key in sd_lib.OWNED_TRAILERS}
@@ -338,6 +341,32 @@ def refuse_long_lines(title: str, body: str, commits) -> None:
                       code="line_too_long", boundary="input", state="operator_decision",
                       next_action=f"Keep the title at {TITLE_LIMIT} characters or less, wrap the named "
                                   f"body and commit lines at {LINE_LIMIT}, then enqueue again.")
+
+
+def docs_lint(root: pathlib.Path, body: str, base: str) -> list[str]:
+    """Prepare's `sd-docs-lint` of `root`, with `body` as `--pr-body`; the warnings it leaves.
+
+    Run from the repository root with no `--work-dir`, and with Jev off.
+    A failure is judged against `origin/<base>` (`lint_against_base`), so
+    only what the branch introduces refuses. Lane enqueue runs the same
+    lint, so a lint failure refuses in seconds there (sd:5989).
+    """
+    lint = ["env", "JEV_SD_DOCS_LINT=0", sys.executable, str(BIN / "sd-docs-lint")]
+    if not (root / "docs/work").is_dir():
+        lint.append("--body-only")
+    with tempfile.TemporaryDirectory(prefix="sd-ship-lint-") as directory:
+        body_path = pathlib.Path(directory) / "pr-body.md"
+        body_path.write_text(body, encoding="utf-8")
+        argv = [*lint, "--pr-body", str(body_path)]
+        try:
+            completed_process(root, argv, timeout=300)
+        except Refusal as refusal:
+            # Failed: run it again in full and gate only on what the
+            # branch introduces, not on what origin/<base> carries (sd:1646).
+            if refusal.workflow["blocker"]["code"] != "command_failed":
+                raise
+            return lint_against_base(root, argv, base)
+    return []
 
 
 def failures(result) -> list[str]:

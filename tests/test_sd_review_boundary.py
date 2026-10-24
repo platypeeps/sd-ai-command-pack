@@ -955,11 +955,16 @@ class LineBudgetTests(unittest.TestCase):
         # 4798 -> 4813 is sd:5109, under the operator's 4900 ceiling: the review
         # policy and the gate's reuse key read the repo row, and a row that does
         # not read refuses (`bin/sd_gate_run.py` +4, `bin/sd_check_receipts.py` +6).
+        #
+        # 4813 -> 4848 is sd:5988, under the operator's 4900 ceiling:
+        # `record_lead_review` (+38 in `bin/sd-review`) writes a clean plain
+        # branch pass to the workflow database, so lane prepare runs the gate
+        # alone on the head the lead already reviewed; main sat at 4810.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4813,
+            4848,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 

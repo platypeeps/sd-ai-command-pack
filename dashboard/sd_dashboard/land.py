@@ -40,6 +40,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import subprocess
 import tempfile
 from pathlib import Path
@@ -265,10 +266,35 @@ def _read(connection, key: str, spec: str | None) -> dict:
     return facts
 
 
+def _contents(path: Path, changed: list[str]) -> list[list[str]]:
+    """Each changed path's mode and content digest as Land would commit it: a symlink's target, a file's bytes and its
+    executable bit, or absent. A file edited or made executable after the preview keeps its name, not its digest."""
+    found = []
+    for name in changed:
+        file = path / name
+        try:
+            mode = file.lstat().st_mode
+            if stat.S_ISLNK(mode):
+                found.append([name, "120000", hashlib.sha256(os.fsencode(os.readlink(file))).hexdigest()])
+            elif stat.S_ISREG(mode):
+                with file.open("rb") as handle:
+                    digest = hashlib.file_digest(handle, "sha256").hexdigest()
+                found.append([name, "100755" if mode & stat.S_IXUSR else "100644", digest])
+            else:
+                found.append([name, "other", ""])
+        except FileNotFoundError:
+            found.append([name, "absent", ""])
+        except OSError as error:
+            raise Unknown(f"{name} was not read: {error}") from None
+    return found
+
+
 def revision(facts: dict) -> str:
-    """What the preview showed and the write must find again: the checkout, its HEAD, its changes and the plan."""
+    """What the preview showed and the write must find again: the checkout, its HEAD, its changes with their contents
+    and modes, and the plan."""
     subject = [facts["path"], facts["branch"], facts["head"], [c["sha"] for c in facts["commits"]], facts["changed"],
-               facts["spec"], facts["mode"], facts["tip"], facts.get("groups", [])]
+               _contents(Path(facts["disk"]), facts["changed"]), facts["spec"], facts["mode"], facts["tip"],
+               facts.get("groups", [])]
     return hashlib.sha256(json.dumps(subject, sort_keys=True).encode()).hexdigest()
 
 
@@ -411,8 +437,8 @@ def land(connection, values: dict):
         done["head"] = tip
         if facts["mode"] != "in place":
             tree = Path(facts["worktree"])
-            listed = _out(path, "worktree", "list", "--porcelain")
-            if f"branch refs/heads/{facts['land_branch']}" not in listed:
+            listed = _out(path, "worktree", "list", "--porcelain").splitlines()
+            if f"branch refs/heads/{facts['land_branch']}" not in listed:  # a whole record: land/sd-1234 is not sd-123
                 tree.parent.mkdir(parents=True, exist_ok=True)
                 _git(path, "worktree", "add", "-q", str(tree), facts["land_branch"])
             done["restored"], done["kept"] = _restore(path, head, tip, _changes(path))
