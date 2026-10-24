@@ -153,6 +153,8 @@ class SourceIntake(BrowserSession):
         argv = self.ship.read_text().splitlines()
         self.assertEqual(argv[:4], ["-C", str(work), "lane", "enqueue"])
         self.assertEqual(argv[argv.index("--item") + 1], str(answer["item"]))
+        # Lane enqueue refuses a title that is not a Conventional Commits header (pack sd:6059).
+        self.assertRegex(argv[argv.index("--title") + 1], r"^docs: Add 1 source to .*'s ledger$")
         self.assertIn("--deliver", argv)
         self.assertIn(f"sd:{answer['item']}", Path(argv[argv.index("--body-file") + 1]).read_text())
         self.assertTrue(answer["enqueued"])

@@ -299,9 +299,12 @@ def revision(facts: dict) -> str:
 
 
 def _title(facts: dict) -> str:
+    from .queue_screen import conventional
+
     groups = facts["groups"]
     refs = ", ".join(f"sd:{g['item']}" for g in groups)
-    return f"{groups[0]['title']} ({refs})" if len(groups) == 1 else f"{groups[0]['title']} and {len(groups) - 1} more ({refs})"
+    return conventional(f"{groups[0]['title']} ({refs})" if len(groups) == 1
+                        else f"{groups[0]['title']} and {len(groups) - 1} more ({refs})")
 
 
 def _body(facts: dict) -> str:

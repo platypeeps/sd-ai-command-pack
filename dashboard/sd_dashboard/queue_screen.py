@@ -112,6 +112,20 @@ def command(name: str) -> str:
     return str(Path(checkout) / "bin" / name) if checkout else name
 
 
+def conventional(title: str, kind: str = "chore") -> str:
+    """`title` as a Conventional Commits header, which `lane enqueue` requires (pack sd:6059): kept when it is one,
+    else `<kind>: ` before it.
+
+    The rule is the pack's own (`sd_lib.conventional_title`). A pack that does not have it (`ImportError`, or no such
+    name) keeps `title`: an enqueue that refuses it says why.
+    """
+    try:
+        check = pack_module("sd_lib").conventional_title
+    except (ImportError, AttributeError):
+        return title
+    return title if check(title) else f"{kind}: {title}"
+
+
 def _run(argv: list[str], seconds: int) -> dict:
     """A pack command's JSON answer and its exit status, `exit`; a failure to run or parse is `{"ok": False, "error": ...}`
     with no `exit`, since a command stopped past `seconds` may have written first."""

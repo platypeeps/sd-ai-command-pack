@@ -146,6 +146,20 @@ class TrailerBlockTests(GitFixture):
         quoted = f"docs: explain the trailer\n\nWrite `Delivers: {ITEM}` on the merge.\n\nItem: {ITEM}"
         self.assertFalse(sd_lib._closes(quoted, ITEM))
 
+    def test_a_last_paragraph_that_is_not_all_trailers_closes_nothing(self) -> None:
+        """Lane review of pack sd:5999, round 6: git reads a trailer block only when every line is one.
+
+        A fenced example, an HTML comment or a prose example ends the message
+        as its last paragraph, and `git interpret-trailers --parse` returns
+        nothing for it; a real block still closes, continuation lines and all.
+        """
+        for last in (f"```\nDelivers: {ITEM}\n```", f"<!--\nDelivers: {ITEM}\n-->",
+                     f"Write the trailer as\nDelivers: {ITEM}", f"Delivers: {ITEM}\n \nRefs: sd:6"):
+            with self.subTest(last=last):
+                self.assertFalse(sd_lib._closes(f"docs: the trailer\n\nWords.\n\n{last}\n", ITEM))
+        self.assertTrue(sd_lib._closes(merge_message("feat: a slice", f"Delivers: {ITEM}", "Co-Authored-By: a",
+                                                     "  b <b@example.test>"), ITEM))
+
     def test_item_alone_closes_nothing(self) -> None:
         """`Item:` ties a merge to an item; it is not a closure. A slice
         shipped without `--deliver` carries exactly this and stays open."""
