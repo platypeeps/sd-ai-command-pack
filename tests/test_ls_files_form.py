@@ -111,8 +111,9 @@ PROSE_SUFFIX = ".md"
 #: rendered page needs no network. It holds no text to scan, and reading it as
 #: UTF-8 raises rather than returning nothing -- which the walk would report as
 #: a collapsed scan. Excluded by directory and not by extension, so a second
-#: binary asset lands in the same place or not at all.
-ASSET_PREFIX = "bin/fonts/"
+#: binary asset lands in the same place or not at all. The dashboard's fonts
+#: came with it from the system checkout (sd:5987) and are its static files.
+ASSET_PREFIX = ("bin/fonts/", "dashboard/sd_dashboard/v2/static/fonts/")
 
 #: Not code either: transcripts the conduct harness recorded from a live model
 #: run (sd:1149). A command in one is what the model typed, kept verbatim as
@@ -254,7 +255,7 @@ def surface(root: pathlib.Path = REPO_ROOT) -> list[str]:
     return [name for name in listed.split("\0")
             if name
             and not name.endswith(PROSE_SUFFIX)
-            and not name.startswith((ASSET_PREFIX, RECORDED_PREFIX))]
+            and not name.startswith((*ASSET_PREFIX, RECORDED_PREFIX))]
 
 
 def scan(root: pathlib.Path = REPO_ROOT) -> tuple[list[Site], list[str]]:

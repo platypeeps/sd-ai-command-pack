@@ -18,7 +18,10 @@ is shipped shell by definition. The location check is an allow-list, because
 this repository legitimately runs shell on itself -- `make check` drives three
 scripts under `.github/scripts/`, which is also exactly the set the bash 3.2
 gate still covers. Adding a fourth there is ordinary work; adding one anywhere
-else is the change that needs a decision record.
+else is the change that needs a decision record. `dashboard/dashboard.sh` is
+one: the operator moved the workflow dashboard here from the system checkout
+(sd:5987), and its entrypoint runs on the operator's machine, never through the
+installer. The bash 3.2 gate reads every tracked `*.sh`, so it covers it.
 """
 
 # This module reads the whole checkout, so no changed-files fast path may
@@ -36,7 +39,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Where this repository is allowed to keep shell it runs on itself. Prefixes,
 # matched against forward-slash paths as git reports them.
-TOOLING_PREFIXES = (".github/scripts/",)
+# `dashboard/dashboard.sh` is the dashboard's entrypoint (sd:5987).
+TOOLING_PREFIXES = (".github/scripts/", "dashboard/dashboard.sh")
 
 # What the installer copies onto a machine. Anything here reaches a consumer.
 RENDER_ROOT = "skills/"
