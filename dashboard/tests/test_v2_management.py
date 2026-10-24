@@ -1498,7 +1498,7 @@ C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; aw
         self.assertIn('data-key="lane_host"', page)
         self.assertIn('data-set="lane_host"', page)
         self.assertEqual(re.findall(r'<option value="([^"]+)"></option>', page.split('id="lane-hosts"')[1]), ["hub", "build-3"])
-        self.assertEqual(out["R"]["cmd"], f"~/repos/platypeeps/sd-ai-command-pack/bin/sd-db repo lane-host '{path}' 'build-2'")
+        self.assertEqual(out["R"]["cmd"], f"sd-db repo lane-host '{path}' 'build-2'")
         # sd:3284: the queue lives in the hub database, so the move takes the pending entries with it.
         self.assertIn("Pending entries follow", out["R"]["note"])
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
@@ -1535,7 +1535,7 @@ fill('obsidian', false, ''); fill('drive', false, ''); propose('channels', 'on')
         self.assertEqual(len(re.findall(r'<input type="checkbox" data-set="channels" data-ch="\w+" checked>', page)), 3)
         self.assertIn(f'data-chf="drive" value="" placeholder="Briefs/{name}"', page)
         self.assertNotIn("data-ch-clear", page, "no setting, nothing to clear")
-        self.assertEqual(out["R"]["cmd"], f"~/repos/platypeeps/sd-ai-command-pack/bin/sd-db repo channels '{path}' 'obsidian=Briefs/x' 'drive='")
+        self.assertEqual(out["R"]["cmd"], f"sd-db repo channels '{path}' 'obsidian=Briefs/x' 'drive='")
         self.assertEqual(out["R"]["title"], "channels none → obsidian=Briefs/x drive=")
         self.assertIn("sd-research-kit render", out["R"]["note"])
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
@@ -1616,7 +1616,7 @@ propose('mail_aliases', 'acme'); R.same = pending.length; propose('mail_aliases'
         self.assertIn('data-key="mail_aliases"', page)
         self.assertIn('data-set="mail_aliases" value="acme"', page)
         self.assertNotIn("Inbound email", page)
-        self.assertEqual(out["R"]["cmd"], f"~/repos/platypeeps/sd-ai-command-pack/bin/sd-db repo channels '{path}' 'email=acme,kiln'")
+        self.assertEqual(out["R"]["cmd"], f"sd-db repo channels '{path}' 'email=acme,kiln'")
         self.assertEqual(out["R"]["title"], "email aliases acme → acme,kiln")
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
                          [("/api/repos/channels", {"path": path, "value": {"email": {"aliases": ["acme", "kiln"]}}, "before": old}),
@@ -1662,7 +1662,7 @@ C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; aw
 C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; await lastToast().undo(); await flush();""",
                             search=f"?repo={path}", answer="(p, b) => [200, {}]")
         self.assertIn('data-set="github_issues"', out["R"]["page"])
-        self.assertEqual(out["R"]["cmd"], f"~/repos/platypeeps/sd-ai-command-pack/bin/sd-db repo github-issues '{path}' on")
+        self.assertEqual(out["R"]["cmd"], f"sd-db repo github-issues '{path}' on")
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
                          [("/api/repos/github-issues", {"path": path, "value": "on", "before": "off"}),
                           ("/api/repos/github-issues", {"path": path, "value": "off", "before": "on"})])
@@ -1690,7 +1690,7 @@ C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; aw
         keys = re.findall(r'data-key="(\w+)"', page)
         self.assertEqual(keys[keys.index("github_issues"):keys.index("channels") + 1], ["github_issues", "jira_project", "channels"])
         self.assertEqual(out["R"]["same"], 0)
-        self.assertEqual(out["R"]["cmd"], f"~/repos/platypeeps/sd-ai-command-pack/bin/sd-db repo jira-project '{path}' 'EXAMPLE'")
+        self.assertEqual(out["R"]["cmd"], f"sd-db repo jira-project '{path}' 'EXAMPLE'")
         self.assertIn("Jira project EXAMPLE", out["R"]["note"])
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
                          [("/api/repos/jira-project", {"path": path, "value": "EXAMPLE", "before": "off"}),
@@ -1709,7 +1709,7 @@ C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; aw
 C.run(cmd('sddb.run'), pending[0]); await flush(); R.toast = lastToast().msg; await lastToast().undo(); await flush();""",
                             search=f"?repo={path}", answer="(p, b) => [200, {}]")
         self.assertIn('data-set="dependabot"', out["R"]["page"])
-        self.assertEqual(out["R"]["cmd"], f"~/repos/platypeeps/sd-ai-command-pack/bin/sd-db repo dependabot '{path}' yes")
+        self.assertEqual(out["R"]["cmd"], f"sd-db repo dependabot '{path}' yes")
         self.assertEqual([(p, b) for p, b, _ in out["posts"]],
                          [("/api/repos/dependabot", {"path": path, "value": "yes", "before": "no"}),
                           ("/api/repos/dependabot", {"path": path, "value": "no", "before": "yes"})])
@@ -1887,7 +1887,7 @@ R.parsed = R.texts.map(t => { try { return JSON.parse(t); } catch (e) { return '
         """sd:5159: the policy lives on the repo row; the page drafts `sd-db repo declare`, the pack's one writer."""
         out = self.proposal(self.LAST, "propose('severity_floor', 'low'); R.p = [pending[0].type, cmd('declaration.write').cli(pending[0])];")
         path = self.ids["checkout"]
-        self.assertEqual(out["R"]["p"], ["declaration change", "~/repos/platypeeps/sd-ai-command-pack/bin/sd-db repo declare "
+        self.assertEqual(out["R"]["p"], ["declaration change", "sd-db repo declare "
                                          f"'{path}' review '{{\"copilot_review\":{{\"automatic_deep\":false}},\"severity_floor\":\"low\"}}'"])
 
     def test_write_posts_the_declaration_with_the_reading_it_changes_and_undo_writes_the_reading_back(self):

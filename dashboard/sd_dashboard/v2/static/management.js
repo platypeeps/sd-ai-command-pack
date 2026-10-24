@@ -12,7 +12,8 @@ window.PAGE_VIEWS = [{ id: 'repos', label: 'Repos' }, { id: 'lane', label: 'Ship
 const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 const shq = s => `'${String(s ?? '').replace(/'/g, "'\\''")}'`; // shell-safe: single quotes, so $(), backticks and \ stay literal
 const GLYPH = { ok: '●', caution: '▲', warning: '■', queued: '◌', unknown: '▨' };
-const SDDB = '~/repos/platypeeps/sd-ai-command-pack/bin/sd-db';
+// The PATH name, as sessions call pack commands (pack sd:1609, sd:5987).
+const SDDB = 'sd-db';
 
 // ---------- Data (build): /api/management, read through shell.read on load and after each write ----------
 let DOC = null, READ = '';
