@@ -268,21 +268,58 @@ def referenced_ids(body: str) -> set[int]:
 _REVIEW_FIX = re.compile(r"^Lane review fix, [A-Za-z0-9_.-]+ sd:([0-9]+)\b")
 
 
-def cited_ids(body: str, commits) -> tuple[int, ...]:
-    """The ids a merge delivers by citation (operator ruling 2026-10-24, sd:5999), in order, once.
+#: A subject that does not deliver what it names: a revert, partial work or a dependency (sd:5999 lane review).
+_NOT_DELIVERY = re.compile(r"^revert|\b(?:part of\b|partial|needs\b|after\b)", re.IGNORECASE)
+
+
+def cited_sources(body: str, commits) -> dict[int, str]:
+    """The ids a merge delivers by citation (operator ruling 2026-10-24, sd:5999), each with what cites it first.
 
     Each `sd:<n>` the subject of a branch commit names, and each `Lane
     review fix, <repo> sd:<n>` line of `body` or of a commit message.
     `commits` is each `(sha, message)` the branch adds. Only those forms:
     prose such as "keeps the sd:<n> guard" cites nothing, and a line a
-    fenced code block or an HTML comment holds is an example.
+    fenced code block or an HTML comment holds is an example. A subject
+    that starts "revert", or says "part of", "partial", "needs" or "after",
+    cites nothing: it names work it does not deliver whole.
     """
-    found = [number for _, message in commits for number in title_ids(message.split("\n", 1)[0])]
-    for text in (body, *(message for _, message in commits)):
+    found: dict[int, str] = {}
+    for sha, message in commits:
+        subject = message.split("\n", 1)[0]
+        if not _NOT_DELIVERY.search(subject):
+            for number in title_ids(subject):
+                found.setdefault(number, f"subject of commit {sha[:12]}")
+    for text, where in ((body, "the body"), *((message, f"commit {sha[:12]}") for sha, message in commits)):
         quoted = quoted_lines(text)
-        found += [int(match[1]) for number, line in enumerate(text.split("\n"), start=1)
-                  if number not in quoted and (match := _REVIEW_FIX.match(line.rstrip("\r")))]
-    return tuple(dict.fromkeys(found))
+        for number, line in enumerate(text.split("\n"), start=1):
+            if number not in quoted and (match := _REVIEW_FIX.match(line.rstrip("\r"))):
+                found.setdefault(int(match[1]), f"review fix line in {where}")
+    return found
+
+
+def cited_ids(body: str, commits) -> tuple[int, ...]:
+    """The ids `cited_sources` finds, in order."""
+    return tuple(cited_sources(body, commits))
+
+
+#: A trailer line, as a body's last paragraph holds them.
+_TRAILER = re.compile(r"^[A-Za-z][A-Za-z0-9-]*:[ \t]")
+
+
+def with_cited(body: str, lines: list[str]) -> str:
+    """`body` with a `## Closed by citation` section of `lines`, before a closing trailer paragraph (sd:5999).
+
+    A reader of the pull request sees each close by citation, so a wrong
+    one is one reopen. The trailers stay the body's last paragraph.
+    """
+    if not lines:
+        return body
+    section = "## Closed by citation\n\n" + "\n".join(lines) + "\n"
+    text = body.rstrip("\n")
+    head, _, last = text.rpartition("\n\n")
+    if last and all(_TRAILER.match(line) for line in last.split("\n") if line.strip()):
+        return f"{head}\n\n{section}\n{last}\n" if head else f"{section}\n{last}\n"
+    return f"{text}\n\n{section}"
 
 
 def open_cited(connection, item: int, repo: str, cited, named, body: str) -> tuple[int, ...]:

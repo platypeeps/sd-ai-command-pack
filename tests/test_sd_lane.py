@@ -2336,8 +2336,36 @@ class CitedCloses(SharedQueue):
         self.assertEqual([prepare[i + 1] for i, part in enumerate(prepare) if part == "--item"],
                          [str(self.own), str(a), str(b), str(e)])
 
+    def test_each_cited_close_is_listed_in_the_body_and_noted_on_its_item(self) -> None:
+        """Lane review of sd:5999, operator ruling: a reader sees every close by citation, so a wrong one is one reopen."""
+        a, b, c, *_ = self.open
+        entry = self.enqueue(f"## Summary\n\nWords.\n\nLane review fix, pack sd:{b}: x.\n\nRefs: sd:{c}\n",
+                             f"fix(lane): the slice (pack sd:{a})", f"fix: needs sd:{c} first")
+        sha = self.entries()[-1]["expected_head"]
+        first = git(self.repo, "rev-parse", f"{sha}~1")
+        self.assertEqual(entry["closes"], [a, b])
+        self.assertEqual(entry["cited"], [{"item": a, "source": f"subject of commit {first[:12]}"},
+                                          {"item": b, "source": "review fix line in the body"}])
+        self.assertEqual(entry["body"], f"## Summary\n\nWords.\n\nLane review fix, pack sd:{b}: x.\n\n"
+                                        f"## Closed by citation\n\n- pack sd:{a}: subject of commit {first[:12]}\n"
+                                        f"- pack sd:{b}: review fix line in the body\n\nRefs: sd:{c}\n")
+        bodies: list[str] = []
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            if argv[2] == "prepare":
+                bodies.append(pathlib.Path(argv[argv.index("--body-file") + 1]).read_text(encoding="utf-8"))
+            return self.ship(argv, log)
+        with mock.patch.object(sd_lane, "default_runner_merge", lambda root: "auto"):
+            sd_lane.run_lane(self.repo, self.environ, ship)
+        self.assertEqual(bodies, [entry["body"]])
+        cited = {item: body for item, body, _ in self.notes if item in (a, b)}
+        self.assertEqual(sorted(cited), [a, b])
+        self.assertIn(f"Closed by citation at merge merged-{self.own}: the subject of commit {first[:12]} cites it",
+                      cited[a])
+        self.assertIn(f"sd task status {b} in_progress", cited[b])
+
     def test_an_associate_only_claim_closes_nothing_it_cites(self) -> None:
-        entry = self.enqueue("Words.\n", f"fix: part of it (sd:{self.open[0]})", claim="associate-only")
+        entry = self.enqueue("Words.\n", f"fix: the slice (sd:{self.open[0]})", claim="associate-only")
         self.assertEqual(entry["closes"], [])
 
     def test_a_failed_hub_read_queues_and_pushes_nothing(self) -> None:

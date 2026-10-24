@@ -232,6 +232,19 @@ class CitedIdTests(unittest.TestCase):
         body = "Lane review fix, system sd:6: y\nSee Lane review fix, pack sd:7.\n~~~\nLane review fix, pack sd:8\n~~~\n"
         self.assertEqual(sd_ship_body.cited_ids(body, commits), (2, 6, 4))
 
+    def test_a_subject_of_partial_work_a_dependency_or_a_revert_cites_nothing(self) -> None:
+        """Lane review of sd:5999, operator ruling: such a subject does not deliver the item it names."""
+        for subject in ("revert: fix one (sd:2)", 'Revert "fix: one (sd:2)"', "feat: part of sd:2",
+                        "fix: Part Of sd:2", "fix: partial sd:2", "fix: partially lands sd:2",
+                        "chore: needs sd:2 first", "fix: NEEDS sd:2", "fix: after sd:2 lands"):
+            with self.subTest(subject=subject):
+                self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, f"{subject}\n\nBody.\n")]), ())
+        for subject in ("fix: one (pack sd:2)", "fix: the aftermath (sd:2)", "feat: departial (sd:2)"):
+            with self.subTest(subject=subject):
+                self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, subject)]), (2,))
+        self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, "revert: x\n\nLane review fix, pack sd:3: y")]),
+                         (3,))
+
 
 class ConventionalTitleTests(unittest.TestCase):
     """sd:6059: the title is the squash subject, so it is a Conventional Commits header."""

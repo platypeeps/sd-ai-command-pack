@@ -696,6 +696,7 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     A delivering entry's `closes` also takes each open item of this
     repository its branch commits or body cite (`cited_closes`, sd:5999),
     read before the push; a read that fails queues and pushes nothing.
+    Each one is listed in `cited` and in the body's `## Closed by citation`.
     """
     worktree = worktree.resolve()
     sd_lib.refuse_unmanaged(worktree, LaneError)  # its prepare would refuse; do not queue it
@@ -734,8 +735,13 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
         check_docs(worktree, body, base)
         if claim == "deliver":  # an associate-only claim closes nothing (sd:3365)
             commits = branch_commits(worktree, base, head)
-            cited = on_hub(queue, lambda connection: cited_closes(connection, item, body, commits, closes))
-            entry["closes"] = [*closes, *cited]
+            cited, repo = on_hub(queue, lambda connection: cited_closes(connection, item, body, commits, closes))
+            entry["closes"] = [*closes, *(row["item"] for row in cited)]
+            if cited:  # listed where a reader sees it (sd:5999 lane review)
+                import sd_ship_body  # noqa: PLC0415
+                entry["cited"] = cited
+                entry["body"] = sd_ship_body.with_cited(
+                    body, [f"- {repo} sd:{row['item']}: {row['source']}" for row in cited])
     require_published(worktree, branch, head, f"{head} names no commit in {worktree}", refuse_before_push,
                       lambda tip: tip_past(worktree, branch, tip, head))
     return add_entry(queue, entry)
@@ -771,20 +777,22 @@ def branch_commits(worktree: pathlib.Path, base: str, head: str) -> list[tuple[s
 
 
 def cited_closes(connection: Any, item: int, body: str, commits: list[tuple[str, str]],
-                 closes: tuple[int, ...]) -> list[int]:
-    """The open items of `item`'s repository its commits or body cite, beyond `closes` (sd:5999).
+                 closes: tuple[int, ...]) -> tuple[list[dict[str, Any]], str]:
+    """The open items of `item`'s repository its commits or body cite, beyond `closes`, and that repository's name (sd:5999).
 
-    A branch commit's subject, or a `Lane review fix, <repo> sd:N` line
-    (`sd_ship_body.cited_ids`); the merge closes each as it closes a later
-    `--item`, with a note naming the merge commit. An item with no
-    repository row adds nothing: `check_item` refuses it first.
+    Each `{"item", "source"}`: a branch commit's subject, or a `Lane review
+    fix, <repo> sd:N` line (`sd_ship_body.cited_sources`). The merge closes
+    each as it closes a later `--item`, and the lane notes each
+    (`note_cited`). An item with no repository row adds nothing:
+    `check_item` refuses it first.
     """
     import sd_ship_body  # noqa: PLC0415
     row = connection.execute("SELECT repo FROM item WHERE id = ?", (item,)).fetchone()
     if row is None or not row["repo"]:
-        return []
-    return list(sd_ship_body.open_cited(connection, item, row["repo"], sd_ship_body.cited_ids(body, commits),
-                                        closes, body))
+        return [], ""
+    sources = sd_ship_body.cited_sources(body, commits)
+    kept = sd_ship_body.open_cited(connection, item, row["repo"], tuple(sources), closes, body)
+    return [{"item": number, "source": sources[number]} for number in kept], pathlib.Path(row["repo"]).name
 
 
 def tip_past(worktree: pathlib.Path, branch: str, tip: str, head: str) -> None:
@@ -1223,7 +1231,8 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
               f"sd:{item}'s head {head} is not on `origin` or in this checkout; run the retry on "
               f"{last.get('enqueued_on')}, or enqueue again from a worktree that has it",
               None, lambda tip: tip_past(root, last["branch"], tip, head))
-    keep = ("repository", "item", "branch", "title", "body", "acceptance", "claim", "closes", "enqueued_on", "worktree")
+    keep = ("repository", "item", "branch", "title", "body", "acceptance", "claim", "closes", "cited", "enqueued_on",
+            "worktree")
     entry = {**{key: last.get(key) for key in keep}, "id": entry_id(), "expected_head": head,
              "authority": "manual" if manual or last.get("authority") == "manual" else None,
              "status": "pending", "enqueued_at": stamp_now()}
@@ -1916,6 +1925,7 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
     gone = not worktree.is_dir()
     main = sd_lib.main_worktree_root(root if gone else worktree).resolve()
     head, merged = outcome.get("head"), str(outcome.get("merge_commit") or "")
+    note_cited(entry, merged, main, note)
     pruned = prune_after_merge(main, [str(head or entry.get("expected_head") or "")])  # the head that merged
     if gone:  # the merge removed the worktree with its branches; nothing is left to clean
         branch, tip = "", None
@@ -1936,6 +1946,21 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
     if remove:
         body += f" Remove{where if entry.get('lane_worktree') else ''}: {remove}"  # last and bare, so it copies whole
     return land_note(fields, body, entry, environ, note, own_lock, main)
+
+
+def note_cited(entry: dict[str, Any], merged: str, main: pathlib.Path, note: Note) -> None:
+    """Note each item the merge closed by citation (`cited_closes`, sd:5999), so a wrong close is one reopen.
+
+    A note that fails is skipped: the merge stands, and the body lists the item too.
+    """
+    for row in entry.get("cited") or ():
+        number = row.get("item")
+        try:
+            note(number, f"Closed by citation at merge {merged[:12]}: the {row.get('source')} cites it (sd:5999), "
+                         f"not an --item. If the work is not whole, reopen it: sd task status {number} in_progress.",
+                 main)
+        except Exception:  # noqa: BLE001 - the merge stands; the body names the item
+            continue
 
 
 def prune_after_merge(main: pathlib.Path, heads: list[str]) -> str:
