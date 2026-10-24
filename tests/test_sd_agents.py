@@ -287,6 +287,21 @@ class SliceBuilderTestPause(unittest.TestCase):
         self.assertNotIn("exits 69", body)
 
 
+class SliceBuilderResultNote(unittest.TestCase):
+    """pack sd:5963. The retired runner wrote each run's result to its item;
+    a builder's report reaches only the lead's session, so the builder notes
+    each item with its head, fail-first line and result lines before it reports."""
+
+    def test_the_slice_builder_notes_each_item_before_it_reports(self) -> None:
+        _, body = (AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8").split("\n---\n", 1)
+        step = body.split("\n8. ", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("sd task note N '<head>", step)
+        for needle in ("fail-first line", "result lines", "one per item"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, step)
+        self.assertLess(step.index("sd task note N"), step.index("Report, then freeze"))
+
+
 class RenderTests(unittest.TestCase):
     def setUp(self) -> None:
         scratch = tempfile.TemporaryDirectory()

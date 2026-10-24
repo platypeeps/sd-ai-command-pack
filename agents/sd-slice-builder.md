@@ -55,7 +55,9 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
    No line starts with `Item:` or `Delivers:`; name the primary item in the report instead.
    A `Work:` line is allowed: `sd-ship prepare` strips one that matches what it writes.
    Check it with `sd-docs-lint --pr-body <file>`.
-8. Report, then freeze: no further commits. The lead reviews and tests the head and enqueues it; the lane gates, prepares and pushes.
+8. Note each item before you report, one per item: `sd task note N '<head> <fail-first line>; <result lines>'`.
+   Keep it short: the head commit, the fail-first line and the result lines; the evidence is in the pull-request body.
+   Report, then freeze: no further commits. The lead reviews and tests the head and enqueues it; the lane gates, prepares and pushes.
    When the lead sends review blockers, fix each fail-first as a new commit, rerun step 5's tests, and report again.
 
 ## Classes reviews keep finding

@@ -29,6 +29,8 @@ database and runs it under one runner lock per repository:
            before each item: head check, `prepare --catch-up` (once more
            with `--retry-review` after an incomplete review, sd:3037),
            then `merge`; a failed entry is marked and the runner goes on.
+           A failed or skipped entry notes each item it carries with its
+           step, reason and head (`note_ended`, sd:5963).
            While one entry ships, the next one's gate runs on its predicted
            landing (sd:2586, below). After a merge it deletes the remote
            branch, notes the item with the worktree's removal command and
@@ -268,6 +270,8 @@ NOT_PUT_BACK = frozenset({"gate_failed"})
 #: The ends short of a merge: `retry` queues such an entry again, with its texts (sd:3254), and a cancelled
 #: one at the head the caller read (sd:3389).
 BLOCKED = ("failed", "skipped", "prepared")
+#: The ends whose entry notes each item it carries (`note_ended`, sd:5963), as the retired runner noted its runs.
+NOTED = ("failed", "skipped")
 
 
 class LaneError(RuntimeError):
@@ -906,7 +910,9 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
         row = pending_entry(entries, item)
         row.update(status="cancelled", finished_at=stamp_now(), reason=f"cancelled by the operator on {this_host()}")
         return row
-    return update(queue, mark, read_first)
+    row = update(queue, mark, read_first)
+    noted = note_ended(row, root)  # a release at merge fails the entry
+    return {**row, "note": noted} if noted else row
 
 
 def stale_prepared(entries: list[dict[str, Any]], item: int) -> list[dict[str, Any]]:
@@ -1234,6 +1240,7 @@ def import_locked(root: pathlib.Path, queue: Queue, path: pathlib.Path) -> dict[
         present = {row["id"]: row for row in read_queue(queue)}
         active = {row.get("item") for row in present.values() if row.get("status") in ("pending", "running")}
         rows = [imported_row(queue, path, entry, host) for entry in old if isinstance(entry, dict)]
+        landed: list[str] = []
         for row in rows:
             if row["status"] != "pending" or row["id"] in present or row.get("item") in active:
                 continue
@@ -1253,6 +1260,7 @@ def import_locked(root: pathlib.Path, queue: Queue, path: pathlib.Path) -> dict[
             queued = {entry.get("item") for entry in entries if entry.get("status") in ("pending", "running")}
             top = max((int(entry.get("position") or 0) for entry in entries), default=0)
             written = []
+            landed.clear()
             for row in rows:
                 if row["id"] in ids:
                     continue
@@ -1263,6 +1271,7 @@ def import_locked(root: pathlib.Path, queue: Queue, path: pathlib.Path) -> dict[
                 top += 1
                 entries.append({**row, "position": top})
                 written.append(row.get("item"))
+                landed.append(row["id"])
             return written
         written = update(queue, write)
         kept = path.with_name(f"queue.json.imported-{time.strftime('%Y%m%dT%H%M%SZ', time.gmtime())}")
@@ -1272,7 +1281,17 @@ def import_locked(root: pathlib.Path, queue: Queue, path: pathlib.Path) -> dict[
             kept = kept.with_name(f"{kept.name.split('~')[0]}~{count}")
         path.rename(kept)
     drop_imported_bodies(queue)
-    return {"imported": written, "file": str(path)}
+    noted = [note_ended(row, root) for row in ended_on_import(rows, old, host, path, landed)]
+    return {"imported": written, "file": str(path), **({"noted": noted} if noted else {})}
+
+
+def ended_on_import(rows: list[dict[str, Any]], old: list[Any], host: str, path: pathlib.Path,
+                    landed: list[str]) -> list[dict[str, Any]]:
+    """The `landed` rows the import itself ended failed or skipped (sd:5963); the file's own ends were an older
+    runner's, so they are not noted again."""
+    before = {import_id(host, path, entry): entry.get("status") for entry in old if isinstance(entry, dict)}
+    return [row for row in rows
+            if row["id"] in landed and row["status"] in NOTED and row["status"] != before[row["id"]]]
 
 
 def drop_imported_bodies(queue: Queue) -> None:
@@ -2013,6 +2032,30 @@ def settle(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, st
     return fields
 
 
+def note_ended(row: dict[str, Any], root: pathlib.Path, note: Note | None = None) -> dict[str, str]:
+    """Note each item `row` carries, its own and its `closes`, once it ends failed or skipped (sd:5963).
+
+    The note names the step, the reason's first line and the head, as a
+    `comment`: `sd task note` writes no `exec` note. No item status changes;
+    the entry holds that state. A write that fails is kept in the answer,
+    `{"sd:N": "written" or "failed: ..."}`, and changes no outcome. `note`
+    defaults to `default_note`, read at the call, so a suite can replace it.
+    """
+    if row.get("status") not in NOTED:
+        return {}
+    reason = next((line.strip() for line in str(row.get("reason") or "").splitlines() if line.strip()),
+                  str(row.get("code") or "no reason recorded"))
+    head = str(row.get("head") or row.get("expected_head") or "an unrecorded head")[:12]
+    body = f"Lane {row['status']} in {row.get('step') or 'the lane'} at {head}: {reason[:400]}"
+    written: dict[str, str] = {}
+    for item in dict.fromkeys([row.get("item"), *(row.get("closes") or ())]):
+        try:
+            written[f"sd:{item}"] = (note or default_note)(int(item), body, sd_lib.main_worktree_root(root))
+        except Exception as error:  # noqa: BLE001 -- the entry's end stands; the answer says the note did not land
+            written[f"sd:{item}"] = f"failed: {type(error).__name__}: {error}"[:400]
+    return written
+
+
 def lane_host_reason(root: pathlib.Path, environ: dict[str, str] | None = None) -> str | None:
     """Why this machine does not run `root`'s lane, or None on its lane host (sd:3003).
 
@@ -2751,16 +2794,22 @@ def settle_checkout(root: pathlib.Path, queue: Queue) -> dict[str, Any]:
     removal, or a claim the hub never took (sd:4184).
     """
     imported = import_file_queue(root, queue, runner_locked=True)
-    stops, running = hub_stops(queue), set[str]()
+    stops, running, ended = hub_stops(queue), set[str](), list[dict[str, Any]]()
 
     def reclaim_stopped(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        held = {row["id"] for row in entries if row.get("status") == "running"}
         settled = reclaim_dead(entries, stops)
         running.clear()
         running.update(str((row.get("holder") or {}).get("token")) for row in entries if row.get("status") == "running")
+        # A recorded outcome noted before its finish write carries `note`; an older version's has none (sd:5963).
+        ended[:] = [dict(row) for row in entries if row["id"] in held and row.get("status") in NOTED
+                    and "note" not in row]
         return settled
     reclaimed = runner_write(queue, reclaim_stopped)
     drop_hub_stops(queue, set(stops) - running)
-    return {**({"import": imported} if imported else {}), **({"reclaimed": reclaimed} if reclaimed else {})}
+    noted = [note_ended(row, root) for row in ended]
+    return {**({"import": imported} if imported else {}), **({"reclaimed": reclaimed} if reclaimed else {}),
+            **({"noted": noted} if noted else {})}
 
 
 def clock() -> float:
@@ -2962,6 +3011,9 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
         outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
     except Exception as error:  # a broken entry is marked; the next one still runs
         outcome = {"status": "failed", "reason": f"{type(error).__name__}: {error}"[:600]}
+    noted = note_ended({**entry, **outcome}, root, note)  # before the finish write, so a hub stop keeps it
+    if noted:
+        outcome["note"] = noted
     try:
         finish_entry(queue, entry, token, outcome)
     except Stop as error:
