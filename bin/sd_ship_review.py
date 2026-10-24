@@ -250,8 +250,9 @@ def lead_review(connection: Any, root: pathlib.Path, repository: str, branch: st
     """sd:5988. The clean `sd-review --scope branch` pass recorded for `branch` that covers `head`, and why.
 
     It covers `head` when it reviewed `head`, or when `carry_forward` carries
-    it across clean merges of `origin/<base>` alone. A record of another
-    subject, of other review tools, or one that selected an automatic Copilot
+    it across clean merges of `origin/<base>` alone, and only when it diffed
+    from the reviewed head's fork from `origin/<base>`, as prepare does. A
+    record of another subject, of other review tools, or one that selected an automatic Copilot
     review (which only a lane pass requests) covers nothing. A read or a git
     that cannot answer is unknown, never a cover: the lane reviews in full.
     """
@@ -272,6 +273,13 @@ def lead_review(connection: Any, root: pathlib.Path, repository: str, branch: st
         return None, "the review tools or policy changed since, or do not read"
     if record.get("copilot_automatic") is not False:
         return None, "it selects an automatic Copilot review"
+    # Prepare diffs from the fork from origin/<base>; a pass from a local-only
+    # base (sd-review falls back to local main) left the commits between unread.
+    fork = sd_lib.git_output(["merge-base", reviewed, f"refs/remotes/origin/{base}"], root)
+    if fork is None:
+        return None, f"git could not compare {reviewed[:12]} with origin/{base}"
+    if record.get("base") != fork:
+        return None, f"it reviewed from {str(record.get('base'))[:12]}, not the fork from origin/{base}"
     if reviewed == head:
         return record, f"the clean pass of {head[:12]} covers it"
     try:

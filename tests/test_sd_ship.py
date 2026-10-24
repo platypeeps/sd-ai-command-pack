@@ -4680,6 +4680,19 @@ roles:
     def test_a_lead_record_that_is_not_clean_is_not_reused(self):
         self.assert_other_subject("it names another subject", status="advisory")
 
+    def test_a_lead_review_from_a_local_only_base_is_not_reused(self):
+        # A missing origin/HEAD makes sd-review diff from local main, which may
+        # hold unpublished commits; prepare diffs from origin/main's fork.
+        calls = self.tiered_branch({"src.py": "value = 2\n"})
+        local_main = _git(self.root, "rev-parse", "HEAD")
+        (self.root / "more.py").write_text("more = 1\n")
+        _git(self.root, "add", "more.py")
+        _git(self.root, "commit", "-qm", "more\n\nAuthored-with: human")
+        self.assertEqual(self.lead_review()["status"], "clean")
+        calls.unlink()
+        self.rewrite_lead_record(base=local_main)
+        self.assert_full_review(calls, f"it reviewed from {local_main[:12]}, not the fork from origin/main")
+
     def test_a_lead_record_of_a_commit_git_cannot_find_is_not_reused(self):
         self.assert_other_subject("git could not compare", head="f" * 40)
 
