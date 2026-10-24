@@ -16,6 +16,7 @@ import os
 import pathlib
 import re
 import shlex
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -1192,24 +1193,18 @@ def open_ledger(env: Mapping[str, str], database: pathlib.Path | None, registry:
 
 
 def capped_bills(registry: sd_registry.Registry, ledger: Ledger, *, read_only: bool = False) -> dict[str, str]:
-    """Report capped exposure. Read-only callers never sweep orphan reservations."""
+    """Report capped exposure. Read-only callers never sweep orphan reservations.
+    A ledger that does not open or answer, as one locked past its busy timeout (pack sd:5955), refuses every capped bill."""
     try:
-        connection = ledger.connection(write=not read_only)
-    except Refusal as error:
-        return {name: str(error) for name in sorted(ledger.capped)}
-    rows = ledger.library.ledger
-    with contextlib.closing(connection):
-        if not read_only:
-            rows.release_orphans(connection)
-        month = ledger.library.writes.now()[:7]
-        lines = {}
-        for name, bill in registry.bills.items():
-            if bill.cap_usd_month is None:
-                continue
-            spent = rows.exposure(connection, bill=name, month=month)
-            if spent >= bill.cap_usd_month:
-                lines[name] = f"${spent:.2f} of its ${bill.cap_usd_month:.2f} cap for {month} is spent or held"
-    return lines
+        with contextlib.closing(ledger.connection(write=not read_only)) as connection:
+            if not read_only:
+                ledger.library.ledger.release_orphans(connection)
+            month = ledger.library.writes.now()[:7]
+            spent = {name: (ledger.library.ledger.exposure(connection, bill=name, month=month), bill.cap_usd_month)
+                     for name, bill in registry.bills.items() if bill.cap_usd_month is not None}
+    except (Refusal, sqlite3.Error) as error:
+        return {name: str(error) if isinstance(error, Refusal) else f"the sd database did not answer: {error}" for name in sorted(ledger.capped)}
+    return {name: f"${used:.2f} of its ${cap:.2f} cap for {month} is spent or held" for name, (used, cap) in spent.items() if used >= cap}
 
 
 def _wire(client: sd_registry.Client, provider: sd_registry.Provider, prompt: str, environ: Mapping[str, str]) -> Any:
@@ -1246,6 +1241,8 @@ def charged_call(
             )
         except (calls.CallRefused, ledger.library.LedgerRefused, sd_registry.RegistryError) as error:
             return _outcome(provider.name, REFUSED, str(error))
+        except sqlite3.Error as error:  # pack sd:5955: a locked ledger is a fault, never a traceback
+            return _outcome(provider.name, REFUSED, f"the sd database did not answer: {error}")
     receipt = {"call_id": result.call_id, "outcome": result.outcome, "bound_usd": result.bound,
                "usd": result.usd, "reason": result.reason}
     if result.http_status is None:
