@@ -313,7 +313,7 @@ def kept_commits(commits, parents=None) -> list:
 def cited_sources(body: str, commits, parents=None) -> dict[int, str]:
     """The ids a merge delivers by citation (operator ruling 2026-10-24, sd:5999), each with what cites it first.
 
-    Each `Closes: sd:<n>` line in the trailer block, the last paragraph,
+    Each `Closes: sd:<n>` line in the trailer block (`sd_lib.trailer_block`)
     of a branch commit, and each `Lane review fix, <repo> sd:<n>` line of
     `body` or of a commit message. `commits` is each `(sha, message)` the
     branch adds. Only those forms (lane review, round 5 ruling): a subject
@@ -325,9 +325,11 @@ def cited_sources(body: str, commits, parents=None) -> dict[int, str]:
     commits = kept_commits(commits, parents)
     found: dict[int, str] = {}
     for sha, message in commits:
-        paragraphs = message.replace("\r\n", "\n").rstrip().split("\n\n")
-        for line in paragraphs[-1].splitlines() if len(paragraphs) > 1 else ():
-            if match := _CLOSES.match(line):
+        text = message.replace("\r\n", "\n").rstrip()
+        block = sd_lib.trailer_block(text).split("\n") if "\n\n" in text else []  # a subject closes nothing
+        quoted = quoted_lines(text)  # a block an open fence or comment holds is an example
+        for number, line in enumerate(block, start=text.count("\n") + 2 - len(block)):
+            if number not in quoted and (match := _CLOSES.match(line)):
                 found.setdefault(int(match[1]), f"Closes trailer of commit {sha[:12]}")
     for text, where in ((body, "the body"), *((message, f"commit {sha[:12]}") for sha, message in commits)):
         quoted = quoted_lines(text)

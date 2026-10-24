@@ -241,6 +241,15 @@ class CitedIdTests(unittest.TestCase):
         self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, "fix: the rest\n\nWords.\n\nCloses: sd:42\n")]),
                          (42,))
 
+    def test_a_quoted_or_prose_closes_line_cites_nothing(self) -> None:
+        """Lane review of sd:5999, round 6: only a block git reads as trailers closes, as `sd_lib.trailer_block`."""
+        for last in ("```\nCloses: sd:42\n```", "<!--\nCloses: sd:42\n-->", "Write the trailer as\nCloses: sd:42",
+                     "~~~\n\nCloses: sd:42"):
+            with self.subTest(last=last):
+                self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, f"fix: x\n\nWords.\n\n{last}\n")]), ())
+        real = "fix: x\n\nWords.\n\nCloses: sd:42\nCo-Authored-By: a\n  b <b@example.test>\nRefs: sd:7\n"
+        self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, real)]), (42,))
+
     def test_a_commit_the_branch_reverts_cites_nothing(self) -> None:
         """Lane review of sd:5999, round 2: the revert undoes the work, so its commit closes nothing."""
         done, undone, again = "a" * 40, "b" * 40, "c" * 40
