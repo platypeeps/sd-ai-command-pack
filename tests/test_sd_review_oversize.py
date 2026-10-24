@@ -461,3 +461,72 @@ class BinaryMaterialTests(ReviewFixture):
         self.assertEqual(result["input_manifest"]["omitted_paths"], ["shot.png"])
         self.assertEqual(result["input_manifest"]["partial_providers"], [])
         self.assertEqual((result["status"], result["completed_reviews"]), ("clean", 1))
+
+
+class DeletedMaterialTests(ReviewFixture):
+    """sd:6088: a deleted file shows as its header and name, never its text."""
+
+    git = BinaryMaterialTests.git
+
+    def deleting_branch(self):
+        root = self.make_repo()
+        (root / "big").mkdir()
+        (root / "big" / "notes.txt").write_text("".join(f"row {index:07d}\n" for index in range(300_000)))
+        (root / "big" / "blob.bin").write_bytes(b"\x00\x01" * 400_000)
+        (root / "keep.py").write_text("value = 1\n")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "big")
+        base = self.git(root, "rev-parse", "HEAD").strip()
+        self.git(root, "checkout", "--quiet", "-b", "prune")
+        self.git(root, "rm", "--quiet", "-r", "big")
+        (root / "keep.py").write_text("value = 2\n")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "prune")
+        return root, base
+
+    def test_branch_deleting_large_files_fits_the_review_limit(self):
+        root, base = self.deleting_branch()
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        manifest = sd_review.sd_review_material.input_manifest(inventory, "prompt", {"fixture": "overhead"},
+                                                               sd_review.MAX_OUTPUT_BYTES)
+        self.assertEqual(manifest["status"], "within_limit", manifest["measured_bytes"])
+        self.assertEqual([row["path"] for row in inventory], ["big/blob.bin", "big/notes.txt", "keep.py"])
+        self.assertIn("diff --git a/big/notes.txt b/big/notes.txt", material)
+        self.assertIn("deleted file mode", material)
+        self.assertNotIn("row 0000001", material)
+        self.assertIn("+value = 2", material)
+        self.assertEqual(sum(row["bytes"] for row in inventory), len(material.encode()))
+
+    def test_deleted_paths_are_summarized_so_material_readers_report_partial(self):
+        root, base = self.deleting_branch()
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        _material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        manifest = sd_review.sd_review_material.input_manifest(inventory, "prompt", {"fixture": "overhead"},
+                                                               sd_review.MAX_OUTPUT_BYTES)
+        self.assertEqual(manifest["omitted_paths"], ["big/blob.bin", "big/notes.txt"])
+        self.assertEqual(manifest["partial_providers"], ["fixture"])
+        native = sd_review.sd_review_material.input_manifest(inventory, "prompt", {"codex": None},
+                                                             sd_review.MAX_OUTPUT_BYTES)
+        self.assertEqual(native["partial_providers"], [])
+        self.assertEqual(native["status"], "within_limit")
+
+    def test_deletion_within_the_limit_is_sent_whole_and_not_omitted(self):
+        root = self.make_repo()
+        (root / "old.py").write_text("gone = 1\n")
+        self.git(root, "add", "-A")
+        self.git(root, "commit", "--quiet", "-m", "old")
+        base = self.git(root, "rev-parse", "HEAD").strip()
+        self.git(root, "rm", "--quiet", "old.py")
+        self.git(root, "commit", "--quiet", "-m", "drop")
+        subject = sd_review.resolve_subject(root, "branch", base=base)
+        material, inventory = sd_review.sd_review_material.collect_review_material(root, subject)
+        self.assertIn("-gone = 1", material)
+        manifest = sd_review.sd_review_material.input_manifest(inventory, "prompt", {"fixture": "overhead"},
+                                                               sd_review.MAX_OUTPUT_BYTES)
+        self.assertEqual(manifest["omitted_paths"], [])
+
+    def test_material_limit_default_matches_the_review_limit(self):
+        default = sd_review.sd_review_material.collect_review_material.__defaults__
+        self.assertEqual(default, (sd_review.MAX_OUTPUT_BYTES,))
+

@@ -960,11 +960,15 @@ class LineBudgetTests(unittest.TestCase):
         # `record_lead_review` (+38 in `bin/sd-review`) writes a clean plain
         # branch pass to the workflow database, so lane prepare runs the gate
         # alone on the head the lead already reviewed; main sat at 4810.
+        #
+        # 4848 -> 4857 is sd:6088, under the operator's 4900 ceiling:
+        # `bin/sd_review_material.py` +9 collects the material again, with a
+        # deleted file as its header only, when it exceeds the review limit.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4848,
+            4857,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
