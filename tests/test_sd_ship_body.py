@@ -223,6 +223,30 @@ class LineLengthTests(unittest.TestCase):
         self.assertEqual(sd_ship_body.long_lines(written), [])
 
 
+class ConventionalTitleTests(unittest.TestCase):
+    """sd:6059: the title is the squash subject, so it is a Conventional Commits header."""
+
+    def test_the_types_are_commitlints_conventional_set(self) -> None:
+        self.assertEqual(sorted(sd_lib.CONVENTIONAL_TYPES),
+                         ["build", "chore", "ci", "docs", "feat", "fix", "perf", "refactor", "revert", "style",
+                          "test"])
+
+    def test_each_type_scope_and_bang_is_accepted(self) -> None:
+        for kind in sd_lib.CONVENTIONAL_TYPES:
+            for title in (f"{kind}: a summary", f"{kind}(lane): a summary", f"{kind}(machine-setup)!: a summary",
+                          f"{kind}!: a summary"):
+                with self.subTest(title=title):
+                    sd_ship_body.refuse_unconventional_title(title)
+
+    def test_anything_else_is_refused(self) -> None:
+        for title in ("A plain title", "Fix: capital type", "fix:no space", "fix: ", "fix(): empty scope",
+                      "fixes: a summary", "wip: draft", " fix: leading space", "fix(a)(b): two scopes",
+                      "Lane note names merge (pack sd:5968)"):
+            with self.subTest(title=title), self.assertRaises(ship.Refusal) as caught:
+                sd_ship_body.refuse_unconventional_title(title)
+            self.assertEqual(caught.exception.workflow["blocker"]["code"], "title_not_conventional")
+
+
 class TemplateTests(unittest.TestCase):
     def test_the_template_writes_no_owned_trailer_outside_a_comment(self) -> None:
         text = re.sub(r"<!--.*?-->", "", TEMPLATE.read_text(encoding="utf-8"), flags=re.DOTALL)

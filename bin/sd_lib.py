@@ -91,6 +91,18 @@ def copilot_automatic(policy: str | None, tier: str, depth: int) -> bool:
     return False
 
 
+#: The types `@commitlint/config-conventional` allows; semantic-release
+#: counts only titles of these (operator ruling 2026-10-24, sd:6059).
+CONVENTIONAL_TYPES = ("build", "chore", "ci", "docs", "feat", "fix", "perf", "refactor", "revert", "style", "test")
+#: `<type>[(<scope>)][!]: <summary>`, as that config's parser reads a header.
+_CONVENTIONAL = re.compile(rf"(?:{'|'.join(CONVENTIONAL_TYPES)})(?:\([^()\r\n]+\))?!?: \S")
+
+
+def conventional_title(title: str) -> bool:
+    """Whether `title` is a Conventional Commits header, as lane enqueue requires of a squash subject (sd:6059)."""
+    return bool(_CONVENTIONAL.match(title))
+
+
 def lead_review_key(repository: str, branch: str) -> str:
     """The `checkpoint` key of the clean branch review `sd-review` records and lane prepare reads (sd:5988)."""
     return f"review:v1:{repository}:{branch}"

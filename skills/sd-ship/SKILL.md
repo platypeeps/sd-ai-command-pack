@@ -114,6 +114,7 @@ The sd-ai-command-pack checkout's `WORKFLOW.md`, section **Parallel work**, is t
    A body `Closes:` line is refused, and the title and commit `Delivers:` lines close nothing.
    A delivering enqueue refuses a title or `## Summary` heading `<repo> sd:N` naming an open item of this repository missing from `--item` (sd:5375).
    Enqueue refuses `line_too_long` for a title over 63 characters, or a body or branch commit line over 72, outside a code fence or a bare URL (sd:5793).
+   Enqueue refuses `title_not_conventional` for a title that is not a Conventional Commits header, `<type>[(<scope>)][!]: <summary>`, with a `@commitlint/config-conventional` type (sd:6059).
    Enqueue refuses `head_moved` for a head the worktree or `origin/<branch>` moved past, and a docs lint failure the branch adds, before it pushes (sd:5989).
    An `--associate-only` claim closes nothing (sd:3365).
    A body `Refs: sd:N` line names a related or partial item; the merge leaves it open.

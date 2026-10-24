@@ -6,7 +6,8 @@ second chain started beside it raced it. This keeps the chain in the hub
 database and runs it under one runner lock per repository:
 
   enqueue  check the item as prepare would (sd:3473), refuse a title over
-           63 characters or a body or commit line over 72 (sd:5793),
+           63 characters or a body or commit line over 72 (sd:5793), a
+           title that is not a Conventional Commits header (sd:6059),
            a head the lane would skip as moved, or a docs lint failure
            (sd:5989), publish the head, then add a worktree, its item, branch and
            head, a title and the body text to the repository's queue;
@@ -733,7 +734,8 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
 
 
 def check_lines(worktree: pathlib.Path, title: str, body: str, base: str, head: str) -> None:
-    """Refuse a title, body line or commit line too long for a commit lint (sd:5793).
+    """Refuse a title, body line or commit line too long for a commit lint (sd:5793), then a title
+    that is not a Conventional Commits header (sd:6059).
 
     The commits are those `head` adds to `origin/<base>`, merges included:
     only a fenced line or a bare URL is exempt. Only enqueue checks; an
@@ -750,6 +752,7 @@ def check_lines(worktree: pathlib.Path, title: str, body: str, base: str, head: 
                (chunk.strip("\n").partition("\x1f") for chunk in raw.split("\x1e")) if sha.strip()]
     try:
         sd_ship_body.refuse_long_lines(title, body, commits)
+        sd_ship_body.refuse_unconventional_title(title)
     except Refusal as error:
         raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
 
@@ -3468,7 +3471,8 @@ def add_lane_verbs(commands: Any) -> None:
     adder = verbs.add_parser("enqueue", help="queue this worktree's item for prepare and merge")
     adder.add_argument("--item", type=int, action="append", dest="items", required=True,
                        help="the claimed item; repeat it to name each other item a --deliver merge closes (sd:3704)")
-    adder.add_argument("--title", required=True, help="the squash subject; refused over 63 characters (sd:5793)")
+    adder.add_argument("--title", required=True, help="the squash subject, a Conventional Commits header such as "
+                       "`fix(lane): ...`; refused otherwise (sd:6059) or over 63 characters (sd:5793)")
     adder.add_argument("--body-file", type=pathlib.Path, required=True,
                        help="the body; refused with a line, or a branch commit line, over 72 characters, "
                             "outside a code fence or a bare URL (sd:5793)")

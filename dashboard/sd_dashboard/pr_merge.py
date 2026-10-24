@@ -169,7 +169,9 @@ def revision(facts: dict) -> str:
 
 
 def _title(facts: dict) -> str:
-    return f"{facts['title']} ({facts['repo']}#{facts['number']})"
+    from .queue_screen import conventional
+
+    return conventional(f"{facts['title']} ({facts['repo']}#{facts['number']})")
 
 
 def _body(facts: dict, item: int) -> str:

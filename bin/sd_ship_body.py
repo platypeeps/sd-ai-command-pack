@@ -343,6 +343,20 @@ def refuse_long_lines(title: str, body: str, commits) -> None:
                                   f"body and commit lines at {LINE_LIMIT}, then enqueue again.")
 
 
+def refuse_unconventional_title(title: str) -> None:
+    """Refuse a title that is not a Conventional Commits header (`sd_lib.conventional_title`, sd:6059).
+
+    The title is the squash subject, so it is what a commit lint and
+    semantic-release read on the default branch.
+    """
+    if not sd_lib.conventional_title(title):
+        raise Refusal(f'the title "{title}" is not a Conventional Commits header, '
+                      "<type>[(<scope>)][!]: <summary>",
+                      code="title_not_conventional", boundary="input", state="operator_decision",
+                      next_action=f"Retitle with one of the types {', '.join(sd_lib.CONVENTIONAL_TYPES)}, "
+                                  "such as `fix(lane): ...`, then enqueue again.")
+
+
 def docs_lint(root: pathlib.Path, body: str, base: str) -> list[str]:
     """Prepare's `sd-docs-lint` of `root`, with `body` as `--pr-body`; the warnings it leaves.
 
