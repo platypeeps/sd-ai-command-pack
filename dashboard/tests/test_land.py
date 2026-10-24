@@ -163,6 +163,35 @@ class DefaultBranch(Fixture, ScreenCase):
         self.assertEqual(git("-C", str(path), "branch", "--list", "land/*"), "")
         self.assertFalse(self.argv_log.exists())
 
+    def test_a_changed_file_edited_or_made_executable_after_the_preview_lands_nothing(self):
+        """The same changed paths with newer contents or another mode are not what the operator confirmed (sd:6056)."""
+        item = self.item("Land button")
+        for name, later in (("alpha", lambda file: file.write_text("newer\n")),
+                            ("beta", lambda file: file.chmod(file.stat().st_mode | 0o111))):
+            with self.subTest(later="contents" if name == "alpha" else "mode"):
+                path = self.checkout(name)
+                (path / "lib" / "a.txt").write_text("changed\n")
+                found = self.preview(path, str(item))
+                later(path / "lib" / "a.txt")
+                with self.assertRaises(workflow.StaleItem):
+                    self.land(path, str(item), found["revision"])
+                self.assertEqual(git("-C", str(path), "branch", "--list", "land/*"), "")
+                self.assertFalse(self.argv_log.exists())
+
+    def test_a_worktree_for_a_longer_land_branch_does_not_stand_in_for_this_one(self):
+        """`land/sd-<n>0` holding a worktree is not `land/sd-<n>` holding one: Land adds its own (sd:6056)."""
+        path = self.checkout()
+        item = self.item("Land button", repo=str(path))
+        other = self.root / "home" / "worktrees" / f"alpha-land-sd-{item}0"
+        git("-C", str(path), "worktree", "add", "-q", "-b", f"land/sd-{item}0", str(other))
+        (path / "lib" / "a.txt").write_text("changed\n")
+        found = self.preview(path, str(item))
+        answer = self.land(path, str(item), found["revision"])
+        self.assertIsInstance(answer, dict, answer)
+        self.assertTrue(answer["ok"], answer)
+        self.assertEqual((Path(found["worktree"]) / "lib" / "a.txt").read_text(), "changed\n")
+        self.assertEqual(self.sent()[:2], ["-C", found["worktree"]])
+
     def test_a_revision_from_another_checkout_is_refused(self):
         alpha, beta = self.checkout("alpha"), self.checkout("beta")
         item = self.item("Land button", repo=str(alpha))
