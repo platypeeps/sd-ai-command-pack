@@ -6,7 +6,8 @@ second chain started beside it raced it. This keeps the chain in the hub
 database and runs it under one runner lock per repository:
 
   enqueue  check the item as prepare would (sd:3473), refuse a title over
-           63 characters or a body or commit line over 72 (sd:5793),
+           63 characters or a body or commit line over 72 (sd:5793), a
+           title that is not a Conventional Commits header (sd:6059),
            a head the lane would skip as moved, or a docs lint failure
            (sd:5989), publish the head, then add a worktree, its item, branch and
            head, a title and the body text to the repository's queue;
@@ -20,8 +21,10 @@ database and runs it under one runner lock per repository:
   retry    queue the item's last failed, skipped or prepared entry again, at
            its head with its texts; `--manual` grants the merge (sd:3254);
            `--expected-head` refuses, in the write's transaction, a last
-           entry at another head (sd:3268); a cancelled one needs it, and
-           refuses a moved branch, a newer entry or a merged head (sd:3389);
+           entry at another head (sd:3268); each refuses a head its
+           worktree here or `origin/<branch>` moved past, as enqueue does
+           (sd:6057); a cancelled one needs `--expected-head`, and refuses
+           any move of the branch, a newer entry or a merged head (sd:3389);
   move     put a pending entry up, down, on top or at a position (sd:2584);
   hold     keep a pending entry in place but skip it; `release` ends that;
            these four take `--expected-revision`, the `revision` `list`
@@ -689,6 +692,11 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     seconds (sd:5989): a head the worktree is not at (`at_head`), an
     `origin/<branch>` past the head (`tip_past`), and prepare's docs lint
     (`check_docs`). Tests stay in the lane's gate.
+
+    A delivering entry's `closes` also takes each open item of this
+    repository its branch commits or body cite (`cited_closes`, sd:5999),
+    read before the push; a read that fails queues and pushes nothing.
+    Each one is listed in `cited` and in the body's `## Closed by citation`.
     """
     worktree = worktree.resolve()
     sd_lib.refuse_unmanaged(worktree, LaneError)  # its prepare would refuse; do not queue it
@@ -725,13 +733,24 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     def refuse_before_push(base: str) -> None:
         check_lines(worktree, title, body, base, head)
         check_docs(worktree, body, base)
+        if claim == "deliver":  # an associate-only claim closes nothing (sd:3365)
+            commits, parents = branch_commits(worktree, base, head), branch_parents(worktree, base, head)
+            cited, repo = on_hub(queue, lambda connection: cited_closes(connection, item, body, commits, closes,
+                                                                        parents))
+            entry["closes"] = [*closes, *(row["item"] for row in cited)]
+            if cited:  # listed where a reader sees it (sd:5999 lane review)
+                import sd_ship_body  # noqa: PLC0415
+                entry["cited"] = cited
+                entry["body"] = sd_ship_body.with_cited(
+                    body, [f"- {repo} sd:{row['item']}: {row['source']}" for row in cited])
     require_published(worktree, branch, head, f"{head} names no commit in {worktree}", refuse_before_push,
                       lambda tip: tip_past(worktree, branch, tip, head))
     return add_entry(queue, entry)
 
 
 def check_lines(worktree: pathlib.Path, title: str, body: str, base: str, head: str) -> None:
-    """Refuse a title, body line or commit line too long for a commit lint (sd:5793).
+    """Refuse a title, body line or commit line too long for a commit lint (sd:5793), then a title
+    that is not a Conventional Commits header (sd:6059).
 
     The commits are those `head` adds to `origin/<base>`, merges included:
     only a fenced line or a bare URL is exempt. Only enqueue checks; an
@@ -740,16 +759,52 @@ def check_lines(worktree: pathlib.Path, title: str, body: str, base: str, head: 
     """
     import sd_ship_body  # noqa: PLC0415
     from sd_ship_remote import Refusal  # noqa: PLC0415
-    raw = lane_git(worktree, "log", "--format=%H%x1f%B%x1e", f"refs/remotes/origin/{base}..{head}")
+    commits = branch_commits(worktree, base, head)
+    try:
+        sd_ship_body.refuse_long_lines(title, body, commits)
+        sd_ship_body.refuse_unconventional_title(title)
+    except Refusal as error:
+        raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
+
+
+def branch_commits(worktree: pathlib.Path, base: str, head: str) -> list[tuple[str, str]]:
+    """Each `(sha, message)` `head` adds to `origin/<base>`, merges included, newest first, each child before its
+    parents; a failed read raises `PUBLISH_UNKNOWN`."""
+    raw = lane_git(worktree, "log", "--topo-order", "--format=%H%x1f%B%x1e", f"refs/remotes/origin/{base}..{head}")
     if raw is None:
         raise LaneError(f"Cannot read the commits {head} adds to origin/{base}; fetch origin, then enqueue "
                         "again. Nothing was queued or pushed.", code=PUBLISH_UNKNOWN)
-    commits = [(sha.strip(), message) for sha, _, message in
-               (chunk.strip("\n").partition("\x1f") for chunk in raw.split("\x1e")) if sha.strip()]
-    try:
-        sd_ship_body.refuse_long_lines(title, body, commits)
-    except Refusal as error:
-        raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
+    return [(sha.strip(), message) for sha, _, message in
+            (chunk.strip("\n").partition("\x1f") for chunk in raw.split("\x1e")) if sha.strip()]
+
+
+def branch_parents(worktree: pathlib.Path, base: str, head: str) -> dict[str, tuple[str, ...]]:
+    """Each commit `head` adds to `origin/<base>`, with its parents; a failed read raises `PUBLISH_UNKNOWN`."""
+    raw = lane_git(worktree, "rev-list", "--parents", f"refs/remotes/origin/{base}..{head}")
+    if raw is None:
+        raise LaneError(f"Cannot read the commits {head} adds to origin/{base}; fetch origin, then enqueue "
+                        "again. Nothing was queued or pushed.", code=PUBLISH_UNKNOWN)
+    return {sha: tuple(rest) for sha, *rest in (line.split() for line in raw.splitlines() if line.strip())}
+
+
+def cited_closes(connection: Any, item: int, body: str, commits: list[tuple[str, str]],
+                 closes: tuple[int, ...], parents: dict[str, tuple[str, ...]] | None = None
+                 ) -> tuple[list[dict[str, Any]], str]:
+    """The open items of `item`'s repository its commits or body cite, beyond `closes`, and that repository's name (sd:5999).
+
+    Each `{"item", "source"}`: a branch commit's `Closes: sd:N` trailer, or a `Lane review
+    fix, <repo> sd:N` line (`sd_ship_body.cited_sources`). The merge closes
+    each as it closes a later `--item`, and the lane notes each
+    (`note_cited`). An item with no repository row adds nothing:
+    `check_item` refuses it first.
+    """
+    import sd_ship_body  # noqa: PLC0415
+    row = connection.execute("SELECT repo FROM item WHERE id = ?", (item,)).fetchone()
+    if row is None or not row["repo"]:
+        return [], ""
+    sources = sd_ship_body.cited_sources(body, commits, parents)
+    kept = sd_ship_body.open_cited(connection, item, row["repo"], tuple(sources), closes, body)
+    return [{"item": number, "source": sources[number]} for number in kept], pathlib.Path(row["repo"]).name
 
 
 def tip_past(worktree: pathlib.Path, branch: str, tip: str, head: str) -> None:
@@ -762,7 +817,7 @@ def tip_past(worktree: pathlib.Path, branch: str, tip: str, head: str) -> None:
     if not catch_up_of(worktree, tip, head):
         raise LaneError(f"origin/{branch} is at {tip}, past {head} and not prepare's catch-up of it, so the lane "
                         "would skip the entry as head_moved; nothing was queued or pushed. Merge "
-                        f"origin/{branch} into {worktree}, then enqueue again.", code=HEAD_MOVED)
+                        f"origin/{branch} into the branch's worktree, then enqueue from there.", code=HEAD_MOVED)
 
 
 def check_docs(worktree: pathlib.Path, body: str, base: str) -> None:
@@ -1088,7 +1143,8 @@ def branch_unmoved(root: pathlib.Path, cancelled: dict[str, Any]) -> None:
     A moved branch is scope the caller did not see: enqueue it from its
     worktree. `origin/<branch>` must be the head, prepare's catch-up of it, or
     gone (the publish puts the head back); this host's worktree, while on the
-    branch, the head or its catch-up. A read that fails raises `PUBLISH_UNKNOWN`.
+    branch, the head or its catch-up (`worktree_unmoved`). A read that fails
+    raises `PUBLISH_UNKNOWN`.
     """
     item, branch, head = cancelled.get("item"), str(cancelled["branch"]), str(cancelled["expected_head"])
     tip = (read_git(root, "ls-remote", "origin", f"refs/heads/{branch}").stdout.split() or [""])[0]
@@ -1098,12 +1154,23 @@ def branch_unmoved(root: pathlib.Path, cancelled: dict[str, Any]) -> None:
         if not catch_up_of(root, tip, head):
             raise LaneError(f"origin/{branch} is at {tip}, not sd:{item}'s cancelled head {head} or its catch-up; "
                             "nothing was queued. Enqueue the new head from its worktree.", code=HEAD_MOVED)
-    worktree = pathlib.Path(str(cancelled.get("worktree")))
-    if (cancelled.get("enqueued_on") == this_host() and worktree.is_dir()
+    worktree_unmoved(cancelled)
+
+
+def worktree_unmoved(last: dict[str, Any]) -> None:
+    """Refuse `HEAD_MOVED` when `last`'s worktree here moved on its branch past its head (sd:3389, sd:6057).
+
+    The runner's own-worktree rule (`checkout_for`) would skip the entry; a
+    worktree on another host, gone, or on another branch is not read. A
+    read that fails raises `PUBLISH_UNKNOWN`.
+    """
+    item, branch, head = last.get("item"), str(last["branch"]), str(last["expected_head"])
+    worktree = pathlib.Path(str(last.get("worktree")))
+    if (last.get("enqueued_on") == this_host() and worktree.is_dir()
             and read_git(worktree, "branch", "--show-current").stdout.strip() == branch
             and not at_head(worktree, head)):
-        raise LaneError(f"{worktree} moved on {branch} from sd:{item}'s cancelled head {head}; nothing was "
-                        "queued. Enqueue the new head from that worktree.", code=HEAD_MOVED)
+        raise LaneError(f"{worktree} moved on {branch} from sd:{item}'s {last.get('status')} head {head}; "
+                        "nothing was queued. Enqueue the new head from that worktree.", code=HEAD_MOVED)
 
 
 def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: bool = False,
@@ -1125,11 +1192,15 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     is made again: another head refuses `STALE_HEAD`, a newer entry
     `SUPERSEDED` (`check_successor`).
 
-    A cancelled last entry (sd:3389) needs `expected_head`, and is refused
-    before the publish by `branch_unmoved` and `check_unmerged`. The new
-    entry joins the queue last, as any enqueue does. A branch that moves
-    after `branch_unmoved` read it leaves the entry pending; the runner's
-    head check (`checkout_for`) then skips it `HEAD_MOVED`.
+    What enqueue refuses as a moved head (sd:5989), retry refuses too, before
+    the publish (sd:6057): a worktree here that moved past the head
+    (`worktree_unmoved`), and an `origin/<branch>` past it that is not
+    prepare's catch-up (`tip_past`). The runner would skip either.
+    A cancelled last entry (sd:3389) also needs `expected_head`, and is
+    refused by `branch_unmoved`, for any move of the branch, and
+    `check_unmerged`. The new entry joins the queue last, as any enqueue
+    does. A branch that moves after these reads leaves the entry pending;
+    the runner's head check (`checkout_for`) then skips it `HEAD_MOVED`.
     """
     def newest_at_expected_head(connection: Any) -> dict[str, Any]:
         latest = newest_entry(connection, queue.repository, item)
@@ -1161,6 +1232,8 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
     if cancelled:
         branch_unmoved(root, last)
         check_unmerged(root, queue, last)
+    else:
+        worktree_unmoved(last)
     on_hub(queue, lambda connection: check_item(connection, root, item, last["body"], last.get("claim"),
                                                 tuple(last.get("closes") or ()), str(last.get("title") or "")))
     worktree, head = pathlib.Path(str(last.get("worktree"))), last["expected_head"]
@@ -1168,8 +1241,10 @@ def retry(root: pathlib.Path, item: int, environ: dict[str, str], *, manual: boo
         head = caught_up(worktree, head)
     require_published(root, last["branch"], head,
               f"sd:{item}'s head {head} is not on `origin` or in this checkout; run the retry on "
-              f"{last.get('enqueued_on')}, or enqueue again from a worktree that has it")
-    keep = ("repository", "item", "branch", "title", "body", "acceptance", "claim", "closes", "enqueued_on", "worktree")
+              f"{last.get('enqueued_on')}, or enqueue again from a worktree that has it",
+              None, lambda tip: tip_past(root, last["branch"], tip, head))
+    keep = ("repository", "item", "branch", "title", "body", "acceptance", "claim", "closes", "cited", "enqueued_on",
+            "worktree")
     entry = {**{key: last.get(key) for key in keep}, "id": entry_id(), "expected_head": head,
              "authority": "manual" if manual or last.get("authority") == "manual" else None,
              "status": "pending", "enqueued_at": stamp_now()}
@@ -1862,6 +1937,7 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
     gone = not worktree.is_dir()
     main = sd_lib.main_worktree_root(root if gone else worktree).resolve()
     head, merged = outcome.get("head"), str(outcome.get("merge_commit") or "")
+    note_cited(entry, merged, main, note)
     pruned = prune_after_merge(main, [str(head or entry.get("expected_head") or "")])  # the head that merged
     if gone:  # the merge removed the worktree with its branches; nothing is left to clean
         branch, tip = "", None
@@ -1882,6 +1958,21 @@ def land(entry: dict[str, Any], outcome: dict[str, Any], environ: dict[str, str]
     if remove:
         body += f" Remove{where if entry.get('lane_worktree') else ''}: {remove}"  # last and bare, so it copies whole
     return land_note(fields, body, entry, environ, note, own_lock, main)
+
+
+def note_cited(entry: dict[str, Any], merged: str, main: pathlib.Path, note: Note) -> None:
+    """Note each item the merge closed by citation (`cited_closes`, sd:5999), so a wrong close is one reopen.
+
+    A note that fails is skipped: the merge stands, and the body lists the item too.
+    """
+    for row in entry.get("cited") or ():
+        number = row.get("item")
+        try:
+            note(number, f"Closed by citation at merge {merged[:12]}: the {row.get('source')} cites it (sd:5999), "
+                         f"not an --item. If the work is not whole, reopen it: sd task status {number} in_progress.",
+                 main)
+        except Exception:  # noqa: BLE001 - the merge stands; the body names the item
+            continue
 
 
 def prune_after_merge(main: pathlib.Path, heads: list[str]) -> str:
@@ -3447,7 +3538,8 @@ def add_lane_verbs(commands: Any) -> None:
     adder = verbs.add_parser("enqueue", help="queue this worktree's item for prepare and merge")
     adder.add_argument("--item", type=int, action="append", dest="items", required=True,
                        help="the claimed item; repeat it to name each other item a --deliver merge closes (sd:3704)")
-    adder.add_argument("--title", required=True, help="the squash subject; refused over 63 characters (sd:5793)")
+    adder.add_argument("--title", required=True, help="the squash subject, a Conventional Commits header such as "
+                       "`fix(lane): ...`; refused otherwise (sd:6059) or over 63 characters (sd:5793)")
     adder.add_argument("--body-file", type=pathlib.Path, required=True,
                        help="the body; refused with a line, or a branch commit line, over 72 characters, "
                             "outside a code fence or a bare URL (sd:5793)")
