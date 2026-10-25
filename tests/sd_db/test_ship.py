@@ -46,6 +46,25 @@ class ManualMergeGuard(unittest.TestCase):
         self.assertIsNotNone(claimed)
         return item, claimed["run"]
 
+    def test_a_running_build_does_not_refuse_a_lane_merge(self):
+        """pack sd:6094, note #29579: a build run lands through the lane, so it holds no manual merge authority."""
+        from sd_db import build
+
+        repo = str(self.root / "built")
+        upsert_repo(self.connection, repo, remote="git@github.com:Fixture/Repo.git", managed=1)
+        item = create_item(self.connection, kind="task", title="Built", repo=repo, status="ready")
+        build.queue(self.connection, [item], who="fixture")
+        run = build.claim(self.connection, owner="fixture", load=1.0, load_cap=40.0, interactive=[],
+                          root=self.root / "worktrees")
+        assert run is not None
+        ship.manual_merge_guard(self.connection, self.repo)
+        build.write(self.connection, run["id"], step="enqueuing")
+        build.enqueued(self.connection, run["id"])
+        ship.manual_merge_guard(self.connection, self.repo)
+        self.claimed_run()
+        with self.assertRaisesRegex(WorkflowError, "manual merge authority"):
+            ship.manual_merge_guard(self.connection, self.repo)
+
     def test_reassigned_item_cannot_hide_active_runner_ownership(self):
         item, run = self.claimed_run()
         unrelated = str(self.root / "unrelated")

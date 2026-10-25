@@ -45,6 +45,7 @@ progress belongs to the database.
 | See weekly numbers, cost and providers | Operations → Usage |
 | Request a supported retry or stop | Operations, `sd jobs retry NAME`, `sd jobs cancel NAME` |
 | Queue a build of ready items | `sd assignments build ID [ID ...]`; one refusal refuses the selection |
+| Run one build-dispatch tick: reap, lane watch, claim, spawn | `sd assignments dispatch`; the hub's job runs it |
 | Cancel a queued assignment or a running build | Operations, or `sd assignments cancel ID` |
 
 Capture defaults to Task. Followup, Comment, Question, Decision and Proposal
