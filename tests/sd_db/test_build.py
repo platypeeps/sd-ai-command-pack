@@ -300,7 +300,8 @@ class Writes(Case):
         """Failure table, Checking: a fresh supervisor lost after the merge; gone, so settled and retried at that step."""
         build.write(self.db, self.bundle["id"], step="enqueuing")
         build.enqueued(self.db, self.bundle["id"])
-        build.write(self.db, self.bundle["id"], step="checking", supervisor_pid=4242, supervisor_start=START)
+        build.write(self.db, self.bundle["id"], step="checking", supervisor_pid=4242, supervisor_pgid=4242,
+                    supervisor_start=START)
         settled = build.reap(self.db, now=later(self.bundle["created_at"], 3600), probe=Probe(alive=False))
         self.assertEqual([(row["run"], row["outcome"], row["blocked"]) for row in settled],
                          [(self.bundle["id"], "interrupted", None)])
@@ -309,6 +310,16 @@ class Writes(Case):
         self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 0,
                          "a lane step takes no builder slot")
         self.assertEqual(self.statuses(self.items), ["in_progress", "in_progress"])
+
+    def test_enqueued_refuses_a_requested_cancel(self):
+        """Failure table, Cancel: a cancel committed before `enqueued` wins; the run never reaches the lane."""
+        build.write(self.db, self.bundle["id"], step="enqueuing")
+        state = operations.assignment_state(self.db, self.bundle["assignment"])
+        operations.cancel_assignment(self.db, self.bundle["assignment"], expected_revision=state["revision"],
+                                     who="operator")
+        self.assertFalse(build.enqueued(self.db, self.bundle["id"]))
+        self.assertEqual(build.run(self.db, self.bundle["id"])["step"], "enqueuing")
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 1)
 
     def test_a_write_outside_the_run_fields_is_refused(self):
         for fields in ({"outcome": "done"}, {"released_at": "x"}, {"step": "nowhere"}):
@@ -376,8 +387,8 @@ class Reap(Case):
         self.assertEqual(self.statuses(self.items), ["blocked", "blocked"])
 
     def test_a_live_supervisor_is_left_alone(self):
-        build.write(self.db, self.bundle["id"], supervisor_pid=4242, supervisor_start="Sat Oct 24 09:00:00 2026",
-                    heartbeat_at=self.bundle["created_at"])
+        build.write(self.db, self.bundle["id"], supervisor_pid=4242, supervisor_pgid=4242,
+                    supervisor_start="Sat Oct 24 09:00:00 2026", heartbeat_at=self.bundle["created_at"])
         soon = later(self.bundle["created_at"], 60)
         self.assertEqual(build.reap(self.db, now=soon, probe=Probe()), [])
         self.assertEqual(build.reap(self.db, now=soon, probe=Probe(alive=None)), [], "an unknown probe is no verdict")
@@ -541,7 +552,8 @@ class Reap(Case):
         """Failure table, Reap gone: no process in the group, the supervisor gone or its pid reused: settled, retried."""
         for name, pids in {"gone": {4242: (False, None)}, "reused": {4242: (True, "Sat Oct 24 08:00:00 2026")}}.items():
             with self.subTest(name):
-                self.ended(builder_pgid=777, builder_start=START, supervisor_pid=4242, supervisor_start=START)
+                self.ended(builder_pgid=777, builder_start=START, supervisor_pid=4242, supervisor_pgid=4242,
+                           supervisor_start=START)
                 kill = Kill(self.db)
                 settled = build.reap(self.db, probe=Probe(alive=False, pids=pids), kill=kill)
                 self.assertEqual(kill.calls, [])
@@ -551,19 +563,62 @@ class Reap(Case):
                          "a loss at claimed resumes at worktree; one there is a first loss too")
 
     def test_a_restore_abandons_every_open_build_run_unretried(self):
-        """Failure table, Restore: the restored store's runs end abandoned with the block; no reap signals or reruns them."""
+        """Failure table, Restore: runs end abandoned, unretried, leases kept; a reap releases each once it reads gone."""
         self.ended(builder_pgid=777, builder_start=START)
         build.queue(self.db, [self.item(repo=B)], who="operator")
         other = self.claim()
         recovery.prepare_restore(self.db)
-        kill = Kill(self.db)
-        self.assertEqual(build.reap(self.db, now=self.stale(), probe=Probe(), kill=kill), [])
-        self.assertEqual(kill.calls, [])
-        rows = self.db.execute("SELECT outcome, released_at IS NOT NULL AS released FROM runner_run ORDER BY id IN (?, ?)",
-                               (self.bundle["id"], other["id"])).fetchall()
-        self.assertEqual([(row["outcome"], row["released"]) for row in rows], [("abandoned", 1), ("abandoned", 1)])
-        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 0)
+        rows = {row["id"]: (row["outcome"], row["released_at"]) for row in build.open_runs(self.db)}
+        self.assertEqual(rows, {self.bundle["id"]: ("abandoned", None), other["id"]: ("abandoned", None)})
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 2)
         self.assertEqual(self.count("SELECT COUNT(*) FROM assignment WHERE status = 'blocked'"), 3)
+        kill = Kill(self.db)
+        self.assertEqual(build.reap(self.db, now=self.stale(), probe=Probe(group=True), kill=kill), [])
+        self.assertEqual(kill.calls, [], "an abandoned run is never signalled")
+        self.assertEqual([row["id"] for row in build.open_runs(self.db)], [self.bundle["id"]],
+                         "the run with no process is released; the one whose builder answers keeps its lease")
+        build.reap(self.db, now=self.stale(), probe=Probe(alive=False), kill=kill)
+        self.assertEqual((build.open_runs(self.db), kill.calls), ([], []))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 2, "no retry")
+
+    def test_dead_supervisor_with_live_group_is_not_gone(self):
+        """Failure table, Reap unsure: the supervisor pid is dead but its group (a git child) lives: no settle."""
+        self.ended(supervisor_pid=4242, supervisor_pgid=4242, supervisor_start=START)
+        kill = Kill(self.db)
+        self.assertEqual(build.verdict(build.run(self.db, self.bundle["id"]), probe=Probe(alive=False, group=True)),
+                         (build.UNSURE, []))
+        self.assertEqual(build.reap(self.db, probe=Probe(alive=False, group=True), kill=kill), [])
+        self.assertEqual((kill.calls, self.count("SELECT COUNT(*) FROM runner_run")), ([], 1))
+
+    def test_a_supervisor_with_no_recorded_group_is_unsure(self):
+        """Failure table, Reap unsure: a dead supervisor pid with no group recorded may have left children."""
+        self.ended(supervisor_pid=4242, supervisor_start=START)
+        self.assertEqual(build.reap(self.db, probe=Probe(alive=False), kill=Kill(self.db)), [])
+        self.assertIsNone(build.run(self.db, self.bundle["id"])["released_at"])
+
+    def test_a_cancel_waits_for_the_supervisor_group(self):
+        """Failure table, Cancel: a cancelled run whose dead supervisor's group lives is not settled; items stay."""
+        build.write(self.db, self.bundle["id"], supervisor_pid=4242, supervisor_pgid=4242, supervisor_start=START)
+        state = operations.assignment_state(self.db, self.bundle["assignment"])
+        operations.cancel_assignment(self.db, self.bundle["assignment"], expected_revision=state["revision"],
+                                     who="operator")
+        self.assertEqual(build.reap(self.db, now=self.stale(), probe=Probe(alive=False, group=True)), [])
+        self.assertEqual(self.statuses(self.items), ["in_progress", "in_progress"])
+        settled = build.reap(self.db, now=self.stale(), probe=Probe(alive=False))
+        self.assertEqual([(row["outcome"], row["retry"]) for row in settled], [("cancelled", None)])
+
+    def test_a_held_run_waits_for_the_supervisor_group(self):
+        """Failure table, Blocked: `_release` asks `verdict`, so a live supervisor group keeps the lease."""
+        self.ended(supervisor_pid=4242, supervisor_pgid=4242, supervisor_start=START, builder_pgid=777,
+                   builder_start=START)
+        build.reap(self.db, probe=Probe(group=True), kill=Kill(self.db, gone=False))
+        build.reap(self.db, probe=Probe(alive=False, group=True), kill=Kill(self.db))
+        self.assertIsNone(build.run(self.db, self.bundle["id"])["released_at"])
+
+    def test_promotion_keeps_build_leases(self):
+        """Failure table, Promote: the runner's leases are released; a build run's stays until a reap reads it gone."""
+        self.assertEqual(backup._release_leases(self.db), [])
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 1)
 
     def test_a_reimport_pending_holds_the_reap(self):
         """Failure table, Restore: a run the restore did not see is left alone until the reimport ends."""

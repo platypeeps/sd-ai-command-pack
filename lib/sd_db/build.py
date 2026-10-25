@@ -369,9 +369,11 @@ def enqueued(connection, ident: str) -> bool:
     marks = ", ".join("?" for _ in LANE_STEPS)
     with transaction(connection):
         stamp = clock()
+        # A cancel asked first wins: the run never reaches `enqueued`, which
+        # the reap skips, and the reap ends it cancelled.
         if connection.execute(
                 f"UPDATE runner_run SET step = 'enqueued', updated_at = ? WHERE id = ? AND released_at IS NULL "
-                f"AND outcome IS NULL AND (step IS NULL OR step NOT IN ({marks}))",
+                f"AND outcome IS NULL AND cancel_requested IS NULL AND (step IS NULL OR step NOT IN ({marks}))",
                 (stamp, ident, *LANE_STEPS)).rowcount != 1:
             return False
         lead = connection.execute("SELECT assignment FROM runner_run WHERE id = ?", (ident,)).fetchone()["assignment"]
@@ -453,48 +455,53 @@ def same_process(pid: int | None, start: str | None, *, probe=Probe) -> bool:
 
 
 GONE, OURS, UNSURE = "gone", "ours", "unsure"
+#: Outcomes of a run that ended unretried while a process may live: it keeps its lease until `_release`.
+HELD = ("blocked", "abandoned")
 #: Unsure reaps in a row before a run ends blocked.
 DOUBTS = 3
 
 
-def verdict(row: dict, *, probe=Probe) -> tuple[str, list[int]]:
-    """What a reap may do to an ended run's processes, and the groups to kill: the one decision every reap path takes.
+def _side(pid: int | None, start: str | None, pgid: int | None, *, probe=Probe) -> str:
+    """One process of a run, and its group, as gone, ours or unsure: the one probe `verdict` takes twice.
 
-    The supervisor and the builder each read as gone, ours or unsure; the
-    run is `UNSURE` when either is, else `OURS` when either is, else `GONE`.
-    No retry starts until both are gone, so a paused supervisor cannot
-    resume beside its replacement.
-
-    - Supervisor: gone with no pid, ESRCH, or a pid now started at another
-      time; ours when pid and start match and it recorded its group
-      (`supervisor_pgid`); anything else (start unread, EPERM, no group) is
-      unsure.
-    - Builder: gone with no group or ESRCH on the group; ours when the
-      leader's pid and start match; anything else (a reused leader pid or a
-      dead one while the group has members, EPERM, an unknown probe) is
-      unsure.
+    - Gone: nothing recorded (no process was spawned), or ESRCH on the group
+      with the pid dead or now started at another time.
+    - Ours: the pid answers with the start the run recorded, and its group
+      is recorded, so a kill can reach every child.
+    - Unsure: anything else, such as a pid with no group recorded, a group
+      with members while its leader is dead or reused, EPERM, an unread
+      start or an unknown probe.
     """
-    states, groups = [], []
-    pid = row["supervisor_pid"]
-    answer = None if pid is None else probe.alive(pid)
+    if pid is None and pgid is None:
+        return GONE
+    if pid is not None and same_process(pid, start, probe=probe):
+        return OURS if pgid is not None else UNSURE
+    if pgid is None or probe.group(pgid) is not False:
+        return UNSURE
+    if pid is None:
+        return GONE
+    answer = probe.alive(pid)
+    if answer is False:
+        return GONE
     started = probe.started(pid) if answer is True else None
-    if pid is None or answer is False or (started is not None and started != row["supervisor_start"]):
-        states.append(GONE)
-    elif started is not None and row["supervisor_start"] and row["supervisor_pgid"] is not None:
-        states.append(OURS)
-        groups.append(row["supervisor_pgid"])
-    else:
-        states.append(UNSURE)
-    pgid = row["builder_pgid"]
-    if same_process(pgid, row["builder_start"], probe=probe):
-        states.append(OURS)
-        groups.append(pgid)
-    elif pgid is None or probe.group(pgid) is False:
-        states.append(GONE)
-    else:
-        states.append(UNSURE)
+    return GONE if started is not None and started != start else UNSURE
+
+
+def verdict(row: dict, *, probe=Probe) -> tuple[str, list[int]]:
+    """What a reap may do to an ended run's processes, and the groups to kill: every gone, release or retry asks it.
+
+    The supervisor (`supervisor_pid`, `supervisor_pgid`) and the builder
+    (`builder_pgid` and its leader) are each a `_side`; the run is `UNSURE`
+    when either is, else `OURS` when either is, else `GONE`. So nothing is
+    released or retried until ESRCH answers on both groups, and a paused
+    supervisor, or a child of a dead one, cannot run beside a replacement.
+    """
+    sides = [(_side(row["supervisor_pid"], row["supervisor_start"], row["supervisor_pgid"], probe=probe),
+              row["supervisor_pgid"]),
+             (_side(row["builder_pgid"], row["builder_start"], row["builder_pgid"], probe=probe), row["builder_pgid"])]
+    states = [state for state, _ in sides]
     state = UNSURE if UNSURE in states else OURS if OURS in states else GONE
-    return state, groups if state == OURS else []
+    return state, [group for side, group in sides if side == OURS] if state == OURS else []
 
 
 def kill_group(pgid: int) -> bool:
@@ -547,7 +554,7 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
     for row in open_runs(connection):
         if row["step"] == "enqueued":
             continue
-        if row["outcome"] == "blocked":
+        if row["outcome"] in HELD:
             _release(connection, row, probe=probe)
             continue
         if row["outcome"] is None:
@@ -580,15 +587,13 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
 
 
 def _release(connection, read: dict, *, probe=Probe) -> bool:
-    """Release a blocked run, and its lease, once the supervisor and both groups are gone; True when released.
+    """Release a held run (`blocked` or `abandoned`), and its lease, once `verdict` reads it gone; True if released.
 
     The probe alone decides: no kill, no retry, no note. Unsure or alive
     leaves the run as it is for the next tick. The write matches the row
     read, as the reap's compare-and-set does.
     """
     if verdict(read, probe=probe)[0] != GONE:
-        return False
-    if read["supervisor_pgid"] is not None and probe.group(read["supervisor_pgid"]) is not False:
         return False
     with transaction(connection):
         stamp = clock()
@@ -685,21 +690,20 @@ def _block(connection, members: list[dict], reason: str, stamp: str) -> None:
 
 
 def abandon(connection, reason: str) -> list[str]:
-    """End every unreleased build run `abandoned`: released, its lease too, never retried; the ids.
+    """End every unreleased build run `abandoned`, never retried; the ids.
 
     A restore and a promotion call it in the transaction that blocks the
-    assignments or releases the leases: the processes those rows name ran on
-    a store, or a machine, that is no longer this one, so nothing may signal
-    them or retry them from here.
+    assignments: the rows came from a store, or a machine, that is no longer
+    this one, so nothing may signal or retry them from here. Each keeps its
+    lease, as a `blocked` run does, until a reap's `_release` finds its
+    groups gone: a supervisor of the old store may still run here.
     """
     with transaction(connection):
         stamp = clock()
-        runs = [row["id"] for row in open_runs(connection)]
+        runs = [row["id"] for row in open_runs(connection) if row["outcome"] not in HELD]
         for ident in runs:
             connection.execute("UPDATE runner_run SET outcome = 'abandoned', detail = COALESCE(detail, ?), "
-                               "released_at = ?, updated_at = ? WHERE id = ?", (reason, stamp, stamp, ident))
-            connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
-                               (stamp, ident))
+                               "updated_at = ? WHERE id = ?", (reason, stamp, ident))
         return runs
 
 

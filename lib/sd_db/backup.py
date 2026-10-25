@@ -1881,11 +1881,14 @@ def _release_leases(connection: sqlite3.Connection) -> list[str]:
     as they are, so they still agree with the runner journal restored beside them.
     """
     with transaction(connection):
+        # A build run's lease stays: `build.abandon` ended the run, and a
+        # reap releases it once its process groups read gone (pack sd:6093).
         rows = list(connection.execute(
             "SELECT lease.run, assignment.item FROM runner_lease lease "
             "LEFT JOIN runner_run run ON run.id = lease.run LEFT JOIN assignment ON assignment.id = run.assignment "
-            "WHERE lease.released_at IS NULL ORDER BY lease.run"))
-        connection.execute("UPDATE runner_lease SET released_at = ? WHERE released_at IS NULL", (stamp_now(),))
+            "WHERE lease.released_at IS NULL AND assignment.scope IS NOT 'build' ORDER BY lease.run"))
+        connection.executemany("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
+                               [(stamp_now(), row["run"]) for row in rows])
         for row in rows:
             if row["item"] is not None:
                 add_note(connection, row["item"], "comment",
