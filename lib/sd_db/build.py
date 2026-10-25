@@ -75,6 +75,8 @@ LOSSES = ("interrupted", "timed_out", "error_max_turns")
 #: The steps from `enqueued` on: the lease is released, the members are `done`, and step 7 releases the run.
 #: Only `enqueued` has no supervisor, so only it is left out of the reap.
 LANE_STEPS = ("enqueued", "checking", "cleaning")
+#: The steps a cancel may stop: from `enqueuing` on, the lane may hold the branch (design, "Liveness").
+CANCELLABLE = ("claimed", "worktree", "building", "reviewing", "fixing")
 ACTIVE = ("queued", "running", "ending")
 #: Auto-pickup's end, a UTC timestamp, or none for off (design, "Auto-pickup").
 AUTO_PICKUP = "build.auto_pickup_until"
@@ -384,6 +386,16 @@ def write(connection, ident: str, **fields) -> bool:
 
 def beat(connection, ident: str) -> bool:
     return write(connection, ident, heartbeat_at=clock())
+
+
+def enqueuing(connection, ident: str) -> bool:
+    """The `enqueuing` step: one compare-and-set from `reviewing`, or from `enqueuing` on a resumed run, that a
+    requested cancel fails. With the cancel's own step check it makes one winner: cancel or enqueue, never both."""
+    with transaction(connection):
+        return connection.execute(
+            "UPDATE runner_run SET step = 'enqueuing', heartbeat_at = ?, updated_at = ? WHERE id = ? "
+            "AND step IN ('reviewing', 'enqueuing') AND outcome IS NULL AND released_at IS NULL "
+            "AND cancel_requested IS NULL", (clock(), clock(), ident)).rowcount == 1
 
 
 def enqueued(connection, ident: str) -> bool:

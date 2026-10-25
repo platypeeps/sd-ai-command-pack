@@ -331,13 +331,43 @@ class Writes(Case):
 
     def test_enqueued_refuses_a_requested_cancel(self):
         """Failure table, Cancel: a cancel committed before `enqueued` wins; the run never reaches the lane."""
-        build.write(self.db, self.bundle["id"], step="enqueuing")
+        build.write(self.db, self.bundle["id"], step="reviewing")
         state = operations.assignment_state(self.db, self.bundle["assignment"])
         operations.cancel_assignment(self.db, self.bundle["assignment"], expected_revision=state["revision"],
                                      who="operator")
+        self.assertFalse(build.enqueuing(self.db, self.bundle["id"]), "the enqueuing compare-and-set loses")
+        build.write(self.db, self.bundle["id"], step="enqueuing")
         self.assertFalse(build.enqueued(self.db, self.bundle["id"]))
         self.assertEqual(build.run(self.db, self.bundle["id"])["step"], "enqueuing")
         self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 1)
+
+    def test_enqueuing_first_refuses_cancel(self):
+        """Failure table, Cancel: after the enqueuing compare-and-set a cancel is refused, naming the lane entry."""
+        build.write(self.db, self.bundle["id"], step="reviewing")
+        self.assertTrue(build.enqueuing(self.db, self.bundle["id"]))
+        state = operations.assignment_state(self.db, self.bundle["assignment"])
+        self.assertIn("sd-ship lane cancel", state["capabilities"]["cancel"]["reason"])
+        with self.assertRaisesRegex(workflow.WorkflowError, "cancel its lane entry"):
+            operations.cancel_assignment(self.db, self.bundle["assignment"], expected_revision=state["revision"],
+                                         who="operator")
+        self.assertIsNone(build.run(self.db, self.bundle["id"])["cancel_requested"])
+
+    def test_cancel_write_checks_the_step(self):
+        """A cancel read before the enqueuing compare-and-set and written after it changes nothing (one winner)."""
+        build.write(self.db, self.bundle["id"], step="reviewing")
+        state = operations.assignment_state(self.db, self.bundle["assignment"])
+        real = operations.assignment_state
+
+        def raced(connection, assignment):
+            build.enqueuing(self.db, self.bundle["id"])
+            return state
+
+        with mock.patch.object(operations, "assignment_state", raced):
+            with self.assertRaisesRegex(workflow.WorkflowError, "moved past the steps a cancel may stop"):
+                operations.cancel_assignment(self.db, self.bundle["assignment"], expected_revision=state["revision"],
+                                             who="operator")
+        self.assertIsNone(build.run(self.db, self.bundle["id"])["cancel_requested"])
+        self.assertEqual(real(self.db, self.bundle["assignment"])["build_run"], self.bundle["id"])
 
     def test_a_write_outside_the_run_fields_is_refused(self):
         for fields in ({"outcome": "done"}, {"released_at": "x"}, {"step": "nowhere"}):
