@@ -47,7 +47,7 @@ class Probe:
 
 
 class Kill:
-    """Records each group kill; `gone` is what each answers."""
+    """Records each group kill; `gone` is what each answers, or a map of group to answer (True when unnamed)."""
 
     def __init__(self, connection, gone=True):
         self.connection, self.gone, self.calls = connection, gone, []
@@ -55,7 +55,7 @@ class Kill:
     def __call__(self, pgid):
         open_runs = self.connection.execute("SELECT COUNT(*) FROM runner_run WHERE released_at IS NULL").fetchone()[0]
         self.calls.append((pgid, open_runs))
-        return self.gone
+        return self.gone.get(pgid, True) if isinstance(self.gone, dict) else self.gone
 
 
 class Case(unittest.TestCase):
@@ -388,6 +388,43 @@ class Reap(Case):
         self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run WHERE released_at IS NULL"), 1)
         self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 1)
         self.assertEqual(self.statuses(self.items), ["in_progress", "in_progress"])
+
+    def supervised(self):
+        """A stale run whose supervisor (pid 4242, group 4242) and builder (group 777) both still answer."""
+        build.write(self.db, self.bundle["id"], supervisor_pid=4242, supervisor_pgid=4242, supervisor_start=START,
+                    builder_pgid=777, builder_start=START)
+        return later(self.bundle["created_at"], build.STALE_SECONDS + 1)
+
+    def test_ours_with_live_supervisor_kills_both_before_retry(self):
+        """Failure table, Reap ours: a paused supervisor and its builder are killed, both ESRCH, then the retry."""
+        kill = Kill(self.db)
+        settled = build.reap(self.db, now=self.supervised(), probe=Probe(group=True), kill=kill)
+        self.assertEqual(kill.calls, [(4242, 1), (777, 1)], "both groups die before the retry's new run")
+        self.assertEqual([row["blocked"] for row in settled], [None])
+        self.assertIsNotNone(settled[0]["retry"])
+
+    def test_ours_supervisor_survives_kill_ends_blocked(self):
+        """Failure table, Reap ours: the supervisor's group outlives SIGKILL: blocked, no retry."""
+        kill = Kill(self.db, gone={4242: False})
+        settled = build.reap(self.db, now=self.supervised(), probe=Probe(group=True), kill=kill)
+        self.assertEqual([(row["retry"], "4242" in row["blocked"]) for row in settled], [(None, True)])
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 1)
+        self.assertEqual(self.statuses(self.items), ["blocked", "blocked"])
+
+    def test_ours_supervisor_unproven_is_unsure(self):
+        """Failure table, Reap unsure: a live supervisor whose start is unread, or EPERM, or no group: no kill."""
+        for name, probe, fields in (("start unread", Probe(started=None), {}),
+                                    ("EPERM", Probe(alive=None), {}),
+                                    ("no group recorded", Probe(), {"supervisor_pgid": None})):
+            with self.subTest(name):
+                self.supervised()
+                build.write(self.db, self.bundle["id"], builder_pgid=None, **fields)
+                self.db.execute("UPDATE runner_run SET outcome = 'interrupted', doubts = NULL WHERE id = ?",
+                                (self.bundle["id"],))
+                kill = Kill(self.db)
+                self.assertEqual(build.reap(self.db, probe=probe, kill=kill), [])
+                self.assertEqual(kill.calls, [])
+                self.db.execute("UPDATE runner_run SET outcome = NULL WHERE id = ?", (self.bundle["id"],))
 
     def test_a_live_builder_whose_start_is_unread_is_unsure(self):
         """The round-2 repro: before, this settled and retried into the live builder's worktree."""

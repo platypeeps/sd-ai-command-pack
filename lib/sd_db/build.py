@@ -59,7 +59,7 @@ STEPS = ("claimed", "worktree", "building", "reviewing", "fixing", "enqueuing", 
 #: The model a bundle runs on (Q60): Sonnet only when every member's `fields.work_kind` is `mechanical`.
 OPUS, SONNET = "opus", "sonnet"
 #: The fields a supervisor may write on its own open run.
-RUN_FIELDS = frozenset({"step", "heartbeat_at", "supervisor_pid", "supervisor_start", "session_id",
+RUN_FIELDS = frozenset({"step", "heartbeat_at", "supervisor_pid", "supervisor_pgid", "supervisor_start", "session_id",
                         "log_path", "builder_pgid", "builder_start", "final", "detail", "model"})
 #: The steps the lane holds the run at: no supervisor runs, reap leaves it, step 7 releases it.
 LANE_STEPS = ("enqueued", "checking", "cleaning")
@@ -442,33 +442,44 @@ GONE, OURS, UNSURE = "gone", "ours", "unsure"
 DOUBTS = 3
 
 
-def verdict(row: dict, *, probe=Probe) -> str:
-    """What a reap may do to an ended run's processes: the one decision every reap path takes.
+def verdict(row: dict, *, probe=Probe) -> tuple[str, list[int]]:
+    """What a reap may do to an ended run's processes, and the groups to kill: the one decision every reap path takes.
 
-    `OURS`: the builder group's leader is the process the run recorded (pid
-    and start), so the reap kills the group. `GONE`: the group has no process
-    at all (ESRCH) and the supervisor is gone too (no pid, ESRCH, or a pid
-    now started at another time), so nothing of the run can still write to
-    its worktree. `UNSURE`: anything else, such as an unread start, EPERM, an
-    unknown probe, or a dead leader whose group still has members; nothing
-    is killed or retried.
+    The supervisor and the builder each read as gone, ours or unsure; the
+    run is `UNSURE` when either is, else `OURS` when either is, else `GONE`.
+    No retry starts until both are gone, so a paused supervisor cannot
+    resume beside its replacement.
+
+    - Supervisor: gone with no pid, ESRCH, or a pid now started at another
+      time; ours when pid and start match and it recorded its group
+      (`supervisor_pgid`); anything else (start unread, EPERM, no group) is
+      unsure.
+    - Builder: gone with no group or ESRCH on the group; ours when the
+      leader's pid and start match; anything else (a reused leader pid or a
+      dead one while the group has members, EPERM, an unknown probe) is
+      unsure.
     """
+    states, groups = [], []
+    pid = row["supervisor_pid"]
+    answer = None if pid is None else probe.alive(pid)
+    started = probe.started(pid) if answer is True else None
+    if pid is None or answer is False or (started is not None and started != row["supervisor_start"]):
+        states.append(GONE)
+    elif started is not None and row["supervisor_start"] and row["supervisor_pgid"] is not None:
+        states.append(OURS)
+        groups.append(row["supervisor_pgid"])
+    else:
+        states.append(UNSURE)
     pgid = row["builder_pgid"]
     if same_process(pgid, row["builder_start"], probe=probe):
-        return OURS
-    if pgid is not None and probe.group(pgid) is not False:
-        return UNSURE
-    pid = row["supervisor_pid"]
-    if pid is None:
-        return GONE
-    answer = probe.alive(pid)
-    if answer is False:
-        return GONE
-    if answer is True:
-        started = probe.started(pid)
-        if started is not None and started != row["supervisor_start"]:
-            return GONE
-    return UNSURE
+        states.append(OURS)
+        groups.append(pgid)
+    elif pgid is None or probe.group(pgid) is False:
+        states.append(GONE)
+    else:
+        states.append(UNSURE)
+    state = UNSURE if UNSURE in states else OURS if OURS in states else GONE
+    return state, groups if state == OURS else []
 
 
 def kill_group(pgid: int) -> bool:
@@ -498,8 +509,9 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
     1. Compare-and-set `outcome` (`interrupted`, or `cancelled` when a cancel
        was asked) where `heartbeat_at` is the value read; a lost race means the
        supervisor beat, and the run is left alone.
-    2. Take the `verdict`. `OURS`: kill the group; a group that still has a
-       process after the SIGKILL ends the run blocked, not retried. `UNSURE`:
+    2. Take the `verdict`. `OURS`: kill the supervisor's group, then the
+       builder's; a group that still has a process after the SIGKILL ends
+       the run blocked, not retried. `UNSURE`:
        the run stays ended and unreleased, its lease held, nothing killed;
        the `DOUBTS`th unsure reap in a row ends it blocked, not retried.
     3. `_settle` it in one transaction.
@@ -529,15 +541,17 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
                         "AND outcome IS NULL AND released_at IS NULL AND heartbeat_at IS ?",
                         (outcome, detail, clock(), row["id"], row["heartbeat_at"])).rowcount != 1:
                     continue
-        state, block = verdict(row, probe=probe), None
+        (state, groups), block = verdict(row, probe=probe), None
         if state == UNSURE:
             doubts = _doubt(connection, row["id"])
             if doubts < DOUBTS:
                 continue
             block = (f"{doubts} reaps in a row could not tell whether builder group {row['builder_pgid']} "
                      f"or supervisor {row['supervisor_pid']} still runs; nothing was killed")
-        elif state == OURS and not kill(row["builder_pgid"]):
-            block = f"builder group {row['builder_pgid']} still had a process after SIGKILL"
+        elif state == OURS:
+            survivors = [group for group in groups if not kill(group)]
+            if survivors:
+                block = f"process group {', '.join(map(str, survivors))} still had a process after SIGKILL"
         result = _settle(connection, row["id"], block=block)
         if result is not None:
             settled.append(result)
