@@ -875,6 +875,20 @@ class AQuietTickWritesNoItem(unittest.TestCase):
         self.assertEqual([row["title"] for row in self.items()],
                          ["watchdog: data at risk", "watchdog: data safe, one step failed: nas copy"])
 
+    def test_an_ungraded_failure_never_folds_into_a_safe_report(self):
+        """A carried safe line gives the same lines, so the grade is in the basis too."""
+        self.tick("safe", exit_code=1, text=START + SAFE)
+        lost = start("2026-09-12T17:45:01-0600") + SAFE
+        self.assertEqual(self.tick("next", exit_code=1, text=lost + START + "broke\n")["recorded"], "report")
+        self.assertEqual(self.tick("again", exit_code=1, text=START + SAFE)["recorded"], "folded")
+        self.assertEqual([row["title"] for row in self.items()],
+                         ["watchdog: data safe, one step failed: nas copy", "watchdog: data at risk"])
+
+    def test_a_failure_without_a_safe_line_keeps_the_basis_older_reports_hold(self):
+        """Open reports filed before the grades still take the folds of their failure."""
+        state = self.tick("risk", exit_code=1, text=START + "SD_REPORT_ATTENTION: snapshot failed\n")
+        self.assertEqual(state["why"], f"job exited 1 on {reporting.ship.this_host()}: snapshot failed")
+
     def test_another_jobs_start_line_is_no_boundary_of_this_one(self):
         """A job that prints another job's start line keeps its own grade."""
         self.tick("safe", exit_code=1, text=START + "[other] 2026-09-12T18:00:02-0600 starting\n" + SAFE)

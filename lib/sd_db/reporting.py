@@ -655,7 +655,12 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
     grade = _grade(marks, starts, started=started, ended=ended) if exit_code else None
     attention = exit_code != 0 or bool(declared)
     host = ship.this_host()
-    basis = (f"job exited {exit_code} on {host}" + (f": {declared}" if declared else "")
+    # A carried safe line gives an ungraded failure the lines of a safe one,
+    # so a failure with a safe line names its grade too, and a fold never
+    # moves it under another grade's title. Without one the basis is as it
+    # was, so an open report filed before the grades still takes its folds.
+    graded = f" ({grade})" if exit_code and any(mark.startswith(SAFE) for mark in marks) else ""
+    basis = (f"job exited {exit_code} on {host}{graded}" + (f": {declared}" if declared else "")
              if exit_code else declared or "not supplied by the job")
     if len(basis) > 2000:
         basis = f"{basis[:1900]} [sha256 {hashlib.sha256(basis.encode()).hexdigest()[:16]}]"
