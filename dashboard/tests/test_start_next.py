@@ -109,6 +109,12 @@ class StartNext(ScreenCase):
                 self.run_plan([{"id": out["eligible"][0]["id"], "revision": out["eligible"][0]["revision"]}], **seams)
         self.assertEqual(self.launched, [])
 
+    def test_a_load_cap_of_zero_is_the_load_rule_off(self):
+        """pack sd:6111: the gate's `load_max` of 0 is no cap, as `build.room` and the lane's `load_stop` read it."""
+        waiting = self.ready("Waiting")
+        out = self.plan(gate=gate(load5=41.5, load_max=0.0))
+        self.assertEqual((out["room"], out["refusal"], [row["id"] for row in out["start"]]), (1, "", [waiting]))
+
     def test_a_run_starts_each_item_with_its_revision_and_writes_its_note(self):
         first, second = self.ready("First"), self.ready("Second")
         out = self.run_plan([{"id": row["id"], "revision": row["revision"]} for row in self.plan()["start"]])

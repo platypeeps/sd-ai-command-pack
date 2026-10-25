@@ -4,7 +4,8 @@
 in its order, less reports, items a Fix note says were started already, items a live Claude session names
 (`claude_sessions`), and items with no checkout on this Mac (`fix_session.checkout`); each one left out is in
 `skipped` with its reason. The room is the builder cap, `CAP` per machine, less the builders running now
-(`claude_sessions.builders`), and none while the five-minute load is above `sd gate status --json`'s `load_max`.
+(`claude_sessions.builders`), and none while the five-minute load is above `sd gate status --json`'s `load_max`;
+a `load_max` of 0 is the load rule off (`build.over_load`, pack sd:6111).
 A count or a load that could not be read is a refusal with its reason, never room.
 
 `run` is the start, in steps, under `STARTING`:
@@ -27,7 +28,7 @@ import subprocess
 import threading
 from datetime import datetime, timezone
 
-from sd_db import reads, workflow
+from sd_db import build, reads, workflow
 from sd_db.errors import SdDbError
 
 from . import claude_sessions, fix_session
@@ -120,8 +121,8 @@ def plan(connection, *, now: str, sessions=None, gate=None) -> dict:
         refusal = refusal or f"the running builders were not counted: {why}"
     elif running >= CAP:
         refusal = refusal or f"{running} builders run already; the cap is {CAP}" + _holders(claude["builders"].get("holders") or [])
-    if load is not None and load > load_max:
-        refusal = refusal or f"the five-minute load is {load:g}, above the cap of {load_max:g}"
+    if load is not None and load_max is not None:
+        refusal = refusal or build.over_load(load, load_max)
     if not eligible and not refusal:
         refusal = "no ready item is left to start"
     room = 0 if refusal else min(CAP - running, len(eligible))
