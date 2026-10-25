@@ -505,7 +505,9 @@ class ThePlaceScript(Fixture):
 
     #: The views each page's markup declares: [id, label, api]. HOA's Tasks is drawn by hoa.js, so it reads nothing here.
     VIEWS = {"hoa": [["overview", "Overview", None], ["tasks", "Tasks", None], ["briefs", "Briefs", "/api/hoa/briefs"], ["reports", "Reports", "/api/hoa/reports"]],
-             "home": [["overview", "Overview", None], ["tasks", "Tasks", "/api/home/tasks"], ["briefs", "Briefs", "/api/home/briefs"], ["reports", "Reports", "/api/home/reports"]]}
+             "home": [["overview", "Overview", None], ["tasks", "Tasks", "/api/home/tasks"], ["briefs", "Briefs", "/api/home/briefs"], ["reports", "Reports", "/api/home/reports"]],
+             # A realm place (place.html, sd:6162): every view reads its own document, the Overview too.
+             "acme": [[v, v.title(), f"/api/place/acme/{v}"] for v in ("overview", "tasks", "briefs", "reports")]}
 
     def run_page(self, body, docs, place="hoa", setup="", before=""):
         script = (STAND_IN + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL
@@ -842,6 +844,59 @@ await window.places.again(); await flush(); R.briefs = OUT.gets.slice(before);
 await go('#view=overview'); before = OUT.gets.length;
 await window.places.again(); await flush(); R.overview = OUT.gets.slice(before);""", self.docs())
         self.assertEqual((out["R"]["briefs"], out["R"]["overview"]), (["/api/hoa/briefs"], []))
+
+
+class TheOverviewScript(Fixture):
+    """sd:6162, sd:6164: places.js draws a realm place's Overview tiles from /api/place/<id>/overview, and a button posts the
+    tile's names, says what came of it and reads the view again."""
+
+    TILES = {"state": "read", "area": "acme", "read": NOW, "reason": "", "problems": [], "rows": [
+        {"id": "app", "label": "Staging site", "url": "https://staging.example.test", "here": True, "why": "",
+         "probe": {"answers": False, "status": "nothing listens there"},
+         "actions": [{"label": "Deploy", "command": "npm run staging:deploy", "last": {"state": "done", "exit": 0, "started": NOW, "ended": NOW, "output": "deployed\n", "cut": False}},
+                     {"label": "Tear down", "command": "npm run staging:down", "last": {"state": "done", "exit": 3, "started": NOW, "ended": NOW, "output": "", "cut": False}},
+                     {"label": "Refresh", "command": "npm run staging:up", "last": {"state": "running", "started": NOW, "output": "", "cut": False}},
+                     {"label": "Smoke", "command": "npm run staging:smoke", "last": {"state": "unknown", "reason": "it ended with no exit record", "started": NOW, "output": "", "cut": False}}]},
+        {"id": "far", "label": "Simulator", "url": "", "here": False, "why": "/x is not on this machine, so its actions run elsewhere",
+         "probe": None, "actions": [{"label": "Start", "command": "./run.sh", "last": {"state": "none"}}]}]}
+
+    #: A click on the button `label` of tile `tile`, as the document listener sees it.
+    CLICK = """const clickAct = (tile, label, off) => { const li = { dataset: { tile, label: tile === 'app' ? 'Staging site' : 'Simulator' } };
+  const b = { dataset: { tileAct: label, tip: off || '' }, closest: () => li, getAttribute: () => off ? 'true' : null, setAttribute: () => {} };
+  (DOC_LISTENERS['click'] || []).forEach(f => f({ button: 0, target: { closest: sel => sel === '[data-tile-act]' ? b : null } })); };
+"""
+
+    def run_overview(self, body, answer=(202, {"started": NOW})):
+        docs = {"/api/place/acme/overview": [200, self.TILES], "/api/place/tiles": list(answer)}
+        return ThePlaceScript.run_page(self, self.CLICK + body, docs, place="acme")
+
+    run_page = ThePlaceScript.run_page
+    VIEWS = ThePlaceScript.VIEWS
+
+    def test_each_tile_shows_its_link_whether_it_answers_and_each_commands_last_run(self):
+        out = self.run_overview("R.rows = ELS['overview-rows'].html;")
+        rows = out["R"]["rows"]
+        self.assertEqual(out["gets"], ["/api/place/acme/overview"])
+        self.assertIn('<a class="btn quiet sm" href="https://staging.example.test" target="_blank" rel="noopener">', rows)
+        self.assertIn("not answering: nothing listens there", rows)
+        for words in ("Done, exit 0", "Failed, exit 3", "Running since", "Not known: it ended with no exit record."):
+            self.assertIn(words, rows)
+        self.assertIn("<summary>Output</summary><pre>deployed\n</pre>", rows)
+        # A tile whose folder is not here says why, and its button is off with the reason.
+        self.assertIn("<p class=\"why\">/x is not on this machine, so its actions run elsewhere.</p>", rows)
+        self.assertIn('data-tile-act="Start" aria-disabled="true"', rows)
+
+    def test_a_button_posts_the_tiles_names_toasts_the_start_and_reads_again(self):
+        out = self.run_overview("clickAct('app', 'Deploy'); await flush();")
+        self.assertEqual(out["posts"], [["/api/place/tiles", {"realm": "acme", "tile": "app", "action": "Deploy"}, 64]])
+        self.assertEqual(out["toasts"][-1]["msg"], "Staging site · Deploy started. Read again shows how it ended.")
+        self.assertEqual(out["gets"], ["/api/place/acme/overview"] * 2)
+
+    def test_a_refused_or_unanswered_start_says_why_and_an_off_button_posts_nothing(self):
+        out = self.run_overview("clickAct('app', 'Deploy'); await flush();", answer=(409, {"error": "Staging site Deploy is already running"}))
+        self.assertEqual(out["toasts"][-1]["msg"], "Staging site · Deploy not run: Staging site Deploy is already running")
+        out = self.run_overview("clickAct('far', 'Start', '/x is not on this machine'); await flush();")
+        self.assertEqual((out["posts"], out["toasts"][-1]["msg"]), ([], "Simulator · Start not run: /x is not on this machine."))
 
 
 class TheTasksRealm(Fixture):

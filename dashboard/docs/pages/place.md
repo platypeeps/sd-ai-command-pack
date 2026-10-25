@@ -8,11 +8,20 @@ after HOA and Home, with its family's icon and no `g` key. A realm whose
 line or family line did not read gets no entry. `/ui/sections.js` carries
 the realms as `SHELL_REALMS`, each with `place`, the family's icon or null.
 
-The page has HOA's and Home's Tasks, Briefs and Reports views (`places.js`,
-`places.py`) and no Overview. `place.js` names the page after the realm and
-points each view at `GET /api/place/<id>/tasks`, `/briefs` or `/reports`,
-read only when shown:
+The page has an Overview, then HOA's and Home's Tasks, Briefs and Reports
+views (`places.js`, `places.py`). `place.js` names the page after the realm
+and points each view at `GET /api/place/<id>/overview`, `/tasks`,
+`/briefs` or `/reports`, read only when shown:
 
+- Overview (sd:6162, sd:6164): the realm's tiles from
+  `<config>/project-dashboard/place-tiles.conf` (`place_tiles.py`;
+  `place-tiles.conf.example` is the template). A tile is an app or a site:
+  Visit opens its link in a new tab, and each read asks the link once and
+  says whether it answers. Each `act` line is a button with its last run:
+  running, done with its exit code and output, or not known. A button posts
+  `POST /api/place/tiles {realm, tile, action}`; the server runs only the
+  command the file names, so the page never sends one. A tile whose folder
+  is not on this machine shows why, and its buttons run nothing.
 - Tasks: the open items `places.realm_of` puts in the realm, the rows of
   Tasks under that Realm.
 - Briefs: briefs whose repo a glob of the realm matches, and briefs whose
@@ -24,8 +33,8 @@ unknown with the line to add, such as
 `family|acme|Acme|map|<job>,<job>,...`. A realm or family list that
 did not read is `error`, never an empty list. An id Tasks reserves (`hoa`,
 `home`, `personal`, `all`) answers 404. Without `?realm=` the page lists
-the realm places. Nothing here writes; a brief's Details carry the Briefs
-page's commands.
+the realm places. Only the Overview buttons write; a brief's Details carry
+the Briefs page's commands.
 
 Open | All (sd:5752): Tasks, Briefs and Reports show their open rows; All
 adds the week's done tasks (`places.task_rows`, the Tasks page's bound), the
