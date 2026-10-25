@@ -319,7 +319,7 @@ class TheJob(PruneCase):
                                    input="", env=environment, check=False)
         self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
         self.assertIn("pruned: 0 exec output(s) expired, 2 stale heartbeat row(s) removed, "
-                      "0 superseded checkpoint row(s) removed, 0 clean report(s) settled, 0 untouched P4 item(s) parked (report #", completed.stdout)
+                      "0 superseded checkpoint row(s) removed, 0 clean report(s) settled, 0 untouched item(s) parked (report #", completed.stdout)
         self.assertEqual(stubs.calls("notify"), [])
         self.assertEqual(len(self.heartbeat_rows()), 1)
         self.assertEqual(self.db.execute("SELECT count(*) FROM item WHERE kind='report' AND source='cron-report'").fetchone()[0], 1)
@@ -477,7 +477,7 @@ class TheCleanReport(PruneCase):
         # The prune's own report is clean and opened tonight, so it waits its week too.
         self.assertEqual(report["status"], "planning")
         self.assertEqual(str(pruned), "0 exec output(s) expired, 0 stale heartbeat row(s) removed, 0 superseded checkpoint row(s) removed, 1 clean report(s) settled, "
-                                      "0 untouched P4 item(s) parked")
+                                      "0 untouched item(s) parked")
 
     def test_the_age_is_the_table_s(self):
         self.assertEqual(CLEAN_REPORT_AGE, timedelta(days=7))
@@ -567,7 +567,7 @@ class AnUnreadableReport(PruneCase):
         pruned = prune(self.db, snapshot, now=NOW)
         row = self.db.execute("SELECT * FROM item WHERE id=?", (pruned.report,)).fetchone()
         text = (f"sd-db prune after backup {snapshot.directory.name} ({snapshot.run_id}): 0 exec output(s) expired, "
-                f"0 stale heartbeat row(s) removed, 0 superseded checkpoint row(s) removed, 1 clean report(s) settled, 0 untouched P4 item(s) parked; "
+                f"0 stale heartbeat row(s) removed, 0 superseded checkpoint row(s) removed, 1 clean report(s) settled, 0 untouched item(s) parked; "
                 f"cost rows and exec notes are never pruned.\n")
         stamp = NOW.isoformat(timespec="seconds")
         self.assertEqual(json.loads(row["body"])["text"], text)
@@ -754,15 +754,19 @@ class TheCostRow(PruneCase):
         self.assertEqual(sum(row["usd"] for row in ledger), total_before, "the item screen's total")
 
 
-class TheUntouchedP4(PruneCase):
-    """sd:3007: a P4 item untouched for thirty days is parked, and stays readable."""
+class ParkCase(PruneCase):
+    """Items seeded with a backdated last touch, for the park rules."""
 
-    def seed(self, *, days, priority=4, status="planning", note_days=None, piece=None, due=None):
-        item = create_item(self.db, kind="task", title=f"P{priority} {status} {days}d", repo=str(self.repo),
+    def seed(self, *, days, priority=4, status="planning", note_days=None, piece=None, due=None, kind="task",
+             seconds=0, ran=False, recurrence=None):
+        item = create_item(self.db, kind=kind, title=f"P{priority} {status} {days}d", repo=str(self.repo),
                            status=status, priority=priority, due=due)
-        self.db.execute("UPDATE item SET created_at=?, updated_at=?, piece=? WHERE id=?",
-                        (ago(days=days), ago(days=days), piece, item))
-        self.db.execute("UPDATE note SET timestamp=? WHERE item=?", (ago(days=days), item))
+        if ran:
+            create_assignment(self.db, role="author", status="done", item=item)
+        touched = ago(days=days, seconds=seconds)
+        self.db.execute("UPDATE item SET created_at=?, updated_at=?, piece=?, recurrence=? WHERE id=?",
+                        (touched, touched, piece, recurrence, item))
+        self.db.execute("UPDATE note SET timestamp=? WHERE item=?", (touched, item))
         self.db.commit()
         if note_days is not None:
             note = add_note(self.db, item, "comment", "still wanted", session="operator")
@@ -772,6 +776,10 @@ class TheUntouchedP4(PruneCase):
 
     def parked_at(self, item):
         return self.db.execute("SELECT parked_at FROM item WHERE id=?", (item,)).fetchone()[0]
+
+
+class TheUntouchedP4(ParkCase):
+    """sd:3007: a P4 item untouched for thirty days is parked, and stays readable."""
 
     def test_only_an_open_p4_untouched_for_thirty_days_is_parked(self):
         stale = self.seed(days=31)
@@ -783,7 +791,7 @@ class TheUntouchedP4(PruneCase):
         piece = self.seed(days=31, piece="essay-one")
         dated = self.seed(days=31, due="2027-01-01")
 
-        self.assertEqual(retention.park_untouched_p4(self.db, now=NOW), [stale, blocked])
+        self.assertEqual(retention.park_untouched(self.db, now=NOW), [stale, blocked])
 
         stamp = NOW.isoformat(timespec="seconds")
         self.assertEqual([self.parked_at(item) for item in (stale, blocked)], [stamp, stamp])
@@ -796,11 +804,11 @@ class TheUntouchedP4(PruneCase):
         self.assertEqual((note["kind"], note["session"]), ("comment", RETENTION))
         self.assertIn("untouched for 30 days", note["body"])
         # A second night finds nothing more.
-        self.assertEqual(retention.park_untouched_p4(self.db, now=NOW + timedelta(days=1)), [])
+        self.assertEqual(retention.park_untouched(self.db, now=NOW + timedelta(days=1)), [])
 
     def test_a_parked_item_leaves_the_backlog_and_stays_searchable(self):
         stale = self.seed(days=31)
-        retention.park_untouched_p4(self.db, now=NOW)
+        retention.park_untouched(self.db, now=NOW)
         self.assertNotIn(stale, [row["id"] for row in reads.backlog_items(self.db)])
         self.assertIn(stale, [row["id"] for row in reads.capture_items(self.db)])
         self.assertEqual(workflow.item_state(self.db, stale)["item"]["id"], stale)
@@ -813,8 +821,64 @@ class TheUntouchedP4(PruneCase):
         report = self.db.execute("SELECT * FROM item WHERE id=?", (pruned.report,)).fetchone()
         self.assertEqual(json.loads(report["fields"])["report"]["removed"]["parked"], 1)
         text = json.loads(report["body"])["text"]
-        self.assertIn("1 untouched P4 item(s) parked", text)
+        self.assertIn("1 untouched item(s) parked", text)
         self.assertIn(f"Parked: {self.repo.name} sd:{stale}\n", text)
+
+
+class TheIdlePlanningItem(ParkCase):
+    """sd:6008: a planning item that never ran and sat ninety days is parked."""
+
+    def last_note(self, item):
+        return self.db.execute("SELECT kind, session, body FROM note WHERE item=? ORDER BY id DESC LIMIT 1",
+                               (item,)).fetchone()
+
+    def test_only_a_never_run_planning_item_idle_past_ninety_days_is_parked(self):
+        idle = self.seed(days=91, priority=2)
+        unprioritised = self.seed(days=91, priority=None, kind="idea")
+        past = self.seed(days=90, seconds=1, priority=1)
+        exact = self.seed(days=90, priority=2)
+        ran = self.seed(days=200, priority=2, ran=True)
+        ready = self.seed(days=200, priority=2, status="ready")
+        blocked = self.seed(days=200, priority=3, status="blocked")
+        recurring = self.seed(days=200, priority=2, recurrence="FREQ=WEEKLY")
+        dated = self.seed(days=200, priority=2, due="2026-01-01")
+        report = self.seed(days=200, priority=None, kind="report")
+        followup = self.seed(days=200, priority=None, kind="followup")
+        piece = self.seed(days=200, priority=2, piece="essay-two")
+        noted = self.seed(days=200, priority=2, note_days=89)
+
+        self.assertEqual(retention.park_untouched(self.db, now=NOW), [idle, unprioritised, past])
+
+        for item in (exact, ran, ready, blocked, recurring, dated, report, followup, piece, noted):
+            self.assertIsNone(self.parked_at(item), item)
+        note = self.last_note(idle)
+        self.assertEqual((note["kind"], note["session"]), ("comment", RETENTION))
+        self.assertEqual(note["body"], "Parked: planning, never run, untouched for 90 days")
+        self.assertEqual(self.status_of(idle), "planning")
+        # A second run finds nothing more; the next day the exact one is past.
+        self.assertEqual(retention.park_untouched(self.db, now=NOW), [])
+        self.assertEqual(retention.park_untouched(self.db, now=NOW + timedelta(days=1)), [exact])
+
+    def test_a_parked_item_keeps_its_stamp_and_gets_no_second_note(self):
+        item = self.seed(days=200, priority=2)
+        earlier = ago(days=150)
+        self.db.execute("UPDATE item SET parked_at=? WHERE id=?", (earlier, item))
+        self.db.commit()
+        notes = self.db.execute("SELECT count(*) FROM note WHERE item=?", (item,)).fetchone()[0]
+
+        self.assertEqual(retention.park_untouched(self.db, now=NOW), [])
+
+        self.assertEqual(self.parked_at(item), earlier)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM note WHERE item=?", (item,)).fetchone()[0], notes)
+
+    def test_a_stale_p4_planning_item_is_parked_once_by_the_p4_rule(self):
+        item = self.seed(days=200)
+
+        self.assertEqual(retention.park_untouched(self.db, now=NOW), [item])
+
+        bodies = [row[0] for row in self.db.execute(
+            "SELECT body FROM note WHERE item=? AND session=?", (item, RETENTION))]
+        self.assertEqual(bodies, ["Parked: P4 untouched for 30 days"])
 
 
 if __name__ == "__main__":

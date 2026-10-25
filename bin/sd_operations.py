@@ -146,8 +146,11 @@ def interactive_builders(connection: Any, now: str, key: Any) -> list[dict] | No
     """One `{repo, session_id}` per interactive builder, as the dashboard counts them; None when not counted.
 
     `repo` is the registered repository the session's cwd lies in, else None
-    (it counts against the machine only).
+    (it counts against the machine only). A cwd in a linked worktree, such as
+    one outside `~/repos`, lies in its main checkout, read from git's common
+    dir by `sd_lib.main_worktree_root` (pack sd:6112).
     """
+    import sd_lib
     sys.path.insert(0, str(BIN.parent / "dashboard"))
     try:
         # By name, as `sd_work` loads its modules: the dashboard is not on bin/'s lint path.
@@ -160,7 +163,7 @@ def interactive_builders(connection: Any, now: str, key: Any) -> list[dict] | No
         for session in document["sessions"] or []:
             count = sum(1 for agent in session["agents"] if agent["builder"] and agent["state"] != "idle")
             count += 1 if session["builder"] and session["status"] != "idle" else 0
-            cwd = key(str(Path(session["cwd"]).resolve())) if session.get("cwd") else ""
+            cwd = key(str(sd_lib.main_worktree_root(Path(session["cwd"]).resolve()))) if session.get("cwd") else ""
             repo = next((path for path in repos if cwd and (cwd == path or cwd.startswith(path.rstrip("/") + "/"))),
                         None)
             found += [{"repo": repo, "session_id": session["id"]}] * count
