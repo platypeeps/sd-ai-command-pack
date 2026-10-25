@@ -257,8 +257,10 @@ def recover_from_journal(connection, record: dict, *, expected_snapshot: str) ->
             raise RunnerRefused("journal does not match the restored assignment's repository and branch")
         # A journal written before migration 014 names the absolute path; the
         # row it restores names the key the item holds now (sd:1439). One
-        # written before 018 has no `detached_from`, which is NULL (sd:2581).
-        record = {"detached_from": None, **record, "repo": item["repo"]}
+        # written before 018 has no `detached_from`, and one before 042 no
+        # build columns; each is NULL (sd:2581, pack sd:6093).
+        from .runner_journal import LATER_COLUMNS
+        record = {**dict.fromkeys(LATER_COLUMNS), **record, "repo": item["repo"]}
         if request["run_count"] > record["run"] or (request["run"] and request["run"]["id"] != record["id"]):
             raise RunnerRefused("another attempt belongs to this assignment; restore compatible database evidence")
         columns = [row["name"] for row in connection.execute("PRAGMA table_info(runner_run)")]
