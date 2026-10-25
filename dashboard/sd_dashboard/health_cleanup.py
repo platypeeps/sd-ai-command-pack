@@ -17,7 +17,8 @@ until the last one, so a stop between any two leaves it in the next read, which 
 `push --force-with-lease=refs/heads/<b>:<head> origin --delete <b>` when origin's branch is at the merged head,
 `checkout --detach` in the tree, `update-ref -d refs/heads/<b> <head>`, and `git worktree remove <path>` without
 `--force`, which refuses uncommitted or untracked files on its own. A branch that moved here or on origin, a process
-working in the tree, or files that are not build output keep the tree, and the answer says why.
+working in the tree, a live session on this machine that holds it (`sd_db.sessions`, pack sd:6024), or files that are
+not build output keep the tree, and the answer says why. A held tree keeps its build output too.
 
 Each write reads its subject again first and refuses a digest that differs from the page's (409): evidence from
 another row, or a subject that changed since the read, writes nothing. Then each step keeps git's own guard:
@@ -152,6 +153,17 @@ def delete_branches(connection, key: str, expected: str):
     return _done(f"br:{key}", done, refused, "deleted")
 
 
+def _held(connection, path: str) -> str:
+    """'' when no live session on this machine holds the worktree; else why it stays. An unread registry is `_Unread`."""
+    from sd_db import sessions
+    from sd_db.ship import this_host
+
+    try:
+        return sessions.describe(sessions.holders(connection, path, machine=this_host()))
+    except Exception as error:  # noqa: BLE001 -- not knowing who holds it is not a reason to remove it
+        raise _Unread(f"the session registry was not read: {error}") from None
+
+
 def _still_removable(walk: Walk, tree: dict) -> str:
     """'' when the worktree is still at its head, in origin/HEAD and clean; otherwise why it is kept.
 
@@ -188,7 +200,7 @@ def remove_build_output(connection, expected: str):
     for tree in merged:
         try:
             # Read again just before this worktree's folders go: a step that moved since the read above keeps them.
-            kept = "it has uncommitted changes" if tree["status"] else _still_removable(
+            kept = "it has uncommitted changes" if tree["status"] else _held(connection, tree["path"]) or _still_removable(
                 Walk(WRITE_SECONDS, "the worktree check"), {**tree, "repo_disk": str(paths.disk(tree["repo"]))})
         except (reads.OverBudget, _Unread) as error:
             return _unknown(f"{tree['path']} was not checked again before its folders went ({error}); it and the "
@@ -294,7 +306,8 @@ def remove_merged_worktrees(connection, expected: str):
             refused.append({"name": tree["path"], "why": tree["kept"]})
             continue
         try:
-            kept = _remove_tree(Walk(WRITE_SECONDS, f"the removal of {tree['path']}"), tree, done)
+            kept = _held(connection, tree["path"]) or _remove_tree(
+                Walk(WRITE_SECONDS, f"the removal of {tree['path']}"), tree, done)
         except (reads.OverBudget, _Unread) as error:
             return _unknown(f"{tree['path']}: {error}; it and the worktrees after it were left where that step stopped. "
                             "Read Health again: a tree still on disk is offered again", done=done, refused=refused)

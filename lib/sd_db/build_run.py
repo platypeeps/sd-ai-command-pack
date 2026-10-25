@@ -36,8 +36,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import build, paths
+from . import build, paths, sessions
 from .build import Probe
+from .ship import this_host
 from .writes import add_note, now, record_cost, record_state
 
 #: A child past this many seconds is ended: TERM to its group, `GRACE_SECONDS`, KILL.
@@ -491,6 +492,13 @@ class Supervisor:
             add_note(self.db, self.lead, "comment",
                      f"Build run {self.ident} kept worktree {self.work}: it is not clean ({dirty.splitlines()[0]})")
             return self.finish("done", f"worktree {self.work} kept: not clean")
+        # A session other than this run's builder works in it (pack sd:6024): it stays.
+        own = self.fresh()["session_id"]
+        held = sessions.describe(sessions.holders(self.db, str(self.work), machine=this_host(),
+                                                  exclude=(own,) if own else ()))
+        if held:
+            add_note(self.db, self.lead, "comment", f"Build run {self.ident} kept worktree {self.work}: {held}")
+            return self.finish("done", f"worktree {self.work} kept: {held}")
         if self.child([*self.tools.git, "-C", str(self.repo), "worktree", "remove", str(self.work)], cwd=self.repo,
                       name="cleaning") != 0:
             add_note(self.db, self.lead, "comment",

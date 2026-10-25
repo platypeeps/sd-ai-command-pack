@@ -110,6 +110,23 @@ class OperationsCLI(unittest.TestCase):
         self.connect.assert_called_with(sd_db, write=True)
         self.assertEqual(self.connection.close.call_count, 2)
 
+    def test_assignments_sessions_lists_the_live_sessions_read_only(self):
+        """pack sd:6024: the registry for a cleanup outside the pack; a failed read refuses, never an empty list."""
+        live = Mock(return_value=[{"session": "session-a1234", "machine": "hub", "beat": "2026-10-25T10:00:00+00:00",
+                                   "worktrees": [{"path": "~/worktrees/pack-one"}]}])
+        registry = types.ModuleType("sd_db.sessions")
+        registry.live = live
+        with patch.dict(sys.modules, {"sd_db.sessions": registry}), patch.object(sd_db, "sessions", registry,
+                                                                                  create=True):
+            code, output = self.call("assignments", "sessions")
+            _, printed = self.call("assignments", "sessions", "--json")
+            live.side_effect = sd_db.SdDbError("the hub is unreachable")
+            with self.assertRaises(cli.WorkRefusal):
+                self.call("assignments", "sessions")
+        self.assertEqual((code, output), (0, "hub  session-  2026-10-25T10:00:00+00:00  ~/worktrees/pack-one\n"))
+        self.assertEqual(json.loads(printed)[0]["session"], "session-a1234")
+        self.connect.assert_called_with(sd_db, write=False)
+
     def builds(self):
         """`sd_db.build` and `sd_db.build_run` fakes; `dispatch` answers an empty tick."""
         build, run = types.ModuleType("sd_db.build"), types.ModuleType("sd_db.build_run")
