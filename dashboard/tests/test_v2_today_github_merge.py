@@ -34,6 +34,17 @@ REMOTE = "git@github.com:example/anvil.git"
 REPO = "example/anvil"
 
 
+class Title(ScreenCase):
+    """pack sd:6059: the enqueue title is a Conventional Commits header; a pull request's own one is kept."""
+
+    def test_a_conventional_title_is_kept_and_any_other_gets_chore(self):
+        for given, sent in (("chore(deps): bump anvil", f"chore(deps): bump anvil ({REPO}#5)"),
+                            ("Bump anvil", f"chore: Bump anvil ({REPO}#5)"),
+                            ("Fix: capital type", f"chore: Fix: capital type ({REPO}#5)")):
+            with self.subTest(given=given):
+                self.assertEqual(pr_merge._title({"title": given, "repo": REPO, "number": 5}), sent)
+
+
 class Copy(Fixture):
     def pull(self, number: int = 5, author: str = "dependabot[bot]", state: str = "open") -> tuple[Path, str]:
         """A checkout of example/anvil whose origin holds pull request `number`, one commit by `author`."""
@@ -112,7 +123,8 @@ class Merge(Copy, ScreenCase):
         sent = self.sent()
         self.assertEqual(sent[:6], ["-C", str(self.tree()), "lane", "enqueue", "--item", str(item["id"])])
         self.assertEqual(sent[sent.index("--expected-head") + 1], head)
-        self.assertEqual(sent[sent.index("--title") + 1], f"Bump anvil ({REPO}#5)")
+        # Lane enqueue refuses a title that is not a Conventional Commits header (pack sd:6059).
+        self.assertEqual(sent[sent.index("--title") + 1], f"chore: Bump anvil ({REPO}#5)")
         self.assertIn("--deliver", sent)
         body = Path(sent[sent.index("--body-file") + 1]).read_text()
         self.assertIn(f"- sd:{item['id']}: Merge {REPO}#5: Bump anvil.", body)

@@ -96,6 +96,7 @@ Claude loads each file for its `paths:`, or always when it has none; Codex reads
 | Planning adversarial review and its caps | [.claude/rules/sd-planning-adversarial-review.md](.claude/rules/sd-planning-adversarial-review.md) |
 | What a document owns: live text, archives, qualified paths | [.claude/rules/document-scope.md](.claude/rules/document-scope.md) |
 | Where a finished document goes: vault, dashboard, mirrors | [.claude/rules/publication.md](.claude/rules/publication.md) |
+| Dashboard pages and CSS: hallmark first | [.claude/rules/dashboard-ui.md](.claude/rules/dashboard-ui.md) |
 
 <!-- SD-AI-COMMAND-PACK:ROUTING:START -->
 ## Canonical Entry Points

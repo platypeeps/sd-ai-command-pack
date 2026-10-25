@@ -223,6 +223,84 @@ class LineLengthTests(unittest.TestCase):
         self.assertEqual(sd_ship_body.long_lines(written), [])
 
 
+class CitedIdTests(unittest.TestCase):
+    """sd:5999: a `Closes: sd:N` trailer or a `Lane review fix, <repo> sd:N` line cites an item; nothing else does."""
+
+    def test_only_closes_trailers_and_review_fix_lines_cite(self) -> None:
+        commits = [("a" * 40, "fix: one (pack sd:2)\r\n\nKeeps the sd:3 guard.\r\nLane review fix, pack sd:4: x\r\n"
+                              "\r\nCloses: sd:9\r\nRefs: sd:3\r\n"),
+                   ("b" * 40, "chore: none\n\n  Lane review fix, pack sd:5: indented\nCloses: sd:10\n\nWords."),
+                   ("c" * 40, "Closes: sd:11")]
+        body = "Lane review fix, system sd:6: y\nSee Lane review fix, pack sd:7.\n~~~\nLane review fix, pack sd:8\n~~~\n"
+        self.assertEqual(sd_ship_body.cited_ids(body, commits), (9, 6, 4))
+
+    def test_a_subject_never_cites_and_a_closes_trailer_does(self) -> None:
+        """Lane review of sd:5999, round 5 ruling: no word list catches every way to say partial."""
+        self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, "fix: first part (sd:42)")]), ())
+        self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, "fix: first part (sd:42)\n\nWords.\n")]), ())
+        self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, "fix: the rest\n\nWords.\n\nCloses: sd:42\n")]),
+                         (42,))
+
+    def test_a_quoted_or_prose_closes_line_cites_nothing(self) -> None:
+        """Lane review of sd:5999, round 6: only a block git reads as trailers closes, as `sd_lib.trailer_block`."""
+        for last in ("```\nCloses: sd:42\n```", "<!--\nCloses: sd:42\n-->", "Write the trailer as\nCloses: sd:42",
+                     "~~~\n\nCloses: sd:42"):
+            with self.subTest(last=last):
+                self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, f"fix: x\n\nWords.\n\n{last}\n")]), ())
+        real = "fix: x\n\nWords.\n\nCloses: sd:42\nCo-Authored-By: a\n  b <b@example.test>\nRefs: sd:7\n"
+        self.assertEqual(sd_ship_body.cited_ids("", [("a" * 40, real)]), (42,))
+
+    def test_a_commit_the_branch_reverts_cites_nothing(self) -> None:
+        """Lane review of sd:5999, round 2: the revert undoes the work, so its commit closes nothing."""
+        done, undone, again = "a" * 40, "b" * 40, "c" * 40
+        work = (done, "fix: implement\n\nLane review fix, pack sd:3: y.\n\nCloses: sd:2\n")
+        revert = (undone, f'Revert "fix: implement (sd:2)"\n\nThis reverts commit {done}.\n')
+        self.assertEqual(sd_ship_body.cited_ids("", [revert, work]), ())
+        # Commits come newest first. A revert of the revert restores the work, and its citation.
+        restore = (again, f'Revert "Revert ..."\n\nThis reverts commit {undone}.\n')
+        self.assertEqual(sd_ship_body.cited_ids("", [restore, revert, work]), (2, 3))
+        # A revert of a commit outside the branch drops nothing the branch adds.
+        elsewhere = ("d" * 40, f'Revert "fix: x"\n\nThis reverts commit {"e" * 40}.\n')
+        self.assertEqual(sd_ship_body.cited_ids("", [elsewhere, work]), (2, 3))
+
+    def test_a_merge_the_branch_reverts_cites_nothing_it_brought_in(self) -> None:
+        """Lane review of sd:5999, round 3: `git revert -m 1 <merge>` undoes each commit the merge brought in."""
+        base, side, main, merge, undo, again = (c * 40 for c in "abcdef")
+        commits = [(undo, f'Revert "Merge"\n\nThis reverts commit {merge}, reversing\nchanges made to {main}.\n'),
+                   (merge, "Merge branch 'side'"), (main, "fix: mainline\n\nCloses: sd:4"),
+                   (side, "fix: implement\n\nLane review fix, pack sd:3: y.\n\nCloses: sd:2\n"),
+                   (base, "fix: base\n\nCloses: sd:5")]
+        parents = {undo: (merge,), merge: (main, side), main: (base,), side: (base,), base: ()}
+        self.assertEqual(sd_ship_body.cited_ids("", commits, parents), (4, 5))
+        # A revert of the merge's revert brings the work back, and its citations.
+        restore = (again, f'Revert "Revert"\n\nThis reverts commit {undo}.\n')
+        self.assertEqual(sd_ship_body.cited_ids("", [restore, *commits], {again: (undo,), **parents}), (4, 2, 5, 3))
+
+
+class ConventionalTitleTests(unittest.TestCase):
+    """sd:6059: the title is the squash subject, so it is a Conventional Commits header."""
+
+    def test_the_types_are_commitlints_conventional_set(self) -> None:
+        self.assertEqual(sorted(sd_lib.CONVENTIONAL_TYPES),
+                         ["build", "chore", "ci", "docs", "feat", "fix", "perf", "refactor", "revert", "style",
+                          "test"])
+
+    def test_each_type_scope_and_bang_is_accepted(self) -> None:
+        for kind in sd_lib.CONVENTIONAL_TYPES:
+            for title in (f"{kind}: a summary", f"{kind}(lane): a summary", f"{kind}(machine-setup)!: a summary",
+                          f"{kind}!: a summary"):
+                with self.subTest(title=title):
+                    self.assertIsNone(sd_ship_body.refuse_unconventional_title(title))
+
+    def test_anything_else_is_refused(self) -> None:
+        for title in ("A plain title", "Fix: capital type", "fix:no space", "fix: ", "fix(): empty scope",
+                      "fixes: a summary", "wip: draft", " fix: leading space", "fix(a)(b): two scopes",
+                      "Lane note names merge (pack sd:5968)"):
+            with self.subTest(title=title), self.assertRaises(ship.Refusal) as caught:
+                sd_ship_body.refuse_unconventional_title(title)
+            self.assertEqual(caught.exception.workflow["blocker"]["code"], "title_not_conventional")
+
+
 class TemplateTests(unittest.TestCase):
     def test_the_template_writes_no_owned_trailer_outside_a_comment(self) -> None:
         text = re.sub(r"<!--.*?-->", "", TEMPLATE.read_text(encoding="utf-8"), flags=re.DOTALL)
