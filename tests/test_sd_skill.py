@@ -169,6 +169,14 @@ class TheListVerb(TrialCase):
         self.assertEqual(rc, 0, output)
         self.assertNotIn("uses=", output)
 
+    def test_the_default_listing_prints_each_skills_last_use(self):
+        """pack sd:5992: the audit reads the last use with no flag; the operator wants no new flags."""
+        sd_db.record_skill_use(self.connection, "sd-plan", surface="claude", timestamp="2026-09-02T09:00:00Z")
+        rc, output = self.run_list()
+        self.assertEqual(rc, 0, output)
+        self.assertIn("sd-plan  path  last=2026-09-02  ", self.line(output, "sd-plan"))
+        self.assertIn("sd-ship  path  last=never  ", self.line(output, "sd-ship"))
+
 
 class TheExpiry(TrialCase):
     """The install run that removes a trial nobody used, and says so."""

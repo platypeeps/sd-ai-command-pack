@@ -59,8 +59,8 @@ def run(args: argparse.Namespace) -> int:
             print(json.dumps(result, ensure_ascii=False))
         elif args.verb == "list":
             for skill in result["skills"]:
-                used = (f"  uses={sum(use['count'] for use in skill['uses'])}  last={(skill['last'] or 'never')[:10]}"
-                        if getattr(args, "usage", False) else "")
+                used = f"  uses={sum(use['count'] for use in skill['uses'])}" if getattr(args, "usage", False) else ""
+                used += f"  last={(skill['last'] or 'never')[:10]}"
                 print(f"{skill['name']}  {skill['status']}{used}  {skill['description']}")
         elif args.verb == "try":
             print(f"{args.name} on trial until {result['trial']['expires'][:10]}")
