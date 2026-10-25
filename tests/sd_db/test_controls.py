@@ -732,6 +732,16 @@ class NoVerbNamesItsOperatorForTheCaller(unittest.TestCase):
         self.assertEqual(self.findings()[3], [], "`\"user\"` names every caller; pass the account or session that is asking")
 
 
+def start(at):
+    """The line `cron-jobs.sh` opens a run of `watchdog` with, at local time `at`."""
+    return f"[watchdog] {at} starting (cwd: /tmp)\n"
+
+
+#: The start line of a run that `AQuietTickWritesNoItem.tick` brackets.
+START = start("2026-09-12T18:00:01-0600")
+SAFE = "SD_REPORT_ATTENTION: data safe, one step failed: nas copy\n"
+
+
 class AQuietTickWritesNoItem(unittest.TestCase):
     """The heartbeat-or-report split in `reporting.ingest_log` (sd:739)."""
 
@@ -805,32 +815,71 @@ class AQuietTickWritesNoItem(unittest.TestCase):
         marker; every other failure reads "data at risk", and a clean run
         with findings keeps "needs attention".
         """
-        self.tick("safe", exit_code=1, text="snapshot verified\n"
-                  "SD_REPORT_ATTENTION: data safe, one step failed: nas copy\n")
-        self.tick("risk", exit_code=2, text="SD_REPORT_ATTENTION: snapshot failed\n")
-        self.tick("bare", exit_code=3, text="broke\n")
-        self.tick("noisy", text="SD_REPORT_ATTENTION: two stale pins\n")
+        self.tick("safe", exit_code=1, text=START + "snapshot verified\n" + SAFE)
+        self.tick("risk", exit_code=2, text=START + "SD_REPORT_ATTENTION: snapshot failed\n")
+        self.tick("bare", exit_code=3, text=START + "broke\n")
+        self.tick("noisy", text=START + "SD_REPORT_ATTENTION: two stale pins\n")
         self.assertEqual([row["title"] for row in self.items()], [
             "watchdog: data safe, one step failed: nas copy", "watchdog: data at risk",
             "watchdog: data at risk", "watchdog: needs attention"])
 
     def test_a_failure_of_another_grade_never_folds_into_the_open_report(self):
         """The grade line is in the basis, so a fold never hides a new grade."""
-        safe = "SD_REPORT_ATTENTION: data safe, one step failed: nas copy\n"
-        self.tick("one", exit_code=1, text=safe)
-        self.assertEqual(self.tick("two", exit_code=1, text=safe)["recorded"], "folded")
-        self.assertEqual(self.tick("three", exit_code=1, text="broke\n")["recorded"], "report")
+        self.tick("one", exit_code=1, text=START + SAFE)
+        self.assertEqual(self.tick("two", exit_code=1, text=START + SAFE)["recorded"], "folded")
+        self.assertEqual(self.tick("three", exit_code=1, text=START + "broke\n")["recorded"], "report")
         self.assertEqual([row["title"] for row in self.items()],
                          ["watchdog: data safe, one step failed: nas copy", "watchdog: data at risk"])
 
     def test_only_a_marker_line_that_starts_with_the_grade_grades_the_title(self):
         """A grade quoted mid-line, outside the marker, blank or on a clean exit grades nothing."""
-        self.tick("quoted", exit_code=1, text="SD_REPORT_ATTENTION: not data safe, one step failed: x\n")
-        self.tick("plain", exit_code=1, text="data safe, one step failed: x\n")
-        self.tick("blank", exit_code=1, text="SD_REPORT_ATTENTION: data safe, one step failed: \n")
-        self.tick("clean", text="SD_REPORT_ATTENTION: data safe, one step failed: x\n")
+        self.tick("quoted", exit_code=1, text=START + "SD_REPORT_ATTENTION: not data safe, one step failed: x\n")
+        self.tick("plain", exit_code=1, text=START + "data safe, one step failed: x\n")
+        self.tick("blank", exit_code=1, text=START + "SD_REPORT_ATTENTION: data safe, one step failed: \n")
+        self.tick("clean", text=START + "SD_REPORT_ATTENTION: data safe, one step failed: x\n")
         self.assertEqual([row["title"] for row in self.items()],
                          ["watchdog: data at risk"] * 3 + ["watchdog: needs attention"])
+
+    def test_a_lost_runs_safe_line_never_grades_the_next_failure(self):
+        """Only this run's own slice grades it (pack sd:6080 review).
+
+        A run whose report was lost is carried in ahead of the next one
+        (sd:3537). Its safe line proves nothing about the next run's data.
+        """
+        lost = start("2026-09-12T17:45:01-0600") + SAFE
+        self.tick("next", exit_code=1, text=lost + START + "broke\n")
+        self.assertEqual([row["title"] for row in self.items()], ["watchdog: data at risk"])
+
+    def test_a_failure_with_no_start_line_of_its_own_is_ungraded(self):
+        """A run that died before its start line cannot tell its lines apart."""
+        lost = start("2026-09-12T17:45:01-0600") + SAFE
+        self.tick("next", exit_code=1, text=lost + "[watchdog] JOB_DIR is not a usable directory\n")
+        self.tick("bare", exit_code=2, text=SAFE)
+        self.assertEqual([row["title"] for row in self.items()], ["watchdog: data at risk"] * 2)
+
+    def test_two_start_lines_in_the_runs_window_leave_it_ungraded(self):
+        """A lost run that started in the same second is not told from this one."""
+        self.tick("next", exit_code=1, text=start("2026-09-12T18:00:00-0600") + SAFE + START + "broke\n")
+        self.assertEqual([row["title"] for row in self.items()], ["watchdog: data at risk"])
+
+    def test_an_unreadable_start_line_leaves_the_run_ungraded(self):
+        """A start line whose time does not parse is a boundary nobody can place."""
+        self.tick("next", exit_code=1, text="[watchdog] yesterday starting (cwd: /tmp)\n" + START + SAFE)
+        self.assertEqual([row["title"] for row in self.items()], ["watchdog: data at risk"])
+
+    def test_a_hand_recovery_grades_on_its_own_slice_and_not_a_later_runs(self):
+        """A recovery of a lost run reads past its end, into the runs after it (sd:955)."""
+        later = start("2026-09-12T18:15:01-0600")
+        self.tick("lost", exit_code=1, text=START + "broke\n" + later + SAFE)
+        self.tick("safe", exit_code=2, text=START + SAFE + later + "broke\n")
+        self.assertEqual([row["title"] for row in self.items()],
+                         ["watchdog: data at risk", "watchdog: data safe, one step failed: nas copy"])
+
+    def test_another_jobs_start_line_is_no_boundary_of_this_one(self):
+        """A job that prints another job's start line keeps its own grade."""
+        self.tick("safe", exit_code=1, text=START + "[other] 2026-09-12T18:00:02-0600 starting\n" + SAFE)
+        self.assertEqual([row["title"] for row in self.items()],
+                         ["watchdog: data safe, one step failed: nas copy"])
 
     def test_the_recovery_writes_a_heartbeat_and_files_no_item(self):
         """A clean run files no report, the one after a failure too (sd:3509).

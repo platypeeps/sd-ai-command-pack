@@ -30,6 +30,10 @@ MARK = b"SD_REPORT_ATTENTION: "
 #: it; every other failure is titled `AT_RISK`.
 SAFE = "data safe, one step failed: "
 AT_RISK = "data at risk"
+#: The line `cron-jobs.sh` opens each run's log slice with: `[<job>] <local
+#: time> starting (cwd: ...)`. A carried lost run (sd:3537) opens with its
+#: own, so only the lines after this run's own line grade it (`_grade`).
+RUN_START = re.compile(rb"\[([^\]\n]*)\] (\S+) starting(?: |\r?\n|\Z)")
 
 #: The `state` key a job's health is recorded under, one row per job by the
 #: `heartbeat` retention rule. Prefixed, because `key` is a flat namespace
@@ -546,6 +550,32 @@ def _quiet(beat, previous):
     return "a clean tick of a job whose last tick was also clean"
 
 
+def _grade(marks, starts, *, started, ended):
+    """A failed run's grade: its first line that proved the data safe, else `AT_RISK`.
+
+    `marks` are the slice's `MARK` lines; `starts` its `RUN_START` lines of
+    this job, each as the count of marks before it and its time. Only the
+    marks between this run's own start line and the next one count: a lost
+    run carried in ahead (sd:3537), or a later run a hand recovery reads
+    past (sd:955), proves nothing about this run's data. This run's line is
+    the one stamped from `started` to `ended`. With none, two, or a start
+    time that does not parse, the run is not told apart, so it is ungraded,
+    and ungraded is at risk (system sd:6030 note #29319).
+    """
+    try:
+        times = [datetime.strptime(at.decode("ascii"), "%Y-%m-%dT%H:%M:%S%z") for _, at in starts]
+    except (UnicodeDecodeError, ValueError):
+        return AT_RISK
+    started, ended = datetime.fromisoformat(stamp(started)), datetime.fromisoformat(stamp(ended))
+    ours = [number for number, at in enumerate(times) if started <= at <= ended]
+    if len(ours) != 1:
+        return AT_RISK
+    first = starts[ours[0]][0]
+    last = starts[ours[0] + 1][0] if ours[0] + 1 < len(starts) else len(marks)
+    safe = next((mark.strip() for mark in marks[first:last] if mark.startswith(SAFE) and mark[len(SAFE):].strip()), None)
+    return safe[:200].replace("\x00", "") if safe else AT_RISK
+
+
 def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, offset=0, now=None):
     """One cron run, recorded as an item only when something happened.
 
@@ -600,8 +630,12 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
         # filed nothing, folded into an acknowledged report, or superseded
         # the report that still held it. Every decision below reads them all.
         stream.seek(offset)
-        marks = [line[len(MARK):].decode("utf-8", errors="replace").removesuffix("\n") for line in stream
-                 if line.startswith(MARK)]
+        marks, starts = [], []
+        for line in stream:
+            if line.startswith(MARK):
+                marks.append(line[len(MARK):].decode("utf-8", errors="replace").removesuffix("\n"))
+            elif (opened := RUN_START.match(line)) and opened[1] == job.encode():
+                starts.append((len(marks), opened[2]))
     truncated = len(data) > MAX_REPORT
     text = data[:MAX_REPORT].decode("utf-8", errors="replace")
     # A successful exit does not prove there were no findings. Jobs can emit
@@ -616,11 +650,9 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
     # limit keeps its head and a digest of the whole, so it files. A line
     # holds no newline, so joining on one keeps two lines apart from one.
     declared = "\n".join(dict.fromkeys(mark for mark in marks if mark))
-    # A failure is titled with its grade (system sd:6030): the first line
-    # that proved the data safe and names the step, else at risk. A clean
-    # exit is no failure, so its findings keep `needs attention`.
-    safe = next((mark.strip() for mark in marks if mark.startswith(SAFE) and mark[len(SAFE):].strip()), None)
-    grade = (safe[:200].replace("\x00", "") if safe else AT_RISK) if exit_code else None
+    # A failure is titled with its grade (system sd:6030); a clean exit is
+    # no failure, so its findings keep `needs attention`.
+    grade = _grade(marks, starts, started=started, ended=ended) if exit_code else None
     attention = exit_code != 0 or bool(declared)
     host = ship.this_host()
     basis = (f"job exited {exit_code} on {host}" + (f": {declared}" if declared else "")
