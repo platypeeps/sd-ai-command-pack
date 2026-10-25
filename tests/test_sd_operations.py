@@ -107,6 +107,44 @@ class OperationsCLI(unittest.TestCase):
         self.connect.assert_called_with(sd_db, write=True)
         self.assertEqual(self.connection.close.call_count, 2)
 
+    def builds(self):
+        """`sd_db.build` and `sd_db.build_run` fakes; `dispatch` answers an empty tick."""
+        build, run = types.ModuleType("sd_db.build"), types.ModuleType("sd_db.build_run")
+        run.dispatch = Mock(return_value={"reaped": [], "moved": [], "claimed": ["r1"], "spawned": ["r1"], "why": ""})
+        run.now = Mock(return_value="2026-10-25T09:00:00+00:00")
+        run.paths = types.SimpleNamespace(key=lambda value: value, expand=Path)
+        run.Tools = lambda **tools: types.SimpleNamespace(**tools)
+        for patcher in (patch.dict(sys.modules, {"sd_db.build": build, "sd_db.build_run": run}),
+                        patch.object(sd_db, "build", build, create=True),
+                        patch.object(sd_db, "build_run", run, create=True)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        return run
+
+    def test_assignments_dispatch_reads_the_load_and_the_log_folder_before_the_tick(self):
+        """pack sd:6094: an unread load is None, never room; an unset bulk root is a reason for no claim."""
+        run = self.builds()
+        with patch.object(cli, "gate_load", return_value=(None, None)), \
+                patch.object(cli, "interactive_builders", return_value=[]), \
+                patch.object(cli, "log_root", return_value=None):
+            code, output = self.call("assignments", "dispatch")
+        self.assertEqual(code, 0)
+        kwargs = run.dispatch.call_args.kwargs
+        self.assertEqual((kwargs["load"], kwargs["load_cap"], kwargs["interactive"]), (None, None, []))
+        self.assertIn("bulk_storage_root is unset", kwargs["why"])
+        self.assertIn("claimed 1, spawned 1", output)
+        self.connect.assert_called_with(sd_db, write=True)
+        self.connection.close.assert_called_once()
+
+    def test_gate_load_is_unread_on_any_odd_answer(self):
+        answers = [("", 1), ("{}", 0), (json.dumps({"load": [1, float("nan"), 1], "load_max": 40}), 0),
+                   (json.dumps({"load": [1.0, 2.5, 3.0], "load_max": 40}), 0)]
+        found = []
+        for stdout, code in answers:
+            with patch.object(cli.subprocess, "run", return_value=Mock(stdout=stdout, returncode=code)):
+                found.append(cli.gate_load())
+        self.assertEqual(found, [(None, None), (None, None), (None, None), (2.5, 40.0)])
+
     def test_invalid_assignment_identity_refuses_and_closes_connection(self):
         with self.assertRaises(cli.WorkRefusal):
             self.call("assignments", "get", "not-an-id", "--json")

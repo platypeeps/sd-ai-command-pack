@@ -19,8 +19,8 @@ that dies between them leaves an ended, unreleased run, and the next `reap`
 starts at the kill.
 
 Nothing here runs a process but the kill and the liveness probe; the
-dispatcher (step 2) reads the load and the interactive builders, which are not
-in the database, and passes them in.
+dispatcher (`build_run`, step 2) reads the load and the interactive builders,
+which are not in the database, and passes them in.
 """
 
 from __future__ import annotations
