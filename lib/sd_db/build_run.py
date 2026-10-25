@@ -74,7 +74,8 @@ Rules:
 - The dispatcher owns every item's status: never run `sd task status`, never push, never open a pull request.
 - Write a test that fails before each fix, then make it pass; skip no test.
 - End the commit that delivers a whole item with a `Closes: sd:N` trailer. Add no attribution lines.
-- Keep every commit line at 72 characters or less.
+- Keep every commit line, and every body line, at 72 characters or less outside a code fence:
+  `sd-ship lane enqueue` refuses a longer one.
 - Write the pull-request title, a Conventional Commit of {title_max} characters or less, alone to {title}.
 - Write the pull-request body, with `## Summary` and `## Test plan`, to {body}; quote each fail-first line.
 - Leave the worktree clean, with your commits on the branch.

@@ -4,8 +4,10 @@ import argparse
 import importlib
 import io
 import json
+import os
 import sqlite3
 import sys
+import tempfile
 import types
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -178,7 +180,6 @@ class OperationsCLI(unittest.TestCase):
 
     def test_the_log_folder_is_the_real_bulk_storage_setting(self):
         """Review round 1: `log_root` reads `sd.bulk_storage_root` through `sd_lib`; a malformed one claims nothing."""
-        import tempfile
         sd_lib = importlib.import_module("sd_lib")
         with tempfile.TemporaryDirectory() as home:
             config = Path(home) / sd_lib.CONFIG_RELATIVE_PATH
@@ -193,6 +194,16 @@ class OperationsCLI(unittest.TestCase):
                     code, _ = self.call("assignments", "dispatch")
         self.assertEqual(code, 0)
         self.assertIn("sd.bulk_storage_root", run.dispatch.call_args.kwargs["why"])
+
+    def test_gate_load_reads_the_real_gate_status(self):
+        """Review round 1: the real `sd gate status --json`, on a machine with no gate settings: load off is 0."""
+        with tempfile.TemporaryDirectory() as home:
+            environ = {key: value for key, value in os.environ.items() if not key.startswith("SD_GATE")}
+            with patch.dict("os.environ", {**environ, "HOME": home, "XDG_CONFIG_HOME": home, "XDG_STATE_HOME": home},
+                            clear=True):
+                load, cap = cli.gate_load()
+        self.assertIsInstance(load, float)
+        self.assertEqual(cap, 0.0, "the gate's default load rule is off, which `build.room` reads as no cap")
 
     def test_gate_load_is_unread_on_any_odd_answer(self):
         answers = [("", 1), ("{}", 0), (json.dumps({"load": [1, float("nan"), 1], "load_max": 40}), 0),

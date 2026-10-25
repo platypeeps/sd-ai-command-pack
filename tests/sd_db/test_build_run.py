@@ -125,6 +125,15 @@ FAKE = textwrap.dedent('''
         if args.claim not in sd_lane.CLAIMS:  # enqueue_entry's first refusal, which the parser leaves to it
             print(json.dumps({"ok": False, "error": "name the delivery claim prepare needs"}))
             sys.exit(3)
+        import sd_ship_body, sd_ship_remote
+        try:  # the lane's own title and line checks (`check_lines`, `check_item`), with no commits read
+            body = args.body_file.read_text()
+            sd_ship_body.refuse_long_lines(args.title, body, [])
+            sd_ship_body.refuse_unconventional_title(args.title)
+            sd_ship_body.normalize(body, args.items[0])
+        except sd_ship_remote.Refusal as error:
+            print(json.dumps({"ok": False, "error": f"{error}; nothing was queued"}))
+            sys.exit(3)
         argv = sys.argv
         items = [int(argv[n + 1]) for n, arg in enumerate(argv) if arg == "--item"]
         entry = {"id": f"e{len(entries) + 1}", "item": items[0], "status": "pending", "enqueue_seq": len(entries) + 1,
@@ -199,11 +208,11 @@ class Case(unittest.TestCase):
         return build_run.Supervisor(self.db, ident or self.bundle["id"], tools=self.tools, log_root=self.logs,
                                     environ=self.env, **options)
 
-    def write_pr(self, title="feat(fixture): build the fixture"):
+    def write_pr(self, title="feat(fixture): build the fixture", body="## Summary\n\nx\n\n## Test plan\n\ny\n"):
         logs = build_run.log_dir(self.logs, self.bundle["repo"])
         logs.mkdir(parents=True, exist_ok=True)
         (logs / f"sd-{self.bundle['assignment']}.title").write_text(title + "\n", encoding="utf-8")
-        (logs / f"sd-{self.bundle['assignment']}.body.md").write_text("## Summary\n\nx\n\n## Test plan\n\ny\n")
+        (logs / f"sd-{self.bundle['assignment']}.body.md").write_text(body)
 
     def wait_for_builder(self, connection):
         """Until the builder (not the worktree's git) runs: the claude call is logged and its group recorded."""
@@ -465,6 +474,16 @@ class Supervise(Case):
         self.plan(claude=["pass"], sd_review=["clean"])
         self.assertEqual(self.supervisor().run()["outcome"], "blocked")
         self.assertEqual([call for call in self.calls("sd-ship") if "enqueue" in call["argv"]], [])
+
+    def test_a_body_the_lane_refuses_blocks_with_its_reason(self):
+        """Review round 1: the lane's own line check refuses a long body line; the run blocks naming it."""
+        self.press()
+        self.write_pr(body="## Summary\n\n" + "x" * 80 + "\n")
+        self.plan(claude=["pass"], sd_review=["clean"])
+        ended = self.supervisor().run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("limit 72", ended["blocked"])
+        self.assertIn("72 characters or less outside a code fence", build_run.BRIEF)
 
     def test_enqueue_resume_no_duplicate(self):
         """Failure table, Enqueuing (pack sd:6094 (a)): a run lost after the lane wrote its entry resumes at
