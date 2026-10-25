@@ -32,6 +32,7 @@ import signal
 import subprocess
 import time
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from pathlib import Path
 
@@ -400,13 +401,16 @@ def enqueuing(connection, ident: str) -> bool:
             "AND cancel_requested IS NULL", (clock(), clock(), ident)).rowcount == 1
 
 
-def enqueued(connection, ident: str) -> bool:
+def enqueued(connection, ident: str, delivered: Collection[int] | None = None) -> bool:
     """The `enqueued` step: the lease released and the members `done`, the items left `in_progress` for the lane.
 
-    The run stays open, `released_at` and `outcome` null, until step 7 ends
-    it; `reap` skips it meanwhile. One compare-and-set on the run, open and
-    not yet at a lane step; False, with no row changed, for a late
-    supervisor whose run was reaped or retried, or one already enqueued.
+    `delivered` is the items the lane entry delivers; a member outside it
+    (the builder skipped it) ends `blocked` with its item and a note, so the
+    merge leaves it open. None delivers every member. The run stays open,
+    `released_at` and `outcome` null, until step 7 ends it; `reap` skips it
+    meanwhile. One compare-and-set on the run, open and not yet at a lane
+    step; False, with no row changed, for a late supervisor whose run was
+    reaped or retried, or one already enqueued.
     """
     marks = ", ".join("?" for _ in LANE_STEPS)
     with transaction(connection):
@@ -420,9 +424,15 @@ def enqueued(connection, ident: str) -> bool:
             return False
         lead = connection.execute("SELECT assignment FROM runner_run WHERE id = ?", (ident,)).fetchone()["assignment"]
         connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL", (stamp, ident))
-        for member in _members(connection, lead):
-            connection.execute("UPDATE assignment SET status = 'done', ended = ?, result = ? WHERE id = ?",
-                               (stamp, f"build run {ident} enqueued in the lane", member["id"]))
+        members = _members(connection, lead)
+        skipped = [member for member in members if delivered is not None and member["item"] not in delivered]
+        for member in members:
+            if member not in skipped:
+                connection.execute("UPDATE assignment SET status = 'done', ended = ?, result = ? WHERE id = ?",
+                                   (stamp, f"build run {ident} enqueued in the lane", member["id"]))
+        for member in skipped:
+            _block(connection, [member], f"build run {ident} enqueued no commit with a `Closes: sd:{member['item']}` "
+                                         "trailer, so the merge leaves this item open", stamp)
         return True
 
 

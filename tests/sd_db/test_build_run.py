@@ -32,10 +32,15 @@ from sd_db.writes import create_item, upsert_repo
 from . import support
 
 BIN = Path(__file__).resolve().parents[2] / "bin"
+with mock.patch("sys.path", [str(BIN), *sys.path]):
+    #: The adapter, for its `cited`: the lane's own reader of what a branch delivers.
+    ADAPTER = importlib.import_module("sd_operations")
+    LANE = importlib.import_module("sd_lane")  # loaded now: `cited` imports it, and the lane's body reader, by name
+    importlib.import_module("sd_ship_body")
 
 #: One fake for every tool: its role is its file name, its answers come from `<plans>/<role>.json`.
 FAKE = textwrap.dedent('''
-    import json, os, subprocess, sys, time
+    import json, os, re, subprocess, sys, time
     from pathlib import Path
     role, plans = Path(sys.argv[0]).stem, Path(os.environ["FAKE_PLANS"])
     with open(plans / "calls.jsonl", "a") as log:
@@ -83,7 +88,13 @@ FAKE = textwrap.dedent('''
         Path("work.txt").write_text(Path("work.txt").read_text() + mode + "\\n" if Path("work.txt").exists()
                                     else mode + "\\n")
         git("add", "work.txt")
-        git("-c", "commit.gpgsign=false", "commit", "-qm", f"fix: {mode}")
+        # One `Closes: sd:N` trailer per item the brief lists, as the brief asks; `skip` leaves out the last
+        # one, as a builder that skips an item for the operator does, and `none` delivers nothing.
+        prompt = sys.argv[sys.argv.index("-p") + 1]
+        items = re.findall(r"^- sd:(\\d+)", prompt, re.M)
+        items = [] if mode == "none" else items[:-1] if mode == "skip" else items
+        trailers = "".join(f"\\nCloses: sd:{item}" for item in items)
+        git("-c", "commit.gpgsign=false", "commit", "-qm", f"fix: {mode}" + (f"\\n{trailers}" if items else ""))
         final = {"type": "result", "subtype": "success", "is_error": False, "permission_denials": [],
                  "session_id": session, "result": f"built ({mode})", "total_cost_usd": 0.42,
                  "usage": {"input_tokens": 10, "output_tokens": 20}}
@@ -205,6 +216,7 @@ class Case(unittest.TestCase):
 
     def supervisor(self, ident=None, **options):
         options = {"beat_seconds": 0.2, "timeout": 30, "grace": 0.5, **options}
+        options = {"cited": ADAPTER.cited, **options}
         return build_run.Supervisor(self.db, ident or self.bundle["id"], tools=self.tools, log_root=self.logs,
                                     environ=self.env, **options)
 
@@ -297,6 +309,46 @@ class Supervise(Case):
         self.assertIn("built (pass)", note.fetchone()["body"])
         self.assertEqual(self.remote_branches(), "main", "the fake lane pushed nothing; the supervisor neither")
         self.assertIsNone(self.latest()["cancel_requested"])
+
+    def test_a_skipped_member_is_not_delivered(self):
+        """Review round 2: only the members a branch commit's `Closes:` trailer cites are enqueued and done."""
+        self.press(2)
+        self.write_pr()
+        self.plan(claude=["skip"], sd_review=["clean"])
+        self.assertEqual(self.supervisor().run()["step"], "enqueued")
+        enqueue = next(call["argv"] for call in self.calls("sd-ship") if "enqueue" in call["argv"])
+        self.assertEqual([enqueue[n + 1] for n, arg in enumerate(enqueue) if arg == "--item"], [str(self.items[0])])
+        self.assertEqual(self.statuses(), ["in_progress", "blocked"])
+        self.assertEqual([m["status"] for m in build.run(self.db, self.bundle["id"])["members"]], ["done", "blocked"])
+        note = self.db.execute("SELECT body FROM note WHERE item = ? AND body LIKE '%Closes: sd:%'", (self.items[1],))
+        self.assertIsNotNone(note.fetchone(), "the skipped item says why it stays open")
+
+    def test_the_lane_entry_is_found_by_any_delivered_member(self):
+        """The entry's item is the first member delivered, so the lookups (resume, watch) read every member."""
+        (self.plans / "lane.json").write_text(json.dumps([{"id": "e1", "item": 7, "status": "merged",
+                                                           "enqueue_seq": 1}]))
+        found = build_run.lane_entry(self.tools.ship, self.repo, [5, 7], env=self.env)
+        self.assertEqual(found and found["id"], "e1")
+        self.assertIsNone(build_run.lane_entry(self.tools.ship, self.repo, [5], env=self.env))
+
+    def test_an_unread_delivery_writes_nothing(self):
+        """`cited` None (the commits were not read) is unknown: no enqueue, no outcome; the reap retries."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.assertIsNone(ADAPTER.cited(self.repo, "origin/no-such-branch", "HEAD", ""))
+        ended = self.supervisor(cited=lambda *_: None).run()
+        self.assertEqual((ended["outcome"], self.latest()["outcome"]), (None, None))
+        self.assertEqual([call for call in self.calls("sd-ship") if "enqueue" in call["argv"]], [])
+
+    def test_a_branch_that_delivers_nothing_blocks(self):
+        self.press()
+        self.write_pr()
+        self.plan(claude=["none"], sd_review=["clean"])
+        ended = self.supervisor().run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("delivers no item", ended["blocked"])
+        self.assertEqual([call for call in self.calls("sd-ship") if "enqueue" in call["argv"]], [])
 
     def test_judge_last_line_not_exit(self):
         """Failure table, Judge: exit 0 (here 3) with a permission denial blocks with a question; the exit code is no verdict."""
@@ -494,7 +546,7 @@ class Supervise(Case):
         support.git(self.repo, "worktree", "add", "-q", "-b", self.bundle["branch"], str(work), "origin/main")
         (work / "work.txt").write_text("done\n")
         support.git(work, "add", "work.txt")
-        support.git(work, "-c", "commit.gpgsign=false", "commit", "-qm", "fix: done")
+        support.git(work, "-c", "commit.gpgsign=false", "commit", "-qm", f"fix: done\n\nCloses: sd:{self.items[0]}")
         head = support.git(work, "rev-parse", "HEAD")
         (self.plans / "lane.json").write_text(json.dumps([{"id": "e1", "item": self.items[0], "status": "pending",
                                                            "enqueue_seq": 1, "expected_head": head}]))
@@ -541,7 +593,7 @@ class Supervise(Case):
     def merge_to_cleaning(self):
         entries = json.loads((self.plans / "lane.json").read_text())
         (self.plans / "lane.json").write_text(json.dumps([{**row, "status": "merged"} for row in entries]))
-        lane = lambda row, item: build_run.lane_entry(self.tools.ship, self.repo, item)  # noqa: E731
+        lane = lambda row, items: build_run.lane_entry(self.tools.ship, self.repo, items)  # noqa: E731
         exited = build.Probe()
         exited.alive = lambda pid: False if pid == os.getpid() else build.Probe.alive(pid)  # type: ignore[method-assign]
         exited.group = lambda pgid: False if pgid == os.getpgrp() else build.Probe.group(pgid)  # type: ignore[method-assign]
@@ -556,8 +608,8 @@ class Tick(Case):
         self.spawned: list[str] = []
         self.entries: dict[int, Any] = {}
 
-    def lane(self, row, item):
-        answer = self.entries.get(item)
+    def lane(self, row, items):
+        answer = next((self.entries[item] for item in items if item in self.entries), None)
         if isinstance(answer, Exception):
             raise answer
         return answer
@@ -628,9 +680,7 @@ class Tick(Case):
 
     def test_every_lane_end_short_of_a_merge_ends_the_run(self):
         """Review round 1: the lane's own list of ends short of a merge, and a cancel, each end the run."""
-        with mock.patch("sys.path", [str(BIN), *sys.path]):
-            lane = importlib.import_module("sd_lane")
-        for status in (*lane.BLOCKED, "cancelled"):
+        for status in (*LANE.BLOCKED, "cancelled"):
             with self.subTest(status=status):
                 run = self.enqueued()
                 self.entries[self.items[0]] = {"id": "e1", "status": status, "reason": "stopped"}

@@ -169,6 +169,23 @@ def interactive_builders(connection: Any, now: str, key: Any) -> list[dict] | No
         sys.path.remove(str(BIN.parent / "dashboard"))
 
 
+def cited(worktree: Path, base: str, head: str, body: str) -> set[int] | None:
+    """The items the lane reads the branch as delivering, as `lane enqueue --deliver` reads them; None when unread.
+
+    `sd_ship_body.cited_ids` over the commits `head` adds to `base` and the
+    body: each `Closes: sd:N` trailer, less a reverted commit's.
+    """
+    import sd_lane
+    import sd_ship_body
+    branch = base.removeprefix("origin/")
+    try:
+        commits = sd_lane.branch_commits(worktree, branch, head)
+        parents = sd_lane.branch_parents(worktree, branch, head)
+    except sd_lane.LaneError:
+        return None
+    return set(sd_ship_body.cited_ids(body, commits, parents))
+
+
 def tools(build_run: Any) -> Any:
     return build_run.Tools(claude=["claude"], review=[str(BIN / "sd-review")], ship=[str(BIN / "sd-ship")],
                            lint=[str(BIN / "sd-docs-lint")])
@@ -197,8 +214,8 @@ def dispatch_builds(args: argparse.Namespace) -> int:
             build_run.spawn([sys.executable, str(BIN / "sd"), "assignments", "supervise", ident],
                             log=build_run.log_dir(root, repo) / f"{ident}.supervisor.log")
 
-        def lane(row: dict, item: int) -> dict | None:
-            return build_run.lane_entry(tools(build_run).ship, build_run.paths.expand(row["repo"]), item)
+        def lane(row: dict, items: list[int]) -> dict | None:
+            return build_run.lane_entry(tools(build_run).ship, build_run.paths.expand(row["repo"]), items)
 
         result = build_run.dispatch(connection, owner="build-dispatch", load=load, load_cap=load_cap,
                                     interactive=interactive_builders(connection, build_run.now(), build_run.paths.key),
@@ -225,7 +242,7 @@ def supervise_build(args: argparse.Namespace) -> int:
         raise WorkRefusal("sd.bulk_storage_root is unset, so a build run has no log folder")
     connection = sd_handoff_rows.connect(sd_db, write=True)
     try:
-        result = build_run.Supervisor(connection, args.run, tools=tools(build_run), log_root=root).run()
+        result = build_run.Supervisor(connection, args.run, tools=tools(build_run), log_root=root, cited=cited).run()
     except (sd_db.SdDbError, ValueError) as error:
         raise WorkRefusal(str(error)) from error
     finally:

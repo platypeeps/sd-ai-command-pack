@@ -31,6 +31,7 @@ import signal
 import subprocess
 import sys
 import time
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -73,7 +74,8 @@ Rules:
 - Work only in {worktree}. Read each item with `sd task show N` and the repository's CLAUDE.md first.
 - The dispatcher owns every item's status: never run `sd task status`, never push, never open a pull request.
 - Write a test that fails before each fix, then make it pass; skip no test.
-- End the commit that delivers a whole item with a `Closes: sd:N` trailer. Add no attribution lines.
+- End the commit that delivers a whole item with a `Closes: sd:N` trailer: an item no trailer names
+  stays open and is not delivered. Add no attribution lines.
 - Keep every commit line, and every body line, at 72 characters or less outside a code fence:
   `sd-ship lane enqueue` refuses a longer one.
 - Write the pull-request title, a Conventional Commit of {title_max} characters or less, alone to {title}.
@@ -183,8 +185,11 @@ def _read(argv: list[str], *, env: dict | None = None) -> str:
     return done.stdout
 
 
-def lane_entry(ship: list[str], cwd: Path | str, item: int, *, env: dict | None = None) -> dict | None:
-    """The newest lane entry of `item` by enqueue order, from `sd-ship lane list`; None when it has none."""
+def lane_entry(ship: list[str], cwd: Path | str, items: Collection[int], *, env: dict | None = None) -> dict | None:
+    """The newest lane entry of any of `items` by enqueue order, from `sd-ship lane list`; None when there is none.
+
+    Any member: the entry's item is the first member the branch delivers.
+    """
     try:
         answer = json.loads(_read([*ship, "-C", str(cwd), "lane", "list"], env=env))
     except ValueError:
@@ -192,7 +197,7 @@ def lane_entry(ship: list[str], cwd: Path | str, item: int, *, env: dict | None 
     entries = answer.get("entries") if isinstance(answer, dict) and answer.get("ok") else None
     if not isinstance(entries, list):
         raise Unread("sd-ship lane list gave no entries")
-    mine = [row for row in entries if isinstance(row, dict) and row.get("item") == item]
+    mine = [row for row in entries if isinstance(row, dict) and row.get("item") in items]
     return max(mine, key=lambda row: row.get("enqueue_seq") or 0) if mine else None
 
 
@@ -201,7 +206,7 @@ def _lead_item(connection, ident: str) -> tuple[int, list[int]]:
     return members[0]["item"], [member["item"] for member in members[1:]]
 
 
-def watch(connection, *, lane: Callable[[dict, int], dict | None], probe=Probe) -> list[dict]:
+def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=Probe) -> list[dict]:
     """Step 7's start: each open `enqueued` run whose lane entry merged moves to `cleaning`; one whose entry
     failed, was skipped or was cancelled ends `lane_failed`. An unread lane changes nothing this tick.
 
@@ -212,9 +217,10 @@ def watch(connection, *, lane: Callable[[dict, int], dict | None], probe=Probe) 
     for row in build.open_runs(connection):
         if row["step"] != "enqueued" or row["outcome"] is not None:
             continue
-        lead, _ = _lead_item(connection, row["id"])
+        delivered = [member["item"] for member in build.run(connection, row["id"])["members"]
+                     if member["status"] == "done"]
         try:
-            entry = lane(row, lead)
+            entry = lane(row, delivered)
         except Unread:
             continue
         status = entry.get("status") if entry else None
@@ -229,7 +235,7 @@ def watch(connection, *, lane: Callable[[dict, int], dict | None], probe=Probe) 
 
 
 def dispatch(connection, *, owner: str, load: float | None, load_cap: float | None, interactive: list[dict] | None,
-             spawn: Callable[[str], Any], lane: Callable[[dict, int], dict | None], why: str = "",
+             spawn: Callable[[str], Any], lane: Callable[[dict, list[int]], dict | None], why: str = "",
              root: Path | None = None, probe=Probe, kill=build.kill_group) -> dict:
     """One tick: heartbeat, reap, watch the lane, claim, spawn; what each did.
 
@@ -276,10 +282,13 @@ def log_dir(log_root: Path, repo: str) -> Path:
 class Supervisor:
     """One run's supervisor: `run()` walks its steps and returns how it ended."""
 
-    def __init__(self, connection, ident: str, *, tools: Tools, log_root: Path, environ: dict | None = None,
+    def __init__(self, connection, ident: str, *, tools: Tools, log_root: Path,
+                 cited: Callable[[Path, str, str, str], Collection[int] | None], environ: dict | None = None,
                  beat_seconds: float = BEAT_SECONDS, timeout: float = TIMEOUT_SECONDS, grace: float = GRACE_SECONDS,
                  probe=Probe):
-        self.db, self.ident, self.tools, self.probe = connection, ident, tools, probe
+        """`cited(worktree, base, head, body)` is the items the lane reads the branch as delivering, None when unread:
+        the lane's own reader, which lives beside it in `bin/`."""
+        self.db, self.ident, self.tools, self.probe, self.cited = connection, ident, tools, probe, cited
         self.beat_seconds, self.timeout, self.grace = beat_seconds, timeout, grace
         self.row = build.run(connection, ident)
         self.logs = log_dir(log_root, self.row["repo"])
@@ -421,9 +430,21 @@ class Supervisor:
             if not build.write(self.db, self.ident, step="reviewing"):
                 raise Lost
             return "reviewing"
-        entry = lane_entry(self.tools.ship, self.work, self.lead, env=self.env)
+        try:
+            body = self.body.read_text(encoding="utf-8")
+        except OSError:
+            body = ""
+        cited = self.cited(self.work, self.base(), head, body)
+        if cited is None:
+            raise Unread(f"the commits {head[:12]} adds were not read")
+        # Delivery as the lane reads it: a member no `Closes:` trailer cites was skipped, and stays open.
+        delivered = [item for item in [self.lead, *self.others] if item in cited]
+        if not delivered:
+            return self.finish("blocked", "the branch delivers no item: no commit has a `Closes: sd:N` trailer "
+                                          "for one of the run's items")
+        entry = lane_entry(self.tools.ship, self.work, delivered, env=self.env)
         if entry and entry.get("status") != "cancelled" and entry.get("expected_head") == head:
-            return self.lane_done(entry)
+            return self.lane_done(entry, delivered)
         try:
             title = self.title.read_text(encoding="utf-8").strip()
         except OSError:
@@ -434,8 +455,8 @@ class Supervisor:
             return self.finish("blocked", f"sd-docs-lint refused the body at {self.body}; see {self.out('lint')}")
         out = self.out("enqueue")
         out.write_bytes(b"")
-        items = [arg for item in [self.lead, *self.others] for arg in ("--item", str(item))]
-        # One run is each item's whole delivery, so it is the last pull request: `--deliver`.
+        items = [arg for item in delivered for arg in ("--item", str(item))]
+        # The run is each delivered item's whole delivery, so it is the last pull request: `--deliver`.
         self.child([*self.tools.ship, "-C", str(self.work), "lane", "enqueue", *items, "--deliver", "--title", title,
                     "--body-file", str(self.body), "--expected-head", head], cwd=self.work, name="enqueue")
         try:
@@ -445,17 +466,17 @@ class Supervisor:
         if not isinstance(answer, dict) or answer.get("ok") is not True:
             reason = answer.get("error") if isinstance(answer, dict) else "no JSON answer"
             return self.finish("blocked", f"sd-ship lane enqueue refused: {reason}; see {out}")
-        return self.lane_done(answer)
+        return self.lane_done(answer, delivered)
 
-    def lane_done(self, entry: dict) -> str | dict:
-        if build.enqueued(self.db, self.ident):
-            add_note(self.db, self.lead, "comment",
+    def lane_done(self, entry: dict, delivered: list[int]) -> str | dict:
+        if build.enqueued(self.db, self.ident, delivered):
+            add_note(self.db, delivered[0], "comment",
                      f"Build run {self.ident} enqueued {self.row['branch']} in the lane"
                      f"{' as entry ' + str(entry.get('id')) if entry.get('id') else ''}")
             return "enqueued"
         if self.fresh()["cancel_requested"]:
             return self.finish("blocked", f"a cancel was asked after the lane entry was written; cancel it with "
-                                          f"`sd-ship lane cancel {self.lead}`")
+                                          f"`sd-ship lane cancel {delivered[0]}`")
         raise Lost
 
     def cleaning(self) -> dict:
