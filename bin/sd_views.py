@@ -263,4 +263,8 @@ def render_sections(found: dict[str, Any], *, now: datetime.datetime, width: int
         if key == "decisions" and (batched := found["summary"].get("review_questions")):
             lines.append(f"+{batched} review {'question waits' if batched == 1 else 'questions wait'}"
                          " on the dashboard's Review page")
+        if key == "decisions" and found["summary"].get("grill"):
+            count, items = found["summary"]["grill"], ", ".join(f"sd:{row['id']}" for row in found["grill"])
+            lines.append(f"Grill ready: {count} {'question' if count == 1 else 'questions'} on {items}"
+                         "; say 'grill' in a fresh session")
     return "\n".join(lines) + "\n"

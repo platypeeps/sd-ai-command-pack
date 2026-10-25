@@ -243,6 +243,31 @@ class SdToday(Zone):
         self.assertIn("+1 review question waits on the dashboard's Review page",
                       sd_views.render_sections(found, now=MOMENT, width=100).splitlines())
 
+    def test_a_ready_grill_is_a_line_under_decisions_not_rows(self):
+        """pack sd:6022: the KISS audit's seed questions wait until the operator says 'grill' in a fresh session."""
+        fill(self.connection)
+        grilled = sd_db.create_item(self.connection, kind="task", title="Weekly grill", source="task-ref",
+                                    external_id="grill:2026-09-07")
+        for number in range(2):
+            add_note(self.connection, grilled, "question", f"Keep mechanism {number}?\nOption: Keep\nOption: Drop")
+        found = today.sections(self.connection, now=NOW, gate=GATE)
+        lines = sd_views.render_sections(found, now=MOMENT, width=100).splitlines()
+        at = lines.index("Decisions (1)")
+        self.assertEqual(lines[at + 4], f"Grill ready: 2 questions on sd:{grilled}; say 'grill' in a fresh session")
+        found["summary"]["grill"] = 0
+        self.assertFalse([line for line in sd_views.render_sections(found, now=MOMENT, width=100).splitlines()
+                          if line.startswith("Grill ready")])
+
+    def test_the_skill_that_answers_grill_reads_the_line_today_prints(self):
+        """pack sd:6022: saying 'grill' loads sd-next, which finds the grill by the line `sd today` prints."""
+        skill = (ROOT / "skills" / "sd-next" / "SKILL.md").read_text(encoding="utf-8")
+        description = next(line for line in skill.splitlines() if line.startswith("description:"))
+        self.assertIn('says "grill"', description)
+        self.assertIn("grep '^Grill ready'", skill)
+        self.assertIn("Grill ready: N questions on sd:X; say 'grill' in a fresh session", skill)
+        self.assertIn("the ref `grill:<date>`", skill)
+        self.assertTrue(today.GRILL.endswith("IS 'grill:')"))
+
     def test_an_empty_store_prints_every_heading(self):
         text = sd_views.render_sections(today.sections(self.connection, now=NOW), now=MOMENT, width=100)
         self.assertEqual(text.splitlines()[2::2], [f"{heading} (0)" for heading in sd_views.HEADINGS.values()])
