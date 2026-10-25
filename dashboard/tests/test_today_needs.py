@@ -7,6 +7,7 @@ nothing the list does not show. A lane read that failed is a dark row, never an 
 
 from __future__ import annotations
 
+import sqlite3
 from unittest import mock
 
 from sd_dashboard import now_screen, queue_screen
@@ -53,6 +54,24 @@ class TheBadge(ReportsCase):
         self.assertIn(f"report:{item}", listed)
         look = sum(row["band"] == "look" for row in doc["needs"])
         self.assertEqual((doc["attention"]["state"], doc["attention"]["n"]), ("caution", look))
+
+    def test_a_ready_grill_is_one_queued_row_that_says_how_to_start_it(self):
+        """pack sd:6022: the KISS audit files the weekly grill's questions; Today says it is ready, once."""
+        from sd_db import create_item
+        from sd_db.writes import add_note
+
+        grilled = create_item(self.connection, kind="task", title="Weekly grill", source="task-ref",
+                              external_id="grill:2026-09-07")
+        for number in range(3):
+            add_note(self.connection, grilled, "question", f"Keep mechanism {number}?\nOption: Keep\nOption: Drop")
+        rows = [row for row in self.today()["needs"] if row["id"] == f"grill:{grilled}"]
+        self.assertEqual([(row["band"], row["item"], row["what"], row["detail"]) for row in rows],
+                         [("queued", grilled, "Grill ready: 3 questions", "say 'grill' in a fresh session")])
+
+    def test_a_grill_read_that_failed_is_a_dark_row(self):
+        with mock.patch("sd_db.today.grill", side_effect=sqlite3.OperationalError("database is locked")):
+            dark = [row for row in self.today()["needs"] if row["id"] == "dark:grill"]
+        self.assertEqual([(row["band"], row["detail"]) for row in dark], [("broken", "database is locked")])
 
     def test_a_blocked_lane_entry_is_a_broken_row_and_outranks_a_report(self):
         self.report("nas-prune", "r1")

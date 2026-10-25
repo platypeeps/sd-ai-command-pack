@@ -114,6 +114,8 @@ def catalog(connection, *, root=None, home=None, now=None):
     use = {}
     for row in connection.execute("SELECT skill,surface,mode,count(*) AS count FROM skill_use GROUP BY skill,surface,mode"):
         use.setdefault(row["skill"], []).append({"surface": row["surface"] or "unknown", "mode": row["mode"] or "unknown", "count": row["count"]})
+    # Each skill's newest use, so a reader can list the skills nobody used lately (pack sd:5992).
+    last = dict(connection.execute("SELECT skill, max(timestamp) FROM skill_use GROUP BY skill").fetchall())
     installed = {}
     for entry in receipt.get("owned", []):
         if not isinstance(entry, dict) or not str(entry.get("kind", "")).startswith("skill:"):
@@ -144,6 +146,7 @@ def catalog(connection, *, root=None, home=None, now=None):
             status = "path" if membership else "trial" if trial and trial["expires"] > moment else "contrib"
             value = {"name": name, "description": description, "when": usage, "path": str(path.relative_to(root)),
                      "paths": membership, "status": status, "trial": trial, "uses": use.get(name, []),
+                     "last": last.get(name),
                      "installed": installed.get(name, []), "source_sha256": _hash(files), "files": files}
             value["revision"] = _hash(value)
             skills.append(value)
