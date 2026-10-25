@@ -64,6 +64,7 @@ STASHES = (
     'echo "open; git -C /tmp/wt stash', "echo $(echo $(git stash))",
     "git status # x\ngit stash pop", "git stash list; git stash pop",
     "git stash show && git stash drop", "2>/dev/null git stash pop", "/usr/bin/env git stash pop",
+    "git \\\nstash pop", "git stash\nlist=done",
 )
 
 

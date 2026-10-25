@@ -56,8 +56,10 @@ STASH = (
 
 SLEEP = re.compile(r"\s*sleep(\s|;|&|\||$)")
 
-#: A line naming `git`, then `stash` not followed by a read-only verb.
-STASHES = re.compile(r"\bgit\b[^\n]*?\bstash\b(?!\s+(list|show)\b)")
+#: A line naming `git`, then `stash` not followed by a read-only verb on the
+#: same line. `reason` joins continued lines first, so `git \` + newline +
+#: `stash` is one line.
+STASHES = re.compile(r"\bgit\b[^\n]*?\bstash\b(?![ \t]+(list|show)\b)")
 
 
 def reason(payload: dict) -> str | None:
@@ -70,7 +72,7 @@ def reason(payload: dict) -> str | None:
     tool_input = payload["tool_input"]
     if SLEEP.match(tool_input["command"]):
         return WAIT
-    if STASHES.search(tool_input["command"]):
+    if STASHES.search(tool_input["command"].replace("\\\n", " ")):
         return STASH
     timeout = tool_input.get("timeout")
     if tool_input.get("run_in_background") or not isinstance(timeout, (int, float)) or timeout < TIMEOUT_MS:
