@@ -12,7 +12,7 @@ from importlib import import_module
 from pathlib import Path
 from typing import Any
 
-from sd_db import build, operations, workflow
+from sd_db import build, operations, recovery, workflow
 from sd_db.database import connect
 from sd_db.errors import BackupError
 from sd_db.migrate import initialise
@@ -22,6 +22,7 @@ from sd_db.writes import create_item, record_state, transition, upsert_repo
 #: `sd_db.backup` the module: the package exports the function under that name.
 backup = import_module("sd_db.backup")
 A, B = "/fixture/a", "/fixture/b"
+START = "Sat Oct 24 09:00:00 2026"
 IDLE: dict[str, Any] = {"load": 1.0, "load_cap": 40.0, "interactive": []}
 
 
@@ -340,16 +341,81 @@ class Reap(Case):
 
     def test_reap_resumes_kill(self):
         """Failure table, Reap: a tick killed between the compare-and-set and the kill; the next kills before any retry."""
-        build.write(self.db, self.bundle["id"], builder_pgid=777)
-        self.db.execute("UPDATE runner_run SET outcome = 'interrupted' WHERE id = ?", (self.bundle["id"],))
+        self.ended(builder_pgid=777, builder_start=START)
         holding = Kill(self.db, gone=False)
-        self.assertEqual(build.reap(self.db, kill=holding), [])
+        self.assertEqual(build.reap(self.db, probe=Probe(), kill=holding), [])
         self.assertEqual(holding.calls, [(777, 1)])
         self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 1, "no retry while the group may live")
         gone = Kill(self.db)
-        settled = build.reap(self.db, kill=gone)
+        settled = build.reap(self.db, probe=Probe(), kill=gone)
         self.assertEqual(gone.calls, [(777, 1)], "the kill came before the retry's new run")
         self.assertIsNotNone(settled[0]["retry"])
+
+    def ended(self, **fields):
+        """The run as a reap that stopped after its compare-and-set left it."""
+        build.write(self.db, self.bundle["id"], **fields)
+        self.db.execute("UPDATE runner_run SET outcome = 'interrupted' WHERE id = ?", (self.bundle["id"],))
+
+    def not_signalled(self, probe, **fields):
+        """Failure table, Reap kill: a group not proven is gone; the reap settles the run and signals nothing."""
+        self.ended(builder_pgid=777, **fields)
+        kill = Kill(self.db)
+        settled = build.reap(self.db, probe=probe, kill=kill)
+        self.assertEqual(kill.calls, [], "a group not proven is not this run's")
+        self.assertEqual([row["run"] for row in settled], [self.bundle["id"]])
+
+    def test_a_reused_builder_pid_is_never_signalled(self):
+        self.not_signalled(Probe(started="Sat Oct 24 08:00:00 2026"), builder_start=START)
+
+    def test_an_unread_builder_start_is_never_signalled(self):
+        self.not_signalled(Probe(started=None), builder_start=START)
+
+    def test_a_builder_without_a_recorded_start_is_never_signalled(self):
+        self.not_signalled(Probe())
+
+    def test_a_gone_or_unknown_builder_pid_is_never_signalled(self):
+        self.not_signalled(Probe(alive=None), builder_start=START)
+        self.db.execute("UPDATE runner_run SET outcome = 'interrupted', builder_pgid = 777, builder_start = ? "
+                        "WHERE released_at IS NULL", (START,))
+        kill = Kill(self.db)
+        self.assertEqual(len(build.reap(self.db, probe=Probe(alive=False), kill=kill)), 1)
+        self.assertEqual(kill.calls, [])
+
+    def test_a_restore_abandons_every_open_build_run_unretried(self):
+        """Failure table, Restore: the restored store's runs end abandoned with the block; no reap signals or reruns them."""
+        self.ended(builder_pgid=777, builder_start=START)
+        build.queue(self.db, [self.item(repo=B)], who="operator")
+        other = self.claim()
+        recovery.prepare_restore(self.db)
+        kill = Kill(self.db)
+        self.assertEqual(build.reap(self.db, now=self.stale(), probe=Probe(), kill=kill), [])
+        self.assertEqual(kill.calls, [])
+        rows = self.db.execute("SELECT outcome, released_at IS NOT NULL AS released FROM runner_run ORDER BY id IN (?, ?)",
+                               (self.bundle["id"], other["id"])).fetchall()
+        self.assertEqual([(row["outcome"], row["released"]) for row in rows], [("abandoned", 1), ("abandoned", 1)])
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 0)
+        self.assertEqual(self.count("SELECT COUNT(*) FROM assignment WHERE status = 'blocked'"), 3)
+
+    def test_a_reimport_pending_holds_the_reap(self):
+        """Failure table, Restore: a run the restore did not see is left alone until the reimport ends."""
+        record_state(self.db, "restore", body={})
+        kill = Kill(self.db)
+        self.assertEqual(build.reap(self.db, now=self.stale(), probe=Probe(), kill=kill), [])
+        self.assertIsNone(build.run(self.db, self.bundle["id"])["outcome"])
+
+    def test_a_bundle_with_no_running_member_is_released_not_retried(self):
+        """Failure table, Retry: members blocked by hand under an open run: released, no retry, no duplicate run."""
+        self.db.execute("UPDATE assignment SET status = 'blocked' WHERE scope = 'build'")
+        settled = build.reap(self.db, now=self.stale(), probe=Probe())
+        self.assertEqual([(row["outcome"], row["retry"]) for row in settled], [("interrupted", None)])
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run WHERE released_at IS NULL"), 0)
+
+    def test_a_retry_numbers_after_the_leads_last_run(self):
+        """Failure table, Retry: a run count behind the lead's runs still gives the retry a fresh number."""
+        self.db.execute("UPDATE assignment SET run_count = 0 WHERE scope = 'build'")
+        retry = build.run(self.db, build.reap(self.db, now=self.stale(), probe=Probe())[0]["retry"])
+        self.assertEqual(retry["run"], 2)
+        self.assertEqual(self.count("SELECT COUNT(*) FROM assignment WHERE scope = 'build' AND run_count = 2"), 2)
 
     def test_cancel_dead_supervisor(self):
         """Failure table, Cancel: the supervisor is dead at cancel; the reap ends the bundle cancelled, not retried."""

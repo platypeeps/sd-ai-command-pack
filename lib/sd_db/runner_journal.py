@@ -35,7 +35,7 @@ def restore_pending(database: Path) -> bool:
 #: `detached_from` (sd:2581) and 042's build columns (pack sd:6093). A runner
 #: run never writes the build columns, so its row holds NULL in each too.
 LATER_COLUMNS = ("detached_from", "step", "heartbeat_at", "model", "session_id",
-                 "log_path", "builder_pgid", "final")
+                 "log_path", "builder_pgid", "builder_start", "final")
 
 
 def canonical(record: dict) -> dict:

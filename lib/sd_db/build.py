@@ -60,7 +60,7 @@ STEPS = ("claimed", "worktree", "building", "reviewing", "fixing", "enqueuing", 
 OPUS, SONNET = "opus", "sonnet"
 #: The fields a supervisor may write on its own open run.
 RUN_FIELDS = frozenset({"step", "heartbeat_at", "supervisor_pid", "supervisor_start", "session_id",
-                        "log_path", "builder_pgid", "final", "detail", "model"})
+                        "log_path", "builder_pgid", "builder_start", "final", "detail", "model"})
 ACTIVE = ("queued", "running", "ending")
 
 
@@ -255,7 +255,7 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
             with transaction(connection):
                 stamp = clock()
                 taken = connection.execute(
-                    f"UPDATE assignment SET status = 'running', started = ?, ended = NULL, run_count = run_count + 1, "
+                    f"UPDATE assignment SET status = 'running', started = ?, ended = NULL, "
                     f"parent = CASE WHEN id = ? THEN NULL ELSE ? END "
                     f"WHERE id IN ({marks}) AND status = 'queued' AND scope = ? AND {_RECHECK}",
                     (stamp, lead, lead, *ids, SCOPE)).rowcount
@@ -282,7 +282,11 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
 
 def _open_run(connection, lead: int, *, repo: str, owner: str, step: str, model: str, work: Path, stamp: str,
               session_id: str | None = None) -> str:
-    number = connection.execute("SELECT run_count FROM assignment WHERE id = ?", (lead,)).fetchone()["run_count"]
+    """The lead's next run and its lease, numbered after every run the lead has, and each member's count moved to it."""
+    number = connection.execute("SELECT MAX(COALESCE((SELECT MAX(run) FROM runner_run WHERE assignment = ?), 0), "
+                                "run_count) + 1 FROM assignment WHERE id = ?", (lead, lead)).fetchone()[0]
+    connection.execute("UPDATE assignment SET run_count = ? WHERE (id = ? OR parent = ?) AND status = 'running' "
+                       "AND scope = ?", (number, lead, lead, SCOPE))
     ident = uuid.uuid4().hex
     connection.execute(
         "INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, retained_path, start_step, "
@@ -407,6 +411,18 @@ def alive(row: dict, *, now: str, probe=Probe) -> bool:
     return started is None or started == row["supervisor_start"]
 
 
+def same_process(pid: int | None, start: str | None, *, probe=Probe) -> bool:
+    """Whether `pid` is the process a run recorded: alive, and started at `start`.
+
+    Anything less is not proof: no pid or start recorded, a pid gone, a start
+    that differs (the pid was reused) or one the probe cannot read. Nothing is
+    signalled without it.
+    """
+    if pid is None or not start or probe.alive(pid) is not True:
+        return False
+    return probe.started(pid) == start
+
+
 def kill_group(pgid: int) -> bool:
     """SIGKILL a builder's process group; True once no member lives, False while one may (next reap tries again)."""
     if not isinstance(pgid, int) or pgid <= 1 or pgid == os.getpgrp():
@@ -434,12 +450,20 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
     1. Compare-and-set `outcome` (`interrupted`, or `cancelled` when a cancel
        was asked) where `heartbeat_at` is the value read; a lost race means the
        supervisor beat, and the run is left alone.
-    2. Kill the builder's group. Until no member lives the run stays ended and
-       unreleased, and every later reap kills again before anything else.
+    2. Kill the builder's group, only while its leader is the process the run
+       recorded (`same_process` on `builder_pgid` and `builder_start`); a group
+       not proven is gone, never signalled. Until a proven group dies the run
+       stays ended and unreleased, and every later reap kills again first.
     3. `_settle` it in one transaction.
+
+    Nothing is reaped while a restore reimport is pending: `abandon` ended
+    every run the restore found, and a run it did not find is not this
+    store's to judge.
     """
     now = now or clock()
-    settled = []
+    settled: list[dict] = []
+    if restoration_pending(connection):
+        return settled
     for row in open_runs(connection):
         if row["outcome"] is None:
             if alive(row, now=now, probe=probe):
@@ -453,7 +477,7 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
                         "AND outcome IS NULL AND released_at IS NULL AND heartbeat_at IS ?",
                         (outcome, detail, clock(), row["id"], row["heartbeat_at"])).rowcount != 1:
                     continue
-        if row["builder_pgid"] is not None and not kill(row["builder_pgid"]):
+        if same_process(row["builder_pgid"], row["builder_start"], probe=probe) and not kill(row["builder_pgid"]):
             continue
         result = _settle(connection, row["id"])
         if result is not None:
@@ -481,9 +505,11 @@ def _settle(connection, ident: str) -> dict | None:
         elif row["outcome"] == "interrupted":
             losses = connection.execute("SELECT COUNT(*) FROM runner_run WHERE assignment = ? AND outcome = 'interrupted'",
                                         (lead,)).fetchone()[0]
-            if losses <= RETRIES:
-                connection.execute(f"UPDATE assignment SET run_count = run_count + 1 WHERE id IN "
-                                   f"({', '.join('?' for _ in members)})", [member["id"] for member in members])
+            if not members:
+                # Nothing of the bundle runs any more (a hand edit, an old
+                # restore): released, and nothing to retry.
+                pass
+            elif losses <= RETRIES:
                 retry = _open_run(connection, lead, repo=row["repo"], owner=row["owner"], step=row["step"] or "claimed",
                                   model=row["model"] or OPUS, work=Path(row["work_path"]), stamp=stamp,
                                   session_id=row["session_id"])
@@ -500,6 +526,25 @@ def _settle(connection, ident: str) -> dict | None:
                     add_note(connection, member["item"], "followup",
                              f"Build blocked: {reason}. Look at the log and the worktree, then requeue or cancel.")
         return {"run": ident, "outcome": row["outcome"], "retry": retry}
+
+
+def abandon(connection, reason: str) -> list[str]:
+    """End every unreleased build run `abandoned`: released, its lease too, never retried; the ids.
+
+    A restore and a promotion call it in the transaction that blocks the
+    assignments or releases the leases: the processes those rows name ran on
+    a store, or a machine, that is no longer this one, so nothing may signal
+    them or retry them from here.
+    """
+    with transaction(connection):
+        stamp = clock()
+        runs = [row["id"] for row in open_runs(connection)]
+        for ident in runs:
+            connection.execute("UPDATE runner_run SET outcome = 'abandoned', detail = COALESCE(detail, ?), "
+                               "released_at = ?, updated_at = ? WHERE id = ?", (reason, stamp, stamp, ident))
+            connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
+                               (stamp, ident))
+        return runs
 
 
 def _move(connection, item: int, target: str, reason: str) -> None:
