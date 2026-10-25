@@ -31,7 +31,8 @@ nothing used it by then, the next install run removes it and says so.
 
 The split is not a ranking. A path says which skills are steps in one
 sequence somebody actually runs, and that is what these three say.
-`sd skill list --usage` prints each skill's recorded uses. A skill in
+`sd skill list --usage` prints each skill's recorded uses and the date
+of its last use; the weekly KISS audit lists the unused ones. A skill in
 `contrib/` is one command away, and use is what moves it.
 
 `sd skill intake <GitHub URL>` judges an outside skill against the installed

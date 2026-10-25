@@ -150,6 +150,19 @@ class TheListVerb(TrialCase):
         self.assertIn("uses=3", self.line(output, "sd-plan"))
         self.assertIn("uses=0", self.line(output, "sd-ship"))
 
+    def test_usage_prints_each_skills_last_use_for_the_weekly_audit(self):
+        """pack sd:5992: the KISS audit lists unused skills; an all-time count cannot say "not lately"."""
+        sd_db.record_skill_use(self.connection, "sd-plan", surface="claude", timestamp="2026-08-01T09:00:00Z")
+        sd_db.record_skill_use(self.connection, "sd-plan", surface="codex", timestamp="2026-09-02T09:00:00Z")
+        rc, output = self.run_list("--usage")
+        self.assertEqual(rc, 0, output)
+        self.assertIn("uses=2  last=2026-09-02", self.line(output, "sd-plan"))
+        self.assertIn("uses=0  last=never", self.line(output, "sd-ship"))
+        rc, output = self.run_list("--json")
+        skills = {skill["name"]: skill for skill in json.loads(output)["skills"]}
+        self.assertEqual(skills["sd-plan"]["last"][:19], "2026-09-02T09:00:00")
+        self.assertIsNone(skills["sd-ship"]["last"])
+
     def test_the_default_listing_prints_no_count(self):
         sd_db.record_skill_use(self.connection, "sd-plan", surface="claude")
         rc, output = self.run_list()
