@@ -31,16 +31,19 @@ def later(stamp: str, seconds: int) -> str:
 
 
 class Probe:
-    """A supervisor pid that answers as told."""
+    """Every pid answers `alive` and `started`, every group `group`; `pids` maps a pid to its own (alive, started)."""
 
-    def __init__(self, alive=True, started="Sat Oct 24 09:00:00 2026"):
-        self.answer, self.start = alive, started
+    def __init__(self, alive=True, started="Sat Oct 24 09:00:00 2026", group=False, pids=None):
+        self.answer, self.start, self.members, self.pids = alive, started, group, pids or {}
 
     def alive(self, pid):
-        return self.answer
+        return self.pids.get(pid, (self.answer, self.start))[0]
 
     def started(self, pid):
-        return self.start
+        return self.pids.get(pid, (self.answer, self.start))[1]
+
+    def group(self, pgid):
+        return self.members
 
 
 class Kill:
@@ -340,46 +343,81 @@ class Reap(Case):
         self.assertIsNone(build.run(self.db, self.bundle["id"])["outcome"])
 
     def test_reap_resumes_kill(self):
-        """Failure table, Reap: a tick killed between the compare-and-set and the kill; the next kills before any retry."""
+        """Failure table, Reap ours: a tick killed between the compare-and-set and the kill; the next kills, then retries."""
         self.ended(builder_pgid=777, builder_start=START)
-        holding = Kill(self.db, gone=False)
-        self.assertEqual(build.reap(self.db, probe=Probe(), kill=holding), [])
-        self.assertEqual(holding.calls, [(777, 1)])
-        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 1, "no retry while the group may live")
-        gone = Kill(self.db)
-        settled = build.reap(self.db, probe=Probe(), kill=gone)
-        self.assertEqual(gone.calls, [(777, 1)], "the kill came before the retry's new run")
+        kill = Kill(self.db)
+        settled = build.reap(self.db, probe=Probe(group=True), kill=kill)
+        self.assertEqual(kill.calls, [(777, 1)], "the kill came before the retry's new run")
         self.assertIsNotNone(settled[0]["retry"])
+
+    def test_a_group_alive_after_the_kill_ends_blocked(self):
+        """Failure table, Reap ours: the group still has a process after SIGKILL: blocked, lease released, no retry."""
+        self.ended(builder_pgid=777, builder_start=START)
+        settled = build.reap(self.db, probe=Probe(group=True), kill=Kill(self.db, gone=False))
+        self.assertEqual([(row["retry"], "777" in row["blocked"]) for row in settled], [(None, True)])
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 1)
+        self.assertEqual(self.statuses(self.items), ["blocked", "blocked"])
 
     def ended(self, **fields):
         """The run as a reap that stopped after its compare-and-set left it."""
         build.write(self.db, self.bundle["id"], **fields)
         self.db.execute("UPDATE runner_run SET outcome = 'interrupted' WHERE id = ?", (self.bundle["id"],))
 
-    def not_signalled(self, probe, **fields):
-        """Failure table, Reap kill: a group not proven is gone; the reap settles the run and signals nothing."""
+    def unsure(self, probe, **fields):
+        """Failure table, Reap unsure: nothing killed, the run and its lease kept, nothing retried."""
         self.ended(builder_pgid=777, **fields)
         kill = Kill(self.db)
-        settled = build.reap(self.db, probe=probe, kill=kill)
-        self.assertEqual(kill.calls, [], "a group not proven is not this run's")
-        self.assertEqual([row["run"] for row in settled], [self.bundle["id"]])
-
-    def test_a_reused_builder_pid_is_never_signalled(self):
-        self.not_signalled(Probe(started="Sat Oct 24 08:00:00 2026"), builder_start=START)
-
-    def test_an_unread_builder_start_is_never_signalled(self):
-        self.not_signalled(Probe(started=None), builder_start=START)
-
-    def test_a_builder_without_a_recorded_start_is_never_signalled(self):
-        self.not_signalled(Probe())
-
-    def test_a_gone_or_unknown_builder_pid_is_never_signalled(self):
-        self.not_signalled(Probe(alive=None), builder_start=START)
-        self.db.execute("UPDATE runner_run SET outcome = 'interrupted', builder_pgid = 777, builder_start = ? "
-                        "WHERE released_at IS NULL", (START,))
-        kill = Kill(self.db)
-        self.assertEqual(len(build.reap(self.db, probe=Probe(alive=False), kill=kill)), 1)
+        self.assertEqual(build.reap(self.db, probe=probe, kill=kill), [])
         self.assertEqual(kill.calls, [])
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run WHERE released_at IS NULL"), 1)
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 1)
+        self.assertEqual(self.statuses(self.items), ["in_progress", "in_progress"])
+
+    def test_a_live_builder_whose_start_is_unread_is_unsure(self):
+        """The round-2 repro: before, this settled and retried into the live builder's worktree."""
+        self.unsure(Probe(started=None, group=True), builder_start=START)
+
+    def test_a_reused_builder_pid_with_group_members_is_unsure(self):
+        self.unsure(Probe(started="Sat Oct 24 08:00:00 2026", group=True), builder_start=START)
+
+    def test_a_dead_leader_with_a_live_child_is_unsure(self):
+        self.unsure(Probe(alive=False, group=True), builder_start=START)
+
+    def test_a_group_the_probe_cannot_read_is_unsure(self):
+        self.unsure(Probe(alive=None, group=None), builder_start=START)
+
+    def test_a_builder_without_a_recorded_start_is_unsure(self):
+        self.unsure(Probe(group=True))
+
+    def test_a_supervisor_the_probe_cannot_read_is_unsure(self):
+        self.unsure(Probe(pids={4242: (None, None), 777: (False, None)}), supervisor_pid=4242,
+                    supervisor_start=START, builder_start=START)
+
+    def test_three_unsure_reaps_end_the_run_blocked_naming_the_group(self):
+        """Failure table, Reap unsure: the third unsure reap in a row ends it blocked with an action note, no retry."""
+        self.ended(builder_pgid=777, builder_start=START)
+        kill, probe = Kill(self.db), Probe(started=None, group=True)
+        self.assertEqual(build.reap(self.db, probe=probe, kill=kill), [])
+        self.assertEqual(build.reap(self.db, probe=probe, kill=kill), [])
+        settled = build.reap(self.db, probe=probe, kill=kill)
+        self.assertEqual(kill.calls, [])
+        self.assertEqual([row["retry"] for row in settled], [None])
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 1)
+        self.assertEqual(self.statuses(self.items), ["blocked", "blocked"])
+        note = self.db.execute("SELECT body FROM note WHERE item = ? AND kind = 'followup'", (self.items[0],)).fetchone()
+        self.assertIn("builder group 777", note["body"])
+
+    def test_an_empty_group_and_a_gone_supervisor_are_gone(self):
+        """Failure table, Reap gone: no process in the group, the supervisor gone or its pid reused: settled, retried."""
+        for name, pids in {"gone": {4242: (False, None)}, "reused": {4242: (True, "Sat Oct 24 08:00:00 2026")}}.items():
+            with self.subTest(name):
+                self.ended(builder_pgid=777, builder_start=START, supervisor_pid=4242, supervisor_start=START)
+                kill = Kill(self.db)
+                settled = build.reap(self.db, probe=Probe(alive=False, pids=pids), kill=kill)
+                self.assertEqual(kill.calls, [])
+                self.assertEqual([row["blocked"] for row in settled], [None])
+                self.bundle = build.run(self.db, settled[0]["retry"]) if settled[0]["retry"] else self.bundle
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 2, "one retry, then the second loss blocks")
 
     def test_a_restore_abandons_every_open_build_run_unretried(self):
         """Failure table, Restore: the restored store's runs end abandoned with the block; no reap signals or reruns them."""

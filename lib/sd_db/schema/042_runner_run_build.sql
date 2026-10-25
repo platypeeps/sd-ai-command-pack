@@ -10,9 +10,11 @@
 -- model the bundle runs on; `session_id`, the builder's Claude session, so it
 -- never counts twice; `log_path`, its stream-json log; `builder_pgid`, its
 -- process group, which the reap and the timeout kill; `builder_start`, its
--- leader's `ps -o lstart=`, without which nothing kills the group; and
--- `final`, its last stream line, the judge's evidence. (The `--   ` lines
--- below are the reverse, which the tests run; nothing else starts so.)
+-- leader's `ps -o lstart=`, without which nothing kills the group;
+-- `final`, its last stream line, the judge's evidence; and `doubts`, the
+-- reaps in a row that could not tell whether its processes still run.
+-- (The `--   ` lines below are the reverse, which the tests run; nothing
+-- else starts so.)
 --
 -- `ADD COLUMN`, as 041: SQLite adds a nullable column in place and moves no
 -- row. Every existing run reads NULL in each, which is what a runner run
@@ -24,6 +26,7 @@
 -- build run end first; take `bin/sd-db backup` before:
 --
 --   BEGIN;
+--   ALTER TABLE runner_run DROP COLUMN doubts;
 --   ALTER TABLE runner_run DROP COLUMN final;
 --   ALTER TABLE runner_run DROP COLUMN builder_start;
 --   ALTER TABLE runner_run DROP COLUMN builder_pgid;
@@ -43,3 +46,4 @@ ALTER TABLE runner_run ADD COLUMN log_path TEXT;
 ALTER TABLE runner_run ADD COLUMN builder_pgid INTEGER;
 ALTER TABLE runner_run ADD COLUMN builder_start TEXT;
 ALTER TABLE runner_run ADD COLUMN final TEXT;
+ALTER TABLE runner_run ADD COLUMN doubts INTEGER;

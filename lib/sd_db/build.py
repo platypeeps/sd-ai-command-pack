@@ -362,7 +362,7 @@ def enqueued(connection, ident: str) -> bool:
 
 
 class Probe:
-    """The liveness probe: `alive` is True (EPERM too), False (ESRCH) or None (unknown); `started` is `ps -o lstart=`."""
+    """The liveness probe: `alive` and `group` are True, False (ESRCH) or None (EPERM, unknown); `started` is `ps -o lstart=`."""
 
     @staticmethod
     def alive(pid: int) -> bool | None:
@@ -370,8 +370,16 @@ class Probe:
             os.kill(pid, 0)
         except ProcessLookupError:
             return False
-        except PermissionError:
-            return True
+        except OSError:
+            return None
+        return True
+
+    @staticmethod
+    def group(pgid: int) -> bool | None:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return False
         except OSError:
             return None
         return True
@@ -423,8 +431,42 @@ def same_process(pid: int | None, start: str | None, *, probe=Probe) -> bool:
     return probe.started(pid) == start
 
 
+GONE, OURS, UNSURE = "gone", "ours", "unsure"
+#: Unsure reaps in a row before a run ends blocked.
+DOUBTS = 3
+
+
+def verdict(row: dict, *, probe=Probe) -> str:
+    """What a reap may do to an ended run's processes: the one decision every reap path takes.
+
+    `OURS`: the builder group's leader is the process the run recorded (pid
+    and start), so the reap kills the group. `GONE`: the group has no process
+    at all (ESRCH) and the supervisor is gone too (no pid, ESRCH, or a pid
+    now started at another time), so nothing of the run can still write to
+    its worktree. `UNSURE`: anything else, such as an unread start, EPERM, an
+    unknown probe, or a dead leader whose group still has members; nothing
+    is killed or retried.
+    """
+    pgid = row["builder_pgid"]
+    if same_process(pgid, row["builder_start"], probe=probe):
+        return OURS
+    if pgid is not None and probe.group(pgid) is not False:
+        return UNSURE
+    pid = row["supervisor_pid"]
+    if pid is None:
+        return GONE
+    answer = probe.alive(pid)
+    if answer is False:
+        return GONE
+    if answer is True:
+        started = probe.started(pid)
+        if started is not None and started != row["supervisor_start"]:
+            return GONE
+    return UNSURE
+
+
 def kill_group(pgid: int) -> bool:
-    """SIGKILL a builder's process group; True once no member lives, False while one may (next reap tries again)."""
+    """SIGKILL a builder's process group; True once no member lives (ESRCH), False while one may."""
     if not isinstance(pgid, int) or pgid <= 1 or pgid == os.getpgrp():
         return False
     try:
@@ -450,10 +492,10 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
     1. Compare-and-set `outcome` (`interrupted`, or `cancelled` when a cancel
        was asked) where `heartbeat_at` is the value read; a lost race means the
        supervisor beat, and the run is left alone.
-    2. Kill the builder's group, only while its leader is the process the run
-       recorded (`same_process` on `builder_pgid` and `builder_start`); a group
-       not proven is gone, never signalled. Until a proven group dies the run
-       stays ended and unreleased, and every later reap kills again first.
+    2. Take the `verdict`. `OURS`: kill the group; a group that still has a
+       process after the SIGKILL ends the run blocked, not retried. `UNSURE`:
+       the run stays ended and unreleased, its lease held, nothing killed;
+       the `DOUBTS`th unsure reap in a row ends it blocked, not retried.
     3. `_settle` it in one transaction.
 
     Nothing is reaped while a restore reimport is pending: `abandon` ended
@@ -477,16 +519,37 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
                         "AND outcome IS NULL AND released_at IS NULL AND heartbeat_at IS ?",
                         (outcome, detail, clock(), row["id"], row["heartbeat_at"])).rowcount != 1:
                     continue
-        if same_process(row["builder_pgid"], row["builder_start"], probe=probe) and not kill(row["builder_pgid"]):
-            continue
-        result = _settle(connection, row["id"])
+        state, block = verdict(row, probe=probe), None
+        if state == UNSURE:
+            doubts = _doubt(connection, row["id"])
+            if doubts < DOUBTS:
+                continue
+            block = (f"{doubts} reaps in a row could not tell whether builder group {row['builder_pgid']} "
+                     f"or supervisor {row['supervisor_pid']} still runs; nothing was killed")
+        elif state == OURS and not kill(row["builder_pgid"]):
+            block = f"builder group {row['builder_pgid']} still had a process after SIGKILL"
+        result = _settle(connection, row["id"], block=block)
         if result is not None:
             settled.append(result)
     return settled
 
 
-def _settle(connection, ident: str) -> dict | None:
-    """Release an ended run and its lease, then retry it once, block it, or end it cancelled."""
+def _doubt(connection, ident: str) -> int:
+    """Count one unsure reap on an ended, unreleased run; the count so far (0 when the run moved on)."""
+    with transaction(connection):
+        connection.execute("UPDATE runner_run SET doubts = COALESCE(doubts, 0) + 1, updated_at = ? "
+                           "WHERE id = ? AND released_at IS NULL", (clock(), ident))
+        row = connection.execute("SELECT doubts FROM runner_run WHERE id = ? AND released_at IS NULL",
+                                 (ident,)).fetchone()
+        return 0 if row is None else row["doubts"]
+
+
+def _settle(connection, ident: str, *, block: str | None = None) -> dict | None:
+    """Release an ended run and its lease, then retry it once, block it, or end it cancelled.
+
+    `block` names processes the reap could not end or could not judge: the
+    bundle ends blocked, never retried, whatever the outcome.
+    """
     with transaction(connection):
         row = connection.execute("SELECT * FROM runner_run WHERE id = ? AND released_at IS NULL "
                                  "AND outcome IS NOT NULL", (ident,)).fetchone()
@@ -497,7 +560,12 @@ def _settle(connection, ident: str) -> dict | None:
         connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL", (stamp, ident))
         lead, members = row["assignment"], _members(connection, row["assignment"])
         retry = None
-        if row["outcome"] == "cancelled":
+        if block is not None:
+            reason = (f"build run {ident} ended at step {row['step']}: {block}; check the group, then requeue or "
+                      f"cancel; log {row['log_path'] or 'none'}, worktree {row['work_path']}")
+            connection.execute("UPDATE runner_run SET detail = ? WHERE id = ?", (reason, ident))
+            _block(connection, members, reason, stamp)
+        elif row["outcome"] == "cancelled":
             for member in members:
                 connection.execute("UPDATE assignment SET status = 'cancelled', ended = ?, result = ? WHERE id = ?",
                                    (stamp, row["detail"], member["id"]))
@@ -519,13 +587,17 @@ def _settle(connection, ident: str) -> dict | None:
             else:
                 reason = (f"build run {ident} lost at step {row['step']} after {losses - 1} retry; "
                           f"log {row['log_path'] or 'none'}, worktree {row['work_path']}")
-                for member in members:
-                    connection.execute("UPDATE assignment SET status = 'blocked', ended = ?, result = ? WHERE id = ?",
-                                       (stamp, reason, member["id"]))
-                    _move(connection, member["item"], "blocked", reason)
-                    add_note(connection, member["item"], "followup",
-                             f"Build blocked: {reason}. Look at the log and the worktree, then requeue or cancel.")
-        return {"run": ident, "outcome": row["outcome"], "retry": retry}
+                _block(connection, members, reason, stamp)
+        return {"run": ident, "outcome": row["outcome"], "retry": retry, "blocked": block}
+
+
+def _block(connection, members: list[dict], reason: str, stamp: str) -> None:
+    for member in members:
+        connection.execute("UPDATE assignment SET status = 'blocked', ended = ?, result = ? WHERE id = ?",
+                           (stamp, reason, member["id"]))
+        _move(connection, member["item"], "blocked", reason)
+        add_note(connection, member["item"], "followup",
+                 f"Build blocked: {reason}. Look at the log and the worktree, then requeue or cancel.")
 
 
 def abandon(connection, reason: str) -> list[str]:
