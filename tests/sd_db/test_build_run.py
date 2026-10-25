@@ -107,7 +107,8 @@ FAKE = textwrap.dedent('''
         if mode == "garbage":
             print("not json")
             sys.exit(4)
-        findings = [{"path": "work.txt", "line": 1, "title": "a blocker", "disposition": "blocking"}]
+        raw = {"path": "work.txt", "line": 1, "severity": "high", "summary": "a blocker", "family": "correctness"}
+        findings = review.dispose([review._finding(raw)], "high")  # the record shape `--json` prints
         print(json.dumps({"status": "blocking" if mode == "blocking" else "clean",
                           "subject": {"head": git("-C", work, "rev-parse", "HEAD")},
                           "findings": findings if mode == "blocking" else []}))
@@ -359,6 +360,7 @@ class Supervise(Case):
         self.assertEqual(len(self.calls("sd-review")), 3)
         fixes = [call["argv"] for call in self.calls("claude")][1:]
         self.assertEqual([argv[argv.index("--resume") + 1] for argv in fixes], ["session-fixture"] * 2)
+        self.assertIn("- work.txt:1 a blocker", fixes[0][fixes[0].index("-p") + 1], "the fix names each blocker")
         self.assertEqual(self.statuses(), ["blocked"])
 
     def test_a_fix_then_a_clean_review_enqueues(self):

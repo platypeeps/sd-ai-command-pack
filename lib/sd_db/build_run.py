@@ -569,8 +569,8 @@ class Supervisor:
 
     @staticmethod
     def summary(blockers: list[dict], limit: int | None = 3) -> str:
-        lines = [f"{row.get('path', '?')}:{row.get('line', '?')} {row.get('title') or row.get('body') or ''}".strip()
-                 for row in blockers]
+        # `summary` is the text of an `sd-review --json` finding record.
+        lines = [f"{row.get('path', '?')}:{row.get('line', '?')} {row.get('summary') or ''}".strip() for row in blockers]
         return "; ".join(lines[:limit]) if limit else "\n".join(f"- {line}" for line in lines)
 
     def out(self, name: str) -> Path:
