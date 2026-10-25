@@ -280,6 +280,22 @@ class Writes(Case):
         self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 0)
         self.assertEqual([m["status"] for m in build.run(self.db, self.bundle["id"])["members"]], ["done", "done"])
         self.assertEqual(self.statuses(self.items), ["in_progress", "in_progress"])
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["step"], row["outcome"], row["released_at"]), ("enqueued", None, None),
+                         "the run stays open for steps 7 and 8")
+        self.assertFalse(build.enqueued(self.db, self.bundle["id"]), "enqueued once")
+
+    def test_reap_skips_enqueued_run(self):
+        """Failure table, Enqueued: no supervisor while the lane holds the run; reap leaves it open, step 7 releases it."""
+        build.write(self.db, self.bundle["id"], supervisor_pid=4242, supervisor_start=START)
+        for step in build.LANE_STEPS:
+            with self.subTest(step):
+                self.assertTrue(build.write(self.db, self.bundle["id"], step=step))
+                kill = Kill(self.db)
+                self.assertEqual(build.reap(self.db, now=later(self.bundle["created_at"], 3600),
+                                            probe=Probe(alive=False), kill=kill), [])
+                row = build.run(self.db, self.bundle["id"])
+                self.assertEqual((row["outcome"], row["released_at"], kill.calls), (None, None, []))
 
     def test_a_write_outside_the_run_fields_is_refused(self):
         for fields in ({"outcome": "done"}, {"released_at": "x"}, {"step": "nowhere"}):

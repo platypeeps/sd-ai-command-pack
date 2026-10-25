@@ -61,6 +61,8 @@ OPUS, SONNET = "opus", "sonnet"
 #: The fields a supervisor may write on its own open run.
 RUN_FIELDS = frozenset({"step", "heartbeat_at", "supervisor_pid", "supervisor_start", "session_id",
                         "log_path", "builder_pgid", "builder_start", "final", "detail", "model"})
+#: The steps the lane holds the run at: no supervisor runs, reap leaves it, step 7 releases it.
+LANE_STEPS = ("enqueued", "checking", "cleaning")
 ACTIVE = ("queued", "running", "ending")
 
 
@@ -344,14 +346,18 @@ def beat(connection, ident: str) -> bool:
 def enqueued(connection, ident: str) -> bool:
     """The `enqueued` step: the lease released and the members `done`, the items left `in_progress` for the lane.
 
-    One compare-and-set on the run, open and unreleased; False, with no row
-    changed, for a late supervisor whose run was reaped or retried.
+    The run stays open, `released_at` and `outcome` null, until step 7 ends
+    it; `reap` skips it meanwhile. One compare-and-set on the run, open and
+    not yet at a lane step; False, with no row changed, for a late
+    supervisor whose run was reaped or retried, or one already enqueued.
     """
+    marks = ", ".join("?" for _ in LANE_STEPS)
     with transaction(connection):
         stamp = clock()
         if connection.execute(
-                "UPDATE runner_run SET step = 'enqueued', outcome = 'enqueued', released_at = ?, updated_at = ? "
-                "WHERE id = ? AND released_at IS NULL AND outcome IS NULL", (stamp, stamp, ident)).rowcount != 1:
+                f"UPDATE runner_run SET step = 'enqueued', updated_at = ? WHERE id = ? AND released_at IS NULL "
+                f"AND outcome IS NULL AND (step IS NULL OR step NOT IN ({marks}))",
+                (stamp, ident, *LANE_STEPS)).rowcount != 1:
             return False
         lead = connection.execute("SELECT assignment FROM runner_run WHERE id = ?", (ident,)).fetchone()["assignment"]
         connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL", (stamp, ident))
@@ -498,7 +504,9 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
        the `DOUBTS`th unsure reap in a row ends it blocked, not retried.
     3. `_settle` it in one transaction.
 
-    Nothing is reaped while a restore reimport is pending: `abandon` ended
+    A run at a `LANE_STEPS` step is left alone: the lane holds it, and no
+    supervisor is expected until step 7. Nothing is reaped while a restore
+    reimport is pending: `abandon` ended
     every run the restore found, and a run it did not find is not this
     store's to judge.
     """
@@ -507,6 +515,8 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
     if restoration_pending(connection):
         return settled
     for row in open_runs(connection):
+        if row["step"] in LANE_STEPS:
+            continue
         if row["outcome"] is None:
             if alive(row, now=now, probe=probe):
                 continue
