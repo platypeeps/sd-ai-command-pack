@@ -83,7 +83,8 @@ other halves are, is in [domain packs](docs/domain-packs.md).
   denies an issue in a managed repository and points to `sd task add`, and
   asks the operator about an issue anywhere else; with `repo.github_issues`
   on, it lets an update of a managed repository's own issue through;
-  `PreToolUse` on `Bash`, `Edit`, `Write` and `NotebookEdit`, and
+  `PreToolUse` on `Bash`, `Edit`, `Write`, `NotebookEdit`, `Read`,
+  `Grep` and `Glob`, and
   `SessionEnd`, for `sd-session-beat`, which keeps the session's heartbeat
   row and the worktrees it holds (`sd assignments sessions`).
   `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
