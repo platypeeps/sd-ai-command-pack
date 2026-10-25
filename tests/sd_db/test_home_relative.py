@@ -80,7 +80,7 @@ COLUMNS = {
                            "end_action outcome supervisor_pid supervisor_pgid supervisor_start "
                            "provider vendor base_head authored_head reviewed_head cancel_requested "
                            "created_at updated_at released_at step heartbeat_at model session_id "
-                           "builder_pgid builder_start doubts"},
+                           "builder_pgid builder_start review_round doubts"},
     "shadow": {"none": "id tracker repo url number kind title state author first_seen last_seen reason "
                        "merged_at closed_at branch linked_issues updated_at created_at filed status assignee"},
     "skill_use": {"key": "cwd", "none": "id timestamp skill surface mode"},

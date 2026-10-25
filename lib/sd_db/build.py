@@ -60,7 +60,12 @@ STEPS = ("claimed", "worktree", "building", "reviewing", "fixing", "enqueuing", 
 OPUS, SONNET = "opus", "sonnet"
 #: The fields a supervisor may write on its own open run.
 RUN_FIELDS = frozenset({"step", "heartbeat_at", "supervisor_pid", "supervisor_pgid", "supervisor_start", "session_id",
-                        "log_path", "builder_pgid", "builder_start", "final", "detail", "model"})
+                        "log_path", "builder_pgid", "builder_start", "review_round", "final", "detail", "model"})
+#: Where a fresh row resumes a step lost (design, "Run ownership by step"); any other step resumes itself.
+#: A fix resumes at its review, which reads the head the fix left.
+RESUME = {"claimed": "worktree", "fixing": "reviewing"}
+#: The outcomes that count as a loss at a step; a second one at the same step blocks the bundle.
+LOSSES = ("interrupted", "timed_out", "error_max_turns")
 #: The steps from `enqueued` on: the lease is released, the members are `done`, and step 7 releases the run.
 #: Only `enqueued` has no supervisor, so only it is left out of the reap.
 LANE_STEPS = ("enqueued", "checking", "cleaning")
@@ -284,7 +289,7 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
 
 
 def _open_run(connection, lead: int, *, repo: str, owner: str, step: str, model: str, work: Path, stamp: str,
-              session_id: str | None = None) -> str:
+              session_id: str | None = None, review_round: int | None = None) -> str:
     """The lead's next run and its lease, numbered after every run the lead has, and each member's count moved to it."""
     number = connection.execute("SELECT MAX(COALESCE((SELECT MAX(run) FROM runner_run WHERE assignment = ?), 0), "
                                 "run_count) + 1 FROM assignment WHERE id = ?", (lead, lead)).fetchone()[0]
@@ -293,8 +298,10 @@ def _open_run(connection, lead: int, *, repo: str, owner: str, step: str, model:
     ident = uuid.uuid4().hex
     connection.execute(
         "INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, retained_path, start_step, "
-        "step, model, session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'claimed', ?, ?, ?, ?, ?)",
-        (ident, lead, number, repo, branch(lead), owner, str(work), str(work), step, model, session_id, stamp, stamp))
+        "step, model, session_id, review_round, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (ident, lead, number, repo, branch(lead), owner, str(work), str(work), step, step, model, session_id,
+         review_round, stamp, stamp))
     if step not in LANE_STEPS:
         connection.execute("INSERT INTO runner_lease (run, repo, branch, exclusive, acquired_at) VALUES (?, ?, ?, 0, ?)",
                            (ident, repo, branch(lead), stamp))
@@ -572,7 +579,12 @@ def _doubt(connection, ident: str) -> int:
 
 
 def _settle(connection, ident: str, *, block: str | None = None) -> dict | None:
-    """Release an ended run and its lease, then retry it once, block it, or end it cancelled.
+    """Release an ended run and its lease, then retry it, block it, or end it cancelled, in one transaction.
+
+    A retry is a fresh row: `run` + 1, the same worktree and branch, the
+    `RESUME` step, the old `review_round` and `session_id`, no outcome; the
+    old row's outcome stays set, so a late old supervisor writes nothing. A
+    second loss at the same step blocks the bundle.
 
     `block` names processes the reap could not end or could not judge: the
     bundle ends blocked, never retried, whatever the outcome.
@@ -599,21 +611,23 @@ def _settle(connection, ident: str, *, block: str | None = None) -> dict | None:
                                    (stamp, row["detail"], member["id"]))
                 _move(connection, member["item"], "ready", f"build run {ident} {row['detail']}; worktree {row['work_path']} kept")
         elif row["outcome"] == "interrupted":
-            losses = connection.execute("SELECT COUNT(*) FROM runner_run WHERE assignment = ? AND outcome = 'interrupted'",
-                                        (lead,)).fetchone()[0]
+            marks = ", ".join("?" for _ in LOSSES)
+            losses = connection.execute(f"SELECT COUNT(*) FROM runner_run WHERE assignment = ? AND step IS ? "
+                                        f"AND outcome IN ({marks})", (lead, row["step"], *LOSSES)).fetchone()[0]
             if not members:
                 # Nothing of the bundle runs any more (a hand edit, an old
                 # restore): released, and nothing to retry.
                 pass
             elif losses <= RETRIES:
-                retry = _open_run(connection, lead, repo=row["repo"], owner=row["owner"], step=row["step"] or "claimed",
+                step = row["step"] or "claimed"
+                retry = _open_run(connection, lead, repo=row["repo"], owner=row["owner"], step=RESUME.get(step, step),
                                   model=row["model"] or OPUS, work=Path(row["work_path"]), stamp=stamp,
-                                  session_id=row["session_id"])
+                                  session_id=row["session_id"], review_round=row["review_round"])
                 for member in members:
                     add_note(connection, member["item"], "comment",
                              f"Build run {ident} lost at step {row['step']}; retried as run {retry}")
             else:
-                reason = (f"build run {ident} lost at step {row['step']} after {losses - 1} retry; "
+                reason = (f"build run {ident} lost at step {row['step']} a second time; "
                           f"log {row['log_path'] or 'none'}, worktree {row['work_path']}")
                 _block(connection, members, reason, stamp)
         return {"run": ident, "outcome": row["outcome"], "retry": retry, "blocked": block}

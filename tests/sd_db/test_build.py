@@ -326,13 +326,13 @@ class Reap(Case):
         return later(self.bundle["created_at"], build.STALE_SECONDS + 1)
 
     def test_reap_unstarted_run(self):
-        """Failure table, Spawn: no beat for 180 s after the claim: reaped and retried once at the same step."""
+        """Failure table, Spawn: no beat for 180 s after the claim: reaped, a fresh row at `worktree`."""
         self.assertEqual(build.reap(self.db, now=later(self.bundle["created_at"], 60)), [])
         settled = build.reap(self.db, now=self.stale())
         self.assertEqual([(row["run"], row["outcome"]) for row in settled], [(self.bundle["id"], "interrupted")])
         retry = build.run(self.db, settled[0]["retry"])
         self.assertEqual((retry["step"], retry["run"], retry["branch"], retry["work_path"], retry["released_at"]),
-                         ("claimed", 2, self.bundle["branch"], self.bundle["work_path"], None))
+                         ("worktree", 2, self.bundle["branch"], self.bundle["work_path"], None))
         self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 1)
         self.assertEqual([m["status"] for m in retry["members"]], ["running", "running"])
 
@@ -348,6 +348,31 @@ class Reap(Case):
         self.assertIn("lost at step building", note["body"])
         self.assertIn(row["work_path"], note["body"])
         self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 0)
+
+    def lose(self, **fields):
+        """Lose the current run at a stale beat; the fresh row the reap opened."""
+        build.write(self.db, self.bundle["id"], **fields)
+        settled = build.reap(self.db, now=later(self.bundle["created_at"], build.STALE_SECONDS + 1), probe=Probe())
+        self.bundle = build.run(self.db, settled[0]["retry"]) if settled[0]["retry"] else self.bundle
+        return settled[0]
+
+    def test_resume_fixing_reviews_again(self):
+        """Failure table, Recovery: a loss at fixing resumes at reviewing, round and session kept, in one fresh row."""
+        old = self.bundle["id"]
+        self.lose(step="fixing", review_round=2, session_id="session-1")
+        self.assertEqual((self.bundle["step"], self.bundle["review_round"], self.bundle["session_id"],
+                          self.bundle["outcome"], self.bundle["work_path"], self.bundle["branch"]),
+                         ("reviewing", 2, "session-1", None, build.run(self.db, old)["work_path"],
+                          build.run(self.db, old)["branch"]))
+        self.assertEqual(build.run(self.db, old)["outcome"], "interrupted")
+        self.assertFalse(build.write(self.db, old, step="building"), "a late old supervisor writes nothing")
+
+    def test_second_loss_same_step(self):
+        """Failure table, Recovery: losses at two steps each retry; a second loss at one step blocks."""
+        self.assertIsNotNone(self.lose(step="building")["retry"])
+        self.assertIsNotNone(self.lose(step="reviewing")["retry"], "a first loss at reviewing")
+        self.assertIsNone(self.lose(step="reviewing")["retry"])
+        self.assertEqual(self.statuses(self.items), ["blocked", "blocked"])
 
     def test_a_live_supervisor_is_left_alone(self):
         build.write(self.db, self.bundle["id"], supervisor_pid=4242, supervisor_start="Sat Oct 24 09:00:00 2026",
@@ -482,7 +507,8 @@ class Reap(Case):
                 self.assertEqual(kill.calls, [])
                 self.assertEqual([row["blocked"] for row in settled], [None])
                 self.bundle = build.run(self.db, settled[0]["retry"]) if settled[0]["retry"] else self.bundle
-        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 2, "one retry, then the second loss blocks")
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 3,
+                         "a loss at claimed resumes at worktree; one there is a first loss too")
 
     def test_a_restore_abandons_every_open_build_run_unretried(self):
         """Failure table, Restore: the restored store's runs end abandoned with the block; no reap signals or reruns them."""

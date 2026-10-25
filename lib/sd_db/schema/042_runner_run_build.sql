@@ -11,7 +11,8 @@
 -- never counts twice; `log_path`, its stream-json log; `builder_pgid`, its
 -- process group, which the reap and the timeout kill; `builder_start`, its
 -- leader's `ps -o lstart=`, without which nothing kills the group;
--- `final`, its last stream line, the judge's evidence; and `doubts`, the
+-- `review_round`, the review round a fresh row carries over; `final`, its
+-- last stream line, the judge's evidence; and `doubts`, the
 -- reaps in a row that could not tell whether its processes still run.
 -- (The `--   ` lines below are the reverse, which the tests run; nothing
 -- else starts so.)
@@ -28,6 +29,7 @@
 --   BEGIN;
 --   ALTER TABLE runner_run DROP COLUMN doubts;
 --   ALTER TABLE runner_run DROP COLUMN final;
+--   ALTER TABLE runner_run DROP COLUMN review_round;
 --   ALTER TABLE runner_run DROP COLUMN builder_start;
 --   ALTER TABLE runner_run DROP COLUMN builder_pgid;
 --   ALTER TABLE runner_run DROP COLUMN log_path;
@@ -45,5 +47,6 @@ ALTER TABLE runner_run ADD COLUMN session_id TEXT;
 ALTER TABLE runner_run ADD COLUMN log_path TEXT;
 ALTER TABLE runner_run ADD COLUMN builder_pgid INTEGER;
 ALTER TABLE runner_run ADD COLUMN builder_start TEXT;
+ALTER TABLE runner_run ADD COLUMN review_round INTEGER;
 ALTER TABLE runner_run ADD COLUMN final TEXT;
 ALTER TABLE runner_run ADD COLUMN doubts INTEGER;
