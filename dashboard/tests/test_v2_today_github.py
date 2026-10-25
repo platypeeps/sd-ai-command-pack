@@ -29,6 +29,7 @@ preview, asks with the exact comment, and posts the preview's revision once. The
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import subprocess
 import unittest
@@ -42,7 +43,7 @@ from sd_dashboard import today_github, v2
 from sd_dashboard.v2 import pages
 
 from support import NOW, ScreenCase, upsert_shadow
-from test_v2_tasks import MARKUP_JS, SHELL, STAND_IN
+from test_v2_tasks import MARKUP_JS, SHELL, SHELL_JS, STAND_IN
 from test_v2_today import OSASCRIPT
 from test_workflow_actions import BrowserSession
 
@@ -387,6 +388,76 @@ class TheScript(unittest.TestCase):
         refused = self.draw(doc(error="no such column: filed"))
         self.assertIn("GitHub could not be read: no such column: filed. Refresh tries again.", refused["R"]["sections"])
 
+
+
+def repos_doc():
+    """Three repositories, two pull requests in the first, one in each of the others."""
+    mix = [(1, "example/anvil"), (2, "example/anvil"), (3, "example/forge"), (4, "example/press")]
+    return doc(pulls=[entry(n, repo=repo, ref=f"{repo}#{n}", key=f"{HUB}/{repo}/pull/{n}", url=f"{HUB}/{repo}/pull/{n}")
+                      for n, repo in mix])
+
+
+class TheRepoColumnAndFilter(unittest.TestCase):
+    """sd:6173: a Repo column, a repo multi-select kept in ?repo=, and a row's actions (its primary, then the menu)."""
+
+    run_page = TheScript.run_page
+    draw = TheScript.draw
+    # shell.js's own rowActions on this page's commands: live() is what the shell's live() is, the commands the row's
+    # type registered that are on for it.
+    ROW_ACTIONS = re.search(r"  function rowActions\(id, \{ icons = false \} = \{\}\) \{.*?\n  \}\n", SHELL_JS, re.S).group(0)
+    REAL = ("const html = mk, tipOf = (c, o) => c.does, live = o => REG.filter(c => c.on === o.type && C.offWhy(c, o) === ''),"
+            " ICON = n => mk`<svg class=\"i\"><use href=\"#i-${n}\"/></svg>`;\n" + ROW_ACTIONS + "\nC.rowActions = rowActions;\n")
+    # A change on the repo box, as the browser sends it.
+    BOX = ("const box = (value, checked) => ELS['github-filters'].listeners.change[0]({ currentTarget: ELS['github-filters'],"
+           " target: { type: 'checkbox', checked, value, dataset: { pick: 'repo' }, getAttribute: () => null } });\n")
+
+    def test_a_repo_column_names_each_rows_repository(self):
+        out = self.draw(repos_doc())
+        sections = out["R"]["sections"]
+        self.assertIn('<th scope="col">Repo</th>', sections)
+        self.assertIn(f'data-key="{HUB}/example/forge/pull/3"', sections)
+        self.assertEqual(re.findall(r'<td class="src">([^<]*)</td>', sections),
+                         ["example/anvil", "example/anvil", "example/forge", "example/press"])
+
+    def test_a_two_repo_selection_hides_the_third_and_survives_a_reload(self):
+        found = repos_doc()
+        out = self.run_page(self.BOX + "show(); await flush(); R.bar = ELS['github-filters'].html;"
+                            " box('example/anvil', true); box('example/forge', true); R.sections = ELS['github-sections'].html;"
+                            " R.after = ELS['github-filters'].html; R.tally = ELS['github-tally'].html; R.search = location.search;",
+                            f"(path, body) => [200, {json.dumps(found)}]")
+        keys = lambda html: [n for n in (1, 2, 3, 4) if f"pull/{n}\"" in html]
+        self.assertIn('data-pick="repo" value="example/press"', out["R"]["bar"])
+        self.assertIn("2 picked", out["R"]["after"])
+        self.assertEqual(keys(out["R"]["sections"]), [1, 2, 3])
+        self.assertIn("3 of 4 open pull requests", out["R"]["tally"])
+        self.assertIn("example%2Fanvil%2Cexample%2Fforge", out["R"]["search"])
+        again = self.draw(found, search=out["R"]["search"])
+        self.assertEqual(keys(again["R"]["sections"]), [1, 2, 3])
+
+    def test_no_repo_selected_lists_every_repo_and_unpicking_goes_back(self):
+        out = self.run_page(self.BOX + "show(); await flush(); R.all = ELS['github-sections'].html;"
+                            " box('example/press', true); R.one = ELS['github-sections'].html; R.s1 = location.search;"
+                            " box('example/press', false); R.back = ELS['github-sections'].html; R.s2 = location.search;",
+                            f"(path, body) => [200, {json.dumps(repos_doc())}]")
+        count = lambda html: html.count("<tr data-key=")
+        self.assertEqual((count(out["R"]["all"]), count(out["R"]["one"]), count(out["R"]["back"])), (4, 1, 4))
+        self.assertIn("repo=example%2Fpress", out["R"]["s1"])
+        self.assertEqual(out["R"]["s2"], "")
+
+    def test_a_row_has_the_open_on_github_button_and_a_menu_for_the_other_commands(self):
+        found = doc(pulls=[entry(1, item=7, checkout="~/repos/anvil", landed={"item": 7, "url": PR, "commit": "c" * 40})])
+        out = self.run_page(self.REAL + "show(); await flush(); R.sections = ELS['github-sections'].html;"
+                            f" R.live = live(C.get('gh:{PR}')).map(c => c.id);",
+                            f"(path, body) => [200, {json.dumps(found)}]")
+        sections = out["R"]["sections"]
+        self.assertIn('<th scope="col"><span class="sr">Actions</span></th>', sections)
+        self.assertEqual(re.findall(r'<td class="act">.*?</td>', sections, re.S).__len__(), 1)
+        self.assertEqual(re.findall(r'data-cmd="([^"]+)"', sections), ["github pull request.open"])
+        self.assertIn('aria-label="Open on GitHub"', sections)
+        self.assertIn(f'data-menu-for="gh:{PR}"', sections)
+        self.assertEqual(out["R"]["live"], ["github pull request.open", "github pull request.item",
+                                           "github pull request.adversarial-review", "github pull request.copilot-review",
+                                           "github pull request.merge", "github pull request.close-original"])
 
 
 PR = f"{HUB}/example/anvil/pull/1"
