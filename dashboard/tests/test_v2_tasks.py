@@ -922,7 +922,7 @@ box('no repo', true); R.two = ELS['view-board'].html; R.after = ELS.filters.html
                        status_since=(read - dt.timedelta(days=days)).isoformat().replace("+00:00", "Z"))
         saved, self.doc = self.doc, doc
         try:
-            out = self.run_page("R.board = ELS['view-board'].html;")
+            out = self.run_page("R.board = ELS['view-board'].html;", search="?done=1")
         finally:
             self.doc = saved
         board = out["R"]["board"]
@@ -930,6 +930,40 @@ box('no repo', true); R.two = ELS['view-board'].html; R.after = ELS.filters.html
         self.assertIn("Done this week", done)
         self.assertNotIn("Done long ago", board)
         self.assertIn('title="done in the last 7 days"', done)
+
+    def test_the_board_hides_done_until_show_done_and_the_status_filter_is_gone(self):
+        """sd:6233: Tasks has no Status dropdown; the board's Show done checkbox shows its Done column, hidden by default
+        (operator decision, note 30400), and the address keeps it as done=1. The list ignores it and keeps its done rows;
+        the matrix never shows done ones."""
+        import copy
+        import datetime as dt
+        read = dt.datetime.fromisoformat(self.doc["read"].replace("Z", "+00:00"))
+        doc = copy.deepcopy(self.doc)
+        doc["rows"][0].update(status="done", title="Done yesterday", status_since=(read - dt.timedelta(days=1)).isoformat().replace("+00:00", "Z"))
+        saved, self.doc = self.doc, doc
+        try:
+            out = self.run_page("""R.filters = ELS.filters.html; R.board = ELS['view-board'].html;
+ELS.filters.listeners.change.forEach(f => f({ target: { id: 'f-done', checked: true } })); await flush();
+R.board2 = ELS['view-board'].html; R.filters2 = ELS.filters.html; R.url = OUT.urls[OUT.urls.length - 1];
+document.dispatchEvent(new CustomEvent('tasks:view', { detail: 'list' })); await flush(); R.listFilters = ELS.filters.html; R.list = ELS['view-list'].html;""")
+            linked = self.run_page("R.board = ELS['view-board'].html; R.filters = ELS.filters.html;", search="?done=1")
+        finally:
+            self.doc = saved
+        R = out["R"]
+        self.assertNotIn('id="f-status"', R["filters"])
+        self.assertIn('<label class="chk"><input type="checkbox" id="f-done"> Show done</label>', R["filters"])
+        self.assertNotIn('aria-label="Done"', R["board"])
+        self.assertNotIn("Done yesterday", R["board"])
+        self.assertIn("data-nodone", R["board"])
+        self.assertIn('aria-label="Done"', R["board2"])
+        self.assertIn("Done yesterday", R["board2"])
+        self.assertNotIn("data-nodone", R["board2"])
+        self.assertIn('<input type="checkbox" id="f-done" checked>', R["filters2"])
+        self.assertIn("done=1", R["url"])
+        self.assertNotIn('id="f-done"', R["listFilters"])
+        self.assertIn("Done yesterday", R["list"])
+        self.assertIn("Done yesterday", linked["R"]["board"])
+        self.assertIn('<input type="checkbox" id="f-done" checked>', linked["R"]["filters"])
 
     def test_the_kind_filter_narrows_the_rows(self):
         out = self.run_page("""ELS.filters.listeners.change[0]({ target: { dataset: { pick: 'kind' }, value: 'work' } });
@@ -2652,7 +2686,10 @@ class TheFilterAddress(ScreenCase):
             with self.subTest(search=search):
                 self.assertEqual(self.listed(search)[0], expected)
         _, out = self.listed("?view=list&status=ready_to_send&age=3&active=1")
-        for key, value in (("status", "ready_to_send"), ("age", "3"), ("active", "1")):
+        # sd:6233: Status has no dropdown; an address's status (Today's Landed 24h and Blocked) narrows, with its chip.
+        self.assertNotIn('id="f-status"', out["R"]["filters"])
+        self.assertIn('data-unfilter="status:ready_to_send"', out["R"]["filters"])
+        for key, value in (("age", "3"), ("active", "1")):
             self.assertRegex(out["R"]["filters"], rf'<select id="f-{key}"[^>]*>(?:(?!</select>).)*<option value="{value}" selected>', key)
         self.assertIn('<option value="14">14-29d</option>', out["R"]["filters"])
 
@@ -2686,9 +2723,9 @@ class TheFilterAddress(ScreenCase):
         self.assertIn('data-page="2" aria-label="Page 2" aria-current="page"', out["R"]["list"])
         self.assertEqual(re.findall(r'data-size="(\d+)"', out["R"]["list"]), ["25", "50", "100", "200"])
         # A filter change starts the list at its first page again.
-        chip = "ELS.filters.listeners.change[0]({ target: { dataset: { pick: 'status' }, value: 'planning' } }); await flush();"
+        chip = "ELS.filters.listeners.change[0]({ target: { dataset: { pick: 'age' }, value: '0' } }); await flush();"
         _, out = self.listed("?view=list&page=2", chip)
-        self.assertEqual(out["urls"][-1], "view=list&status=planning&realm=all")
+        self.assertEqual(out["urls"][-1], "view=list&age=0&realm=all")
         # A short list draws its range and no page numbers; the board shows every filtered card, whatever the page.
         short = self.listed("?view=list&q=row%2059")[1]["R"]["list"]
         self.assertIn('<span class="range">1–1 of 1</span>', short)
