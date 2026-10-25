@@ -20,7 +20,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sd_db import repos, workflow, writes
-from sd_db.testing import FixtureRemote, GitHubDouble, gh_environment, install_gh
+from sd_db.testing import FixtureRemote, GitHubDouble, gh_environment, install_gh, patience
 from sd_dashboard import issue_filing, management_screen, tasks_screen
 from sd_dashboard.issue_filing import REMOVED, findings, sanitize, scan
 
@@ -100,14 +100,15 @@ class FilingCase(BrowserSession):
         return status, json.loads(body)
 
     def settled(self, run_id):
-        deadline = time.monotonic() + SETTLE
+        budget = patience(SETTLE)
+        deadline = time.monotonic() + budget
         while time.monotonic() < deadline:
             status, document = self.read(run_id)
             self.assertEqual(status, 200, document)
             if document["state"] not in ("queued", "drafting"):
                 return document
             time.sleep(0.05)
-        self.fail(f"run {run_id} did not settle in {SETTLE} s: {document}")
+        self.fail(f"run {run_id} did not settle in {budget:.0f} s: {document}")
 
     def drafted(self, item, target="github"):
         status, _, run = self.start(item, target)
