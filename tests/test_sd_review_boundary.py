@@ -964,11 +964,16 @@ class LineBudgetTests(unittest.TestCase):
         # 4848 -> 4857 is sd:6088, under the operator's 4900 ceiling:
         # `bin/sd_review_material.py` +9 collects the material again, with a
         # deleted file as its header only, when it exceeds the review limit.
+        #
+        # 4857 -> 4899 is pack sd:6028, under the operator's 4900 ceiling:
+        # `blocker_checklist` (+42 in `bin/sd-review`) gives the reviewer the
+        # blocker classes the repository's ship receipts hold, read-only, and
+        # anchors the read at the base so a replayed request stays the same.
         lane = sorted(REVIEW_LANE)
         total = sum(_lines(path) for path in lane)
         self.assertLessEqual(
             total,
-            4857,
+            4899,
             f"the review lane is {total} lines across {[p.name for p in lane]}",
         )
 
