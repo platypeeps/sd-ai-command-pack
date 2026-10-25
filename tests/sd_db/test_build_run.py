@@ -8,6 +8,7 @@ answer from a plan file and log each call. Each fake but `claude` first
 parses its argv with the real tool's own parser, so a call the tool would
 refuse fails here too.
 """
+import importlib
 import json
 import os
 import signal
@@ -551,7 +552,7 @@ class Tick(Case):
         self.items = [create_item(self.db, kind="task", title="Built", repo=str(self.repo), status="ready")]
         build.queue(self.db, self.items, who="operator")
         self.tick()
-        run = build.open_runs(self.db)[0]
+        run = next(row for row in build.open_runs(self.db) if row["step"] != "enqueued")  # this item's, not an older
         build.write(self.db, run["id"], step="enqueuing")
         self.assertTrue(build.enqueued(self.db, run["id"]))
         self.spawned.clear()
@@ -605,6 +606,17 @@ class Tick(Case):
         self.assertEqual((row["outcome"], row["released_at"] is not None), ("lane_failed", True))
         self.assertIn("gate red", row["detail"])
         self.assertEqual(self.spawned, [])
+
+    def test_every_lane_end_short_of_a_merge_ends_the_run(self):
+        """Review round 1: the lane's own list of ends short of a merge, and a cancel, each end the run."""
+        with mock.patch("sys.path", [str(BIN), *sys.path]):
+            lane = importlib.import_module("sd_lane")
+        for status in (*lane.BLOCKED, "cancelled"):
+            with self.subTest(status=status):
+                run = self.enqueued()
+                self.entries[self.items[0]] = {"id": "e1", "status": status, "reason": "stopped"}
+                self.tick()
+                self.assertEqual(build.run(self.db, run["id"])["outcome"], "lane_failed")
 
     def test_an_unread_lane_changes_nothing(self):
         run = self.enqueued()

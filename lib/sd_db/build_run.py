@@ -51,8 +51,9 @@ TITLE_MAX = 63
 READ_SECONDS = 120
 #: The `heartbeat` state row the tick writes first.
 HEARTBEAT = "build-dispatch"
-#: The lane entry states that end an `enqueued` run without a merge.
-LANE_ENDED = ("failed", "skipped", "cancelled")
+#: The lane entry states that end an `enqueued` run without a merge: the lane's `BLOCKED` ends, which
+#: `lane retry` queues again (`prepared` is a merge the lane refused), and a cancel.
+LANE_ENDED = ("failed", "skipped", "prepared", "cancelled")
 
 #: The child waits for one byte on its pipe, written once its group is recorded, then execs the command.
 GATE = ("import os, sys\n"
