@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""PreToolUse hook for `sd-slice-builder`: a builder never waits in the background.
+"""PreToolUse and Stop hook for `sd-slice-builder`.
+
+A builder never waits in the background, and never ends without its check
+output.
 
 A Bash call that outlives its timeout (120 s by default) moves to the
 background, and so does one the builder starts with `run_in_background`.
@@ -24,6 +27,19 @@ a second rewriter on Bash, such as the rtk proxy hook copying the original
 `run_in_background: true`, put one live probe call back in the background.
 A deny always wins, and the corrected re-run passes every hook unchanged.
 
+At Stop it blocks a final report that quotes no check output (sd:6021); the
+frontmatter's `Stop` entry fires as `SubagentStop` for a subagent. It reads
+`last_assistant_message`, which both events carry, and so parses no transcript
+for the text. The report passes when it says `not verified: <reason>`, or
+quotes a test runner's result line (`Ran 12 tests` and `OK` or `FAILED`,
+`5 passed`). When the transcript shows an Edit, Write, MultiEdit or
+NotebookEdit call to a file that is not prose, it must quote a failing line
+too, the fail-first one. An unreadable transcript counts as a code change: an
+unknown is not a negative answer, and `not verified` still ends the turn. So
+a block holds when `stop_hook_active` is set; that reason is the way out.
+Edits made through Bash are not seen. A Stop hook does not fire at max-turns;
+the dispatcher covers that (system sd:6012).
+
 Malformed input fails open: no decision, a warning on stderr, exit 0. A broken
 hook must not stop a builder.
 """
@@ -33,6 +49,7 @@ from __future__ import annotations
 import json
 import re
 import sys
+from pathlib import Path
 
 TIMEOUT_MS = 600000
 
@@ -62,6 +79,63 @@ SLEEP = re.compile(r"\s*sleep(\s|;|&|\||$)")
 STASHES = re.compile(r"\bgit\b[^\n]*?\bstash\b(?![ \t]+(list|show)\b)")
 
 
+REPORT = (
+    "A builder's final report quotes its check output: {missing}. Quote the "
+    "line as the runner printed it, or say not verified: <reason>, such as "
+    "not verified: docs only, no check covers them."
+)
+
+NOT_VERIFIED = re.compile(r"\bnot verified\b[ \t]*[:,(\u2013\u2014-]?[ \t]*\w", re.IGNORECASE)
+
+#: A test runner's result line: unittest's count and verdict, or a count passed.
+RAN = re.compile(r"\bRan [1-9]\d* tests?\b")
+VERDICT = re.compile(r"\b(OK|FAILED)\b")
+PASSED = re.compile(r"\b[1-9]\d* passed\b")
+
+#: A failing line from a test runner: the fail-first evidence.
+FAILING = re.compile(r"\bFAILED\b|\bFAIL:|\b[1-9]\d* failed\b|\bAssertionError\b")
+
+EDITS = {"Edit": "file_path", "Write": "file_path", "MultiEdit": "file_path",
+         "NotebookEdit": "notebook_path"}
+PROSE = (".md", ".mdx", ".txt", ".rst", ".adoc")
+
+
+def touched_code(transcript: object) -> bool:
+    """Whether the transcript shows an edit to a file that is not prose.
+
+    An unreadable transcript is an unknown, so it answers True: the stricter rule.
+    """
+    try:
+        lines = Path(str(transcript)).read_text(encoding="utf-8").splitlines()
+        for line in lines:
+            entry = json.loads(line) if line.strip() else {}
+            content = (entry.get("message") or {}).get("content") if entry.get("type") == "assistant" else None
+            for block in content if isinstance(content, list) else ():
+                key = EDITS.get(block.get("name")) if block.get("type") == "tool_use" else None
+                path = (block.get("input") or {}).get(key) if key else None
+                if isinstance(path, str) and not path.lower().endswith(PROSE):
+                    return True
+    except (OSError, ValueError, AttributeError, TypeError):
+        return True
+    return False
+
+
+def report_reason(payload: dict) -> str | None:
+    """Why this final report may not end the turn, or None to let it end."""
+    message = payload["last_assistant_message"]
+    if not isinstance(message, str):
+        raise TypeError(f"last_assistant_message is {type(message).__name__}")
+    if NOT_VERIFIED.search(message):
+        return None
+    if not ((RAN.search(message) and VERDICT.search(message)) or PASSED.search(message)):
+        return REPORT.format(missing="no test runner's result line, such as Ran 12 tests and OK, or 5 passed")
+    transcript = payload.get("agent_transcript_path") or payload.get("transcript_path")
+    if not FAILING.search(message) and touched_code(transcript):
+        return REPORT.format(missing="this change edits code, and the report quotes no fail-first line, such as "
+                                     "FAILED (failures=1) from the test run before the fix")
+    return None
+
+
 def reason(payload: dict) -> str | None:
     """Why this call is denied, or None to let it pass unchanged."""
     name = payload["tool_name"]
@@ -82,11 +156,15 @@ def reason(payload: dict) -> str | None:
 
 def builder_guard_main() -> int:
     try:
-        why = reason(json.load(sys.stdin))
+        payload = json.load(sys.stdin)
+        at_stop = payload.get("hook_event_name") in ("Stop", "SubagentStop")
+        why = report_reason(payload) if at_stop else reason(payload)
     except (ValueError, KeyError, TypeError, AttributeError) as error:
         print(f"sd-builder-guard: unreadable input, allowing: {error!r}", file=sys.stderr)
         return 0
-    if why is not None:
+    if why is not None and at_stop:
+        print(json.dumps({"decision": "block", "reason": why}))
+    elif why is not None:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",
             "permissionDecision": "deny",

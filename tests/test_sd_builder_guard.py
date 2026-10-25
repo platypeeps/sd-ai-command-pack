@@ -153,10 +153,130 @@ class Decisions(unittest.TestCase):
                 self.assertIn("sd-builder-guard: unreadable input, allowing", result.stderr)
 
 
-def frontmatter_hooks() -> list[dict]:
+def stop(message: str | None, transcript: Path | None, **fields: Any) -> str:
+    """A `SubagentStop` payload as Claude Code sends it; `None` drops the field."""
+    payload: dict[str, Any] = {"hook_event_name": "SubagentStop", "stop_hook_active": False,
+                               "agent_id": "a1", "agent_type": "sd-slice-builder", **fields}
+    if message is not None:
+        payload["last_assistant_message"] = message
+    if transcript is not None:
+        payload["agent_transcript_path"] = str(transcript)
+    return json.dumps(payload)
+
+
+def edit(path: str, tool: str = "Edit") -> dict:
+    key = "notebook_path" if tool == "NotebookEdit" else "file_path"
+    return {"type": "assistant", "message": {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "t1", "name": tool, "input": {key: path}}]}}
+
+
+PASS = "Focused run: `Ran 12 tests in 0.41s` then `OK`."
+FAIL_FIRST = "Fail-first on origin/main: `FAILED (failures=1)`."
+
+
+class Reports(unittest.TestCase):
+    """The Stop check: a builder's final report quotes its check output (sd:6021)."""
+
+    def setUp(self) -> None:
+        scratch = tempfile.TemporaryDirectory()
+        self.addCleanup(scratch.cleanup)
+        self.root = Path(scratch.name)
+
+    def transcript(self, *entries: dict) -> Path:
+        path = self.root / "agent.jsonl"
+        path.write_text("".join(json.dumps(entry) + "\n" for entry in entries), encoding="utf-8")
+        return path
+
+    def outcome(self, stdin: str) -> dict | None:
+        result = run(stdin)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout) if result.stdout.strip() else None
+
+    def assertBlocked(self, stdin: str, *needles: str) -> None:
+        output = self.outcome(stdin)
+        self.assertIsNotNone(output, "the report passed")
+        self.assertEqual(output["decision"], "block")
+        self.assertIn("not verified: <reason>", output["reason"])
+        for needle in needles:
+            self.assertIn(needle, output["reason"])
+
+    def test_a_result_line_passes_a_report_that_touched_no_code(self) -> None:
+        docs = self.transcript(edit("/wt/README.md"), edit("/wt/docs/a.md", "Write"))
+        for report in (PASS, "Ran 1 test in 0.01s\n\nOK", "tests: 5 passed in 0.2s",
+                       "check.sh: `3 passed, 0 failed`", "test result: ok. 4 passed; 0 failed"):
+            with self.subTest(report=report):
+                self.assertIsNone(self.outcome(stop(report, docs)))
+
+    def test_a_report_with_no_result_line_is_blocked(self) -> None:
+        docs = self.transcript(edit("/wt/README.md"))
+        for report in ("Done. Branch x, head abc1234. All tests pass.", "Ran 0 tests in 0.0s\n\nOK",
+                       "OK", "Ran 12 tests", "0 passed", ""):
+            with self.subTest(report=report):
+                self.assertBlocked(stop(report, docs), "result line")
+
+    def test_not_verified_with_a_reason_passes(self) -> None:
+        code = self.transcript(edit("/wt/bin/tool.py"))
+        for report in ("Not verified: docs only, no check runs them.",
+                       "Head abc1234. not verified - the suite needs the hub."):
+            with self.subTest(report=report):
+                self.assertIsNone(self.outcome(stop(report, code)))
+        for report in ("not verified", "Not verified:\n"):
+            with self.subTest(report=report):
+                self.assertBlocked(stop(report, code))
+
+    def test_a_code_change_needs_a_fail_first_line_too(self) -> None:
+        for tool, path in (("Edit", "/wt/bin/tool.py"), ("Write", "/wt/bin/sd-new"),
+                           ("MultiEdit", "/wt/lib/a.sh"), ("NotebookEdit", "/wt/n.ipynb")):
+            with self.subTest(tool=tool):
+                code = self.transcript(edit("/wt/README.md"), edit(path, tool))
+                self.assertBlocked(stop(PASS, code), "fail-first")
+                self.assertIsNone(self.outcome(stop(f"{FAIL_FIRST}\n{PASS}", code)))
+        code = self.transcript(edit("/wt/bin/tool.py"))
+        for fail_first in ("FAIL: test_x (tests.test_a.T.test_x)", "1 failed, 3 passed",
+                           "AssertionError: 2 != 3"):
+            with self.subTest(fail_first=fail_first):
+                self.assertIsNone(self.outcome(stop(f"{fail_first}\n{PASS}", code)))
+        self.assertBlocked(stop(f"0 failed\n{PASS}", code), "fail-first")
+
+    def test_an_unreadable_transcript_counts_as_a_code_change(self) -> None:
+        """An unknown is not a negative answer: the stricter rule holds, `not verified` still ends."""
+        broken = self.root / "broken.jsonl"
+        broken.write_text("{not json\n", encoding="utf-8")
+        for transcript in (self.root / "missing.jsonl", broken, None):
+            with self.subTest(transcript=transcript):
+                self.assertBlocked(stop(PASS, transcript), "fail-first")
+                self.assertIsNone(self.outcome(stop(f"{FAIL_FIRST}\n{PASS}", transcript)))
+
+    def test_the_main_session_stop_reads_transcript_path(self) -> None:
+        code = self.transcript(edit("/wt/bin/tool.py"))
+        payload = json.dumps({"hook_event_name": "Stop", "stop_hook_active": False,
+                              "transcript_path": str(code), "last_assistant_message": PASS})
+        self.assertBlocked(payload, "fail-first")
+        docs = self.transcript(edit("/wt/README.md"))
+        payload = json.dumps({"hook_event_name": "Stop", "stop_hook_active": False,
+                              "transcript_path": str(docs), "last_assistant_message": PASS})
+        self.assertIsNone(self.outcome(payload))
+
+    def test_a_block_holds_on_the_second_stop_too(self) -> None:
+        """`stop_hook_active` does not let a bare report through; `not verified` is the way out."""
+        docs = self.transcript(edit("/wt/README.md"))
+        self.assertBlocked(stop("Done.", docs, stop_hook_active=True))
+
+    def test_malformed_stop_input_allows_with_a_warning(self) -> None:
+        docs = self.transcript(edit("/wt/README.md"))
+        for stdin in (stop(None, docs), stop(None, None),
+                      json.dumps({"hook_event_name": "SubagentStop", "last_assistant_message": 7})):
+            with self.subTest(stdin=stdin):
+                result = run(stdin)
+                self.assertEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("sd-builder-guard: unreadable input, allowing", result.stderr)
+
+
+def frontmatter_hooks(event: str = "PreToolUse") -> list[dict]:
     text = AGENT.read_text(encoding="utf-8")
     _, header, _ = text.split("---\n", 2)
-    return yaml.safe_load(header)["hooks"]["PreToolUse"]
+    return yaml.safe_load(header)["hooks"][event]
 
 
 def load_installer():
@@ -178,6 +298,12 @@ class Registration(unittest.TestCase):
             self.assertFalse(matcher.search(tool), tool)
         self.assertEqual(entry["hooks"], [{"type": "command", "command": HOOK.name}])
         self.assertTrue(os.access(HOOK, os.X_OK))
+
+    def test_the_frontmatter_runs_the_guard_at_stop(self) -> None:
+        """Claude Code turns a subagent's frontmatter `Stop` hook into `SubagentStop`."""
+        (entry,) = frontmatter_hooks("Stop")
+        self.assertNotIn("matcher", entry)
+        self.assertEqual(entry["hooks"], [{"type": "command", "command": HOOK.name}])
 
     def test_the_installed_agent_finds_the_guard_on_the_linked_path(self) -> None:
         """The installer copies the agent verbatim, so the hook names a command, not a path.

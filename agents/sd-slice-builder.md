@@ -17,6 +17,10 @@ hooks:
       hooks:
         - type: command
           command: sd-builder-guard
+  Stop:
+    - hooks:
+        - type: command
+          command: sd-builder-guard
 ---
 
 # Slice builder
@@ -105,3 +109,5 @@ Check each class your change touches before you commit.
 Return: branch, head SHA, whether the worktree is clean, each item's outcome (built, already fixed, or skipped and why),
 the origin/main commit merged, fail-first lines, focused test lines, the body file path and the primary item, each item as `<repo> sd:N`.
 A partial pass is not a pass; "not verified" is a valid report.
+The `sd-builder-guard` hook blocks a final report that quotes no test runner's result line, such as `Ran 12 tests` and `OK`.
+After a code edit it also wants the fail-first line; `not verified: <reason>` ends the turn without either.
