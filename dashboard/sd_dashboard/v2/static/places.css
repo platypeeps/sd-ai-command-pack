@@ -58,8 +58,19 @@
 .place-tile .pt-out summary { cursor: pointer; color: var(--color-ink-2); }
 .place-tile .pt-out pre { max-height: 16rem; overflow: auto; margin: var(--space-2xs) 0 0; padding: var(--space-xs); background: var(--color-well); border-radius: var(--radius-sm); white-space: pre-wrap; overflow-wrap: anywhere; font: 400 var(--text-2xs)/1.4 var(--font-data); }
 
+/* sd:6164: a realm place's issues under its Tasks: source, a link to the tracker in a new tab, and Show hidden. */
+.place-issues-head { margin: var(--space-md) 0 var(--space-2xs); }
+.place-issues-head h3 { margin: 0; font: 600 var(--text-sm)/1.25 var(--font-ui); }
+.place-issues td { vertical-align: top; height: auto; padding-block: var(--space-xs); }
+.place-issues .src, .place-issues .ref { white-space: nowrap; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-ink-2); }
+.place-issues .what { min-width: 0; overflow-wrap: anywhere; }
+.place-issues a { color: var(--color-ink); }
+.place-issues a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.place-issues .hidden-row { color: var(--color-muted); }
+.place-issues tr.empty td { color: var(--color-muted); padding-block: var(--space-sm); }
+
 @media (max-width: 899px) {
-  .place-rows .hide-sm { display: none; }
+  .place-rows .hide-sm, .place-issues .hide-sm { display: none; }
 }
 @media (pointer: coarse) {
   .place-rows a { display: inline-block; min-height: var(--row-touch); line-height: var(--row-touch); }

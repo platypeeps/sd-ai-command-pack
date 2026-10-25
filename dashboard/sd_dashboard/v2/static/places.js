@@ -73,16 +73,33 @@
     await window.places.reread('overview');
   }
 
+  // sd:6164: a realm place's Tasks also lists the realm's open GitHub and Jira issues (places.realm_issues), each marked by
+  // its source and linked to its tracker in a new tab. An issue Hide hid (sd:6175) stays off until Show hidden.
+  let hiddenShown = false;
+  function issuesHTML(doc) {
+    if (!doc.issues) return '';
+    const hidden = doc.issues.filter(r => r.hidden).length, rows = hiddenShown ? doc.issues : doc.issues.filter(r => !r.hidden);
+    const toggle = hidden ? html` <button class="btn quiet sm" type="button" data-issues-hidden>${hiddenShown ? 'Hide hidden' : `Show hidden (${hidden})`}</button>` : '';
+    const notes = [doc.issues_reason && `Not every issue was read: ${doc.issues_reason}.`, doc.issues_store?.reason && `Hide is off: ${doc.issues_store.reason}.`].filter(Boolean);
+    return html`<div class="place-issues-head"><h3>Issues</h3><p class="note">The realm's open GitHub and Jira issues assigned to you or filed by you, as GitHub's Your issues lists them.${toggle}</p></div>
+      ${notes.map(n => html`<p class="note">${n}</p>`)}
+      <table class="ledger place-issues"><thead><tr><th scope="col">Source</th><th scope="col">Issue</th><th scope="col">Title</th><th scope="col" class="hide-sm">Repo</th><th scope="col" class="hide-sm">Why</th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => html`<tr${r.hidden ? html` class="hidden-row"` : ''}><td class="src">${r.tracker}</td>
+        <td class="ref">${r.url ? html`<a href="${r.url}" target="_blank" rel="noopener">${r.ref}</a>` : r.ref}</td>
+        <td class="what">${r.title}${r.hidden ? html` <span class="note">(hidden)</span>` : ''}</td><td class="hide-sm">${r.repo}</td><td class="hide-sm">${r.reason || '—'}</td></tr>`)
+        : html`<tr class="empty"><td colspan="5">${hidden ? `No issue shown: ${plural(hidden, 'hidden issue')}.` : 'No open issue of yours in this realm.'}</td></tr>`}</tbody></table>`;
+  }
+
   // Each place view: its table head, one row, the empty text and the tally.
   // The view's tab carries the row count (sd:5524, shell.view.auto), so a tally says only what the count does not.
   const DRAW = {
     overview: (doc, rows) => [rows.length ? html`<ul class="place-tiles">${rows.map(tileHTML)}</ul>` : '', ''],
     // sd:5635: a task row is selected in place; Details is the Tasks page's (task-details.js), with a link to Tasks.
-    tasks: (doc, rows) => [table([['ID', 'num'], ['What'], ['Kind', 'hide-sm'], ['Status'], ['Due', 'hide-sm'], ACT],
+    tasks: (doc, rows) => [html`${table([['ID', 'num'], ['What'], ['Kind', 'hide-sm'], ['Status'], ['Due', 'hide-sm'], ACT],
       rows.map(r => html`<tr data-id="${r.id}" aria-selected="${String(String(r.id) === sel.tasks)}"><td class="ref num">sd:${r.id}</td><td class="what"><button type="button">${r.title}</button></td>
         <td class="hide-sm">${r.kind}</td><td>${r.status}</td><td class="hide-sm">${day(r.due) || '—'}</td>${act(String(r.id))}</tr>`),
       rows.length || !doc.done?.length ? $('view-tasks')?.dataset.empty || 'No open item without a repo.'
-        : `No open item. All lists the ${plural(doc.done.length, 'item')} done this week.`), ''],
+        : `No open item. All lists the ${plural(doc.done.length, 'item')} done this week.`)}${issuesHTML(doc)}`, ''],
     // sd:5620: a brief row is selected in place; Details is the Briefs page's (brief-details.js), with a link to Briefs.
     briefs: (doc, rows) => [table([['Day'], ['Brief'], ['Words', 'num hide-sm'], ['Lead', 'hide-sm'], ACT],
       rows.map(r => html`<tr data-id="${r.id}" aria-selected="${String(r.id === sel.briefs)}"><td class="when">${r.day}</td><td class="what"><button type="button">${r.subj}</button></td>
@@ -106,6 +123,7 @@
   document.addEventListener('click', e => {
     const run = e.target.closest('[data-tile-act]');
     if (run) { runTile(run); return; }
+    if (e.target.closest('[data-issues-hidden]')) { hiddenShown = !hiddenShown; if (RAW.tasks?.state === 'read') draw('tasks'); return; }
     // A view that reads its own document (data-api) has its Open | All here; HOA's Tasks is hoa.js's.
     const f = e.target.closest('.place-view[data-api] [data-f]');
     if (OPEN[f?.dataset?.f]) { show(f.dataset.f, f.dataset.v); return; }

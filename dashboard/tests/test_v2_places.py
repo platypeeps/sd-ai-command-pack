@@ -20,7 +20,7 @@ from unittest import mock
 
 import sqlite3
 
-from sd_db import reporting, routine_briefs, workflow, writes
+from sd_db import repos, reporting, routine_briefs, upsert_repo, upsert_shadow, workflow, writes
 
 from sd_dashboard import hoa_screen, places, reports_screen, snooze, tasks_screen, today_reports, v2
 
@@ -356,8 +356,8 @@ class TheRowWins(Fixture):
         self.assertIn("database is locked", briefs["reason"])
 
 
-class RealmPlaces(Fixture):
-    """sd:5663: a realm whose id is also a report family key is a place page, with HOA's and Home's three views."""
+class RealmFixture(Fixture):
+    """A realm acme with a report family of its id, an open item, a report and two briefs."""
 
     def setUp(self):
         super().setUp()
@@ -371,6 +371,10 @@ class RealmPlaces(Fixture):
         self.acme_report = report(self, "acme-nightly", "r4")
         self.site_brief = brief(self, "2026-09-05 - Site Notes", self.site)
         self.nightly_brief = brief(self, "2026-09-05 - Acme Nightly", self.other)
+
+
+class RealmPlaces(RealmFixture):
+    """sd:5663: a realm whose id is also a report family key is a place page, with HOA's and Home's three views."""
 
     def refuse(self):
         def refuse(connection, keys):
@@ -434,6 +438,52 @@ class RealmPlaces(Fixture):
         self.assertEqual(self.ids(places.tasks(self.connection, "hoa", now=NOW)), [self.hoa_item])
         self.assertEqual(self.ids(places.tasks(self.connection, "home", now=NOW)), [self.home_item])
         self.assertEqual(self.ids(places.briefs(self.connection, "home", now=NOW, config=self.config)), [self.fun_brief])
+
+
+class RealmIssues(RealmFixture):
+    """sd:6164: a realm place's Tasks also lists the operator's open GitHub and Jira issues that /api/github/issues reads
+    (issue sources and the shadow sync), only those of the realm's repos, each with its source; issue Hide (sd:6175)
+    marks a row hidden, which the page leaves out until Show hidden."""
+
+    MINE = {"/repos/acme-site": [
+        {"tracker": "jira", "url": "https://example.test/browse/ACME-8", "number": None, "title": "Fix the kit",
+         "state": "open", "reason": "filed", "last_seen": "2026-09-06T08:00:00+00:00"},
+        {"tracker": "github", "url": "https://github.com/example/acme-site/issues/12", "number": 12, "title": "Crash on start",
+         "state": "open", "reason": "assigned", "last_seen": "2026-09-05T08:00:00+00:00"}],
+        "/repos/system": [
+        {"tracker": "github", "url": "https://github.com/example/system/issues/3", "number": 3, "title": "Not the realm's",
+         "state": "open", "reason": "assigned", "last_seen": "2026-09-04T08:00:00+00:00"}]}
+
+    def setUp(self):
+        super().setUp()
+        upsert_repo(self.connection, self.site, remote="git@github.com:example/acme-site.git")
+        for number, state in ((30, "open"), (31, "closed")):
+            upsert_shadow(self.connection, tracker="github", url=f"https://github.com/example/acme-site/issues/{number}",
+                          repo="example/acme-site", number=number, kind="issue", title=f"Site {number}", state=state,
+                          reason="filed", filed=True, author="me", closed_at="2026-09-05T10:00:00Z" if state == "closed" else None)
+        upsert_shadow(self.connection, tracker="github", url="https://github.com/upstream/tool/issues/5", repo="upstream/tool",
+                      number=5, kind="issue", title="Upstream", state="open", reason="filed", filed=True, author="me")
+        writes.set_view(self.connection, "issue:jira:acme-8", hidden=True)
+        self.connection.commit()
+
+    def doc(self, area="acme"):
+        with mock.patch.object(repos, "mine_issues", create=True, return_value=self.MINE):
+            return places.tasks(self.connection, area, now=NOW)
+
+    def test_the_realms_open_issues_from_both_trackers_each_with_its_source_and_hidden(self):
+        doc = self.doc()
+        self.assertEqual([(r["tracker"], r["ref"], r["hidden"]) for r in doc["issues"]],
+                         [("Jira", "ACME-8", True), ("GitHub", "#12", False), ("GitHub", "#30", False)])
+        self.assertEqual((doc["issues_reason"], doc["issues_store"]), ("", {"available": True, "reason": ""}))
+        self.assertEqual(self.ids(doc), [self.acme_item], "the item rows stay as they were")
+
+    def test_a_failed_issue_read_is_named_and_hoa_and_home_list_none(self):
+        with mock.patch.object(repos, "mine_issues", create=True, side_effect=sqlite3.OperationalError("database is locked")):
+            doc = places.tasks(self.connection, "acme", now=NOW)
+        self.assertEqual([r["ref"] for r in doc["issues"]], ["#30"])
+        self.assertIn("database is locked", doc["issues_reason"])
+        for area in ("hoa", "home"):
+            self.assertNotIn("issues", self.doc(area))
 
 
 class TheRoutes(BrowserSession):
@@ -891,6 +941,30 @@ class TheOverviewScript(Fixture):
         self.assertEqual(out["posts"], [["/api/place/tiles", {"realm": "acme", "tile": "app", "action": "Deploy"}, 64]])
         self.assertEqual(out["toasts"][-1]["msg"], "Staging site · Deploy started. Read again shows how it ended.")
         self.assertEqual(out["gets"], ["/api/place/acme/overview"] * 2)
+
+    ISSUES = {"state": "read", "area": "acme", "read": NOW, "reason": "", "rows": [], "done": [], "lead": False, "issues_reason": "",
+              "issues_store": {"available": True, "reason": ""}, "issues": [
+                  {"tracker": "Jira", "ref": "ACME-8", "key": "jira:ACME-8", "title": "Fix the kit", "repo": "acme-site", "reason": "filed",
+                   "url": "https://example.test/browse/ACME-8", "hidden": True},
+                  {"tracker": "GitHub", "ref": "#12", "key": "github:example/acme-site#12", "title": "Crash <b>on</b> start", "repo": "acme-site",
+                   "reason": "assigned", "url": "https://github.com/example/acme-site/issues/12", "hidden": False}]}
+
+    def test_tasks_lists_the_realms_issues_with_their_source_and_hidden_ones_on_show_hidden(self):
+        docs = {"/api/place/acme/overview": [200, self.TILES], "/api/place/acme/tasks": [200, self.ISSUES]}
+        out = self.run_page("""await go('#view=tasks'); R.rows = ELS['tasks-rows'].html;
+const b = { dataset: { issuesHidden: '' } };
+(DOC_LISTENERS['click'] || []).forEach(f => f({ button: 0, target: { closest: sel => sel === '[data-issues-hidden]' ? b : null } }));
+await flush(); R.all = ELS['tasks-rows'].html;""", docs, place="acme")
+        rows, every = out["R"]["rows"], out["R"]["all"]
+        self.assertIn("<h3>Issues</h3>", rows)
+        self.assertIn('<td class="src">GitHub</td>', rows)
+        self.assertIn('<a href="https://github.com/example/acme-site/issues/12" target="_blank" rel="noopener">#12</a>', rows)
+        self.assertIn("Crash &lt;b&gt;on&lt;/b&gt; start", rows)
+        self.assertNotIn("ACME-8", rows, "a hidden issue showed by default")
+        self.assertIn("Show hidden (1)", rows)
+        self.assertIn('<td class="src">Jira</td>', every)
+        self.assertIn("ACME-8", every)
+        self.assertIn("Hide hidden", every)
 
     def test_a_refused_or_unanswered_start_says_why_and_an_off_button_posts_nothing(self):
         out = self.run_overview("clickAct('app', 'Deploy'); await flush();", answer=(409, {"error": "Staging site Deploy is already running"}))

@@ -24,6 +24,11 @@ and points each view at `GET /api/place/<id>/overview`, `/tasks`,
   is not on this machine shows why, and its buttons run nothing.
 - Tasks: the open items `places.realm_of` puts in the realm, the rows of
   Tasks under that Realm.
+  Under them, Issues (sd:6164, `places.realm_issues`): the open GitHub and
+  Jira issues GitHub's Your issues reads (`/api/github/issues`) whose repo
+  the realm owns, each with its source and a link to its tracker. An issue
+  outside the issue sources counts by its registered checkout; an upstream
+  one stays off. An issue Hide hid (sd:6175) stays off until Show hidden.
 - Briefs: briefs whose repo a glob of the realm matches, and briefs whose
   series, lower-cased with spaces as hyphens, names a job of the family.
 - Reports: reports of the family's jobs, from the newest 200.
