@@ -74,12 +74,13 @@ COLUMNS = {
                         "none": "observed_at status default_branch"},
     "request_outcome": {"none": "id committed_at"},
     "runner_lease": {"key": "repo", "none": "run branch exclusive acquired_at released_at"},
-    "runner_run": {"key": "repo detached_from", "hub-only": "work_path retained_path",
-                   "history": "detail delivery_proof ignored_manifest quarantine",
+    "runner_run": {"key": "repo detached_from", "hub-only": "work_path retained_path log_path",
+                   "history": "detail delivery_proof ignored_manifest quarantine final",
                    "none": "id assignment run branch owner journal_version start_step end_step "
                            "end_action outcome supervisor_pid supervisor_pgid supervisor_start "
                            "provider vendor base_head authored_head reviewed_head cancel_requested "
-                           "created_at updated_at released_at"},
+                           "created_at updated_at released_at step heartbeat_at model session_id "
+                           "builder_pgid"},
     "shadow": {"none": "id tracker repo url number kind title state author first_seen last_seen reason "
                        "merged_at closed_at branch linked_issues updated_at created_at filed status assignee"},
     "skill_use": {"key": "cwd", "none": "id timestamp skill surface mode"},
@@ -256,7 +257,9 @@ class TheMigration(AThirteenStore):
         # `judgment` columns or `runner_run.detached_from`. 026's reverse puts
         # `status_source` back at `row`, which every row here held, and 025's
         # puts `satellite_gate` back so 020's can drop it. 041's goes first of
-        # all: the one later column on `item`, whose rows this compares.
+        # all: the one later column on `item`, whose rows this compares, after
+        # 042's build columns on `runner_run`.
+        connection.executescript(reverse_script("042_runner_run_build.sql"))
         connection.executescript(reverse_script("041_recurrence_lead.sql"))
         connection.executescript(reverse_script("026_repo_drop_status_source.sql"))
         connection.executescript(reverse_script("025_repo_drop_satellite_gate.sql"))

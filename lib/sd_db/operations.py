@@ -509,9 +509,14 @@ def assignment_state(connection: sqlite3.Connection, assignment: int) -> dict:
     _identifier(assignment, "assignment")
     # The item's status and an unreleased runner attempt decide whether a
     # blocked row may be cancelled, so both are in the row the revision hashes.
+    # A running build's bundle run is its lead's (`build.claim`), and the
+    # cancel is asked on that run, so the run's id is in the row too.
     row = connection.execute("SELECT assignment.*, item.title AS title, item.status AS item_status, "
                              "EXISTS (SELECT 1 FROM runner_run WHERE runner_run.assignment=assignment.id "
-                             "AND runner_run.released_at IS NULL) AS leased "
+                             "AND runner_run.released_at IS NULL) AS leased, "
+                             "(SELECT runner_run.id FROM runner_run WHERE runner_run.assignment="
+                             "COALESCE(assignment.parent, assignment.id) AND runner_run.released_at IS NULL "
+                             "AND runner_run.outcome IS NULL) AS build_run "
                              "FROM assignment LEFT JOIN item ON item.id=assignment.item WHERE assignment.id=?",
                              (assignment,)).fetchone()
     if row is None:
@@ -521,6 +526,8 @@ def assignment_state(connection: sqlite3.Connection, assignment: int) -> dict:
     # runner attempt holds its lease. One whose item is open may still be
     # requeued, and stays the runner's to settle.
     if row["status"] == "queued":
+        reason = ""
+    elif row["status"] == "running" and row["scope"] == "build" and row["build_run"]:
         reason = ""
     elif row["status"] == "running":
         reason = "running assignment has no supported cancellation backend"
@@ -532,7 +539,8 @@ def assignment_state(connection: sqlite3.Connection, assignment: int) -> dict:
         reason = "a runner attempt still holds this assignment's lease"
     else:
         reason = ""
-    result = {key: row[key] for key in ("id", "item", "title", "role", "provider", "status", "started", "ended")}
+    result = {key: row[key] for key in ("id", "item", "title", "role", "provider", "status", "started", "ended",
+                                        "scope", "build_run")}
     result["revision"] = _digest(dict(row))
     result["capabilities"] = {"cancel": {"allowed": not reason, "reason": reason}}
     return result
@@ -546,6 +554,21 @@ def cancel_assignment(connection: sqlite3.Connection, assignment: int, *, expect
         if not current["capabilities"]["cancel"]["allowed"]:
             raise WorkflowError(current["capabilities"]["cancel"]["reason"])
         ended = now()
+        if current["status"] == "running":
+            # A running build stops at its supervisor's next beat, or at the
+            # reap when no supervisor lives; either ends the whole bundle
+            # `cancelled` and moves its items back to ready (pack sd:6093).
+            connection.execute("UPDATE runner_run SET cancel_requested = ?, updated_at = ? "
+                               "WHERE id = ? AND released_at IS NULL AND outcome IS NULL",
+                               (f"cancelled by {who}", ended, current["build_run"]))
+            audit = {"assignment": assignment, "run": current["build_run"], "status": "cancel_requested",
+                     "who": who, "at": ended}
+            row = record_state(connection, "checkpoint", key=f"operations:assignment:{assignment}", body=audit)
+            resolve_state(connection, row)
+            add_note(connection, current["item"], "comment",
+                     f"Running build assignment {assignment} cancel requested by {who}; run "
+                     f"{current['build_run']} stops with its bundle", session=who)
+            return assignment_state(connection, assignment)
         update_assignment(connection, assignment, status="cancelled", ended=ended)
         audit = {"assignment": assignment, "old_status": current["status"], "status": "cancelled", "who": who, "at": ended}
         row = record_state(connection, "checkpoint", key=f"operations:assignment:{assignment}", body=audit)
