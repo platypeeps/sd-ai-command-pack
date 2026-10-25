@@ -184,6 +184,10 @@ Synthetic provider preflight excludes that block.
 When findings contradict a convention, check the supplied wording before assigning blame.
 Use `sd-rules --for <path>` for applicable repository rules.
 
+A code review prompt also names up to 8 blocker classes this repository's ship receipts hold (pack sd:6028).
+They come from the 14 days before the reviewed base, grouped by family and path, with the newest summary.
+An unreadable database prints one stderr line, and the review runs without them.
+
 ## The `codex-json` entry is subscription-only (R10-D4)
 
 `codex_preflight` requires `auth_mode == chatgpt` and no stored `OPENAI_API_KEY` field (R10-D4).
