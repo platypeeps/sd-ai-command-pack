@@ -172,8 +172,9 @@ def room(connection, *, load: float | None, load_cap: float | None, interactive:
     """Builders that may start now: `machine`, `used` and `held` by repository, and `why` there is none.
 
     `load` and `load_cap` are the five-minute load and its cap from `sd gate
-    status --json`; `interactive` is one `{repo, session_id}` per interactive
-    builder, `repo` its key or None when its cwd names none. Either unread
+    status --json`, a cap of 0 or less meaning none; `interactive` is one
+    `{repo, session_id}` per interactive builder, `repo` its key or None
+    when its cwd names none. Either unread
     (None) is no room, never room. A headless run's own session is not counted
     twice. A repository holding an exclusive or quarantined lease of any other
     kind has no room (`held`).
@@ -200,7 +201,8 @@ def room(connection, *, load: float | None, load_cap: float | None, interactive:
             used[repo] = used.get(repo, 0) + 1
     held = sorted({row["repo"] for row in leases if row["scope"] != SCOPE and (row["exclusive"] or row["quarantine"])})
     machine = MACHINE_CAP - len(builds) - len(others)
-    if not why and isinstance(load, (int, float)) and isinstance(load_cap, (int, float)) and load > load_cap:
+    # A cap of 0 or less is the gate's load rule off, as the lane's `load_stop` reads it.
+    if not why and isinstance(load, (int, float)) and isinstance(load_cap, (int, float)) and 0 < load_cap < load:
         why = f"the five-minute load is {load:g}, above the cap of {load_cap:g}"
     if not why and machine <= 0:
         why = f"{MACHINE_CAP - machine} builders run already; the cap is {MACHINE_CAP}"

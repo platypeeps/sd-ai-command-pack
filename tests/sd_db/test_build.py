@@ -4,6 +4,7 @@ The design's failure table names most of these tests: system
 `docs/work/2026-10-24-build-dispatcher/design.md`.
 """
 import sqlite3
+import sys
 import tempfile
 import threading
 import unittest
@@ -250,6 +251,15 @@ class Claim(Case):
                 self.assertIsNone(self.claim(**inputs))
                 self.assertTrue(build.room(self.db, **{**IDLE, **inputs})["why"])
         self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 0)
+
+    def test_the_gates_off_limit_is_no_load_cap(self):
+        """Review round 1: the gate reports `load_max` 0 when its load rule is off, its default; that is no cap."""
+        with mock.patch("sys.path", [str(Path(__file__).resolve().parents[2] / "bin"), *sys.path]):
+            gate = import_module("sd_gate_slots")
+        off = gate.load_rule({}).limit
+        build.queue(self.db, [self.item()], who="operator")
+        self.assertEqual(build.room(self.db, **{**IDLE, "load": 2.5, "load_cap": off})["why"], "")
+        self.assertIsNotNone(self.claim(load=2.5, load_cap=off))
 
     def test_interactive_builders_count_against_their_repository_and_the_machine(self):
         build.queue(self.db, [self.item()], who="operator")
