@@ -438,6 +438,29 @@ R.button = press('Enter', el('button'));""")
         self.assertEqual(R["button"], {"prevented": False, "opened": None})
         self.assertEqual(R["summary"], {"prevented": False, "opened": None})
 
+    # The shell's open-menu rules, as shell.js has them: toggle, a press outside, focus leaving.
+    MENU_JS = re.search(r"^  // A filter dropdown in use stays open across a redraw;.*?\n\n", SHELL_JS, re.S | re.M).group(0)
+
+    def test_a_tap_on_a_box_keeps_the_menu_open_where_the_browser_focuses_an_ancestor(self):
+        """sd:6254, the operator's iPad: WebKit does not focus a checkbox on a press. A tap on a box moved focus from the
+        summary to <main tabindex="-1">, its focusable ancestor; the focusout rule read that as focus leaving the menu and
+        shut it on mousedown, so the click fell on what lay under it and nothing was picked. Chrome focuses the box."""
+        R = run_keys(self.MENU_JS + r"""
+// A tree: main > details.fpick[open] > summary, input; and a button outside the menu.
+const node = (name, parent, extra = {}) => Object.assign({ name, parent,
+  contains(n) { for (; n; n = n.parent) if (n === this) return true; return false; },
+  closest(sel) { for (let n = this; n; n = n.parent) if (sel === 'details.fpick[open]' && n.name === 'details' && n.open) return n; return null; } }, extra);
+const main = node('main', null), menu = node('details', main, { open: true }), summary = node('summary', menu), box = node('input', menu);
+const outside = node('button', main);
+const blur = (target, relatedTarget) => { menu.open = true; DOC_LISTENERS.focusout.forEach(f => f({ target, relatedTarget })); return menu.open; };
+R.toMain = blur(summary, main); R.fromBoxToMain = blur(box, main); R.toBox = blur(summary, box); R.toNothing = blur(summary, null);
+R.toOutside = blur(summary, outside);""")
+        self.assertTrue(R["toMain"], "a press on a box moved focus to an ancestor and shut the menu")
+        self.assertTrue(R["fromBoxToMain"])
+        self.assertTrue(R["toBox"])
+        self.assertTrue(R["toNothing"])
+        self.assertFalse(R["toOutside"], "focus leaving for a control outside still shuts it")
+
 
 class TheSharedRules(unittest.TestCase):
     """sd:2588: shell.css holds each shared annunciator and ledger rule once; no page repeats one."""

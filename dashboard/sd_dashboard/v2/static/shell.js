@@ -1353,10 +1353,12 @@
   }
   // viewpick:end
   // A filter dropdown in use stays open across a redraw; a press outside it or focus leaving it closes it, and so does Esc
-  // (Keys, below). toggle does not bubble, so it is heard on the way down.
+  // (Keys, below). toggle does not bubble, so it is heard on the way down. Focus moving to an ancestor is a press inside:
+  // WebKit (Safari, the iPad) does not focus a box it taps, and focuses its focusable ancestor (<main tabindex="-1">)
+  // instead, which shut the menu before the click landed (sd:6254).
   document.addEventListener('toggle', e => { const d = e.target; if (d.matches?.('details.fpick')) { if (d.open) PICKS.add(d.dataset.pick); else PICKS.delete(d.dataset.pick); } }, true);
   document.addEventListener('pointerdown', e => document.querySelectorAll('details.fpick[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }));
-  document.addEventListener('focusout', e => { const d = e.target.closest?.('details.fpick[open]'); if (d && e.relatedTarget && !d.contains(e.relatedTarget)) d.open = false; });
+  document.addEventListener('focusout', e => { const d = e.target.closest?.('details.fpick[open]'); if (d && e.relatedTarget && !d.contains(e.relatedTarget) && !e.relatedTarget.contains(d)) d.open = false; });
 
   // ---------- Table grammar: every table sorts, filters and folds (sd:5064) ----------
   // tables:start
