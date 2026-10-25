@@ -900,7 +900,7 @@ def _change_status(workflow: Any, connection: Any, args: argparse.Namespace,
             f"item {args.item} is a report, and a report closes by acknowledgement: "
             f"`sd reports acknowledge {args.item} --resolve-followups` also resolves its open followups")
     result = workflow.change_status(
-        connection, args.item, args.status, who=who,
+        connection, args.item, args.status, who=who, session=_session(who),
         expected_revision=getattr(args, "if_revision", None), reason=reason)
     spawned = result.get("next_occurrence")
     following = None if spawned is None else workflow.item_state(connection, spawned)["item"]
@@ -1191,14 +1191,22 @@ def _note_text(args: argparse.Namespace) -> str:
 
 #: Claude Code sets it to the session's id in every Bash call and hook (sd:6023).
 SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+#: Claude Code 2.1.303 sets it on an agent's Bash calls alone, as `claude-code_<version>_agent`; a teammate
+#: shares its lead's session id, so its notes record the id with `TEAMMATE` after it (pack sd:6046).
+AGENT_ENV, TEAMMATE = "AI_AGENT", ":agent"
 
 
 def _session(who: str) -> str:
-    """The session a note records: the harness session id when set, else `who` (sd:6023).
+    """The session a note records: the harness session id when set, marked for a teammate, else `who` (sd:6023).
 
-    `bin/sd-session-trail` reads a session's own notes back by it after a compact.
+    `bin/sd-session-trail` reads a session's own notes back by it after a compact; the mark keeps a
+    teammate's notes out of its lead's trail.
     """
-    return os.environ.get(SESSION_ENV) or who
+    session = os.environ.get(SESSION_ENV)
+    if not session:
+        return who
+    agent = os.environ.get(AGENT_ENV, "")
+    return session + TEAMMATE if agent.startswith("claude-code") and agent.endswith("_agent") else session
 
 
 def _note(workflow: Any, connection: Any, args: argparse.Namespace, who: str, revision: str | None) -> dict:
@@ -1278,7 +1286,8 @@ def _rule_batch(review: Any, workflow: Any, connection: Any, args: argparse.Name
                                           expected_revision=revision)["revision"]
     if revision is None:
         revision = workflow.item_state(connection, args.item)["revision"]
-    state = review.rule(connection, args.item, args.answers, option, expected_revision=revision, who=who)
+    state = review.rule(connection, args.item, args.answers, option, expected_revision=revision, who=who,
+                        session=_session(who))
     state["note"] = state["ruling"]
     return state
 

@@ -270,18 +270,45 @@ class TaskCLI(unittest.TestCase):
             self.assertEqual(sd_db.reads.open_followups(connection), [])
         self.assertNotIn("advisory", self.call("task", "note", item, "--body", "Again").stderr)
 
+    def harness(self, session: str | None = None, agent: str | None = None) -> dict[str, str]:
+        """This environment with the harness's session id and agent marker set as given, else unset."""
+        bare = {key: value for key, value in self.environment.items()
+                if key not in ("CLAUDE_CODE_SESSION_ID", "AI_AGENT")}
+        return {**bare, **({"CLAUDE_CODE_SESSION_ID": session} if session else {}),
+                **({"AI_AGENT": agent} if agent else {})}
+
     def test_add_and_note_record_the_harness_session_id(self):
         """pack sd:6023: add, note and an answer record `CLAUDE_CODE_SESSION_ID`; unset, the user as before."""
-        session = {**self.environment, "CLAUDE_CODE_SESSION_ID": "session-under-test"}
+        session = self.harness("session-under-test")
         item = json.loads(self.call("task", "add", "Filed by a session", "--json", env=session).stdout)["item"]["id"]
         asked = json.loads(self.call("task", "note", item, "Which?", "--kind", "question", "--json",
                                      env=session).stdout)["note"]["id"]
         self.call("task", "note", item, "This one", "--kind", "decision", "--answers", asked, env=session)
-        bare = {key: value for key, value in self.environment.items() if key != "CLAUDE_CODE_SESSION_ID"}
-        state = json.loads(self.call("task", "note", item, "Plain", "--json", env=bare).stdout)
+        state = json.loads(self.call("task", "note", item, "Plain", "--json", env=self.harness()).stdout)
         self.assertEqual([(note["kind"], note["session"]) for note in state["notes"]],
                          [("status_change", "session-under-test"), ("question", "session-under-test"),
                           ("decision", "session-under-test"), ("comment", getpass.getuser())])
+
+    def test_a_status_move_records_the_harness_session_id(self):
+        """pack sd:6046: `sd task status` recorded the user where add and note record the session."""
+        item = json.loads(self.call("task", "add", "Moved by a session", "--json", env=self.harness()).stdout)
+        state = json.loads(self.call("task", "status", item["item"]["id"], "in_progress", "--json",
+                                     env=self.harness("session-under-test")).stdout)
+        self.assertEqual([(note["body"].split(" by ")[0], note["session"]) for note in state["notes"]],
+                         [("opened as planning", getpass.getuser()), ("planning -> in_progress", "session-under-test")])
+
+    def test_a_teammate_note_carries_the_agent_mark(self):
+        """pack sd:6046: a teammate shares its lead's session id; Claude Code sets `AI_AGENT` on its Bash calls
+        only (`claude-code_<version>_agent`), so its notes record `<id>:agent` and leave the lead's trail."""
+        agent = self.harness("session-under-test", "claude-code_2-1-303_agent")
+        item = json.loads(self.call("task", "add", "Filed by a teammate", "--json", env=agent).stdout)["item"]["id"]
+        self.call("task", "note", item, "Teammate ruling", "--kind", "decision", env=agent)
+        self.call("task", "note", item, "Lead ruling", "--kind", "decision", env=self.harness("session-under-test"))
+        other = self.harness("session-under-test", "cursor-agent")
+        state = json.loads(self.call("task", "note", item, "Another tool", "--json", env=other).stdout)
+        self.assertEqual([note["session"] for note in state["notes"]],
+                         ["session-under-test:agent", "session-under-test:agent", "session-under-test",
+                          "session-under-test"])
 
     def done_item(self, *merge_note):
         """A task closed by hand, optionally carrying a merge comment first."""
@@ -392,6 +419,16 @@ class TaskCLI(unittest.TestCase):
         self.assertIn(f"On note #{asked}: Worth a try", [note["body"] for note in state["notes"]])
         filed = int(state["note"]["body"].rsplit("sd:", 1)[1])
         self.assertEqual(json.loads(self.call("task", "show", filed, "--json").stdout)["item"]["kind"], "task")
+
+    def test_an_approval_task_records_the_session_and_the_ruling_the_user(self):
+        """pack sd:6046: the task an approval files is the session's, so its trail lists it; the ruling
+        and its comment keep the user, because the Review page shows their session as "ruled by"."""
+        item, asked = self.batch_question()
+        state = json.loads(self.call("task", "note", item, "Worth a try", "--kind", "decision", "--answers", asked,
+                                     "--option", "approve", "--json", env=self.harness("session-under-test")).stdout)
+        filed = json.loads(self.call("task", "show", int(state["note"]["body"].rsplit("sd:", 1)[1]), "--json").stdout)
+        self.assertEqual([note["session"] for note in filed["notes"]], ["session-under-test"])
+        self.assertEqual({note["session"] for note in state["notes"] if note["id"] > asked}, {getpass.getuser()})
 
     def test_option_refuses_an_unknown_label_or_a_plain_question_and_writes_nothing(self):
         """sd:5065: an unknown label names the valid ones; `--option` needs `--answers` on a batch question."""

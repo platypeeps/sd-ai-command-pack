@@ -71,6 +71,15 @@ class SessionTrail(unittest.TestCase):
         self.assertNotIn("another session", text.lower())
         self.assertNotIn("comment", text)
 
+    def test_a_teammates_notes_stay_out_of_its_leads_trail(self):
+        """pack sd:6046: a teammate's notes carry `<id>:agent`, so the lead's trail is its own."""
+        mine = self.file("Filed by the lead", "session-a")
+        self.note(mine, "A teammate's ruling", "decision", "session-a:agent")
+        self.file("Filed by a teammate", "session-a:agent")
+        text = self.hook({"session_id": "session-a"})
+        self.assertIn("Filed by the lead", text)
+        self.assertNotIn("teammate", text)
+
     def test_the_environment_names_the_session_when_the_payload_does_not(self):
         self.file("Filed by this session", "session-a")
         self.assertIn("Filed by this session", self.hook({"source": "compact"}, CLAUDE_CODE_SESSION_ID="session-a"))
@@ -84,6 +93,19 @@ class SessionTrail(unittest.TestCase):
         self.assertEqual(len(lines), 1 + LIMIT + 1)
         self.assertTrue(lines[1].endswith(f": Ruling {LIMIT + 1}"), lines[1])
         self.assertIn("Older entries not shown", lines[-1])
+
+    def test_a_long_or_multiline_title_keeps_one_bounded_line(self):
+        """pack sd:6046: a filed item's title skipped the first-line cut and the `WIDTH` bound notes get."""
+        workflow.capture_task(self.connection, title="Short head", who="operator", session="session-a")
+        self.connection.execute("UPDATE item SET title = ?", ("First line\nsecond line " + "x" * 400,))
+        self.connection.commit()
+        lines = self.hook({"session_id": "session-a"}).splitlines()
+        self.assertEqual(len(lines), 2, lines)
+        self.assertTrue(lines[1].endswith(": First line"), lines[1])
+        self.connection.execute("UPDATE item SET title = ?", ("y" * 400,))
+        self.connection.commit()
+        entry = self.hook({"session_id": "session-a"}).splitlines()[1]
+        self.assertTrue(entry.endswith("y" * 157 + "..."), entry)
 
     def test_a_session_with_no_trail_prints_nothing(self):
         self.file("Someone else's", "session-b")

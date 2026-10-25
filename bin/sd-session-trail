@@ -6,7 +6,8 @@ add` and `sd task note` record the harness session id (`CLAUDE_CODE_SESSION_ID`)
 as the note's session (sd:6023). This hook reads those rows back by that id --
 the items the session filed and the decisions and questions it wrote, newest
 first, at most `LIMIT` -- so the session continues from the database and needs
-no handoff file.
+no handoff file. A teammate shares its lead's id, and its notes record the id
+with `:agent` after it (pack sd:6046), so the trail holds the lead's own.
 
 Register on the `compact` matcher only. `bin/sd-handoff-restore` owns `startup`
 and `clear`, and a fresh session has no trail of its own.
@@ -38,13 +39,17 @@ def session_of(payload: dict, environ: dict[str, str]) -> str:
     return found if isinstance(found, str) and found else environ.get(SESSION_ENV, "")
 
 
+def first_line(text) -> str:
+    """The first line of a note or title, at most `WIDTH` characters (pack sd:6046)."""
+    first = str(text).strip().partition("\n")[0]
+    return first if len(first) <= WIDTH else first[:WIDTH - 3] + "..."
+
+
 def trail_entry(row, item_ref) -> str:
     ref = item_ref(row["item"], row["repo"])
     if row["kind"] == "status_change":
-        return f"- filed {ref} {row['timestamp'][:10]}: {row['title']}"
-    first = str(row["body"]).strip().partition("\n")[0]
-    if len(first) > WIDTH:
-        first = first[:WIDTH - 3] + "..."
+        return f"- filed {ref} {row['timestamp'][:10]}: {first_line(row['title'])}"
+    first = first_line(row["body"])
     state = ", resolved" if row["kind"] == "question" and row["resolved_at"] else ""
     return f"- {row['kind']} #{row['id']} on {ref} {row['timestamp'][:10]}{state}: {first}"
 

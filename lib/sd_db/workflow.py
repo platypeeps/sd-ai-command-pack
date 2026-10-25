@@ -697,9 +697,12 @@ def _refuse_unlanded_branch(state: dict, item: int) -> None:
 
 def change_status(
     connection: sqlite3.Connection, item: int, target: str, *, who: str,
-    reason: str | None = None, expected_revision: str | None = None,
+    reason: str | None = None, expected_revision: str | None = None, session: str | None = None,
 ) -> dict:
-    """Move a task, personal, followup or active work item without bypassing delivery authority."""
+    """Move a task, personal, followup or active work item without bypassing delivery authority.
+
+    `session` is the status note's session, `who` when not given (pack sd:6046).
+    """
     who = _text(who, "who")
     if reason is not None:
         reason = _text(reason, "reason")
@@ -773,7 +776,7 @@ def change_status(
                 closed = (f"resolved open note{'s' if len(owed) > 1 else ''} "
                           + ", ".join(str(note) for note in owed))
                 reason = f"{reason}; {closed}" if reason else closed
-        transition(connection, item, target, who=who, reason=reason)
+        transition(connection, item, target, who=who, reason=reason, session=session)
         if target != "done" or row.get("recurrence") is None:
             return item_state(connection, item)
         spawned, ended = _next_occurrence(connection, row, who=who)
