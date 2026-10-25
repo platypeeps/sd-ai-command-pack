@@ -134,6 +134,8 @@ class DefaultBranch(Fixture, ScreenCase):
         self.assertEqual(sent[:5], ["-C", str(tree), "lane", "enqueue", "--item"])
         self.assertEqual(sent[sent.index("--expected-head") + 1], tip)
         self.assertEqual([sent[i + 1] for i, a in enumerate(sent) if a == "--item"], [str(one), str(two)])
+        # Lane enqueue refuses a title that is not a Conventional Commits header (pack sd:6059).
+        self.assertEqual(sent[sent.index("--title") + 1], f"chore: Land button and 1 more (sd:{one}, sd:{two})")
         self.assertIn("--deliver", sent)
         self.assertEqual(answer["lane"]["status"], "pending")
 

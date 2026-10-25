@@ -428,6 +428,7 @@ The merge lane:
 - **The lead ships only through the lane.** `sd-ship lane enqueue` adds an item; `sd-ship lane run` drains the queue in order.
   A hand-run prepare-and-merge chain jumps the queue and leaves no log. Verbs: `enqueue|list|retry|cancel|move|hold|release|run|watch|prune`.
 - **`lane retry <item>` queues a failed, skipped or prepared entry again** at its head; a cancelled one needs `--expected-head`.
+  It refuses `head_moved` for a branch that moved past the head, as enqueue does (pack sd:6057): enqueue the new head instead.
 - **`lane cancel <item>` clears a prepared entry merged by hand** (sd:5743), once a `merged` ship receipt of the item holds its head.
   It also clears the item's newest failed or skipped entries, back to its last merged or prepared one (pack sd:5838): their work landed in another bundle.
 - **Keep one `sd-ship lane watch --item A --item B ...` naming every item the lead has in that lane.**

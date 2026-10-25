@@ -221,7 +221,7 @@ class QueueOutlivesTheProcess(Lane):
         """sd:5773. `sd-ship -C <file> lane list` raised AttributeError: lane verbs take no --json."""
         for verb in (["list"], ["cancel", "7"], ["retry", "7"], ["move", "7", "top"], ["hold", "7"], ["release", "7"],
                      ["run"], ["prune"], ["prune", "--json"], ["watch", "--item", "7"],
-                     ["enqueue", "--item", "7", "--title", "t", "--body-file", str(self.body), "--deliver"]):
+                     ["enqueue", "--item", "7", "--title", "fix: t", "--body-file", str(self.body), "--deliver"]):
             done = self.sd_ship(self.repo, *verb, chdir=str(self.body))
             self.assertEqual((done.returncode, done.stderr), (3, ""), verb)
             answer = json.loads(done.stdout)
@@ -230,7 +230,7 @@ class QueueOutlivesTheProcess(Lane):
     def test_an_entry_one_process_enqueued_is_read_by_the_next(self) -> None:
         tree = self.worktree("topic")
         head = git(tree, "rev-parse", "HEAD")
-        done = self.sd_ship(tree, "enqueue", "--item", "7", "--title", "Topic", "--body-file", str(self.body), "--deliver")
+        done = self.sd_ship(tree, "enqueue", "--item", "7", "--title", "fix: Topic", "--body-file", str(self.body), "--deliver")
         self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
         listed = self.sd_ship(self.repo, "list")
         self.assertEqual(listed.returncode, 0, listed.stderr + listed.stdout)
@@ -238,7 +238,7 @@ class QueueOutlivesTheProcess(Lane):
         self.assertEqual(answer["queue"], str(self.root / "pack/lane/queue/queue.json"))
         [entry] = answer["entries"]
         self.assertEqual({key: entry[key] for key in ("worktree", "item", "expected_head", "title", "status", "branch")},
-                         {"worktree": str(tree), "item": 7, "expected_head": head, "title": "Topic", "status": "pending",
+                         {"worktree": str(tree), "item": 7, "expected_head": head, "title": "fix: Topic", "status": "pending",
                           "branch": "topic"})
         # The entry holds the body's text, and `list` prints its size (sd:3282); nothing goes to `bodies/`.
         self.assertEqual((entry["body_bytes"], "body" in entry), (len(self.body.read_bytes()), False))
@@ -246,7 +246,7 @@ class QueueOutlivesTheProcess(Lane):
 
     def test_retry_prints_json_as_the_other_verbs_do(self) -> None:
         """sd:3254. The system Queue page calls `lane retry`; it reads the same JSON shape."""
-        sd_lane.enqueue_entry(self.feature, 7, "Topic", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 7, "fix: Topic", self.body, self.environ, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         done = self.sd_ship(self.repo, "retry", "7", "--manual")
         self.assertEqual(done.returncode, 0, done.stderr + done.stdout)
@@ -257,7 +257,7 @@ class QueueOutlivesTheProcess(Lane):
 
     def test_retry_expected_head_refuses_another_head_and_names_both(self) -> None:
         """sd:3268. The Queue page sends the head it showed; another blocked head is refused with `stale_head`."""
-        sd_lane.enqueue_entry(self.feature, 7, "Topic", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 7, "fix: Topic", self.body, self.environ, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         head = self.entries()[0]["expected_head"]
         done = self.sd_ship(self.repo, "retry", "7", "--expected-head", "0" * 40)
@@ -272,7 +272,7 @@ class QueueOutlivesTheProcess(Lane):
 
     def test_retry_takes_a_cancelled_entry_and_its_help_says_so(self) -> None:
         """sd:3389. The system Queue page re-queues a cancelled row; it reads `cancelled` in the help to offer it."""
-        sd_lane.enqueue_entry(self.feature, 7, "Topic", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 7, "fix: Topic", self.body, self.environ, claim="deliver")
         sd_lane.cancel(self.repo, 7, self.environ)
         head = self.entries()[0]["expected_head"]
         done = self.sd_ship(self.repo, "retry", "7", "--expected-head", head)
@@ -283,7 +283,7 @@ class QueueOutlivesTheProcess(Lane):
         self.assertIn("cancelled", " ".join(helped.stdout.split()))
 
     def test_an_entry_without_a_delivery_claim_is_refused_with_exit_3(self) -> None:
-        done = self.sd_ship(self.feature, "enqueue", "--item", "7", "--title", "Topic", "--body-file", str(self.body))
+        done = self.sd_ship(self.feature, "enqueue", "--item", "7", "--title", "fix: Topic", "--body-file", str(self.body))
         self.assertEqual(done.returncode, 3, done.stderr + done.stdout)
         self.assertIn("--associate-only", json.loads(done.stdout)["error"])
         self.assertEqual(self.entries(), [])
@@ -299,12 +299,12 @@ class Enqueue(Lane):
         self.assertEqual(sd_lane.queue_path(self.repo, environ), self.tmp / "storage/pack/lane/queue/queue.json")
 
     def test_an_item_already_queued_is_refused(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 3, "t", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 3, "fix: t", self.body, self.environ, claim="deliver")
         with self.assertRaisesRegex(sd_lane.LaneError, "already queued"):
-            sd_lane.enqueue_entry(self.feature, 3, "t", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(self.feature, 3, "fix: t", self.body, self.environ, claim="deliver")
 
     def test_a_cancelled_entry_is_not_run(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 3, "t", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 3, "fix: t", self.body, self.environ, claim="deliver")
         sd_lane.cancel(self.repo, 3, self.environ)
         self.assertEqual(sd_lane.run_lane(self.repo, self.environ, self.ship), {"ran": []})
         self.assertEqual(self.calls, [])
@@ -313,8 +313,8 @@ class Enqueue(Lane):
 class Runner(Lane):
     def test_entries_run_in_order_and_a_failure_does_not_stop_the_next(self) -> None:
         first, second = self.worktree("first"), self.worktree("second")
-        sd_lane.enqueue_entry(first, 1, "one", self.body, self.environ, manual=True, claim="deliver")
-        sd_lane.enqueue_entry(second, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(first, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(second, 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([(int(c[c.index("--item") + 1]), c[2]) for c in self.calls],
@@ -325,7 +325,7 @@ class Runner(Lane):
 
     def test_prepare_reads_the_lanes_copy_of_the_body_once_the_original_is_gone(self) -> None:
         """sd:3170: a reboot that clears /tmp left entries naming a lost body; the lane keeps its own copy."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         self.body.unlink()
         read: list[tuple[str, str]] = []
 
@@ -346,7 +346,7 @@ class Runner(Lane):
         """sd:3282: the body and acceptance texts live in the entry, so any host can run it and `retry` needs no file."""
         acceptance = self.tmp / "acceptance.md"
         acceptance.write_text("accepted\n", encoding="utf-8")
-        sd_lane.enqueue_entry(self.feature, 1, "t", self.body, self.environ, claim="deliver", acceptance_file=acceptance)
+        sd_lane.enqueue_entry(self.feature, 1, "fix: t", self.body, self.environ, claim="deliver", acceptance_file=acceptance)
         [entry] = self.entries()
         self.assertEqual((entry["body"], entry["acceptance"], "body_file" in entry), ("Item: sd:1\n", "accepted\n", False))
         self.assertFalse(sd_lane.lane_dir(self.repo, self.environ).joinpath("bodies").exists())
@@ -355,7 +355,7 @@ class Runner(Lane):
         """sd:3254. A failed entry could not be queued again without its body file; retry needs none."""
         tree, acceptance = self.worktree("topic"), self.tmp / "acceptance.md"
         acceptance.write_text("accepted\n", encoding="utf-8")
-        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver",
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver",
                               acceptance_file=acceptance)
         self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -364,7 +364,7 @@ class Runner(Lane):
         retried = sd_lane.retry(self.repo, 1, self.environ)
         self.assertEqual({key: retried[key] for key in ("item", "expected_head", "title", "authority", "claim",
                                                         "acceptance", "body", "status")},
-                         {"item": 1, "expected_head": failed["expected_head"], "title": "one", "authority": "manual",
+                         {"item": 1, "expected_head": failed["expected_head"], "title": "fix: one", "authority": "manual",
                           "claim": "deliver", "acceptance": "accepted\n", "body": "Item: sd:1\n", "status": "pending"})
         self.assertEqual(retried["retried"], {"status": "failed", "finished_at": failed["finished_at"]})
         with self.assertRaisesRegex(sd_lane.LaneError, "already queued"):
@@ -374,7 +374,7 @@ class Runner(Lane):
         self.assertEqual([row["status"] for row in self.entries()], ["failed", "merged"])
 
     def test_retry_manual_approves_an_entry_that_stopped_prepared(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual(self.entries()[0]["code"], sd_lane.RUNNER_MERGE_MANUAL)
         self.assertEqual(sd_lane.retry(self.repo, 1, self.environ, manual=True)["authority"], "manual")
@@ -384,7 +384,7 @@ class Runner(Lane):
 
     def test_retry_starts_from_prepares_catch_up_merge(self) -> None:
         tree = self.worktree("topic")
-        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
         git(self.repo, "push", "-q", "origin", "main")  # prepare merges `origin/<default>`
 
@@ -398,18 +398,18 @@ class Runner(Lane):
     def test_retry_refuses_what_it_cannot_retry(self) -> None:
         with self.assertRaisesRegex(sd_lane.LaneError, "no entry"):
             sd_lane.retry(self.repo, 1, self.environ)
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         with self.assertRaisesRegex(sd_lane.LaneError, "already queued"):
             sd_lane.retry(self.repo, 1, self.environ)
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         with self.assertRaisesRegex(sd_lane.LaneError, "last entry is merged"):
             sd_lane.retry(self.repo, 1, self.environ)
-        sd_lane.enqueue_entry(self.feature, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.cancel(self.repo, 2, self.environ)
         with self.assertRaisesRegex(sd_lane.LaneError, "cancelled.*--expected-head"):
             sd_lane.retry(self.repo, 2, self.environ)
         # An entry that ended before its copy was kept has none to queue again.
-        sd_lane.enqueue_entry(self.feature, 3, "three", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 3, "fix: three", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(3, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         sd_lane.update(self.store(), lambda rows: rows[-1].update(body=None))
@@ -420,12 +420,12 @@ class Runner(Lane):
     def test_retry_expected_head_is_checked_under_the_queue_lock(self) -> None:
         """sd:3268. An entry that ends at another head between retry's read and its write is refused, not retried."""
         tree = self.worktree("topic")
-        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         shown = self.entries()[0]["expected_head"]
-        git(tree, "commit", "-q", "--allow-empty", "-m", "fix")
-        moved = git(tree, "rev-parse", "HEAD")
+        # Another head the worktree is not at yet, so only the write's read refuses (sd:6057).
+        moved = git(tree, "commit-tree", f"{shown}^{{tree}}", "-p", shown, "-m", "fix")
         caught_up = sd_lane.caught_up
 
         def another_run_ends_first(worktree: pathlib.Path, expected: str) -> str:
@@ -439,6 +439,7 @@ class Runner(Lane):
         self.assertIn(moved, str(refused.exception))
         self.assertEqual([(row["status"], row["expected_head"]) for row in self.entries()],
                          [("failed", shown), ("failed", moved)])
+        git(tree, "reset", "-q", "--hard", moved)
         self.assertEqual(sd_lane.retry(self.repo, 1, self.environ, expected_head=moved)["expected_head"], moved)
 
     def moved_above(self, item: int) -> tuple[str, str]:
@@ -448,7 +449,7 @@ class Runner(Lane):
         for message in ("first", "second"):
             git(tree, "commit", "-q", "--allow-empty", "-m", message)
             heads.append(git(tree, "rev-parse", "HEAD"))
-            sd_lane.enqueue_entry(tree, item, "t", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(tree, item, "fix: t", self.body, self.environ, claim="deliver")
             if message == "second":
                 sd_lane.move(self.repo, item, "top", self.environ)
             self.answers[(item, "prepare")] = {"ok": False, "error": f"{message} failure"}
@@ -458,7 +459,7 @@ class Runner(Lane):
 
     def test_retry_takes_the_newest_entry_when_a_move_put_it_above_older_ones(self) -> None:
         """sd:3412. After a hold and `move top`, the newest entry sits above an older finished one."""
-        sd_lane.enqueue_entry(self.feature, 1, "held", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: held", self.body, self.environ, claim="deliver")
         sd_lane.set_hold(self.repo, 1, self.environ, held=True)
         old, new = self.moved_above(2)
         with self.assertRaises(sd_lane.LaneError) as refused:
@@ -470,14 +471,14 @@ class Runner(Lane):
 
     def test_a_cancel_records_who_cancelled_it(self) -> None:
         """sd:3483. Thirteen cancelled entries carried an empty reason, while a release says who released it."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         sd_lane.cancel(self.repo, 1, self.environ)
         self.assertEqual(self.entries()[0]["reason"], f"cancelled by the operator on {sd_lane.this_host()}")
 
     def test_lane_list_gives_each_entry_its_enqueue_order(self) -> None:
         """sd:3419. A reader of `lane list` takes an item's newest entry by `enqueue_seq`, not by its place after a move."""
         import argparse  # noqa: PLC0415
-        sd_lane.enqueue_entry(self.feature, 1, "held", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: held", self.body, self.environ, claim="deliver")
         sd_lane.set_hold(self.repo, 1, self.environ, held=True)
         _, new = self.moved_above(2)
         parser = argparse.ArgumentParser()
@@ -497,7 +498,7 @@ class Runner(Lane):
 
     def test_retry_refuses_a_newer_entry_written_between_its_read_and_its_write(self) -> None:
         """sd:3412. With no expected head, the write still finds the entry it read is no longer the item's newest."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         self.answers[(1, "prepare")] = {"ok": False, "error": "a failure"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         real = sd_lane.require_published
@@ -514,14 +515,14 @@ class Runner(Lane):
 
     def test_a_queue_write_that_fails_changes_nothing_and_says_hub_unavailable(self) -> None:
         """sd:3282: a write is one hub transaction; a fault in it leaves the entry as it was."""
-        sd_lane.enqueue_entry(self.feature, 1, "t", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: t", self.body, self.environ, manual=True, claim="deliver")
         with mock.patch.object(sd_lane, "store", side_effect=sqlite3.OperationalError("disk I/O error")):
             with self.assertRaises(sd_lane.LaneError) as refused:
                 sd_lane.cancel(self.repo, 1, self.environ)
         self.assertEqual((refused.exception.code, self.entries()[0]["status"]), (sd_lane.HUB_UNAVAILABLE, "pending"))
 
     def test_an_associate_only_entry_prepares_with_associate_only(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="associate-only")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="associate-only")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertIn("--associate-only", self.calls[0])
         self.assertNotIn("--deliver", self.calls[0])
@@ -529,7 +530,7 @@ class Runner(Lane):
     def test_an_acceptance_file_is_forwarded_to_prepare(self) -> None:
         acceptance = self.tmp / "acceptance.json"
         acceptance.write_text("{}", encoding="utf-8")
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver", acceptance_file=acceptance)
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver", acceptance_file=acceptance)
         acceptance.unlink()  # the entry holds the text (sd:3282)
         read: list[str] = []
 
@@ -542,32 +543,32 @@ class Runner(Lane):
 
     def test_each_item_the_enqueue_names_reaches_prepare(self) -> None:
         """sd:3704: the enqueue's --item list is the closing set; prepare gets every one, the claimed item first."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver", closes=(2, 3, 1, 2))
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver", closes=(2, 3, 1, 2))
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         items = [self.calls[0][index + 1] for index, part in enumerate(self.calls[0]) if part == "--item"]
         self.assertEqual(items, ["1", "2", "3"])
 
     def test_prepare_catches_up_with_the_base_inside_the_runner(self) -> None:
         """The catch-up merge runs under the lane lock, never before it."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertIn("--catch-up", self.calls[0])
 
     def test_the_merge_names_the_prepared_head(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         merge = self.calls[1]
         self.assertEqual((merge[merge.index("--expected-head") + 1], "--manual" in merge), ("head-1", True))
 
     def test_without_manual_authority_the_runner_stops_at_a_prepared_head(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([c[2] for c in self.calls], ["prepare"])
         self.assertEqual(self.entries()[0]["status"], "prepared")
 
     def test_a_worktree_that_moved_is_skipped_without_a_prepare(self) -> None:
         tree = self.worktree("topic")
-        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         git(tree, "commit", "-q", "--allow-empty", "-m", "moved")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual((self.calls, self.entries()[0]["status"]), ([], "skipped"))
@@ -584,7 +585,7 @@ class Runner(Lane):
 
     def test_an_incomplete_review_spends_the_one_automatic_retry(self) -> None:
         """sd:3037. The lane retries as an operator would, with prepare --retry-review."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.incomplete_review(retried=False))
         self.assertEqual([(c[2], "--retry-review" in c) for c in self.calls],
                          [("prepare", False), ("prepare", True), ("merge", False)])
@@ -600,7 +601,7 @@ class Runner(Lane):
         fake = self.tmp / "fake-bin"
         fake.mkdir()
         (fake / "sd-ship").write_text(FAKE_PREPARE.format(bin=str(REPO_ROOT / "bin")), encoding="utf-8")
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         with mock.patch.object(sd_lane, "BIN", fake), mock.patch.dict(os.environ, self.environ):
             sd_lane.run_lane(self.repo, self.environ)
         entry = self.entries()[0]
@@ -610,7 +611,7 @@ class Runner(Lane):
 
     def test_a_prepare_that_reconciles_a_landed_merge_records_it_merged(self) -> None:
         """sd:3482. A retry after a death at merge: prepare answered `merged`, and the entry failed 'not ready'."""
-        head = sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")["expected_head"]
+        head = sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")["expected_head"]
         self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": head, "merge_commit": "landed-1"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         entry = self.entries()[0]
@@ -633,7 +634,7 @@ class Runner(Lane):
         """sd:3482: the merge that landed was of prepare's catch-up of the queued head."""
         tree, work, caught = self.caught_up_topic()
         git(tree, "reset", "-q", "--hard", work)
-        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, claim="deliver")
         git(tree, "reset", "-q", "--hard", caught)
         self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": caught, "merge_commit": "landed-1"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -642,7 +643,7 @@ class Runner(Lane):
     def test_a_reconciled_merge_of_an_earlier_head_is_not_a_catch_up_of_it(self) -> None:
         """Codex round 1: the queued head is a catch-up of the merged one; that merge is not this entry's."""
         tree, work, caught = self.caught_up_topic()
-        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, claim="deliver")
         self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": work, "merge_commit": "landed-0"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         entry = self.entries()[0]
@@ -652,7 +653,7 @@ class Runner(Lane):
 
     def test_a_reconciled_merge_whose_claim_was_released_lands_nothing(self) -> None:
         """Codex round 1: the claim must still hold before the landing deletes the branch and notes the item."""
-        head = sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")["expected_head"]
+        head = sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")["expected_head"]
 
         def released_meanwhile(argv: list[str], log: pathlib.Path) -> dict:
             sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(token="released"))
@@ -666,7 +667,7 @@ class Runner(Lane):
         """sd:3482, evidence: the receipt's merge must be of the entry's head; an earlier pull request's is not."""
         tree = self.worktree("topic")
         git(tree, "commit", "-q", "--allow-empty", "-m", "follow-up")
-        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, claim="deliver")
         earlier = git(self.repo, "rev-parse", "main")
         self.answers[(1, "prepare")] = {"ok": True, "phase": "merged", "head": earlier, "merge_commit": "landed-0"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -676,7 +677,7 @@ class Runner(Lane):
         self.assertIn(f"merge of {earlier}, not this entry's head", entry["reason"])
 
     def test_the_lane_retries_an_incomplete_review_only_once(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.incomplete_review(retried=True))
         self.assertEqual([(c[2], "--retry-review" in c) for c in self.calls], [("prepare", False), ("prepare", True)])
         entry = self.entries()[0]
@@ -694,8 +695,8 @@ class Runner(Lane):
 
     def test_a_retryable_refusal_that_spent_no_pass_is_put_back_and_the_next_run_ships_it(self) -> None:
         """sd:3478. Five entries failed on this refusal in 10 to 13 s each; seven retries by hand shipped them."""
-        sd_lane.enqueue_entry(self.worktree("topic"), 1, "one", self.body, self.environ, manual=True, claim="deliver")
-        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("topic"), 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "prepare")] = self.NO_PLAN
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([(c[2], c[4]) for c in self.calls], [("prepare", "1")])
@@ -713,7 +714,7 @@ class Runner(Lane):
         self.assertEqual([entry["status"] for entry in self.entries()], ["merged", "merged"])
 
     def test_a_retryable_refusal_fails_the_entry_on_its_second_time(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "prepare")] = self.NO_PLAN
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -732,7 +733,7 @@ class Runner(Lane):
         for item, (case, change) in enumerate(cases.items(), start=1):
             with self.subTest(case=case):
                 answer = {key: value for key, value in {**self.NO_PLAN, **change}.items() if value is not None}
-                sd_lane.enqueue_entry(self.feature, item, "one", self.body, self.environ, manual=True, claim="deliver")
+                sd_lane.enqueue_entry(self.feature, item, "fix: one", self.body, self.environ, manual=True, claim="deliver")
                 self.answers[(item, "prepare")] = answer
                 self.calls.clear()
                 sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -742,8 +743,8 @@ class Runner(Lane):
     def test_a_hub_fault_puts_the_entry_back_and_the_next_run_ships_it(self) -> None:
         """sd:3239. A hub upgrade broke prepare's session; the entry failed as a policy block and was lost."""
         tree = self.worktree("topic")
-        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
-        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "prepare")] = self.HUB_FAULT
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
         # The run stops: the hub is mid-upgrade, and the next entry would meet it too.
@@ -765,7 +766,7 @@ class Runner(Lane):
 
     def test_a_failed_entry_keeps_the_failing_test_its_refusal_names(self) -> None:
         """sd:3476. The reason was cut at 600 characters, before the gate refusal's failing lines."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         error = ("the repository gate failed after the review cleared: sd-check fail (check fail: suite leg-shared)\n"
                  "check (exit 2): whole output: " + "/tmp/" + "o" * 700 + ".log\nfailing: FAIL: test_sd3476_marker")
         self.answers[(1, "prepare")] = {"ok": False, "phase": "reviewed", "error": error}
@@ -778,8 +779,8 @@ class Runner(Lane):
         """sd:3475. On 2026-10-10 a pack landing built the library for schema 25 over a database at 24,
         and the runner failed four entries in turn, each in no time, before anyone migrated."""
         from sd_db.errors import SchemaTooOld
-        sd_lane.enqueue_entry(self.worktree("topic"), 1, "one", self.body, self.environ, manual=True, claim="deliver")
-        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("topic"), 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "prepare")] = sd_lane.sd_ship_workflow.failure("prepare", SchemaTooOld(24, 25))
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([(c[2], c[4]) for c in self.calls], [("prepare", "1")])
@@ -789,7 +790,7 @@ class Runner(Lane):
         self.assertIn("migrate", one["hub_fault"]["reason"])
 
     def test_a_hub_fault_in_the_merge_is_retried_too(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "merge")] = {**self.HUB_FAULT, "phase": "merge"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         entry = self.entries()[0]
@@ -811,7 +812,7 @@ class Runner(Lane):
             with self.subTest(builder=builder, pushed=pushed, fault=fault):
                 name = f"topic-{builder}-{pushed}-{fault}"
                 tree = self.worktree(name)
-                queued = sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True,
+                queued = sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, manual=True,
                                                claim="deliver")["expected_head"]
                 git(self.repo, "commit", "-q", "--allow-empty", "-m", "base moved")
                 git(self.repo, "push", "-q", "origin", "main")  # prepare merges `origin/<default>`
@@ -834,7 +835,7 @@ class Runner(Lane):
 
     def test_a_hub_that_keeps_failing_holds_the_entry_after_its_retries(self) -> None:
         """sd:4184. A hub fault is never the entry's: past its retries it waits, held, instead of failing."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "prepare")] = self.HUB_FAULT
         for _ in range(sd_lane.HUB_RETRIES):
             sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -852,14 +853,14 @@ class Runner(Lane):
         self.assertEqual(self.entries()[0]["status"], "merged")
 
     def test_the_whole_prepare_output_is_kept(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         log = pathlib.Path(self.entries()[0]["prepare_log"])
         self.assertEqual(log.read_text(encoding="utf-8"), "whole output " * 1000)
         self.assertEqual(log.parent, self.root / "pack/lane/logs")
 
     def test_a_second_runner_exits_at_once_instead_of_waiting(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         lock = self.store().lock_file
         lock.parent.mkdir(parents=True, exist_ok=True)
         with open(lock, "a", encoding="utf-8") as held:
@@ -874,7 +875,7 @@ class Runner(Lane):
         """sd:3273 review 1: a lane queued after `other_lanes_idle` scanned, with no runner lock yet, waits."""
         with sd_lane.other_lanes_idle(self.root) as busy:
             self.assertIsNone(busy)
-            sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
             lock = sd_lane.queue_path(self.repo, self.environ).parent / "runner.lock"
             self.assertFalse(lock.exists(), "the lane already had a runner lock for the scan to find")
             started = time.monotonic()
@@ -888,7 +889,7 @@ class Runner(Lane):
     def test_a_run_past_its_budget_starts_no_new_entry_and_leaves_the_rest_pending(self) -> None:
         """sd:3287: the job limit TERMed a runner mid `make check`; an entry started in budget still finishes."""
         for item in (1, 2, 3):
-            sd_lane.enqueue_entry(self.worktree(f"b{item}"), item, str(item), self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(self.worktree(f"b{item}"), item, f"fix: {item}", self.body, self.environ, claim="deliver")
         now = [0.0]
 
         def slow(argv: list[str], log: pathlib.Path) -> dict:
@@ -907,7 +908,7 @@ class Runner(Lane):
 
     def test_a_claim_leases_one_prepare_and_renews_it_before_the_retry(self) -> None:
         """sd:3481. A claim leased two prepares, 14 hours, so a dead satellite runner held its lane most of a day."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         leases: list[float] = []
 
         def incomplete_once(argv: list[str], log: pathlib.Path) -> dict:
@@ -926,7 +927,7 @@ class Runner(Lane):
 
     def test_a_claim_released_before_the_retry_starts_no_second_prepare(self) -> None:
         """sd:3481, the renew step: a claim lost before the --retry-review prepare stops the run there."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
 
         def released_then_incomplete(argv: list[str], log: pathlib.Path) -> dict:
             sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(token="released"))
@@ -938,7 +939,7 @@ class Runner(Lane):
 
     def test_a_loaded_machine_claims_no_entry_until_load5_falls_below_the_gate_limit(self) -> None:
         """sd:3479. Six gates timed out at one hour under load, and a retry ran the same gate under the same load."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         environ = {**self.environ, "SD_GATE_LOAD_MAX": "8"}
         with mock.patch.object(sd_lane.os, "getloadavg", lambda: (2.0, 9.5, 9.0)):
             answer = sd_lane.run_lane(self.repo, environ, self.ship)
@@ -953,7 +954,7 @@ class Runner(Lane):
         self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
 
     def test_no_gate_load_limit_claims_whatever_the_load(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         with mock.patch.object(sd_lane.os, "getloadavg", lambda: (99.0, 99.0, 99.0)):
             sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
@@ -961,7 +962,7 @@ class Runner(Lane):
     def left_running(self, pid: int | None, step: str = "prepare") -> None:
         """Item 1 claimed by the runner `pid` and never finished, as a killed runner leaves it (sd:2821)."""
         if not self.entries():
-            sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
 
         def claimed(entries: list[dict]) -> None:
             entries[0].update(status="running", step=step, holder={"host": sd_lane.this_host(), "pid": pid, "token": "t"})
@@ -976,14 +977,14 @@ class Runner(Lane):
         """Failure table, merge: the runner dies mid-merge; a merge may have landed, so reclaim fails it (sd:3282)."""
         pid = self.dead_pid()
         self.left_running(pid, step="merge")
-        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, claim="deliver")
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual(answer["reclaimed"], [{"item": 1, "runner_pid": pid, "step": "merge", "status": "failed"}])
         first, second = self.entries()
         self.assertEqual((first["status"], first["step"], first["reclaimed_by"]), ("failed", "runner", os.getpid()))
         self.assertIn(f"runner pid {pid} died", first["reason"])
         self.assertEqual(([call[4] for call in self.calls], second["status"]), (["2"], "prepared"))
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")  # no longer refused
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")  # no longer refused
 
     def test_a_running_entry_whose_runner_may_live_is_kept(self) -> None:
         for pid in (os.getpid(), None, 1):  # alive, unreadable, and a pid this user may not signal
@@ -1004,13 +1005,13 @@ class Runner(Lane):
         self.assertEqual(self.entries()[0]["status"], "running")
 
     def test_an_entry_queued_while_the_runner_works_is_run_too(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         second = self.worktree("second")
         ship = self.ship
 
         def enqueue_during(argv: list[str], log: pathlib.Path) -> dict:
             if not any(entry["item"] == 2 for entry in self.entries()):
-                sd_lane.enqueue_entry(second, 2, "two", self.body, self.environ, claim="deliver")
+                sd_lane.enqueue_entry(second, 2, "fix: two", self.body, self.environ, claim="deliver")
             return ship(argv, log)
         sd_lane.run_lane(self.repo, self.environ, enqueue_during)
         self.assertEqual([entry["status"] for entry in self.entries()], ["prepared", "prepared"])
@@ -1021,7 +1022,7 @@ class Reorder(Lane):
 
     def queue(self, *items: int, manual: bool = False) -> None:
         for item in items:
-            sd_lane.enqueue_entry(self.worktree(f"t{item}"), item, f"t{item}", self.body, self.environ,
+            sd_lane.enqueue_entry(self.worktree(f"t{item}"), item, f"fix: t{item}", self.body, self.environ,
                                   manual=manual, claim="deliver")
 
     def items_run(self) -> list[int]:
@@ -1243,8 +1244,8 @@ class Speculation(Lane):
         return {"status": "success", "summary": "sd-check pass (check pass)", "receipt_revision": 1}
 
     def queue_both(self, *, manual: bool = True) -> None:
-        sd_lane.enqueue_entry(self.first, 1, "one", self.body, self.environ, manual=manual, claim="deliver")
-        sd_lane.enqueue_entry(self.second, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.first, 1, "fix: one", self.body, self.environ, manual=manual, claim="deliver")
+        sd_lane.enqueue_entry(self.second, 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
 
     def test_the_next_entry_is_gated_on_the_predicted_landing_while_this_one_ships(self) -> None:
         self.queue_both()
@@ -1330,7 +1331,7 @@ class Speculation(Lane):
             "id": "older", "position": 0, "worktree": str(self.repo), "item": 1, "gate": "satellite", "branch": "sat", "base": "main",
             "expected_head": git(satellite, "rev-parse", "HEAD"), "authority": "manual", "status": "pending",
             "enqueued_at": sd_lane.stamp_now(), "enqueued_on": sd_lane.this_host()}))
-        sd_lane.enqueue_entry(self.second, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.second, 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, super().ship, lambda root, head, base: {"status": "success"})
         self.assertEqual([(entry["item"], entry["status"]) for entry in self.entries()], [(1, "skipped"), (2, "merged")])
         self.assertEqual([call[call.index("--item") + 1] for call in self.calls], ["2", "2"])
@@ -1475,7 +1476,7 @@ class Landing(Lane):
         return tree, git(tree, "rev-parse", "HEAD")
 
     def merge_lands(self, tree: pathlib.Path, item: int, head: str) -> None:
-        sd_lane.enqueue_entry(tree, item, "t", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(tree, item, "fix: t", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(item, "prepare")] = {"ok": True, "phase": "ready_to_send", "head": head}
         self.answers[(item, "merge")] = {"ok": True, "phase": "merged", "merge_commit": "c0ffee" * 6 + "c0ff"}
 
@@ -1915,14 +1916,14 @@ class Publishing(SharedQueue):
         """Failure table, enqueue: push refused or fails, or branch_diverged; nothing queued."""
         tree, [head] = self.committed("topic", "work")
         with self.failing("push"), self.assertRaises(sd_lane.LaneError) as refused:
-            sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual((refused.exception.code, self.rows()), (sd_lane.PUBLISH_UNKNOWN, []))
         other = self.tmp / "other"
         git(self.tmp, "clone", "-q", str(self.origin), str(other))
         git(other, "-c", "user.email=t@example.test", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "x")
         git(other, "push", "-q", "origin", "HEAD:refs/heads/topic")
         with self.assertRaises(sd_lane.LaneError) as refused:
-            sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual((refused.exception.code, self.rows()), (sd_lane.BRANCH_DIVERGED, []))
         self.assertNotEqual(self.remote_tip("topic"), head)
 
@@ -1931,7 +1932,7 @@ class Publishing(SharedQueue):
         before = self.remote_tip("main")
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "unreviewed")
         with self.assertRaises(sd_lane.LaneError) as refused:
-            sd_lane.enqueue_entry(self.repo, 1, "t", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(self.repo, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("main"), self.git_verbs),
                          (sd_lane.DEFAULT_BRANCH, [], before, ["ls-remote"]))
         head = git(self.repo, "rev-parse", "HEAD")
@@ -1945,7 +1946,7 @@ class Publishing(SharedQueue):
         tree, _ = self.committed("trunk", "unreviewed")
         self.assertEqual(git(self.repo, "for-each-ref", "refs/remotes/origin/HEAD"), "")
         with self.assertRaises(sd_lane.LaneError) as refused:
-            sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("trunk"), "push" in self.git_verbs),
                          (sd_lane.DEFAULT_BRANCH, [], before, False))
 
@@ -1955,7 +1956,7 @@ class Publishing(SharedQueue):
         before = self.remote_tip("main")
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "unreviewed")
         with self.assertRaises(sd_lane.LaneError) as refused:
-            sd_lane.enqueue_entry(self.repo, 1, "t", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(self.repo, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("main"), "push" in self.git_verbs),
                          (sd_lane.DEFAULT_BRANCH, [], before, False))
 
@@ -1964,7 +1965,7 @@ class Publishing(SharedQueue):
         git(self.origin, "symbolic-ref", "HEAD", "refs/heads/unborn")
         tree, _ = self.committed("topic", "work")
         with self.assertRaises(sd_lane.LaneError) as refused:
-            sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("topic"), "push" in self.git_verbs),
                          (sd_lane.PUBLISH_UNKNOWN, [], None, False))
 
@@ -1982,10 +1983,10 @@ class Publishing(SharedQueue):
         """Failure table, enqueue: killed between the push and the row write."""
         tree, [head] = self.committed("topic", "work")
         with mock.patch.object(sd_lane, "add_entry", side_effect=Killed), self.assertRaises(Killed):
-            sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual((self.remote_tip("topic"), self.rows()), (head, []))
         self.git_verbs.clear()
-        sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertNotIn("push", self.git_verbs)
         self.assertEqual([row["item"] for row in self.entries()], [1])
 
@@ -2000,10 +2001,10 @@ class Publishing(SharedQueue):
                 return answer
             raise sd_lane.LaneError("the session dropped", code=sd_lane.HUB_UNAVAILABLE)
         with mock.patch.object(sd_lane, "on_hub", landed_then_lost), self.assertRaises(sd_lane.LaneError) as lost:
-            sd_lane.enqueue_entry(self.feature, 1, "t", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(self.feature, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual(lost.exception.code, sd_lane.HUB_UNAVAILABLE)
         with self.assertRaisesRegex(sd_lane.LaneError, "already queued"):
-            sd_lane.enqueue_entry(self.feature, 1, "t", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(self.feature, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual(len(self.entries()), 1)
 
 
@@ -2037,7 +2038,7 @@ class EnqueuePrechecks(SharedQueue):
 
     def refused(self, tree: pathlib.Path, **extra: Any) -> sd_lane.LaneError:
         with self.assertRaises(sd_lane.LaneError) as refused:
-            sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver", **extra)
+            sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, claim="deliver", **extra)
         self.assertEqual((self.rows(), "push" in self.git_verbs), ([], False))
         return refused.exception
 
@@ -2056,7 +2057,7 @@ class EnqueuePrechecks(SharedQueue):
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "main moves")
         git(self.repo, "push", "-q", "origin", "main")
         git(tree, "merge", "-q", "--no-ff", "-m", "Merge origin/main", "origin/main")
-        entry = sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver", expected_head=head)
+        entry = sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, claim="deliver", expected_head=head)
         self.assertEqual((entry["status"], entry["expected_head"]), ("pending", head))
 
     def test_an_origin_branch_past_the_head_is_refused_before_any_push(self) -> None:
@@ -2078,7 +2079,7 @@ class EnqueuePrechecks(SharedQueue):
         caught_up = git(tree, "rev-parse", "HEAD")
         git(tree, "push", "-q", "origin", "HEAD:refs/heads/topic")
         git(tree, "reset", "-q", "--hard", head)
-        entry = sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+        entry = sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual((entry["expected_head"], self.remote_tip("topic")), (head, caught_up))
 
     def test_a_docs_lint_failure_the_branch_adds_is_refused_before_any_push(self) -> None:
@@ -2112,7 +2113,7 @@ class EnqueuePrechecks(SharedQueue):
 
     def test_a_clean_branch_is_linted_and_queued(self) -> None:
         tree, [head] = self.committed("topic", "work")
-        entry = sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+        entry = sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, claim="deliver")
         self.assertEqual((entry["status"], self.remote_tip("topic")), ("pending", head))
 
 
@@ -2142,7 +2143,7 @@ class ItemChecks(SharedQueue):
             connection.close()
         self.tree, _ = self.committed("topic", "work")
 
-    def refused(self, item: int, title: str = "t", body: str = "Words.\n", claim: str = "deliver",
+    def refused(self, item: int, title: str = "fix: t", body: str = "Words.\n", claim: str = "deliver",
                 closes: tuple[int, ...] = ()) -> sd_lane.LaneError:
         self.body.write_text(body, encoding="utf-8")
         with self.assertRaises(sd_lane.LaneError) as refused:
@@ -2160,7 +2161,7 @@ class ItemChecks(SharedQueue):
 
     def test_a_body_closes_line_is_refused_before_any_push(self) -> None:
         """sd:3704: the --item list is the one closing set, so a body `Closes:` line waits for no prepare to refuse it."""
-        refused = self.refused(self.own, "t", f"Closes: sd:{self.own + 99}\n")
+        refused = self.refused(self.own, "fix: t", f"Closes: sd:{self.own + 99}\n")
         self.assertEqual(refused.code, "body_trailer_refused")
         self.assertIn("a body `Closes:` line closes nothing; name each item the merge closes with --item", str(refused))
 
@@ -2173,7 +2174,7 @@ class ItemChecks(SharedQueue):
     def test_a_title_naming_another_repositorys_item_is_queued(self) -> None:
         """sd:3704: a title closes nothing, so the item it names is context, not a refusal."""
         self.body.write_text("Words.\n", encoding="utf-8")
-        entry = sd_lane.enqueue_entry(self.tree, self.own, f"Two fixes (sd:{self.own}, sd:{self.foreign})", self.body,
+        entry = sd_lane.enqueue_entry(self.tree, self.own, f"fix: two fixes (sd:{self.own}, sd:{self.foreign})", self.body,
                                       self.environ, claim="deliver")
         self.assertEqual(entry["status"], "pending")
 
@@ -2198,7 +2199,7 @@ class ItemChecks(SharedQueue):
         also, later = self.items("planning", "ready")
         body = (f"## Summary\n\npack sd:{self.own}: the first\n\n- pack sd:{also}: the second\n\n"
                 f"## Test plan\n\n- pack sd:{later}: its test\n")
-        refused = self.refused(self.own, "Two fixes", body)
+        refused = self.refused(self.own, "fix: two fixes", body)
         self.assertEqual(refused.code, "closing_set_incomplete")
         self.assertIn(f"names sd:{also}, which this merge leaves open; add --item {also}", str(refused))
         self.assertNotIn(f"sd:{later}", str(refused))
@@ -2213,7 +2214,7 @@ class ItemChecks(SharedQueue):
 
     def test_every_named_item_with_an_item_flag_is_queued(self) -> None:
         also, = self.items("planning")
-        self.queued(f"Two fixes (sd:{self.own}, sd:{also})", f"## Summary\n\npack sd:{also}: the second\n",
+        self.queued(f"fix: two fixes (sd:{self.own}, sd:{also})", f"## Summary\n\npack sd:{also}: the second\n",
                     closes=(also,))
 
     def test_an_item_the_merge_cannot_or_need_not_close_is_not_demanded(self) -> None:
@@ -2224,9 +2225,9 @@ class ItemChecks(SharedQueue):
         body = (f"## Summary\n\npack sd:{done}: done\n\npack sd:{blocked}: blocked\n\nsystem sd:{other}: elsewhere\n\n"
                 f"pack sd:{refs}: context only\n\npack sd:{idea}: an idea\n\n```\npack sd:{quoted}: example\n```\n\n"
                 f"Refs: sd:{refs}\n")
-        self.queued(f"Fixes (sd:{done}, sd:{self.foreign}, sd:{self.unregistered})", body)
+        self.queued(f"fix: fixes (sd:{done}, sd:{self.foreign}, sd:{self.unregistered})", body)
         sd_lane.update(self.store(), lambda rows: rows[0].update(status="cancelled"))
-        self.queued(f"Context (sd:{other})", "## Summary\n\nWords.\n", claim="associate-only")
+        self.queued(f"docs: context (sd:{other})", "## Summary\n\nWords.\n", claim="associate-only")
 
     def test_a_failed_read_of_a_named_item_is_unknown_and_queues_nothing(self) -> None:
         """Failures: the hub fails on the named item's read; that is no pass, so nothing is pushed or queued."""
@@ -2239,14 +2240,14 @@ class ItemChecks(SharedQueue):
                     raise sqlite3.OperationalError("disk I/O error")
             real(Dropped(), *args)
         with mock.patch.object(sd_ship_body, "refuse_left_open", hub_drops):
-            refused = self.refused(self.own, f"Two fixes (sd:{self.own}, sd:{also})")
+            refused = self.refused(self.own, f"fix: two fixes (sd:{self.own}, sd:{also})")
         self.assertEqual(refused.code, sd_lane.HUB_UNAVAILABLE)
 
     def test_retry_of_an_entry_whose_named_item_reopened_is_refused(self) -> None:
         """Older state: an entry queued while its named item was done; the item reopened, so a retry
         would leave it open."""
         also, = self.items("done")
-        self.queued(f"Two fixes (sd:{self.own}, sd:{also})", "Words.\n")
+        self.queued(f"fix: two fixes (sd:{self.own}, sd:{also})", "Words.\n")
         sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed"))
         import sd_db
         connection = sd_db.connect(home=self.tmp)
@@ -2265,13 +2266,13 @@ class ItemChecks(SharedQueue):
 
     def test_an_item_of_this_repository_is_queued(self) -> None:
         self.body.write_text("Words.\n", encoding="utf-8")
-        entry = sd_lane.enqueue_entry(self.tree, self.own, f"One fix (sd:{self.own})", self.body, self.environ,
+        entry = sd_lane.enqueue_entry(self.tree, self.own, f"fix: one fix (sd:{self.own})", self.body, self.environ,
                                       claim="deliver")
         self.assertEqual(([row["item"] for row in self.entries()], entry["status"]), ([self.own], "pending"))
 
     def test_retry_checks_the_item_again(self) -> None:
         """A retry queues the same item again; one moved to another repository since refuses as enqueue does."""
-        sd_lane.enqueue_entry(self.tree, self.own, "t", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.tree, self.own, "fix: t", self.body, self.environ, claim="deliver")
         sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed"))
         import sd_db
         connection = sd_db.connect(home=self.tmp)
@@ -2284,6 +2285,143 @@ class ItemChecks(SharedQueue):
             sd_lane.retry(self.repo, self.own, self.environ)
         self.assertEqual(refused.exception.code, "item_repository_mismatch")
         self.assertEqual([row["status"] for row in self.entries()], ["failed"])
+
+
+class CitedCloses(SharedQueue):
+    """sd:5999, operator ruling 2026-10-24 (grill Q20): the merge closes every item a merged commit delivers.
+
+    Enqueue adds to the closing set each open item of this repository that
+    a branch commit's `Closes: sd:N` trailer names, or that a `Lane review
+    fix, <repo> sd:N` line of the body or a commit names. Only those forms
+    (lane review round 5 ruling): a subject or prose closes nothing. System
+    sd:5939 shipped in #505 and stayed in_progress.
+    """
+
+    checks_item = True
+
+    def setUp(self) -> None:
+        super().setUp()
+        [self.own] = self.register_items(1)
+        import sd_db
+        other = self.tmp / "other"
+        other.mkdir()
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            sd_db.upsert_repo(connection, str(other), remote="https://github.com/example/other.git", managed=1)
+            self.foreign = sd_db.create_item(connection, kind="task", title="theirs", status="in_progress",
+                                             repo=str(other))
+            self.open = [sd_db.create_item(connection, kind="task", title=f"cited {n}", status="in_progress",
+                                           repo=str(self.repo)) for n in range(6)]
+            self.done = sd_db.create_item(connection, kind="task", title="done", status="done", repo=str(self.repo))
+        finally:
+            connection.close()
+
+    def enqueue(self, body: str, *subjects: str, claim: str = "deliver") -> dict:
+        tree, _ = self.committed(f"topic-{len(self.entries())}", *subjects)
+        self.body.write_text(body, encoding="utf-8")
+        return sd_lane.enqueue_entry(tree, self.own, "fix: a slice", self.body, self.environ, claim=claim)
+
+    def test_cited_open_items_join_the_closing_set_and_prose_does_not(self) -> None:
+        a, b, c, d, e, f = self.open
+        body = (f"## Summary\n\nKeeps the sd:{c} guard.\n\nLane review fix, pack sd:{b}: the read is unknown.\n"
+                f"```\nLane review fix, pack sd:{d}: an example\n```\n<!--\nLane review fix, pack sd:{d}\n-->\n"
+                f"Refs: sd:{f}\n")
+        entry = self.enqueue(body, f"fix(lane): the slice (pack sd:{d})\n\nCloses: sd:{a}",
+                             f"fix: a done one and a foreign one\n\nCloses: sd:{self.done}\nCloses: sd:{self.foreign}",
+                             f"fix: a review fix\n\nLane review fix, pack sd:{e}: one more.\nAlso keeps sd:{c}.")
+        self.assertEqual(entry["closes"], [a, b, e])
+        self.calls.clear()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [prepare] = [call for call in self.calls if call[2] == "prepare"]
+        self.assertEqual([prepare[i + 1] for i, part in enumerate(prepare) if part == "--item"],
+                         [str(self.own), str(a), str(b), str(e)])
+
+    def test_each_cited_close_is_listed_in_the_body_and_noted_on_its_item(self) -> None:
+        """Lane review of sd:5999, operator ruling: a reader sees every close by citation, so a wrong one is one reopen."""
+        a, b, c, *_ = self.open
+        entry = self.enqueue(f"## Summary\n\nWords.\n\nLane review fix, pack sd:{b}: x.\n\nRefs: sd:{c}\n",
+                             f"fix(lane): the slice\n\nCloses: sd:{a}", f"fix: first part (sd:{c})")
+        sha = self.entries()[-1]["expected_head"]
+        first = git(self.repo, "rev-parse", f"{sha}~1")
+        self.assertEqual(entry["closes"], [a, b])
+        self.assertEqual(entry["cited"], [{"item": a, "source": f"Closes trailer of commit {first[:12]}"},
+                                          {"item": b, "source": "review fix line in the body"}])
+        self.assertEqual(entry["body"], f"## Summary\n\nWords.\n\nLane review fix, pack sd:{b}: x.\n\n"
+                                        f"## Closed by citation\n\n- pack sd:{a}: Closes trailer of commit {first[:12]}\n"
+                                        f"- pack sd:{b}: review fix line in the body\n\nRefs: sd:{c}\n")
+        bodies: list[str] = []
+
+        def ship(argv: list[str], log: pathlib.Path) -> dict:
+            if argv[2] == "prepare":
+                bodies.append(pathlib.Path(argv[argv.index("--body-file") + 1]).read_text(encoding="utf-8"))
+            return self.ship(argv, log)
+        with mock.patch.object(sd_lane, "default_runner_merge", lambda root: "auto"):
+            sd_lane.run_lane(self.repo, self.environ, ship)
+        self.assertEqual(bodies, [entry["body"]])
+        cited = {item: body for item, body, _ in self.notes if item in (a, b)}
+        self.assertEqual(sorted(cited), [a, b])
+        self.assertIn(f"Closed by citation at merge merged-{self.own}: the Closes trailer of commit {first[:12]} cites it",
+                      cited[a])
+        self.assertIn(f"sd task status {b} in_progress", cited[b])
+
+    def test_only_a_closes_trailer_closes_and_a_subject_does_not(self) -> None:
+        """Lane review of sd:5999, round 5 ruling: no word list catches every way to say partial."""
+        a, b, *_ = self.open
+        entry = self.enqueue("Words.\n", f"fix: first part (sd:{a})", f"fix: the rest\n\nCloses: sd:{b}")
+        self.assertEqual(entry["closes"], [b])
+
+    def test_a_commit_the_branch_reverts_closes_nothing(self) -> None:
+        """Lane review of sd:5999, round 2: `git revert` undoes the work its commit cites."""
+        a, b, *_ = self.open
+        tree, _ = self.committed("topic-revert")
+        (tree / "work.txt").write_text("work\n", encoding="utf-8")
+        git(tree, "add", "work.txt")
+        git(tree, "commit", "-q", "-m", f"fix: implement\n\nLane review fix, pack sd:{b}: y.\n\nCloses: sd:{a}")
+        git(tree, "revert", "--no-edit", "HEAD")
+        self.body.write_text("Words.\n", encoding="utf-8")
+        entry = sd_lane.enqueue_entry(tree, self.own, "fix: a slice", self.body, self.environ, claim="deliver")
+        self.assertEqual((entry["closes"], "cited" in entry), ([], False))
+
+    def test_a_merge_the_branch_reverts_closes_nothing_it_brought_in(self) -> None:
+        """Lane review of sd:5999, round 3: `git revert -m 1` of a merge undoes the commits it brought in."""
+        a, b, c, *_ = self.open
+        tree, _ = self.committed("topic-merge")
+        git(tree, "switch", "-q", "-c", "side")
+        (tree / "side.txt").write_text("side\n", encoding="utf-8")
+        git(tree, "add", "side.txt")
+        git(tree, "commit", "-q", "-m", f"fix: implement\n\nLane review fix, pack sd:{b}: y.\n\nCloses: sd:{a}")
+        git(tree, "switch", "-q", "topic-merge")
+        git(tree, "commit", "-q", "--allow-empty", "-m", f"fix: mainline\n\nCloses: sd:{c}")
+        git(tree, "merge", "-q", "--no-ff", "--no-edit", "side")
+        git(tree, "revert", "--no-edit", "-m", "1", "HEAD")
+        self.body.write_text("Words.\n", encoding="utf-8")
+        entry = sd_lane.enqueue_entry(tree, self.own, "fix: a slice", self.body, self.environ, claim="deliver")
+        self.assertEqual(entry["closes"], [c])
+
+    def test_a_range_the_branch_reverts_closes_nothing(self) -> None:
+        """Lane review of sd:5999, round 3: `git revert A..B` writes one revert per commit, each naming it."""
+        a, b, c, *_ = self.open
+        tree, _ = self.committed("topic-range")
+        for number in (a, b, c):
+            (tree / f"{number}.txt").write_text("work\n", encoding="utf-8")
+            git(tree, "add", f"{number}.txt")
+            git(tree, "commit", "-q", "-m", f"fix: implement\n\nCloses: sd:{number}")
+        git(tree, "revert", "--no-edit", "HEAD~2..HEAD")
+        self.body.write_text("Words.\n", encoding="utf-8")
+        entry = sd_lane.enqueue_entry(tree, self.own, "fix: a slice", self.body, self.environ, claim="deliver")
+        self.assertEqual(entry["closes"], [a])
+
+    def test_an_associate_only_claim_closes_nothing_it_cites(self) -> None:
+        entry = self.enqueue("Words.\n", f"fix: the slice\n\nCloses: sd:{self.open[0]}", claim="associate-only")
+        self.assertEqual(entry["closes"], [])
+
+    def test_a_failed_hub_read_queues_and_pushes_nothing(self) -> None:
+        """Failures: the cited items' read did not answer; that is no "nothing to close"."""
+        unanswered = mock.patch.object(sd_lane, "cited_closes", side_effect=sqlite3.OperationalError("disk I/O error"))
+        with unanswered, self.assertRaises(sd_lane.LaneError) as refused:
+            self.enqueue("Words.\n", f"fix: the slice\n\nCloses: sd:{self.open[0]}")
+        self.assertEqual((refused.exception.code, self.rows(), "push" in self.git_verbs),
+                         (sd_lane.HUB_UNAVAILABLE, [], False))
 
 
 class LineLimits(SharedQueue):
@@ -2316,7 +2454,7 @@ class LineLimits(SharedQueue):
         git(self.repo, "push", "-q", "origin", "main")
         git(tree, "merge", "-q", "--no-ff", "-m", "m" * 72, "origin/main")
         self.body.write_text("b" * 72 + f"\n{url}\n~~~\n" + "c" * 90 + "\n", encoding="utf-8")
-        entry = sd_lane.enqueue_entry(tree, 1, "t" * 63, self.body, self.environ, claim="deliver")
+        entry = sd_lane.enqueue_entry(tree, 1, "fix: " + "t" * 58, self.body, self.environ, claim="deliver")
         self.assertEqual((entry["status"], self.remote_tip("topic")), ("pending", entry["expected_head"]))
 
     def test_a_merge_commit_is_a_branch_commit_too(self) -> None:
@@ -2333,7 +2471,7 @@ class LineLimits(SharedQueue):
         git(self.repo, "commit", "-q", "--allow-empty", "-m", "m" * 90)
         git(self.repo, "push", "-q", "origin", "main")
         tree, _ = self.committed("topic", "fine")
-        self.assertEqual(sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")["status"],
+        self.assertEqual(sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, claim="deliver")["status"],
                          "pending")
 
     def test_an_unreadable_branch_range_is_unknown_and_queues_nothing(self) -> None:
@@ -2345,15 +2483,47 @@ class LineLimits(SharedQueue):
     def test_an_entry_already_queued_is_not_checked_again(self) -> None:
         """Older state: an entry queued before the limit retries with its long title and body."""
         tree, _ = self.committed("topic", "fine")
-        sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, claim="deliver")
         sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed", title="t" * 80, body="b" * 80))
         self.assertEqual(sd_lane.retry(self.repo, 1, self.environ)["title"], "t" * 80)
+
+
+class ConventionalTitles(SharedQueue):
+    """sd:6059: enqueue refuses a title that is not a Conventional Commits header, before any push.
+
+    The title is the squash subject, and semantic-release counts only such
+    subjects (operator ruling 2026-10-24).
+    """
+
+    def test_a_plain_title_is_refused_before_any_push(self) -> None:
+        tree, _ = self.committed("topic", "fine")
+        for title in ("Lane retry refuses a moved head", "Fix: capital type", "fix:no space", "wip: draft"):
+            with self.subTest(title=title), self.assertRaises(sd_lane.LaneError) as refused:
+                sd_lane.enqueue_entry(tree, 1, title, self.body, self.environ, claim="deliver")
+            self.assertEqual(refused.exception.code, "title_not_conventional")
+            self.assertIn(f'the title "{title}" is not a Conventional Commits header', str(refused.exception))
+        self.assertEqual((self.rows(), "push" in self.git_verbs, self.remote_tip("topic")), ([], False, None))
+
+    def test_a_conventional_title_is_queued(self) -> None:
+        for number, title in enumerate(("fix(lane): retry refuses a moved head", "feat!: drop a verb",
+                                        "chore: bump the pin"), start=1):
+            tree, _ = self.committed(f"topic-{number}", "fine")
+            with self.subTest(title=title):
+                entry = sd_lane.enqueue_entry(tree, number, title, self.body, self.environ, claim="deliver")
+                self.assertEqual((entry["status"], entry["title"]), ("pending", title))
+
+    def test_an_entry_queued_before_the_rule_retries_with_its_title(self) -> None:
+        """Older state: retry does not check the title again, as it does not check line lengths."""
+        tree, _ = self.committed("topic", "fine")
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, claim="deliver")
+        sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed", title="Lane fix"))
+        self.assertEqual(sd_lane.retry(self.repo, 1, self.environ)["title"], "Lane fix")
 
 
 class ClaimAndLease(SharedQueue):
     def test_a_claim_that_lands_with_its_answer_lost_is_put_back_by_the_next_run(self) -> None:
         """Failure table, claim: the hub fails after the claim landed; no step starts, and reclaim puts it back."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         real = sd_lane.on_hub
 
         def claim_lands_then_hub_goes(queue: sd_lane.Queue, work: Any) -> Any:
@@ -2373,7 +2543,7 @@ class ClaimAndLease(SharedQueue):
     def test_a_move_between_the_host_read_and_the_claim_claims_nothing(self) -> None:
         """Failure table, claim: the lane moved after the runner's last read; the claim reads the host itself."""
         self.repo_row()
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         settle = sd_lane.settle_checkout
 
         def then_moved(root: pathlib.Path, queue: sd_lane.Queue) -> dict:
@@ -2387,8 +2557,8 @@ class ClaimAndLease(SharedQueue):
     def test_two_hosts_claim_and_one_wins(self) -> None:
         """Failure table, claim: old and new host claim at once; the second sees a running entry and stops."""
         self.repo_row()
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
-        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, claim="deliver")
         first = sd_lane.claim_entry(self.store(), "hub-token")
         self.repo_row("build-2")
         with mock.patch("sd_db.ship.this_host", lambda: "build-2"), self.assertRaises(sd_lane.LaneError) as busy:
@@ -2399,9 +2569,9 @@ class ClaimAndLease(SharedQueue):
     def test_another_hosts_entry_gets_no_speculative_gate_and_says_why(self) -> None:
         """Failure table, speculation (sd:3283): the next entry has no worktree on this host; nothing is gated."""
         self.repo_row()
-        sd_lane.enqueue_entry(self.worktree("second"), 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         with mock.patch("sd_db.ship.this_host", lambda: "build-2"):
-            sd_lane.enqueue_entry(self.feature, 2, "two", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(self.feature, 2, "fix: two", self.body, self.environ, claim="deliver")
         claimed = sd_lane.claim_entry(self.store(), "token")
         self.assertEqual((claimed or {}).get("item"), 1)
         gate = mock.Mock()
@@ -2413,7 +2583,7 @@ class ClaimAndLease(SharedQueue):
 
     def test_a_kill_mid_prepare_puts_the_entry_back_and_the_third_fails_it(self) -> None:
         """Failure table, prepare: the runner dies; pid gone, back to pending; the third reclaim fails it."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         seen: list[Any] = []
 
         def killed_in_prepare(argv: list[str], log: pathlib.Path) -> dict:
@@ -2431,7 +2601,7 @@ class ClaimAndLease(SharedQueue):
 
     def test_release_voids_the_token_and_refuses_a_live_local_holder(self) -> None:
         """Failure table, release (D3): a released holder's writes are refused; a live pid here is not released."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         entry = sd_lane.claim_entry(self.store(), "mine")
         with self.assertRaises(sd_lane.LaneError) as alive:
             sd_lane.cancel(self.repo, 1, self.environ)
@@ -2461,7 +2631,7 @@ class ClaimAndLease(SharedQueue):
 
     def test_a_bound_release_refuses_a_step_the_caller_did_not_see(self) -> None:
         """Failure table, release (sd:3330): prepare moved to merge between the read and the cancel."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         entry = sd_lane.claim_entry(self.store(), "seen")
         seen = f"{self.entries()[0]['holder']['token']}:{self.entries()[0]['step']}"
         sd_lane.advance(self.store(), entry, "seen")
@@ -2477,8 +2647,8 @@ class ClaimAndLease(SharedQueue):
 
     def test_a_bound_release_refuses_a_reclaimed_entry_at_the_same_revision(self) -> None:
         """Failure table, release (sd:3330): recovery put the entry back and a new runner claimed it again."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
-        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, claim="deliver")
         sd_lane.claim_entry(self.store(), "seen")
         revision = sd_lane.queue_revision(self.entries())
         self.make_dead()
@@ -2495,8 +2665,8 @@ class ClaimAndLease(SharedQueue):
 
     def test_a_bound_release_refuses_a_finished_entry_and_another_items_entry(self) -> None:
         """Failure table, release (sd:3330): the claim ended before the cancel, and its item was queued again."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
-        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, claim="deliver")
         entry = sd_lane.claim_entry(self.store(), "seen")
         self.elsewhere()
         before = self.rows()
@@ -2513,7 +2683,7 @@ class ClaimAndLease(SharedQueue):
 
     def test_the_claim_is_compared_under_the_queue_lock(self) -> None:
         """A step write that lands while the cancel waits for the hub's write lock is caught (sd:3330)."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.claim_entry(self.store(), "seen")
         self.elsewhere()
         refused: list[str | None] = []
@@ -2538,7 +2708,7 @@ class ClaimAndLease(SharedQueue):
 
     def test_cancel_takes_the_claim_list_prints_and_unbound_keeps_todays_behaviour(self) -> None:
         """`--expected-claim <holder.token>:<step>` from `lane list`; a stale one exits 3 with its code (sd:3330)."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.claim_entry(self.store(), "seen")
         self.elsewhere()
 
@@ -2555,7 +2725,7 @@ class ClaimAndLease(SharedQueue):
 
     def test_an_expired_lease_with_a_live_pid_on_this_host_keeps_the_entry_running(self) -> None:
         """Failure table, prepare: the lease passed while the holder slept; same host, live pid: no reclaim."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.claim_entry(self.store(), "sleeper")
         sd_lane.update(self.store(), lambda rows: rows[0].update(lease_until="2020-01-01T00:00:00Z"))
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -2565,7 +2735,7 @@ class ClaimAndLease(SharedQueue):
 
     def test_a_step_write_that_fails_stops_the_runner_and_reclaim_puts_it_back(self) -> None:
         """Failure table, before merge: the hub fails for the whole retry; no merge, and the rerun runs it."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         with self.failing_store(lambda entry: entry.get("step") == "merge"):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertIn("the hub went away", answer["stopped"])
@@ -2577,7 +2747,7 @@ class ClaimAndLease(SharedQueue):
     def test_a_retryable_put_back_that_fails_to_write_is_reclaimed_and_counts_nothing(self) -> None:
         """Failure table, sd:3478 put-back: the write of the count fails; the entry stays running, a reclaim
         puts it back with no count, and the next prepare still has its one retry."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "prepare")] = Runner.NO_PLAN
         with self.failing_store(lambda entry: "retryable_retries" in entry):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -2595,7 +2765,7 @@ class ClaimAndLease(SharedQueue):
 
     def test_a_runner_write_is_tried_again_until_the_hub_answers(self) -> None:
         """The 10-minute write retry: two faults, then the write lands and the entry merges."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         faults = [1, 1]
         with mock.patch.object(sd_lane, "WRITE_RETRY_SECONDS", 600), \
                 self.failing_store(lambda entry: entry.get("step") == "merge" and faults and faults.pop()):
@@ -2612,7 +2782,7 @@ class ClaimAndLease(SharedQueue):
         """
         import sd_db.database
         from sd_db import remote
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         refusing: list[bool] = []
         connect = sd_db.database.connect
 
@@ -2649,7 +2819,7 @@ class ClaimAndLease(SharedQueue):
     def test_a_finish_write_that_fails_after_a_merge_is_merged_by_reclaim(self) -> None:
         """Failure table, finish: the hub fails after a merge; the run stops, and reclaim writes the outcome it
         kept (sd:4184). A runner that died without a record still fails it: see the mid-merge test above."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         with self.failing_store(lambda entry: entry.get("status") == "merged"):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual((answer["ran"][0]["recorded"], self.entries()[0]["step"]), (False, "merge"))
@@ -2660,7 +2830,7 @@ class ClaimAndLease(SharedQueue):
 
     def test_a_late_finish_after_a_reclaim_writes_nothing(self) -> None:
         """Failure table, finish: the token was reclaimed while the holder slept; it reports claim_lost."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         entry = sd_lane.claim_entry(self.store(), "sleeper")
         self.make_dead()
         sd_lane.runner_write(self.store(), sd_lane.reclaim_dead)
@@ -2671,7 +2841,7 @@ class ClaimAndLease(SharedQueue):
 
     def test_a_double_finish_writes_one_outcome_row(self) -> None:
         """Failure table, finish: a retried outcome write finds its own outcome under its token."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         entry = sd_lane.claim_entry(self.store(), "mine")
         for _ in range(2):
             sd_lane.finish_entry(self.store(), entry, "mine", {"status": "merged", "merge_commit": "c0ffee"})
@@ -2697,7 +2867,7 @@ class RefusingHub(SharedQueue):
         patcher = mock.patch("sd_db.database.connect", hub)
         patcher.start()
         self.addCleanup(patcher.stop)
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
 
     def refused(self, step: str) -> dict:
         """`sd-ship`'s answer when the hub refused its build in `step`, as its `main` prints it."""
@@ -2787,7 +2957,7 @@ class HubSkew(RefusingHub):
 
     def test_an_upgrade_right_after_the_claim_raises_nothing_and_loses_nothing(self) -> None:
         """Failure table, claim to prepare: the speculation's queue read met the refusal, and the run raised."""
-        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
         claim = sd_lane.claim_entry
 
         def then_upgraded(*args: Any, **kwargs: Any) -> Any:
@@ -3140,7 +3310,7 @@ class AnyHost(SharedQueue):
         """`name`'s commits, enqueued by another host; this disk keeps neither its worktree nor its branch."""
         tree, heads = self.committed(name, *messages)
         with mock.patch("sd_db.ship.this_host", lambda: "build-2"):
-            sd_lane.enqueue_entry(tree, item, name, self.body, self.environ, manual=True, claim="deliver")
+            sd_lane.enqueue_entry(tree, item, f"fix: {name}", self.body, self.environ, manual=True, claim="deliver")
         git(self.repo, "worktree", "remove", "--force", str(tree))
         git(self.repo, "branch", "-D", name)
         return heads
@@ -3294,7 +3464,7 @@ class AnyHost(SharedQueue):
             with self.subTest(edited=edited):
                 item = 1 + edited
                 tree = self.worktree(f"own{item}")
-                sd_lane.enqueue_entry(tree, item, "one", self.body, self.environ, manual=True, claim="deliver")
+                sd_lane.enqueue_entry(tree, item, "fix: one", self.body, self.environ, manual=True, claim="deliver")
                 self.foreign_merge(tree, edited)
                 sd_lane.run_lane(self.repo, self.environ, self.ship)
                 self.assertEqual((self.entries()[-1]["status"], self.calls), ("skipped", []))
@@ -3309,7 +3479,7 @@ class AnyHost(SharedQueue):
             with self.subTest(case=case):
                 item = {"hub_fault": 1, "merge_elsewhere": 2, "moved": 3}[case]
                 tree = self.worktree(f"back{item}")
-                queued = sd_lane.enqueue_entry(tree, item, "one", self.body, self.environ, manual=True,
+                queued = sd_lane.enqueue_entry(tree, item, "fix: one", self.body, self.environ, manual=True,
                                                claim="deliver")["expected_head"]
                 self.answers[(item, "merge")] = {"ok": False, "phase": "merge", "error": "runs on build-2",
                                                  "workflow": {"blocker": {"code": "lane_elsewhere"}}}
@@ -3335,7 +3505,7 @@ class AnyHost(SharedQueue):
             with self.subTest(amended=amended):
                 item = 1 + amended
                 tree, _ = self.committed(f"moved{item}", "work")
-                sd_lane.enqueue_entry(tree, item, "t", self.body, self.environ, manual=True, claim="deliver")
+                sd_lane.enqueue_entry(tree, item, "fix: t", self.body, self.environ, manual=True, claim="deliver")
                 git(tree, "commit", "-q", *(["--amend"] if amended else []), "--allow-empty", "-m", "more")
                 sd_lane.run_lane(self.repo, self.environ, self.ship)
                 entry = self.entries()[-1]
@@ -3346,7 +3516,7 @@ class AnyHost(SharedQueue):
     def test_a_failing_branch_read_of_a_moved_own_worktree_leaves_the_entry_pending(self) -> None:
         """sd:3413, unknown reads: the moved own worktree's branch read failed; not a skip, not a fall-through."""
         tree, _ = self.committed("moved", "work")
-        sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, manual=True, claim="deliver")
         git(tree, "commit", "-q", "--allow-empty", "-m", "more")
         with self.failing("branch"):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -3357,7 +3527,7 @@ class AnyHost(SharedQueue):
     def test_an_entry_with_no_worktree_never_reads_the_runners_directory_as_its_own(self) -> None:
         """sd:3413, codex review: `Path("")` is the current directory, which may hold the branch at another head."""
         tree, [head] = self.committed("topic", "work")
-        sd_lane.enqueue_entry(tree, 1, "t", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: t", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.update(self.store(), lambda rows: rows[0].update(worktree=""))
         git(self.repo, "worktree", "remove", "--force", str(tree))
         git(self.repo, "branch", "-D", "topic")
@@ -3375,17 +3545,23 @@ class AnyHost(SharedQueue):
         self.assertEqual((self.entries()[0]["status"], heads[:1]), ("merged", [head]))
 
     def test_a_retry_never_starts_from_a_foreign_merge(self) -> None:
-        """Review round 1, retry: the worktree's HEAD is a merge the lane did not make; the retry keeps the head."""
+        """Review round 1, retry: the worktree's HEAD is a merge the lane did not make; the retry never starts there.
+
+        The runner would skip the old head too, so the retry refuses it as a
+        moved head (sd:6057) and queues nothing.
+        """
         tree = self.worktree("again")
-        queued = sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True,
-                                       claim="deliver")["expected_head"]
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
 
         def blocked(argv: list[str], log: pathlib.Path) -> dict:
             self.foreign_merge(tree)
             self.ship(argv, log)
             return {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
         sd_lane.run_lane(self.repo, self.environ, blocked)
-        self.assertEqual(sd_lane.retry(self.repo, 1, self.environ)["expected_head"], queued)
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, 1, self.environ)
+        self.assertEqual((refused.exception.code, [row["status"] for row in self.entries()]),
+                         (sd_lane.HEAD_MOVED, ["failed"]))
 
     def test_a_chain_of_pushed_catch_ups_after_two_reclaims_still_runs(self) -> None:
         """Codex review: prepare pushed a catch-up, died, was reclaimed, caught up again; both merges are its own."""
@@ -3572,7 +3748,7 @@ class AnyHost(SharedQueue):
         Now the claim refuses and writes nothing; the sleeper's token still holds, and only a stop proof,
         here the operator's release, lets the lane host run the entry.
         """
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         entry = sd_lane.claim_entry(self.store(), "sleeper")
         sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(host="build-2")
                        or rows[0].update(lease_until="2020-01-01T00:00:00Z"))
@@ -3589,7 +3765,7 @@ class AnyHost(SharedQueue):
 
     def test_a_holder_on_another_host_is_settled_by_its_own_host_once_its_pid_is_gone(self) -> None:
         """Failure table, claim (sd:4660): the holder's own machine proves the death by its pid, and settles it."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.claim_entry(self.store(), "gone")
         runner = subprocess.Popen([sys.executable, "-c", ""])
         runner.wait()
@@ -3602,8 +3778,8 @@ class AnyHost(SharedQueue):
     def test_a_move_during_prepare_puts_the_entry_back_and_the_new_host_claims_it(self) -> None:
         """Failure table, before merge: the lane moved mid-prepare; no merge here, the entry keeps its place."""
         self.repo_row()
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
-        sd_lane.enqueue_entry(self.worktree("second"), 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.worktree("second"), 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
 
         def prepared_then_moved(argv: list[str], log: pathlib.Path) -> dict:
             answer = self.ship(argv, log)
@@ -3620,7 +3796,7 @@ class AnyHost(SharedQueue):
     def test_a_demotion_during_prepare_puts_the_entry_back(self) -> None:
         """sd:4044, codex pass: the fence refuses before the merge; the entry keeps its place, as on a move."""
         self.repo_row()
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
 
         def prepared_then_demoted(argv: list[str], log: pathlib.Path) -> dict:
             import sd_db
@@ -3641,7 +3817,7 @@ class AnyHost(SharedQueue):
     def test_a_lane_host_that_cannot_be_read_before_the_merge_stops_with_no_merge(self) -> None:
         """Failure table, before merge: clones that disagree on the host; no merge starts and the run stops."""
         self.repo_row()
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
 
         def prepared_then_unknown(argv: list[str], log: pathlib.Path) -> dict:
             import sd_db
@@ -3660,7 +3836,7 @@ class AnyHost(SharedQueue):
 
     def test_a_merge_that_answers_lane_elsewhere_puts_the_entry_back(self) -> None:
         """Failure table, merge: `sd-ship merge` refused `lane_elsewhere`; the runner treats it as a move."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "merge")] = {"ok": False, "phase": "merge", "error": "The lane for example/pack runs on build-2",
                                       "workflow": {"blocker": {"code": "lane_elsewhere"}}}
         answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -3680,11 +3856,11 @@ class AnyHost(SharedQueue):
         import argparse
         self.repo_row("build-2")
         tree, _ = self.committed("topic", "work")
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         sd_lane.update(self.store(), lambda rows: rows[0].update(status="failed"))
         parser = argparse.ArgumentParser()
         sd_lane.add_lane_verbs(parser.add_subparsers(dest="command"))
-        verbs = (["enqueue", "--item", "2", "--title", "t", "--body-file", str(self.body), "--deliver"], ["list"],
+        verbs = (["enqueue", "--item", "2", "--title", "fix: t", "--body-file", str(self.body), "--deliver"], ["list"],
                  ["move", "2", "top"], ["hold", "2"], ["release", "2"], ["cancel", "2"], ["retry", "1"], ["run"])
         codes = []
         for argv in verbs:
@@ -3725,7 +3901,8 @@ class Retrying(SharedQueue):
         rows = self.rows()
         with self.assertRaises(sd_lane.LaneError) as refused:
             sd_lane.retry(self.repo, 1, self.environ)
-        remote = [verb for verb in self.git_verbs if verb != "rev-parse"]  # the local head read is not a publish step
+        # The local head and branch reads are not publish steps.
+        remote = [verb for verb in self.git_verbs if verb not in ("rev-parse", "branch")]
         self.assertEqual((refused.exception.code, self.rows(), self.remote_tip("main"), remote),
                          (sd_lane.DEFAULT_BRANCH, rows, before, ["ls-remote"]))
 
@@ -3763,7 +3940,7 @@ class RetryCancelled(SharedQueue):
     def cancelled(self, item: int = 1) -> tuple[pathlib.Path, str]:
         """Item `item` enqueued from its own worktree with one commit, then cancelled; the worktree and its head."""
         tree, [head] = self.committed(f"topic-{item}", "work")
-        sd_lane.enqueue_entry(tree, item, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(tree, item, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.cancel(self.repo, item, self.environ)
         self.git_verbs.clear()  # the enqueue's own publish
         return tree, head
@@ -3772,7 +3949,7 @@ class RetryCancelled(SharedQueue):
         """Failure table, write: the retried entry is a plain pending entry after every other one; it jumps nothing."""
         self.cancelled(1)
         for item in (2, 3):
-            sd_lane.enqueue_entry(self.committed(f"topic-{item}", "work")[0], item, "t", self.body, self.environ,
+            sd_lane.enqueue_entry(self.committed(f"topic-{item}", "work")[0], item, "fix: t", self.body, self.environ,
                                   claim="deliver")
         head = self.entries()[0]["expected_head"]
         retried = sd_lane.retry(self.repo, 1, self.environ, expected_head=head)
@@ -3841,20 +4018,23 @@ class RetryCancelled(SharedQueue):
         self.merged_receipt("topic-1", 1, head)
         git(tree, "commit", "-q", "--allow-empty", "-m", "follow-up")
         later = git(tree, "rev-parse", "HEAD")
-        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.cancel(self.repo, 1, self.environ)
         self.assertEqual(sd_lane.retry(self.repo, 1, self.environ, expected_head=later)["expected_head"], later)
 
     def test_a_branch_that_moves_after_the_check_is_skipped_by_the_runner(self) -> None:
-        """Failure table, publish: the builder pushes between the branch read and the write; the run skips it."""
+        """Failure table, publish: the builder pushes between the publish and the write; the run skips it.
+
+        A push before the publish is refused there (`tip_past`, sd:6057).
+        """
         tree, head = self.cancelled()
         real = sd_lane.require_published
 
-        def builder_pushes_first(*args: Any) -> None:
+        def builder_pushes_after(*args: Any) -> None:
+            real(*args)
             git(tree, "commit", "-q", "--allow-empty", "-m", "more")
             git(tree, "push", "-q", "origin", "topic-1")
-            real(*args)
-        with mock.patch.object(sd_lane, "require_published", builder_pushes_first):
+        with mock.patch.object(sd_lane, "require_published", builder_pushes_after):
             self.assertEqual(sd_lane.retry(self.repo, 1, self.environ, expected_head=head)["expected_head"], head)
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual((self.entries()[-1]["status"], self.entries()[-1]["code"], self.calls),
@@ -3865,9 +4045,9 @@ class RetryCancelled(SharedQueue):
 
         The retry takes that newer entry, the item's last by enqueue order (sd:3412), never the cancelled one.
         """
-        sd_lane.enqueue_entry(self.committed("topic-2", "work")[0], 2, "t", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.committed("topic-2", "work")[0], 2, "fix: t", self.body, self.environ, claim="deliver")
         _, head = self.cancelled(1)
-        sd_lane.enqueue_entry(self.tmp / "topic-1", 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.tmp / "topic-1", 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.move(self.repo, 1, "top", self.environ)
         sd_lane.update(self.store(), lambda rows: [row.update(status="failed") for row in rows
                                                    if row["item"] == 1 and row["status"] == "pending"])
@@ -3915,13 +4095,56 @@ class RetryCancelled(SharedQueue):
         self.assertEqual([row["status"] for row in self.entries()], ["cancelled", "pending"])
 
 
+class RetryMoved(SharedQueue):
+    """sd:6057. `lane retry` refuses a failed entry whose branch moved, as enqueue does (sd:5989).
+
+    The lane skipped such an entry as head_moved once it reached the head of
+    the queue; the retry now refuses it before anything is pushed or queued.
+    """
+
+    def failed(self) -> tuple[pathlib.Path, str]:
+        """Item 1 enqueued from its own worktree with one commit, then failed in prepare."""
+        tree, [head] = self.committed("topic-1", "work")
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual(self.entries()[-1]["status"], "failed")
+        self.git_verbs.clear()
+        return tree, head
+
+    def test_a_failed_entry_whose_worktree_moved_is_refused(self) -> None:
+        tree, head = self.failed()
+        git(tree, "commit", "-q", "--allow-empty", "-m", "review fix")
+        before = self.rows()
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, 1, self.environ)
+        self.assertEqual(refused.exception.code, sd_lane.HEAD_MOVED)
+        self.assertIn("Enqueue the new head", str(refused.exception))
+        self.assertEqual((self.rows(), self.remote_tip("topic-1"), "push" in self.git_verbs), (before, head, False))
+
+    def test_a_failed_entry_whose_branch_moved_on_origin_is_refused(self) -> None:
+        tree, head = self.failed()
+        git(tree, "commit", "-q", "--allow-empty", "-m", "review fix")
+        git(tree, "push", "-q", "origin", "topic-1")
+        git(tree, "reset", "-q", "--hard", head)  # the worktree is back at the head; origin is not
+        before = self.rows()
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.retry(self.repo, 1, self.environ)
+        self.assertEqual(refused.exception.code, sd_lane.HEAD_MOVED)
+        self.assertEqual((self.rows(), "push" in self.git_verbs), (before, False))
+
+    def test_a_failed_entry_at_its_head_is_queued_again(self) -> None:
+        _, head = self.failed()
+        self.assertEqual(sd_lane.retry(self.repo, 1, self.environ)["expected_head"], head)
+
+
 class CancelMerged(SharedQueue):
     """sd:5743. `lane cancel` clears a prepared entry whose head a ship receipt shows merged; nothing else changes."""
 
     def prepared(self) -> str:
         """Item 1 enqueued without merge authority from its own worktree, run to `prepared`; its queued head."""
         tree, [head] = self.committed("topic-1", "work")
-        sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
         return head
@@ -3976,7 +4199,7 @@ class CancelMerged(SharedQueue):
         with self.assertRaisesRegex(sd_lane.LaneError, "no merged ship receipt"):
             sd_lane.cancel(self.repo, 1, self.environ)
         self.assertEqual(self.entries()[0]["status"], "prepared")
-        sd_lane.enqueue_entry(self.committed("topic-2", "work")[0], 2, "two", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.committed("topic-2", "work")[0], 2, "fix: two", self.body, self.environ, claim="deliver")
         self.assertEqual(sd_lane.cancel(self.repo, 2, self.environ)["status"], "cancelled")
 
 
@@ -3988,7 +4211,7 @@ class CancelEnded(SharedQueue):
         """Item 1 enqueued once per status, each entry ended at its status before the next enqueue."""
         tree, _ = self.committed("topic-1", "work")
         for index, status in enumerate(statuses):
-            sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")
+            sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, claim="deliver")
             sd_lane.update(self.store(), lambda rows, status=status, index=index: rows[-1].update(
                 status=status, reason=f"{status} {index}", finished_at="2026-10-22T00:00:00Z"))
 
@@ -4257,7 +4480,7 @@ class Importing(SharedQueue):
 
     def test_older_rows_import_by_the_migration_rules(self) -> None:
         """Failure table, import: running, no branch, no body, `handed_back` and a duplicate item, one each."""
-        sd_lane.enqueue_entry(self.feature, 6, "queued here", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 6, "fix: queued here", self.body, self.environ, claim="deliver")
         tree = self.worktree("topic")
         self.write_file(
             self.old(1, tree, status="running", runner_pid=4242),
@@ -4301,12 +4524,12 @@ class HubDown(SharedQueue):
         """Failure table, hub down: an unreachable hub refuses each lane verb with `hub_unavailable`."""
         import argparse
         tree, _ = self.committed("topic", "work")
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         before = self.rows()
         self.git_verbs.clear()
         parser = argparse.ArgumentParser()
         sd_lane.add_lane_verbs(parser.add_subparsers(dest="command"))
-        verbs = (["enqueue", "--item", "2", "--title", "t", "--body-file", str(self.body), "--deliver"], ["list"],
+        verbs = (["enqueue", "--item", "2", "--title", "fix: t", "--body-file", str(self.body), "--deliver"], ["list"],
                  ["retry", "1"], ["cancel", "1"], ["move", "1", "top"], ["hold", "1"], ["release", "1"], ["run"])
         for argv in verbs:
             with self.subTest(verb=argv[0]), contextlib.chdir(tree), mock.patch.dict(os.environ, self.environ), \
@@ -4396,12 +4619,12 @@ class Watch(Lane):
     def test_watch_item_waits_for_each_item_and_outlives_the_worktree_it_started_in(self) -> None:
         """sd:3565. A hand-run loop of `lane list` from a builder worktree broke once the merge removed it."""
         one, two = self.worktree("one"), self.worktree("two")
-        sd_lane.enqueue_entry(one, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(one, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         del self.answers[(1, "prepare")]
         sd_lane.retry(self.repo, 1, self.environ)  # the failed entry is older: it ends nothing
-        sd_lane.enqueue_entry(two, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(two, 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(2, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
         pauses: list[int] = []
 
@@ -4416,11 +4639,11 @@ class Watch(Lane):
         self.assertEqual(self.watch_items(self.repo, 1), (0, ["pack sd:1 merged at merged-1"]))
 
     def test_watch_item_skips_cancelled_entries_and_ends_an_item_with_none_at_once(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 3, "three", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 3, "fix: three", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
-        sd_lane.enqueue_entry(self.feature, 3, "three", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 3, "fix: three", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.cancel(self.repo, 3, self.environ)
-        sd_lane.enqueue_entry(self.feature, 4, "four", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 4, "fix: four", self.body, self.environ, manual=True, claim="deliver")
         sd_lane.cancel(self.repo, 4, self.environ)
         with mock.patch.object(sd_lane, "watch_pause", side_effect=AssertionError("waited")):
             code, lines = self.watch_items(self.repo, 3, 4, 5)
@@ -4430,7 +4653,7 @@ class Watch(Lane):
 
     def test_watch_item_reads_again_after_a_hub_fault(self) -> None:
         """A read the hub did not answer is unknown, not an end."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         on_hub, faults = sd_lane.on_hub, [sd_lane.LaneError("down", code=sd_lane.HUB_UNAVAILABLE)]
 
         def flaky(queue: sd_lane.Queue, work: Any) -> Any:
@@ -4510,8 +4733,8 @@ class HostedParallel(Lane):
                 sd_db.upsert_repo(connection, str(path), remote=f"https://github.com/example/{remote}.git", managed=1)
         finally:
             connection.close()
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
-        sd_lane.enqueue_entry(self.zeta_feature, 2, "two", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.zeta_feature, 2, "fix: two", self.body, self.environ, manual=True, claim="deliver")
         for name, value in (("START_POLL_SECONDS", 0.01), ("load_stop", lambda environ: None)):
             patcher = mock.patch.object(sd_lane, name, value, create=True)  # create: the suite fails first, not its setUp
             patcher.start()
@@ -4554,7 +4777,7 @@ class HostedParallel(Lane):
             if argv[2] == "prepare":
                 seen.append(f"start {argv[4]}")
                 if argv[4] == "1":
-                    sd_lane.enqueue_entry(self.zeta_feature, 3, "three", self.body, self.environ, manual=True,
+                    sd_lane.enqueue_entry(self.zeta_feature, 3, "fix: three", self.body, self.environ, manual=True,
                                           claim="deliver")
                     late.wait(5)
                 else:
@@ -4772,7 +4995,7 @@ class FailureNotes(SharedQueue):
         return [(item, body) for item, body, _ in self.notes if body.startswith("Lane ")]
 
     def test_a_failed_prepare_notes_each_item_with_its_step_reason_and_head(self) -> None:
-        head = sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver",
+        head = sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver",
                                      closes=(2,))["expected_head"]
         self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding\nmore"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -4783,7 +5006,7 @@ class FailureNotes(SharedQueue):
 
     def test_a_skip_notes_its_item(self) -> None:
         tree = self.worktree("topic")
-        head = sd_lane.enqueue_entry(tree, 1, "one", self.body, self.environ, claim="deliver")["expected_head"]
+        head = sd_lane.enqueue_entry(tree, 1, "fix: one", self.body, self.environ, claim="deliver")["expected_head"]
         git(tree, "commit", "-q", "--allow-empty", "-m", "moved")
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         [(item, body)] = self.lane_notes()
@@ -4791,7 +5014,7 @@ class FailureNotes(SharedQueue):
         self.assertTrue(body.startswith(f"Lane skipped in prepare at {head[:12]}: {tree} moved on topic"), body)
 
     def test_a_note_that_fails_is_reported_and_the_entry_still_fails(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
 
         def broken(item: int, body: str, main: pathlib.Path) -> str:
@@ -4803,7 +5026,7 @@ class FailureNotes(SharedQueue):
         self.assertEqual(entry["note"], {"sd:1": "failed: RuntimeError: the hub refused the note"})
 
     def test_a_merge_failure_notes_its_item(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
         self.answers[(1, "merge")] = {"ok": False, "phase": "merging", "error": "the merge was refused"}
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual(self.lane_notes(), [(1, "Lane failed in merge at head-1: the merge was refused")])
@@ -4813,7 +5036,7 @@ class FailureNotes(SharedQueue):
         for error in (OSError("the merge log did not write"), sd_lane.LaneError("the merge read failed")):
             with self.subTest(error=type(error).__name__):
                 self.notes.clear()
-                sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, manual=True, claim="deliver")
+                sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, manual=True, claim="deliver")
 
                 def ship(argv: list[str], log: pathlib.Path, error: Exception = error) -> dict:
                     if argv[2] == "merge":
@@ -4828,7 +5051,7 @@ class FailureNotes(SharedQueue):
 
     def test_a_dead_runner_at_merge_notes_its_item_once(self) -> None:
         """Steps: the runner died with the entry at merge; the reclaim fails it and notes it, and no later run does."""
-        head = sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")["expected_head"]
+        head = sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")["expected_head"]
         entry = sd_lane.claim_entry(self.store(), "dead")
         sd_lane.advance(self.store(), entry, "dead")
         self.make_dead()
@@ -4840,7 +5063,7 @@ class FailureNotes(SharedQueue):
         self.assertEqual(answer["noted"], [{"sd:1": "written"}])
 
     def test_an_operator_release_at_merge_notes_its_item(self) -> None:
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         entry = sd_lane.claim_entry(self.store(), "stuck")
         sd_lane.advance(self.store(), entry, "stuck")
         sd_lane.update(self.store(), lambda rows: rows[0]["holder"].update(host="build-2"))
@@ -4851,7 +5074,7 @@ class FailureNotes(SharedQueue):
 
     def test_a_failure_whose_finish_write_fails_is_noted_once(self) -> None:
         """Steps: the note lands, the finish write does not; the next run applies the record and notes nothing."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
         with self.failing_store(lambda entry: entry.get("status") == "failed"):
             answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
@@ -4862,7 +5085,7 @@ class FailureNotes(SharedQueue):
 
     def test_a_failure_an_older_version_recorded_is_noted_when_applied(self) -> None:
         """Older state: a hub-stop record from before sd:5963 holds a failure no note was written for."""
-        sd_lane.enqueue_entry(self.feature, 1, "one", self.body, self.environ, claim="deliver")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         self.answers[(1, "prepare")] = {"ok": False, "phase": "review_blocked", "error": "a blocking finding"}
         with self.failing_store(lambda entry: entry.get("status") == "failed"):
             sd_lane.run_lane(self.repo, self.environ, self.ship)

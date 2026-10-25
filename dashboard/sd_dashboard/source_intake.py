@@ -223,7 +223,7 @@ def add(connection, *, target: str, urls: list, files: list, who: str) -> dict:
     from sd_db import paths, repos, workflow, writes
 
     from . import research_screen, server
-    from .queue_screen import _run, command
+    from .queue_screen import _run, command, conventional
 
     root = Path(os.environ.get("REPO_ROOT", "~/repos")).expanduser()
     checkout = research_screen.checkout(root, target) if research_screen.KEY.fullmatch(target) else None
@@ -348,8 +348,8 @@ def add(connection, *, target: str, urls: list, files: list, who: str) -> dict:
     body.write_text(f"## Summary\n\nsd:{item}: {summary}, as grade U rows, not yet read. The source review on the "
                     f"Research page grades each one.\n\n{listed}\n\n## Test plan\n\nLedger rows and source files only; "
                     f"the gate runs the repository's check.\n", encoding="utf-8")
-    argv = [command("sd-ship"), "-C", str(work), "lane", "enqueue", "--item", str(item), "--title", summary,
-            "--body-file", str(body), "--deliver"]
+    argv = [command("sd-ship"), "-C", str(work), "lane", "enqueue", "--item", str(item), "--title",
+            conventional(summary, "docs"), "--body-file", str(body), "--deliver"]
     answer = _run(argv, ENQUEUE_SECONDS)
     enqueued = answer.get("exit") == 0 and answer.get("ok") is not False
     if not enqueued:

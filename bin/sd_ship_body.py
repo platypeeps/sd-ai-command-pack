@@ -264,6 +264,125 @@ def referenced_ids(body: str) -> set[int]:
             for number in _TITLE_ID.findall(re.sub(r"<!--.*?(?:-->|$)", "", match[1]))}
 
 
+#: A `Lane review fix, <repo> sd:<n>` line: a fix the lane's review asked for, and the item it delivers (sd:5999).
+_REVIEW_FIX = re.compile(r"^Lane review fix, [A-Za-z0-9_.-]+ sd:([0-9]+)\b")
+
+
+#: A `Closes: sd:<n>` line, as `sd_lib._closes` reads it in a commit's trailer block.
+_CLOSES = re.compile(rf"^{re.escape(sd_lib.CLOSES_TRAILER)} sd:([0-9]+)[ \t]*$")
+
+
+#: The line `git revert` writes into a revert's message, with the mainline parent when it reverts a merge.
+_REVERTS = re.compile(r"^This reverts commit ([0-9a-f]{7,40})\b(?:, reversing\s+changes made to ([0-9a-f]{7,40}))?",
+                      re.MULTILINE)
+
+
+def kept_commits(commits, parents=None) -> list:
+    """`commits`, newest first, less each one a later commit of them reverts (sd:5999 lane review, rounds 2 and 3).
+
+    A revert of a merge also undoes each commit the merge brought in over
+    the mainline parent its message names, read from `parents` (sha to
+    parent shas, the range's `git rev-list --parents`). A revert that is
+    itself reverted undoes nothing, so its target stays.
+    """
+    parents = parents or {}
+
+    def full(prefix: str) -> str:
+        return next((sha for sha, _ in commits if sha.startswith(prefix)), prefix)
+
+    def ancestors(start: str) -> set[str]:
+        seen, todo = set(), [start]
+        while todo:
+            sha = todo.pop()
+            if sha not in seen:
+                seen.add(sha)
+                todo += parents.get(sha, ())
+        return seen
+
+    undone: set[str] = set()
+    kept = []
+    for sha, message in commits:
+        if sha in undone:
+            continue
+        for target, mainline in _REVERTS.findall(message):
+            undone |= ancestors(full(target)) - ancestors(full(mainline)) if mainline else {full(target)}
+        kept.append((sha, message))
+    return kept
+
+
+def cited_sources(body: str, commits, parents=None) -> dict[int, str]:
+    """The ids a merge delivers by citation (operator ruling 2026-10-24, sd:5999), each with what cites it first.
+
+    Each `Closes: sd:<n>` line in the trailer block (`sd_lib.trailer_block`)
+    of a branch commit, and each `Lane review fix, <repo> sd:<n>` line of
+    `body` or of a commit message. `commits` is each `(sha, message)` the
+    branch adds. Only those forms (lane review, round 5 ruling): a subject
+    or prose such as "first part of sd:<n>" cites nothing, since no word
+    list catches every way to say partial, and a line a fenced code block
+    or an HTML comment holds is an example. A commit a later branch commit
+    reverts cites nothing either (`kept_commits`).
+    """
+    commits = kept_commits(commits, parents)
+    found: dict[int, str] = {}
+    for sha, message in commits:
+        text = message.replace("\r\n", "\n").rstrip()
+        block = sd_lib.trailer_block(text).split("\n") if "\n\n" in text else []  # a subject closes nothing
+        quoted = quoted_lines(text)  # a block an open fence or comment holds is an example
+        for number, line in enumerate(block, start=text.count("\n") + 2 - len(block)):
+            if number not in quoted and (match := _CLOSES.match(line)):
+                found.setdefault(int(match[1]), f"Closes trailer of commit {sha[:12]}")
+    for text, where in ((body, "the body"), *((message, f"commit {sha[:12]}") for sha, message in commits)):
+        quoted = quoted_lines(text)
+        for number, line in enumerate(text.split("\n"), start=1):
+            if number not in quoted and (match := _REVIEW_FIX.match(line.rstrip("\r"))):
+                found.setdefault(int(match[1]), f"review fix line in {where}")
+    return found
+
+
+def cited_ids(body: str, commits, parents=None) -> tuple[int, ...]:
+    """The ids `cited_sources` finds, in order."""
+    return tuple(cited_sources(body, commits, parents))
+
+
+#: A trailer line, as a body's last paragraph holds them.
+_TRAILER = re.compile(r"^[A-Za-z][A-Za-z0-9-]*:[ \t]")
+
+
+def with_cited(body: str, lines: list[str]) -> str:
+    """`body` with a `## Closed by citation` section of `lines`, before a closing trailer paragraph (sd:5999).
+
+    A reader of the pull request sees each close by citation, so a wrong
+    one is one reopen. The trailers stay the body's last paragraph.
+    """
+    if not lines:
+        return body
+    section = "## Closed by citation\n\n" + "\n".join(lines) + "\n"
+    text = body.rstrip("\n")
+    head, _, last = text.rpartition("\n\n")
+    if last and all(_TRAILER.match(line) for line in last.split("\n") if line.strip()):
+        return f"{head}\n\n{section}\n{last}\n" if head else f"{section}\n{last}\n"
+    return f"{text}\n\n{section}"
+
+
+def open_cited(connection, item: int, repo: str, cited, named, body: str) -> tuple[int, ...]:
+    """Of `cited`, the items a merge of `item` should close beyond `named`, its later `--item` list (sd:5999).
+
+    An item counts when it belongs to `repo`, is a kind a merge closes, and
+    is open, as `refuse_left_open` reads them; a `Refs:` line of `body`
+    keeps one open.
+    """
+    left = referenced_ids(body) | {item, *named}
+    kept = []
+    for number in cited:
+        if number in left:
+            continue
+        row = connection.execute("SELECT repo, kind, status FROM item WHERE id = ?", (number,)).fetchone()
+        if row is not None and row["repo"] == repo and row["kind"] in _CLOSABLE_KINDS \
+                and row["status"] in _OPEN_STATUSES:
+            kept.append(number)
+    return tuple(kept)
+
+
 def refuse_left_open(connection, item: int, repo: str, names, title: str, body: str, named, deliver: bool) -> None:
     """Refuse a delivering entry whose title or Summary headings name an open item missing from --item (sd:5375).
 
@@ -341,6 +460,20 @@ def refuse_long_lines(title: str, body: str, commits) -> None:
                       code="line_too_long", boundary="input", state="operator_decision",
                       next_action=f"Keep the title at {TITLE_LIMIT} characters or less, wrap the named "
                                   f"body and commit lines at {LINE_LIMIT}, then enqueue again.")
+
+
+def refuse_unconventional_title(title: str) -> None:
+    """Refuse a title that is not a Conventional Commits header (`sd_lib.conventional_title`, sd:6059).
+
+    The title is the squash subject, so it is what a commit lint and
+    semantic-release read on the default branch.
+    """
+    if not sd_lib.conventional_title(title):
+        raise Refusal(f'the title "{title}" is not a Conventional Commits header, '
+                      "<type>[(<scope>)][!]: <summary>",
+                      code="title_not_conventional", boundary="input", state="operator_decision",
+                      next_action=f"Retitle with one of the types {', '.join(sd_lib.CONVENTIONAL_TYPES)}, "
+                                  "such as `fix(lane): ...`, then enqueue again.")
 
 
 def docs_lint(root: pathlib.Path, body: str, base: str) -> list[str]:
