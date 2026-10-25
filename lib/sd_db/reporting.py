@@ -25,6 +25,15 @@ from .writes import (
 MAX_REPORT = 200_000
 #: The line prefix a job declares a finding with (`ingest_log`).
 MARK = b"SD_REPORT_ATTENTION: "
+#: The finding a failed job declares once it proved its data safe, then the
+#: step that failed (system sd:6030). `ingest_log` titles the report with
+#: it; every other failure is titled `AT_RISK`.
+SAFE = "data safe, one step failed: "
+AT_RISK = "data at risk"
+#: The line `cron-jobs.sh` opens each run's log slice with: `[<job>] <local
+#: time> starting (cwd: ...)`. A carried lost run (sd:3537) opens with its
+#: own, so only the lines after this run's own line grade it (`_grade`).
+RUN_START = re.compile(rb"\[([^\]\n]*)\] (\S+) starting(?: |\r?\n|\Z)")
 
 #: The `state` key a job's health is recorded under, one row per job by the
 #: `heartbeat` retention rule. Prefixed, because `key` is a flat namespace
@@ -189,8 +198,12 @@ def _check_times(started, ended):
 
 def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_path,
            attention=False, attention_basis="explicit report", truncated=False, removed=None,
-           actor=None, record=None, chain=None, now=None, host=None):
+           actor=None, record=None, chain=None, now=None, host=None, grade=None):
     """File one run's report, or answer a replay of it with the report it filed.
+
+    `grade` titles a new report in place of `needs attention`: `ingest_log`
+    passes the failed run's grade (`SAFE`, `AT_RISK`). A fold keeps the
+    target's title, and a replay never reads it.
 
     `host` is the machine the run ran on, which `ingest_log` passes, stored as
     `fields.report.host`: the key `_supersede` reads (sd:4641). A row filed
@@ -277,6 +290,8 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         raise workflow.WorkflowError("report chain must be an item id")
     if host is not None and (not isinstance(host, str) or not 1 <= len(host) <= 255):
         raise workflow.WorkflowError("report host must be a short name")
+    if grade is not None and (not isinstance(grade, str) or not 1 <= len(grade) <= 200 or "\x00" in grade):
+        raise workflow.WorkflowError("report grade must be short text")
     started, ended = _check_times(started, ended)
     external = job + ":" + run_id
     provenance = {"job": job, "run_id": run_id, "started": started, "ended": ended,
@@ -349,7 +364,7 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
             set_item_fields(connection, target["id"], fields={**stored, "repeats": repeats},
                             **({"body": {"text": text}} if newest and whole else {}))
             return workflow.item_state(connection, target["id"])
-        item = create_item(connection, kind="report", title=f"{job}: {'needs attention' if attention else 'run report'}",
+        item = create_item(connection, kind="report", title=f"{job}: {grade or ('needs attention' if attention else 'run report')}",
                            status="planning", source="cron-report", external_id=external,
                            fields=fields, body={"text": text}, session=INGEST_SESSION)
         if attention:
@@ -535,6 +550,32 @@ def _quiet(beat, previous):
     return "a clean tick of a job whose last tick was also clean"
 
 
+def _grade(marks, starts, *, started, ended):
+    """A failed run's grade: its first line that proved the data safe, else `AT_RISK`.
+
+    `marks` are the slice's `MARK` lines; `starts` its `RUN_START` lines of
+    this job, each as the count of marks before it and its time. Only the
+    marks between this run's own start line and the next one count: a lost
+    run carried in ahead (sd:3537), or a later run a hand recovery reads
+    past (sd:955), proves nothing about this run's data. This run's line is
+    the one stamped from `started` to `ended`. With none, two, or a start
+    time that does not parse, the run is not told apart, so it is ungraded,
+    and ungraded is at risk (system sd:6030 note #29319).
+    """
+    try:
+        times = [datetime.strptime(at.decode("ascii"), "%Y-%m-%dT%H:%M:%S%z") for _, at in starts]
+    except (UnicodeDecodeError, ValueError):
+        return AT_RISK
+    started, ended = datetime.fromisoformat(stamp(started)), datetime.fromisoformat(stamp(ended))
+    ours = [number for number, at in enumerate(times) if started <= at <= ended]
+    if len(ours) != 1:
+        return AT_RISK
+    first = starts[ours[0]][0]
+    last = starts[ours[0] + 1][0] if ours[0] + 1 < len(starts) else len(marks)
+    safe = next((mark.strip() for mark in marks[first:last] if mark.startswith(SAFE) and mark[len(SAFE):].strip()), None)
+    return safe[:200].replace("\x00", "") if safe else AT_RISK
+
+
 def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, offset=0, now=None):
     """One cron run, recorded as an item only when something happened.
 
@@ -589,8 +630,12 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
         # filed nothing, folded into an acknowledged report, or superseded
         # the report that still held it. Every decision below reads them all.
         stream.seek(offset)
-        marks = [line[len(MARK):].decode("utf-8", errors="replace").removesuffix("\n") for line in stream
-                 if line.startswith(MARK)]
+        marks, starts = [], []
+        for line in stream:
+            if line.startswith(MARK):
+                marks.append(line[len(MARK):].decode("utf-8", errors="replace").removesuffix("\n"))
+            elif (opened := RUN_START.match(line)) and opened[1] == job.encode():
+                starts.append((len(marks), opened[2]))
     truncated = len(data) > MAX_REPORT
     text = data[:MAX_REPORT].decode("utf-8", errors="replace")
     # A successful exit does not prove there were no findings. Jobs can emit
@@ -605,9 +650,17 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
     # limit keeps its head and a digest of the whole, so it files. A line
     # holds no newline, so joining on one keeps two lines apart from one.
     declared = "\n".join(dict.fromkeys(mark for mark in marks if mark))
+    # A failure is titled with its grade (system sd:6030); a clean exit is
+    # no failure, so its findings keep `needs attention`.
+    grade = _grade(marks, starts, started=started, ended=ended) if exit_code else None
     attention = exit_code != 0 or bool(declared)
     host = ship.this_host()
-    basis = (f"job exited {exit_code} on {host}" + (f": {declared}" if declared else "")
+    # A carried safe line gives an ungraded failure the lines of a safe one,
+    # so a failure with a safe line names its grade too, and a fold never
+    # moves it under another grade's title. Without one the basis is as it
+    # was, so an open report filed before the grades still takes its folds.
+    graded = f" ({grade})" if exit_code and any(mark.startswith(SAFE) for mark in marks) else ""
+    basis = (f"job exited {exit_code} on {host}{graded}" + (f": {declared}" if declared else "")
              if exit_code else declared or "not supplied by the job")
     if len(basis) > 2000:
         basis = f"{basis[:1900]} [sha256 {hashlib.sha256(basis.encode()).hexdigest()[:16]}]"
@@ -670,7 +723,7 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
                        exit_code=exit_code, text=text, source_path=str(path.resolve()),
                        attention=attention, attention_basis=basis, truncated=truncated,
                        chain=last.get("item") if moves and type(last.get("item")) is int else None, now=clock,
-                       host=host or None)
+                       host=host or None, grade=grade)
         # A truncated body is not the whole set to show in place of the older
         # report's, even with every finding named in the basis: neither this
         # run's nor the one the report it folded into kept. A whole run

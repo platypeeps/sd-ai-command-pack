@@ -337,7 +337,7 @@ class ARepeatedFailureFoldsIntoTheOpenReport(unittest.TestCase):
         self.assertEqual((third["recorded"], third["item"]["id"], third["count"]), ("folded", item, 3))
         rows = self.rows()
         self.assertEqual([row["external_id"] for row in rows], ["probe:a"])
-        self.assertEqual(rows[0]["title"], "probe: needs attention")
+        self.assertEqual(rows[0]["title"], "probe: data at risk")
         self.assertEqual(json.loads(rows[0]["body"]), {"text": "boom at 31\n"})
         self.assertEqual(self.followups(item), 1)
         fields = json.loads(rows[0]["fields"])
