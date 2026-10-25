@@ -5,13 +5,13 @@
 -- The retired runner's columns serve as they are; these are the ones a
 -- headless builder run needs and the runner never had:
 --
---   step          the step the supervisor is on, written before it starts
---   heartbeat_at  the supervisor's last beat, the reap's compare-and-set key
---   model         the model the bundle runs on
---   session_id    the builder's Claude session, so it never counts twice
---   log_path      the builder's stream-json log
---   builder_pgid  the builder's process group, which reap and timeout kill
---   final         the builder's last stream line, the judge's evidence
+-- `step`, the step the supervisor is on, written before it starts;
+-- `heartbeat_at`, its last beat, the reap's compare-and-set key; `model`, the
+-- model the bundle runs on; `session_id`, the builder's Claude session, so it
+-- never counts twice; `log_path`, its stream-json log; `builder_pgid`, its
+-- process group, which the reap and the timeout kill; and `final`, its last
+-- stream line, the judge's evidence. (The `--   ` lines below are the
+-- reverse, which the tests run; nothing else here starts that way.)
 --
 -- `ADD COLUMN`, as 041: SQLite adds a nullable column in place and moves no
 -- row. Every existing run reads NULL in each, which is what a runner run
