@@ -11,10 +11,12 @@ for builders only and the lead's own background watches keep working.
   means the 120 s default): denied, naming the two fields to re-run with.
 - Bash whose command starts with `sleep`: denied.
 - Any tool whose name holds `Monitor`: denied.
-- Bash that runs `git stash` anywhere on the line, `git -C <dir> stash` too:
-  denied with its reason (sd:5985). The read-only `stash list` and `stash
-  show` pass. The rule moved here from prose after it kept breaking. A
-  command line the lexer cannot read gets a line scan, so it fails closed.
+- Bash with a line that names `git` and then `stash`: denied with its reason
+  (sd:5985), except `stash list` and `stash show`. The rule moved here from
+  prose after it kept breaking. It is a text scan on purpose: three review
+  rounds found shell forms a parser missed. A mention, such as a commit
+  message, is a false deny the refusal says how to rephrase; a builder is
+  not hostile, and a miss costs lost work.
 
 It denies rather than rewriting the input with `updatedInput`. Every matching
 PreToolUse hook runs in parallel and the last `updatedInput` to arrive wins, so
@@ -29,9 +31,7 @@ hook must not stop a builder.
 from __future__ import annotations
 
 import json
-import os
 import re
-import shlex
 import sys
 
 TIMEOUT_MS = 600000
@@ -50,126 +50,14 @@ WAIT = (
 STASH = (
     "A builder never runs git stash: git stash in a shared worktree hid or "
     "dropped another writer's work. Commit the work on your branch instead; "
-    "git stash list and git stash show still pass."
+    "git stash list and git stash show still pass. A line that only mentions "
+    "stash is refused too: put that text in a file, as git commit -F <file>."
 )
 
 SLEEP = re.compile(r"\s*sleep(\s|;|&|\||$)")
 
-#: The characters that separate commands, as `bin/sd-issue-guard` reads them.
-PUNCTUATION = ";&|()\n"
-
-#: Shell words after which the next word is in command position again.
-KEYWORDS = frozenset({"if", "then", "elif", "else", "do", "while", "until", "!", "{"})
-
-#: Words that run the command after them, each with its options that take
-#: the next word as a value. `rtk` is the token-saving proxy, and `rtk proxy`
-#: runs the next word bare.
-WRAPPERS: dict[str, frozenset[str]] = {
-    "env": frozenset({"-u", "-C", "-S"}),
-    "command": frozenset(),
-    "exec": frozenset({"-a"}),
-    "nohup": frozenset(),
-    "sudo": frozenset({"-u", "-g", "-C", "-D", "-h", "-p", "-U", "-r", "-t"}),
-    "time": frozenset(),
-    "rtk": frozenset(),
-    "proxy": frozenset(),
-    "xargs": frozenset({"-I", "-J", "-L", "-P", "-R", "-S", "-E", "-a", "-d", "-n", "-s"}),
-    "nice": frozenset({"-n", "--adjustment"}),
-    "timeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
-    "gtimeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
-}
-
-#: Wrappers that take one duration word after their options.
-TIMED = frozenset({"timeout", "gtimeout"})
-
-#: Shells whose `-c` word is a script of its own.
-SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
-
-#: `git` global options that take the next word as their value.
-GIT_VALUED = frozenset({"-C", "-c", "--git-dir", "--work-tree", "--namespace",
-                        "--config-env", "--super-prefix"})
-
-STASH_READS = frozenset({"list", "show"})
-
-#: `$(...)` without nesting, and backticks: they run inside double quotes too.
-SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
-
-#: The line scan for a command the lexer cannot read, so the check fails closed.
-UNREAD = re.compile(r"\bgit\b[^\n]*\bstash\b(?!\s+(list|show)\b)")
-
-
-def words_of(command: str) -> list[str] | None:
-    """Shell words and separators, or None when the line does not lex."""
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=PUNCTUATION)
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    try:
-        return list(lexer)
-    except ValueError:
-        return None
-
-
-def skip_flags(words: list[str], position: int, valued: frozenset[str]) -> int:
-    """The position after the options at `position`, a `valued` one with its value."""
-    while position < len(words) and words[position].startswith("-"):
-        position += 2 if words[position] in valued else 1
-    return position
-
-
-def command_stashes(name: str, args: list[str]) -> bool:
-    """Whether one simple command, `name` with its `args`, runs `git stash`."""
-    if name == "eval":
-        return stashes(" ".join(args))
-    if name in SHELLS:
-        for index, flag in enumerate(args):
-            if not flag.startswith("-"):
-                return False
-            if not flag.startswith("--") and "c" in flag[1:]:
-                return index + 1 < len(args) and stashes(args[index + 1])
-        return False
-    if name != "git":
-        return False
-    rest = args[skip_flags(args, 0, GIT_VALUED):]
-    return rest[:1] == ["stash"] and (rest[1:2] or [""])[0] not in STASH_READS
-
-
-def stashes(command: str) -> bool:
-    """Whether a shell line runs `git stash` other than its read-only verbs.
-
-    `git` counts in command position: first in a segment, after `KEYWORDS`,
-    `VAR=value` words and `WRAPPERS` with their options. The body of each
-    command substitution, `sh -c` script and `eval` argument is read as a
-    line of its own. A quoted string that mentions `git stash` is one word
-    and never matches, but a single-quoted `$(...)` or backtick still does.
-
-    A line the lexer cannot read, such as a heredoc body with an apostrophe,
-    gets the `UNREAD` line scan instead. A heredoc body line is read as a
-    command too: one that names `git stash` is a false deny, accepted
-    rather than a heredoc parser.
-    """
-    for match in SUBSTITUTION.finditer(command):
-        if stashes(match.group(1) or match.group(2) or ""):
-            return True
-    words = words_of(command)
-    if words is None:
-        return bool(UNREAD.search(command))
-    position = 0
-    while position < len(words):
-        word = words[position]
-        position += 1
-        if (not word.strip(PUNCTUATION) or word in KEYWORDS
-                or "=" in word and word.split("=", 1)[0].isidentifier()):
-            continue
-        if word in WRAPPERS:
-            position = skip_flags(words, position, WRAPPERS[word]) + (word in TIMED)
-            continue
-        args = []
-        while position < len(words) and words[position].strip(PUNCTUATION):
-            args.append(words[position])
-            position += 1
-        if command_stashes(os.path.basename(word), args):
-            return True
-    return False
+#: A line naming `git`, then `stash` not followed by a read-only verb.
+STASHES = re.compile(r"\bgit\b[^\n]*?\bstash\b(?!\s+(list|show)\b)")
 
 
 def reason(payload: dict) -> str | None:
@@ -182,7 +70,7 @@ def reason(payload: dict) -> str | None:
     tool_input = payload["tool_input"]
     if SLEEP.match(tool_input["command"]):
         return WAIT
-    if stashes(tool_input["command"]):
+    if STASHES.search(tool_input["command"]):
         return STASH
     timeout = tool_input.get("timeout")
     if tool_input.get("run_in_background") or not isinstance(timeout, (int, float)) or timeout < TIMEOUT_MS:

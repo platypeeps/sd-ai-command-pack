@@ -673,8 +673,6 @@ DYNAMIC: frozenset[str] = frozenset()
 
 #: Duplicate function pairs already in the tree, each as a sorted 2-tuple.
 CLONES = frozenset({
-    ("bin/sd-builder-guard::words_of",
-     "bin/sd-issue-guard::tokens"),
     ("bin/sd-handoff-restore::canonical_remote",
      "bin/sd-handoff::canonical_remote"),
     ("bin/sd-handoff-restore::git",
