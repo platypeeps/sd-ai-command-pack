@@ -53,6 +53,10 @@ file is made, with the dispatch line, before the request leaves, and the note is
 so a stop between the two leaves the file, never a note that waits for a reconcile no palette request can finish.
 Home Assistant's own reason for a refusal (401, 403, 400) reaches the page. Then the tile's state is read again with
 `GET /api/states/<entity_id>`. `writes.available` is true once the read worked; `writes.services` is `SERVICES`.
+
+**Web UI (sd:6163).** The page's first tile links to `WEB`, `/home/assistant`, on the dashboard itself; the
+server answers it with a 302 to the REST base above (`web`), or a 503 naming why there is none. `document`
+carries `web` as `{path, available, reason}`, so the page never holds the host either.
 """
 
 from __future__ import annotations
@@ -73,7 +77,7 @@ from urllib.parse import urlsplit
 from .documents import _config_dir, pipe_lines
 
 __all__ = ["CONFIG", "JOURNAL_ITEM", "KEY", "NOT_LISTED", "NO_TILES", "ROW_SOURCE", "SERVICES", "SERVICE_TIMEOUT", "TIMEOUT", "TYPES",
-           "document", "parse", "save", "service"]
+           "WEB", "document", "parse", "save", "service", "web"]
 
 #: In this machine's config directory, never supplied by a request. The checkout ships `home-tiles.conf.example` only.
 CONFIG = _config_dir() / "home-tiles.conf"
@@ -86,6 +90,9 @@ KEY = "dashboard.home_tiles"
 
 #: How the page names the row as its source.
 ROW_SOURCE = f"workflow database setting {KEY}"
+
+#: The dashboard path that opens Home Assistant's web UI (sd:6163): a 302 to the REST base, so no page holds the host.
+WEB = "/home/assistant"
 
 #: Seconds for each socket step of the one Home Assistant read; the page waits on it.
 TIMEOUT = 3.0
@@ -212,6 +219,14 @@ def _settings(environ) -> tuple[str, str]:
     return f"{url.scheme}://{url.netloc}", values["HA_TOKEN"]
 
 
+def web(environ=None) -> tuple[str | None, str]:
+    """Where `WEB` sends the browser: (the REST base with a trailing slash, "") or (None, why there is none)."""
+    try:
+        return _settings(os.environ if environ is None else environ)[0] + "/", ""
+    except _Failed as failed:
+        return None, failed.reason
+
+
 def _read_states(environ=None, timeout: float = TIMEOUT) -> dict[str, dict]:
     """Every entity's state from one `GET /api/states`, by entity id. Raises `_Failed` naming why there is none."""
     base, token = _settings(os.environ if environ is None else environ)
@@ -330,6 +345,7 @@ def document(connection, *, now: str, config: Path | None = None, environ=None, 
             states, reader = _read_states(environ, timeout), {"available": True, "reason": ""}
         except _Failed as failed:
             reader, short = {"available": False, "reason": failed.reason}, failed.short
+    opens, why = web(environ)
     for tile in tiles:
         row = states.get(tile["id"])
         tile["state"] = _state(row) if row else None
@@ -341,6 +357,7 @@ def document(connection, *, now: str, config: Path | None = None, environ=None, 
         "writes": {"available": reader["available"], "reason": "" if reader["available"] else reader["reason"], "services": {domain: dict(names) for domain, names in SERVICES.items()}},
         "headline": headline,
         "groups": groups,
+        "web": {"path": WEB, "available": opens is not None, "reason": why},
     }
 
 
