@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import getpass
+import importlib
 import json
 import math
 import os
@@ -149,7 +150,8 @@ def interactive_builders(connection: Any, now: str, key: Any) -> list[dict] | No
     """
     sys.path.insert(0, str(BIN.parent / "dashboard"))
     try:
-        from sd_dashboard import claude_sessions
+        # By name, as `sd_work` loads its modules: the dashboard is not on bin/'s lint path.
+        claude_sessions = importlib.import_module("sd_dashboard.claude_sessions")
         document = claude_sessions.document(connection, now=now)
         if document["builders"]["running"] is None:
             return None
