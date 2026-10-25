@@ -3,6 +3,7 @@
   Today, v2 (sd:2110), the default page at / and /today since sd:2163. Built from ui-design products/system/designs/v2/today.html at a3861c9 and design.md.
   One page, no tabs (sd:5921, docs/work/2026-10-23-today-queue/design.md): what is going on, then what needs you.
   Data: /api/now, the document now_screen.document builds, read when the page opens and on Refresh.
+  Since yesterday (sd:6002, now_screen.digest): merged per repo with the PRs folded, failed with why and fix, questions.
   The day track: the last 24 hours as marks (landed, failed jobs, briefs, sessions), a table of them and a key to Tasks.
   Under it the spend line (sd:6031): spent in the last 24 hours and each of the last 7, from the cost table; Metrics has the rest.
   The annunciator: Jobs, Lane, Reports, Pulls, Mail and Repos filter Needs you to their rows; Sessions opens In motion and
@@ -52,6 +53,11 @@
       <li><a class="cell" href="/queue" id="lamp-gate" data-state="unknown"><span class="lbl">Gate<svg class="i" aria-hidden="true"><use href="#i-gauge"/></svg></span><span class="val">reading…</span></a></li>
       <li><button class="cell clock" type="button" id="refresh"><span class="lbl">Observed<svg class="i" aria-hidden="true"><use href="#i-rotate-ccw"/></svg></span><span class="val"><span class="ph" id="observed">not yet</span> · <span class="ph">refresh</span></span></button></li>
     </ul></annunciator-strip>
+
+    <section class="digest" aria-labelledby="digest-h">
+      <h2 id="digest-h">Since yesterday</h2>
+      <div id="digest"><p class="why">Reading the day…</p></div>
+    </section>
 
     <section class="daytrack" id="track" aria-labelledby="track-h">
       <h2 class="sr" id="track-h">The last 24 hours</h2>

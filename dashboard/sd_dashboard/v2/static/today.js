@@ -219,6 +219,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     $('unread').hidden = !unread.length;
     $('unread').textContent = unread.map(([k, why]) => `${k} could not be read: ${why}. Refresh tries again.`).join(' ');
     motion();
+    digest();
     dayTrack();
     spendLine();
     window.snooze.draw($('snoozed'), SNOOZED);
@@ -302,6 +303,19 @@ window.PAGE_FILTER = { '': 'Needs you' };
     put($('track-rows'), html`${[...marks].sort((a, b) => a.at < b.at ? 1 : -1).map(m => html`<tr><td class="when"><time datetime="${m.at}">${clock(m.at)}</time></td><td>${m.label}</td><td class="what"><a href="${markHref(m.lane, m)}">${m.what}</a></td></tr>`)}`);
   }
 
+  // Since yesterday (sd:6002): the document's `digest`, merged per repo with the PRs folded under the lines, failed with
+  // why and one fix each, and the questions waiting on Decide. A read that failed says so, never a quiet night.
+  function digest() {
+    const D = DOC.digest || { error: 'the document carried no digest' };
+    if (D.error) return put($('digest'), html`<p class="why">The digest was not read: ${D.error}. Refresh tries again.</p>`);
+    if (!D.merged.length && !D.failed.length && !D.questions) return put($('digest'), html`<p class="why">Nothing merged, failed or waiting since yesterday.</p>`);
+    put($('digest'), html`<ul class="lines">${D.merged.map(m => html`<li><b>${m.repo}</b>: ${m.n} merged · ${m.titles.join(', ')}${m.n > m.titles.length ? ', …' : ''}</li>`)}
+      ${D.more ? html`<li>and ${plural(D.more, 'more repo')}</li>` : ''}
+      ${D.failed.map(f => html`<li class="g-warning"><b>${f.what}</b> · ${f.why} · ${f.fix}</li>`)}
+      ${D.questions ? html`<li><a href="/decide">${plural(D.questions, 'question')} ${D.questions === 1 ? 'waits' : 'wait'}</a></li>` : ''}</ul>
+      ${D.prs.length ? html`<details><summary>${plural(D.prs.length, 'merged item')}</summary><ul class="prs">${D.prs.map(p => html`<li><a href="${shell.itemHref(p.item)}">#${p.item} ${p.title}</a> · ${p.repo}${p.pr ? ` · PR #${p.pr}` : ''}</li>`)}</ul></details>` : ''}`);
+  }
+
   // The spend line (sd:6031): the document's `spend`, spent in the last 24 hours and in each of the last 7, as bars oldest
   // first. Visibility only: no cap. A read that failed says so, never $0.00.
   const usd = n => `$${Number(n).toFixed(2)}`;
@@ -353,6 +367,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     $('active-note').hidden = true; $('unread').hidden = true;
     put($('track-plot'), html`<p class="why">The day track was not read: ${failed}.</p>`); put($('flowkey'), html``); $('track-table').hidden = true;
     put($('spend'), html`Spend not read: ${failed}.`);
+    put($('digest'), html`<p class="why">The digest was not read: ${failed}.</p>`);
     window.snooze.draw($('snoozed'), []);
     attend();
   }

@@ -710,6 +710,43 @@ def spend(connection: sqlite3.Connection, now: str) -> dict:
     return {"day": round(days[-1], 2), "week": round(sum(days), 2), "days": [round(day, 2) for day in days], "error": ""}
 
 
+#: The digest's merged lines (sd:6002): at most this many repos, the rest counted in `more`.
+DIGEST_LINES = 5
+
+
+def digest(connection: sqlite3.Connection, now: str, *, rows: list[dict], lanes: list[dict]) -> dict:
+    """Since yesterday (sd:6002), the overnight card (grill Q32): what changed in the day track's 24 hours.
+
+    `merged` is one line per repo, most merges first, each with its count and newest titles, at most `DIGEST_LINES`;
+    `more` counts the repos left out, and `prs` is every merged item with its PR, folded under the lines. `failed` is
+    each failed job and blocked lane entry with its why and one fix; `questions` counts the decisions waiting on Decide.
+    A read that failed is `error`, so the card says the digest was not read, never a quiet night.
+    """
+    from sd_db import today
+
+    try:
+        landed = today.delivered(connection, now=now, hours=TRACK_HOURS)
+        questions = len(today.decisions(connection)) + today.review_questions(connection)
+    except (SdDbError, sqlite3.Error, KeyError, TypeError) as failure:
+        return {"error": str(failure) or "the merged items and questions could not be read"}
+    def repo(row):
+        return Path(row["repo"]).name if row.get("repo") else "no repo"
+
+    by_repo: dict[str, list[dict]] = {}
+    for row in landed:
+        by_repo.setdefault(repo(row), []).append(row)
+    ranked = sorted(by_repo.items(), key=lambda pair: -len(pair[1]))
+    failed = [{"what": row["what"], "why": (row.get("triage") or {}).get("why") or row["detail"], "fix": f"retry: {row['retry']}"}
+              for row in rows if row["kind"] == "job" and row.get("state") == "failed"]
+    failed += [{"what": row["what"], "why": row["detail"], "fix": "Retry it in Needs you or on Queue"} for row in lane_rows(lanes)]
+    return {"merged": [{"repo": name, "n": len(found), "titles": [row.get("title") or "" for row in found[:3]]}
+                       for name, found in ranked[:DIGEST_LINES]],
+            "more": max(0, len(ranked) - DIGEST_LINES),
+            "prs": [{"item": row["id"], "title": row.get("title") or "", "repo": repo(row), "pr": row.get("pr")}
+                    for row in landed],
+            "failed": failed, "questions": questions, "error": ""}
+
+
 #: Each build step as the stage Today names (sd:6003): the builder works, the review reads, the lane holds the branch.
 STAGE = {"claimed": "building", "worktree": "building", "building": "building", "fixing": "building",
          "reviewing": "review", "enqueuing": "lane", "enqueued": "lane", "checking": "lane", "cleaning": "lane"}
@@ -791,6 +828,7 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
     default, and a lane read that failed is a dark `lane` row, as a dark collector is.
     `spend` is the spend line (sd:6031, `spend`): the last 24 hours and the 7-day trend from the cost table.
     `builders` is In motion's builder runs (sd:6003, `builders`): each open build run's items, stage, start and ETA.
+    `digest` is Since yesterday (sd:6002, `digest`): merged per repo, failed with why and fix, questions waiting.
     """
     collect_area, kept = fleet or fleet_module.collect, {}
 
@@ -849,6 +887,7 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
             "snoozed": held, "snooze_error": snooze_error,
             "work": work, "work_error": work_error, "needs": listed, "lane": summary,
             "track": track(connection, now, rows=rows, briefs=reported["briefs"], active=active, lane=summary),
+            "digest": digest(connection, now, rows=rows, lanes=queue.get("lanes") or []),
             "spend": spend(connection, now), "builders": builders(connection, now), "attention": _attention(listed), **mail, **reported}
 
 

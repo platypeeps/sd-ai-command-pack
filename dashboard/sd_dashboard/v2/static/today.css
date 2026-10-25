@@ -42,6 +42,15 @@
 .daytrack .spend a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 @media (pointer: coarse) { .daytrack .spend a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
 
+/* Since yesterday (sd:6002): a few plain lines over the track, the merged items folded under them. */
+.digest { margin-top: var(--space-md); }
+.digest h2 { margin: 0 0 var(--space-2xs); }
+.digest ul { margin: 0; padding-left: var(--space-md); overflow-wrap: anywhere; }
+.digest li + li { margin-top: var(--space-3xs); }
+.digest details { margin-top: var(--space-xs); color: var(--color-muted); }
+.digest summary:focus-visible, .digest a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+@media (pointer: coarse) { .digest summary, .digest .prs a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
+
 /* Section heads */
 .tally { gap: var(--space-md); line-height: 1; }
 .tally .i { vertical-align: -0.2em; }

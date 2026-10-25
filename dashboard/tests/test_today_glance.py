@@ -16,6 +16,7 @@ from sd_dashboard import now_screen
 
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document
+from test_today_needs import blocked, lane, queue
 from test_v2_today_reader import ReaderCase
 
 CLOCK = datetime.fromisoformat(NOW.replace("Z", "+00:00"))
@@ -26,8 +27,9 @@ def ago(**delta) -> str:
 
 
 class TodayCase(ScreenCase):
-    def today(self, **seams):
-        return now_screen.document(self.connection, now=NOW, jobs=JobsBackend(self.tmp.name), fleet=fleet_document, **seams)
+    def today(self, jobs=(), **seams):
+        return now_screen.document(self.connection, now=NOW, jobs=JobsBackend(self.tmp.name, jobs=jobs),
+                                   fleet=fleet_document, **seams)
 
     def cost(self, usd, at, source="run", **columns):
         self.connection.execute(
@@ -162,3 +164,73 @@ class TheBuilderRows(ReaderCase):
         out = self.run_page("R.builds = ELS.builds.html; R.hidden = ELS['builds-table'].hidden;")
         self.assertFalse(out["R"]["hidden"])
         self.assertIn("Builder runs could not be read: no such column: step", out["R"]["builds"])
+
+
+SHA = "a" * 40
+
+
+class TheDigest(TodayCase):
+    """sd:6002: Since yesterday, the overnight card (grill Q32): merged per repo, failed with why and fix, questions."""
+
+    def merged(self, title, repo, pr):
+        item = self.item(title, kind="task", repo=self.repo(f"/repos/{repo}"))
+        self.note(item, f"Code delivery https://example.test/{repo}/pull/{pr} at {SHA}", kind="comment")
+        return item
+
+    def test_the_digest_groups_merges_by_repo_and_lists_failures_and_questions(self):
+        one = self.merged("Port the page", "pack", 12)
+        two = self.merged("Fix the link", "pack", 13)
+        three = self.merged("Pin the gate", "system", 7)
+        asks = self.item("Pick a colour", repo=self.repo("/repos/pack"))
+        self.note(asks, "Which colour?\nOption: red\nOption: blue", kind="question")
+        digest = self.today(jobs=[("backup", "failed", 1, None)], lanes=queue(lane(rows=[blocked(5)])))["digest"]
+        self.assertEqual(digest["error"], "")
+        self.assertEqual(digest["merged"], [{"repo": "pack", "n": 2, "titles": ["Fix the link", "Port the page"]},
+                                            {"repo": "system", "n": 1, "titles": ["Pin the gate"]}])
+        self.assertEqual(digest["more"], 0)
+        self.assertEqual([(pr["item"], pr["repo"], pr["pr"]) for pr in digest["prs"]],
+                         [(three, "system", 7), (two, "pack", 13), (one, "pack", 12)])
+        self.assertEqual([(row["what"], row["fix"]) for row in digest["failed"]],
+                         [("backup failed with exit 1", "retry: launchctl kickstart fixture/backup"),
+                          ("system sd:5 blocked at prepare", "Retry it in Needs you or on Queue")])
+        self.assertTrue(all(row["why"] for row in digest["failed"]))
+        self.assertEqual(digest["failed"][1]["why"], "lane: sd-check: a suite failed")
+        self.assertEqual(digest["questions"], 1)
+
+    def test_more_repos_than_the_card_holds_are_counted(self):
+        for n in range(7):
+            self.merged(f"Item {n}", f"repo{n}", n + 1)
+        digest = self.today()["digest"]
+        self.assertEqual((len(digest["merged"]), digest["more"], len(digest["prs"])), (5, 2, 7))
+
+    def test_a_read_that_failed_is_its_reason_never_a_quiet_night(self):
+        from sd_db import today
+
+        with mock.patch.object(today, "decisions", side_effect=sqlite3.OperationalError("database is locked")):
+            self.assertEqual(self.today()["digest"], {"error": "database is locked"})
+
+
+DIGEST = {"merged": [{"repo": "pack", "n": 2, "titles": ["Fix the link", "Port the page"]}], "more": 1,
+          "prs": [{"item": 7, "title": "Fix the link", "repo": "pack", "pr": 13}],
+          "failed": [{"what": "backup failed with exit 1", "why": "the disk was full",
+                      "fix": "retry: launchctl kickstart fixture/backup"}], "questions": 2, "error": ""}
+
+
+class TheDigestCard(ReaderCase):
+    def test_the_card_shows_merged_lines_failures_and_questions_with_the_prs_folded(self):
+        self.doc["digest"] = DIGEST
+        card = self.run_page("R.digest = ELS.digest.html;")["R"]["digest"]
+        self.assertIn("<b>pack</b>: 2 merged · Fix the link, Port the page", card)
+        self.assertIn("and 1 more repo", card)
+        self.assertIn("<details><summary>1 merged item</summary>", card)
+        self.assertIn("#7 Fix the link</a> · pack · PR #13", card)
+        self.assertIn("backup failed with exit 1</b> · the disk was full · retry: launchctl kickstart fixture/backup", card)
+        self.assertIn('<a href="/decide">2 questions wait</a>', card)
+
+    def test_a_quiet_night_says_so_and_a_failed_read_says_why(self):
+        self.doc["digest"] = {"merged": [], "more": 0, "prs": [], "failed": [], "questions": 0, "error": ""}
+        quiet = self.run_page("R.digest = ELS.digest.html;")["R"]["digest"]
+        self.assertIn("Nothing merged, failed or waiting since yesterday.", quiet)
+        self.doc["digest"] = {"error": "database is locked"}
+        failed = self.run_page("R.digest = ELS.digest.html;")["R"]["digest"]
+        self.assertIn("The digest was not read: database is locked. Refresh tries again.", failed)
