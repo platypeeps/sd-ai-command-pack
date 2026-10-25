@@ -43,6 +43,9 @@ BRANCH_ITEM = re.compile(r"(?:^|[-_/])(?:sd-?|b)?(\d{1,9})(?=$|[-_/])", re.ASCII
 COMMAND_PATH = re.compile(r"""(?:^|(?<=[\s'"=:(]))(~?/[^\s'";|&()<>`$]+)""")
 #: The paths one command adds, and the words and characters of it read: a hook pays this on each tool call.
 MAX_COMMAND_PATHS, MAX_COMMAND_WORDS, MAX_COMMAND_CHARS = 32, 512, 16384
+#: A word that is a script, not a path: after `-c`, `-lc`, `-e` or `eval`, holding a shell operator, quote or
+#: bracket, or with a space and not starting as a path. It is read as a command again, at most this deep.
+SCRIPT_FLAG, SCRIPT_MARK, MAX_SCRIPT_DEPTH = re.compile(r"-[a-z]*[ce]|eval"), re.compile(r"[;&|<>`$'\"()\n]"), 3
 
 
 def _key(path: str) -> str:
@@ -97,12 +100,13 @@ def touched(payload: dict) -> list[str]:
     return [entry for entry in found if isinstance(entry, str) and entry.startswith(("/", "~/"))]
 
 
-def command_paths(command: str, cwd: object) -> list[str]:
+def command_paths(command: str, cwd: object, depth: int = 0) -> list[str]:
     """The paths in a shell command, read as the shell splits its words (pack sd:6152).
 
     A quoted path keeps its spaces. A relative one (`../pack`, `lib/x`) resolves against `cwd`, or against
     the folder a `cd` before it named; without an absolute `cwd` it is dropped. `NAME=a:b` names `a` and `b`,
-    and `--flag=a` names `a`.
+    and `--flag=a` names `a`. A quoted script (`sh -c '...'`, `python -c`, `eval`, a message) is read again
+    for its own paths; a `cd` in it moves no later word.
     """
     lexer = shlex.shlex(command[:MAX_COMMAND_CHARS], posix=True, punctuation_chars=True)
     lexer.whitespace_split = True
@@ -113,6 +117,11 @@ def command_paths(command: str, cwd: object) -> list[str]:
     base = cwd if isinstance(cwd, str) and cwd.startswith("/") else None
     found: list[str] = []
     for before, word in itertools.pairwise(["", *words]):
+        if SCRIPT_FLAG.fullmatch(before) or SCRIPT_MARK.search(word) or (
+                any(char.isspace() for char in word) and not word.startswith(("/", "~/"))):
+            found += (command_paths(word, base, depth + 1) if depth < MAX_SCRIPT_DEPTH
+                      else COMMAND_PATH.findall(word))
+            continue
         for part in [] if "://" in word else re.split(r"[=:]", word)[word.startswith("-"):]:
             if part.startswith(("/", "~/")):
                 path = part
