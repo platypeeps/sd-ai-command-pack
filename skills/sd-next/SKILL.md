@@ -1,6 +1,6 @@
 ---
 name: sd-next
-description: 'Use when the operator asks for status, "what next", recommendations, followups or "what do you need from me" across all their work: done recently, landing soon, open items, numbered next steps, then the waiting questions one at a time.'
+description: 'Use when the operator asks for status, "what next", recommendations, followups or "what do you need from me" across all their work: done recently, landing soon, open items, numbered next steps, then the waiting questions one at a time; and when the operator says "grill", to walk the weekly grill questions.'
 ---
 
 # sd-next
@@ -37,6 +37,7 @@ Keep each sentence short and plain, in simple tenses. Add no preamble and no clo
 
 After the answer, take the operator through the waiting questions, oldest first: the `Decisions` rows, then this session's unfiled questions.
 Skip review questions: `sd today` leaves a review batch's questions out of `Decisions` and counts them in its `+N review questions wait` line, as the operator labels them on the dashboard's Review page.
+Skip the grill's questions too: `sd today` leaves them out of `Decisions` and names them in its `Grill ready` line, as the operator answers them in a session of their own (below).
 
 1. File an unfiled question first: `sd task note N $'<question>\nOption: <a>\nOption: <b>' --kind question`.
 2. Ask one question per `AskUserQuestion` call. Give its context in one or two lines, and put your recommended option first, marked "(Recommended)".
@@ -45,9 +46,21 @@ Skip review questions: `sd today` leaves a review batch's questions out of `Deci
 
 In a run with no operator present, skip this walk; the questions wait on the dashboard.
 
+## Grill
+
+The weekly KISS audit files about ten seed questions on one item, filed under the ref `grill:<date>`: new mechanisms, drift, slow lanes and stale rulings (pack sd:6022).
+`sd today` then prints `Grill ready: N questions on sd:X; say 'grill' in a fresh session`, and the dashboard's Today shows the same row.
+When the operator says "grill":
+
+1. Run `sd today | grep '^Grill ready'`. With no such line, say no grill waits, and stop.
+2. Run `sd task show N` for each item the line names, and read its open questions, oldest first.
+3. Walk them as the waiting questions above: one per `AskUserQuestion` call, the recommended option first, and each answer recorded at once with `--answers`.
+4. Stop when the operator says stop, or when no question waits. A question left open stays on the item for the next grill.
+5. Once every question on an item has a ruling, close it: `sd task status N done --reason 'grill answered'`.
+
 ## Never
 
 - Never say "none" for a section `sd today` printed as `unknown`; say it is unknown.
 - Never list more than five rows in a section; the rest stay in `sd today` and the dashboard.
 - Never invent an item number, a PR number, a commit or a note id; copy them from the output.
-- Never write anything but the question and decision notes of the walk above.
+- Never write anything but the question and decision notes of the walks above, and a grill item's close.
