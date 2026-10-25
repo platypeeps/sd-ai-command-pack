@@ -91,6 +91,18 @@ def copilot_automatic(policy: str | None, tier: str, depth: int) -> bool:
     return False
 
 
+#: The types `@commitlint/config-conventional` allows; semantic-release
+#: counts only titles of these (operator ruling 2026-10-24, sd:6059).
+CONVENTIONAL_TYPES = ("build", "chore", "ci", "docs", "feat", "fix", "perf", "refactor", "revert", "style", "test")
+#: `<type>[(<scope>)][!]: <summary>`, as that config's parser reads a header.
+_CONVENTIONAL = re.compile(rf"(?:{'|'.join(CONVENTIONAL_TYPES)})(?:\([^()\r\n]+\))?!?: \S")
+
+
+def conventional_title(title: str) -> bool:
+    """Whether `title` is a Conventional Commits header, as lane enqueue requires of a squash subject (sd:6059)."""
+    return bool(_CONVENTIONAL.match(title))
+
+
 def lead_review_key(repository: str, branch: str) -> str:
     """The `checkpoint` key of the clean branch review `sd-review` records and lane prepare reads (sd:5988)."""
     return f"review:v1:{repository}:{branch}"
@@ -2773,7 +2785,7 @@ def _closes(message: str, item: "str | tuple[str, ...]", parents: str | None = N
     if parents is not None and held_at_merge(message, parents):
         return False
     wanted = _spellings(item)
-    for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
+    for line in trailer_block(message).splitlines():
         name, _, value = line.rstrip().partition(" ")
         if name in (DELIVERS_TRAILER, CLOSES_TRAILER) and value.strip() in wanted:
             return True
@@ -3032,15 +3044,33 @@ _STATED_RE = re.compile(
 )
 
 
-def trailer_block(message: str) -> str:
-    """The last paragraph of `message`, which is the whole of what a trailer is.
+#: A trailer line, `Key: value`, and a continuation line, indented under one.
+_TRAILER_LINE = re.compile(r"^[A-Za-z0-9-]+[ \t]*:")
+_CONTINUATION = re.compile(r"^[ \t]+\S")
 
-    The same slice `_closes` takes, and the same one `git interpret-trailers
-    --parse` takes: a trailer block is the final paragraph and nothing else. It
-    is spelled once here so the two readers cannot drift, and named so the
-    property has somewhere to be tested from.
+
+def trailer_block(message: str) -> str:
+    """The trailer block of `message`, the end of `message.rstrip()`; `""` when it has none.
+
+    The slice `_closes` takes, and the one `git interpret-trailers --parse`
+    takes: the final paragraph, after a line that is blank or whitespace
+    only, and only when each of its lines is a `Key: value` trailer or a
+    continuation under one. A fenced or commented example, or a prose line,
+    makes the paragraph prose, and git reads no trailer in it (pack sd:5999
+    lane review, round 6). A message of one paragraph is read too: a pull
+    request body of trailers alone ends the squash. Git also takes a block
+    that is a quarter trailers when it holds a `Signed-off-by:`; this reads
+    none there, so an item stays open rather than closing on prose. It is
+    spelled once here so the readers cannot drift.
     """
-    return message.rstrip().rsplit("\n\n", 1)[-1]
+    text = message.rstrip()
+    paragraphs = re.split(r"\n[ \t]*\r?\n", text)
+    lines = paragraphs[-1].splitlines()
+    if not lines or not _TRAILER_LINE.match(lines[0]):
+        return ""
+    if all(_TRAILER_LINE.match(line) or _CONTINUATION.match(line) for line in lines):
+        return paragraphs[-1]
+    return ""
 
 
 def demoted_trailers(message: str) -> tuple[str, ...]:

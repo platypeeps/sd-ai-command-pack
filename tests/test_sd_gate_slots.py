@@ -201,19 +201,24 @@ class ConcurrentGates(GateSlotFixture):
         self.assertLess(elapsed, 60)
 
     def test_a_slot_bound_leaves_each_check_its_whole_timeout(self):
-        """sd:2607: queued 3 s under `--timeout 2`, the check still gets its 2 s; without the bound it got 1."""
-        root = self.repo("repo", f"{PY} -c 'import time; time.sleep(1.5)'")
+        """sd:2607: queued 4 s under `--timeout 4`, the check still gets its 4 s; without the bound it got none.
+
+        The queue lasts the whole timeout, so the old clock fails whatever the
+        check takes. The check sleeps 0.5 s: 3.5 s of slack for a loaded
+        machine's start-up, where 0.5 s flaked at load5 42 (sd:6063).
+        """
+        root = self.repo("repo", f"{PY} -c 'import time; time.sleep(0.5)'")
         self.slots.mkdir()
         held = open(self.slots / "slot.1.lock", "a")
         self.addCleanup(held.close)
         fcntl.flock(held, fcntl.LOCK_EX)
-        gate = self.start(root, self.env(SD_GATE_SLOTS="1"), "--timeout", "2", "--slot-timeout", "120")
+        gate = self.start(root, self.env(SD_GATE_SLOTS="1"), "--timeout", "4", "--slot-timeout", "120")
         self.assertTrue(wait_until(lambda: any((self.slots / "queue").glob("*"))), "the gate never queued")
-        time.sleep(3)
+        time.sleep(4)
         held.close()
         code, report, err = self.finish(gate)
         self.assertEqual((code, report["status"]), (0, "pass"), f"{err}\n{report}")
-        self.assertGreaterEqual(report["gate_slot"]["waited_seconds"], 3)
+        self.assertGreaterEqual(report["gate_slot"]["waited_seconds"], 4)
         self.assertEqual(report["gate_slot"]["bound_seconds"], 120)
 
     def test_a_slot_bound_ends_the_queue_on_its_own_clock(self):
