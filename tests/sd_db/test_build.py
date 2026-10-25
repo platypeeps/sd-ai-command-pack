@@ -18,7 +18,13 @@ from sd_db.database import connect
 from sd_db.errors import BackupError
 from sd_db.migrate import initialise
 from sd_db.workflow import item_state
-from sd_db.writes import create_item, record_state, transition, upsert_repo
+from sd_db.writes import (
+    create_assignment,
+    create_item,
+    record_state,
+    transition,
+    upsert_repo,
+)
 
 #: `sd_db.backup` the module: the package exports the function under that name.
 backup = import_module("sd_db.backup")
@@ -461,6 +467,39 @@ class Reap(Case):
         self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 0)
         self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 1, "no retry")
         self.assertEqual(self.count("SELECT COUNT(*) FROM note WHERE kind = 'followup'"), notes, "no new followup")
+
+    def held(self):
+        """The bundle's run held (a survivor of SIGKILL), and both items moved back to ready by the operator."""
+        self.ended(builder_pgid=777, builder_start=START)
+        build.reap(self.db, probe=Probe(group=True), kill=Kill(self.db, gone=False))
+        for item in self.items:
+            workflow.change_status(self.db, item, "ready", who="operator")
+        self.assertEqual(self.statuses(self.items), ["ready", "ready"])
+
+    def test_queue_refuses_an_item_a_held_run_holds(self):
+        """Failure table, Held: no press of the lead's or a member's item while its held run keeps the lease."""
+        self.held()
+        for item in self.items:
+            with self.subTest(item=item):
+                with self.assertRaisesRegex(build.BuildRefused,
+                                            f"held by build run {self.bundle['id']} .*releases once"):
+                    build.queue(self.db, [item], who="operator")
+
+    def test_claim_skips_an_item_a_held_run_holds(self):
+        """Failure table, Held: a queued build of a held item is not claimed; it ends blocked naming the run."""
+        self.held()
+        queued = []
+        for item in self.items:
+            ident = create_assignment(self.db, item=item, role="author", status="queued", lane="parallel")
+            self.db.execute("UPDATE assignment SET scope = 'build', queued_at = ? WHERE id = ?",
+                            (self.bundle["created_at"], ident))
+            queued.append(ident)
+        self.assertIsNone(self.claim())
+        rows = self.db.execute(f"SELECT status, result FROM assignment WHERE id IN ({queued[0]}, {queued[1]})")
+        for row in rows:
+            self.assertEqual(row["status"], "blocked")
+            self.assertIn(f"held by build run {self.bundle['id']}", row["result"])
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 1, "no second builder")
 
     def ended(self, **fields):
         """The run as a reap that stopped after its compare-and-set left it."""

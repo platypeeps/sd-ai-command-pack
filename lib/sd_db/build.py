@@ -106,6 +106,9 @@ def _item(connection, item: int) -> dict:
         f"SELECT id, status FROM assignment WHERE item = ? AND status IN {ACTIVE} LIMIT 1", (item,)).fetchone()
     if active:
         raise BuildRefused(f"item {item} has {active['status']} assignment {active['id']}")
+    held = _held(connection, item)
+    if held:
+        raise BuildRefused(held)
     return dict(row)
 
 
@@ -232,10 +235,32 @@ class _Moved(Exception):
 
 
 #: The claim's re-check of each member, in the UPDATE's WHERE (design, claim step 4).
+def _holding(item: str) -> str:
+    """The unreleased build runs that hold `item` (an SQL expression), as its lead's or a member's: one query.
+
+    A held run (`blocked` or `abandoned`) keeps its lease while a process
+    may live in its worktree; the item's status may move, but no build of it
+    starts until a reap releases that run.
+    """
+    return (f"SELECT runner_run.id, runner_run.outcome FROM assignment holder JOIN runner_run "
+            f"ON runner_run.assignment = COALESCE(holder.parent, holder.id) WHERE holder.item = {item} "
+            f"AND holder.scope = '{SCOPE}' AND runner_run.released_at IS NULL")
+
+
+def _held(connection, item: int) -> str | None:
+    """Why no build of `item` may start while a run holds it, or None."""
+    run = connection.execute(_holding("?") + " LIMIT 1", (item,)).fetchone()
+    if run is None:
+        return None
+    return (f"item {item} is held by build run {run['id']} ({run['outcome'] or 'open'}), which releases once "
+            f"its process groups read gone")
+
+
 _RECHECK = (f"EXISTS (SELECT 1 FROM item WHERE item.id = assignment.item AND item.status = 'ready' "
             f"AND item.kind IN ({', '.join(repr(kind) for kind in RUNNABLE_KINDS)})) "
             f"AND NOT EXISTS (SELECT 1 FROM assignment other WHERE other.item = assignment.item "
-            f"AND other.id != assignment.id AND other.status IN {ACTIVE})")
+            f"AND other.id != assignment.id AND other.status IN {ACTIVE}) "
+            f"AND NOT EXISTS ({_holding('assignment.item')})")
 
 
 def claim(connection, *, owner: str, load: float | None, load_cap: float | None, interactive: list[dict] | None,
@@ -286,7 +311,8 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
                 f"SELECT assignment.id, assignment.item, item.status FROM assignment JOIN item ON item.id = assignment.item "
                 f"WHERE assignment.id IN ({marks}) AND NOT ({_RECHECK})", ids).fetchall()
             for row in moved:
-                reason = f"item {row['item']} moved to {row['status']} after the press; not built"
+                reason = (_held(connection, row["item"])
+                          or f"item {row['item']} moved to {row['status']} after the press") + "; not built"
                 connection.execute("UPDATE assignment SET status = 'blocked', ended = ?, result = ? "
                                    "WHERE id = ? AND status = 'queued'", (clock(), reason, row["id"]))
                 add_note(connection, row["item"], "comment", f"Build assignment {row['id']} blocked: {reason}")
