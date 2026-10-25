@@ -6,7 +6,7 @@
 /* The day track (sd:5921): the last 24 hours in four lanes, its key beside it; one column on a phone. */
 .daytrack { margin-top: var(--space-md); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-xs) var(--space-md);
   align-items: center; border: var(--rule-hair) solid var(--color-rule-2); border-radius: var(--radius-md); padding: var(--space-sm) var(--space-md); }
-.daytrack svg { display: block; width: 100%; height: auto; }
+.daytrack .track-plot svg { display: block; width: 100%; height: auto; }
 .daytrack .axis { font: 400 12px var(--font-data); fill: var(--color-muted); }
 .daytrack .lane-l { font: 600 11px var(--font-label); letter-spacing: .09em; text-transform: uppercase; fill: var(--color-muted); }
 .daytrack .grid { stroke: var(--color-grid); stroke-width: 1; }
