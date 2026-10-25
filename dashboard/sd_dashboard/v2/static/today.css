@@ -130,6 +130,10 @@ section[aria-labelledby="motion-h"] { margin-top: var(--space-xl); }
 .active .via { display: block; color: var(--color-muted); }
 .active .when, .active .num { white-space: nowrap; font: 400 var(--text-xs)/1.35 var(--font-data); font-variant-numeric: tabular-nums; color: var(--color-ink-2); }
 .active .num { text-align: right; }
+/* The builder runs (sd:6003): the session rows' parts above them; the stage leads its cell. No new tokens.
+ * states: default · hover (the item links) · focus · running ● · stalled ▲ · held outcome ■ · not read (one line) */
+.builds { margin-bottom: var(--space-sm); }
+.builds .detail b { font-weight: 500; color: var(--color-ink); }
 @media (max-width: 899px) {
   .active tbody tr { grid-template-columns: 2rem minmax(0, 1fr) auto; grid-template-areas: "g what num" ". detail detail" ". when when"; }
   .active .what { grid-area: what; width: auto; } .active .detail { grid-area: detail; } .active .when { grid-area: when; } .active .num { grid-area: num; }

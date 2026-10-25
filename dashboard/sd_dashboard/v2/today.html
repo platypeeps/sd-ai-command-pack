@@ -10,6 +10,7 @@
   Needs you: the document's `needs`, every fact that asks for an act, ranked in the bands, with group rows for the work items
   and briefs. The rail badge counts its rows (now_screen._attention). One selection: ?row=, a group row too.
   In motion: each open item's live sessions (active_sessions.document), longest-running first; the tally counts the lanes.
+  Above them the builder runs (sd:6003, now_screen.builders): each open build run's items, stage, start and ETA.
   Snooze (sd:1896): /ui/snooze.js; a row's Snooze or Unsnooze posts /api/snooze, and Today reads again.
   The old views' addresses (#view=now|work|inbox|status) land here; Decisions moved to Decide and GitHub to GitHub (sd:5781).
 -->
@@ -83,10 +84,14 @@
 
     <section aria-labelledby="motion-h">
       <div class="sec-head">
-        <h2 id="motion-h">In motion <button class="help" type="button" aria-label="Help: In motion" data-help="&lt;b&gt;Open items with a live session.&lt;/b&gt; A worktree, a lane entry, a running &lt;code&gt;sd-*&lt;/code&gt; command or a herdr agent, each tied to its item by a lane entry, a branch name, &lt;code&gt;--item&lt;/code&gt;, &lt;code&gt;-C&lt;/code&gt; or a Fix note. Longest-running first. What landed today is on Queue.">
+        <h2 id="motion-h">In motion <button class="help" type="button" aria-label="Help: In motion" data-help="&lt;b&gt;Open items with a live session.&lt;/b&gt; First the headless builder runs: each one's items, stage (building, review, lane), start and ETA, the median of past runs. Then each session: a worktree, a lane entry, a running &lt;code&gt;sd-*&lt;/code&gt; command or a herdr agent, each tied to its item by a lane entry, a branch name, &lt;code&gt;--item&lt;/code&gt;, &lt;code&gt;-C&lt;/code&gt; or a Fix note. Longest-running first. What landed today is on Queue.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="active-tally"></p>
       </div>
+      <table class="ledger active builds" id="builds-table" aria-label="Builder runs" hidden>
+        <thead id="builds-head"></thead>
+        <tbody id="builds"></tbody>
+      </table>
       <table class="ledger active" aria-labelledby="motion-h">
         <thead id="active-head"></thead>
         <tbody id="active"><tr class="empty"><td colspan="5">Reading sessions…</td></tr></tbody>

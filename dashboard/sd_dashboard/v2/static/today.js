@@ -242,11 +242,28 @@ window.PAGE_FILTER = { '': 'Needs you' };
         <td class="when">${top.started ? html`<time datetime="${top.started}" title="${top.started.slice(11, 16)} UTC">${clock(top.started)}</time>` : 'not known'}</td>
         <td class="num">${top.elapsed || 'not known'}</td></tr>`; })}${more ? html`<tr class="more"><td></td><td colspan="4"><button type="button" class="linkbtn" id="motion-more">${more} more: ${items.slice(SHOWN, SHOWN + 3).map(it => `sd:${it.item}`).join(', ')}${more > 3 ? ' …' : ''}</button></td></tr>` : ''}`
       : html`<tr class="empty"><td colspan="5">No open item has a live session.</td></tr>`);
-    const dark = Object.entries(a.sources || {}).filter(([, why]) => why);
-    put($('active-tally'), html`<span>${plural(items.length, 'item')} live</span><span>${L.merging ?? 0} merging</span><span>${L.landed ?? 0} landed today in ${plural(L.landed_lanes ?? 0, 'lane')}</span><a href="/queue?show=all">Queue</a>${dark.length ? html`<span class="g-caution">▲ ${dark.length} not read</span>` : ''}`);
+    const dark = Object.entries(a.sources || {}).filter(([, why]) => why), B = builds();
+    put($('active-tally'), html`${B.rows.length ? html`<span>${plural(B.rows.length, 'builder')}</span>` : ''}<span>${plural(items.length, 'item')} live</span><span>${L.merging ?? 0} merging</span><span>${L.landed ?? 0} landed today in ${plural(L.landed_lanes ?? 0, 'lane')}</span><a href="/queue?show=all">Queue</a>${dark.length ? html`<span class="g-caution">▲ ${dark.length} not read</span>` : ''}`);
     const note = $('active-note');
     note.hidden = !dark.length;
     note.textContent = dark.map(([k, why]) => `${SOURCE[k] || k} not read: ${why}`).join(' · ');
+  }
+
+  // The builder runs (sd:6003): the document's `builders`, each open headless build run above the sessions, with its
+  // items, stage, start and ETA (the median of past runs, or why there is none). Its state is the run row's: running ●,
+  // stalled ▲ (no supervisor beat), an outcome it holds ■. None open hides the table; a read that failed says so.
+  const BSTATE = { running: 'ok', stalled: 'caution' };
+  function builds() {
+    const B = DOC.builders || { rows: [], error: 'the document carried no builder runs' };
+    $('builds-table').hidden = !B.rows.length && !B.error;
+    put($('builds'), B.error ? html`<tr class="empty"><td colspan="5">Builder runs could not be read: ${B.error}. Refresh tries again.</td></tr>`
+      : html`${B.rows.map(b => { const s = BSTATE[b.state] || 'warning'; return html`<tr data-run="${b.run}">
+        <td class="g g-${s}" title="${b.state === 'stalled' ? `stalled: no beat for ${Math.round(b.quiet / 60)}m` : b.state}">${GLYPH[s]}</td>
+        <td class="what"><ul class="sessions">${b.items.map(it => html`<li><a href="${window.shell.itemHref(it.item)}">#${it.item} ${it.title}</a></li>`)}</ul><span class="via">${b.repo} · ${b.model || 'model not recorded'} · ${usd(b.usd)} so far</span></td>
+        <td class="detail"><b>${b.stage}</b><span class="via">step ${b.step} · ${b.state}</span></td>
+        <td class="when"><time datetime="${b.started}" title="${b.started.slice(11, 16)} UTC">${clock(b.started)}</time><span class="via">${b.elapsed} ago</span></td>
+        <td class="num" title="${b.eta_why}">${b.eta ? html`<time datetime="${b.eta}">${clock(b.eta)}</time>` : 'not known'}<span class="via">${b.eta ? 'ETA' : b.eta_why}</span></td></tr>`; })}`);
+    return B;
   }
 
   // The day track (sd:5921): the document's `track`, the last 24 hours as marks in four lanes, each linked to its row, with
@@ -332,7 +349,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     put($('tally'), html``); put($('intents'), html``);
     put($('rows'), html`<tr class="empty"><td colspan="6">Needs you could not be read: ${failed}</td></tr>`);
     put($('active'), html`<tr class="empty"><td colspan="5">Sessions could not be read: ${failed}. Refresh tries again.</td></tr>`);
-    put($('active-tally'), html``);
+    put($('active-tally'), html``); $('builds-table').hidden = true;
     $('active-note').hidden = true; $('unread').hidden = true;
     put($('track-plot'), html`<p class="why">The day track was not read: ${failed}.</p>`); put($('flowkey'), html``); $('track-table').hidden = true;
     put($('spend'), html`Spend not read: ${failed}.`);
@@ -479,6 +496,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
       if (DOC) applyFilter();
     });
     put($('rows-head'), COLS); // drawn before the read, so a failed one keeps the columns
+    put($('builds-head'), html`<tr><th class="g">${SR('State')}</th><th>Builder run</th><th>Stage</th><th>Started</th><th class="num">ETA</th></tr>`);
     put($('active-head'), html`<tr><th class="g">${SR('State')}</th><th>Item</th><th>Session</th><th>Started</th><th class="num">Elapsed</th></tr>`);
 
     // The shell's Shapeshift bar (sd:5539) filters Needs you through shell:filter.
