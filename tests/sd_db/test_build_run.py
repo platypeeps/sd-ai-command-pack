@@ -4,7 +4,9 @@ The design's failure table names most of these tests: system
 `docs/work/2026-10-24-build-dispatcher/design.md`, step 2. The supervisor
 runs real git in a fixture repository with a bare origin; `claude`,
 `sd-review`, `sd-ship` and `sd-docs-lint` are fakes that read their next
-answer from a plan file and log each call.
+answer from a plan file and log each call. Each fake but `claude` first
+parses its argv with the real tool's own parser, so a call the tool would
+refuse fails here too.
 """
 import json
 import os
@@ -28,6 +30,8 @@ from sd_db.writes import create_item, upsert_repo
 
 from . import support
 
+BIN = Path(__file__).resolve().parents[2] / "bin"
+
 #: One fake for every tool: its role is its file name, its answers come from `<plans>/<role>.json`.
 FAKE = textwrap.dedent('''
     import json, os, subprocess, sys, time
@@ -41,6 +45,27 @@ FAKE = textwrap.dedent('''
     plan.write_text(json.dumps(queue))
     def git(*args):
         return subprocess.run(["git", *args], capture_output=True, text=True).stdout.strip()
+    def real(name):
+        """The real tool's module and `sys.argv` as its own parser reads it; a parse error exits 2 as it does."""
+        import argparse, importlib.machinery, importlib.util
+        bin_dir = os.environ["FAKE_BIN"]
+        sys.path.insert(0, bin_dir)
+        loader = importlib.machinery.SourceFileLoader(name.replace("-", "_"), os.path.join(bin_dir, name))
+        module = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+        loader.exec_module(module)
+        class Parsed(Exception):
+            pass
+        original = argparse.ArgumentParser.parse_args
+        def parse(self, args=None, namespace=None):
+            raise Parsed(original(self, args, namespace))
+        argparse.ArgumentParser.parse_args = parse
+        try:
+            module.main(sys.argv[1:])
+        except Parsed as parsed:
+            return module, parsed.args[0]
+        finally:
+            argparse.ArgumentParser.parse_args = original
+        sys.exit(f"{name} never parsed its arguments")
     def line(record):
         print(json.dumps(record), flush=True)
     if role == "claude":
@@ -71,6 +96,8 @@ FAKE = textwrap.dedent('''
         sys.exit(3 if mode in ("deny", "exit3") else 0)
     if role == "sd-review":
         work = sys.argv[sys.argv.index("-C") + 1]
+        review, args = real("sd-review")
+        assert (args.scope, args.json) == ("branch", True), args
         if mode == "cancel":
             import sqlite3
             db = sqlite3.connect(os.environ["FAKE_DB"])
@@ -87,9 +114,15 @@ FAKE = textwrap.dedent('''
     if role == "sd-ship":
         lane = plans / "lane.json"
         entries = json.loads(lane.read_text()) if lane.exists() else []
+        _, args = real("sd-ship")
+        assert args.command == "lane", args
         if "list" in sys.argv:
             print(json.dumps({"ok": mode != "unread", "entries": entries}))
             sys.exit(3 if mode == "unread" else 0)
+        import sd_lane
+        if args.claim not in sd_lane.CLAIMS:  # enqueue_entry's first refusal, which the parser leaves to it
+            print(json.dumps({"ok": False, "error": "name the delivery claim prepare needs"}))
+            sys.exit(3)
         argv = sys.argv
         items = [int(argv[n + 1]) for n, arg in enumerate(argv) if arg == "--item"]
         entry = {"id": f"e{len(entries) + 1}", "item": items[0], "status": "pending", "enqueue_seq": len(entries) + 1,
@@ -97,6 +130,8 @@ FAKE = textwrap.dedent('''
         lane.write_text(json.dumps(entries + [entry]))
         print(json.dumps({"ok": True, **entry}))
     if role == "sd-docs-lint":
+        _, args = real("sd-docs-lint")
+        assert args.pr_body is not None and args.pr_body.is_file(), args
         sys.exit(1 if mode == "refuse" else 0)
 ''')
 
@@ -134,7 +169,8 @@ class Case(unittest.TestCase):
         self.tools = build_run.Tools(**{name: [sys.executable, str(tools / f"{role}.py")] for name, role in
                                         (("claude", "claude"), ("review", "sd-review"), ("ship", "sd-ship"),
                                          ("lint", "sd-docs-lint"))})
-        self.env = {**os.environ, "FAKE_PLANS": str(self.plans), "FAKE_DB": str(self.database)}
+        self.env = {**os.environ, "FAKE_PLANS": str(self.plans), "FAKE_DB": str(self.database),
+                    "FAKE_BIN": str(BIN)}
         self.logs = self.root / "bulk"
 
     def plan(self, **roles):
@@ -213,6 +249,21 @@ class Judge(unittest.TestCase):
 
 
 class Supervise(Case):
+    def test_the_fakes_refuse_what_the_real_tools_refuse(self):
+        """Review round 1: the fake took an enqueue the real `sd-ship` refuses; now each parses as its tool does."""
+        body = self.root / "body.md"
+        body.write_text("## Summary\n", encoding="utf-8")
+        enqueue = ["-C", str(self.repo), "lane", "enqueue", "--item", "1", "--title", "fix: x", "--body-file",
+                   str(body), "--expected-head", "HEAD"]
+        for argv, code in ((enqueue, 3), ([*enqueue, "--deliver"], 0), (["-C", str(self.repo), "lane", "lsit"], 2)):
+            with self.subTest(argv=argv):
+                done = subprocess.run([*self.tools.ship, *argv], capture_output=True, text=True, env=self.env,
+                                      check=False)
+                self.assertEqual(done.returncode, code, done.stdout + done.stderr)
+        done = subprocess.run([*self.tools.review, "-C", str(self.repo), "--scope", "brnach", "--json"],
+                              capture_output=True, text=True, env=self.env, check=False)
+        self.assertEqual(done.returncode, 2, done.stderr)
+
     def test_a_press_runs_to_the_lane(self):
         """Two items, one run, one branch, one lane entry; the members end done and the items stay in progress."""
         self.press(2)
@@ -472,7 +523,7 @@ class Supervise(Case):
         exited = build.Probe()
         exited.alive = lambda pid: False if pid == os.getpid() else build.Probe.alive(pid)  # type: ignore[method-assign]
         exited.group = lambda pgid: False if pgid == os.getpgrp() else build.Probe.group(pgid)  # type: ignore[method-assign]
-        with mock.patch.dict(os.environ, {"FAKE_PLANS": str(self.plans)}):
+        with mock.patch.dict(os.environ, {"FAKE_PLANS": str(self.plans), "FAKE_BIN": str(BIN)}):
             moved = build_run.watch(self.db, lane=lane, probe=exited)
         self.assertEqual(moved, [{"run": self.bundle["id"], "step": "cleaning"}])
 

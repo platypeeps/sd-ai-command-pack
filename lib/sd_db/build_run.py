@@ -433,7 +433,8 @@ class Supervisor:
         out = self.out("enqueue")
         out.write_bytes(b"")
         items = [arg for item in [self.lead, *self.others] for arg in ("--item", str(item))]
-        self.child([*self.tools.ship, "-C", str(self.work), "lane", "enqueue", *items, "--title", title,
+        # One run is each item's whole delivery, so it is the last pull request: `--deliver`.
+        self.child([*self.tools.ship, "-C", str(self.work), "lane", "enqueue", *items, "--deliver", "--title", title,
                     "--body-file", str(self.body), "--expected-head", head], cwd=self.work, name="enqueue")
         try:
             answer = json.loads(out.read_text(encoding="utf-8"))
