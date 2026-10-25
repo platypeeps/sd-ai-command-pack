@@ -686,16 +686,23 @@ def local_conventions(root: pathlib.Path) -> str:
     )
 
 
-#: The blocker checklist (pack sd:6028) reads the blocking findings in each ship receipt's newest row before the base.
+#: The blocker checklist (pack sd:6028) reads the blocking findings in each ship receipt's newest row before the base,
+#: less each one its adjudication's newest row before the base rebutted (pack sd:6105); a parked risk stays.
 BLOCKER_DAYS, BLOCKER_LINES, BLOCKER_SUMMARY_CHARS = 14, 8, 160
 BLOCKER_HEADER = "Blocker classes that earlier reviews of this repository raised"
 BLOCKER_QUERY = (
     "SELECT json_extract(f.value, '$.family'), json_extract(f.value, '$.path'), substr(json_extract(f.value, '$.summary'),"
-    " 1, 400) FROM state AS s JOIN (SELECT max(id) AS id FROM state WHERE kind = 'checkpoint' AND timestamp < ? AND (key"
+    " 1, 400) FROM state AS s JOIN (SELECT max(id) AS id FROM state WHERE kind = 'checkpoint' AND timestamp < ?1 AND (key"
     " LIKE 'ship:%' OR key LIKE 'ship-review-no-item:%') GROUP BY key) AS latest ON latest.id = s.id, json_each(CASE WHEN"
     " json_valid(s.body) THEN s.body END, '$.passes') AS p, json_each(p.value, '$.report.findings') AS f WHERE s.timestamp"
-    " >= ? AND lower(json_extract(s.body, '$.repository')) = ? AND p.type = 'object' AND f.type = 'object' AND"
-    " json_extract(f.value, '$.disposition') = 'blocking' ORDER BY s.timestamp DESC, s.id DESC, p.key DESC, f.key LIMIT 2000")
+    " >= ?2 AND lower(json_extract(s.body, '$.repository')) = ?3 AND p.type = 'object' AND f.type = 'object' AND"
+    " json_extract(f.value, '$.disposition') = 'blocking' AND NOT EXISTS (SELECT 1 FROM state AS a, json_each(CASE WHEN"
+    " json_valid(a.body) THEN a.body END, '$.proposal.findings') AS d WHERE a.id = (SELECT max(id) FROM state WHERE kind ="
+    " 'checkpoint' AND timestamp < ?1 AND key = CASE WHEN s.key LIKE 'ship:%' THEN 'ship-adjudication:' || substr(s.key, 6)"
+    " ELSE 'ship-adjudication-no-item:' || substr(s.key, 21) END) AND json_extract(d.value, '$.response_disposition') ="
+    " 'rebutted' AND json_extract(d.value, '$.raw_finding.summary') IS json_extract(f.value, '$.summary') AND"
+    " json_extract(d.value, '$.raw_finding.path') IS json_extract(f.value, '$.path'))"
+    " ORDER BY s.timestamp DESC, s.id DESC, p.key DESC, f.key LIMIT 2000")
 
 
 def blocker_checklist(root: pathlib.Path, subject: Subject, database: Any, env: Mapping[str, str]) -> str:
