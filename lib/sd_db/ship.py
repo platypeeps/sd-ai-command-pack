@@ -70,17 +70,19 @@ def manual_merge_guard(connection: sqlite3.Connection, repo: str, *, repository:
     canonical = _manual_merge_repository(connection, repo, repository)
     # Item metadata can move or clear during a run. Durable ownership remains
     # bound to the repository claimed by the run and lease until each releases.
+    # A build run (scope `build`) lands only through the lane, whose merge this
+    # guard would otherwise refuse while the run waits on it (pack sd:6094).
     active = connection.execute(
         "WITH ownership(id,status,repo,source) AS ("
         "SELECT a.id, a.status, i.repo, 'assignment' FROM assignment a JOIN item i ON a.item=i.id "
-        "WHERE a.status IN ('running','ending') AND i.repo IS NOT NULL "
+        "WHERE a.status IN ('running','ending') AND i.repo IS NOT NULL AND a.scope IS NOT 'build' "
         "UNION ALL "
         "SELECT run.assignment, a.status, run.repo, 'runner run ' || run.id FROM runner_run run "
-        "LEFT JOIN assignment a ON a.id=run.assignment WHERE run.released_at IS NULL "
+        "LEFT JOIN assignment a ON a.id=run.assignment WHERE run.released_at IS NULL AND a.scope IS NOT 'build' "
         "UNION ALL "
         "SELECT run.assignment, a.status, lease.repo, 'runner lease ' || lease.run FROM runner_lease lease "
         "LEFT JOIN runner_run run ON run.id=lease.run LEFT JOIN assignment a ON a.id=run.assignment "
-        "WHERE lease.released_at IS NULL) "
+        "WHERE lease.released_at IS NULL AND a.scope IS NOT 'build') "
         "SELECT ownership.*, r.remote FROM ownership LEFT JOIN repo r ON r.path=ownership.repo "
         "ORDER BY ownership.id, ownership.source, ownership.repo"
     )
