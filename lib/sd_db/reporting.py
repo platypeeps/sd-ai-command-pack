@@ -25,6 +25,11 @@ from .writes import (
 MAX_REPORT = 200_000
 #: The line prefix a job declares a finding with (`ingest_log`).
 MARK = b"SD_REPORT_ATTENTION: "
+#: The finding a failed job declares once it proved its data safe, then the
+#: step that failed (system sd:6030). `ingest_log` titles the report with
+#: it; every other failure is titled `AT_RISK`.
+SAFE = "data safe, one step failed: "
+AT_RISK = "data at risk"
 
 #: The `state` key a job's health is recorded under, one row per job by the
 #: `heartbeat` retention rule. Prefixed, because `key` is a flat namespace
@@ -189,8 +194,12 @@ def _check_times(started, ended):
 
 def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_path,
            attention=False, attention_basis="explicit report", truncated=False, removed=None,
-           actor=None, record=None, chain=None, now=None, host=None):
+           actor=None, record=None, chain=None, now=None, host=None, grade=None):
     """File one run's report, or answer a replay of it with the report it filed.
+
+    `grade` titles a new report in place of `needs attention`: `ingest_log`
+    passes the failed run's grade (`SAFE`, `AT_RISK`). A fold keeps the
+    target's title, and a replay never reads it.
 
     `host` is the machine the run ran on, which `ingest_log` passes, stored as
     `fields.report.host`: the key `_supersede` reads (sd:4641). A row filed
@@ -277,6 +286,8 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
         raise workflow.WorkflowError("report chain must be an item id")
     if host is not None and (not isinstance(host, str) or not 1 <= len(host) <= 255):
         raise workflow.WorkflowError("report host must be a short name")
+    if grade is not None and (not isinstance(grade, str) or not 1 <= len(grade) <= 200 or "\x00" in grade):
+        raise workflow.WorkflowError("report grade must be short text")
     started, ended = _check_times(started, ended)
     external = job + ":" + run_id
     provenance = {"job": job, "run_id": run_id, "started": started, "ended": ended,
@@ -349,7 +360,7 @@ def ingest(connection, *, job, run_id, started, ended, exit_code, text, source_p
             set_item_fields(connection, target["id"], fields={**stored, "repeats": repeats},
                             **({"body": {"text": text}} if newest and whole else {}))
             return workflow.item_state(connection, target["id"])
-        item = create_item(connection, kind="report", title=f"{job}: {'needs attention' if attention else 'run report'}",
+        item = create_item(connection, kind="report", title=f"{job}: {grade or ('needs attention' if attention else 'run report')}",
                            status="planning", source="cron-report", external_id=external,
                            fields=fields, body={"text": text}, session=INGEST_SESSION)
         if attention:
@@ -605,6 +616,11 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
     # limit keeps its head and a digest of the whole, so it files. A line
     # holds no newline, so joining on one keeps two lines apart from one.
     declared = "\n".join(dict.fromkeys(mark for mark in marks if mark))
+    # A failure is titled with its grade (system sd:6030): the first line
+    # that proved the data safe and names the step, else at risk. A clean
+    # exit is no failure, so its findings keep `needs attention`.
+    safe = next((mark.strip() for mark in marks if mark.startswith(SAFE) and mark[len(SAFE):].strip()), None)
+    grade = (safe[:200].replace("\x00", "") if safe else AT_RISK) if exit_code else None
     attention = exit_code != 0 or bool(declared)
     host = ship.this_host()
     basis = (f"job exited {exit_code} on {host}" + (f": {declared}" if declared else "")
@@ -670,7 +686,7 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
                        exit_code=exit_code, text=text, source_path=str(path.resolve()),
                        attention=attention, attention_basis=basis, truncated=truncated,
                        chain=last.get("item") if moves and type(last.get("item")) is int else None, now=clock,
-                       host=host or None)
+                       host=host or None, grade=grade)
         # A truncated body is not the whole set to show in place of the older
         # report's, even with every finding named in the basis: neither this
         # run's nor the one the report it folded into kept. A whole run

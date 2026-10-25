@@ -798,6 +798,40 @@ class AQuietTickWritesNoItem(unittest.TestCase):
                          "two stale pins")
         self.assertEqual(len(self.items()), 1)
 
+    def test_a_failure_that_proved_its_data_safe_is_titled_with_that_grade(self):
+        """The title carries the job's grade (sd:6030 ruling, pack sd:6080).
+
+        A failed job that proved its data safe declares it with the one
+        marker; every other failure reads "data at risk", and a clean run
+        with findings keeps "needs attention".
+        """
+        self.tick("safe", exit_code=1, text="snapshot verified\n"
+                  "SD_REPORT_ATTENTION: data safe, one step failed: nas copy\n")
+        self.tick("risk", exit_code=2, text="SD_REPORT_ATTENTION: snapshot failed\n")
+        self.tick("bare", exit_code=3, text="broke\n")
+        self.tick("noisy", text="SD_REPORT_ATTENTION: two stale pins\n")
+        self.assertEqual([row["title"] for row in self.items()], [
+            "watchdog: data safe, one step failed: nas copy", "watchdog: data at risk",
+            "watchdog: data at risk", "watchdog: needs attention"])
+
+    def test_a_failure_of_another_grade_never_folds_into_the_open_report(self):
+        """The grade line is in the basis, so a fold never hides a new grade."""
+        safe = "SD_REPORT_ATTENTION: data safe, one step failed: nas copy\n"
+        self.tick("one", exit_code=1, text=safe)
+        self.assertEqual(self.tick("two", exit_code=1, text=safe)["recorded"], "folded")
+        self.assertEqual(self.tick("three", exit_code=1, text="broke\n")["recorded"], "report")
+        self.assertEqual([row["title"] for row in self.items()],
+                         ["watchdog: data safe, one step failed: nas copy", "watchdog: data at risk"])
+
+    def test_only_a_marker_line_that_starts_with_the_grade_grades_the_title(self):
+        """A grade quoted mid-line, outside the marker, blank or on a clean exit grades nothing."""
+        self.tick("quoted", exit_code=1, text="SD_REPORT_ATTENTION: not data safe, one step failed: x\n")
+        self.tick("plain", exit_code=1, text="data safe, one step failed: x\n")
+        self.tick("blank", exit_code=1, text="SD_REPORT_ATTENTION: data safe, one step failed: \n")
+        self.tick("clean", text="SD_REPORT_ATTENTION: data safe, one step failed: x\n")
+        self.assertEqual([row["title"] for row in self.items()],
+                         ["watchdog: data at risk"] * 3 + ["watchdog: needs attention"])
+
     def test_the_recovery_writes_a_heartbeat_and_files_no_item(self):
         """A clean run files no report, the one after a failure too (sd:3509).
 
@@ -808,7 +842,7 @@ class AQuietTickWritesNoItem(unittest.TestCase):
         failed = self.tick("bad", exit_code=1, text="broke\n")
         recovered = self.tick("good")
         self.assertEqual((recovered["recorded"], recovered["why"]), ("heartbeat", "the job recovered"))
-        self.assertEqual(self.items(), [{"id": failed["item"]["id"], "title": "watchdog: needs attention"}])
+        self.assertEqual(self.items(), [{"id": failed["item"]["id"], "title": "watchdog: data at risk"}])
         self.assertIs(reporting.health(self.db, "watchdog"), True)
         # And the job is quiet again from here.
         self.assertEqual(self.tick("also-good")["recorded"], "heartbeat")
