@@ -286,16 +286,28 @@ class Writes(Case):
         self.assertFalse(build.enqueued(self.db, self.bundle["id"]), "enqueued once")
 
     def test_reap_skips_enqueued_run(self):
-        """Failure table, Enqueued: no supervisor while the lane holds the run; reap leaves it open, step 7 releases it."""
-        build.write(self.db, self.bundle["id"], supervisor_pid=4242, supervisor_start=START)
-        for step in build.LANE_STEPS:
-            with self.subTest(step):
-                self.assertTrue(build.write(self.db, self.bundle["id"], step=step))
-                kill = Kill(self.db)
-                self.assertEqual(build.reap(self.db, now=later(self.bundle["created_at"], 3600),
-                                            probe=Probe(alive=False), kill=kill), [])
-                row = build.run(self.db, self.bundle["id"])
-                self.assertEqual((row["outcome"], row["released_at"], kill.calls), (None, None, []))
+        """Failure table, Enqueued: no supervisor while the run waits on the lane; reap leaves it open."""
+        build.write(self.db, self.bundle["id"], step="enqueuing", supervisor_pid=4242, supervisor_start=START)
+        build.enqueued(self.db, self.bundle["id"])
+        kill = Kill(self.db)
+        self.assertEqual(build.reap(self.db, now=later(self.bundle["created_at"], 3600), probe=Probe(alive=False),
+                                    kill=kill), [])
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["outcome"], row["released_at"], kill.calls), (None, None, []))
+
+    def test_reap_judges_a_checking_run(self):
+        """Failure table, Checking: a fresh supervisor lost after the merge; gone, so settled and retried at that step."""
+        build.write(self.db, self.bundle["id"], step="enqueuing")
+        build.enqueued(self.db, self.bundle["id"])
+        build.write(self.db, self.bundle["id"], step="checking", supervisor_pid=4242, supervisor_start=START)
+        settled = build.reap(self.db, now=later(self.bundle["created_at"], 3600), probe=Probe(alive=False))
+        self.assertEqual([(row["run"], row["outcome"], row["blocked"]) for row in settled],
+                         [(self.bundle["id"], "interrupted", None)])
+        retry = build.run(self.db, settled[0]["retry"])
+        self.assertEqual((retry["step"], retry["run"], retry["released_at"]), ("checking", 2, None))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 0,
+                         "a lane step takes no builder slot")
+        self.assertEqual(self.statuses(self.items), ["in_progress", "in_progress"])
 
     def test_a_write_outside_the_run_fields_is_refused(self):
         for fields in ({"outcome": "done"}, {"released_at": "x"}, {"step": "nowhere"}):

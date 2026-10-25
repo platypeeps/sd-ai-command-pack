@@ -61,7 +61,8 @@ OPUS, SONNET = "opus", "sonnet"
 #: The fields a supervisor may write on its own open run.
 RUN_FIELDS = frozenset({"step", "heartbeat_at", "supervisor_pid", "supervisor_pgid", "supervisor_start", "session_id",
                         "log_path", "builder_pgid", "builder_start", "final", "detail", "model"})
-#: The steps the lane holds the run at: no supervisor runs, reap leaves it, step 7 releases it.
+#: The steps from `enqueued` on: the lease is released, the members are `done`, and step 7 releases the run.
+#: Only `enqueued` has no supervisor, so only it is left out of the reap.
 LANE_STEPS = ("enqueued", "checking", "cleaning")
 ACTIVE = ("queued", "running", "ending")
 
@@ -287,22 +288,23 @@ def _open_run(connection, lead: int, *, repo: str, owner: str, step: str, model:
     """The lead's next run and its lease, numbered after every run the lead has, and each member's count moved to it."""
     number = connection.execute("SELECT MAX(COALESCE((SELECT MAX(run) FROM runner_run WHERE assignment = ?), 0), "
                                 "run_count) + 1 FROM assignment WHERE id = ?", (lead, lead)).fetchone()[0]
-    connection.execute("UPDATE assignment SET run_count = ? WHERE (id = ? OR parent = ?) AND status = 'running' "
-                       "AND scope = ?", (number, lead, lead, SCOPE))
+    connection.execute("UPDATE assignment SET run_count = ? WHERE (id = ? OR parent = ?) AND scope = ?",
+                       (number, lead, lead, SCOPE))
     ident = uuid.uuid4().hex
     connection.execute(
         "INSERT INTO runner_run (id, assignment, run, repo, branch, owner, work_path, retained_path, start_step, "
         "step, model, session_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'claimed', ?, ?, ?, ?, ?)",
         (ident, lead, number, repo, branch(lead), owner, str(work), str(work), step, model, session_id, stamp, stamp))
-    connection.execute("INSERT INTO runner_lease (run, repo, branch, exclusive, acquired_at) VALUES (?, ?, ?, 0, ?)",
-                       (ident, repo, branch(lead), stamp))
+    if step not in LANE_STEPS:
+        connection.execute("INSERT INTO runner_lease (run, repo, branch, exclusive, acquired_at) VALUES (?, ?, ?, 0, ?)",
+                           (ident, repo, branch(lead), stamp))
     return ident
 
 
-def _members(connection, lead: int) -> list[dict]:
+def _members(connection, lead: int, status: str = "running") -> list[dict]:
     return [dict(row) for row in connection.execute(
-        "SELECT id, item FROM assignment WHERE (id = ? OR parent = ?) AND status = 'running' AND scope = ? "
-        "ORDER BY id = ? DESC, id", (lead, lead, SCOPE, lead))]
+        "SELECT id, item FROM assignment WHERE (id = ? OR parent = ?) AND status = ? AND scope = ? "
+        "ORDER BY id = ? DESC, id", (lead, lead, status, SCOPE, lead))]
 
 
 def run(connection, ident: str) -> dict:
@@ -516,8 +518,9 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
        the `DOUBTS`th unsure reap in a row ends it blocked, not retried.
     3. `_settle` it in one transaction.
 
-    A run at a `LANE_STEPS` step is left alone: the lane holds it, and no
-    supervisor is expected until step 7. Nothing is reaped while a restore
+    A run at `enqueued` is left alone: it waits on the lane, and no
+    supervisor runs until the merge; `checking` and `cleaning` run under a
+    fresh supervisor and take the verdict like any step. Nothing is reaped while a restore
     reimport is pending: `abandon` ended
     every run the restore found, and a run it did not find is not this
     store's to judge.
@@ -527,7 +530,7 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
     if restoration_pending(connection):
         return settled
     for row in open_runs(connection):
-        if row["step"] in LANE_STEPS:
+        if row["step"] == "enqueued":
             continue
         if row["outcome"] is None:
             if alive(row, now=now, probe=probe):
@@ -582,7 +585,8 @@ def _settle(connection, ident: str, *, block: str | None = None) -> dict | None:
         stamp = clock()
         connection.execute("UPDATE runner_run SET released_at = ?, updated_at = ? WHERE id = ?", (stamp, stamp, ident))
         connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL", (stamp, ident))
-        lead, members = row["assignment"], _members(connection, row["assignment"])
+        lead = row["assignment"]
+        members = _members(connection, lead, "done" if row["step"] in LANE_STEPS else "running")
         retry = None
         if block is not None:
             reason = (f"build run {ident} ended at step {row['step']}: {block}; check the group, then requeue or "
