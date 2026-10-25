@@ -71,15 +71,6 @@ class SessionTrail(unittest.TestCase):
         self.assertNotIn("another session", text.lower())
         self.assertNotIn("comment", text)
 
-    def test_a_teammates_notes_stay_out_of_its_leads_trail(self):
-        """pack sd:6046: a teammate's notes carry `<id>:agent`, so the lead's trail is its own."""
-        mine = self.file("Filed by the lead", "session-a")
-        self.note(mine, "A teammate's ruling", "decision", "session-a:agent")
-        self.file("Filed by a teammate", "session-a:agent")
-        text = self.hook({"session_id": "session-a"})
-        self.assertIn("Filed by the lead", text)
-        self.assertNotIn("teammate", text)
-
     def test_the_environment_names_the_session_when_the_payload_does_not(self):
         self.file("Filed by this session", "session-a")
         self.assertIn("Filed by this session", self.hook({"source": "compact"}, CLAUDE_CODE_SESSION_ID="session-a"))

@@ -6,8 +6,7 @@ add` and `sd task note` record the harness session id (`CLAUDE_CODE_SESSION_ID`)
 as the note's session (sd:6023). This hook reads those rows back by that id --
 the items the session filed and the decisions and questions it wrote, newest
 first, at most `LIMIT` -- so the session continues from the database and needs
-no handoff file. A teammate shares its lead's id, and its notes record the id
-with `:agent` after it (pack sd:6046), so the trail holds the lead's own.
+no handoff file.
 
 Register on the `compact` matcher only. `bin/sd-handoff-restore` owns `startup`
 and `clear`, and a fresh session has no trail of its own.

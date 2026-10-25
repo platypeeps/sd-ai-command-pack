@@ -1191,22 +1191,14 @@ def _note_text(args: argparse.Namespace) -> str:
 
 #: Claude Code sets it to the session's id in every Bash call and hook (sd:6023).
 SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
-#: Claude Code 2.1.303 sets it on an agent's Bash calls alone, as `claude-code_<version>_agent`; a teammate
-#: shares its lead's session id, so its notes record the id with `TEAMMATE` after it (pack sd:6046).
-AGENT_ENV, TEAMMATE = "AI_AGENT", ":agent"
 
 
 def _session(who: str) -> str:
-    """The session a note records: the harness session id when set, marked for a teammate, else `who` (sd:6023).
+    """The session a note records: the harness session id when set, else `who` (sd:6023).
 
-    `bin/sd-session-trail` reads a session's own notes back by it after a compact; the mark keeps a
-    teammate's notes out of its lead's trail.
+    `bin/sd-session-trail` reads a session's own notes back by it after a compact.
     """
-    session = os.environ.get(SESSION_ENV)
-    if not session:
-        return who
-    agent = os.environ.get(AGENT_ENV, "")
-    return session + TEAMMATE if agent.startswith("claude-code") and agent.endswith("_agent") else session
+    return os.environ.get(SESSION_ENV) or who
 
 
 def _note(workflow: Any, connection: Any, args: argparse.Namespace, who: str, revision: str | None) -> dict:

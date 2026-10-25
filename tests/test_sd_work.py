@@ -297,18 +297,14 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual([(note["body"].split(" by ")[0], note["session"]) for note in state["notes"]],
                          [("opened as planning", getpass.getuser()), ("planning -> in_progress", "session-under-test")])
 
-    def test_a_teammate_note_carries_the_agent_mark(self):
-        """pack sd:6046: a teammate shares its lead's session id; Claude Code sets `AI_AGENT` on its Bash calls
-        only (`claude-code_<version>_agent`), so its notes record `<id>:agent` and leave the lead's trail."""
-        agent = self.harness("session-under-test", "claude-code_2-1-303_agent")
-        item = json.loads(self.call("task", "add", "Filed by a teammate", "--json", env=agent).stdout)["item"]["id"]
-        self.call("task", "note", item, "Teammate ruling", "--kind", "decision", env=agent)
-        self.call("task", "note", item, "Lead ruling", "--kind", "decision", env=self.harness("session-under-test"))
-        other = self.harness("session-under-test", "cursor-agent")
-        state = json.loads(self.call("task", "note", item, "Another tool", "--json", env=other).stdout)
-        self.assertEqual([note["session"] for note in state["notes"]],
-                         ["session-under-test:agent", "session-under-test:agent", "session-under-test",
-                          "session-under-test"])
+    def test_a_note_under_ai_agent_records_the_plain_session_id(self):
+        """pack sd:6046: Claude Code sets `AI_AGENT` in the lead's Bash as in a teammate's, so it tells
+        neither apart; a mark from it hid the lead's own notes from its trail."""
+        lead = self.harness("session-under-test", "claude-code_2-1-303_agent")
+        item = json.loads(self.call("task", "add", "Filed by the lead", "--json", env=lead).stdout)["item"]["id"]
+        state = json.loads(self.call("task", "note", item, "Lead ruling", "--kind", "decision", "--json",
+                                     env=lead).stdout)
+        self.assertEqual([note["session"] for note in state["notes"]], ["session-under-test", "session-under-test"])
 
     def done_item(self, *merge_note):
         """A task closed by hand, optionally carrying a merge comment first."""
