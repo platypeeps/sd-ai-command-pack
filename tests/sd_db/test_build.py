@@ -21,7 +21,9 @@ from sd_db.workflow import item_state
 from sd_db.writes import (
     create_assignment,
     create_item,
+    read_settings,
     record_state,
+    set_setting,
     transition,
     upsert_repo,
 )
@@ -379,7 +381,8 @@ class Reap(Case):
 
     def lose(self, **fields):
         """Lose the current run at a stale beat; the fresh row the reap opened."""
-        build.write(self.db, self.bundle["id"], **fields)
+        if fields:
+            build.write(self.db, self.bundle["id"], **fields)
         settled = build.reap(self.db, now=later(self.bundle["created_at"], build.STALE_SECONDS + 1), probe=Probe())
         self.bundle = build.run(self.db, settled[0]["retry"]) if settled[0]["retry"] else self.bundle
         return settled[0]
@@ -401,6 +404,39 @@ class Reap(Case):
         self.assertIsNotNone(self.lose(step="reviewing")["retry"], "a first loss at reviewing")
         self.assertIsNone(self.lose(step="reviewing")["retry"])
         self.assertEqual(self.statuses(self.items), ["blocked", "blocked"])
+
+    def at_lane_step(self, step):
+        build.write(self.db, self.bundle["id"], step="enqueuing")
+        build.enqueued(self.db, self.bundle["id"])
+        build.write(self.db, self.bundle["id"], step=step)
+
+    def test_a_second_loss_at_checking_turns_off_and_files(self):
+        """pack sd:6094 (c): health unknown after a second loss, so auto-pickup off, an item filed, then cleaning."""
+        set_setting(self.db, "build.auto_pickup_until", "2026-10-25T13:00:00+00:00")
+        self.at_lane_step("checking")
+        items = self.count("SELECT COUNT(*) FROM item")
+        self.assertIsNotNone(self.lose()["retry"], "a first loss at checking retries")
+        settled = self.lose()
+        self.assertEqual(read_settings(self.db, ["build.auto_pickup_until"]), {"build.auto_pickup_until": None})
+        filed = self.db.execute("SELECT * FROM item WHERE id > ? ORDER BY id", (max(self.items),)).fetchall()
+        self.assertEqual((self.count("SELECT COUNT(*) FROM item"), len(filed)), (items + 1, 1))
+        self.assertIn("health unknown", filed[0]["title"])
+        retry = build.run(self.db, settled["retry"])
+        self.assertEqual((retry["step"], retry["outcome"], retry["released_at"]), ("cleaning", None, None))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 0)
+        self.assertEqual(self.statuses(self.items), ["in_progress", "in_progress"], "the lane owns the items")
+
+    def test_a_second_loss_at_cleaning_ends_done(self):
+        """pack sd:6094 (c): a second loss at cleaning ends the run done; the worktree stays, with a note."""
+        self.at_lane_step("cleaning")
+        self.assertIsNotNone(self.lose()["retry"])
+        settled = self.lose()
+        row = build.run(self.db, settled["run"])
+        self.assertEqual((settled["retry"], row["outcome"], row["released_at"] is not None), (None, "done", True))
+        self.assertEqual(self.statuses(self.items), ["in_progress", "in_progress"])
+        note = self.db.execute("SELECT body FROM note WHERE item = ? ORDER BY id DESC", (self.items[0],)).fetchone()
+        self.assertIn(f"worktree {row['work_path']} kept", note["body"])
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run WHERE released_at IS NULL"), 0)
 
     def test_a_live_supervisor_is_left_alone(self):
         build.write(self.db, self.bundle["id"], supervisor_pid=4242, supervisor_pgid=4242,

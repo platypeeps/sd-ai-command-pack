@@ -39,7 +39,7 @@ from . import paths, reads
 from .database import transaction
 from .errors import SdDbError
 from .runner import RUNNABLE_KINDS, queue_state, restoration_pending
-from .writes import add_note, create_assignment, transition
+from .writes import add_note, create_assignment, create_item, set_setting, transition
 from .writes import now as clock
 
 #: The assignment scope a Build press writes.
@@ -76,6 +76,8 @@ LOSSES = ("interrupted", "timed_out", "error_max_turns")
 #: Only `enqueued` has no supervisor, so only it is left out of the reap.
 LANE_STEPS = ("enqueued", "checking", "cleaning")
 ACTIVE = ("queued", "running", "ending")
+#: Auto-pickup's end, a UTC timestamp, or none for off (design, "Auto-pickup").
+AUTO_PICKUP = "build.auto_pickup_until"
 
 
 class BuildRefused(SdDbError):
@@ -410,6 +412,78 @@ def enqueued(connection, ident: str) -> bool:
         return True
 
 
+def register(connection, ident: str, *, pid: int, pgid: int, start: str | None) -> bool:
+    """A supervisor takes its run: one compare-and-set on an open run no supervisor holds; False for a second one."""
+    with transaction(connection):
+        return connection.execute(
+            "UPDATE runner_run SET supervisor_pid = ?, supervisor_pgid = ?, supervisor_start = ?, heartbeat_at = ?, "
+            "updated_at = ? WHERE id = ? AND supervisor_pid IS NULL AND released_at IS NULL AND outcome IS NULL",
+            (pid, pgid, start, clock(), clock(), ident)).rowcount == 1
+
+
+def end(connection, ident: str, outcome: str, detail: str, *, question: str | None = None) -> dict | None:
+    """The supervisor ends its own run, its groups confirmed gone; `_settle`'s answer, or None once the run moved.
+
+    One compare-and-set from an open outcome, then `_settle` in the same
+    transaction: `cancelled` ends the bundle and moves its items to ready,
+    a `LOSSES` outcome retries once at the `RESUME` step, `blocked` blocks
+    the bundle with `detail` (held until a reap reads the supervisor gone),
+    and `done` releases it. `question` adds a question note on each item.
+    """
+    if outcome not in ("cancelled", "blocked", "done", *LOSSES):
+        raise BuildRefused(f"no supervisor outcome {outcome!r}")
+    with transaction(connection):
+        if connection.execute("UPDATE runner_run SET outcome = ?, detail = ?, updated_at = ? WHERE id = ? "
+                              "AND outcome IS NULL AND released_at IS NULL",
+                              (outcome, detail, clock(), ident)).rowcount != 1:
+            return None
+        row = dict(connection.execute("SELECT * FROM runner_run WHERE id = ?", (ident,)).fetchone())
+        if question:
+            for member in _members(connection, row["assignment"], "done" if row["step"] in LANE_STEPS else "running"):
+                add_note(connection, member["item"], "question", question)
+        if outcome == "done":
+            stamp = clock()
+            connection.execute("UPDATE runner_run SET released_at = ?, updated_at = ? WHERE id = ?",
+                               (stamp, stamp, ident))
+            connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
+                               (stamp, ident))
+            return {"run": ident, "outcome": "done", "retry": None, "blocked": None}
+        return _settle(connection, row, block=detail if outcome == "blocked" else None)
+
+
+def merged(connection, read: dict) -> bool:
+    """The tick moves an `enqueued` run whose lane entry merged to `cleaning`, with a fresh beat and no supervisor.
+
+    The compare-and-set matches the row read, at `enqueued` and open; the
+    process columns of the supervisor that enqueued it are cleared, so the
+    tick spawns a fresh one and the reap judges it as any step.
+    """
+    with transaction(connection):
+        stamp = clock()
+        return connection.execute(
+            f"UPDATE runner_run SET step = 'cleaning', heartbeat_at = ?, supervisor_pid = NULL, "
+            f"supervisor_pgid = NULL, supervisor_start = NULL, builder_pgid = NULL, builder_start = NULL, "
+            f"updated_at = ? WHERE id = ? AND step = 'enqueued' AND {_SAME}",
+            (stamp, stamp, read["id"], *(read[name] for name in REAP_READS))).rowcount == 1
+
+
+def lane_failed(connection, read: dict, reason: str) -> bool:
+    """The tick ends an `enqueued` run whose lane entry failed or was skipped: `lane_failed`, released, in one write.
+
+    The worktree stays for Retry; the lane's own note names the step.
+    """
+    with transaction(connection):
+        stamp = clock()
+        if connection.execute(
+                f"UPDATE runner_run SET outcome = 'lane_failed', detail = ?, released_at = ?, updated_at = ? "
+                f"WHERE id = ? AND step = 'enqueued' AND {_SAME}",
+                (reason, stamp, stamp, read["id"], *(read[name] for name in REAP_READS))).rowcount != 1:
+            return False
+        connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
+                           (stamp, read["id"]))
+        return True
+
+
 class Probe:
     """The liveness probe: `alive` and `group` are True, False (ESRCH) or None (EPERM, unknown); `started` is `ps -o lstart=`."""
 
@@ -684,7 +758,7 @@ def _settle(connection, read: dict, *, block: str | None = None) -> dict | None:
                 connection.execute("UPDATE assignment SET status = 'cancelled', ended = ?, result = ? WHERE id = ?",
                                    (stamp, row["detail"], member["id"]))
                 _move(connection, member["item"], "ready", f"build run {ident} {row['detail']}; worktree {row['work_path']} kept")
-        elif row["outcome"] == "interrupted":
+        elif row["outcome"] in LOSSES:
             marks = ", ".join("?" for _ in LOSSES)
             losses = connection.execute(f"SELECT COUNT(*) FROM runner_run WHERE assignment = ? AND step IS ? "
                                         f"AND outcome IN ({marks})", (lead, row["step"], *LOSSES)).fetchone()[0]
@@ -700,11 +774,42 @@ def _settle(connection, read: dict, *, block: str | None = None) -> dict | None:
                 for member in members:
                     add_note(connection, member["item"], "comment",
                              f"Build run {ident} lost at step {row['step']}; retried as run {retry}")
+            elif row["step"] == "checking":
+                retry = _health_unknown(connection, row, members, stamp)
+            elif row["step"] == "cleaning":
+                # Merged, and the lane owns the items: nothing is blocked, the worktree just stays.
+                connection.execute("UPDATE runner_run SET outcome = 'done', updated_at = ? WHERE id = ?",
+                                   (stamp, ident))
+                for member in members:
+                    add_note(connection, member["item"], "comment",
+                             f"Build run {ident} lost at cleaning a second time; worktree {row['work_path']} kept: "
+                             f"remove it by hand once it is clean")
+                return {"run": ident, "outcome": "done", "retry": None, "blocked": None}
             else:
                 reason = (f"build run {ident} lost at step {row['step']} a second time; "
                           f"log {row['log_path'] or 'none'}, worktree {row['work_path']}")
                 _block(connection, members, reason, stamp)
         return {"run": ident, "outcome": row["outcome"], "retry": retry, "blocked": block}
+
+
+def _health_unknown(connection, row, members: list[dict], stamp: str) -> str:
+    """A second loss at `checking`: the merge's health is unknown, so auto-pickup goes off first, an item is filed,
+    and a fresh row goes on to `cleaning` (design, "Run ownership by step"); the fresh row's id."""
+    set_setting(connection, AUTO_PICKUP, None)
+    filed = create_item(connection, kind="task", title=f"Build run {row['id']}: health unknown after its merge",
+                        repo=row["repo"])
+    add_note(connection, filed, "comment",
+             f"Build run {row['id']} was lost at checking a second time, so the health check after its merge has no "
+             f"answer. Auto-pickup ({AUTO_PICKUP}) is off. Run `repo-sync.sh refresh` and `dashboard.sh health`, "
+             f"then turn it on again. Log {row['log_path'] or 'none'}.")
+    retry = _open_run(connection, row["assignment"], repo=row["repo"], owner=row["owner"], step="cleaning",
+                      model=row["model"] or OPUS, work=Path(row["work_path"]), stamp=stamp,
+                      session_id=row["session_id"], review_round=row["review_round"])
+    for member in members:
+        add_note(connection, member["item"], "comment",
+                 f"Build run {row['id']} lost at checking a second time; auto-pickup is off, item {filed} filed, "
+                 f"run {retry} cleans up")
+    return retry
 
 
 def _block(connection, members: list[dict], reason: str, stamp: str) -> None:
