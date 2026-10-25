@@ -111,6 +111,10 @@ class Decisions(unittest.TestCase):
                 "echo $(git stash)", 'echo "$(git stash pop)"', "echo `git stash`",
                 'echo "`git stash`"', "exec git stash", "exec -a name git stash",
                 "xargs git stash", "xargs -n 1 git stash", "env -u HOME git stash",
+                "timeout 60 git stash", "timeout -s KILL 60 git stash pop",
+                "timeout -k 5 --signal=TERM 60s git stash", "gtimeout 60 git stash",
+                "nice git stash", "nice -n 10 git stash", "nohup git stash",
+                "command git stash", "timeout 600 nice -n 5 git -C /tmp/wt stash",
                 "sh -c 'git stash'", 'bash -c "git stash pop"', "bash -lc 'git stash'",
                 "eval git stash", "eval 'git stash'"):
             with self.subTest(command=command):
@@ -143,7 +147,9 @@ class Decisions(unittest.TestCase):
     def test_read_only_stash_and_other_git_pass(self) -> None:
         for command in ("git stash list", "git -C /tmp/wt stash show -p", "git status",
                         "git log --grep stash", "echo git stash", "git commit -m 'git stash'",
-                        "grep -n stash notes.txt", "git -C stash status"):
+                        "grep -n stash notes.txt", "git -C stash status",
+                        "timeout 60 git stash list", "nice -n 10 git status",
+                        "timeout -k 5 60 echo git stash"):
             with self.subTest(command=command):
                 self.assertIsNone(self.decision(bash(command, timeout=600000)))
 

@@ -74,7 +74,13 @@ WRAPPERS: dict[str, frozenset[str]] = {
     "rtk": frozenset(),
     "proxy": frozenset(),
     "xargs": frozenset({"-I", "-J", "-L", "-P", "-R", "-S", "-E", "-a", "-d", "-n", "-s"}),
+    "nice": frozenset({"-n", "--adjustment"}),
+    "timeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
+    "gtimeout": frozenset({"-s", "-k", "--signal", "--kill-after"}),
 }
+
+#: Wrappers that take one duration word after their options.
+TIMED = frozenset({"timeout", "gtimeout"})
 
 #: Shells whose `-c` word is a script of its own.
 SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh"})
@@ -155,7 +161,7 @@ def stashes(command: str) -> bool:
                 or "=" in word and word.split("=", 1)[0].isidentifier()):
             continue
         if word in WRAPPERS:
-            position = skip_flags(words, position, WRAPPERS[word])
+            position = skip_flags(words, position, WRAPPERS[word]) + (word in TIMED)
             continue
         args = []
         while position < len(words) and words[position].strip(PUNCTUATION):
