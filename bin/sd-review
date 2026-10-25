@@ -699,18 +699,18 @@ BLOCKER_QUERY = (
 
 
 def blocker_checklist(root: pathlib.Path, subject: Subject, database: Any, env: Mapping[str, str]) -> str:
-    """The prompt section naming past blocker classes; read-only, and a failed read says why on stderr (pack sd:6028).
-    The window ends at the base's commit time, not now, so `--explain`, dispatch and a replay ask the same (sd:1397).
-    A planning subject, or a repository with no GitHub origin and so no ship receipt, reads nothing."""
+    """Past blocker classes for the prompt, read-only (pack sd:6028); a database that exists but fails says so on stderr.
+    The window ends at the base's commit time, not now, so `--explain`, dispatch and a replay ask the same (sd:1397);
+    a planning subject, a repository with no GitHub origin and a machine with no database have no history to read."""
     origin = sd_lib.github_head(root) if subject.scope != "planning" else None
-    if origin is None:
-        return ""
     try:
         stamp, imported = sd_lib.git_output(["show", "-s", "--format=%ct", subject.base], root) or "", sd_lib.import_sd_db()
         if not stamp.isdigit() or imported.module is None:
             raise ValueError(imported.problem or f"git cannot read the commit time of {subject.base}")
         window = [time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime(int(stamp) - back)) for back in (0, BLOCKER_DAYS * 86400)]
-        target = database if database is not None else imported.module.default_path(env.get("HOME"))
+        target = pathlib.Path(database) if database is not None else imported.module.default_path(env.get("HOME"))
+        if origin is None or not target.exists():  # a satellite's `HubPath` asks the hub; one that does not answer raises
+            return ""
         with contextlib.closing(imported.module.connect(target, write=False)) as connection:
             rows = connection.execute(BLOCKER_QUERY, (*window, "/".join(origin[:2]))).fetchall()
     except Exception as error:  # a failed read is unknown, not empty: say so, and review without it

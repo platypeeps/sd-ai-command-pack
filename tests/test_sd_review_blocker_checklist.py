@@ -97,9 +97,19 @@ class BlockerChecklistTests(ReviewFixture):
             self.assertNotIn(sd_review.BLOCKER_HEADER, prompt)
         self.assertEqual(stderr, "")
 
-    def test_an_unreadable_database_still_renders_the_prompt(self) -> None:
-        # No database at all under this HOME: the read fails, the review goes on.
+    def test_no_database_is_no_history_and_says_nothing(self) -> None:
+        # No database at all under this HOME: nothing to read, so nothing to say.
         prompts, result, stderr = self.prompts()
+        self.assertEqual(result["status"], "dry_run")
+        for prompt in prompts:
+            self.assertNotIn(sd_review.BLOCKER_HEADER, prompt)
+        self.assertEqual(stderr, "")
+
+    def test_an_unreadable_database_still_renders_the_prompt(self) -> None:
+        # A database that exists but does not answer: the read fails, the review goes on.
+        self.receipt("one", finding("reap races the state write"))
+        with unittest.mock.patch.object(sd_review, "BLOCKER_QUERY", "SELECT * FROM no_such_table"):
+            prompts, result, stderr = self.prompts()
         self.assertEqual(result["status"], "dry_run")
         for prompt in prompts:
             self.assertNotIn(sd_review.BLOCKER_HEADER, prompt)
