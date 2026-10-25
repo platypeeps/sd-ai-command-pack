@@ -106,6 +106,35 @@ def queue_builds(args: argparse.Namespace) -> int:
     return 0
 
 
+def list_sessions(args: argparse.Namespace) -> int:
+    """`sd assignments sessions`: the live Claude sessions and the worktrees each holds (pack sd:6024).
+
+    For a cleanup outside the pack, such as a `target/` prune: a worktree a
+    listed session on this machine names is held. A failed read exits 1, so
+    the caller keeps everything.
+    """
+    sd_db = sd_handoff_rows.library()
+    try:
+        import sd_db.sessions as sessions
+    except ImportError:
+        raise WorkRefusal("update this pack checkout, whose lib/ is the sd_db bin/ runs for sessions") from None
+    connection = sd_handoff_rows.connect(sd_db, write=False)
+    try:
+        found = sessions.live(connection)
+    except (sd_db.SdDbError, ValueError) as error:
+        raise WorkRefusal(str(error)) from error
+    finally:
+        connection.close()
+    if args.json:
+        print(json.dumps(found, ensure_ascii=False))
+    elif not found:
+        print("No live sessions.")
+    for entry in [] if args.json else found:
+        trees = ", ".join(str(tree.get("path")) for tree in entry.get("worktrees") or []) or "no worktree"
+        print(f"{entry.get('machine')}  {entry['session'][:8]}  {entry['beat']}  {trees}")
+    return 0
+
+
 BIN = Path(__file__).resolve().parent
 GATE_SECONDS = 15
 
@@ -279,6 +308,9 @@ def register(groups: Any) -> None:
             parser.add_argument("--json", action="store_true")
             parser = verbs.add_parser("dispatch", help="one build-dispatch tick: reap, watch the lane, claim, spawn")
             parser.set_defaults(handler=dispatch_builds)
+            parser.add_argument("--json", action="store_true")
+            parser = verbs.add_parser("sessions", help="list the live Claude sessions and the worktrees each holds")
+            parser.set_defaults(handler=list_sessions)
             parser.add_argument("--json", action="store_true")
             parser = verbs.add_parser("supervise", help="supervise one build run to the lane; the tick starts it")
             parser.set_defaults(handler=supervise_build)

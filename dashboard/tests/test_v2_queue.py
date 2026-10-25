@@ -1175,6 +1175,47 @@ R.det = ELS.adv.html;""")
         self.assertEqual(re.findall(r'data-act="cancel" data-item="(\d+)"', out["R"]["details"]), ["9", "12"])
         self.assertEqual(out["pane"], "tab-details")
 
+    # sd:6154: a click anywhere on a lane row opens that lane, as its name button does; a button or link keeps its own job.
+    def second_lane(self):
+        """A second busy lane, `other`, with one pending entry; returns its path."""
+        other = Path(self.tmp.name) / "other"
+        other.mkdir()
+        upsert_repo(self.connection, str(other), remote="git@example.invalid:o.git", managed=1)
+        Path(f"{self.fixture}.other").write_text(json.dumps({"ok": True, "queue": str(
+            Path(self.tmp.name) / "lanes" / "other" / "lane" / "queue" / "queue.json"), "entries": [
+            {"item": 40, "title": "Other lane work", "status": "pending", "expected_head": "d" * 40}]}))
+        return str(other)
+
+    def test_a_click_on_a_lane_rows_why_cell_opens_that_lane_in_details(self):
+        other = json.dumps(self.second_lane())
+        out = self.run_page("window.shell.openPane = t => { OUT.pane = t; }; R.before = ELS.lanes.html; R.beforeDetails = ELS.details.html;"
+                            " ELS.lanes.listeners.click[0]({ target: { closest: s => s === 'tr[data-lane]'"
+                            f" ? {{ dataset: {{ lane: {other} }} }} : null }} }}); R.after = ELS.lanes.html; R.details = ELS.details.html;", search="")
+        selected = lambda html: re.findall(r'<tr data-lane="([^"]+)" aria-selected="true"', html)
+        self.assertEqual(selected(out["R"]["before"]), [str(self.checkout)])
+        self.assertEqual(selected(out["R"]["after"]), [json.loads(other)])
+        self.assertIn("sd:40", out["R"]["details"])
+        self.assertNotIn("sd:40", out["R"]["beforeDetails"])
+        self.assertEqual(out["pane"], "tab-details")
+
+    def test_a_click_on_a_button_in_a_lane_row_does_not_open_the_row_twice(self):
+        other = json.dumps(self.second_lane())
+        out = self.run_page("window.shell.openPane = t => { OUT.pane = t; };"
+                            " ELS.lanes.listeners.click[0]({ target: { closest: s => s === 'button[data-act]' ? { disabled: false, dataset:"
+                            f" {{ repo: {json.dumps(str(self.checkout))}, item: '9', act: 'down' }} }} : s === 'tr[data-lane]'"
+                            f" ? {{ dataset: {{ lane: {other} }} }} : null }} }}); await flush(); await flush(); R.after = ELS.lanes.html;", search="")
+        self.assertEqual([post[1]["action"] for post in out["posts"]], ["down"])
+        self.assertEqual(re.findall(r'<tr data-lane="([^"]+)" aria-selected="true"', out["R"]["after"]), [str(self.checkout)])
+        self.assertNotIn("pane", out)
+
+    def test_a_click_on_a_link_in_a_lane_row_leaves_the_lane_alone(self):
+        other = json.dumps(self.second_lane())
+        out = self.run_page("window.shell.openPane = t => { OUT.pane = t; };"
+                            " ELS.lanes.listeners.click[0]({ target: { closest: s => /(^|,\\s*)a(,|$)/.test(s) ? {} : s === 'tr[data-lane]'"
+                            f" ? {{ dataset: {{ lane: {other} }} }} : null }} }}); R.after = ELS.lanes.html;", search="")
+        self.assertEqual(re.findall(r'<tr data-lane="([^"]+)" aria-selected="true"', out["R"]["after"]), [str(self.checkout)])
+        self.assertNotIn("pane", out)
+
     def test_a_write_from_details_posts_and_says_so_in_details(self):
         out = self.run_page("ELS.details.listeners.click[0]({ target: { closest: s => s === 'button[data-act]' ? { disabled: false, dataset:"
                             f" {{ repo: {json.dumps(str(self.checkout))}, item: '9', act: 'down' }} }} : null }} }}); await flush(); await flush();"

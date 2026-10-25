@@ -31,8 +31,9 @@ nothing used it by then, the next install run removes it and says so.
 
 The split is not a ranking. A path says which skills are steps in one
 sequence somebody actually runs, and that is what these three say.
-`sd skill list --usage` prints each skill's recorded uses. A skill in
-`contrib/` is one command away, and use is what moves it.
+`sd skill list` prints the date of each skill's last use, and `--usage`
+adds its recorded uses; the weekly KISS audit lists the unused ones. A
+skill in `contrib/` is one command away, and use is what moves it.
 
 `sd skill intake <GitHub URL>` judges an outside skill against the installed
 set: its risk, its overlap with installed skills and its value, then a verdict
@@ -74,7 +75,7 @@ other halves are, is in [domain packs](docs/domain-packs.md).
   `bin/`, so the commands resolve from any directory; `--bin-dir DIR` puts them
   elsewhere. The installer never edits `PATH`: `--user` warns when the link
   directory is not on it, and `--status` says how many commands resolve.
-- five hook entries in `~/.claude/settings.json` — `SessionStart` for
+- seven hook entries in `~/.claude/settings.json` — `SessionStart` for
   `sd-handoff-restore` (`startup`, `clear`) and `sd-session-trail`
   (`compact`, which prints the items, decisions and questions the session
   wrote, read back by its `CLAUDE_CODE_SESSION_ID`), `PreToolUse` and
@@ -82,7 +83,11 @@ other halves are, is in [domain packs](docs/domain-packs.md).
   for `sd-issue-guard`, which decides by the target an `issue_write` call names: it
   denies an issue in a managed repository and points to `sd task add`, and
   asks the operator about an issue anywhere else; with `repo.github_issues`
-  on, it lets an update of a managed repository's own issue through. `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
+  on, it lets an update of a managed repository's own issue through;
+  `PreToolUse` on `Bash`, `Edit`, `Write` and `NotebookEdit`, and
+  `SessionEnd`, for `sd-session-beat`, which keeps the session's heartbeat
+  row and the worktrees it holds (`sd assignments sessions`).
+  `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
   line describes it and does not govern it.
 - one line — `CLAUDE.local.md` — in the global git excludes
 

@@ -19,6 +19,8 @@
 // sd:5757, sd:5899: Show mine, the default, keeps the rows assigned to you or opened by you (the read's `mine`); Show all
 // adds what others opened in a registered repo, a review asked of you among them. ?gh=all keeps All across a reload.
 // State open, the default, lists open pull requests; with closed adds those merged or closed in the window (?prs=closed).
+// sd:6173: a Repo column; a Repo pick (shell.list.pick, multi) keeps the rows of the repos picked, none picked keeps all, and
+// names them in ?repo= (comma separated); an Actions column of the shell's rowActions: Open on GitHub, then the ⋯ menu.
 (() => {
   const { html, put, plural } = window.markup;
   const count = (shown, total, noun) => window.shell.list.count(shown, total, noun);
@@ -44,7 +46,12 @@
   const mine = r => !!r.mine;
   // The table's rows: open pull requests, and with closed those settled in the window, before Show.
   const listed = () => [...DOC.pulls, ...(closed() ? DOC.settled.filter(r => r.kind === 'pull') : [])];
-  const shown = () => listed().filter(r => all() || mine(r));
+  // The Repo pick's choice (F.repo), read from the address when the first read arrives; none picked means every repo.
+  const F = { repo: new Set() };
+  let seeded = false;
+  const inRepo = r => !F.repo.size || F.repo.has(r.repo);
+  const scoped = () => listed().filter(r => all() || mine(r));
+  const shown = () => scoped().filter(inRepo);
   // A filter or the pager writes its params around the others (shell.url keeps ?row=).
   function address(changes) {
     const p = new URLSearchParams(location.search);
@@ -60,9 +67,11 @@
     const s = state(r);
     return html`<tr data-key="${r.key}" data-id="${oid(r.key)}" data-pr aria-selected="${String(chosen() === r.key)}">
       <td class="g g-${s}" title="${r.state}">${GLYPH[s]}</td>
-      <td class="what"><button type="button" data-gh-open="${r.key}">${r.title || r.ref}</button><span class="repo">${r.ref}</span></td>
+      <td class="what"><button type="button" data-gh-open="${r.key}">${r.title || r.ref}</button><span class="repo">#${r.number}</span></td>
+      <td class="src">${r.repo}</td>
       <td class="detail">${r.state === 'open' ? r.why : html`${r.state} · ${r.why}`}${r.item ? html`<span class="sub"><a href="${window.shell.itemHref(r.item)}">sd:${r.item}</a></span>` : ''}</td>
-      <td class="when">${when(r)}</td></tr>`;
+      <td class="when">${when(r)}</td>
+      <td class="act">${window.shell.commands.rowActions(oid(r.key))}</td></tr>`;
   };
   // With closed, the window and the settled rows it could not place.
   const note = () => closed() ? html`<p class="st-line">Merged or closed: the last ${DOC.days} days${DOC.undated ? html` · <span class="g-unknown">▨</span> ${plural(DOC.undated, 'merged or closed row')} with no date recorded, not placed` : ''}</p>` : '';
@@ -70,7 +79,7 @@
     const L = window.shell.list, rows = shown();
     if (!rows.length) return html`<p class="st-line st-empty">No ${closed() ? '' : 'open '}pull request ${all() ? 'is listed' : 'is assigned to you or opened by you'}.</p>`;
     return html`<table class="ledger st" aria-labelledby="github-h">
-      <thead><tr><th scope="col"><span class="sr">State</span></th><th scope="col">Pull request</th><th scope="col">Why</th><th scope="col">Activity</th></tr></thead>
+      <thead><tr><th scope="col"><span class="sr">State</span></th><th scope="col">Pull request</th><th scope="col">Repo</th><th scope="col">Why</th><th scope="col">Activity</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
       <tbody>${L.pageOf(rows, st()).map(row)}</tbody></table>${L.pager(rows.length, st(), 'pull requests')}`;
   }
 
@@ -92,11 +101,14 @@
       return;
     }
     put($('github-tally'), tally());
-    const L = window.shell.list, n = f => String(listed().filter(f).length);
-    const open = DOC.pulls.filter(r => all() || mine(r)).length, every = open + DOC.settled.filter(r => r.kind === 'pull' && (all() || mine(r))).length;
+    const L = window.shell.list, n = f => String(listed().filter(r => f(r) && inRepo(r)).length);
+    const open = DOC.pulls.filter(r => (all() || mine(r)) && inRepo(r)).length;
+    const every = open + DOC.settled.filter(r => r.kind === 'pull' && (all() || mine(r)) && inRepo(r)).length;
+    const repos = [...new Set(scoped().map(r => r.repo))].sort();
     put($('github-filters'), L.fbar(html`${L.fseg('gh', 'Show', [['mine', mine], ['all', () => true]].map(([v, f]) =>
       ({ v, pressed: all() === (v === 'all'), label: html`${v} <span class="n">${n(f)}</span>` })))}${L.fseg('prs', 'State', [['open', open], ['closed', every]].map(([v, c]) =>
-      ({ v, pressed: closed() === (v === 'closed'), label: html`${v === 'open' ? 'open' : 'with closed'} <span class="n">${String(c)}</span>` })))}`));
+      ({ v, pressed: closed() === (v === 'closed'), label: html`${v === 'open' ? 'open' : 'with closed'} <span class="n">${String(c)}</span>` })))}${
+      repos.length || F.repo.size ? L.pick('repo', 'Repo', repos.map(x => [x, x, scoped().filter(r => r.repo === x).length]), F.repo, { multi: true }) : ''}`));
     const unread = Object.entries(DOC.unread || {});
     put($('github-sections'), html`${unread.map(([k, why]) => html`<p class="st-line"><span class="g-unknown">▨</span> ${UNREAD[k] || k} not read: ${why}</p>`)}${note()}${table()}`);
   }
@@ -235,6 +247,7 @@
       const doc = await window.shell.getJSON('/api/today/github');
       if (n !== reads) return;
       DOC = doc;
+      if (!seeded) { seeded = true; F.repo = new Set((param('repo') || '').split(',').filter(Boolean)); }
     } catch (e) {
       if (n !== reads) return;
       DOC = null; failed = e.message;
@@ -261,6 +274,10 @@
       draw();
       $('github-filters').querySelector(`[data-f="${b.dataset.f}"][data-v="${b.dataset.v}"]`)?.focus();
     });
+    // The Repo pick (shell.list.pickChange): the box changes F.repo, the address names it, the table draws again.
+    $('github-filters').addEventListener('change', e => window.shell.list.pickChange(e, F, () => {
+      st().page = 1; address({ repo: [...F.repo].join(',') }); draw();
+    }));
     $('github-sections').addEventListener('click', e => {
       const opened = e.target.closest('[data-gh-open]'); if (opened) return details(opened.dataset.ghOpen);
       // The pager (shell.list): a page or a size redraws, and focus stays on the new copy of the button.

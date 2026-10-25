@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+"""Hook: keep this session's heartbeat row, the worktrees it holds (pack sd:6024).
+
+Registered on PreToolUse for the tools that name a path (Bash, Edit,
+Write, NotebookEdit) and on SessionEnd. PreToolUse beats `sd_db.sessions`:
+the machine, the cwd, and each linked worktree the payload names, at most
+once a `BEAT_SECONDS` unless a new worktree appears. PreToolUse, not
+PostToolUse, so a hold starts before a long test run does. SessionEnd
+deletes the row, freeing the worktrees.
+
+The id is the payload's `session_id`, else the environment's. With neither,
+no `sd_db`, or an unreachable database, it writes nothing. It prints nothing
+and exits 0 whatever happens: a hook never breaks a session, and a missing
+row is no hold, which cleanup's own checks still cover.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+
+SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+
+
+def beat_session(payload: dict, environ: dict[str, str]) -> None:
+    session = payload.get("session_id")
+    session = session if isinstance(session, str) and session else environ.get(SESSION_ENV, "")
+    if not session:
+        return
+    import sd_lib  # noqa: PLC0415 - this file's own bin/, imported once a session id is known
+
+    sd_db = sd_lib.import_sd_db().module
+    if sd_db is None:
+        return
+    from sd_db import sessions  # noqa: PLC0415
+    from sd_db.ship import this_host  # noqa: PLC0415
+
+    connection = sd_db.connect(write=True)
+    try:
+        if payload.get("hook_event_name") == "SessionEnd":
+            sessions.end(connection, session)
+            return
+        found = sessions.worktrees(sessions.touched(payload))
+        sessions.beat(connection, session, machine=this_host(), cwd=payload.get("cwd"), found=found)
+    finally:
+        connection.close()
+
+
+def beat_main() -> int:
+    try:
+        payload = json.loads(sys.stdin.read() or "{}")
+        beat_session(payload if isinstance(payload, dict) else {}, dict(os.environ))
+    except BaseException:  # noqa: BLE001 - a hook never breaks a session
+        return 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(beat_main())

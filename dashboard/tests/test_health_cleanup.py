@@ -15,12 +15,14 @@ from __future__ import annotations
 
 import os
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import workflow
+from sd_db import sessions, workflow
+from sd_db.ship import this_host
 
 from sd_dashboard import fleet, health_cleanup, health_collectors, health_screen
 from sd_dashboard.health_collectors import Walk
@@ -360,6 +362,28 @@ class RemoveBuildOutput(Isolated, ScreenCase):
         self.assertEqual((status, answer["outcome"], answer["done"]), (502, "unknown", [f"{one}/target"]))
         self.assertIn("its status was not read", answer["error"])
         self.assertTrue((two / "target").exists())
+
+    def test_a_worktree_a_live_session_holds_keeps_its_build_output(self):
+        """pack sd:6024: a session working in a merged worktree keeps its target/; the write names the session."""
+        one, held = self.tree("one", "target"), self.tree("held", "target")
+        row = self.row()
+        sessions.beat(self.connection, "session-a", machine=this_host(), cwd=None,
+                      found=sessions.worktrees([str(held)]))
+        answer = self.write(row["id"], row["revision"])
+        self.assertEqual(answer["done"], [f"{one}/target"])
+        self.assertEqual([entry["name"] for entry in answer["refused"]], [str(held)])
+        self.assertIn("a live session holds it: session-", answer["refused"][0]["why"])
+        self.assertTrue((held / "target" / "deep" / "file").exists())
+
+    def test_an_unread_registry_keeps_the_tree(self):
+        """Not knowing who holds a worktree is unknown (502), never a removal."""
+        one = self.tree("one", "target")
+        row = self.row()
+        with patch.object(sessions, "holders", side_effect=sqlite3.OperationalError("database is locked")):
+            status, answer = self.write(row["id"], row["revision"])
+        self.assertEqual((status, answer["outcome"], answer["done"]), (502, "unknown", []))
+        self.assertIn("the session registry was not read", answer["error"])
+        self.assertTrue((one / "target").exists())
 
 
 class TheRequest(ScreenCase):
