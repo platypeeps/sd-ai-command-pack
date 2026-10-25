@@ -29,6 +29,19 @@
 }
 @media (pointer: coarse) { .flowkey a, .track-table summary { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
 
+/* The spend line (sd:6031): spent in the last 24 hours and the 7 days, a bar per day; under the track, both columns.
+ * Hallmark · component: spend line · genre: modern-minimal · theme: design.md instrument panel
+ * states: default · hover (the Metrics link) · focus · not read (the reason as text) -- no control of its own. */
+.daytrack .spend { grid-column: 1 / -1; margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs) var(--space-xs);
+  font: 400 var(--text-xs)/1.5 var(--font-data); font-variant-numeric: tabular-nums; color: var(--color-ink-2); }
+.daytrack .spend .lbl { font: 600 var(--text-2xs)/1 var(--font-label); letter-spacing: .09em; text-transform: uppercase; color: var(--color-muted); }
+.daytrack .spend b { color: var(--color-ink); font-weight: 400; }
+.daytrack .spend .spark { width: 42px; height: 16px; }
+.daytrack .spend .spark rect { fill: var(--color-series-1); }
+.daytrack .spend a { color: inherit; text-decoration-color: var(--color-rule); text-underline-offset: 3px; }
+.daytrack .spend a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+@media (pointer: coarse) { .daytrack .spend a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
+
 /* Section heads */
 .tally { gap: var(--space-md); line-height: 1; }
 .tally .i { vertical-align: -0.2em; }

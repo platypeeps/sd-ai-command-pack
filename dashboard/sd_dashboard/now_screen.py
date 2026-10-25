@@ -681,6 +681,35 @@ def track(connection: sqlite3.Connection, now: str, *, rows: list[dict], briefs:
                     "blocked": blocked}}
 
 
+#: The spend line's trend (sd:6031): this many 24-hour windows, the last one ending at the read.
+SPEND_DAYS = 7
+
+
+def _at(stamp) -> datetime | None:
+    found = _utc(stamp)
+    return datetime.fromisoformat(found.replace("Z", "+00:00")) if found else None
+
+
+def spend(connection: sqlite3.Connection, now: str) -> dict:
+    """Today's spend line (sd:6031): what the cost table says was spent in each of the last `SPEND_DAYS` 24-hour
+    windows, oldest first, the last ending at the read, as the day track's 24 hours do; `day` is the last, `week` all.
+
+    Visibility only, no cap (grill Q59). A read that failed is `error`, so the page says spend was not read, never $0.
+    """
+    end = _at(now)
+    since = end - timedelta(days=SPEND_DAYS)
+    try:
+        rows = reads.spent_since(connection, since=_utc(since.timestamp()))
+    except (SdDbError, sqlite3.Error) as failure:
+        return {"error": str(failure) or "the cost table could not be read"}
+    days = [0.0] * SPEND_DAYS
+    for row in rows:
+        at = _at(row["timestamp"])
+        if at is not None and since < at <= end:
+            days[SPEND_DAYS - 1 - int((end - at) / timedelta(days=1))] += float(row["usd"])
+    return {"day": round(days[-1], 2), "week": round(sum(days), 2), "days": [round(day, 2) for day in days], "error": ""}
+
+
 def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None, jev=None, herdr=None,
              lanes=None) -> dict:
     """The merged, ranked, banded rows, and what each source said if it said nothing.
@@ -709,6 +738,7 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
     work and briefs as group rows, ranked in one list; the badge counts its rows and nothing else. `lane` is what the
     Lane and Gate lamps read (`lane_summary`); `lanes` is the seam for Queue's document, `queue_screen.document` by
     default, and a lane read that failed is a dark `lane` row, as a dark collector is.
+    `spend` is the spend line (sd:6031, `spend`): the last 24 hours and the 7-day trend from the cost table.
     """
     collect_area, kept = fleet or fleet_module.collect, {}
 
@@ -767,7 +797,7 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
             "snoozed": held, "snooze_error": snooze_error,
             "work": work, "work_error": work_error, "needs": listed, "lane": summary,
             "track": track(connection, now, rows=rows, briefs=reported["briefs"], active=active, lane=summary),
-            "attention": _attention(listed), **mail, **reported}
+            "spend": spend(connection, now), "attention": _attention(listed), **mail, **reported}
 
 
 def _attention(rows: list[dict]) -> dict:

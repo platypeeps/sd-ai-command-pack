@@ -4,6 +4,7 @@
   One page, no tabs (sd:5921, docs/work/2026-10-23-today-queue/design.md): what is going on, then what needs you.
   Data: /api/now, the document now_screen.document builds, read when the page opens and on Refresh.
   The day track: the last 24 hours as marks (landed, failed jobs, briefs, sessions), a table of them and a key to Tasks.
+  Under it the spend line (sd:6031): spent in the last 24 hours and each of the last 7, from the cost table; Metrics has the rest.
   The annunciator: Jobs, Lane, Reports, Pulls, Mail and Repos filter Needs you to their rows; Sessions opens In motion and
   Gate opens Queue. Each number counts the rows its filter shows.
   Needs you: the document's `needs`, every fact that asks for an act, ranked in the bands, with group rows for the work items
@@ -55,6 +56,7 @@
       <h2 class="sr" id="track-h">The last 24 hours</h2>
       <div class="track-plot" id="track-plot"><p class="why">Reading the day…</p></div>
       <ul class="flowkey" id="flowkey" aria-label="Where the work is"></ul>
+      <p class="spend" id="spend">Reading spend…</p>
       <details class="track-table" id="track-table" hidden><summary>The marks as a table</summary>
         <table class="ledger"><thead><tr><th>When</th><th>Lane</th><th>What</th></tr></thead><tbody id="track-rows"></tbody></table>
       </details>

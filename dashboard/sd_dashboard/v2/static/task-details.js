@@ -635,6 +635,9 @@
         : html`<h3><label for="det-body">Description</label></h3><textarea id="det-body" class="fld" rows="4"${dis}>${body}</textarea>`;
       if (!d) return html`${desc}<h3>History, notes and assignments</h3><p class="why">${DET.failed[t.id] ? `Not read: ${DET.failed[t.id]}` : `Reading sd task show ${t.id} --json…`}</p>`;
       const it = d.item;
+      // The item's cost (sd:6031): each assignment's spent cost rows, `~` when any is an estimate (`bound`); no cap.
+      const spent = x => ({ usd: x.assignments.reduce((n, a) => n + (a.usd || 0), 0), estimated: x.assignments.some(a => a.estimated) });
+      const cost = a => `${a.estimated ? '~' : ''}$${Number(a.usd).toFixed(2)}`;
       const open = d.notes.filter(n => n.kind === 'followup' && !n.resolved).length;
       const docs = d.documents || [];
       return html`${desc}${baseOf(t, d)}
@@ -646,8 +649,8 @@
         ${d.history.length ? html`<ol class="rec">${d.history.map(n => html`<li><time class="rel" datetime="${n.at}"></time><span>${n.body}</span></li>`)}</ol>` : html`<p class="why">This item has never changed status.</p>`}
         <h3>Notes <span class="n">${plural(d.notes.length, 'note')} · ${open} open ${plural.word(open, 'followup')}</span> ${src('Notes', `sd task show ${t.id} --json · every other note kind`)}</h3>
         ${d.notes.length ? html`<ol class="rec">${d.notes.map(n => html`<li data-note="${String(n.id)}"><time class="rel" datetime="${n.at}"></time><span><b>${n.kind}</b>${n.kind === 'followup' ? (n.resolved ? ' · resolved' : ' · open') : ''} ${n.body}</span>${C.rowActions('note:' + n.id)}</li>`)}</ol>` : html`<p class="why">No notes on this item.</p>`}
-        <h3>Assignments ${src('Assignments', `sd assignments list --json · item ${t.id}; not in sd task show`)}</h3>
-        ${d.assignments.length ? html`<ol class="rec">${d.assignments.map(a => html`<li><span class="mono">#${String(a.id)}</span><span>${a.role} · ${a.provider || 'no provider'} · <b>${a.status}</b>${a.ended ? html` · ended <time class="rel" datetime="${a.ended.replace('+00:00', 'Z')}"></time>` : ''}${a.cancel.allowed ? '' : html`<br><small>sd assignments cancel: ${a.cancel.reason}</small>`}</span>${C.rowActions('asg:' + a.id)}</li>`)}</ol>` : html`<p class="why">No assignment has run on this item.</p>`}
+        <h3>Assignments${d.assignments.length ? html` <span class="n">${cost(spent(d))} spent</span>` : ''} ${src('Assignments', `sd assignments list --json · item ${t.id}; not in sd task show · cost: the run and bound cost rows of each assignment`)}</h3>
+        ${d.assignments.length ? html`<ol class="rec">${d.assignments.map(a => html`<li><span class="mono">#${String(a.id)}</span><span>${a.role} · ${a.provider || 'no provider'} · <b>${a.status}</b>${a.usd ? ` · ${cost(a)}` : ''}${a.ended ? html` · ended <time class="rel" datetime="${a.ended.replace('+00:00', 'Z')}"></time>` : ''}${a.cancel.allowed ? '' : html`<br><small>sd assignments cancel: ${a.cancel.reason}</small>`}</span>${C.rowActions('asg:' + a.id)}</li>`)}</ol>` : html`<p class="why">No assignment has run on this item.</p>`}
         <h3>Artifact ${src('Artifact', `sd task show ${t.id} --json · item.path`)}</h3>
         <dl><dt>Path</dt><dd>${it.path || 'none'}</dd><dt>Repo</dt><dd>${it.repo || 'none'}</dd>${it.branch ? html`<dt>Branch</dt><dd>${it.branch}</dd>` : ''}</dl>
         <h3>Recurrence ${src('Recurrence', `sd task show ${t.id} --json · item.recurrence`)}</h3>

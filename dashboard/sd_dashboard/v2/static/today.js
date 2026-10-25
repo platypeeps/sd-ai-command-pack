@@ -220,6 +220,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     $('unread').textContent = unread.map(([k, why]) => `${k} could not be read: ${why}. Refresh tries again.`).join(' ');
     motion();
     dayTrack();
+    spendLine();
     window.snooze.draw($('snoozed'), SNOOZED);
   }
 
@@ -284,6 +285,20 @@ window.PAGE_FILTER = { '': 'Needs you' };
     put($('track-rows'), html`${[...marks].sort((a, b) => a.at < b.at ? 1 : -1).map(m => html`<tr><td class="when"><time datetime="${m.at}">${clock(m.at)}</time></td><td>${m.label}</td><td class="what"><a href="${markHref(m.lane, m)}">${m.what}</a></td></tr>`)}`);
   }
 
+  // The spend line (sd:6031): the document's `spend`, spent in the last 24 hours and in each of the last 7, as bars oldest
+  // first. Visibility only: no cap. A read that failed says so, never $0.00.
+  const usd = n => `$${Number(n).toFixed(2)}`;
+  function spendLine() {
+    const S = DOC.spend || { error: 'the document carried no spend' };
+    if (S.error) return put($('spend'), html`Spend not read: ${S.error}. Refresh tries again.`);
+    const top = Math.max(...S.days, 0.01), H = 16;
+    put($('spend'), html`<span class="lbl">Spend</span> 24h <b>${usd(S.day)}</b> · 7 days <b>${usd(S.week)}</b>
+      <svg class="spark" viewBox="0 0 ${S.days.length * 6} ${H}" role="img" aria-label="${`Spent per day, oldest first: ${S.days.map(usd).join(', ')}`}">${S.days.map((d, i) => {
+        const h = d > 0 ? Math.max(1, Math.round(H * d / top)) : 0;
+        return html`<rect x="${i * 6}" y="${H - h}" width="4" height="${h}"><title>${usd(d)}</title></rect>`; })}</svg>
+      <a href="/metrics">Metrics</a>`);
+  }
+
   // The badge is the read's own (sd:3446, now_screen._attention): Needs you's broken rows, else its look rows.
   function attend() {
     shell.attention(DOC && DOC.attention || { state: 'unknown', n: 0, what: 'rows' });
@@ -320,6 +335,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     put($('active-tally'), html``);
     $('active-note').hidden = true; $('unread').hidden = true;
     put($('track-plot'), html`<p class="why">The day track was not read: ${failed}.</p>`); put($('flowkey'), html``); $('track-table').hidden = true;
+    put($('spend'), html`Spend not read: ${failed}.`);
     window.snooze.draw($('snoozed'), []);
     attend();
   }
