@@ -168,7 +168,12 @@ def reimport(connection: sqlite3.Connection, repo: str, *, dry_run: bool = False
 
 def prepare_restore(connection: sqlite3.Connection) -> None:
     """Freeze work that an old snapshot must never dispatch a second time."""
+    from .build import abandon
+
     with transaction(connection):
+        # A build run's pids belong to the store, or the machine, before this
+        # one: end it unretried, so no reap signals or reruns it.
+        abandon(connection, "abandoned at restore")
         connection.execute("UPDATE assignment SET status='blocked' WHERE status IN ('queued','running')")
         for row in list(connection.execute("SELECT * FROM repo")):
             for name, (_, marker) in AUTHORITIES.items():

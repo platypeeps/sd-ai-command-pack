@@ -44,7 +44,8 @@ progress belongs to the database.
 | Find items by age in status | Operations → Progress; a bar opens matching Backlog items |
 | See weekly numbers, cost and providers | Operations → Usage |
 | Request a supported retry or stop | Operations, `sd jobs retry NAME`, `sd jobs cancel NAME` |
-| Cancel a queued assignment | Operations, or `sd assignments cancel ID` |
+| Queue a build of ready items | `sd assignments build ID [ID ...]`; one refusal refuses the selection |
+| Cancel a queued assignment or a running build | Operations, or `sd assignments cancel ID` |
 
 Capture defaults to Task. Followup, Comment, Question, Decision and Proposal
 require a Related item; the short inline CLI hint follows that selection.

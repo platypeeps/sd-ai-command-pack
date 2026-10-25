@@ -30,6 +30,14 @@ def restore_pending(database: Path) -> bool:
     return (database.parent / "runner-restore-intent.json").exists()
 
 
+#: The columns migrations added to `runner_run` after its journal format,
+#: which a record written before each lacks and reads as NULL: 018's
+#: `detached_from` (sd:2581) and 042's build columns (pack sd:6093). A runner
+#: run never writes the build columns, so its row holds NULL in each too.
+LATER_COLUMNS = ("detached_from", "step", "heartbeat_at", "model", "session_id",
+                 "log_path", "builder_pgid", "builder_start", "review_round", "final", "doubts")
+
+
 def canonical(record: dict) -> dict:
     """The record with `repo` in the form migration 014 gives the row (sd:1447).
 
@@ -43,9 +51,10 @@ def canonical(record: dict) -> dict:
     both sides agree byte for byte; a path outside the home, or a record
     compared without `$HOME`, is kept as it is.
     """
-    if "detached_from" not in record:
-        # Written before migration 018, which added the column (sd:2581).
-        record = {**record, "detached_from": None}
+    missing = [name for name in LATER_COLUMNS if name not in record]
+    if missing:
+        # Written before the migration that added the column: 018 or 042.
+        record = {**record, **dict.fromkeys(missing)}
     repo = record.get("repo")
     try:
         keyed = paths.home_relative(repo) if isinstance(repo, str) else repo

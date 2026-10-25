@@ -392,7 +392,7 @@ def _copy_runner_journal(source: Path, directory: Path, expected: dict[str, int]
     if intent.exists() or intent.is_symlink():
         raise BackupError("runner journal restore is incomplete; resume its verified backup first")
     if not journal.exists() and not journal.is_symlink():
-        if expected.get("runner_run", 0):
+        if expected.get("runner_run", 0) and _journaled_runs_in(directory / source.name):
             raise BackupError("runner rows exist but their durable journal is missing")
         return False
     _runner_files(journal)
@@ -402,6 +402,21 @@ def _copy_runner_journal(source: Path, directory: Path, expected: dict[str, int]
         raise BackupError(f"runner journal was not copied: {error}") from error
     _runner_files(directory / "runner-journal")
     return True
+
+
+#: The runs the journal holds: every `runner_run` but a build run's. A build
+#: run (pack sd:6093) keeps no journal: its evidence is its worktree and
+#: branch on disk, and a restore blocks its assignment (`recovery`).
+JOURNALED_RUNS = ("SELECT runner_run.* FROM runner_run LEFT JOIN assignment "
+                  "ON assignment.id = runner_run.assignment WHERE assignment.scope IS NOT 'build'")
+
+
+def _journaled_runs_in(copy: Path) -> bool:
+    connection = connect(copy, write=False)
+    try:
+        return connection.execute(JOURNALED_RUNS + " LIMIT 1").fetchone() is not None
+    finally:
+        connection.close()
 
 
 def _check_runner_records(connection: sqlite3.Connection, directory: Path) -> None:
@@ -414,7 +429,7 @@ def _check_runner_records(connection: sqlite3.Connection, directory: Path) -> No
     if "runner_run" not in set(tables(connection)):
         raise BackupError(f"a version {schema_version(connection)} database has no runner_run table; "
                           f"migration {RUNNER_RUN_VERSION:03d} creates it, so the copy is malformed")
-    rows = list(connection.execute("SELECT * FROM runner_run"))
+    rows = list(connection.execute(JOURNALED_RUNS))
     if not rows:
         return
     from .runner_journal import against, canonical
@@ -1866,11 +1881,14 @@ def _release_leases(connection: sqlite3.Connection) -> list[str]:
     as they are, so they still agree with the runner journal restored beside them.
     """
     with transaction(connection):
+        # A build run's lease stays: `build.abandon` ended the run, and a
+        # reap releases it once its process groups read gone (pack sd:6093).
         rows = list(connection.execute(
             "SELECT lease.run, assignment.item FROM runner_lease lease "
             "LEFT JOIN runner_run run ON run.id = lease.run LEFT JOIN assignment ON assignment.id = run.assignment "
-            "WHERE lease.released_at IS NULL ORDER BY lease.run"))
-        connection.execute("UPDATE runner_lease SET released_at = ? WHERE released_at IS NULL", (stamp_now(),))
+            "WHERE lease.released_at IS NULL AND assignment.scope IS NOT 'build' ORDER BY lease.run"))
+        connection.executemany("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
+                               [(stamp_now(), row["run"]) for row in rows])
         for row in rows:
             if row["item"] is not None:
                 add_note(connection, row["item"], "comment",
