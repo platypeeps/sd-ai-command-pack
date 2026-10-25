@@ -98,6 +98,48 @@ class Decisions(unittest.TestCase):
                                   "git stash in a shared worktree hid or dropped "
                                   "another writer's work")
 
+    def test_git_stash_in_every_command_position_is_denied(self) -> None:
+        """The class "a command position the parser does not see as one" (sd:5985 review)."""
+        for command in (
+                "if git stash pop; then echo; fi", "if true; then git stash pop; fi",
+                "if false; then :; elif git stash; then :; fi",
+                "if false; then :; else git stash; fi",
+                "for f in a; do git stash; done", "while git stash pop; do :; done",
+                "until git stash; do :; done", "! git stash", "time git stash",
+                "{ git stash; }", "(git stash)", "f() { git stash; }",
+                "case x in x) git stash;; esac",
+                "echo $(git stash)", 'echo "$(git stash pop)"', "echo `git stash`",
+                'echo "`git stash`"', "exec git stash", "exec -a name git stash",
+                "xargs git stash", "xargs -n 1 git stash", "env -u HOME git stash",
+                "sh -c 'git stash'", 'bash -c "git stash pop"', "bash -lc 'git stash'",
+                "eval git stash", "eval 'git stash'"):
+            with self.subTest(command=command):
+                self.assertDenied(bash(command, timeout=600000),
+                                  "git stash in a shared worktree hid or dropped "
+                                  "another writer's work")
+
+    def test_a_line_the_lexer_cannot_read_falls_back_to_a_line_scan(self) -> None:
+        """An apostrophe in a heredoc body breaks the lexer; the check must not turn off."""
+        for command in ("cat <<EOF\nit's here\nEOF\ngit stash",
+                        "echo 'unbalanced; git stash pop",
+                        "echo \"open; git -C /tmp/wt stash"):
+            with self.subTest(command=command):
+                self.assertDenied(bash(command, timeout=600000), "another writer's work")
+        for command in ("echo 'unbalanced", "echo \"open; git stash list",
+                        "cat <<EOF\nit's here\nEOF\ngit status"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decision(bash(command, timeout=600000)))
+        # Accepted false deny: a heredoc body line reads as a command.
+        self.assertDenied(bash("cat <<'EOF'\ngit stash\nEOF", timeout=600000), "stash")
+
+    def test_control_words_and_shells_without_stash_pass(self) -> None:
+        for command in ("if git status; then echo ok; fi", "for f in a b; do echo $f; done",
+                        "sh -c 'git status'", "bash -c 'git stash list'",
+                        "echo $(git rev-parse HEAD)", "xargs -n 1 echo stash",
+                        "! git diff --quiet"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decision(bash(command, timeout=600000)))
+
     def test_read_only_stash_and_other_git_pass(self) -> None:
         for command in ("git stash list", "git -C /tmp/wt stash show -p", "git status",
                         "git log --grep stash", "echo git stash", "git commit -m 'git stash'",
