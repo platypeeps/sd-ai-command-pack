@@ -1,0 +1,209 @@
+"""The session registry: which Claude session holds which worktree, on which machine (pack sd:6024).
+
+Each session keeps one `heartbeat` row in `state`, key `session:<id>` (grill
+Q44: the registry lives in the database, in the heartbeat rows that already
+exist). Its body names the machine, the session's cwd and each linked
+worktree the session touched: path, repository, branch, item and when.
+`bin/sd-session-beat`, a hook, writes it; SessionEnd deletes it.
+
+A row older than `STALE` holds nothing, and the nightly prune deletes it: a
+session that crashed without its SessionEnd hook frees its worktrees then.
+A path is one machine's, so a hold counts only on the machine that wrote it.
+A main checkout is never held; only a linked worktree, whose `.git` is a
+file, is.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+from . import paths
+from .database import transaction
+from .writes import now as clock
+
+#: The key prefix of a session's heartbeat row.
+PREFIX = "session:"
+#: A beat older than this holds nothing; the prune deletes it.
+STALE = timedelta(hours=24)
+#: A session beats at most this often unless it touches a new worktree.
+BEAT_SECONDS = 60
+#: The worktrees one row keeps, newest first.
+MAX_WORKTREES = 24
+#: Directories walked up from one path before giving up.
+MAX_DEPTH = 64
+#: An item number in a branch name: `session-registry-6024`, `build/sd-6024`, `b5106-sessions`.
+BRANCH_ITEM = re.compile(r"(?:^|[-_/])(?:sd-?|b)?(\d{1,9})(?=$|[-_/])", re.ASCII)
+#: An absolute or home path in a shell command.
+COMMAND_PATH = re.compile(r"""(?:^|(?<=[\s'"=:(]))(~?/[^\s'";|&()<>`$]+)""")
+
+
+def _key(path: str) -> str:
+    return str(paths.key(os.path.realpath(os.path.expanduser(path))))
+
+
+def worktree_of(path: str) -> dict | None:
+    """The linked worktree `path` lies in: `{path, repo, branch}`, or None for a main checkout or no checkout.
+
+    Read from `.git` files alone, with no `git` call: a hook pays this on each tool call.
+    """
+    here = Path(os.path.realpath(os.path.expanduser(path)))
+    for folder in [here, *here.parents][:MAX_DEPTH]:
+        marker = folder / ".git"
+        if marker.is_dir():
+            return None
+        if not marker.is_file():
+            continue
+        try:
+            text = marker.read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            return None
+        if not text.startswith("gitdir:"):
+            return None
+        gitdir = Path(text.removeprefix("gitdir:").strip())
+        gitdir = gitdir if gitdir.is_absolute() else folder / gitdir
+        if gitdir.parent.name != "worktrees" or gitdir.parent.parent.name != ".git":
+            return None
+        try:
+            head = (gitdir / "HEAD").read_text(encoding="utf-8", errors="replace").strip()
+        except OSError:
+            head = ""
+        branch = head.removeprefix("ref: refs/heads/") if head.startswith("ref: refs/heads/") else ""
+        return {"path": _key(str(folder)), "repo": _key(str(gitdir.parent.parent.parent)), "branch": branch}
+    return None
+
+
+def item_of(branch: str) -> int | None:
+    found = BRANCH_ITEM.findall(branch or "")
+    return int(found[-1]) if found else None
+
+
+def touched(payload: dict) -> list[str]:
+    """The paths a hook payload names: its cwd, a tool's file path, and each path in a Bash command."""
+    found = [payload.get("cwd")]
+    given = payload.get("tool_input")
+    tool: dict = given if isinstance(given, dict) else {}
+    found += [tool.get("file_path"), tool.get("notebook_path"), tool.get("path")]
+    command = tool.get("command")
+    if isinstance(command, str):
+        found += COMMAND_PATH.findall(command)[:32]
+    return [entry for entry in found if isinstance(entry, str) and entry.startswith(("/", "~/"))]
+
+
+def worktrees(candidates: list[str]) -> list[dict]:
+    """The distinct linked worktrees the candidate paths lie in, each with its item."""
+    found: dict[str, dict] = {}
+    for candidate in candidates:
+        tree = worktree_of(candidate)
+        if tree and tree["path"] not in found:
+            found[tree["path"]] = {**tree, "item": item_of(tree["branch"])}
+    return list(found.values())
+
+
+def _body(row) -> dict:
+    try:
+        body = json.loads(row["body"]) if row else {}
+    except (TypeError, ValueError):
+        body = {}
+    return body if isinstance(body, dict) else {}
+
+
+def _row(connection, session: str):
+    return connection.execute("SELECT id, timestamp, body FROM state WHERE kind = 'heartbeat' AND key = ? "
+                              "ORDER BY timestamp DESC, id DESC LIMIT 1", (PREFIX + session,)).fetchone()
+
+
+def _age(stamp: str, now: str) -> float:
+    try:
+        return (datetime.fromisoformat(now) - datetime.fromisoformat(stamp)).total_seconds()
+    except (TypeError, ValueError):
+        return float("inf")
+
+
+def beat(connection, session: str, *, machine: str, cwd: str | None, found: list[dict],
+         now: str | None = None) -> bool:
+    """Record that `session` is alive and holds `found`; False when the row was fresh and nothing new was held.
+
+    One row per session: an update, else an insert, in one transaction. The
+    skip is read outside it, so a throttled beat takes no write lock; the
+    merge is read again inside it, so a parallel beat's worktree is kept.
+    """
+    if not session or not machine:
+        return False
+    stamp = now or clock()
+    row = _row(connection, session)
+    if (row is not None and _age(row["timestamp"], stamp) < BEAT_SECONDS
+            and {entry["path"] for entry in found} <= set(_held(row))):
+        return False
+    with transaction(connection):
+        held = _held(_row(connection, session))
+        for entry in found:
+            held[entry["path"]] = {**entry, "at": stamp}
+        kept = sorted(held.values(), key=lambda entry: str(entry.get("at", "")), reverse=True)[:MAX_WORKTREES]
+        newest = kept[0] if kept else {}
+        text = json.dumps({"session": session, "machine": machine, "cwd": _key(cwd) if cwd else None,
+                           "repo": newest.get("repo"), "item": newest.get("item"), "worktrees": kept})
+        updated = connection.execute("UPDATE state SET timestamp = ?, body = ? WHERE kind = 'heartbeat' AND key = ?",
+                                     (stamp, text, PREFIX + session)).rowcount
+        if not updated:
+            connection.execute("INSERT INTO state (kind, key, timestamp, body) VALUES ('heartbeat', ?, ?, ?)",
+                               (PREFIX + session, stamp, text))
+    return True
+
+
+def _held(row) -> dict[str, dict]:
+    return {entry["path"]: entry for entry in _body(row).get("worktrees") or []
+            if isinstance(entry, dict) and isinstance(entry.get("path"), str)}
+
+
+def end(connection, session: str) -> int:
+    """Delete `session`'s row: its worktrees are free. The count deleted."""
+    with transaction(connection):
+        return connection.execute("DELETE FROM state WHERE kind = 'heartbeat' AND key = ?",
+                                  (PREFIX + session,)).rowcount
+
+
+def _cutoff(now: str | None) -> str:
+    moment = datetime.fromisoformat(now) if now else datetime.now(UTC)
+    return (moment - STALE).astimezone(UTC).isoformat(timespec="seconds")
+
+
+def live(connection, *, now: str | None = None) -> list[dict]:
+    """Every session whose beat is younger than `STALE`, newest first, each body with its `beat` time."""
+    rows = connection.execute(
+        "SELECT key, timestamp, body FROM state WHERE kind = 'heartbeat' AND substr(key, 1, ?) = ? AND timestamp >= ? "
+        "ORDER BY timestamp DESC, id DESC", (len(PREFIX), PREFIX, _cutoff(now))).fetchall()
+    found, seen = [], set()
+    for row in rows:
+        if row["key"] in seen:
+            continue
+        seen.add(row["key"])
+        found.append({**_body(row), "session": row["key"][len(PREFIX):], "beat": row["timestamp"]})
+    return found
+
+
+def holders(connection, path: str, *, machine: str, exclude: tuple[str, ...] = (), now: str | None = None) -> list[dict]:
+    """The live sessions on `machine` that hold the worktree at `path`, less those named in `exclude`."""
+    key = _key(path)
+    return [session for session in live(connection, now=now)
+            if session.get("machine") == machine and session["session"] not in exclude
+            and any(isinstance(entry, dict) and entry.get("path") == key for entry in session.get("worktrees") or [])]
+
+
+def describe(sessions: list[dict]) -> str:
+    """'' for none; else why a worktree stays, naming each holder."""
+    if not sessions:
+        return ""
+    named = ", ".join(f"{entry['session'][:8]} (beat {entry['beat']})" for entry in sessions)
+    return f"a live session holds it: {named}"
+
+
+def expire(connection, *, now: str | None = None) -> int:
+    """Delete every session row older than `STALE`: the prune's half of the registry. The count deleted."""
+    with transaction(connection):
+        return connection.execute(
+            "DELETE FROM state WHERE kind = 'heartbeat' AND substr(key, 1, ?) = ? AND timestamp < ?",
+            (len(PREFIX), PREFIX, _cutoff(now))).rowcount

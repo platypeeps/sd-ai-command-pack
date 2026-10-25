@@ -66,12 +66,16 @@ RECEIPT_SCHEMA = 1
 # that file a GitHub issue; it reads a `Bash` command before anything else and
 # is silent outside a managed repository (sd:2256). `bin/sd-session-trail`
 # takes the `compact` start the restore hook leaves out (sd:6023).
+# `bin/sd-session-beat` keeps the session's heartbeat row: the tools that name
+# a path, and the end that frees its worktrees (sd:6024).
 HOOK_SPECS: tuple[tuple[str, str, tuple[str, ...]], ...] = (
     ("bin/sd-handoff-restore", "SessionStart", ("startup", "clear")),
     ("bin/sd-session-trail", "SessionStart", ("compact",)),
     ("bin/sd-skill-use", "PreToolUse", ("Skill|Read",)),
     ("bin/sd-skill-use", "UserPromptSubmit", ("",)),
     ("bin/sd-issue-guard", "PreToolUse", ("Bash|mcp__github__issue_write",)),
+    ("bin/sd-session-beat", "PreToolUse", ("Bash|Edit|Write|NotebookEdit",)),
+    ("bin/sd-session-beat", "SessionEnd", ("",)),
 )
 
 EXCLUDES_LINE = "CLAUDE.local.md"

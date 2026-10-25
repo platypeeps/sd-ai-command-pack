@@ -16,7 +16,8 @@ its snapshot restored and compared, and never before. What the table says:
     heartbeat rows   one per key.  Schema 005 already keeps `runner` unique
                      with a partial index; every other key accumulates a row
                      per tick, and the newest is the only one any reader asks
-                     for.
+                     for. A `session:` row older than `sessions.STALE` goes
+                     whole: that session ended without its hook (sd:6024).
     checkpoint rows  one per key, once the key sat a week (sd:3472).  For
                      the keys `NEWEST_ONLY_CHECKPOINTS` names every reader
                      takes the newest row (`ship.read`, `LIMIT 1`, `MAX(id)`),
@@ -92,7 +93,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import reporting
+from . import reporting, sessions
 from .backup import Snapshot, passed
 from .database import refuse_hub_only, transaction
 from .errors import SdDbError
@@ -257,14 +258,15 @@ def expire_exec_outputs(connection, *, now: datetime) -> int:
     return removed
 
 
-def compact_heartbeats(connection) -> int:
-    """One `heartbeat` row per key: the one every reader orders first."""
+def compact_heartbeats(connection, *, now: datetime | None = None) -> int:
+    """One `heartbeat` row per key: the one every reader orders first; with `now`, no stale session row."""
     with transaction(connection):
         cursor = connection.execute(
             "DELETE FROM state WHERE kind='heartbeat' AND id NOT IN ("
             "  SELECT id FROM (SELECT id, ROW_NUMBER() OVER (PARTITION BY key ORDER BY timestamp DESC, id DESC) AS rank"
             "                  FROM state WHERE kind='heartbeat') WHERE rank = 1)")
-    return cursor.rowcount
+    stale = sessions.expire(connection, now=now.astimezone(UTC).isoformat(timespec="seconds")) if now else 0
+    return cursor.rowcount + stale
 
 
 def compact_checkpoints(connection, *, now: datetime) -> int:
@@ -392,7 +394,7 @@ def prune(connection, backup: Snapshot, *, now: datetime | None = None) -> Prune
             f"prune report; one backup is one prune, and nothing was removed")
     stamp = now.astimezone(UTC).isoformat(timespec="seconds")
     exec_outputs = expire_exec_outputs(connection, now=now)
-    heartbeats = compact_heartbeats(connection)
+    heartbeats = compact_heartbeats(connection, now=now)
     checkpoints = compact_checkpoints(connection, now=now)
     clean_reports = settle_clean_reports(connection, now=now)
     parked = park_untouched(connection, now=now)
