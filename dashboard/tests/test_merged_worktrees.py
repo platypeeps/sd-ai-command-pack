@@ -18,7 +18,8 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import workflow
+from sd_db import sessions, workflow
+from sd_db.ship import this_host
 
 from sd_dashboard import health_collectors, health_screen
 from sd_dashboard.health_collectors import Walk
@@ -151,6 +152,19 @@ class TheWrite(Merged):
                          {"ok": True, "row": "wt:merged", "done": ["origin/feat/one", str(one)], "refused": []})
         self.gone(one, "feat/one")
         self.assertIsNone(self.row())
+
+    def test_a_tree_a_live_session_holds_stays(self):
+        """pack sd:6024: a session on this machine that holds the tree keeps it, its branch and origin's."""
+        one, held = self.tree("one"), self.tree("held")
+        row = self.row()
+        sessions.beat(self.connection, "session-a", machine=this_host(), cwd=None,
+                      found=sessions.worktrees([str(held)]))
+        answer = self.write(row["id"], row["revision"])
+        self.assertEqual(answer["done"], ["origin/feat/one", str(one)])
+        self.assertEqual([entry["name"] for entry in answer["refused"]], [str(held)])
+        self.assertIn("a live session holds it", answer["refused"][0]["why"])
+        self.assertTrue(held.is_dir())
+        self.assertNotEqual(git("ls-remote", str(self.origin), "refs/heads/feat/held"), "")
 
     def test_a_revision_from_another_row_or_a_tree_moved_since_the_read_is_stale(self):
         one = self.tree("one")
