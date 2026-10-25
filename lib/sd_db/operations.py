@@ -510,13 +510,14 @@ def assignment_state(connection: sqlite3.Connection, assignment: int) -> dict:
     # The item's status and an unreleased runner attempt decide whether a
     # blocked row may be cancelled, so both are in the row the revision hashes.
     # A running build's bundle run is its lead's (`build.claim`), and the
-    # cancel is asked on that run, so the run's id is in the row too.
+    # cancel is asked on that run, so the run's id is in the row too; an
+    # ended run the reap has not released yet takes it as well.
     row = connection.execute("SELECT assignment.*, item.title AS title, item.status AS item_status, "
                              "EXISTS (SELECT 1 FROM runner_run WHERE runner_run.assignment=assignment.id "
                              "AND runner_run.released_at IS NULL) AS leased, "
                              "(SELECT runner_run.id FROM runner_run WHERE runner_run.assignment="
-                             "COALESCE(assignment.parent, assignment.id) AND runner_run.released_at IS NULL "
-                             "AND runner_run.outcome IS NULL) AS build_run "
+                             "COALESCE(assignment.parent, assignment.id) AND runner_run.released_at IS NULL) "
+                             "AS build_run "
                              "FROM assignment LEFT JOIN item ON item.id=assignment.item WHERE assignment.id=?",
                              (assignment,)).fetchone()
     if row is None:
@@ -558,8 +559,10 @@ def cancel_assignment(connection: sqlite3.Connection, assignment: int, *, expect
             # A running build stops at its supervisor's next beat, or at the
             # reap when no supervisor lives; either ends the whole bundle
             # `cancelled` and moves its items back to ready (pack sd:6093).
+            # An ended run not yet released takes the cancel too: its settle
+            # ends it cancelled instead of opening a fresh row.
             connection.execute("UPDATE runner_run SET cancel_requested = ?, updated_at = ? "
-                               "WHERE id = ? AND released_at IS NULL AND outcome IS NULL",
+                               "WHERE id = ? AND released_at IS NULL",
                                (f"cancelled by {who}", ended, current["build_run"]))
             audit = {"assignment": assignment, "run": current["build_run"], "status": "cancel_requested",
                      "who": who, "at": ended}

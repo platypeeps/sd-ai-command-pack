@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from importlib import import_module
 from pathlib import Path
 from typing import Any
+from unittest import mock
 
 from sd_db import build, operations, recovery, workflow
 from sd_db.database import connect
@@ -566,6 +567,79 @@ class Reap(Case):
         with self.assertRaisesRegex(workflow.TransitionRefused,
                                     f"cancel running build assignment {self.bundle['assignment']} first"):
             workflow.change_status(self.db, self.items[0], "blocked", who="operator")
+
+
+class Race(Case):
+    """Race table: a writer runs between the reap's read and its compare-and-set; the reap must do nothing then."""
+
+    def setUp(self):
+        super().setUp()
+        self.items = [self.item(), self.item()]
+        build.queue(self.db, self.items, who="operator")
+        self.bundle = self.claim()
+        self.stale = later(self.bundle["created_at"], build.STALE_SECONDS + 1)
+
+    def reap_after(self, writer, probe=None):
+        """One reap whose `open_runs` read is followed by `writer`, as a supervisor or an operator landing then."""
+        read = build.open_runs
+
+        def snapshot(connection):
+            rows = read(connection)
+            writer()
+            return rows
+
+        kill = Kill(self.db)
+        with mock.patch.object(build, "open_runs", snapshot):
+            settled = build.reap(self.db, now=self.stale, probe=probe or Probe(alive=False), kill=kill)
+        return settled, kill
+
+    def test_enqueued_between_read_and_reap_wins(self):
+        build.write(self.db, self.bundle["id"], step="enqueuing")
+        settled, kill = self.reap_after(lambda: build.enqueued(self.db, self.bundle["id"]))
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((settled, kill.calls, row["step"], row["outcome"], row["released_at"]),
+                         ([], [], "enqueued", None, None))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 1, "no retry")
+
+    def test_cancel_between_read_and_reap_wins(self):
+        def cancel():
+            state = operations.assignment_state(self.db, self.bundle["assignment"])
+            operations.cancel_assignment(self.db, self.bundle["assignment"], expected_revision=state["revision"],
+                                         who="operator")
+
+        settled, _ = self.reap_after(cancel)
+        self.assertEqual(settled, [])
+        settled = build.reap(self.db, now=self.stale, probe=Probe(alive=False))
+        self.assertEqual([(row["outcome"], row["retry"]) for row in settled], [("cancelled", None)])
+        self.assertEqual(self.statuses(self.items), ["ready", "ready"])
+
+    def test_cancel_after_the_compare_and_set_still_wins(self):
+        """The cancel lands on the ended, unreleased run: its settle ends it cancelled, no fresh row."""
+        self.db.execute("UPDATE runner_run SET outcome = 'interrupted' WHERE id = ?", (self.bundle["id"],))
+        state = operations.assignment_state(self.db, self.bundle["assignment"])
+        operations.cancel_assignment(self.db, self.bundle["assignment"], expected_revision=state["revision"],
+                                     who="operator")
+        settled = build.reap(self.db, now=self.stale, probe=Probe(alive=False))
+        self.assertEqual([row["retry"] for row in settled], [None])
+        self.assertEqual(self.statuses(self.items), ["ready", "ready"])
+
+    def test_supervisor_registration_between_read_and_reap_wins(self):
+        settled, kill = self.reap_after(lambda: build.write(
+            self.db, self.bundle["id"], supervisor_pid=4242, supervisor_pgid=4242, supervisor_start=START))
+        self.assertEqual((settled, kill.calls, build.run(self.db, self.bundle["id"])["outcome"]), ([], [], None))
+
+    def test_builder_registration_between_read_and_reap_wins(self):
+        settled, kill = self.reap_after(lambda: build.write(
+            self.db, self.bundle["id"], builder_pgid=777, builder_start=START))
+        self.assertEqual((settled, kill.calls, build.run(self.db, self.bundle["id"])["outcome"]), ([], [], None))
+
+    def test_a_step_between_read_and_reap_wins(self):
+        settled, _ = self.reap_after(lambda: build.write(self.db, self.bundle["id"], step="building"))
+        self.assertEqual((settled, build.run(self.db, self.bundle["id"])["outcome"]), ([], None))
+
+    def test_a_beat_between_read_and_reap_wins(self):
+        settled, _ = self.reap_after(lambda: build.beat(self.db, self.bundle["id"]))
+        self.assertEqual((settled, build.run(self.db, self.bundle["id"])["outcome"]), ([], None))
 
 
 class Backup(Case):

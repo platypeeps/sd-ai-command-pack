@@ -61,6 +61,12 @@ OPUS, SONNET = "opus", "sonnet"
 #: The fields a supervisor may write on its own open run.
 RUN_FIELDS = frozenset({"step", "heartbeat_at", "supervisor_pid", "supervisor_pgid", "supervisor_start", "session_id",
                         "log_path", "builder_pgid", "builder_start", "review_round", "final", "detail", "model"})
+#: Every run column a reap decides on. Its compare-and-set, and the settle after it, match them all against the
+#: row the reap read, so a writer between the read and the write (a beat, a registration, `enqueued`, a cancel)
+#: makes the reap do nothing that tick.
+REAP_READS = ("step", "outcome", "heartbeat_at", "supervisor_pid", "supervisor_start", "supervisor_pgid",
+              "builder_pgid", "builder_start", "cancel_requested", "released_at")
+_SAME = " AND ".join(f"{name} IS ?" for name in REAP_READS)
 #: Where a fresh row resumes a step lost (design, "Run ownership by step"); any other step resumes itself.
 #: A fix resumes at its review, which reads the head the fix left.
 RESUME = {"claimed": "worktree", "fixing": "reviewing"}
@@ -516,8 +522,9 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
     """End every open build run that fails `alive`; the runs settled, each `{run, outcome, retry}`.
 
     1. Compare-and-set `outcome` (`interrupted`, or `cancelled` when a cancel
-       was asked) where `heartbeat_at` is the value read; a lost race means the
-       supervisor beat, and the run is left alone.
+       was asked) where every `REAP_READS` column is the value read; a lost
+       race means a writer moved the run (a beat, a registration, `enqueued`,
+       a cancel), and the run is left alone this tick.
     2. Take the `verdict`. `OURS`: kill the supervisor's group, then the
        builder's; a group that still has a process after the SIGKILL ends
        the run blocked, not retried. `UNSURE`:
@@ -547,10 +554,10 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
                       else f"supervisor lost at step {row['step']}: no live beat for {STALE_SECONDS} s")
             with transaction(connection):
                 if connection.execute(
-                        "UPDATE runner_run SET outcome = ?, detail = ?, updated_at = ? WHERE id = ? "
-                        "AND outcome IS NULL AND released_at IS NULL AND heartbeat_at IS ?",
-                        (outcome, detail, clock(), row["id"], row["heartbeat_at"])).rowcount != 1:
+                        f"UPDATE runner_run SET outcome = ?, detail = ?, updated_at = ? WHERE id = ? AND {_SAME}",
+                        (outcome, detail, clock(), row["id"], *(row[name] for name in REAP_READS))).rowcount != 1:
                     continue
+            row = {**row, "outcome": outcome, "detail": detail}
         (state, groups), block = verdict(row, probe=probe), None
         if state == UNSURE:
             doubts = _doubt(connection, row["id"])
@@ -562,7 +569,7 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
             survivors = [group for group in groups if not kill(group)]
             if survivors:
                 block = f"process group {', '.join(map(str, survivors))} still had a process after SIGKILL"
-        result = _settle(connection, row["id"], block=block)
+        result = _settle(connection, row, block=block)
         if result is not None:
             settled.append(result)
     return settled
@@ -578,20 +585,25 @@ def _doubt(connection, ident: str) -> int:
         return 0 if row is None else row["doubts"]
 
 
-def _settle(connection, ident: str, *, block: str | None = None) -> dict | None:
+def _settle(connection, read: dict, *, block: str | None = None) -> dict | None:
     """Release an ended run and its lease, then retry it, block it, or end it cancelled, in one transaction.
 
     A retry is a fresh row: `run` + 1, the same worktree and branch, the
     `RESUME` step, the old `review_round` and `session_id`, no outcome; the
     old row's outcome stays set, so a late old supervisor writes nothing. A
-    second loss at the same step blocks the bundle.
+    second loss at the same step blocks the bundle. A run with
+    `cancel_requested` ends cancelled whatever its outcome: no fresh row.
+
+    `read` is the row the reap decided on; nothing happens unless every
+    `REAP_READS` column still holds its value (a cancel since then moves it).
 
     `block` names processes the reap could not end or could not judge: the
     bundle ends blocked, never retried, whatever the outcome.
     """
+    ident = read["id"]
     with transaction(connection):
-        row = connection.execute("SELECT * FROM runner_run WHERE id = ? AND released_at IS NULL "
-                                 "AND outcome IS NOT NULL", (ident,)).fetchone()
+        row = connection.execute(f"SELECT * FROM runner_run WHERE id = ? AND outcome IS NOT NULL AND {_SAME}",
+                                 (ident, *(read[name] for name in REAP_READS))).fetchone()
         if row is None:
             return None
         stamp = clock()
@@ -605,7 +617,7 @@ def _settle(connection, ident: str, *, block: str | None = None) -> dict | None:
                       f"cancel; log {row['log_path'] or 'none'}, worktree {row['work_path']}")
             connection.execute("UPDATE runner_run SET detail = ? WHERE id = ?", (reason, ident))
             _block(connection, members, reason, stamp)
-        elif row["outcome"] == "cancelled":
+        elif row["outcome"] == "cancelled" or row["cancel_requested"]:
             for member in members:
                 connection.execute("UPDATE assignment SET status = 'cancelled', ended = ?, result = ? WHERE id = ?",
                                    (stamp, row["detail"], member["id"]))
