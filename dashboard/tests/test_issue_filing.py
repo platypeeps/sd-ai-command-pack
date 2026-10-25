@@ -326,6 +326,25 @@ class TheDraft(FilingCase):
         self.assertIn("claude -p exited 3", run["reason"])
         self.assertEqual(self.asked("POST"), 0)
 
+    def test_a_runner_that_ends_between_the_read_and_the_probe_reads_as_its_outcome(self):
+        """sd:6158: the runner writes its outcome, then exits. Under gate load a read before that write and a probe after
+        the exit saw a drafting run with no runner, and a model failure read "stopped without a draft"."""
+        self.enable()
+        (self.double / "exit").write_text("3")
+        run = self.drafted(self.task())
+        record = self.runs / f"{run['id']}.json"
+        outcome = record.read_text(encoding="utf-8")
+        record.write_text(json.dumps({**json.loads(outcome), "state": "drafting"}), encoding="utf-8")
+
+        def ends(pid):
+            record.write_text(outcome, encoding="utf-8")
+            return False
+
+        with patch.object(issue_filing, "_alive", ends):
+            status, document = issue_filing.status(run["id"])
+        self.assertEqual((status, document["state"]), (200, "failed"))
+        self.assertIn("claude -p exited 3", document["reason"])
+
     def test_a_second_start_while_one_drafts_is_refused(self):
         self.enable()
         item = self.task()
