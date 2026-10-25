@@ -54,7 +54,7 @@
       const t = byKey(key); if (!t || !state?.item) return;
       if (t.due !== state.item.due || t.recurrence !== state.item.recurrence) t.nextDue = undefined; // not known until the rows are read again
       const dueMoved = t.due !== state.item.due;
-      Object.assign(t, { status: state.item.status, p: state.item.priority, due: state.item.due, recurrence: state.item.recurrence,
+      Object.assign(t, { status: state.item.status, kind: state.item.kind ?? t.kind, p: state.item.priority, due: state.item.due, recurrence: state.item.recurrence,
         anchor: state.item.recurrence_anchor ?? null, revision: state.revision, title: state.item.title ?? t.title, stage: t.base ? state.item.stage : null });
         if ('recurrence_lead' in state.item) t.lead = state.item.recurrence_lead ?? null;
       if ('repo' in state.item && state.item.repo !== t.repo_path) Object.assign(t, { repo_path: state.item.repo,
@@ -118,6 +118,9 @@
     const RECURS = ['task', 'personal', 'followup'];
     // build (sd:3012): sd_db.progress.CANCELLABLE_TASK_KINDS, the kinds task_guard lets sd task cancel close.
     const CLOSES = ['task', 'followup'];
+    // sd:6231: the Kind field's kinds, sd_db.workflow.HAND_KINDS, the ones sd task edit --kind sets; REPO_LESS is
+    // workflow.REPO_LESS_KINDS, which carry no repository, so a move to one clears the repo in the same edit (--no-repo).
+    const KINDS = ['task', 'personal', 'followup', 'work-idea', 'personal-idea'], REPO_LESS = ['personal', 'work-idea', 'personal-idea'];
     const repeats = t => !!t?.recurrence;
     // build (sd:2250): sd stores a rule only from sd_db.recurrence.PARTS. A rule with any other part (COUNT), written around
     // the library, cannot be walked: completing it ends the series. test_v2_tasks holds this set to the library's.
@@ -136,6 +139,7 @@
     const cliMove = (t, to) => `sd task status ${t.id} ${to}`;
     function cliQuad(t, ch) {
       const a = [];
+      if ('kind' in ch) a.push(`--kind ${ch.kind}`);
       if ('p' in ch) a.push(ch.p ? `--priority ${ch.p}` : '--clear-priority');
       if ('due' in ch) a.push(ch.due ? `--due ${ch.due}` : '--clear-due');
       if ('repo' in ch) a.push(ch.repo ? `--belongs-to ${window.shell.shq(ch.repo)}` : '--no-repo');
@@ -534,6 +538,7 @@
           <dt><label for="det-title">Title</label>${hint('Title', 'The name lists, the board and briefs show for this item.')}</dt><dd><input id="det-title" class="fld" value="${t.title}" required${dis}></dd>
           <dt><label for="det-status">Status</label>${hint('Status', 'Where the work stands; a status this item cannot move to is off, with its reason.')}</dt><dd><select id="det-status" class="fld"${gone ? html` disabled aria-describedby="det-off"` : ''}>${STATUSES.map(([s, name]) => { const L = legal(t, s);
             return html`<option value="${s}"${s === t.status ? html` selected` : L.ok ? '' : html` disabled title="${L.reason}"`}>${name}</option>`; })}${SLABEL[t.status] ? '' : html`<option value="${t.status}" selected disabled>${slabel(t.status)}</option>`}</select></dd>
+          ${kindField(t, gone)}
           <dt><label for="det-p">Priority</label>${hint('Priority', 'P1 is the most important and P4 the least; P1 and P2 count as important.')}</dt><dd><select id="det-p" class="fld"${dis}>${t.p ? '' : html`<option value="" selected>not recorded</option>`}${[1, 2, 3, 4].map(n => html`<option value="${n}"${t.p === n ? html` selected` : ''}>P${n}</option>`)}</select></dd>
           <dt><label for="det-due">Due</label>${hint('Due', 'The date the work is due; a date within 7 days makes the item urgent.')}</dt><dd><input id="det-due" class="fld" type="date" value="${String(t.due || '')}"${dis}>${t.due || t.overdue ? html` <span class="why">${t.due ? dt : 'overdue · date not recorded'}</span>` : ''}</dd>
           ${repeatFields(t, off)}
@@ -567,6 +572,13 @@
         rules.map(([v, name]) => html`<option value="${v}"${v === t.recurrence ? html` selected` : ''}>${name}</option>`)}</select>${note ? html` <span class="why">${note}</span>` : ''}</dd>${
         host.lead?.() && repeats(t) ? html`<dt><label for="det-lead">Lead</label>${hint('Lead', 'How many days before the due date the next one opens.')}</dt><dd><select id="det-lead" class="fld"${dis}>${
           [...new Set([...LEADS, t.lead ?? 0])].sort((a, b) => a - b).map(n => html`<option value="${n}"${n === (t.lead ?? 0) ? html` selected` : ''}>${n ? `${plural(n, 'day')} early` : 'On the due date'}</option>`)}</select></dd>` : ''}`;
+    }
+    // sd:6231: Kind, a select of the hand kinds. edit_item takes a kind change on any hand kind, so a personal item, whose
+    // other fields are off, can still be reclassified; a kind with a producer (work, report, idea) is off with the reason.
+    function kindField(t, gone) {
+      const why = gone ? 'this task was not read again after the change' : KINDS.includes(t.kind) ? '' : `${t.kind} items are owned by their producer; their kind cannot be changed here`;
+      return html`<dt><label for="det-kind">Kind</label>${hint('Kind', 'What the item is: a task, a personal to-do, a followup or an idea. Personal and idea kinds carry no repo.')}</dt><dd><select id="det-kind" class="fld"${why ? html` disabled title="${why}"` : ''}>${
+        (KINDS.includes(t.kind) ? KINDS : [t.kind, ...KINDS]).map(k => html`<option value="${k}"${k === t.kind ? html` selected` : ''}>${k}</option>`)}</select></dd>`;
     }
     // The repos a task can move to: every registered one (the capture's list) once read, else the ones these rows name.
     function repoOptions(t, list) {
@@ -602,6 +614,16 @@
         write(t.key, y => `/api/items/${y.id}/experiment`, { experiment: [spec] }).then(() => toast(`${label(t)} experiments → ${spec} · sd task edit ${t.id} --experiment ${window.shell.shq(spec)}`),
           err => { failed(label(t), err); err.status === 409 ? refused() : redrawDet(t.id); });
         return true; }
+      // sd:6231: a move to a kind that carries no repository clears the repo in the same edit, as sd task edit --kind needs
+      // --no-repo; the confirm says so, and its Undo sets back the kind only, since edit_item takes a repo with no kind change.
+      if (id === 'det-kind') { if (v === t.kind || !KINDS.includes(v)) return false;
+        const ch = REPO_LESS.includes(v) && t.repo_path ? { kind: v, repo: null } : { kind: v };
+        const go = () => commitEdit(byKey(t.key) || t, ch, `kind ${t.kind} → ${v}${'repo' in ch ? ', repo cleared' : ''}`, { keep: ['kind'], check: r => r.kind !== v || `it is already ${v}` });
+        if (!('repo' in ch)) { go(); return true; }
+        window.shell.confirm({ title: `Kind → ${v}: ${label(t)}?`, ok: `Make it ${v}`, keep: 'Cancel', danger: false, cli: cliQuad(t, ch),
+          body: `A ${v} item carries no repo, so this also clears its repo (${t.repo}). Undo sets the kind back, not the repo.` })
+          .then(yes => { if (yes) go(); });
+        return false; }
       if (id === 'det-q') return v !== quadOf(t) && toQuad(t.key, v);
       if (id === 'det-p') { const n = v ? +v : null; if (n === t.p) return false;
         commitEdit(t, { p: n }, `priority ${t.p ? 'P' + t.p : 'unset'} → ${n ? 'P' + n : 'unset'}`, { check: r => r.p !== n || `it is already ${n ? 'P' + n : 'unset'}` }); return true; }
