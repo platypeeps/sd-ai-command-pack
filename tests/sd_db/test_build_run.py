@@ -23,9 +23,10 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from sd_db import build, build_run, operations
+from sd_db import build, build_run, operations, sessions
 from sd_db.database import connect
 from sd_db.migrate import initialise
+from sd_db.ship import this_host
 from sd_db.workflow import item_state
 from sd_db.writes import create_item, upsert_repo
 
@@ -589,6 +590,34 @@ class Supervise(Case):
         self.assertEqual(self.supervisor().run()["outcome"], "done")
         self.assertFalse(Path(self.bundle["work_path"]).exists())
         self.assertEqual(self.db.execute("SELECT COUNT(*) FROM runner_run WHERE released_at IS NULL").fetchone()[0], 0)
+
+    def hold(self, session: str) -> None:
+        work = Path(self.bundle["work_path"])
+        sessions.beat(self.db, session, machine=this_host(), cwd=None, found=sessions.worktrees([str(work)]))
+
+    def test_a_held_build_worktree_is_kept(self):
+        """pack sd:6024: a session other than the run's builder holds the worktree, so cleaning keeps it."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.supervisor().run()
+        self.hold("session-other")
+        self.merge_to_cleaning()
+        ended = self.supervisor().run()
+        self.assertEqual(ended["outcome"], "done")
+        self.assertTrue(Path(self.bundle["work_path"]).is_dir())
+        note = self.db.execute("SELECT body FROM note WHERE item = ? ORDER BY id DESC", (self.items[0],)).fetchone()
+        self.assertIn("a live session holds it: session-", note["body"])
+
+    def test_the_builders_own_session_does_not_keep_its_worktree(self):
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        self.supervisor().run()
+        self.hold("session-fixture")
+        self.merge_to_cleaning()
+        self.assertEqual(self.supervisor().run()["outcome"], "done")
+        self.assertFalse(Path(self.bundle["work_path"]).exists())
 
     def merge_to_cleaning(self):
         entries = json.loads((self.plans / "lane.json").read_text())

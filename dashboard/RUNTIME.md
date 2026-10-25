@@ -290,7 +290,12 @@ log offset, times and exit code. Existing job output, emails and notifications
 continue. Every run records a heartbeat, the job's health. A report item exists
 only for an event. A failed job or explicit `SD_REPORT_ATTENTION: reason` line
 files a report with a followup. The same failure again, while that report is
-open, adds to its repeat count instead. A clean run after a failed one writes
+open, adds to its repeat count instead. A failed job that proved its data
+safe prints `SD_REPORT_ATTENTION: data safe, one step failed: <step>`, and
+its report takes that line as its title; any other failure is titled
+`data at risk` (system sd:6030). Only a line after the run's own
+`[<job>] <time> starting` line counts, so a carried lost run never grades
+the next one; a run without exactly one such line is at risk. A clean run after a failed one writes
 only its heartbeat, which says the job recovered; it files no report (pack
 sd:3509). A quiet success writes the heartbeat and no report. Success
 is still not a claim that no findings exist; a job states findings with the

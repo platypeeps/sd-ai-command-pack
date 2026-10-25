@@ -256,7 +256,8 @@ class IdempotencyTests(InstallerHarness):
         design: `PreToolUse` sees a skill invoked or its `SKILL.md` read,
         `UserPromptSubmit` sees the bare slash form, which reaches no tool
         call at all. The last names the two tools that file a GitHub issue,
-        and nothing wider (sd:2256). Pinned whole, because what the pack registers in
+        and nothing wider (sd:2256). `sd-session-beat` keeps the session
+        registry: the tools that name a path, and the end (sd:6024). Pinned whole, because what the pack registers in
         somebody else's settings file is not a detail to drift.
         """
         self.assertEqual(
@@ -268,6 +269,8 @@ class IdempotencyTests(InstallerHarness):
                 ("bin/sd-skill-use", "UserPromptSubmit", ("",)),
                 ("bin/sd-issue-guard", "PreToolUse",
                  ("Bash|mcp__github__issue_write",)),
+                ("bin/sd-session-beat", "PreToolUse", ("Bash|Edit|Write|NotebookEdit",)),
+                ("bin/sd-session-beat", "SessionEnd", ("",)),
             ),
         )
 
