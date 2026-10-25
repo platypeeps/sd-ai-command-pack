@@ -420,7 +420,7 @@ let polling = 0;
       : rows.length ? html`${rows.map(o => html`<tr data-id="${o.key}" aria-selected="${o.key === selected ? 'true' : 'false'}">
         <td class="id num">sd:${o.id}</td><td class="g g-${o.state}" aria-label="${o.state}">${GLYPH[o.state]}</td>
         <td class="what"><button type="button">${o.title}</button>${o.p == null ? '' : html` <span class="tag real">P${o.p}</span>`}<div class="detail">${dueText(o)}</div></td>
-        <td class="hide-sm">${o.kind}</td><td class="detail hide-sm">${dueText(o)}</td><td class="src hide-sm">${o.status}</td>
+        <td class="hide-sm">${o.kind}</td><td class="detail hide-sm due">${dueText(o)}</td><td class="src hide-sm">${o.status}</td>
         <td class="act">${C.rowActions(o.key)}</td></tr>`)}`
       : html`<tr><td colspan="7" class="why">No open item in the checkout.${obShow === 'open' && OBD.length ? ` All lists the ${plural(OBD.length, 'item')} done this week.` : ''}</td></tr>`);
   }

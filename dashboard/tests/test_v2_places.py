@@ -722,6 +722,13 @@ await go('#view=reports'); R.reports = ELS['reports-rows'].html; seg('reports', 
         self.assertIn(row(self.swept), out["R"]["tasks"])
         self.assertIn('data-f="tasks" data-v="all" aria-pressed="true"', out["R"]["tasks"])
 
+    def test_a_tasks_due_cell_and_a_reports_when_cell_are_date_cells(self):
+        # sd:6185: shell.css's date-cell rule keeps them on one line; the Due cell carries its class too.
+        out = self.run_page("await go('#view=tasks'); R.tasks = ELS['tasks-rows'].html; "
+                            "await go('#view=reports'); R.reports = ELS['reports-rows'].html;", self.acked_docs(), place="home")
+        self.assertIn('<td class="hide-sm due">', out["R"]["tasks"])
+        self.assertIn('<td class="when">', out["R"]["reports"])
+
     def test_each_tasks_and_reports_rows_primary_act_is_its_acknowledge(self):
         # sd:5752: a task's Done (task-details.js' own move), whatever its status, and a report's Acknowledge (report.ack).
         docs = self.acked_docs()

@@ -405,6 +405,18 @@ class TheSharedRules(unittest.TestCase):
             with self.subTest(name):
                 self.assertEqual(found, [])
 
+    def test_a_due_or_when_cell_keeps_its_date_on_one_line_and_no_page_lets_it_wrap(self):
+        """sd:6185: shell.css's one date-cell rule holds every Due and When cell to one line; no page loosens it, even in
+        a narrow container, and none sets a width for it."""
+        self.assertRegex(SHELL_CSS, r"(?m)^td:is\(\.due, \.when\) \{ white-space: nowrap; \}")
+        for name, css in PAGE_CSS.items():
+            found = []
+            for m in re.finditer(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", css, flags=re.S)):
+                if re.search(r"white-space:\s*(normal|pre-wrap)|(^|;)\s*(min-|max-)?width:", m.group(2)) and re.search(r"\.due\b", m.group(1)):
+                    found.append(m.group(1).strip())
+            with self.subTest(name):
+                self.assertEqual(found, [])
+
     def test_one_ledger_layout_auto_with_no_colgroup(self):
         self.assertNotIn("table-layout", SHELL_CSS)
         for name, text in {**PAGE_CSS, **PAGE_JS, **{p.name: p.read_text(encoding="utf-8") for p in V2.glob("*.html")}}.items():

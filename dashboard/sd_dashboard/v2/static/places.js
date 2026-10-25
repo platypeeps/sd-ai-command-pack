@@ -41,7 +41,7 @@
     // sd:5635: a task row is selected in place; Details is the Tasks page's (task-details.js), with a link to Tasks.
     tasks: (doc, rows) => [table([['ID', 'num'], ['What'], ['Kind', 'hide-sm'], ['Status'], ['Due', 'hide-sm'], ACT],
       rows.map(r => html`<tr data-id="${r.id}" aria-selected="${String(String(r.id) === sel.tasks)}"><td class="ref num">sd:${r.id}</td><td class="what"><button type="button">${r.title}</button></td>
-        <td class="hide-sm">${r.kind}</td><td>${r.status}</td><td class="hide-sm">${day(r.due) || '—'}</td>${act(String(r.id))}</tr>`),
+        <td class="hide-sm">${r.kind}</td><td>${r.status}</td><td class="hide-sm due">${day(r.due) || '—'}</td>${act(String(r.id))}</tr>`),
       rows.length || !doc.done?.length ? $('view-tasks')?.dataset.empty || 'No open item without a repo.'
         : `No open item. All lists the ${plural(doc.done.length, 'item')} done this week.`), ''],
     // sd:5620: a brief row is selected in place; Details is the Briefs page's (brief-details.js), with a link to Briefs.

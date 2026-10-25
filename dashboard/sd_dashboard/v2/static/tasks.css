@@ -138,9 +138,10 @@
 .list td.rp span { display: inline-block; max-width: 7rem; overflow: hidden; text-overflow: ellipsis; vertical-align: bottom; }
 @container (max-width: 64rem) {
   .list .rowact .btn.sm { display: none; }
-  /* With a base's Stage and Score (sd:3977) the list still needs room: every gutter narrows and Status and Due wrap. */
+  /* With a base's Stage and Score (sd:3977) the list still needs room: every gutter narrows and Status wraps; Due stays
+   * on one line (shell.css's date cell, sd:6185). */
   .list :is(th, td) { padding-inline: var(--space-2xs); }
-  .list td:is(.st, .due) { white-space: normal; }
+  .list td.st { white-space: normal; }
   .list td.title { min-width: 10.5rem; }
 }
 /* Narrower still, as beside the docked pane from 1240 to 1430 (sd:4037): Id and Repo fold into a line under the title and
