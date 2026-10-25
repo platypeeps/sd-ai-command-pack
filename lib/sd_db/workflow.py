@@ -717,17 +717,20 @@ def change_status(
         # the dashboard's status route and the pack's `sd task status`; the
         # runner moves its item through `writes.transition` and never here.
         active = connection.execute(
-            "SELECT id, status FROM assignment WHERE item = ? AND status IN ('queued', 'running') LIMIT 1",
+            "SELECT id, status, scope FROM assignment WHERE item = ? AND status IN ('queued', 'running') LIMIT 1",
             (item,),
         ).fetchone()
         if active:
             # The refusal names the row and the way out, as an action each
             # surface renders as its own control (sd:3503). A queued row has no
-            # process, so its cancel is the library's own. A running row has no
-            # cancel: the runner's stop went with the runner (sd:3041), and
-            # `operations.assignment_state` refuses it.
+            # process, so its cancel is the library's own. A running build's
+            # cancel asks its run to stop (pack sd:6093). Any other running row
+            # has no cancel: the runner's stop went with the runner (sd:3041),
+            # and `operations.assignment_state` refuses it.
             if active["status"] == "queued":
                 way_out = f"cancel queued assignment {active['id']} first"
+            elif active["scope"] == "build":
+                way_out = f"cancel running build assignment {active['id']} first"
             else:
                 way_out = "it is running, and no verb cancels a running assignment now that the runner is gone"
             raise TransitionRefused(f"item {item} has queued or running assignment {active['id']}; {way_out}")

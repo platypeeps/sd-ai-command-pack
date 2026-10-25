@@ -39,6 +39,10 @@ def write_raw(database: Path, record: dict) -> Path:
     return target
 
 
+#: The columns a record written after migration 042 carries beyond its first shape, each NULL.
+LATER = dict.fromkeys(runner_journal.LATER_COLUMNS)
+
+
 class Canonical(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="sd1447-")
@@ -49,28 +53,34 @@ class Canonical(unittest.TestCase):
         patcher.start()
         self.addCleanup(patcher.stop)
 
-    # Each record below carries `detached_from`, as one written after migration 018 does.
+    # Each record below carries `detached_from` and the build columns, as one written after migration 042 does.
 
     def test_an_absolute_path_under_the_home_becomes_the_key(self):
-        record = {"id": "a", "repo": str(self.home / "repos" / "x"), "detached_from": None}
-        self.assertEqual(runner_journal.canonical(record), {"id": "a", "repo": "~/repos/x", "detached_from": None})
+        record = {"id": "a", "repo": str(self.home / "repos" / "x"), **LATER}
+        self.assertEqual(runner_journal.canonical(record), {"id": "a", "repo": "~/repos/x", **LATER})
         self.assertEqual(record["repo"], str(self.home / "repos" / "x"), "the argument is not changed")
 
     def test_a_key_and_a_path_outside_the_home_are_kept(self):
         for repo in ("~/repos/x", "/srv/repos/x", "checkout"):
-            record = {"id": "a", "repo": repo, "detached_from": None}
+            record = {"id": "a", "repo": repo, **LATER}
             self.assertIs(runner_journal.canonical(record), record)
 
     def test_no_home_keeps_the_record_as_it_is(self):
-        record = {"id": "a", "repo": str(self.home / "repos" / "x"), "detached_from": None}
+        record = {"id": "a", "repo": str(self.home / "repos" / "x"), **LATER}
         with mock.patch.dict(os.environ, {"HOME": ""}):
             self.assertIs(runner_journal.canonical(record), record)
 
     def test_a_record_written_before_migration_018_reads_detached_from_as_null(self):
         """sd:2581: 018 added the column, so every older journal lacks the field and still matches its row."""
         record = {"id": "a", "repo": "~/repos/x"}
-        self.assertEqual(runner_journal.canonical(record), {**record, "detached_from": None})
+        self.assertEqual(runner_journal.canonical(record), {**record, **LATER})
         self.assertNotIn("detached_from", record, "the argument is not changed")
+
+    def test_a_record_written_before_migration_042_reads_the_build_columns_as_null(self):
+        """pack sd:6093: 042 added the build columns, and a runner run holds NULL in each; its journal still matches."""
+        record = {"id": "a", "repo": "~/repos/x", "detached_from": None}
+        self.assertEqual(runner_journal.canonical(record), {**record, **LATER})
+        self.assertNotIn("step", record, "the argument is not changed")
 
 
 class BackupCheck(unittest.TestCase):
@@ -153,6 +163,15 @@ class BackupCheck(unittest.TestCase):
         with self.assertRaisesRegex(BackupError, "conflicts with live evidence"):
             backup._compatible_runner_records({name: envelope({**old, "detail": "other"})}, {name: envelope(self.row)})
 
+    def test_a_journal_written_before_042_still_matches_its_row(self):
+        """pack sd:6093: 042 added the build columns, NULL on a runner run; the nightly check still passes."""
+        old = {name: value for name, value in self.row.items() if name not in runner_journal.LATER_COLUMNS[1:]}
+        write_raw(self.database, old)
+        backup._check_runner_records(self.db, self.database.parent)
+        with self.assertRaisesRegex(BackupError, "differs from the backup journal"):
+            write_raw(self.database, {**old, "detail": "other"})
+            backup._check_runner_records(self.db, self.database.parent)
+
     def test_persist_still_refuses_another_repository(self):
         write_raw(self.database, {**self.row, "repo": str(self.home / "repos" / "other")})
         with self.assertRaisesRegex(Exception, "identity changed: repo"):
@@ -174,7 +193,7 @@ class Detached(unittest.TestCase):
         self.database = Path(self.temp.name).resolve() / "sd.db"
         self.record = {"id": uuid.uuid4().hex, "assignment": 6, "run": 1, "repo": "/srv/repos/x", "branch": "sd/x",
                        "owner": "runner", "work_path": "/w", "retained_path": "/r", "created_at": STAMP,
-                       "journal_version": 3, "released_at": STAMP, "detached_from": None}
+                       "journal_version": 3, "released_at": STAMP, **LATER}
         self.row = {**self.record, "repo": None, "detached_from": "/srv/repos/x"}
 
     def test_a_detached_row_reads_its_journal_as_the_move(self):

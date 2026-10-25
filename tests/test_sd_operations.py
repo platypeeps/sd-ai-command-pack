@@ -90,6 +90,23 @@ class OperationsCLI(unittest.TestCase):
         self.service.cancel_assignment.assert_called_once_with(
             self.connection, 8, expected_revision="fresh", who="operator")
 
+    def test_assignments_build_queues_every_item_on_a_write_connection(self):
+        """pack sd:6093: the Build press from the CLI, the items as `sd:N` or bare."""
+        queue = Mock(return_value=[{"id": 31, "item": 7, "status": "queued"}, {"id": 32, "item": 9, "status": "queued"}])
+        builds = types.ModuleType("sd_db.build")
+        builds.queue = queue
+        with patch.dict(sys.modules, {"sd_db.build": builds}), patch.object(sd_db, "build", builds, create=True):
+            code, output = self.call("assignments", "build", "sd:7", "9")
+            with self.assertRaises(cli.WorkRefusal):
+                queue.side_effect = sd_db.SdDbError("item 9 is planning; a build takes a ready item")
+                self.call("assignments", "build", "9")
+        self.assertEqual(code, 0)
+        self.assertEqual(output.splitlines(), ["#31  queued  build  sd:7", "#32  queued  build  sd:9"])
+        self.assertEqual(queue.call_args_list[0].args[1:], ([7, 9],))
+        self.assertEqual(queue.call_args_list[0].kwargs, {"who": "operator"})
+        self.connect.assert_called_with(sd_db, write=True)
+        self.assertEqual(self.connection.close.call_count, 2)
+
     def test_invalid_assignment_identity_refuses_and_closes_connection(self):
         with self.assertRaises(cli.WorkRefusal):
             self.call("assignments", "get", "not-an-id", "--json")
