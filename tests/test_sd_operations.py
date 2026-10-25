@@ -4,6 +4,7 @@ import argparse
 import importlib
 import io
 import json
+import sqlite3
 import sys
 import types
 import unittest
@@ -135,6 +136,63 @@ class OperationsCLI(unittest.TestCase):
         self.assertIn("claimed 1, spawned 1", output)
         self.connect.assert_called_with(sd_db, write=True)
         self.connection.close.assert_called_once()
+
+    def test_a_spawn_runs_the_supervise_verb_the_real_parser_reads(self):
+        """Review round 1: the spawned argv is `sd`'s own `assignments supervise RUN`, parsed by the real parser."""
+        run = self.builds()
+        sys.modules["sd_db.build"].run = Mock(return_value={"repo": "/repo"})
+        run.spawn, run.log_dir = Mock(), lambda root, repo: root
+        run.dispatch.side_effect = lambda connection, **kwargs: (kwargs["spawn"]("r1"), {
+            "reaped": [], "moved": [], "claimed": [], "spawned": ["r1"], "why": ""})[1]
+        with patch.object(cli, "gate_load", return_value=(1.0, 0.0)), \
+                patch.object(cli, "interactive_builders", return_value=[]), \
+                patch.object(cli, "log_root", return_value=Path("/bulk")):
+            self.call("assignments", "dispatch")
+        argv = run.spawn.call_args.args[0]
+        self.assertEqual(Path(argv[1]), ROOT / "bin" / "sd")
+        arguments = self.parser.parse_args(argv[2:])
+        self.assertEqual((arguments.handler, arguments.run), (cli.supervise_build, "r1"))
+        self.assertEqual(run.spawn.call_args.kwargs["log"], Path("/bulk/r1.supervisor.log"))
+
+    def test_interactive_builders_count_as_the_dashboard_counts_them(self):
+        """Review round 1: one entry per slot the dashboard's own `claude_sessions.builders` counts."""
+        with patch.object(sys, "path", [str(ROOT / "dashboard"), *sys.path]):
+            sessions_module = importlib.import_module("sd_dashboard.claude_sessions")
+        def session(ident, status, builder, agents, cwd="/repos/a/src"):
+            return {"id": ident, "name": ident, "cwd": cwd, "status": status, "builder": builder, "age": 5,
+                    "safe": {"state": "yes", "why": []},
+                    "agents": [{"name": f"{ident}-{n}", "builder": kind, "state": state, "age": 5}
+                               for n, (kind, state) in enumerate(agents)]}
+        listed = [session("s1", "busy", True, [(True, "running"), (False, "running"), (True, "stalled")]),
+                  session("s2", "idle", True, [(True, "running")], cwd="/elsewhere"),
+                  session("s3", "waiting", True, []), session("s4", "unknown", False, [(True, "unknown")])]
+        document = {"sessions": listed, "builders": sessions_module.builders(listed, "")}
+        connection = sqlite3.connect(":memory:")
+        connection.row_factory = sqlite3.Row
+        connection.execute("CREATE TABLE repo (path TEXT)")
+        connection.execute("INSERT INTO repo VALUES ('/repos/a')")
+        with patch.object(sessions_module, "document", return_value=document):
+            found = cli.interactive_builders(connection, "2026-10-25T09:00:00+00:00", lambda path: path)
+        self.assertEqual(len(found), document["builders"]["running"])
+        self.assertEqual([row["repo"] for row in found if row["session_id"] == "s1"], ["/repos/a"] * 3)
+
+    def test_the_log_folder_is_the_real_bulk_storage_setting(self):
+        """Review round 1: `log_root` reads `sd.bulk_storage_root` through `sd_lib`; a malformed one claims nothing."""
+        import tempfile
+        sd_lib = importlib.import_module("sd_lib")
+        with tempfile.TemporaryDirectory() as home:
+            config = Path(home) / sd_lib.CONFIG_RELATIVE_PATH
+            config.parent.mkdir(parents=True)
+            with patch.dict("os.environ", {"XDG_CONFIG_HOME": home}):
+                config.write_text(json.dumps({"config": {"sd": {"bulk_storage_root": home}}}))
+                self.assertEqual(cli.log_root(), Path(home))
+                config.write_text(json.dumps({"config": {"sd": {"bulk_storage_root": "relative/path"}}}))
+                run = self.builds()
+                with patch.object(cli, "gate_load", return_value=(1.0, 0.0)), \
+                        patch.object(cli, "interactive_builders", return_value=[]):
+                    code, _ = self.call("assignments", "dispatch")
+        self.assertEqual(code, 0)
+        self.assertIn("sd.bulk_storage_root", run.dispatch.call_args.kwargs["why"])
 
     def test_gate_load_is_unread_on_any_odd_answer(self):
         answers = [("", 1), ("{}", 0), (json.dumps({"load": [1, float("nan"), 1], "load_max": 40}), 0),

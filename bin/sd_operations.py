@@ -176,12 +176,16 @@ def tools(build_run: Any) -> Any:
 
 def dispatch_builds(args: argparse.Namespace) -> int:
     """`sd assignments dispatch`: one build-dispatch tick (pack sd:6094)."""
+    import sd_lib
     sd_db, build, build_run = build_modules()
-    root = log_root()
     why = ""
-    if root is None:
+    try:
+        root = log_root()
+    except sd_lib.ConfigError as error:  # a malformed setting is unread: no claim, but the reap and watch run
+        root, why = None, f"{error}, so a build run has no log folder"
+    if root is None and not why:
         why = "sd.bulk_storage_root is unset, so a build run has no log folder"
-    elif not (root.is_dir() and os.access(root, os.W_OK)):
+    elif root is not None and not (root.is_dir() and os.access(root, os.W_OK)):
         why = f"the log folder {root} is not writable"
     load, load_cap = gate_load()
     connection = sd_handoff_rows.connect(sd_db, write=True)
@@ -211,8 +215,12 @@ def dispatch_builds(args: argparse.Namespace) -> int:
 
 def supervise_build(args: argparse.Namespace) -> int:
     """`sd assignments supervise RUN`: walk one build run to the lane; the tick starts it in its own session."""
+    import sd_lib
     sd_db, _, build_run = build_modules()
-    root = log_root()
+    try:
+        root = log_root()
+    except sd_lib.ConfigError as error:
+        raise WorkRefusal(str(error)) from error
     if root is None:
         raise WorkRefusal("sd.bulk_storage_root is unset, so a build run has no log folder")
     connection = sd_handoff_rows.connect(sd_db, write=True)
