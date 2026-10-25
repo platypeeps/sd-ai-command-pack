@@ -195,6 +195,33 @@ class OperationsCLI(unittest.TestCase):
         self.assertEqual(len(found), document["builders"]["running"])
         self.assertEqual([row["repo"] for row in found if row["session_id"] == "s1"], ["/repos/a"] * 3)
 
+    def test_a_builder_in_a_linked_worktree_counts_against_its_repository(self):
+        """pack sd:6112: a cwd in a worktree outside the checkout is its registered repository, by git's common dir."""
+        with patch.object(sys, "path", [str(ROOT / "dashboard"), *sys.path]):
+            sessions_module = importlib.import_module("sd_dashboard.claude_sessions")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            checkout, linked, plain = root / "repos" / "a", root / "worktrees" / "a-branch", root / "plain"
+            plain.mkdir()
+            git = ["git", "-c", "user.name=Test", "-c", "user.email=test@example.test"]
+            cli.subprocess.run([*git, "init", "-q", str(checkout)], check=True)
+            cli.subprocess.run([*git, "-C", str(checkout), "commit", "-q", "--allow-empty", "-m", "start"], check=True)
+            cli.subprocess.run([*git, "-C", str(checkout), "worktree", "add", "-q", "-b", "branch", str(linked)],
+                               check=True)
+            (linked / "src").mkdir()
+            listed = [{"id": ident, "name": ident, "cwd": str(cwd), "status": "busy", "builder": True, "age": 5,
+                       "safe": {"state": "yes", "why": []}, "agents": []}
+                      for ident, cwd in (("s1", linked / "src"), ("s2", checkout), ("s3", plain))]
+            document = {"sessions": listed, "builders": sessions_module.builders(listed, "")}
+            connection = sqlite3.connect(":memory:")
+            connection.row_factory = sqlite3.Row
+            connection.execute("CREATE TABLE repo (path TEXT)")
+            connection.execute("INSERT INTO repo VALUES (?)", (str(checkout),))
+            with patch.object(sessions_module, "document", return_value=document):
+                found = cli.interactive_builders(connection, "2026-10-25T09:00:00+00:00", lambda path: path)
+        self.assertEqual([(row["session_id"], row["repo"]) for row in found],
+                         [("s1", str(checkout)), ("s2", str(checkout)), ("s3", None)])
+
     def test_the_log_folder_is_the_real_bulk_storage_setting(self):
         """Review round 1: `log_root` reads `sd.bulk_storage_root` through `sd_lib`; a malformed one claims nothing."""
         sd_lib = importlib.import_module("sd_lib")

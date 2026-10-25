@@ -63,6 +63,12 @@ its snapshot restored and compared, and never before. What the table says:
                      waits on it; P1-P3 are never touched.
                      `workflow.edit_item` clears `parked_at` to unpark one,
                      and sets it to park an item by hand (sd:5905).
+    idle planning    ninety days, then parked (sd:6008).  An open item in
+                     `planning` that never ran -- no `assignment` row --
+                     parks by the same touch rule, any priority, with its
+                     own note. An item that ran is left to its run's
+                     outcome. Reports and followups wait for a person, and
+                     a recurring item, like a dated one, waits on its date.
 
 There is no request-log rule, and the prd's table no longer names one (it
 said "the request log thirty days" until the 2026-09-12 amendment, sd:541).
@@ -126,6 +132,9 @@ CLEAN_REPORT_AGE = timedelta(days=7)
 #: How long an open P4 item may go untouched before retention parks it.
 P4_PARK_AGE = timedelta(days=30)
 
+#: How long a `planning` item that never ran may go untouched before retention parks it.
+PLANNING_PARK_AGE = timedelta(days=90)
+
 #: The `who` on the status_change note a settled report carries.
 RETENTION = "retention"
 
@@ -174,7 +183,7 @@ class Pruned:
                 f"{self.heartbeats} stale heartbeat row(s) removed, "
                 f"{self.checkpoints} superseded checkpoint row(s) removed, "
                 f"{self.clean_reports} clean report(s) settled, "
-                f"{self.parked} untouched P4 item(s) parked")
+                f"{self.parked} untouched item(s) parked")
 
 
 def _cutoff(now: datetime, age: timedelta) -> str:
@@ -313,31 +322,44 @@ def settle_clean_reports(connection, *, now: datetime) -> int:
 
 
 #: An item's last touch: its own `updated_at` or its newest note, whichever is later.
-_UNTOUCHED_P4 = """
+_UNTOUCHED = """
 SELECT id FROM item
- WHERE priority = 4 AND status != 'done' AND parked_at IS NULL AND piece IS NULL AND due IS NULL
+ WHERE status != 'done' AND parked_at IS NULL AND piece IS NULL AND due IS NULL AND recurrence IS NULL
    AND max(updated_at, coalesce((SELECT max(timestamp) FROM note WHERE note.item = item.id), '')) < ?
+   AND {rule}
  ORDER BY id
 """
 
+#: Each park rule: its age, its extra predicate and its note, P4 first.
+_PARK_RULES = (
+    (P4_PARK_AGE, "priority = 4", "Parked: P4 untouched for {days} days"),
+    (PLANNING_PARK_AGE,
+     "status = 'planning' AND kind NOT IN ('report', 'followup')"
+     " AND NOT EXISTS (SELECT 1 FROM assignment WHERE assignment.item = item.id)",
+     "Parked: planning, never run, untouched for {days} days"),
+)
 
-def park_untouched_p4(connection, *, now: datetime) -> list[int]:
-    """Park every open P4 item nobody touched for `P4_PARK_AGE`; return their ids.
+
+def park_untouched(connection, *, now: datetime) -> list[int]:
+    """Park every open item a `_PARK_RULES` rule finds untouched; return their ids.
 
     Touched means the item row changed (`updated_at`) or a note landed on it.
-    An item with a due date (every recurring one has one) is waiting on its
-    date, not stale, so it is never parked: parking would hide it from Today.
-    The read sits inside the `BEGIN IMMEDIATE` transaction, as in
-    `settle_clean_reports`, so a note landing mid-sweep is seen or waits.
+    An item with a due date or a recurrence is waiting on its date, not
+    stale, so it is never parked: parking would hide it from Today. The
+    rules run in order in one transaction, so an item both find is parked
+    once, by the first, with its note. The reads sit inside the `BEGIN
+    IMMEDIATE` transaction, as in `settle_clean_reports`, so a note landing
+    mid-sweep is seen or waits.
     """
-    cutoff = _cutoff(now, P4_PARK_AGE)
     stamp = now.astimezone(UTC).isoformat(timespec="seconds")
-    days = P4_PARK_AGE.days
+    ids: list[int] = []
     with transaction(connection):
-        ids = [row[0] for row in connection.execute(_UNTOUCHED_P4, (cutoff,))]
-        for item in ids:
-            set_item_fields(connection, item, parked_at=stamp)
-            add_note(connection, item, "comment", f"Parked: P4 untouched for {days} days", session=RETENTION)
+        for age, rule, note in _PARK_RULES:
+            found = [row[0] for row in connection.execute(_UNTOUCHED.format(rule=rule), (_cutoff(now, age),))]
+            for item in found:
+                set_item_fields(connection, item, parked_at=stamp)
+                add_note(connection, item, "comment", note.format(days=age.days), session=RETENTION)
+            ids.extend(found)
     return ids
 
 
@@ -375,7 +397,7 @@ def prune(connection, backup: Snapshot, *, now: datetime | None = None) -> Prune
     heartbeats = compact_heartbeats(connection, now=now)
     checkpoints = compact_checkpoints(connection, now=now)
     clean_reports = settle_clean_reports(connection, now=now)
-    parked = park_untouched_p4(connection, now=now)
+    parked = park_untouched(connection, now=now)
     result = Pruned(exec_outputs=exec_outputs, heartbeats=heartbeats, clean_reports=clean_reports, report=0,
                     parked=len(parked), checkpoints=checkpoints)
     text = (f"sd-db prune after backup {backup.directory.name} ({backup.run_id}): {result}; "

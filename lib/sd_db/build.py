@@ -169,6 +169,15 @@ def _key(repo: str | None) -> str | None:
     return paths.key(repo) if isinstance(repo, str) and repo.startswith("/") else repo
 
 
+def over_load(load: float, cap: float) -> str:
+    """Why no builder starts under this five-minute load, or "" (pack sd:6111).
+
+    A cap of 0 or less is the gate's load rule off, as the lane's `load_stop`
+    reads it; Start next on the dashboard reads the cap the same way.
+    """
+    return f"the five-minute load is {load:g}, above the cap of {cap:g}" if 0 < cap < load else ""
+
+
 def room(connection, *, load: float | None, load_cap: float | None, interactive: list[dict] | None) -> dict:
     """Builders that may start now: `machine`, `used` and `held` by repository, and `why` there is none.
 
@@ -202,9 +211,8 @@ def room(connection, *, load: float | None, load_cap: float | None, interactive:
             used[repo] = used.get(repo, 0) + 1
     held = sorted({row["repo"] for row in leases if row["scope"] != SCOPE and (row["exclusive"] or row["quarantine"])})
     machine = MACHINE_CAP - len(builds) - len(others)
-    # A cap of 0 or less is the gate's load rule off, as the lane's `load_stop` reads it.
-    if not why and isinstance(load, (int, float)) and isinstance(load_cap, (int, float)) and 0 < load_cap < load:
-        why = f"the five-minute load is {load:g}, above the cap of {load_cap:g}"
+    if not why and isinstance(load, (int, float)) and isinstance(load_cap, (int, float)):
+        why = over_load(load, load_cap)
     if not why and machine <= 0:
         why = f"{MACHINE_CAP - machine} builders run already; the cap is {MACHINE_CAP}"
     return {"machine": 0 if why else machine, "used": used, "held": held, "why": why}
