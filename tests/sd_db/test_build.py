@@ -302,6 +302,16 @@ class Writes(Case):
         row = build.run(self.db, self.bundle["id"])
         self.assertEqual((row["outcome"], row["released_at"], kill.calls), (None, None, []))
 
+    def test_an_abandoned_enqueued_run_releases_once_gone(self):
+        """Failure table, Restore: an enqueued run abandoned by a restore is held, then released once it reads gone."""
+        build.write(self.db, self.bundle["id"], step="enqueuing")
+        build.enqueued(self.db, self.bundle["id"])
+        recovery.prepare_restore(self.db)
+        build.reap(self.db, probe=Probe(alive=False))
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["step"], row["outcome"], row["released_at"] is not None), ("enqueued", "abandoned", True))
+        self.assertIsNone(build._held(self.db, self.items[0]), "no held run left")
+
     def test_reap_judges_a_checking_run(self):
         """Failure table, Checking: a fresh supervisor lost after the merge; gone, so settled and retried at that step."""
         build.write(self.db, self.bundle["id"], step="enqueuing")

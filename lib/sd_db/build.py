@@ -566,7 +566,8 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
        the `DOUBTS`th unsure reap in a row ends it blocked, not retried.
     3. `_settle` it in one transaction.
 
-    A run at `enqueued` is left alone: it waits on the lane, and no
+    A held run (`HELD`) goes to `_release` at any step, `enqueued` too. An
+    open run at `enqueued` is left alone: it waits on the lane, and no
     supervisor runs until the merge; `checking` and `cleaning` run under a
     fresh supervisor and take the verdict like any step. Nothing is reaped while a restore
     reimport is pending: `abandon` ended
@@ -578,10 +579,10 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
     if restoration_pending(connection):
         return settled
     for row in open_runs(connection):
-        if row["step"] == "enqueued":
-            continue
         if row["outcome"] in HELD:
             _release(connection, row, probe=probe)
+            continue
+        if row["step"] == "enqueued" and row["outcome"] is None:
             continue
         if row["outcome"] is None:
             if alive(row, now=now, probe=probe):
