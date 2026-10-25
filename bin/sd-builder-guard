@@ -11,6 +11,12 @@ for builders only and the lead's own background watches keep working.
   means the 120 s default): denied, naming the two fields to re-run with.
 - Bash whose command starts with `sleep`: denied.
 - Any tool whose name holds `Monitor`: denied.
+- Bash with a line that names `git` and then `stash`: denied with its reason
+  (sd:5985), except `stash list` and `stash show`. The rule moved here from
+  prose after it kept breaking. It is a text scan on purpose: three review
+  rounds found shell forms a parser missed. A mention, such as a commit
+  message, is a false deny the refusal says how to rephrase; a builder is
+  not hostile, and a miss costs lost work.
 
 It denies rather than rewriting the input with `updatedInput`. Every matching
 PreToolUse hook runs in parallel and the last `updatedInput` to arrive wins, so
@@ -41,7 +47,19 @@ WAIT = (
     f"the command itself in the foreground with timeout {TIMEOUT_MS}."
 )
 
+STASH = (
+    "A builder never runs git stash: git stash in a shared worktree hid or "
+    "dropped another writer's work. Commit the work on your branch instead; "
+    "git stash list and git stash show still pass. A line that only mentions "
+    "stash is refused too: put that text in a file, as git commit -F <file>."
+)
+
 SLEEP = re.compile(r"\s*sleep(\s|;|&|\||$)")
+
+#: A line naming `git`, then `stash` not followed by a read-only verb on the
+#: same line. `reason` joins continued lines first, so `git \` + newline +
+#: `stash` is one line.
+STASHES = re.compile(r"\bgit\b[^\n]*?\bstash\b(?![ \t]+(list|show)\b)")
 
 
 def reason(payload: dict) -> str | None:
@@ -54,6 +72,8 @@ def reason(payload: dict) -> str | None:
     tool_input = payload["tool_input"]
     if SLEEP.match(tool_input["command"]):
         return WAIT
+    if STASHES.search(tool_input["command"].replace("\\\n", " ")):
+        return STASH
     timeout = tool_input.get("timeout")
     if tool_input.get("run_in_background") or not isinstance(timeout, (int, float)) or timeout < TIMEOUT_MS:
         return FOREGROUND

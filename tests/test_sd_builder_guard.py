@@ -42,6 +42,32 @@ def bash(command: str, **fields: Any) -> str:
                        "tool_input": {"command": command, **fields}})
 
 
+#: Every form the review rounds of sd:5985 found, each a line the guard must deny.
+STASHES = (
+    "git stash", "git stash push -m wip", "git stash pop", "git stash drop", "git stash -q",
+    "git -C /tmp/wt stash", "git -c core.pager=cat stash apply", "/usr/bin/git stash",
+    "cd /tmp/wt && git stash", "make; git stash", "GIT_DIR=x git stash", "rtk git stash",
+    "rtk proxy git stash", "git --git-dir=/tmp/wt/.git stash clear",
+    "if git stash pop; then echo; fi", "if true; then git stash pop; fi",
+    "if false; then :; elif git stash; then :; fi", "if false; then :; else git stash; fi",
+    "for f in a; do git stash; done", "while git stash pop; do :; done",
+    "until git stash; do :; done", "! git stash", "time git stash", "{ git stash; }",
+    "(git stash)", "f() { git stash; }", "case x in x) git stash;; esac",
+    "echo $(git stash)", 'echo "$(git stash pop)"', "echo `git stash`", 'echo "`git stash`"',
+    "exec git stash", "exec -a name git stash", "xargs git stash", "xargs -n 1 git stash",
+    "env -u HOME git stash", "timeout 60 git stash", "timeout -s KILL 60 git stash pop",
+    "timeout -k 5 --signal=TERM 60s git stash", "gtimeout 60 git stash", "nice git stash",
+    "nice -n 10 git stash", "nohup git stash", "command git stash",
+    "timeout 600 nice -n 5 git -C /tmp/wt stash", "sh -c 'git stash'",
+    'bash -c "git stash pop"', "bash -lc 'git stash'", "eval git stash", "eval 'git stash'",
+    "cat <<EOF\nit's here\nEOF\ngit stash", "echo 'unbalanced; git stash pop",
+    'echo "open; git -C /tmp/wt stash', "echo $(echo $(git stash))",
+    "git status # x\ngit stash pop", "git stash list; git stash pop",
+    "git stash show && git stash drop", "2>/dev/null git stash pop", "/usr/bin/env git stash pop",
+    "git \\\nstash pop", "git stash\nlist=done",
+)
+
+
 class Decisions(unittest.TestCase):
     def decision(self, stdin: str) -> dict | None:
         result = run(stdin)
@@ -86,6 +112,31 @@ class Decisions(unittest.TestCase):
         for command in ("make test", "sleeper 30", "echo sleep 30"):
             with self.subTest(command=command):
                 self.assertIsNone(self.decision(bash(command, timeout=600000)))
+
+    def test_git_stash_in_every_form_is_denied_with_its_reason(self) -> None:
+        for command in STASHES:
+            with self.subTest(command=command):
+                self.assertDenied(bash(command, timeout=600000),
+                                  "git stash in a shared worktree hid or dropped "
+                                  "another writer's work")
+
+    def test_read_only_stash_and_other_commands_pass(self) -> None:
+        for command in ("git stash list", "git -C /tmp/wt stash show -p", "git status",
+                        "echo $(git rev-parse HEAD)", "timeout 60 git stash list",
+                        "nice -n 10 git status", "grep -n stash notes.txt",
+                        "if git status; then echo ok; fi", "bash -c 'git stash list'",
+                        "echo 'unbalanced", "cat <<EOF\nit's here\nEOF\ngit status",
+                        "git commit -F - <<'EOF'\nfix: drop the stash step\nEOF"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decision(bash(command, timeout=600000)))
+
+    def test_a_mention_is_an_accepted_false_deny_that_names_the_way_past(self) -> None:
+        """A builder is not hostile: a false deny costs a rephrase, a miss costs work."""
+        for command in ("echo git stash", "git commit -m 'git stash'", "git log --grep stash",
+                        "git -C stash status", "timeout -k 5 60 echo git stash",
+                        "cat <<'EOF'\ngit stash\nEOF"):
+            with self.subTest(command=command):
+                self.assertDenied(bash(command, timeout=600000), "git commit -F")
 
     def test_other_tools_pass(self) -> None:
         payload = json.dumps({"hook_event_name": "PreToolUse", "tool_name": "Read",
