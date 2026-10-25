@@ -45,6 +45,8 @@ _CODE_DELIVERY = re.compile(r"Code delivery (\S+) at ([0-9a-f]{40,64})\b")
 _PULL = re.compile(r"/pull/([0-9]+)\b")
 _BLOCKED_BECAUSE = re.compile(r"-> blocked by [^:\n]*: *(.*)")
 _WAITING = re.compile(r"\s*(?:waiting|waits)\s+(?:on|for)\b", re.IGNORECASE)
+#: A weekly grill: the task the KISS audit files under `sd task add --ref grill:<date>` (pack sd:6022).
+GRILL = "(item.source IS 'task-ref' AND substr(item.external_id, 1, 6) IS 'grill:')"
 
 
 def _keep(repos: Iterable[str] | None) -> set[str | None] | None:
@@ -159,8 +161,26 @@ def decisions(connection: sqlite3.Connection, *, repos: Iterable[str] | None = N
     """
     keep = _keep(repos)
     bodies = {note["id"]: note["body"] for note in open_notes(connection, "question", batches=False)}
+    grilled = {row["id"] for row in grill(connection, repos=repos)}
     return [row for row in _notes(connection, "question", keep, batches=False)
-            if len(OPTION_LINE.findall(bodies.get(row["note"], ""))) >= 2]
+            if len(OPTION_LINE.findall(bodies.get(row["note"], ""))) >= 2 and row["id"] not in grilled]
+
+
+def grill(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None) -> list[dict]:
+    """Open grill items with open questions, oldest first: `questions` (how many wait), `at` (when filed).
+
+    Their questions are no `decisions` rows: the operator answers them in one
+    fresh session by saying 'grill', and `sd today` says the grill is ready
+    (pack sd:6022).
+    """
+    where, values = _in("item.repo", _keep(repos))
+    return [dict(row) for row in connection.execute(
+        f"""
+        SELECT item.id, item.repo, item.title, item.created_at AS at, COUNT(note.id) AS questions
+          FROM item JOIN note ON note.item = item.id AND note.kind = 'question' AND note.resolved_at IS NULL
+         WHERE item.status != 'done' AND {_unparked_clause(connection)} AND {GRILL} AND {where}
+         GROUP BY item.id ORDER BY item.created_at ASC, item.id ASC
+        """, values)]
 
 
 def review_questions(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None) -> int:
@@ -396,9 +416,9 @@ def work(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None,
 
 def sections(connection: sqlite3.Connection, *, repos: Iterable[str] | None = None,
              now: str | None = None, gate: Any = None) -> dict[str, Any]:
-    """Every section in `ORDER`, read once, with `summary` counts first and `closed_by_hand` last.
+    """Every section in `ORDER`, read once, with `summary` counts first, then `closed_by_hand` and `grill`.
 
-    `summary["review_questions"]` counts what `decisions` leaves out.
+    `summary["review_questions"]` and `summary["grill"]` count what `decisions` leaves out.
     """
     keep = None if repos is None else sorted(set(repos))
     found: dict[str, Any] = {
@@ -421,4 +441,6 @@ def sections(connection: sqlite3.Connection, *, repos: Iterable[str] | None = No
     summary["planned_this_week"] = sum(1 for row in found["planned"] if row["due"] <= week)
     summary["closed_by_hand"] = len(by_hand)
     summary["review_questions"] = review_questions(connection, repos=keep)
-    return {"summary": summary, **{key: found[key] for key in ORDER}, "closed_by_hand": by_hand}
+    grilled = grill(connection, repos=keep)
+    summary["grill"] = sum(row["questions"] for row in grilled)
+    return {"summary": summary, **{key: found[key] for key in ORDER}, "closed_by_hand": by_hand, "grill": grilled}
