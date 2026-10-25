@@ -527,7 +527,8 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
        a cancel), and the run is left alone this tick.
     2. Take the `verdict`. `OURS`: kill the supervisor's group, then the
        builder's; a group that still has a process after the SIGKILL ends
-       the run blocked, not retried. `UNSURE`:
+       the run `blocked`, not retried, unreleased with its lease until
+       `_release` finds every group gone. `UNSURE`:
        the run stays ended and unreleased, its lease held, nothing killed;
        the `DOUBTS`th unsure reap in a row ends it blocked, not retried.
     3. `_settle` it in one transaction.
@@ -545,6 +546,9 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
         return settled
     for row in open_runs(connection):
         if row["step"] == "enqueued":
+            continue
+        if row["outcome"] == "blocked":
+            _release(connection, row, probe=probe)
             continue
         if row["outcome"] is None:
             if alive(row, now=now, probe=probe):
@@ -573,6 +577,27 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
         if result is not None:
             settled.append(result)
     return settled
+
+
+def _release(connection, read: dict, *, probe=Probe) -> bool:
+    """Release a blocked run, and its lease, once the supervisor and both groups are gone; True when released.
+
+    The probe alone decides: no kill, no retry, no note. Unsure or alive
+    leaves the run as it is for the next tick. The write matches the row
+    read, as the reap's compare-and-set does.
+    """
+    if verdict(read, probe=probe)[0] != GONE:
+        return False
+    if read["supervisor_pgid"] is not None and probe.group(read["supervisor_pgid"]) is not False:
+        return False
+    with transaction(connection):
+        stamp = clock()
+        if connection.execute(f"UPDATE runner_run SET released_at = ?, updated_at = ? WHERE id = ? AND {_SAME}",
+                              (stamp, stamp, read["id"], *(read[name] for name in REAP_READS))).rowcount != 1:
+            return False
+        connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
+                           (stamp, read["id"]))
+        return True
 
 
 def _doubt(connection, ident: str) -> int:
@@ -607,17 +632,22 @@ def _settle(connection, read: dict, *, block: str | None = None) -> dict | None:
         if row is None:
             return None
         stamp = clock()
-        connection.execute("UPDATE runner_run SET released_at = ?, updated_at = ? WHERE id = ?", (stamp, stamp, ident))
-        connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL", (stamp, ident))
         lead = row["assignment"]
         members = _members(connection, lead, "done" if row["step"] in LANE_STEPS else "running")
-        retry = None
         if block is not None:
+            # A process may live: the run stays unreleased and keeps its
+            # lease, so it still counts in `room`, until `_release` finds
+            # every group gone.
             reason = (f"build run {ident} ended at step {row['step']}: {block}; check the group, then requeue or "
                       f"cancel; log {row['log_path'] or 'none'}, worktree {row['work_path']}")
-            connection.execute("UPDATE runner_run SET detail = ? WHERE id = ?", (reason, ident))
+            connection.execute("UPDATE runner_run SET outcome = 'blocked', detail = ?, updated_at = ? WHERE id = ?",
+                               (reason, stamp, ident))
             _block(connection, members, reason, stamp)
-        elif row["outcome"] == "cancelled" or row["cancel_requested"]:
+            return {"run": ident, "outcome": "blocked", "retry": None, "blocked": block}
+        connection.execute("UPDATE runner_run SET released_at = ?, updated_at = ? WHERE id = ?", (stamp, stamp, ident))
+        connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL", (stamp, ident))
+        retry = None
+        if row["outcome"] == "cancelled" or row["cancel_requested"]:
             for member in members:
                 connection.execute("UPDATE assignment SET status = 'cancelled', ended = ?, result = ? WHERE id = ?",
                                    (stamp, row["detail"], member["id"]))

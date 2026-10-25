@@ -412,6 +412,45 @@ class Reap(Case):
         self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 1)
         self.assertEqual(self.statuses(self.items), ["blocked", "blocked"])
 
+    def test_a_survivor_keeps_its_lease(self):
+        """Failure table, Blocked: a group outlives SIGKILL; the run stays unreleased with its lease, a slot short."""
+        free = build.room(self.db, **IDLE)["machine"]
+        self.ended(builder_pgid=777, builder_start=START)
+        build.reap(self.db, probe=Probe(group=True), kill=Kill(self.db, gone=False))
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["outcome"], row["released_at"]), ("blocked", None))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 1)
+        self.assertEqual(build.room(self.db, **IDLE)["machine"], free, "the survivor still holds its slot")
+
+    def test_third_unsure_keeps_the_lease(self):
+        """Failure table, Blocked: the third unsure reap blocks the run but keeps it unreleased with its lease."""
+        self.ended(builder_pgid=777, builder_start=START)
+        for _ in range(build.DOUBTS):
+            build.reap(self.db, probe=Probe(started=None, group=True), kill=Kill(self.db))
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["outcome"], row["released_at"]), ("blocked", None))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 1)
+        self.assertEqual(self.statuses(self.items), ["blocked", "blocked"])
+
+    def test_blocked_run_releases_once_groups_are_gone(self):
+        """Failure table, Blocked: later ticks re-probe; alive or unsure changes nothing, ESRCH releases; never a retry."""
+        self.ended(builder_pgid=777, builder_start=START, supervisor_pid=4242, supervisor_pgid=4242,
+                   supervisor_start=START)
+        build.reap(self.db, probe=Probe(group=True), kill=Kill(self.db, gone=False))
+        notes = self.count("SELECT COUNT(*) FROM note WHERE kind = 'followup'")
+        for probe in (Probe(group=True), Probe(alive=None, group=None)):
+            kill = Kill(self.db)
+            self.assertEqual(build.reap(self.db, probe=probe, kill=kill), [])
+            self.assertEqual(kill.calls, [], "never killed again")
+            self.assertIsNone(build.run(self.db, self.bundle["id"])["released_at"])
+        kill = Kill(self.db)
+        build.reap(self.db, probe=Probe(alive=False, group=False), kill=kill)
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["outcome"], row["released_at"] is not None, kill.calls), ("blocked", True, []))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_lease WHERE released_at IS NULL"), 0)
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run"), 1, "no retry")
+        self.assertEqual(self.count("SELECT COUNT(*) FROM note WHERE kind = 'followup'"), notes, "no new followup")
+
     def ended(self, **fields):
         """The run as a reap that stopped after its compare-and-set left it."""
         build.write(self.db, self.bundle["id"], **fields)
