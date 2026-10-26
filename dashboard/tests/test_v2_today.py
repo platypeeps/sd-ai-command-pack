@@ -23,10 +23,9 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from sd_dashboard import now_screen, server, v2
-
 from test_now_screen import JobsBackend, fleet_document, repo
-from test_workflow_actions import BrowserSession
 from test_v2_registry import Registers
+from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent
 TODAY_JS = (V2 / "static" / "today.js").read_text(encoding="utf-8")

@@ -17,10 +17,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from sd_dashboard.server import NotFound, route
 from sd_db import reads, transition, update_assignment, upsert_shadow
 from sd_db.writes import record_cost
-from sd_dashboard.server import NotFound, route
-
 from support import ScreenCase
 
 DASHBOARD = Path(__file__).resolve().parents[1] / "sd_dashboard"

@@ -21,7 +21,6 @@ import unittest
 from pathlib import Path
 
 from sd_dashboard import v2
-
 from test_v2_today import OSASCRIPT
 
 V2 = Path(v2.__file__).resolve().parent

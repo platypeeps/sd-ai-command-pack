@@ -160,7 +160,8 @@ def _launch(directory: Path, label: str, text: str):
 
 def _row(connection, row: str, fleet, jobs):
     """The row's checkout, workspace label and prompt, from a read of its source now; see the module's last part."""
-    from . import now_screen  # now_screen reads active_sessions, which reads this module's NOTE
+    # now_screen reads active_sessions, which reads this module's NOTE
+    from . import now_screen
 
     found = ROW_ID.fullmatch(row)
     kind, name, source = found[1] or ("worktree" if row.startswith("worktrees:") else "dark"), found[2], found[3]

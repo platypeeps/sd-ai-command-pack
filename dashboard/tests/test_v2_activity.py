@@ -28,17 +28,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db.ship import note_merge
 from sd_dashboard import activity_screen, server, v2
-
+from sd_db.ship import note_merge
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend
 from test_v2_read import READ_SHELL
+from test_v2_registry import Registers
+from test_v2_shell_shared import cell_grammar
 from test_v2_tasks import SHELL, STAND_IN
 from test_v2_today import OSASCRIPT, Refused
 from test_workflow_actions import BrowserSession
-from test_v2_registry import Registers
-from test_v2_shell_shared import cell_grammar
 
 V2 = Path(v2.__file__).resolve().parent
 ACTIVITY_JS = (V2 / "static" / "activity.js").read_text(encoding="utf-8")

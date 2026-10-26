@@ -17,9 +17,8 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
-from sd_db import operations, runner_exec, writes
-
 from sd_dashboard import activity_screen, command_journal, research_deck
+from sd_db import operations, runner_exec, writes
 
 from .support import ScreenCase
 from .test_operations_actions import FakeBackend

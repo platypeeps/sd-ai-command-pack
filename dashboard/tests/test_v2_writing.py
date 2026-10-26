@@ -18,13 +18,10 @@ import re
 import subprocess
 import unittest
 from pathlib import Path
-
-from sd_db import upsert_repo, writing
-
 from unittest import mock
 
 from sd_dashboard import places, server, v2, writing_screen
-
+from sd_db import upsert_repo, writing
 from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
 from test_v2_tasks import SHELL, STAND_IN

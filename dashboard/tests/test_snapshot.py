@@ -13,8 +13,14 @@ import json
 import threading
 import unittest
 
-from sd_dashboard import fleet, health_screen, metrics_screen, now_screen, server, snapshot
-
+from sd_dashboard import (
+    fleet,
+    health_screen,
+    metrics_screen,
+    now_screen,
+    server,
+    snapshot,
+)
 from support import NOW, ScreenCase
 from test_workflow_actions import BrowserSession
 

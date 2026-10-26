@@ -10,10 +10,9 @@ check.
 import re
 from unittest.mock import patch
 
+from fleet_support import FleetCase, SlowStart
 from sd_dashboard import fleet, operations_screen
 from sd_dashboard.sessions_screen import sessions_panel
-
-from fleet_support import FleetCase, SlowStart
 
 PS = ("  4242 01:02:03 /Users/pat/repos/pack/bin/sd-review --json\n"
       "  4243    00:07 sd store item 719 --json\n"

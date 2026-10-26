@@ -17,8 +17,8 @@ import json
 import socketserver
 from unittest.mock import patch
 
-from sd_db import repos, workflow
 from sd_dashboard import server
+from sd_db import repos, workflow
 from test_workflow_actions import BrowserSession
 
 

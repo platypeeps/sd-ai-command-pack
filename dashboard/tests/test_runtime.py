@@ -688,8 +688,8 @@ class BuildIdentity(unittest.TestCase):
         self.assertEqual(json.loads(done.stdout), sorted(PACK_MODULES))
 
     def test_health_keeps_startup_digests_and_refuses_changed_disk_build(self):
-        from sd_db.migrate import initialise
         from sd_dashboard import server
+        from sd_db.migrate import initialise
 
         database = self.root / "sd.db"
         initialise(database)
@@ -723,8 +723,8 @@ class BuildIdentity(unittest.TestCase):
 
     def test_health_reports_the_commit_the_process_started_on(self):
         """sd:3528: /health names the commit captured at start, not the checkout's HEAD now."""
-        from sd_db.migrate import initialise
         from sd_dashboard import server
+        from sd_db.migrate import initialise
 
         database = self.root / "sd.db"
         initialise(database)
@@ -749,8 +749,8 @@ class BuildIdentity(unittest.TestCase):
         self.assertEqual(body["commit"], "a" * 40)
 
     def test_a_commit_that_cannot_be_read_still_starts_the_server(self):
-        from sd_db.migrate import initialise
         from sd_dashboard import server
+        from sd_db.migrate import initialise
 
         database = self.root / "sd.db"
         initialise(database)
@@ -765,8 +765,8 @@ class BuildIdentity(unittest.TestCase):
 
         `disk` patches what `build_digests` reads next; by default a changed dashboard digest.
         """
-        from sd_db.migrate import initialise
         from sd_dashboard import server
+        from sd_db.migrate import initialise
 
         database = self.root / "sd.db"
         initialise(database)
@@ -960,6 +960,7 @@ class PackLibrary(unittest.TestCase):
 
     def test_the_restart_probe_imports_sd_db_from_the_packs_lib(self):
         from unittest.mock import Mock
+
         from sd_dashboard import server
         marker = self.home / "probe-library-ran"
         self.source.write_text(f"open({str(marker)!r}, 'w').write(__file__)\n"

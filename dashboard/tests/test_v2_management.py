@@ -26,17 +26,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_dashboard import management_screen, server, upload_link, v2
 from sd_db import repos, upsert_repo, upsert_shadow, workflow, writes
 from sd_db.errors import SdDbError
-from sd_dashboard import management_screen, server, upload_link, v2
-
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document, tree
+from test_v2_read import READ_SHELL
+from test_v2_registry import Registers
 from test_v2_tasks import SHELL, STAND_IN
 from test_v2_today import OSASCRIPT, Refused
 from test_workflow_actions import BrowserSession
-from test_v2_registry import Registers
-from test_v2_read import READ_SHELL
 
 V2 = Path(v2.__file__).resolve().parent
 PAGE_JS = (V2 / "static" / "management.js").read_text(encoding="utf-8")

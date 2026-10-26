@@ -18,12 +18,10 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import sessions, workflow
-from sd_db.ship import this_host
-
 from sd_dashboard import health_collectors, health_screen
 from sd_dashboard.health_collectors import Walk
-
+from sd_db import sessions, workflow
+from sd_db.ship import this_host
 from support import ScreenCase
 from test_health_cleanup import Isolated, git
 

@@ -20,9 +20,8 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import workflow, writes
 from sd_dashboard import research_screen
-
+from sd_db import workflow, writes
 from test_workflow_actions import BrowserSession
 
 LEDGER = """# Source Registry

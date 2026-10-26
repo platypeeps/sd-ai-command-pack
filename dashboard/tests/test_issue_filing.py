@@ -22,11 +22,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import repos, workflow, writes
-from sd_db.testing import FixtureRemote, GitHubDouble, gh_environment, install_gh, patience
 from sd_dashboard import command_journal, issue_filing, management_screen, tasks_screen
 from sd_dashboard.issue_filing import REMOVED, findings, sanitize, scan
-
+from sd_db import repos, workflow, writes
+from sd_db.testing import (
+    FixtureRemote,
+    GitHubDouble,
+    gh_environment,
+    install_gh,
+    patience,
+)
 from test_workflow_actions import BrowserSession
 
 SETTLE = 30

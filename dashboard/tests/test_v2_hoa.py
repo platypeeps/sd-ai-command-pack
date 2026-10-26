@@ -29,17 +29,15 @@ from pathlib import Path
 from unittest import mock
 
 from sd_dashboard import hoa_download, hoa_screen, places, server, v2
-
 from sd_db import SdDbError, connect, upsert_repo, workflow, writes
 from sd_db.migrate import initialise
-
 from support import NOW, ScreenCase, before_5648
-from test_v2_today import OSASCRIPT, Refused
 from test_v2_read import READ_SHELL
-from test_v2_tasks import SHELL, STAND_IN
-from test_workflow_actions import BrowserSession
 from test_v2_registry import Registers
 from test_v2_shell_shared import cell_grammar
+from test_v2_tasks import SHELL, STAND_IN
+from test_v2_today import OSASCRIPT, Refused
+from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent
 HOA_JS = (V2 / "static" / "hoa.js").read_text(encoding="utf-8")
@@ -954,7 +952,7 @@ press('all'); R.all = ELS['al-body'].html;""", self.acked_doc())
         self.assertIn("Every alarm event in the last 30 days is acknowledged", out["R"]["al"])
 
     def test_acknowledge_posts_the_key_and_undo_posts_it_back(self):
-        out = self.run_page(f"""ANSWER = (path, body) => path === '/api/hoa' ? [200, DOC] : [200, {{ key: body.key, hidden: body.acked }}];
+        out = self.run_page("""ANSWER = (path, body) => path === '/api/hoa' ? [200, DOC] : [200, { key: body.key, hidden: body.acked }];
 const o = OBJ.get('alarm:2026-09-05 06:00:00 Tank Low Alarm');
 R.when = cmd('alarm.ack').when(o); R.off = cmd('alarm.unack').when(o);
 C.run(cmd('alarm.ack'), o); await flush();

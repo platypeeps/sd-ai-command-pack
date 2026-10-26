@@ -9,9 +9,8 @@ the page makes. An `item_state` call opens the savepoint `sd_workflow_state`; `r
 
 from __future__ import annotations
 
-from sd_db import reporting, workflow
 from sd_dashboard import decisions, now_screen, reports_screen, review_screen
-
+from sd_db import reporting, workflow
 from support import NOW, ScreenCase
 from test_v2_review import seed as seed_review
 

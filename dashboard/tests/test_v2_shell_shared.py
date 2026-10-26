@@ -21,7 +21,15 @@ import subprocess
 import unittest
 from html.parser import HTMLParser
 
-from test_v2_tasks import FETCH_JS, LIST_JS, MARKUP_JS, SETTLE_JS, SHELL_JS, STAND_IN, V2
+from test_v2_tasks import (
+    FETCH_JS,
+    LIST_JS,
+    MARKUP_JS,
+    SETTLE_JS,
+    SHELL_JS,
+    STAND_IN,
+    V2,
+)
 from test_v2_today import OSASCRIPT
 
 STATIC = V2 / "static"

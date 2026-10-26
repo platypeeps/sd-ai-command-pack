@@ -28,7 +28,6 @@ from unittest import mock
 from zoneinfo import ZoneInfo
 
 from sd_dashboard import command_journal, hoa_download
-
 from test_workflow_actions import BrowserSession
 
 #: claude: records its argv, prints a stream-json reply by `mode`; `login` waits for `release` after its WAITING line.

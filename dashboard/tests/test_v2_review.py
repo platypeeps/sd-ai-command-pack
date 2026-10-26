@@ -20,9 +20,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import review, workflow
 from sd_dashboard import decisions, review_screen, v2
-
+from sd_db import review, workflow
 from support import ScreenCase, before_5648
 from test_v2_registry import GROUP_BLOCK, Registers
 from test_v2_tasks import MARKUP_JS, SHELL, STAND_IN
@@ -360,7 +359,7 @@ class TodaysDecisions(ScreenCase):
 
     def test_the_batch_ref_today_names_is_the_one_review_files_under(self):
         self.assertEqual(decisions.BATCH_SOURCE, review.REF_SOURCE)
-        self.assertTrue(f"review:labels:C1".startswith(decisions.BATCH_PREFIX))
+        self.assertTrue("review:labels:C1".startswith(decisions.BATCH_PREFIX))
 
 
 class ThePage(unittest.TestCase):

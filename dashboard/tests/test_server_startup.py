@@ -3,7 +3,6 @@
 import http.client
 import io
 import json
-from pathlib import Path
 import socket
 import subprocess
 import sys
@@ -11,10 +10,11 @@ import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import ANY, Mock, patch
 
-from sd_db.testing import patience
 from sd_dashboard import runtime, server
+from sd_db.testing import patience
 
 
 class ServerStartup(unittest.TestCase):

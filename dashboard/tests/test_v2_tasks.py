@@ -24,17 +24,16 @@ import re
 import subprocess
 import unittest
 from pathlib import Path
-from urllib.parse import quote, urlencode, urlsplit
 from unittest.mock import patch
+from urllib.parse import quote, urlencode, urlsplit
 
-from sd_db import connect, reads, set_item_fields, upsert_repo, workflow
 from sd_dashboard import server, tasks_screen, v2
-
+from sd_db import connect, reads, set_item_fields, upsert_repo, workflow
 from support import NOW, ScreenCase, transition, upsert_shadow
 from test_v2_read import READ_SHELL
+from test_v2_registry import Registers
 from test_v2_today import OSASCRIPT, Refused
 from test_workflow_actions import BrowserSession
-from test_v2_registry import Registers
 
 V2 = Path(v2.__file__).resolve().parent
 TASKS_JS = (V2 / "static" / "tasks.js").read_text(encoding="utf-8")
@@ -1562,7 +1561,7 @@ box.listeners.keydown.forEach(f => f({ key: 'Enter', preventDefault() {}, stopPr
         row = self.row("plan")
         enter = """var box = document.getElementById('shift-in'); box.value = %s;
 box.listeners.keydown.forEach(f => f({ key: 'Enter', preventDefault() {}, stopPropagation() {} })); await flush();"""
-        out = self.run_page(enter % "'Ship it'" + "\n" + enter % "'Ship that p1'" + f"""
+        out = self.run_page(enter % "'Ship it'" + "\n" + enter % "'Ship that p1'" + """
 R.filtered = window.PAGE_REPO(null);""", "(path, body) => [201, { item: { id: 99, title: body.title } }]", search=f"?repo={row['repo']}")
         self.assertEqual([p[1] for p in out["posts"][:2]], [{"title": "Ship it", "priority": 3, "repo": row["repo_path"]},
                                                            {"title": "Ship that", "priority": 1, "repo": row["repo_path"]}])

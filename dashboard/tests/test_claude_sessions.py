@@ -7,12 +7,10 @@ the real claude, `ps` or git.
 
 import json
 import os
-import time
 import unittest
 from pathlib import Path
 
 from sd_dashboard import claude_sessions, fix_session
-
 from support import ScreenCase, transition
 
 NOW = "2026-09-06T12:00:00Z"

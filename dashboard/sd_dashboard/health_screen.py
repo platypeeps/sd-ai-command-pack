@@ -66,15 +66,14 @@ import subprocess
 import sys
 import threading
 import time
-from datetime import datetime, timezone
 from concurrent.futures import Future
 from concurrent.futures import TimeoutError as FutureTimeout
+from datetime import datetime, timezone
 from pathlib import Path
 
+from sd_db import protection as protection_module
 from sd_db import reads, repos
 from sd_db.errors import SdDbError
-
-from sd_db import protection as protection_module
 
 from . import fleet as fleet_module
 from . import health_collectors, ports_screen, runtime, snooze

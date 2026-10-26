@@ -68,9 +68,9 @@ import os
 import re
 import socket
 import sqlite3
-import uuid
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 

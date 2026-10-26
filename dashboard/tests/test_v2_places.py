@@ -12,19 +12,32 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-import sqlite3
-
-from sd_db import repos, reporting, routine_briefs, upsert_repo, upsert_shadow, workflow, writes
-
-from sd_dashboard import hoa_screen, places, reports_screen, snooze, tasks_screen, today_reports, v2
-
 import test_v2_tasks
+from sd_dashboard import (
+    hoa_screen,
+    places,
+    reports_screen,
+    snooze,
+    tasks_screen,
+    today_reports,
+    v2,
+)
+from sd_db import (
+    reporting,
+    repos,
+    routine_briefs,
+    upsert_repo,
+    upsert_shadow,
+    workflow,
+    writes,
+)
 from support import NOW, ScreenCase, before_5648
 from test_now_screen import JobsBackend
 from test_v2_tasks import SHELL, STAND_IN
@@ -787,7 +800,7 @@ await go('#view=reports'); R.reports = ELS['reports-rows'].html; seg('reports', 
         out = self.run_page(self.ACTS + """await go('#view=tasks'); R.tasks = ELS['tasks-rows'].html;
 await go('#view=reports'); R.reports = ELS['reports-rows'].html;""", docs, place="home")
         r = out["R"]
-        self.assertIn(f'<td class="what"><button type="button">Clean the gutters</button></td>', r["tasks"])
+        self.assertIn('<td class="what"><button type="button">Clean the gutters</button></td>', r["tasks"])
         self.assertRegex(r["tasks"], rf'(?s)<tr data-id="{self.home_item}" .*?<i data-act="item.status.done"></i></td></tr>')
         self.assertRegex(r["reports"], rf'(?s)<tr data-id="r{self.open_report}" .*?<i data-act="report.ack"></i></td></tr>')
         self.assertIn('<th scope="col" class=""><span class="sr">Actions</span></th>', r["tasks"])

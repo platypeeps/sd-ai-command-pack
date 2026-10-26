@@ -33,7 +33,6 @@ from unittest import mock
 
 from sd_dashboard import now_screen, pack_bin, places, queue_screen, v2
 from sd_db import upsert_repo
-
 from support import NOW, ScreenCase
 from test_v2_read import READ_SHELL
 from test_v2_registry import GROUP_BLOCK, Registers

@@ -9,9 +9,8 @@ drew it was retired in sd:3402.
 import os
 from unittest.mock import patch
 
-from sd_dashboard import fleet
-
 from fleet_support import FleetCase, SlowStart
+from sd_dashboard import fleet
 
 
 class ReposRead(FleetCase):

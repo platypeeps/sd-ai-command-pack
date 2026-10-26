@@ -36,12 +36,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import progress, reads, repos, upsert_repo
-from sd_db.writes import set_item_fields
-
 from sd_dashboard import today_github, v2
 from sd_dashboard.v2 import pages
-
+from sd_db import progress, reads, repos, upsert_repo
+from sd_db.writes import set_item_fields
 from support import NOW, ScreenCase, upsert_shadow
 from test_v2_tasks import MARKUP_JS, SHELL, SHELL_JS, STAND_IN
 from test_v2_today import OSASCRIPT

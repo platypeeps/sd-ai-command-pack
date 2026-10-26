@@ -16,10 +16,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import repos
 from sd_dashboard import issues, now_screen, review_screen, v2
 from sd_dashboard.v2.pages import Read
-
+from sd_db import repos
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document
 from test_v2_registry import GROUP_BLOCK, Registers, registry

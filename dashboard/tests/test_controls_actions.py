@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_dashboard import controls
 from sd_db import (
     connect,
     create_assignment,
@@ -16,7 +17,6 @@ from sd_db import (
     workflow,
 )
 from sd_db.writes import add_note, upsert_repo
-from sd_dashboard import controls
 
 from .test_capture_screen import Fields
 from .test_workflow_actions import BrowserSession

@@ -21,7 +21,6 @@ import unittest
 from pathlib import Path
 
 from sd_dashboard import v2
-
 from test_workflow_actions import BrowserSession
 
 HERE = Path(__file__).resolve().parents[1]

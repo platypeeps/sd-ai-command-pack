@@ -9,9 +9,9 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_dashboard import server, skills_screen
 from sd_db import registry, runner, skills_catalog
 from sd_db.writes import upsert_repo
-from sd_dashboard import server, skills_screen
 
 from .test_controls_actions import REGISTRY
 from .test_workflow_actions import BrowserSession

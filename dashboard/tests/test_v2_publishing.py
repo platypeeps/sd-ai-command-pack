@@ -20,11 +20,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import repos
-from sd_dashboard import documents_screen, publish_drain, publishing
-
 import test_v2_briefs as brief_tests
 import test_v2_documents as document_tests
+from sd_dashboard import documents_screen, publish_drain, publishing
+from sd_db import repos
 from support import NOW, ScreenCase
 
 CONF = '''DOCS = [

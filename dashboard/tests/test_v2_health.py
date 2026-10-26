@@ -34,18 +34,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_dashboard import health_collectors, health_screen, runtime, server, v2
 from sd_db import credentials, upsert_repo, writes
 from sd_db.writes import record_state, snooze
-
-from sd_dashboard import health_collectors, health_screen, runtime, server, v2
-
 from support import NOW, ScreenCase
-from test_v2_today import OSASCRIPT, Refused
 from test_v2_read import READ_SHELL
-from test_v2_tasks import SHELL, STAND_IN
-from test_workflow_actions import BrowserSession
 from test_v2_registry import Registers
 from test_v2_shell_shared import cell_grammar
+from test_v2_tasks import SHELL, STAND_IN
+from test_v2_today import OSASCRIPT, Refused
+from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent
 #: The real reader, before `Collectors` replaces it for every test.

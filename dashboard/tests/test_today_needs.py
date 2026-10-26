@@ -11,7 +11,6 @@ import sqlite3
 from unittest import mock
 
 from sd_dashboard import now_screen, queue_screen
-
 from support import NOW
 from test_now_screen import JobsBackend, fleet_document
 from test_today_reports import ReportsCase
@@ -291,9 +290,8 @@ class TheUnread(ReportsCase):
         """sd:5954: the dark rows a part read raised skipped the snooze, so they carried no `seen` and /api/snooze refused
         their Snooze. Each is split as Now's rows are: it carries a `seen`, a snooze holds it, and a snoozed one still
         names its lamp, so the lamp reads unknown (sd:5939)."""
-        from sd_db import writes
         from sd_dashboard import active_sessions, today_mail, today_reports
-
+        from sd_db import writes
         from test_now_screen import repo
 
         def lane_down(connection, now):

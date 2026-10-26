@@ -16,9 +16,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import workflow
 from sd_dashboard import fix_session
-
+from sd_db import workflow
 from test_now_screen import JobsBackend, fleet_document, repo, tree
 from test_workflow_actions import BrowserSession
 

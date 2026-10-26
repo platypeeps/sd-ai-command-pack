@@ -16,11 +16,9 @@ import re
 import subprocess
 from unittest import mock
 
-from sd_db import ship, upsert_repo, upsert_shadow, workflow, writes
-
 from sd_dashboard import command_journal, pr_close, today_github
 from sd_dashboard.issue_filing import GH
-
+from sd_db import ship, upsert_repo, upsert_shadow, workflow, writes
 from support import ScreenCase
 from test_workflow_actions import BrowserSession
 

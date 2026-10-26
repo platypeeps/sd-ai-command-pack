@@ -467,7 +467,7 @@ class Hashes(unittest.TestCase):
 
     def page(self, name, *bodies, extra=""):
         (self.out / name).write_text(
-            f'<html><script type="application/json">{{"a":1}}</script>'
+            '<html><script type="application/json">{"a":1}</script>'
             + "".join(f"<script>{body}</script>" for body in bodies) + f"{extra}</html>")
 
     def pinned(self, *bodies):

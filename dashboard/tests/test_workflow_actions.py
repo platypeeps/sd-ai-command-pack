@@ -10,10 +10,9 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import reads, workflow, upsert_repo, set_item_fields, upsert_shadow
-from sd_db.testing import patience
 from sd_dashboard import server
-
+from sd_db import reads, set_item_fields, upsert_repo, upsert_shadow, workflow
+from sd_db.testing import patience
 from support import ScreenCase
 
 
@@ -87,6 +86,7 @@ class BrowserSession(ScreenCase):
 class BrowserActions(BrowserSession):
     def test_local_health_reports_actual_schema_without_writing(self):
         import os
+
         from sd_db.schema import SCHEMA_VERSION
 
         before = self.snapshot()

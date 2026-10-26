@@ -24,18 +24,16 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import contributions, upsert_repo, writes
-
 from sd_dashboard import contribution_screen, server, v2
-
+from sd_db import contributions, upsert_repo, writes
 from support import NOW, ScreenCase
 from test_contribution_screen import contribution, seed_registered
-from test_v2_today import OSASCRIPT, Refused
 from test_v2_read import READ_SHELL
-from test_v2_tasks import SHELL, STAND_IN
-from test_workflow_actions import BrowserSession
 from test_v2_registry import Registers
 from test_v2_shell_shared import cell_grammar
+from test_v2_tasks import SHELL, STAND_IN
+from test_v2_today import OSASCRIPT, Refused
+from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent
 PAGE_JS = (V2 / "static" / "contributions.js").read_text(encoding="utf-8")

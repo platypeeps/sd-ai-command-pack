@@ -8,9 +8,9 @@ An optional IP listener authenticates its socket peer through Tailscale WhoIs;
 request headers never provide that listener's identity.
 """
 
-from dataclasses import dataclass
 import ipaddress
 import re
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from sd_db import tailnet
