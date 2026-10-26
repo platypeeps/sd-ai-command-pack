@@ -517,6 +517,11 @@ R.near = ELS.map.html;""", self.tract_doc())
         self.assertEqual(re.findall(r'<button type="button">([^<]+)</button>', out["R"]["al"]),
                          ["Tank Low Alarm", "A2 VSD Normal", "A2 VSD Alarm", "Generator Running"])
 
+    def test_the_due_cell_is_a_due_date_cell(self):
+        # sd:6185: the Due column carries shell.css's date-cell class, so "overdue 5 days" stays on one line.
+        out = self.run_page("R.ob = ELS['ob-body'].html;")
+        self.assertIn('<td class="detail hide-sm due">overdue 5 days</td>', out["R"]["ob"])
+
     # sd:4959: the HOA Tasks view is the one table of every open hoa item: the id is its own first column, every column
     # with data sorts through shell.list, a third click on a header returns to the urgency rank, and Kind narrows the rows.
     def sort(self, key):

@@ -90,6 +90,7 @@ Now and Work rows share one selection (sd:5654): pressing a row in either marks 
 
 **Decide**, at `/decide` in the rail's Now group (sd:5781), has two tabs: **Decisions** and **Scoring**, the review
 queue that was the Review page (`/review` opens Scoring). Its rail badge counts both. **Decisions** list the questions that wait on the operator, one button per option (sd:3012).
+Under them, **Rulings by session** groups the last 7 days of `decision` notes by the session that wrote them, each with its item's state (pack sd:6015); Reverse reopens the question a ruling answered.
 Ask one with a `question` note that carries one `Option: <text>` line per choice, at least two:
 `sd task note N $'Which store?\nOption: Pack store kind\nOption: Database rows' --kind question`.
 Keep each option short; the rest of the body is the question. A button writes the ruling as a `decision` note,
@@ -137,6 +138,14 @@ or screen; a section in none of the three, such as Notes or HOA, has no old
 screen, and the rail says it is not built yet. The classic screens' own nav links
 each ported section to its new page, read from the same registry (sd:2473); the
 palette still opens the kept classic screens.
+
+"Why is it like this?" starts in the palette (pack sd:6019). Type a file path
+and it lists the items the commits on that path cite (their `Closes:`,
+`Delivers:` or `Item:` trailers) or deliver (`Code delivery` notes). Type a
+rule's words and it lists the `sd:N` each matching line of a `CLAUDE.md`,
+`AGENTS.md` or `.claude/rules/` file cites. Each item opens its page, where
+its decisions, design and pull requests are. `/api/why?q=` serves it
+(`why_search.py`).
 
 The same script carries each page's rail badge, so every page shows every
 badge (sd:3446). The server writes it on each request, unversioned and never
@@ -197,6 +206,8 @@ The page reads each lane in-process with the pack's own `sd_lane`, the read `lan
 The header shows load5 with its 1- and 15-minute neighbours, and the gate slots in use against `sd gate status`'s cap.
 Each item is one row: merging (step, holder host, claim age, lease end; a passed lease lights caution), next (order, gate, head), building, blocked (status, step, the reason's first line, who acts), cancelled (when, head), or landed today (pull request, merge commit).
 Blocked and cancelled entries show for three days; older ones drop off.
+Under the lanes, Last 7 days shows each lane's median wait (enqueue to claim), median gate time (the speculative gate plus prepare) and slowest entry, enqueue to end, read from the entries' history rows (pack sd:6006).
+When a lane's median wait passes an hour, the hosted lane run files the parallel-lanes question on that repository's `Decide: parallel lanes` item, once a week at most.
 Building rows are the builder gate logs, `gate-*.log`, in the lane folder `lane list` names, `<lane root>/<checkout name>/lane`; set `sd.lane_root` where builders write them.
 Up, down, top, hold, release and cancel run `sd-ship lane move|hold|release|cancel` and nothing else.
 Cancel asks first. A cancelled row offers Re-queue (sd:3398): `lane retry <item> --expected-head <head>` queues the cancelled entry again, last, at the head the row showed (pack sd:3389).

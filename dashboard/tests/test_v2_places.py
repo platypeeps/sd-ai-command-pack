@@ -20,7 +20,7 @@ from unittest import mock
 
 import sqlite3
 
-from sd_db import reporting, routine_briefs, workflow, writes
+from sd_db import repos, reporting, routine_briefs, upsert_repo, upsert_shadow, workflow, writes
 
 from sd_dashboard import hoa_screen, places, reports_screen, snooze, tasks_screen, today_reports, v2
 
@@ -356,8 +356,8 @@ class TheRowWins(Fixture):
         self.assertIn("database is locked", briefs["reason"])
 
 
-class RealmPlaces(Fixture):
-    """sd:5663: a realm whose id is also a report family key is a place page, with HOA's and Home's three views."""
+class RealmFixture(Fixture):
+    """A realm acme with a report family of its id, an open item, a report and two briefs."""
 
     def setUp(self):
         super().setUp()
@@ -371,6 +371,10 @@ class RealmPlaces(Fixture):
         self.acme_report = report(self, "acme-nightly", "r4")
         self.site_brief = brief(self, "2026-09-05 - Site Notes", self.site)
         self.nightly_brief = brief(self, "2026-09-05 - Acme Nightly", self.other)
+
+
+class RealmPlaces(RealmFixture):
+    """sd:5663: a realm whose id is also a report family key is a place page, with HOA's and Home's three views."""
 
     def refuse(self):
         def refuse(connection, keys):
@@ -434,6 +438,52 @@ class RealmPlaces(Fixture):
         self.assertEqual(self.ids(places.tasks(self.connection, "hoa", now=NOW)), [self.hoa_item])
         self.assertEqual(self.ids(places.tasks(self.connection, "home", now=NOW)), [self.home_item])
         self.assertEqual(self.ids(places.briefs(self.connection, "home", now=NOW, config=self.config)), [self.fun_brief])
+
+
+class RealmIssues(RealmFixture):
+    """sd:6164: a realm place's Tasks also lists the operator's open GitHub and Jira issues that /api/github/issues reads
+    (issue sources and the shadow sync), only those of the realm's repos, each with its source; issue Hide (sd:6175)
+    marks a row hidden, which the page leaves out until Show hidden."""
+
+    MINE = {"/repos/acme-site": [
+        {"tracker": "jira", "url": "https://example.test/browse/ACME-8", "number": None, "title": "Fix the kit",
+         "state": "open", "reason": "filed", "last_seen": "2026-09-06T08:00:00+00:00"},
+        {"tracker": "github", "url": "https://github.com/example/acme-site/issues/12", "number": 12, "title": "Crash on start",
+         "state": "open", "reason": "assigned", "last_seen": "2026-09-05T08:00:00+00:00"}],
+        "/repos/system": [
+        {"tracker": "github", "url": "https://github.com/example/system/issues/3", "number": 3, "title": "Not the realm's",
+         "state": "open", "reason": "assigned", "last_seen": "2026-09-04T08:00:00+00:00"}]}
+
+    def setUp(self):
+        super().setUp()
+        upsert_repo(self.connection, self.site, remote="git@github.com:example/acme-site.git")
+        for number, state in ((30, "open"), (31, "closed")):
+            upsert_shadow(self.connection, tracker="github", url=f"https://github.com/example/acme-site/issues/{number}",
+                          repo="example/acme-site", number=number, kind="issue", title=f"Site {number}", state=state,
+                          reason="filed", filed=True, author="me", closed_at="2026-09-05T10:00:00Z" if state == "closed" else None)
+        upsert_shadow(self.connection, tracker="github", url="https://github.com/upstream/tool/issues/5", repo="upstream/tool",
+                      number=5, kind="issue", title="Upstream", state="open", reason="filed", filed=True, author="me")
+        writes.set_view(self.connection, "issue:jira:acme-8", hidden=True)
+        self.connection.commit()
+
+    def doc(self, area="acme"):
+        with mock.patch.object(repos, "mine_issues", create=True, return_value=self.MINE):
+            return places.tasks(self.connection, area, now=NOW)
+
+    def test_the_realms_open_issues_from_both_trackers_each_with_its_source_and_hidden(self):
+        doc = self.doc()
+        self.assertEqual([(r["tracker"], r["ref"], r["hidden"]) for r in doc["issues"]],
+                         [("Jira", "ACME-8", True), ("GitHub", "#12", False), ("GitHub", "#30", False)])
+        self.assertEqual((doc["issues_reason"], doc["issues_store"]), ("", {"available": True, "reason": ""}))
+        self.assertEqual(self.ids(doc), [self.acme_item], "the item rows stay as they were")
+
+    def test_a_failed_issue_read_is_named_and_hoa_and_home_list_none(self):
+        with mock.patch.object(repos, "mine_issues", create=True, side_effect=sqlite3.OperationalError("database is locked")):
+            doc = places.tasks(self.connection, "acme", now=NOW)
+        self.assertEqual([r["ref"] for r in doc["issues"]], ["#30"])
+        self.assertIn("database is locked", doc["issues_reason"])
+        for area in ("hoa", "home"):
+            self.assertNotIn("issues", self.doc(area))
 
 
 class TheRoutes(BrowserSession):
@@ -505,7 +555,9 @@ class ThePlaceScript(Fixture):
 
     #: The views each page's markup declares: [id, label, api]. HOA's Tasks is drawn by hoa.js, so it reads nothing here.
     VIEWS = {"hoa": [["overview", "Overview", None], ["tasks", "Tasks", None], ["briefs", "Briefs", "/api/hoa/briefs"], ["reports", "Reports", "/api/hoa/reports"]],
-             "home": [["overview", "Overview", None], ["tasks", "Tasks", "/api/home/tasks"], ["briefs", "Briefs", "/api/home/briefs"], ["reports", "Reports", "/api/home/reports"]]}
+             "home": [["overview", "Overview", None], ["tasks", "Tasks", "/api/home/tasks"], ["briefs", "Briefs", "/api/home/briefs"], ["reports", "Reports", "/api/home/reports"]],
+             # A realm place (place.html, sd:6162): every view reads its own document, the Overview too.
+             "acme": [[v, v.title(), f"/api/place/acme/{v}"] for v in ("overview", "tasks", "briefs", "reports")]}
 
     def run_page(self, body, docs, place="hoa", setup="", before=""):
         script = (STAND_IN + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL
@@ -722,6 +774,13 @@ await go('#view=reports'); R.reports = ELS['reports-rows'].html; seg('reports', 
         self.assertIn(row(self.swept), out["R"]["tasks"])
         self.assertIn('data-f="tasks" data-v="all" aria-pressed="true"', out["R"]["tasks"])
 
+    def test_a_tasks_due_cell_and_a_reports_when_cell_are_date_cells(self):
+        # sd:6185: shell.css's date-cell rule keeps them on one line; the Due cell carries its class too.
+        out = self.run_page("await go('#view=tasks'); R.tasks = ELS['tasks-rows'].html; "
+                            "await go('#view=reports'); R.reports = ELS['reports-rows'].html;", self.acked_docs(), place="home")
+        self.assertIn('<td class="hide-sm due">', out["R"]["tasks"])
+        self.assertIn('<td class="when">', out["R"]["reports"])
+
     def test_each_tasks_and_reports_rows_primary_act_is_its_acknowledge(self):
         # sd:5752: a task's Done (task-details.js' own move), whatever its status, and a report's Acknowledge (report.ack).
         docs = self.acked_docs()
@@ -842,6 +901,83 @@ await window.places.again(); await flush(); R.briefs = OUT.gets.slice(before);
 await go('#view=overview'); before = OUT.gets.length;
 await window.places.again(); await flush(); R.overview = OUT.gets.slice(before);""", self.docs())
         self.assertEqual((out["R"]["briefs"], out["R"]["overview"]), (["/api/hoa/briefs"], []))
+
+
+class TheOverviewScript(Fixture):
+    """sd:6162, sd:6164: places.js draws a realm place's Overview tiles from /api/place/<id>/overview, and a button posts the
+    tile's names, says what came of it and reads the view again."""
+
+    TILES = {"state": "read", "area": "acme", "read": NOW, "reason": "", "problems": [], "rows": [
+        {"id": "app", "label": "Staging site", "url": "https://staging.example.test", "here": True, "why": "",
+         "probe": {"answers": False, "status": "nothing listens there"},
+         "actions": [{"label": "Deploy", "command": "npm run staging:deploy", "last": {"state": "done", "exit": 0, "started": NOW, "ended": NOW, "output": "deployed\n", "cut": False}},
+                     {"label": "Tear down", "command": "npm run staging:down", "last": {"state": "done", "exit": 3, "started": NOW, "ended": NOW, "output": "", "cut": False}},
+                     {"label": "Refresh", "command": "npm run staging:up", "last": {"state": "running", "started": NOW, "output": "", "cut": False}},
+                     {"label": "Smoke", "command": "npm run staging:smoke", "last": {"state": "unknown", "reason": "it ended with no exit record", "started": NOW, "output": "", "cut": False}}]},
+        {"id": "far", "label": "Simulator", "url": "", "here": False, "why": "/x is not on this machine, so its actions run elsewhere",
+         "probe": None, "actions": [{"label": "Start", "command": "./run.sh", "last": {"state": "none"}}]}]}
+
+    #: A click on the button `label` of tile `tile`, as the document listener sees it.
+    CLICK = """const clickAct = (tile, label, off) => { const li = { dataset: { tile, label: tile === 'app' ? 'Staging site' : 'Simulator' } };
+  const b = { dataset: { tileAct: label, tip: off || '' }, closest: () => li, getAttribute: () => off ? 'true' : null, setAttribute: () => {} };
+  (DOC_LISTENERS['click'] || []).forEach(f => f({ button: 0, target: { closest: sel => sel === '[data-tile-act]' ? b : null } })); };
+"""
+
+    def run_overview(self, body, answer=(202, {"started": NOW})):
+        docs = {"/api/place/acme/overview": [200, self.TILES], "/api/place/tiles": list(answer)}
+        return ThePlaceScript.run_page(self, self.CLICK + body, docs, place="acme")
+
+    run_page = ThePlaceScript.run_page
+    VIEWS = ThePlaceScript.VIEWS
+
+    def test_each_tile_shows_its_link_whether_it_answers_and_each_commands_last_run(self):
+        out = self.run_overview("R.rows = ELS['overview-rows'].html;")
+        rows = out["R"]["rows"]
+        self.assertEqual(out["gets"], ["/api/place/acme/overview"])
+        self.assertIn('<a class="btn quiet sm" href="https://staging.example.test" target="_blank" rel="noopener">', rows)
+        self.assertIn("not answering: nothing listens there", rows)
+        for words in ("Done, exit 0", "Failed, exit 3", "Running since", "Not known: it ended with no exit record."):
+            self.assertIn(words, rows)
+        self.assertIn("<summary>Output</summary><pre>deployed\n</pre>", rows)
+        # A tile whose folder is not here says why, and its button is off with the reason.
+        self.assertIn("<p class=\"why\">/x is not on this machine, so its actions run elsewhere.</p>", rows)
+        self.assertIn('data-tile-act="Start" aria-disabled="true"', rows)
+
+    def test_a_button_posts_the_tiles_names_toasts_the_start_and_reads_again(self):
+        out = self.run_overview("clickAct('app', 'Deploy'); await flush();")
+        self.assertEqual(out["posts"], [["/api/place/tiles", {"realm": "acme", "tile": "app", "action": "Deploy"}, 64]])
+        self.assertEqual(out["toasts"][-1]["msg"], "Staging site · Deploy started. Read again shows how it ended.")
+        self.assertEqual(out["gets"], ["/api/place/acme/overview"] * 2)
+
+    ISSUES = {"state": "read", "area": "acme", "read": NOW, "reason": "", "rows": [], "done": [], "lead": False, "issues_reason": "",
+              "issues_store": {"available": True, "reason": ""}, "issues": [
+                  {"tracker": "Jira", "ref": "ACME-8", "key": "jira:ACME-8", "title": "Fix the kit", "repo": "acme-site", "reason": "filed",
+                   "url": "https://example.test/browse/ACME-8", "hidden": True},
+                  {"tracker": "GitHub", "ref": "#12", "key": "github:example/acme-site#12", "title": "Crash <b>on</b> start", "repo": "acme-site",
+                   "reason": "assigned", "url": "https://github.com/example/acme-site/issues/12", "hidden": False}]}
+
+    def test_tasks_lists_the_realms_issues_with_their_source_and_hidden_ones_on_show_hidden(self):
+        docs = {"/api/place/acme/overview": [200, self.TILES], "/api/place/acme/tasks": [200, self.ISSUES]}
+        out = self.run_page("""await go('#view=tasks'); R.rows = ELS['tasks-rows'].html;
+const b = { dataset: { issuesHidden: '' } };
+(DOC_LISTENERS['click'] || []).forEach(f => f({ button: 0, target: { closest: sel => sel === '[data-issues-hidden]' ? b : null } }));
+await flush(); R.all = ELS['tasks-rows'].html;""", docs, place="acme")
+        rows, every = out["R"]["rows"], out["R"]["all"]
+        self.assertIn("<h3>Issues</h3>", rows)
+        self.assertIn('<td class="src">GitHub</td>', rows)
+        self.assertIn('<a href="https://github.com/example/acme-site/issues/12" target="_blank" rel="noopener">#12</a>', rows)
+        self.assertIn("Crash &lt;b&gt;on&lt;/b&gt; start", rows)
+        self.assertNotIn("ACME-8", rows, "a hidden issue showed by default")
+        self.assertIn("Show hidden (1)", rows)
+        self.assertIn('<td class="src">Jira</td>', every)
+        self.assertIn("ACME-8", every)
+        self.assertIn("Hide hidden", every)
+
+    def test_a_refused_or_unanswered_start_says_why_and_an_off_button_posts_nothing(self):
+        out = self.run_overview("clickAct('app', 'Deploy'); await flush();", answer=(409, {"error": "Staging site Deploy is already running"}))
+        self.assertEqual(out["toasts"][-1]["msg"], "Staging site · Deploy not run: Staging site Deploy is already running")
+        out = self.run_overview("clickAct('far', 'Start', '/x is not on this machine'); await flush();")
+        self.assertEqual((out["posts"], out["toasts"][-1]["msg"]), ([], "Simulator · Start not run: /x is not on this machine."))
 
 
 class TheTasksRealm(Fixture):

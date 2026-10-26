@@ -732,13 +732,16 @@ def spend(connection: sqlite3.Connection, now: str) -> dict:
 DIGEST_LINES = 5
 
 
-def digest(connection: sqlite3.Connection, now: str, *, rows: list[dict], lanes: list[dict]) -> dict:
+def digest(connection: sqlite3.Connection, now: str, *, rows: list[dict], lanes: list[dict],
+           unread: dict[str, str] | None = None) -> dict:
     """Since yesterday (sd:6002), the overnight card (grill Q32): what changed in the day track's 24 hours.
 
     `merged` is one line per repo, most merges first, each with its count and newest titles, at most `DIGEST_LINES`;
     `more` counts the repos left out, and `prs` is every merged item with its PR, folded under the lines. `failed` is
     each failed job and blocked lane entry with its why and one fix; `questions` counts the decisions waiting on Decide.
-    A read that failed is `error`, so the card says the digest was not read, never a quiet night.
+    A read that failed is `error`, so the card says the digest was not read, never a quiet night. `unread` names the
+    job and lane reads that failed, each with its reason; `unknown` joins them, since `failed` then lists only what
+    was read (sd:6259).
     """
     from sd_db import today
 
@@ -762,7 +765,19 @@ def digest(connection: sqlite3.Connection, now: str, *, rows: list[dict], lanes:
             "more": max(0, len(ranked) - DIGEST_LINES),
             "prs": [{"item": row["id"], "title": row.get("title") or "", "repo": repo(row), "pr": row.get("pr")}
                     for row in landed],
-            "failed": failed, "questions": questions, "error": ""}
+            "failed": failed, "questions": questions, "error": "",
+            "unknown": "; ".join(f"{name}: {why}" for name, why in (unread or {}).items() if why)}
+
+
+def digest_unread(sources: dict, queue: dict) -> dict[str, str]:
+    """The job and lane reads the digest's `failed` could not cover: a collector that failed whole, or a repo whose
+    lane Queue could not list, each with its reason (sd:6259)."""
+    unread = {name: sources[name] for name in ("jobs", "lane") if sources.get(name)}
+    problems = queue.get("problems") if isinstance(queue, dict) else None
+    for problem in problems if isinstance(problems, list) else []:
+        if isinstance(problem, dict) and isinstance(problem.get("repo"), str) and problem["repo"]:
+            unread[f"lane {Path(problem['repo']).name}"] = str(problem.get("error") or "no reason given")
+    return unread
 
 
 #: Each build step as the stage Today names (sd:6003): the builder works, the review reads, the lane holds the branch.
@@ -896,16 +911,19 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
     # one names its lamp, so the lamp still reads unknown (sd:5939).
     dark, dark_snoozed = snooze.split("today", [*([dark_row("lane", sources["lane"])] if sources["lane"] else []),
                                                 *unread_rows(sources, kept, queue, active, reported, mail)], snoozes)
+    # The Grill ready row snoozes as a work item does: its seen is its question count (pack sd:6235).
+    grills, grill_snoozed = snooze.split("today", grill_rows(connection), snoozes)
     held = [{**row, "lamp": LAMP.get(row["source"], "")} if row["kind"] == "dark" else row
-            for row in snoozed + dark_snoozed + work_snoozed + reports_snoozed + mail_snoozed]
-    listed = needs([*shown, *dark, *reports, *threads, *grill_rows(connection)], work=work, live=live, today=now[:10],
+            for row in snoozed + dark_snoozed + work_snoozed + reports_snoozed + mail_snoozed + grill_snoozed]
+    listed = needs([*shown, *dark, *reports, *threads, *grills], work=work, live=live, today=now[:10],
                    lanes=queue.get("lanes") or [], briefs=reported["briefs"])
     summary = lane_summary(queue)
     return {"now": now, "sources": sources, "observed": observed, "rows": shown, "active": active,
             "snoozed": held, "snooze_error": snooze_error,
             "work": work, "work_error": work_error, "needs": listed, "lane": summary,
             "track": track(connection, now, rows=rows, briefs=reported["briefs"], active=active, lane=summary),
-            "digest": digest(connection, now, rows=rows, lanes=queue.get("lanes") or []),
+            "digest": digest(connection, now, rows=rows, lanes=queue.get("lanes") or [],
+                             unread=digest_unread(sources, queue)),
             "spend": spend(connection, now), "builders": builders(connection, now), "attention": _attention(listed), **mail, **reported}
 
 

@@ -2851,7 +2851,8 @@ class TheLinksIntoTasks(unittest.TestCase):
 
 class TheRegistration(Registers, unittest.TestCase):
     page, section, route, api = "tasks", "Tasks", "/tasks", ("/api/tasks", "/api/tasks/start-next", "/api/tasks/start-next/run",
-                                                           "/api/tasks/1", "/api/tasks/sweep", "/api/tasks/sweep/status")
+                                                           "/api/tasks/1", "/api/tasks/sweep", "/api/tasks/sweep/status",
+                                                           "/api/why")
 
 
 class TheDocumentLinks(ScreenCase):

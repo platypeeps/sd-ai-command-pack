@@ -1,7 +1,8 @@
 <!doctype html>
 <!--
   Places (sd:5663), at /places?realm=<id>: the place page of a realm (dashboard.realms) with a report family of its own id
-  (dashboard.report_families). It is HOA's and Home's Tasks, Briefs and Reports with no Overview: place.js names the page
+  (dashboard.report_families). It is HOA's and Home's Tasks, Briefs and Reports after an Overview of the realm's tiles
+  (place_tiles.py, sd:6162, sd:6164): place.js names the page
   after the realm (SHELL_REALMS, from /ui/sections.js) and points each view at /api/place/<id>/<view> (places.py), then
   places.js reads a view when it shows. No realm is named here: the lines are the operator's. Without ?realm= the page
   lists the realm places. A Briefs row shows its Details in the pane, the Briefs page's own (brief-details.js, sd:5620); a
@@ -35,6 +36,10 @@
   </div>
   <div id="state" hidden></div>
 
+  <section class="place-view" id="view-overview" data-place-view="overview" data-label="Overview" aria-labelledby="overview-h" hidden>
+    <div class="sec-head"><div><h2 id="overview-h">Overview</h2><p>The realm's apps and sites, from <code>place-tiles.conf</code>: a link, whether it answers, and the commands that run it.</p></div><p class="tally" id="overview-tally"></p></div>
+    <div id="overview-rows"></div>
+  </section>
   <section class="place-view" id="view-tasks" data-place-view="tasks" data-label="Tasks" data-empty="No open item in this realm." aria-labelledby="tasks-h" hidden>
     <div class="sec-head"><div><h2 id="tasks-h">Tasks</h2><p>Open items whose repo a glob of the realm matches (<code>dashboard.realms</code>), as Tasks' realm tab.</p></div><p class="tally" id="tasks-tally"></p></div>
     <div id="tasks-rows"></div>

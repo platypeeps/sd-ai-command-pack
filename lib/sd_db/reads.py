@@ -1470,6 +1470,32 @@ def session_trail(connection: sqlite3.Connection, session: str, *, limit: int) -
 __all__ += ["session_trail"]
 
 
+def ruling_notes(connection: sqlite3.Connection, *, since: str) -> list[sqlite3.Row]:
+    """Every `decision` note from `since` on, oldest first, with its item and the question it answered (pack sd:6015).
+
+    `question` is the body of the open item's `question` note a `Ruling on note #<n>:` body names, else None.
+    Behind the dashboard's Decide rulings.
+    """
+    return connection.execute(
+        "SELECT note.id, note.item, note.timestamp, note.body, note.session, item.title, item.repo, item.status, "
+        "asked.body AS question FROM note JOIN item ON item.id = note.item "
+        "LEFT JOIN note AS asked ON asked.id = CAST(substr(note.body, 17, instr(note.body, ':') - 17) AS INTEGER) "
+        "AND asked.item = note.item AND asked.kind = 'question' AND note.body LIKE 'Ruling on note #%' "
+        "WHERE note.kind = 'decision' AND note.timestamp >= ? ORDER BY note.timestamp, note.id", (since,)).fetchall()
+
+
+def items_by_ids(connection: sqlite3.Connection, items) -> dict[int, sqlite3.Row]:
+    """The id, title, status and repo of each of `items` that exists, by id (pack sd:6019, the 'why' search)."""
+    items = list(items)
+    if not items:
+        return {}
+    return {row["id"]: row for row in connection.execute(
+        f"SELECT id, title, status, repo FROM item WHERE id IN ({', '.join('?' for _ in items)})", items)}
+
+
+__all__ += ["items_by_ids", "ruling_notes"]
+
+
 #: The lane's key prefix, `sd_lane.KEY_PREFIX`; `;` is the character after `:`, so the two bound one index range.
 LANE_KEYS = ("lane:v1:", "lane:v1;")
 

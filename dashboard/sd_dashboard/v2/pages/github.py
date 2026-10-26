@@ -3,6 +3,7 @@ and issues: `/api/today/github` (`today_github`); a pull request's Copilot revie
 `/api/today/github/copilot-review`, and its Merge (sd:5668) previews with a GET and copies into the lane with a POST
 (`pr_merge`); Close original (sd:5669) previews its comment with a GET and closes with a POST (`pr_close`). Your issues
 (sd:4628) and Intake (sd:4840) are `/api/github/issues` (`issues`); File as item posts `/api/items` with the ref.
+Their rows' Hide (sd:6175) is the view state that read carries; Sync now posts `/api/jobs/shadow-sync-nightly/retry`.
 Your issues holds the operator's GitHub issues `today_github` reads too (sd:5899), so the Pull requests view lists none."""
 
 from __future__ import annotations
@@ -17,10 +18,20 @@ def _github(read):
 
 
 def _issues(read):
+    from sd_db import operations
+
     from ... import issues, today_github
 
     found = issues.with_github(issues.document(read.connection), today_github.document(read.connection, now=read.now))
-    return {**found, **issues.intake(read.connection)}
+    # sd:6175: each row's Hide state, and Sync now's job, as HOA's Refresh now reads its own.
+    return {**issues.with_views({**found, **issues.intake(read.connection)}, read.connection),
+            "sync": issues.sync_job(read.connection, read.jobs or operations.LaunchdBackend())}
+
+
+def _view(payload, principal):
+    from ... import issues
+
+    return issues.view(payload)
 
 
 def _copilot(payload, principal):
@@ -59,6 +70,8 @@ PAGE = Page(
     html="github.html",
     item="sd:5781",
     api=(Api("/api/today/github", _github), Api("/api/github/issues", _issues),
+         # Hide (sd:6175): the per-page view route Designs, Documents and Contributions have, on the same view store.
+         Api("/api/github/issues/view", write=_view),
          Api("/api/today/github/copilot-review", write=_copilot),
          # Merge (sd:5668): the GET previews, the POST copies; `pr_merge` checks the preview's revision before anything moves.
          Api("/api/today/github/merge/preview", read=_merge_preview, query=True),

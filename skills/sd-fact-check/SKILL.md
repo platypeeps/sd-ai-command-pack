@@ -20,7 +20,7 @@ claim-led audit: the original wording and locator remain visible beside the
 evidence and verdict.
 
 Do not use for an open-ended evidence question (`sd-research`), synthesis of
-several documents into one position (`sd-digest`), or general proofreading and
+several documents into one position, or general proofreading and
 style editing. A digest may expose disagreements; fact-checking owns a verdict
 only when the user explicitly asks to audit the underlying claims.
 

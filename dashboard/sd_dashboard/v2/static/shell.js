@@ -1119,6 +1119,26 @@
   }
 
   // ---------- Palette ----------
+  // why:start
+  // The why search (pack sd:6019): text typed in the palette, a file path or a rule's words, reads /api/why
+  // (why_search.py), and each item it finds is an option that opens the item's page, where its decisions, design and pull
+  // requests say why. WHY holds the last answer and the text it answers; a read that failed says so.
+  const WHY = { q: '', doc: null, failed: '' };
+  const whyNote = text => html`<li role="presentation" class="why-note">${text}</li>`;
+  async function whyRead(q) {
+    try { return { q, doc: await getJSON(`/api/why?q=${encodeURIComponent(q)}`), failed: '' }; }
+    catch (e) { return { q, doc: null, failed: e.message }; }
+  }
+  function whyGroup(q) {
+    if (!q || WHY.q !== q) return '';
+    if (WHY.failed) return html`<li role="presentation" class="grp">Why · not read: ${WHY.failed}</li>`;
+    const d = WHY.doc, n = d.uncited.length;
+    return html`<li role="presentation" class="grp">Why · ${d.kind === 'path' ? 'commits on this path' : 'rules with this text'}</li>${
+      d.items.map(r => html`<li role="option" data-why data-href="${itemHref(r.item)}" title="${r.why}">${ICON('circle-help')}<span>#${r.item} ${r.title ?? 'not in this database'}</span><code>${r.why}</code></li>`)}${
+      d.items.length ? '' : whyNote('No item found')}${d.errors.map(e => whyNote(`▨ ${e}`))}${
+      n ? whyNote(`${n} matching rule ${n === 1 ? 'line cites' : 'lines cite'} no item`) : ''}`;
+  }
+  // why:end
   // Context first: the selected row's commands, then this page's, then capture, chat and go-to.
   const pal = document.createElement('dialog');
   pal.className = 'palette'; pal.setAttribute('aria-label', 'Commands');
@@ -1135,7 +1155,8 @@
       }${VIEW_LIST.length > 1 ? [grp('Views'), VIEW_LIST.map(v => html`<li role="option" data-pview="${v.id}">${ICON('layout-dashboard')}<span>View: ${v.label}</span><kbd>v ${viewKey(v)}</kbd></li>`)] : ''
       }${grp('Anywhere')}<li role="option" data-capture>${ICON('plus')}<span>Capture a task, followup or note</span><kbd>n</kbd></li><li role="option" data-chat>${ICON('message-square')}<span>Ask in chat</span><kbd>c</kbd></li>${
       GROUPS.flatMap(([, items]) => items).map(([n, icon, k]) => html`<li role="option" data-go="${n}">${ICON(icon)}<span>Go to ${n}${classic(n) ? ' (classic)' : ''}</span>${k ? html`<kbd>g ${k}</kbd>` : ''}</li>`)}${
-      Object.keys(SCREENS).length ? [grp('Classic screens'), Object.entries(SCREENS).map(([n, href]) => html`<li role="option" data-href="${href}">${ICON('arrow-up-right')}<span>Open ${n}</span><code>${href}</code></li>`)] : ''}`);
+      Object.keys(SCREENS).length ? [grp('Classic screens'), Object.entries(SCREENS).map(([n, href]) => html`<li role="option" data-href="${href}">${ICON('arrow-up-right')}<span>Open ${n}</span><code>${href}</code></li>`)] : ''}${
+      whyGroup(palIn.value.trim())}`);
     opts = [...palList.querySelectorAll('[role="option"]')];
     opts.forEach(x => x.addEventListener('click', () => runOpt(x)));
   }
@@ -1143,7 +1164,7 @@
   const markOpt = o => { opts.forEach(x => x.setAttribute('aria-selected', x === o)); if (o) { o.id ||= `opt-${opts.indexOf(o)}`; palIn.setAttribute('aria-activedescendant', o.id); o.scrollIntoView({ block: 'nearest' }); } };
   function palFilter() {
     const q = palIn.value.trim().toLowerCase();
-    opts.forEach(o => o.classList.toggle('out', !!q && !o.textContent.toLowerCase().includes(q) && !o.hasAttribute('data-chat')));
+    opts.forEach(o => o.classList.toggle('out', !!q && !o.textContent.toLowerCase().includes(q) && !o.hasAttribute('data-chat') && !o.hasAttribute('data-why')));
     palList.querySelectorAll('.grp').forEach(g => { let n = g.nextElementSibling, any = false; while (n && !n.classList.contains('grp')) { if (!n.classList.contains('out')) any = true; n = n.nextElementSibling; } g.classList.toggle('out', !any); });
     markOpt(vis()[0]);
   }
@@ -1158,7 +1179,14 @@
     extra[+o.dataset.cmd]?.run?.();
   }
   function openPal() { closeMenu(); buildPal(); palIn.value = ''; palFilter(); modal(pal, palIn); }
+  // The why search reads once typing pauses; an answer for text no longer typed draws nothing.
+  let whyTimer = 0;
   palIn.addEventListener('input', palFilter);
+  palIn.addEventListener('input', () => {
+    clearTimeout(whyTimer);
+    const q = palIn.value.trim();
+    if (q.length >= 3) whyTimer = setTimeout(async () => { const got = await whyRead(q); if (pal.open && palIn.value.trim() === q) { Object.assign(WHY, got); buildPal(); palFilter(); } }, 300);
+  });
   palIn.addEventListener('keydown', e => {
     const v = vis(), i = v.findIndex(o => o.getAttribute('aria-selected') === 'true');
     if (e.key === 'ArrowDown') { e.preventDefault(); markOpt(v[Math.min(i + 1, v.length - 1)]); }
