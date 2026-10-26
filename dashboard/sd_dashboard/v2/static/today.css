@@ -26,6 +26,7 @@
 .flowkey b { color: var(--color-ink); font-weight: 400; text-align: right; }
 .track-table { grid-column: 1 / -1; font: 400 var(--text-xs) var(--font-ui); }
 .track-table summary { color: var(--color-ink-2); cursor: pointer; }
+.track-table .what { overflow-wrap: anywhere; } /* a long word in a title stays on a phone's screen (pack sd:6017) */
 @media (max-width: 899px) {
   .daytrack { grid-template-columns: minmax(0, 1fr); padding: var(--space-xs); }
   .flowkey { padding: var(--space-xs) 0 0; border-left: 0; border-top: var(--rule-hair) solid var(--color-rule-2); grid-template-columns: auto auto auto auto; }

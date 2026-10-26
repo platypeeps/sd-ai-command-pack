@@ -952,7 +952,7 @@ class TheTableGrammar(unittest.TestCase):
         self.assertIn("try { localStorage.setItem(TKEY, JSON.stringify(TKEPT)); } catch", js)
         self.assertIn("list.chips(chipped, shown, total, 'tunfilter')", js)
         self.assertIn("tr[data-tout] { display: none !important; }", SHELL_CSS)
-        self.assertIn('td > .tfold[aria-expanded="true"] > .i:first-child { transform: rotate(90deg); }', SHELL_CSS)
+        self.assertIn(':is(td, th) > .tfold[aria-expanded="true"] > .i:first-child { transform: rotate(90deg); }', SHELL_CSS)
 
     def test_a_folded_row_stays_hidden_under_every_page_rule_that_sets_a_row_display(self):
         # A page's mobile `.ledger tbody tr { display: grid }` outranks a plain `tr[data-tout]`, so a shut fold hid nothing at
@@ -1933,3 +1933,41 @@ staleness(); R.state = b.dataset.state || null; R.html = b.html;""")
 SHELL_AGAIN
 loaded(); click(); await flush(); R.busy = BTN.attrs['aria-busy'] || null;""")
         self.assertEqual((out["toasts"], out["R"]["busy"]), (["Not read again: no answer"], None))
+
+
+# Pack sd:6019: the palette's why search, a path or a rule's text to the items whose pages say why.
+WHY = re.search(r"^  // why:start\n(.*?)^  // why:end$", SHELL_JS, re.S | re.M)
+
+
+class TheWhySearch(unittest.TestCase):
+    """The palette reads /api/why for what is typed and lists each item as an option that opens its page."""
+
+    DOC = {"query": "dashboard/page.py", "kind": "path", "uncited": ["pack/CLAUDE.md:4"],
+           "errors": ["git log in system failed: fatal: bad object"],
+           "items": [{"item": 42, "title": "Queue <times>", "status": "done", "repo": "pack",
+                      "why": "pack commit abc123: feat: first (#1)"},
+                     {"item": 999, "title": None, "status": None, "repo": None, "why": "~/.claude/CLAUDE.md:1: rule"}]}
+
+    def run_why(self, body, answer):
+        self.assertIsNotNone(WHY, "shell.js has no why:start block, so the palette has no why search")
+        return run_js("const itemHref = n => `/tasks?row=${n}`;\nANSWER = " + answer + ";\n" + WHY.group(1) + body)
+
+    def test_each_item_is_an_option_that_opens_its_page_and_values_stay_text(self):
+        out = self.run_why("Object.assign(WHY, await whyRead('dashboard/page.py')); R.group = String(whyGroup('dashboard/page.py'));"
+                           " R.stale = String(whyGroup('dashboard/other.py')); R.gets = OUT.gets;",
+                           f"(path) => [200, {json.dumps(self.DOC)}]")
+        self.assertEqual(out["gets"], ["/api/why?q=dashboard%2Fpage.py"])
+        group = out["group"]
+        self.assertIn("Why · commits on this path", group)
+        self.assertIn('data-why data-href="/tasks?row=42"', group)
+        self.assertIn("#42 Queue &lt;times&gt;", group)
+        self.assertIn("#999 not in this database", group)
+        self.assertIn("▨ git log in system failed: fatal: bad object", group)
+        self.assertIn("1 matching rule line cites no item", group)
+        # A reply for other text draws nothing.
+        self.assertEqual(out["stale"], "")
+
+    def test_a_failed_read_says_so(self):
+        out = self.run_why("Object.assign(WHY, await whyRead('some rule text')); R.group = String(whyGroup('some rule text'));",
+                           "(path) => [500, { error: 'database locked' }]")
+        self.assertIn("Why · not read: database locked", out["group"])

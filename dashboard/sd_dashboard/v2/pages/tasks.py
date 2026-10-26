@@ -3,7 +3,8 @@ takes v1's status, age, active, q and page filters, which Operations > Progress 
 opens this page with its query (sd:2356). The Personal and Work views' Run sweep posts /api/tasks/sweep (sd:5096,
 sd:5097), which starts that realm's sweep in the background; GET /api/tasks/sweep/status reads both realms' last runs.
 Start next (sd:5107) reads its plan at `/api/tasks/start-next` and posts the items it showed to
-`/api/tasks/start-next/run` (`start_next`)."""
+`/api/tasks/start-next/run` (`start_next`). The palette's why search (pack sd:6019) reads `/api/why?q=`: a path or a
+rule's text, to the items whose pages say why (`why_search`)."""
 
 from __future__ import annotations
 
@@ -37,6 +38,15 @@ def _details(read):
     return tasks_screen.details(read.connection, number, now=read.now)
 
 
+def _why(read):
+    from ... import why_search
+
+    asked = read.parameters.get("q", [])
+    if set(read.parameters) - {"q"} or len(asked) != 1:
+        return 400, {"error": "Search takes one q: a file path or a rule's text."}
+    return why_search.search(read.connection, asked[0])
+
+
 def _sweeps(read):
     from ... import sweep
 
@@ -56,7 +66,8 @@ PAGE = Page(
     item="sd:2124",
     api=(Api("/api/tasks", _rows), Api("/api/tasks/start-next", _start_plan), Api("/api/tasks/start-next/run", write=_start),
          Api(pattern=r"/api/tasks/[1-9][0-9]{0,18}", example="/api/tasks/1", read=_details),
-         Api("/api/tasks/sweep", write=_run_sweep), Api("/api/tasks/sweep/status", _sweeps)),
+         Api("/api/tasks/sweep", write=_run_sweep), Api("/api/tasks/sweep/status", _sweeps),
+         Api("/api/why", _why, query=True)),
     count="/api/tasks",
     live=True,
 )

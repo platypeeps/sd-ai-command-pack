@@ -25,6 +25,11 @@ The six states, from each entry's `status`:
 An item's newest entry is the one with the highest `enqueue_seq`, not the last one listed: `lane move` can list a newer
 entry above older ones (sd:3419). `newest` is the one place that picks it.
 
+Each lane also carries `times` (pack sd:6006): over the last 7 days, the median wait from enqueue to claim, the
+median gate time (the speculative gate plus the prepare step), and the slowest entry, enqueue to end, read from each
+entry's history rows by the pack's `sd_lane.lane_times`. A median wait past an hour is `over`: the lane runner files
+the parallel-lanes question then.
+
 Writes: `move` runs `sd-ship -C <repo> lane move|hold|release|cancel|retry`, the queue's only writers. It compares the
 page's revision (a digest of the pending order, the holds and each blocked or cancelled entry's head) with a fresh `lane list` first
 and refuses a stale one. `move`, `hold`, `release` and `cancel` then pass the fresh list's lane revision (the pending
@@ -146,6 +151,27 @@ def refused(answer: dict) -> bool:
     """Whether a lane verb refused and wrote nothing: `sd-ship lane` exits 3 with its refusal, coded in `REFUSED` or with
     no code, which is a check before the write. Any other failure is unknown, not a refusal (sd:3339)."""
     return answer.get("exit") == 3 and answer.get("ok") is False and (answer.get("code") or None) in (None, *REFUSED)
+
+
+def times(connection, remote: str | None, now: float) -> dict:
+    """The lane's last `sd_lane.TIMES_DAYS`: its median wait and gate time and its slowest entry (pack sd:6006).
+
+    Read through the pack's own `sd_lane.lane_times` on the request's connection, from each entry's history rows. A
+    read that failed, or a remote that names no GitHub repository, is `{"error": ...}`, never a quiet lane.
+    """
+    from sd_db.protection import github_slug
+
+    found = github_slug(remote)
+    if found is None:
+        return {"error": "its remote names no GitHub repository, so it has no lane history"}
+    try:
+        read = pack_module("sd_lane").lane_times
+    except (ImportError, AttributeError) as error:
+        return {"error": f"the pack's sd_lane reads no lane times: {error}"}
+    try:
+        return read(connection, "/".join(found).lower(), now=now)
+    except READ_FAILURES as error:
+        return {"error": f"the lane times were not read: {type(error).__name__}: {error}"}
 
 
 def lane_list(path: str) -> dict:
@@ -394,7 +420,8 @@ def document(connection, *, now: str = "") -> dict:
         entries = answer.get("entries") or []
         lanes.append({"repo": Path(path).name, "path": path, "lane": str(lane), "revision": revision(entries),
                       "runner_merge": managed[path]["runner_merge"], "host": managed[path]["lane_host"] or "hub",
-                      "rows": rows(entries, path=path, lane=lane, now=clock, done=closed(connection, entries))})
+                      "rows": rows(entries, path=path, lane=lane, now=clock, done=closed(connection, entries)),
+                      "times": times(connection, managed[path]["remote"], clock)})
     return {"read": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(clock)), "load": _load(), "gates": gates,
             "lanes": lanes, "problems": problems, "root": str(root) if root else None, "edits": EDITS,
             "managed": len(managed),
