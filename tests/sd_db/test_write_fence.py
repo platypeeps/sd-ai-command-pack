@@ -13,6 +13,7 @@ before the promoted machine takes the hub's name, and passes.
 
 from __future__ import annotations
 
+import contextlib
 import functools
 import os
 import sqlite3
@@ -573,13 +574,16 @@ class ThePragmaWrites(FenceCase):
                    "PRAGMA wal_checkpoint(TRUNCATE)", "PRAGMA wal_checkpoint", "PRAGMA incremental_vacuum")
         paths: dict[str, Callable[[], object]] = {
             statement: functools.partial(connection.execute, statement) for statement in writes_}
-        paths["executescript"] = lambda: connection.executescript("PRAGMA user_version = 8;")
+        paths["executescript"] = lambda: connection.executescript("BEGIN IMMEDIATE; PRAGMA user_version = 8; COMMIT;")
         paths["inside BEGIN"] = lambda: (connection.execute("BEGIN IMMEDIATE"),
                                          connection.execute("PRAGMA user_version = 9"))
         for name, write in paths.items():
             with self.subTest(path=name), self.assertRaises(hub.Fenced):
                 write()
             self.assertFalse(connection.in_transaction)
+        self.assertEqual(self.header(), before)
+        with self.assertRaises(SdDbError):
+            connection.executescript("PRAGMA user_version = 8;")
         self.assertEqual(self.header(), before)
 
     def test_a_pragma_write_in_a_transaction_across_the_rename_rolls_back(self):
@@ -619,6 +623,68 @@ class ThePragmaWrites(FenceCase):
         self.assertEqual(connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0], 0)
         self.assertFalse(connection.in_transaction)
         self.assertEqual(self.header()[1:], (7, "wal"))
+
+    def free_pages(self) -> int:
+        reader = database.connect(write=False)
+        try:
+            return reader.execute("PRAGMA freelist_count").fetchone()[0]
+        finally:
+            reader.close()
+
+    def vacuumable(self) -> int:
+        """Switch the record to incremental auto-vacuum and leave free pages for `incremental_vacuum`."""
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        try:
+            raw.execute("PRAGMA auto_vacuum = INCREMENTAL")
+            raw.execute("VACUUM")
+            raw.execute("CREATE TABLE filler (body TEXT)")
+            raw.executemany("INSERT INTO filler VALUES (?)", [("x" * 1000,) for _ in range(200)])
+            raw.execute("DELETE FROM filler")
+        finally:
+            raw.close()
+        free = self.free_pages()
+        self.assertGreater(free, 1)
+        return free
+
+    def test_an_autocommit_incremental_vacuum_demoted_mid_fetch_frees_nothing(self):
+        """Lane review of cae42071c: it frees one page per row fetched, after execute() has returned."""
+        self.name_hub(HUB_NAME)
+        self.node()
+        before = self.vacuumable()
+        connection = self.open()
+        cursor = connection.cursor()
+        refused = None
+        try:
+            cursor.execute("PRAGMA incremental_vacuum")
+        except sqlite3.OperationalError as error:
+            refused = error
+        self.node(OLD_HUB)
+        self.later()
+        with contextlib.suppress(sqlite3.Error):
+            cursor.fetchall()
+        cursor.close()
+        self.assertFalse(connection.in_transaction)
+        self.assertEqual(self.free_pages(), before)
+        self.assertIsNotNone(refused, "no commit could ask after the last row")
+
+    def test_an_incremental_vacuum_in_a_transaction_frees_only_after_a_fresh_ask(self):
+        self.name_hub(HUB_NAME)
+        self.node()
+        before = self.vacuumable()
+        connection = self.open()
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("PRAGMA incremental_vacuum").fetchall()
+        self.node(OLD_HUB)
+        self.later()
+        with self.assertRaises(hub.Fenced):
+            connection.execute("COMMIT")
+        self.assertEqual(self.free_pages(), before)
+        self.node()
+        self.later()
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("PRAGMA incremental_vacuum").fetchall()
+        connection.execute("COMMIT")
+        self.assertEqual(self.free_pages(), 0)
 
 
 class TheRestore(FenceCase):

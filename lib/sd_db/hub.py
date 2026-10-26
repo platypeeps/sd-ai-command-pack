@@ -338,6 +338,12 @@ _PRAGMA_READS = frozenset({
 })
 #: Pragmas that write the file with no value given.
 _PRAGMA_WRITES = frozenset({"incremental_vacuum", "wal_checkpoint"})
+#: Write pragmas that fail inside a transaction, so they cannot run inside
+#: BEGIN IMMEDIATE ... COMMIT: `journal_mode` to or from WAL ("cannot change
+#: out of wal mode from within a transaction") and `wal_checkpoint`
+#: ("database table is locked"). Each writes all it writes before its one
+#: row, so execute() has finished the write when it returns.
+_PRAGMA_UNWRAPPED = frozenset({"journal_mode", "wal_checkpoint"})
 
 _answers: dict[str, tuple[float, float, Role]] = {}
 _answers_guard = threading.Lock()
@@ -414,8 +420,10 @@ class _WriteFence:
     is refused at prepare (`unwrapped`); the cursor runs it again inside
     BEGIN IMMEDIATE ... COMMIT (`_batched`), as it runs `executemany`. A
     transaction that wrote nothing commits without asking, so reads keep working.
-    A pragma that changes the file is a write (pack sd:6328); outside a
-    transaction it asks afresh at prepare, since it runs there and then.
+    A pragma that changes the file is a write (pack sd:6328). Outside a
+    transaction it runs again inside one, as other writes do:
+    `incremental_vacuum` frees a page per row fetched, after execute().
+    Only those that fail inside one (`_PRAGMA_UNWRAPPED`) ask afresh at prepare.
     Only SQLite's own state ends a transaction here: the write flag and the
     outer savepoint clear when a statement is prepared outside one, never on
     a BEGIN, ROLLBACK or RELEASE that may yet fail (review of f716079a9).
@@ -456,18 +464,13 @@ class _WriteFence:
             if arg1 == "RELEASE" and opened and name == self.outer and self.wrote:
                 return self._ask(fresh=True)
             return sqlite3.SQLITE_OK
-        if action == sqlite3.SQLITE_PRAGMA and database != "temp":
-            name = (arg1 or "").lower()
-            if name in _PRAGMA_WRITES or arg2 is not None and name not in _PRAGMA_READS:
-                if not opened:
-                    # It runs as soon as it is prepared, and `journal_mode`
-                    # and `wal_checkpoint` fail inside a transaction, so it
-                    # asks afresh here and is not run again inside one.
-                    return self._ask(fresh=True)
-                self.wrote = True
-                return self._ask(fresh=False)
-        if action in _WRITES and database != "temp":
+        pragma = (arg1 or "").lower() if action == sqlite3.SQLITE_PRAGMA else None
+        writes = action in _WRITES or pragma is not None and (
+            pragma in _PRAGMA_WRITES or arg2 is not None and pragma not in _PRAGMA_READS)
+        if writes and database != "temp":
             if not opened:
+                if pragma in _PRAGMA_UNWRAPPED:
+                    return self._ask(fresh=True)
                 self.unwrapped = True
                 return sqlite3.SQLITE_DENY
             self.wrote = True
