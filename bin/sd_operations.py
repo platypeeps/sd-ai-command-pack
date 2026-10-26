@@ -107,7 +107,7 @@ def queue_builds(args: argparse.Namespace) -> int:
 
 
 def list_sessions(args: argparse.Namespace) -> int:
-    """`sd assignments sessions`: the live Claude sessions and the worktrees each holds (pack sd:6024).
+    """`sd assignments dispatch --sessions`: the live Claude sessions and the worktrees each holds (pack sd:6024).
 
     For a cleanup outside the pack, such as a `target/` prune: a worktree a
     listed session on this machine names is held. A failed read exits 1, so
@@ -245,7 +245,7 @@ def dispatch_builds(args: argparse.Namespace) -> int:
             if root is None:
                 return
             repo = build.run(connection, ident)["repo"]
-            build_run.spawn([sys.executable, str(BIN / "sd"), "assignments", "supervise", ident],
+            build_run.spawn([sys.executable, str(BIN / "sd"), "assignments", "dispatch", "--supervise", ident],
                             log=build_run.log_dir(root, repo) / f"{ident}.supervisor.log")
 
         def lane(row: dict, items: list[int]) -> dict | None:
@@ -265,9 +265,8 @@ def dispatch_builds(args: argparse.Namespace) -> int:
 
 
 def supervise_build(args: argparse.Namespace) -> int:
-    """`sd assignments supervise RUN`: walk one build run to the lane, or one draft run to its spec (pack sd:6361).
-
-    The tick starts it in its own session; the run's assignment scope picks the supervisor.
+    """`sd assignments dispatch --supervise RUN`: walk one build run to the lane, or one draft run to its spec
+    (pack sd:6361). The tick starts it in its own session; the run's assignment scope picks the supervisor.
     """
     import sd_lib
     sd_db, _, build_run = build_modules()
@@ -295,6 +294,15 @@ def supervise_build(args: argparse.Namespace) -> int:
     return 0
 
 
+def build_dispatcher(args: argparse.Namespace) -> int:
+    """`sd assignments dispatch`: the tick; `--supervise RUN` walks one run; `--sessions` lists the live sessions."""
+    if args.run is not None:
+        return supervise_build(args)
+    if args.sessions:
+        return list_sessions(args)
+    return dispatch_builds(args)
+
+
 def register(groups: Any) -> None:
     for name in ("jobs", "assignments", "services"):
         group = groups.add_parser(name, help=f"inspect {name} and request supported controls")
@@ -316,12 +324,13 @@ def register(groups: Any) -> None:
             parser.set_defaults(handler=queue_builds)
             parser.add_argument("items", nargs="+", type=item_id, help=ITEM_HELP)
             parser.add_argument("--json", action="store_true")
+            # One verb for the dispatcher (ruling #31545, pack sd:6356): the tick, and with a flag its supervisor or
+            # the sessions it counts.
             parser = verbs.add_parser("dispatch", help="one build-dispatch tick: reap, watch the lane, claim, spawn")
-            parser.set_defaults(handler=dispatch_builds)
+            parser.set_defaults(handler=build_dispatcher)
+            mode = parser.add_mutually_exclusive_group()
+            mode.add_argument("--supervise", metavar="RUN", dest="run",
+                              help="supervise one build or draft run; the tick starts it")
+            mode.add_argument("--sessions", action="store_true",
+                              help="list the live Claude sessions and the worktrees each holds")
             parser.add_argument("--json", action="store_true")
-            parser = verbs.add_parser("sessions", help="list the live Claude sessions and the worktrees each holds")
-            parser.set_defaults(handler=list_sessions)
-            parser.add_argument("--json", action="store_true")
-            parser = verbs.add_parser("supervise", help="supervise one build or draft run; the tick starts it")
-            parser.set_defaults(handler=supervise_build)
-            parser.add_argument("run", help="the build run id")

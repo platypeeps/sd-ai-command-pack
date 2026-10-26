@@ -112,6 +112,19 @@ class OperationsCLI(unittest.TestCase):
         self.connect.assert_called_with(sd_db, write=True)
         self.assertEqual(self.connection.close.call_count, 2)
 
+    def test_the_dispatcher_is_one_verb_with_its_supervisor_and_sessions_as_flags(self):
+        """pack sd:6356 (ruling #31545): `dispatch` takes `--supervise RUN` and `--sessions`; the two old verbs are
+        gone, and the flags exclude each other."""
+        self.assertEqual(self.parser.parse_args(["assignments", "dispatch", "--supervise", "r1"]).run, "r1")
+        self.assertTrue(self.parser.parse_args(["assignments", "dispatch", "--sessions"]).sessions)
+        with patch.object(cli, "supervise_build", return_value=0) as supervise:
+            self.call("assignments", "dispatch", "--supervise", "r1")
+        self.assertEqual(supervise.call_args.args[0].run, "r1")
+        for argv in (["assignments", "supervise", "r1"], ["assignments", "sessions"],
+                     ["assignments", "dispatch", "--sessions", "--supervise", "r1"]):
+            with self.assertRaises(SystemExit, msg=argv), patch("sys.stderr", io.StringIO()):
+                self.parser.parse_args(argv)
+
     def test_assignments_sessions_lists_the_live_sessions_read_only(self):
         """pack sd:6024: the registry for a cleanup outside the pack; a failed read refuses, never an empty list."""
         live = Mock(return_value=[{"session": "session-a1234", "machine": "hub", "beat": "2026-10-25T10:00:00+00:00",
@@ -120,11 +133,11 @@ class OperationsCLI(unittest.TestCase):
         registry.live = live
         with patch.dict(sys.modules, {"sd_db.sessions": registry}), patch.object(sd_db, "sessions", registry,
                                                                                   create=True):
-            code, output = self.call("assignments", "sessions")
-            _, printed = self.call("assignments", "sessions", "--json")
+            code, output = self.call("assignments", "dispatch", "--sessions")
+            _, printed = self.call("assignments", "dispatch", "--sessions", "--json")
             live.side_effect = sd_db.SdDbError("the hub is unreachable")
             with self.assertRaises(cli.WorkRefusal):
-                self.call("assignments", "sessions")
+                self.call("assignments", "dispatch", "--sessions")
         self.assertEqual((code, output), (0, "hub  session-  2026-10-25T10:00:00+00:00  ~/worktrees/pack-one\n"))
         self.assertEqual(json.loads(printed)[0]["session"], "session-a1234")
         self.connect.assert_called_with(sd_db, write=False)
@@ -159,7 +172,8 @@ class OperationsCLI(unittest.TestCase):
         self.connection.close.assert_called_once()
 
     def test_a_spawn_runs_the_supervise_verb_the_real_parser_reads(self):
-        """Review round 1: the spawned argv is `sd`'s own `assignments supervise RUN`, parsed by the real parser."""
+        """Review round 1: the spawned argv is `sd`'s own `assignments dispatch --supervise RUN`, parsed by the real
+        parser (pack sd:6356)."""
         run = self.builds()
         sys.modules["sd_db.build"].run = Mock(return_value={"repo": "/repo"})
         run.spawn, run.log_dir = Mock(), lambda root, repo: root
@@ -172,7 +186,7 @@ class OperationsCLI(unittest.TestCase):
         argv = run.spawn.call_args.args[0]
         self.assertEqual(Path(argv[1]), ROOT / "bin" / "sd")
         arguments = self.parser.parse_args(argv[2:])
-        self.assertEqual((arguments.handler, arguments.run), (cli.supervise_build, "r1"))
+        self.assertEqual((arguments.handler, arguments.run, arguments.sessions), (cli.build_dispatcher, "r1", False))
         self.assertEqual(run.spawn.call_args.kwargs["log"], Path("/bulk/r1.supervisor.log"))
 
     def test_interactive_builders_count_as_the_dashboard_counts_them(self):
