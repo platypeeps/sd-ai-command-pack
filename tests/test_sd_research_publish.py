@@ -2336,6 +2336,29 @@ class SourceUrlTests(Fixture):
         self.assertEqual(request["source_url"],
                          "https://github.com/example-org/research-repo/blob/HEAD/10-x/a%20b.md")
 
+    LINKS = ("# A\n\nSee [DESIGN §5](DESIGN-x.md#five), [B](../20-y/b.md), [web](https://example.test/c.md),\n"
+             "[here](#anchor) and ![chart](img/c.png).\n\n```text\n[code](c.md)\n```\n")
+
+    def test_a_relative_link_points_at_its_github_file(self) -> None:
+        """sd:6156: Notion made `[x](DESIGN.md)` into `https://DESIGN.md`."""
+        (self.repo / "10-x" / "a.md").write_text(self.LINKS, encoding="utf-8")
+        self.origin("git@github.com:example-org/research-repo.git")
+        content = self.queued()["content"]
+        blob = "https://github.com/example-org/research-repo/blob/HEAD/"
+        self.assertIn("[DESIGN §5](%s10-x/DESIGN-x.md#five)" % blob, content)
+        self.assertIn("[B](%s20-y/b.md)" % blob, content)
+        self.assertIn("![chart](%s10-x/img/c.png)" % blob, content)
+        self.assertIn("[web](https://example.test/c.md)", content)
+        self.assertIn("[here](#anchor)", content)
+        self.assertIn("[code](c.md)", content)
+
+    def test_without_a_github_origin_a_relative_link_keeps_its_text(self) -> None:
+        (self.repo / "10-x" / "a.md").write_text(self.LINKS, encoding="utf-8")
+        content = self.queued()["content"]
+        self.assertIn("See DESIGN §5, B, [web](https://example.test/c.md)", content)
+        self.assertNotIn("DESIGN-x.md", content)
+        self.assertIn("[code](c.md)", content)
+
     def test_a_moved_origin_queues_the_delivered_document_again(self) -> None:
         """The pointer line is part of the mirror, so a new owner is a new
         generation: a delivered page naming the old owner is written again."""
@@ -3419,6 +3442,41 @@ class ArchifyImageTests(ReceiptFixture):
             PUBLISH.enqueue(self.repo, self.doc())
         self.assertEqual(self.rendered, [])
 
+    def test_an_image_no_pending_request_names_goes_on_the_next_render(self) -> None:
+        """sd:6081: each changed diagram left its PNG behind for good."""
+        self.source(ARCHIFY)
+        PUBLISH.enqueue(self.repo, self.doc())
+        old = Path(self.request()["image"]["path"])
+        self.drain()
+        stray = PUBLISH.images() / ("%s.png.partial" % ("f" * 32))
+        stray.write_bytes(b"half")
+        other = PUBLISH.images() / "notes.txt"
+        other.write_text("not an image")
+        self.source(ARCHIFY.replace('height="20"/>', 'height="10"/>'))
+        PUBLISH.enqueue(self.repo, self.doc())
+        new = Path(self.request()["image"]["path"])
+        self.assertTrue(new.is_file())
+        self.assertFalse(old.exists())
+        self.assertFalse(stray.exists())
+        self.assertTrue(other.exists())
+
+    def test_an_image_a_pending_request_names_stays(self) -> None:
+        self.source(ARCHIFY)
+        PUBLISH.enqueue(self.repo, self.doc())
+        PUBLISH.enqueue(self.repo, [dict(src="10-x/a.md", out="a", title="A", drive=dict())])
+        self.assertTrue(Path(self.request()["image"]["path"]).is_file())
+
+    def test_an_unreadable_request_keeps_every_image(self) -> None:
+        """Failures: a request that cannot be read may name any image, so nothing goes."""
+        self.source(ARCHIFY)
+        PUBLISH.enqueue(self.repo, self.doc())
+        old = Path(self.request()["image"]["path"])
+        self.drain()
+        (PUBLISH.QUEUE / "other.b.notion.json").write_text("{not json")
+        self.source(ARCHIFY.replace('height="20"/>', 'height="10"/>'))
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue(old.is_file())
+
     def test_a_trash_request_drops_the_image(self) -> None:
         self.source(ARCHIFY)
         PUBLISH.enqueue(self.repo, self.doc())
@@ -3463,6 +3521,16 @@ class UploadTests(ArchifyImageTests):
         self.assertIn(b'name="file"', request.data)
         self.assertIn(b"Content-Type: image/png", request.data)
         self.assertIn(PNG, request.data)
+
+    def test_an_answer_that_is_not_an_object_is_a_failure(self) -> None:
+        """sd:6082: a list, a string or null from Notion is no confirmation; the request stays."""
+        self.queued()
+        for answer in ([self.uploaded()], "uploaded", None):
+            with self.subTest(answer=answer):
+                _, urlopen = self.opener(answer)
+                status, said = PUBLISH.upload_image(self.NAME, self.URL, "Bearer t0k", opener=urlopen)
+                self.assertEqual(status, 1, said)
+                self.assertIn("did not confirm", said)
 
     def test_upload_refuses_a_url_off_notion(self) -> None:
         self.queued()

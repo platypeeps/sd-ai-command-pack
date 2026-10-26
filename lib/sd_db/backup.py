@@ -397,7 +397,10 @@ def _copy_runner_journal(source: Path, directory: Path, expected: dict[str, int]
         return False
     _runner_files(journal)
     try:
-        shutil.copytree(journal, directory / "runner-journal", symlinks=True)
+        # A lock is an empty flock file restore makes again; copied, a live
+        # one can vanish under the mirror's rsync (sd:6071).
+        shutil.copytree(journal, directory / "runner-journal", symlinks=True,
+                        ignore=shutil.ignore_patterns("*.lock"))
     except OSError as error:
         raise BackupError(f"runner journal was not copied: {error}") from error
     _runner_files(directory / "runner-journal")
@@ -844,6 +847,15 @@ def verify(copy: Path, *, run_id: str, expected: dict[str, int], checkpointed: b
 #: judged without them: the writer never records them and restore never reads them.
 FINDER_METADATA = re.compile(r"\.DS_Store|\._.*")
 
+#: A run's lock as a snapshot before sd:6071 listed it. A moved copy is
+#: judged without it, so a mirror that skips the locks still matches.
+RUNNER_LOCK = re.compile(r"runner-journal/[0-9a-f]{32}\.lock")
+
+
+def _manifest_entries(entries: dict, *, moved: bool) -> dict:
+    """The manifest's entries a copy is compared on: all, or for a moved copy, all but run locks."""
+    return {name: digest for name, digest in entries.items() if not (moved and RUNNER_LOCK.fullmatch(name))}
+
 
 def _retention_inventory(directory: Path, *, moved: bool = False, hashed: bool = True) -> dict[str, str | None]:
     """Bind every entry, including empty directories, without following links.
@@ -863,6 +875,8 @@ def _retention_inventory(directory: Path, *, moved: bool = False, hashed: bool =
                 raise BackupError("backup retention manifest is not a regular file")
             continue
         name = path.relative_to(directory).as_posix()
+        if moved and RUNNER_LOCK.fullmatch(name):
+            continue
         if stat.S_ISREG(details.st_mode):
             inventory[name] = hashlib.sha256(path.read_bytes()).hexdigest() if hashed else ""
         elif stat.S_ISDIR(details.st_mode):
@@ -939,11 +953,12 @@ def _check_backup(directory: Path, *, run_id: str | None = None, moved: bool = F
         if not moved and value.get("directory") != str(directory.resolve()):
             raise BackupError("its manifest records another directory")
         if owned_only:
-            listed = {name: digest is None for name, digest in value["entries"].items()}
+            listed = {name: digest is None
+                      for name, digest in _manifest_entries(value["entries"], moved=moved).items()}
             if listed != {name: digest is None
                           for name, digest in _retention_inventory(directory, moved=moved, hashed=False).items()}:
                 raise BackupError("its files differ from its manifest")
-        elif value["entries"] != _retention_inventory(directory, moved=moved):
+        elif _manifest_entries(value["entries"], moved=moved) != _retention_inventory(directory, moved=moved):
             raise BackupError("its files differ from its manifest")
         checkpointed = not (read_only and value.get("checkpoint") is False)
         if owned_only:
@@ -2087,8 +2102,8 @@ def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None
             try:
                 shutil.copytree(path, local, symlinks=True)
                 # The hashes first: every later decision, the schema stop included, reads these bytes.
-                if json.loads((local / BACKUP_MANIFEST).read_bytes()).get("entries") != _retention_inventory(
-                        local, moved=True):
+                if _manifest_entries(json.loads((local / BACKUP_MANIFEST).read_bytes()).get("entries"),
+                                     moved=True) != _retention_inventory(local, moved=True):
                     raise BackupError("its files differ from its manifest")
             except (BackupError, OSError, ValueError, AttributeError) as error:
                 refuse(path, str(error))

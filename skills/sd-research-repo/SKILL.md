@@ -38,9 +38,8 @@ Do not use for:
 
 - answering a research *question* from scratch — that is `sd-research`, which
   produces a graded brief and has no repo to live in;
-- synthesising material the user already supplied — that is `sd-digest`;
-- prose-level editing with no repo standard in play — that is
-  `sd-technical-editor` or `sd-prose-lint`.
+- synthesising material the user already supplied;
+- prose-level editing with no repo standard in play.
 
 If the checkout has no `research.conf.py` and no numbered directories, it is not
 a research repo; say so rather than imposing the layout on it.

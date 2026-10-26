@@ -93,6 +93,19 @@ class Case(unittest.TestCase):
         (copy / BACKUP_MANIFEST).write_text(json.dumps(manifest))
         return copy
 
+    def listed_lock(self, copy, *, present):
+        """What a snapshot before sd:6071 left: a run's lock in the manifest. The
+        mirror skips it (system sd:6048), so `present=False` is the copy on the share."""
+        manifest = json.loads((copy / BACKUP_MANIFEST).read_text())
+        journal = copy / "runner-journal"
+        journal.mkdir(exist_ok=True)
+        manifest["entries"]["runner-journal"] = None
+        manifest["entries"][f"runner-journal/{'e' * 32}.lock"] = hashlib.sha256(b"").hexdigest()
+        if present:
+            (journal / f"{'e' * 32}.lock").write_bytes(b"")
+        (copy / BACKUP_MANIFEST).write_text(json.dumps(manifest))
+        return copy
+
     def stopped(self, copy):
         """What a run that failed before `_record_backup` leaves: everything but the manifest."""
         (copy / BACKUP_MANIFEST).unlink()
@@ -477,6 +490,22 @@ class MovedCopies(Case):
 
         self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [old])
 
+    def test_an_old_copy_listing_a_run_lock_the_mirror_skipped_is_pruned(self):
+        # sd:6071: so the hourly pair can drop the locks too, as the nightly pair did.
+        skipped = self.listed_lock(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))),
+                                   present=False)
+        kept = self.listed_lock(self.mirror(self.snapshot(datetime(2026, 10, 2, 9, 0, tzinfo=UTC))),
+                                present=True)
+
+        self.assertEqual(prune_older(self.nas, 7, now=NOW, moved=True), [skipped, kept])
+
+    def test_a_local_snapshot_missing_a_listed_lock_stays(self):
+        # Only a moved copy is judged without its locks; in place, the manifest binds every name.
+        listed = self.listed_lock(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC)), present=False)
+
+        self.assertEqual(prune_older(self.local, 7, now=NOW), [])
+        self.assertTrue(listed.exists())
+
     def test_a_pre_json_copy_past_the_window_is_pruned(self):
         # sd:4694: a bare-timestamp checkpoint was unreadable, so these copies never aged out.
         old = self.pre_json(self.mirror(self.snapshot(datetime(2026, 10, 1, 9, 0, tzinfo=UTC))))
@@ -726,6 +755,15 @@ class TheNewest(Case):
         self.assertEqual(result.refused[0][0], self.base / "missing")
         row = unresolved_state(self.open(home), "restore")[0]
         self.assertEqual(json.loads(row["body"])["from"], str(renamed))
+
+    def test_a_copy_whose_listed_run_lock_the_mirror_skipped_restores(self):
+        copy = self.listed_lock(self.mirror(self.snapshot(NOW, title="only")), present=False)
+        home = self.fresh_home()
+
+        result = backup.restore_newest([self.nas], home=home)
+
+        self.assertEqual(result.snapshot, copy)
+        self.assertEqual(self.items(home), ["only"])
 
     def test_a_corrupt_newest_is_refused_and_the_next_restores(self):
         good = self.mirror(self.snapshot(datetime(2026, 10, 12, 9, 0, tzinfo=UTC), title="first"))

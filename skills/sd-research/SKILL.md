@@ -29,7 +29,7 @@ Do not use for:
 
 - single-fact lookups — just answer them directly;
 - breadth-first inventories of a market or category — that is `sd-scan`;
-- synthesizing material the user already supplied — that is `sd-digest`.
+- synthesizing material the user already supplied.
 
 ## Arguments
 

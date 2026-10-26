@@ -50,7 +50,7 @@ import uuid
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from sd_lib import git_output, import_sd_db, main_worktree_root
 
@@ -601,6 +601,35 @@ def source_url(repo: Path, src: str) -> str | None:
         return None
     return "https://github.com/%s/%s/blob/HEAD/%s" % (
         match[1], match[2], quote(path.as_posix(), safe="/"))
+
+
+#: A Markdown link or image whose target has no scheme and is no anchor or
+#: absolute path: one a mirror cannot follow.
+RELATIVE_LINK = re.compile(
+    r"(?P<bang>!?)\[(?P<label>[^\]\n]*)\]\((?![A-Za-z][A-Za-z0-9+.-]*:|#|/)(?P<path>[^)\s#]+)(?P<anchor>#[^)\s]*)?\)")
+
+
+def repo_links(text: str, repo: Path, src: str) -> str:
+    """`text` with each repo-relative link pointing at its file on GitHub.
+
+    A mirror has no repository beside it: Notion read `[x](DESIGN.md)` as
+    `https://DESIGN.md` (sd:6156). Without a GitHub origin the link keeps
+    its text only. Fenced code is left as written.
+    """
+    folder = Path(src).parent
+
+    def linked(match: re.Match[str]) -> str:
+        url = source_url(repo, (folder / unquote(match["path"])).as_posix())
+        if not url:
+            return match["label"]
+        return "%s[%s](%s%s)" % (match["bang"], match["label"], url, match["anchor"] or "")
+
+    lines, fenced = [], False
+    for line in text.split("\n"):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        lines.append(line if fenced else RELATIVE_LINK.sub(linked, line))
+    return "\n".join(lines)
 
 
 def notion_target(
@@ -2147,13 +2176,7 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
     if refused:
         return [refused]
     home = repo_home(repo)
-    reports = stale_requests(home, channels)
-    wanted: list[tuple[dict[str, Any], dict[str, str]]] = []
-    for cfg in docs:
-        targets, problems = mirror_targets(cfg, home, channels)
-        problems += designated_item(cfg)[1]
-        reports += ["mirror: %s in %s" % (p, cfg.get("out", "?")) for p in problems]
-        wanted += [(cfg, target) for target in targets]
+    wanted, reports = wanted_targets(docs, home, channels)
     if not wanted:
         return reports
 
@@ -2197,7 +2220,22 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
                 queued=digest, revision=rev, repo=str(home), document=out,
                 destination=target["destination"], identity=identity if isinstance(cfg.get("content"), str) else None))
             reports.append(queued_report(out, target["target"], what, carried, reverted))
+        if not dry:
+            prune_images()
     return reports
+
+
+def wanted_targets(docs: list[dict[str, Any]], home: Path, channels: dict[str, dict[str, str]] | None
+                   ) -> tuple[list[tuple[dict[str, Any], dict[str, str]]], list[str]]:
+    """Each `(document, target)` pair `enqueue` writes, and its reports so far."""
+    reports = stale_requests(home, channels)
+    wanted: list[tuple[dict[str, Any], dict[str, str]]] = []
+    for cfg in docs:
+        targets, problems = mirror_targets(cfg, home, channels)
+        problems += designated_item(cfg)[1]
+        reports += ["mirror: %s in %s" % (p, cfg.get("out", "?")) for p in problems]
+        wanted += [(cfg, target) for target in targets]
+    return wanted, reports
 
 
 def unchanged_report(state: str, out: str, target: str, rev: str) -> str:
@@ -2276,7 +2314,7 @@ def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, An
         # above say where it came from and where the copies sit;
         # none of them is what gets published. Joined here, once, for
         # every destination and so for the fingerprint too (sd:5872).
-        "content": cfg["content"] if brief else source_text(repo / src) if src else "",
+        "content": cfg["content"] if brief else repo_links(source_text(repo / src), repo, src) if src else "",
     }
     # A Notion page shows the Archify diagram as an image, and only it
     # (sd:6066): Drive and the served page keep the text as written.
@@ -2310,6 +2348,34 @@ def images() -> Path:
     it was queued with, whatever a later render writes.
     """
     return QUEUE.with_name(QUEUE.name + "-images")
+
+
+#: What `drawn` leaves in `images()`: a PNG, or one a killed draw left partial.
+IMAGE_FILE = re.compile(r"[0-9a-f]{32}\.png(?:\.partial)?")
+
+
+def prune_images() -> None:
+    """Remove each PNG in `images()` no pending request names (sd:6081).
+
+    Called under the queue lock, so no render writes or draws meanwhile,
+    and after a render's draws, so an unchanged diagram is not drawn again.
+    A request that cannot be read may name any PNG, so then nothing goes.
+    """
+    named = set()
+    for path in QUEUE.glob("*.json"):
+        try:
+            image = json.loads(path.read_text(encoding="utf-8")).get("image")
+        except (OSError, ValueError, AttributeError):
+            return
+        if isinstance(image, dict) and isinstance(image.get("path"), str):
+            named.add(Path(image["path"]).name)
+    try:
+        found = list(images().iterdir())
+    except OSError:
+        return
+    for png in found:
+        if IMAGE_FILE.fullmatch(png.name) and png.name not in named:
+            png.unlink(missing_ok=True)
 
 
 def notion_diagram(text: str) -> tuple[str, dict[str, str]]:
@@ -2442,7 +2508,9 @@ def upload_image(name: str, url: str, authorization: str, *,
     except (OSError, ValueError) as problem:
         return 1, "upload: the send to Notion failed (%s); the request stays" % problem
     upload_id = str(said.get("file_upload_id", "")) if isinstance(said, dict) else ""
-    if said.get("status") != "uploaded" or upload_id.replace("-", "") != sent_to.group(1).replace("-", ""):
+    # A list, a string or null confirms nothing (sd:6082).
+    if (not isinstance(said, dict) or said.get("status") != "uploaded"
+            or upload_id.replace("-", "") != sent_to.group(1).replace("-", "")):
         return 1, "upload: Notion did not confirm upload %s (%r); the request stays" % (sent_to.group(1), said)
     caption = html.escape(str(image.get("caption") or ""), quote=False)
     return 0, '<image source="file-upload://%s">%s</image>' % (upload_id, caption)
