@@ -1,0 +1,190 @@
+"""The Build press on Tasks and the Builds panel on Queue (pack sd:6095), over real HTTP on a disposable store.
+
+`builds.kickstart` is replaced, so nothing reaches launchctl; the room's gate and sessions are seams of `plan`.
+"""
+
+from unittest.mock import patch
+
+from sd_db import build, upsert_repo
+from sd_db.writes import now as clock
+from sd_db.workflow import item_state
+from sd_dashboard import builds
+
+from support import NOW
+from test_workflow_actions import BrowserSession
+
+REPO = "/fixture/repos/alpha"
+IDLE = {"load": 1.0, "load_cap": 40.0, "interactive": []}
+
+
+class Fixture(BrowserSession):
+    def setUp(self):
+        super().setUp()
+        upsert_repo(self.connection, REPO, remote="/fixture/remote-alpha", managed=1)
+        self.kicks = []
+        kick = patch.object(builds, "kickstart", lambda: self.kicks.append(1) or {"ok": True, "service": "x", "why": ""})
+        kick.start()
+        self.addCleanup(kick.stop)
+
+    def ready(self, status="ready", **columns):
+        return self.item("Build me", kind="task", status=status, repo=REPO, **columns)
+
+    def revision(self, item):
+        return item_state(self.connection, item)["revision"]
+
+    def builds_of(self, item):
+        return self.connection.execute("SELECT COUNT(*) FROM assignment WHERE item = ? AND scope = 'build'",
+                                       (item,)).fetchone()[0]
+
+
+
+class BuildRoutes(Fixture):
+    def test_build_refuses_a_non_ready_item_with_409_and_writes_nothing(self):
+        """Slice 4's fail-first: a press with a planning item is a 409, and no item of the selection is queued."""
+        ready, planning = self.ready(), self.ready(status="planning")
+        status, _, body = self.post("/api/tasks/build", {"items": [ready, planning], "revisions": {
+            str(ready): self.revision(ready), str(planning): self.revision(planning)}})
+        self.assertEqual(status, 409, body)
+        self.assertIn(f"item {planning} is planning", body["error"])
+        self.assertEqual((self.builds_of(ready), self.builds_of(planning), self.kicks), (0, 0, []))
+
+    def test_build_refuses_a_stale_revision_with_409(self):
+        item = self.ready()
+        before = self.revision(item)
+        self.connection.execute("UPDATE item SET title = 'moved' WHERE id = ?", (item,))
+        status, _, body = self.post("/api/tasks/build", {"items": [item], "revisions": {str(item): before}})
+        self.assertEqual((status, self.builds_of(item)), (409, 0), body)
+
+    def test_build_queues_each_item_and_kickstarts_the_dispatcher(self):
+        first, second = self.ready(), self.ready()
+        status, _, body = self.post("/api/tasks/build", {"items": [first, second], "revisions": {
+            str(first): self.revision(first), str(second): self.revision(second)}})
+        self.assertEqual(status, 200, body)
+        self.assertEqual([(row["item"], row["status"]) for row in body["queued"]], [(first, "queued"), (second, "queued")])
+        self.assertEqual((body["kickstart"]["ok"], len(self.kicks)), (True, 1))
+        self.assertEqual((self.builds_of(first), self.builds_of(second)), (1, 1))
+
+    def test_build_refuses_a_malformed_body_with_400(self):
+        item = self.ready()
+        for payload in ({"items": [item]}, {"items": [], "revisions": {}}, {"items": [item, item], "revisions": {}},
+                        {"items": ["1"], "revisions": {}}):
+            status, _, body = self.post("/api/tasks/build", payload)
+            self.assertEqual(status, 400, (payload, body))
+        self.assertEqual(self.builds_of(item), 0)
+
+    def test_the_plan_bundles_by_repository_and_names_each_refusal(self):
+        items = [self.ready() for _ in range(4)]
+        planning = self.ready(status="planning")
+        out = builds.plan(self.connection, items + [planning], now=NOW,
+                          sessions=lambda connection, *, now: {"sessions": [], "builders": {"running": 0, "why": ""}},
+                          gate=lambda: {"load": [1.0, 1.0, 1.0], "load_max": 40.0})
+        self.assertEqual([[row["id"] for row in bundle["items"]] for bundle in out["bundles"]], [items[:3], items[3:]])
+        self.assertEqual({bundle["model"] for bundle in out["bundles"]}, {"opus"})
+        self.assertEqual([row["id"] for row in out["refused"]], [planning])
+        self.assertEqual((out["room"]["machine"], out["room"]["why"], out["bundles"][0]["room"]), (6, "", 3))
+
+    def test_the_plan_shows_no_room_when_the_load_was_not_read(self):
+        out = builds.plan(self.connection, [self.ready()], now=NOW,
+                          sessions=lambda connection, *, now: {"sessions": [], "builders": {"running": 0, "why": ""}},
+                          gate=lambda: {})
+        self.assertEqual((out["room"]["machine"], out["room"]["why"], out["bundles"][0]["room"]),
+                         (0, "the load was not read", 0))
+
+    def test_the_plan_route_reads_its_items(self):
+        item = self.ready()
+        with patch.object(builds, "_room", lambda connection, **_: {"machine": 6, "used": {}, "held": [], "why": ""}):
+            status, _, body = self.request(f"/api/tasks/build/plan?items={item}", headers={"Cookie": self.cookie})
+        self.assertEqual(status, 200, body)
+        self.assertIn('"bundles"', body)
+        status, _, _ = self.request("/api/tasks/build/plan?items=abc", headers={"Cookie": self.cookie})
+        self.assertEqual(status, 400)
+
+
+class BuildsPanel(Fixture):
+    def claimed(self, items):
+        build.queue(self.connection, items, who="fixture")
+        return build.claim(self.connection, owner="fixture", root=self.path.parent / "worktrees", **IDLE)
+
+    def blocked(self, items):
+        """A run lost twice at one step: blocked, released, its items blocked (the reap's second loss)."""
+        run = self.claimed(items)
+        build.write(self.connection, run["id"], step="building")
+        retry = build.reap(self.connection, now="2099-01-01T00:00:00Z")[0]["retry"]
+        build.reap(self.connection, now="2099-01-02T00:00:00Z")
+        return build.run(self.connection, retry)
+
+    def panel(self, now="2099-01-02T01:00:00Z"):
+        return builds.panel(self.connection, now=now)
+
+    def test_an_open_run_is_a_row_with_its_items_step_state_and_cancel(self):
+        items = [self.ready(), self.ready()]
+        run = self.claimed(items)
+        out = builds.panel(self.connection, now=run["created_at"])
+        self.assertEqual(out["error"], "")
+        row = out["runs"][0]
+        self.assertEqual((row["run"], [m["item"] for m in row["items"]], row["step"], row["state"]),
+                         (run["id"], items, "claimed", "working"))
+        self.assertEqual((row["cancel"]["assignment"], row["cancel"]["allowed"]), (run["assignment"], True))
+        status, _, body = self.post(f"/api/assignments/{run['assignment']}/cancel",
+                                    {"revision": row["cancel"]["revision"]})
+        self.assertEqual(status, 200, body)
+        self.assertIsNotNone(build.run(self.connection, run["id"])["cancel_requested"])
+        again = builds.panel(self.connection, now=run["created_at"])["runs"][0]["cancel"]
+        self.assertFalse(again["allowed"])
+
+    def test_a_silent_supervisor_is_lost_and_a_quiet_builder_log_is_stalled(self):
+        run = self.claimed([self.ready()])
+        self.assertEqual(self.panel()["runs"][0]["state"], "lost")
+        log = self.path.parent / "run.jsonl"
+        log.write_text("{}\n")
+        build.write(self.connection, run["id"], step="building", log_path=str(log),
+                    heartbeat_at="2099-01-02T00:59:30Z")
+        import os
+        os.utime(log, (0, 0))
+        self.assertEqual(self.panel()["runs"][0]["state"], "stalled")
+
+    def test_an_open_question_makes_a_run_wait_on_the_operator(self):
+        item = self.ready()
+        run = self.claimed([item])
+        build.write(self.connection, run["id"], heartbeat_at="2099-01-02T00:59:30Z")
+        self.note(item, "Which option?", kind="question")
+        row = self.panel()["runs"][0]
+        self.assertEqual(row["state"], "waiting")
+        self.assertIn("question note", row["why"])
+
+    def test_retry_on_a_blocked_run_queues_its_items_again(self):
+        items = [self.ready(), self.ready()]
+        run = self.blocked(items)
+        self.assertEqual([item_state(self.connection, i)["item"]["status"] for i in items], ["blocked", "blocked"])
+        recent = self.panel(clock())["recent"]
+        self.assertEqual((recent[0]["outcome"], recent[0]["retry"]["allowed"]), ("interrupted", True))
+        status, _, body = self.post("/api/queue/builds/retry", {"assignment": run["assignment"],
+                                                               "revision": recent[0]["retry"]["revision"]})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(sorted(row["item"] for row in body["queued"]), items)
+        self.assertEqual([item_state(self.connection, i)["item"]["status"] for i in items], ["ready", "ready"])
+        queued = self.connection.execute("SELECT COUNT(*) FROM assignment WHERE scope = 'build' AND status = 'queued'")
+        self.assertEqual(queued.fetchone()[0], 2)
+        self.assertEqual(len(self.kicks), 1)
+        status, _, body = self.post("/api/queue/builds/retry", {"assignment": run["assignment"],
+                                                               "revision": recent[0]["retry"]["revision"]})
+        self.assertEqual(status, 409, body)
+
+    def test_retry_refuses_a_run_that_did_not_block(self):
+        run = self.claimed([self.ready()])
+        build.end(self.connection, run["id"], "done", "landed")
+        recent = self.panel(clock())["recent"][0]
+        self.assertEqual((recent["outcome"], recent["retry"]["allowed"]), ("done", False))
+        status, _, body = self.post("/api/queue/builds/retry", {"assignment": run["assignment"],
+                                                               "revision": recent["retry"]["revision"]})
+        self.assertEqual(status, 400, body)
+        self.assertIn("Retry takes a blocked one", body["error"])
+
+    def test_retry_with_a_stale_revision_is_a_409_and_writes_nothing(self):
+        items = [self.ready()]
+        run = self.blocked(items)
+        status, _, body = self.post("/api/queue/builds/retry", {"assignment": run["assignment"], "revision": "0" * 64})
+        self.assertEqual(status, 409, body)
+        self.assertEqual(item_state(self.connection, items[0])["item"]["status"], "blocked")
+        self.assertEqual(self.connection.execute(
+            "SELECT COUNT(*) FROM assignment WHERE scope = 'build' AND status = 'queued'").fetchone()[0], 0)

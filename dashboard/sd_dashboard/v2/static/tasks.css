@@ -200,6 +200,10 @@
 .start-list { display: grid; gap: var(--space-2xs); margin: 0; padding-left: var(--space-lg); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .start-list code { font: 400 var(--text-xs)/1.3 var(--font-data); }
 .start-list li.off { color: var(--color-muted); }
+/* Build (pack sd:6095): one section per bundle in the Build dialog; a queued card names its queued build. */
+.build-bundle h3 { margin: var(--space-sm) 0 var(--space-2xs); font-size: var(--text-sm); font-weight: 600; }
+.build-bundle h3 small { font: 400 var(--text-xs)/1.3 var(--font-data); color: var(--color-muted); overflow-wrap: anywhere; }
+.card .queued { font: 400 var(--text-xs)/1 var(--font-data); color: var(--color-muted); }
 /* sd:5103: the filed issue's link on a card and a list row; the focus ring shows at once, as every control's does. */
 .issue-link { display: inline-flex; align-items: center; justify-content: center; min-width: 1.5rem; min-height: 1.5rem; margin-left: var(--space-2xs); color: var(--color-ink-2); border-radius: var(--radius-sm); }
 .issue-link:hover { color: var(--color-ink); }

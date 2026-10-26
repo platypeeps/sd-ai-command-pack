@@ -179,9 +179,11 @@ queue isolated runner work. They never move files or create branches in the
 operator checkout. Review proposals carry the source snapshot and the actual
 reviewer's identity. The reviewer never shares a vendor with any of the latest authors.
 
-The dashboard queues no runs: the runner stopped (sd:3041). A queued
-assignment is cancelled through `/api/assignments/<id>/cancel`, the route
-`sd assignments cancel` matches, bound to the assignment's revision.
+The dashboard queues one kind of run: Build on Tasks (pack sd:6095) posts
+`/api/tasks/build`, which is `sd assignments build`, then kickstarts the
+`build-dispatch` job. A queued or running assignment is cancelled through
+`/api/assignments/<id>/cancel`, the route `sd assignments cancel` matches,
+bound to the assignment's revision; Queue's Builds panel posts it.
 
 Operations renders one area per entry of `operations_screen.AREAS`.
 [README.md](README.md) names them, and no list here repeats that inventory.
