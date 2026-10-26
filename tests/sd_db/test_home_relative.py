@@ -513,7 +513,8 @@ EQUALITY_LOOKUPS = {
     "runner.py": (6, "every argument is an item or run row's `repo`"),
     "runner_exec.py": (1, "the item row's `repo`"),
     "ship.py": (1, "the item row's `repo`"),
-    "writes.py": (1, "`upsert_repo`, whose guard refuses an unconverted path"),
+    "writes.py": (2, "`upsert_repo`, whose guard refuses an unconverted path; `settle_shadow` "
+                  "sets `shadow.repo`, a slug, and looks nothing up by it"),
 }
 
 
