@@ -3,12 +3,15 @@
   Today, v2 (sd:2110), the default page at / and /today since sd:2163. Built from ui-design products/system/designs/v2/today.html at a3861c9 and design.md.
   One page, no tabs (sd:5921, docs/work/2026-10-23-today-queue/design.md): what is going on, then what needs you.
   Data: /api/now, the document now_screen.document builds, read when the page opens and on Refresh.
+  Since yesterday (sd:6002, now_screen.digest): merged per repo with the PRs folded, failed with why and fix, questions.
   The day track: the last 24 hours as marks (landed, failed jobs, briefs, sessions), a table of them and a key to Tasks.
+  Under it the spend line (sd:6031): spent in the last 24 hours and each of the last 7, from the cost table; Metrics has the rest.
   The annunciator: Jobs, Lane, Reports, Pulls, Mail and Repos filter Needs you to their rows; Sessions opens In motion and
   Gate opens Queue. Each number counts the rows its filter shows.
   Needs you: the document's `needs`, every fact that asks for an act, ranked in the bands, with group rows for the work items
   and briefs. The rail badge counts its rows (now_screen._attention). One selection: ?row=, a group row too.
   In motion: each open item's live sessions (active_sessions.document), longest-running first; the tally counts the lanes.
+  Above them the builder runs (sd:6003, now_screen.builders): each open build run's items, stage, start and ETA.
   Snooze (sd:1896): /ui/snooze.js; a row's Snooze or Unsnooze posts /api/snooze, and Today reads again.
   The old views' addresses (#view=now|work|inbox|status) land here; Decisions moved to Decide and GitHub to GitHub (sd:5781).
 -->
@@ -51,10 +54,16 @@
       <li><button class="cell clock" type="button" id="refresh"><span class="lbl">Observed<svg class="i" aria-hidden="true"><use href="#i-rotate-ccw"/></svg></span><span class="val"><span class="ph" id="observed">not yet</span> · <span class="ph">refresh</span></span></button></li>
     </ul></annunciator-strip>
 
+    <section class="digest" aria-labelledby="digest-h">
+      <h2 id="digest-h">Since yesterday</h2>
+      <div id="digest"><p class="why">Reading the day…</p></div>
+    </section>
+
     <section class="daytrack" id="track" aria-labelledby="track-h">
       <h2 class="sr" id="track-h">The last 24 hours</h2>
       <div class="track-plot" id="track-plot"><p class="why">Reading the day…</p></div>
       <ul class="flowkey" id="flowkey" aria-label="Where the work is"></ul>
+      <p class="spend" id="spend">Reading spend…</p>
       <details class="track-table" id="track-table" hidden><summary>The marks as a table</summary>
         <table class="ledger"><thead><tr><th>When</th><th>Lane</th><th>What</th></tr></thead><tbody id="track-rows"></tbody></table>
       </details>
@@ -81,10 +90,14 @@
 
     <section aria-labelledby="motion-h">
       <div class="sec-head">
-        <h2 id="motion-h">In motion <button class="help" type="button" aria-label="Help: In motion" data-help="&lt;b&gt;Open items with a live session.&lt;/b&gt; A worktree, a lane entry, a running &lt;code&gt;sd-*&lt;/code&gt; command or a herdr agent, each tied to its item by a lane entry, a branch name, &lt;code&gt;--item&lt;/code&gt;, &lt;code&gt;-C&lt;/code&gt; or a Fix note. Longest-running first. What landed today is on Queue.">
+        <h2 id="motion-h">In motion <button class="help" type="button" aria-label="Help: In motion" data-help="&lt;b&gt;Open items with a live session.&lt;/b&gt; First the headless builder runs: each one's items, stage (building, review, lane), start and ETA, the median of past runs. Then each session: a worktree, a lane entry, a running &lt;code&gt;sd-*&lt;/code&gt; command or a herdr agent, each tied to its item by a lane entry, a branch name, &lt;code&gt;--item&lt;/code&gt;, &lt;code&gt;-C&lt;/code&gt; or a Fix note. Longest-running first. What landed today is on Queue.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
         <p class="tally" id="active-tally"></p>
       </div>
+      <table class="ledger active builds" id="builds-table" aria-label="Builder runs" hidden>
+        <thead id="builds-head"></thead>
+        <tbody id="builds"></tbody>
+      </table>
       <table class="ledger active" aria-labelledby="motion-h">
         <thead id="active-head"></thead>
         <tbody id="active"><tr class="empty"><td colspan="5">Reading sessions…</td></tr></tbody>

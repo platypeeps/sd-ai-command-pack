@@ -25,8 +25,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sd_db import review, routine_briefs, upsert_shadow, workflow, writes
+from sd_db.testing import patience
 
-from sd_dashboard import adversarial
+from sd_dashboard import adversarial, command_journal
 
 from test_workflow_actions import BrowserSession
 
@@ -94,9 +95,26 @@ def git(directory, *args):
                            *args], capture_output=True, text=True, check=True, timeout=30).stdout.strip()
 
 
+def _gone(pid):
+    """Whether `pid` ended; a child of this process is reaped, so its zombie does not read as running."""
+    try:
+        return os.waitpid(pid, os.WNOHANG)[0] == pid
+    except ChildProcessError:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        return False
+
+
 class AdversarialCase(BrowserSession):
     def setUp(self):
         super().setUp()
+        # sd:6106: what a case starts ends before its folder goes. A released runner files into the case's database,
+        # and the execution journal's watch writes its log beside it: one writing while the folder was removed failed
+        # the case with 'Directory not empty'. The watch looks often here, so the drain below waits little.
+        self.enterContext(patch.object(command_journal, "POLL_SECONDS", 0.1))
+        self.addCleanup(self.drain, set(threading.enumerate()))
         # Resolved, as git names a checkout: macOS's temporary folder is a symlink.
         root = Path(self.tmp.name).resolve()
         self.root = root
@@ -127,6 +145,25 @@ class AdversarialCase(BrowserSession):
         self.runs = self.state / "system" / "adversarial-gate" / "runs"
         # A run still holding the lock when a case ends would hold it into the next case's state folder: release it.
         self.addCleanup(self.release.write_text, "")
+
+    def drain(self, before):
+        """Wait for each runner the case started, then move the database aside, so each journal watch it started
+        returns at its next look (`command_journal.watch`), and wait for those too."""
+        deadline = time.monotonic() + patience(SETTLE)
+        # A case that runs the runner in this process records this process.
+        pids = ({json.loads(path.read_text()).get("pid") for path in self.runs.glob("*.json")} if self.runs.exists()
+                else set()) - {None, os.getpid()}
+        for pid in pids:
+            while not _gone(pid) and time.monotonic() < deadline:
+                time.sleep(0.05)
+        watches = [thread for thread in threading.enumerate()
+                   if thread not in before and thread.name.startswith("sd-journal ")]
+        if watches and self.path.exists():
+            os.replace(self.path, self.path.with_name(self.path.name + ".ended"))
+        for thread in watches:
+            thread.join(max(0.0, deadline - time.monotonic()))
+        self.assertEqual([pid for pid in pids if not _gone(pid)], [], "a runner outlived its case")
+        self.assertEqual([thread.name for thread in watches if thread.is_alive()], [], "a journal watch outlived its case")
 
     def review(self, kind, target, **extra):
         return self.post("/api/adversarial", {"kind": kind, "target": target, **extra})
@@ -428,6 +465,25 @@ class OneAtATime(AdversarialCase):
         self.assertEqual(json.loads(record.read_text())["filed"], "written")
         with open(self.runs.parent / "lock", "a+") as probe:
             fcntl.flock(probe, fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+class TheTeardown(AdversarialCase):
+    def test_no_runner_or_journal_watch_outlives_the_case(self):
+        """sd:6106: under load the execution journal's watch wrote its log into the case's folder while the folder was
+        removed, and the case failed 'Directory not empty'. Every runner and watch a case starts ends before it goes."""
+        before = set(threading.enumerate())
+        self.mode.write_text("hold")
+        status, _, run = self.review("task", self.task())
+        self.assertEqual(status, 202, run)
+        self.wait_for_codex()
+        pid = json.loads((self.runs / f"{run['id']}.json").read_text())["pid"]
+        watches = [thread for thread in threading.enumerate()
+                   if thread not in before and thread.name.startswith("sd-journal ")]
+        self.assertEqual(len(watches), 1, watches)
+        self.doCleanups()
+        self.assertEqual([thread.name for thread in watches if thread.is_alive()], [])
+        self.assertTrue(_gone(pid), f"the runner {pid} outlived its case")
+        self.assertFalse(Path(self.tmp.name).exists())
 
 
 class FailedRuns(AdversarialCase):
