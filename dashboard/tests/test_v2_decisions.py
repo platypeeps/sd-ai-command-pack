@@ -39,7 +39,8 @@ ASKED = "Which store holds quick notes?\nThe page keeps them for the visit today
 
 
 def seed(case):
-    """One item with a decision, a resolved one, a one-option question and an old prose comment; one done item."""
+    """One item with a decision, a resolved one, a one-option question and an old prose comment; one done item,
+    whose question still waits: closing an item answers none (pack sd:6329)."""
     item = case.item("Notes quick capture", repo=case.repo())
     ids = {"item": item,
            "asked": case.note(item, ASKED, kind="question"),
@@ -98,11 +99,11 @@ class TheRecommendation(ScreenCase):
 
 
 class TheDocument(ScreenCase):
-    def test_every_unresolved_question_on_an_open_item_is_listed_free_text_ones_too(self):
+    def test_every_unresolved_question_on_an_open_or_done_item_is_listed_free_text_ones_too(self):
         ids = seed(self)
         doc = decisions.document(self.connection)
-        self.assertEqual([row["note"] for row in doc["decisions"]], [ids["asked"], ids["single"], ids["free"]])
-        self.assertEqual([row["options"] for row in doc["decisions"][1:]], [["Approve"], []])
+        self.assertEqual([row["note"] for row in doc["decisions"]], [ids["asked"], ids["single"], ids["free"], ids["closed"]])
+        self.assertEqual([row["options"] for row in doc["decisions"][1:]], [["Approve"], [], ["Yes", "No"]])
         self.assertEqual(doc["decisions"][2]["question"], "Which name fits the quick notes page?")
         row = doc["decisions"][0]
         self.assertEqual((row["item"], row["title"], row["repo"]), (ids["item"], "Notes quick capture", "/repos/system"))
@@ -116,9 +117,9 @@ class TheDocument(ScreenCase):
         until it opens. A pack before sd:5648 lists its questions as before."""
         ids = seed(self)
         self.schedule(ids["item"], "2026-09-09")
-        self.assertEqual(decisions.document(self.connection, now=NOW)["decisions"], [])
+        self.assertEqual([row["note"] for row in decisions.document(self.connection, now=NOW)["decisions"]], [ids["closed"]])
         with before_5648():
-            self.assertEqual(len(decisions.document(self.connection, now=NOW)["decisions"]), 3)
+            self.assertEqual(len(decisions.document(self.connection, now=NOW)["decisions"]), 4)
 
     def test_no_decisions_is_an_empty_list(self):
         self.assertEqual(decisions.document(self.connection)["decisions"], [])
@@ -143,7 +144,7 @@ class TheAnswer(ScreenCase):
         self.assertIsNotNone(notes[self.ids["asked"]]["resolved_at"])
         self.assertEqual(notes[ruling["id"]]["body"], ruling["body"])
         self.assertEqual(state["revision"], workflow.item_state(self.connection, self.ids["item"])["revision"])
-        self.assertEqual([row["note"] for row in decisions.document(self.connection)["decisions"]], [self.ids["single"], self.ids["free"]])
+        self.assertEqual([row["note"] for row in decisions.document(self.connection)["decisions"]], [self.ids["single"], self.ids["free"], self.ids["closed"]])
 
     def test_the_ruling_reads_back_as_sd_task_show_prints_it(self):
         decisions.answer(self.connection, self.ids["item"], self.ids["asked"], "A pack store kind", expected_revision=self.revision, who="dashboard")
@@ -179,7 +180,8 @@ class TheAnswer(ScreenCase):
                 state = decisions.answer(self.connection, self.ids["item"], note, words, expected_revision=revision, who="dashboard")
                 self.assertEqual((state["ruling"]["kind"], state["ruling"]["body"]), ("decision", f"Ruling on note #{note}: {words.strip()}"))
                 self.assertIsNotNone(self.notes()[note]["resolved_at"])
-        self.assertEqual([row["note"] for row in decisions.document(self.connection)["decisions"]], [self.ids["asked"]])
+        self.assertEqual([row["note"] for row in decisions.document(self.connection)["decisions"]],
+                         [self.ids["asked"], self.ids["closed"]])
 
 
 class TheRulings(ScreenCase):
@@ -243,17 +245,15 @@ class TheRulings(ScreenCase):
         self.assertIn("is open already", str(refused.exception))
         self.assertEqual(tuple(self.connection.iterdump()), before)
 
-    def test_reverse_refuses_a_ruling_of_a_done_item(self):
-        """Pack sd:6281: Decisions lists no question of a done item, so a reopened one would wait unseen."""
+    def test_a_ruling_of_a_done_item_reverses_and_its_question_lists_again(self):
+        """Pack sd:6329: Decisions lists a done item's open question, so its ruling reverses (sd:6281 refused it)."""
         ruling = self.rule(self.ids["asked"], "A pack store kind", "grill-session")
         self.connection.execute("UPDATE item SET status = 'done' WHERE id = ?", (self.ids["item"],))
         self.connection.commit()
-        before = tuple(self.connection.iterdump())
         revision = workflow.item_state(self.connection, self.ids["item"])["revision"]
-        with self.assertRaises(workflow.WorkflowError) as refused:
-            decisions.reverse(self.connection, self.ids["item"], ruling, expected_revision=revision, who="dashboard")
-        self.assertIn(f"sd:{self.ids['item']} is done", str(refused.exception))
-        self.assertEqual(tuple(self.connection.iterdump()), before)
+        state = decisions.reverse(self.connection, self.ids["item"], ruling, expected_revision=revision, who="dashboard")
+        self.assertIsNone(next(n for n in state["notes"] if n["id"] == self.ids["asked"])["resolved_at"])
+        self.assertIn(self.ids["asked"], [row["note"] for row in decisions.document(self.connection)["decisions"]])
 
 
 class TheRoutes(BrowserSession):

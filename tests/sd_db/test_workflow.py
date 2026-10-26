@@ -364,27 +364,37 @@ class BranchItemClose(WorkflowCase):
 
 
 class DoneResolvesOpenNotes(WorkflowCase):
-    """sd:3505: a move to done resolves the item's open followup and question
-    notes, the ones a brief and the review queue read, in the transaction that
-    moves it, and the status note names them."""
+    """sd:3505: a move to done resolves the item's open followup notes, the
+    ones a brief reads, in the transaction that moves it, and the status note
+    names them. An open question stays open: the close is no answer to it
+    (pack sd:6329)."""
 
     def notes(self, item):
         rows = self.db.execute("SELECT id, kind, resolved_at FROM note WHERE item = ? AND kind != 'status_change' "
                                "ORDER BY id", (item,)).fetchall()
         return {row["id"]: (row["kind"], row["resolved_at"] is None) for row in rows}
 
-    def test_done_resolves_open_followups_and_questions_and_names_them(self):
+    def test_done_resolves_open_followups_and_names_them(self):
         item = self.capture()["item"]["id"]
         followup = add_note(self.db, item, "followup", "Check the backup")
-        question = add_note(self.db, item, "question", "Keep the old flag?")
+        second = add_note(self.db, item, "followup", "Check the restore")
         comment = add_note(self.db, item, "comment", "Context only")
         settled = add_note(self.db, item, "followup", "Already done")
         resolve_item_note(self.db, settled, who="operator")
         finished = change_status(self.db, item, "done", who="operator")
-        self.assertEqual(self.notes(item), {followup: ("followup", False), question: ("question", False),
+        self.assertEqual(self.notes(item), {followup: ("followup", False), second: ("followup", False),
                                             comment: ("comment", True), settled: ("followup", False)})
         self.assertEqual(finished["notes"][-1]["body"],
-                         f"planning -> done by operator: resolved open notes {followup}, {question}")
+                         f"planning -> done by operator: resolved open notes {followup}, {second}")
+
+    def test_done_leaves_an_unanswered_question_open(self):
+        item = self.capture()["item"]["id"]
+        followup = add_note(self.db, item, "followup", "Check the backup")
+        question = add_note(self.db, item, "question", "Move all 45?\nOption: Approve all\nOption: Videos only")
+        finished = change_status(self.db, item, "done", who="sd-ship", reason="delivered at " + "a" * 40)
+        self.assertEqual(self.notes(item), {followup: ("followup", False), question: ("question", True)})
+        self.assertEqual(finished["notes"][-1]["body"],
+                         f"planning -> done by sd-ship: delivered at {'a' * 40}; resolved open note {followup}")
 
     def test_a_reason_keeps_its_place_before_the_resolved_notes(self):
         item = self.capture()["item"]["id"]
@@ -410,11 +420,11 @@ class DoneResolvesOpenNotes(WorkflowCase):
 
     def test_a_failed_transition_rolls_the_resolution_back(self):
         item = self.capture()["item"]["id"]
-        question = add_note(self.db, item, "question", "Keep the old flag?")
+        followup = add_note(self.db, item, "followup", "Check the backup")
         with patch("sd_db.workflow.transition", side_effect=sqlite3.OperationalError("disk I/O error")):
             with self.assertRaises(sqlite3.OperationalError):
                 change_status(self.db, item, "done", who="operator")
-        self.assertEqual(self.notes(item), {question: ("question", True)})
+        self.assertEqual(self.notes(item), {followup: ("followup", True)})
         self.assertEqual(item_state(self.db, item)["item"]["status"], "planning")
 
 
