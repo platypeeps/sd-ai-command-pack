@@ -432,6 +432,28 @@ def open_runs(connection) -> list[dict]:
         (SCOPE,))]
 
 
+def ended_runs(connection, since: str, *, limit: int = 50) -> list[dict]:
+    """The build runs released at or after `since`, newest first (Queue's Builds panel, pack sd:6095)."""
+    return [dict(row) for row in connection.execute(
+        "SELECT runner_run.* FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
+        "WHERE assignment.scope = ? AND runner_run.released_at IS NOT NULL AND runner_run.released_at >= ? "
+        "ORDER BY runner_run.released_at DESC, runner_run.run DESC, runner_run.rowid DESC LIMIT ?",
+        (SCOPE, since, limit))]
+
+
+def open_question(connection, items: list[int], since: str) -> dict | None:
+    """The first `question` note on `items` since `since` that no `Ruling on note #<n>:` decision answers."""
+    if not items:
+        return None
+    marks = ", ".join("?" for _ in items)
+    row = connection.execute(
+        f"SELECT asked.id, asked.item FROM note asked WHERE asked.kind = 'question' AND asked.item IN ({marks}) "
+        f"AND asked.timestamp >= ? AND NOT EXISTS (SELECT 1 FROM note ruling WHERE ruling.item = asked.item "
+        f"AND ruling.kind = 'decision' AND ruling.body LIKE 'Ruling on note #' || asked.id || ':%') "
+        f"ORDER BY asked.id LIMIT 1", (*items, since)).fetchone()
+    return dict(row) if row else None
+
+
 def finished_seconds(connection, *, limit: int = 20) -> list[float]:
     """Claim to release, in seconds, of the last `limit` build runs that ended `done`, newest first.
 

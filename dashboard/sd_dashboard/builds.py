@@ -25,6 +25,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from sd_db import build, operations, reads, runner, workflow
+from sd_db import repos as sd_repos
 from sd_db.config import label_prefix
 from sd_db.database import transaction
 from sd_db.errors import SdDbError
@@ -83,7 +84,7 @@ def interactive(connection, *, now: str, sessions=None) -> list[dict] | None:
         if document["builders"]["running"] is None:
             return None
         root = pack_module("sd_lib").main_worktree_root
-        repos = [row["path"] for row in connection.execute("SELECT path FROM repo")]
+        repos = [row["path"] for row in sd_repos.registered(connection)]
         found = []
         for session in document["sessions"] or []:
             count = sum(1 for agent in session.get("agents") or [] if agent["builder"] and agent["state"] != "idle")
@@ -180,14 +181,7 @@ def _waiting(connection, run: dict, items: list[int]) -> str:
     """Why a run waits on the operator: it is held (`blocked`, `abandoned`), or an open question note asks."""
     if run["outcome"] in ("blocked", "abandoned"):
         return run["detail"] or f"the run ended {run['outcome']}"
-    if not items:
-        return ""
-    marks = ", ".join("?" for _ in items)
-    asked = connection.execute(
-        f"SELECT asked.id, asked.item FROM note asked WHERE asked.kind = 'question' AND asked.item IN ({marks}) "
-        f"AND asked.timestamp >= ? AND NOT EXISTS (SELECT 1 FROM note ruling WHERE ruling.item = asked.item "
-        f"AND ruling.kind = 'decision' AND ruling.body LIKE 'Ruling on note #' || asked.id || ':%') "
-        f"ORDER BY asked.id LIMIT 1", (*items, run["created_at"])).fetchone()
+    asked = build.open_question(connection, items, run["created_at"])
     return f"question note #{asked['id']} on sd:{asked['item']}" if asked else ""
 
 
@@ -239,7 +233,7 @@ def _open_row(connection, run: dict, now: str) -> dict:
             "cancel": cancel}
 
 
-def _retry_state(connection, run: dict, latest: dict) -> dict:
+def _retry_state(connection, run: dict) -> dict:
     """Retry on an ended run: only the lead's latest run, released, whose bundle ended blocked or cancelled.
 
     A bundle blocks on a `blocked` outcome and on a second loss at one step, whose run keeps the loss as its
@@ -247,6 +241,7 @@ def _retry_state(connection, run: dict, latest: dict) -> dict:
     A cancelled bundle keeps its worktree too, so Send to builder may resume it (pack sd:6020).
     """
     current = runner.queue_state(connection, run["assignment"])
+    latest = current["run"]
     reason = ""
     if latest["id"] != run["id"]:
         reason = f"run {latest['id']} is newer"
@@ -266,19 +261,13 @@ def panel(connection, *, now: str) -> dict:
     try:
         rows = [_open_row(connection, run, now) for run in build.open_runs(connection)]
         since = (_at(now) - timedelta(hours=RECENT_HOURS)).isoformat().replace("+00:00", "Z")
-        ended = connection.execute(
-            "SELECT runner_run.* FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
-            "WHERE assignment.scope = ? AND runner_run.released_at IS NOT NULL AND runner_run.released_at >= ? "
-            "ORDER BY runner_run.released_at DESC, runner_run.run DESC, runner_run.rowid DESC LIMIT 50", (build.SCOPE, since)).fetchall()
         recent = []
-        for row in map(dict, ended):
-            latest = dict(connection.execute("SELECT * FROM runner_run WHERE assignment = ? ORDER BY run DESC LIMIT 1",
-                                             (row["assignment"],)).fetchone())
+        for row in build.ended_runs(connection, since):
             recent.append({"run": row["id"], "repo": row["repo"], "name": Path(row["repo"]).name,
                            "items": _members(connection, row), "outcome": row["outcome"], "detail": row["detail"] or "",
                            "ended": row["released_at"], "step": row["step"] or "claimed", "model": row["model"] or "",
                            "usd": round(build.run_spent(connection, row["id"]), 2), "log": row["log_path"] or "",
-                           "worktree": row["work_path"] or "", "retry": _retry_state(connection, row, latest)})
+                           "worktree": row["work_path"] or "", "retry": _retry_state(connection, row)})
     except (SdDbError, sqlite3.Error, ValueError, TypeError, KeyError) as failure:
         return {"runs": [], "recent": [], "error": str(failure) or "the build runs could not be read", "read": now}
     return {"runs": rows, "recent": recent, "error": "", "read": now, "quiet_seconds": QUIET_SECONDS,
@@ -299,18 +288,17 @@ def retry(connection, assignment: int, *, expected_revision: str, who: str, find
         if current["revision"] != expected_revision:
             raise workflow.StaleItem(f"build assignment {assignment} changed; read the Builds panel again")
         run = current["run"]
-        state = _retry_state(connection, run, run) if run else {"allowed": False, "reason": "it never ran"}
+        state = _retry_state(connection, run) if run else {"allowed": False, "reason": "it never ran"}
         if not state["allowed"]:
             raise workflow.WorkflowError(f"Retry refused: {state['reason']}")
-        members = connection.execute(
-            "SELECT id, item FROM assignment WHERE (id = ? OR parent = ?) AND scope = ? AND status = ? "
-            "ORDER BY id = ? DESC, id", (assignment, assignment, build.SCOPE, current["status"], assignment)).fetchall()
+        members = build._members(connection, assignment, current["status"])
         if not members:
             raise workflow.WorkflowError(f"Retry refused: build run {run['id']} has no {current['status']} member")
+        items = reads.items_by_ids(connection, [member["item"] for member in members])
         queued = []
         for member in members:
-            status = connection.execute("SELECT status FROM item WHERE id = ?", (member["item"],)).fetchone()
-            if status is not None and status["status"] == "blocked":
+            item = items.get(member["item"])
+            if item is not None and item["status"] == "blocked":
                 transition(connection, member["item"], "ready", who=who, reason=f"Retry of build run {run['id']}")
             try:
                 build._item(connection, member["item"])

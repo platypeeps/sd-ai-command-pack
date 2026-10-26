@@ -431,7 +431,7 @@ addEventListener('DOMContentLoaded', () => {
     buildDlg.showModal(); (buildDlg.querySelector('[value="build"]') || buildDlg.querySelector('[value="cancel"]'))?.focus();
   }
   C.register({ id: 'item.build', on: 'item', label: 'Build', icon: 'rocket', risk: 'safe', bulk: true, executes: true,
-    does: 'Queues a headless build of each item; the dispatcher bundles them by repository and enqueues the result.',
+    does: 'Queues a headless build per item; the dispatcher bundles them by repository.',
     when: o => { const t = byKey(o.id); return !t ? 'the task is no longer listed' : t.status !== 'ready' ? `a build takes a ready task; this one is ${slabel(t.status).toLowerCase()}`
       : !t.repo ? 'a build needs a repository' : t.assignment === 'running' || t.assignment === 'queued' ? `a runner assignment is ${t.assignment}` : true; },
     cli: o => `sd assignments build ${byKey(o.id)?.id ?? o.id}`,
