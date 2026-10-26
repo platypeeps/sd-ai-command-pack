@@ -306,10 +306,12 @@ REVIEW_BATCH = "(item.source IS 'task-ref' AND substr(item.external_id, 1, 7) IS
 
 def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200,
                batches: bool = True) -> list[sqlite3.Row]:
-    """Unresolved `kind` notes on items that are neither done nor parked, oldest first (sd:3501).
+    """Unresolved `kind` notes on items that are not parked, oldest first (sd:3501).
 
-    A row moved to a Documents view keeps its open notes here (pack sd:6262):
-    a question on it still waits on the operator.
+    A followup on a done item is not owed, so only an open item's lists. A
+    question on a done item lists: closing an item answers none of its
+    questions (pack sd:6329). A row moved to a Documents view keeps its open
+    notes here (pack sd:6262): a question on it still waits on the operator.
 
     `batches=False` leaves out the notes of review batches, in the query, so
     a batch of hundreds does not fill `limit`: the dashboard's Review page
@@ -320,7 +322,7 @@ def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200,
             f"""
             SELECT note.*, item.title AS item_title, item.repo AS item_repo, item.status AS item_status
               FROM note JOIN item ON item.id = note.item
-             WHERE note.kind = ? AND note.resolved_at IS NULL AND item.status != 'done'
+             WHERE note.kind = ? AND note.resolved_at IS NULL AND (item.status != 'done' OR note.kind = 'question')
                AND {_unparked_clause(connection, documents=True)} AND {"1" if batches else "NOT " + REVIEW_BATCH}
              ORDER BY note.timestamp ASC, note.id ASC
              LIMIT ?

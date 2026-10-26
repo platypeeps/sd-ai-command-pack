@@ -54,7 +54,7 @@ import sys
 import tempfile
 import time
 import uuid
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -2048,20 +2048,47 @@ class Newest:
     released: list[str]
 
 
-def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None) -> Newest:
-    """Restore the newest verified snapshot under `roots`, newest checkpoint first (sd:4011).
+@dataclass
+class Restorable:
+    """What `newest_restorable` found, restoring nothing (pack sd:6323).
+
+    `snapshot` is the one `restore_newest` would restore, or `None` when none
+    passes. `refused` says why each newer one failed, an unreadable root and
+    a run stopped before its manifest included. `newer` is `(path, version)`
+    when the walk stopped at a snapshot of a schema newer than this library,
+    as `restore_newest` stops there; `snapshot` is then `None`. `released`
+    is the runs whose leases a restore of `snapshot` would release.
+    """
+
+    snapshot: Path | None
+    taken_at: datetime | None
+    refused: list[tuple[Path, str]]
+    released: list[str]
+    newer: tuple[Path, int] | None = None
+
+
+def newest_restorable(roots: Sequence[Path | str], *, report=None) -> Restorable:
+    """The newest snapshot under `roots` that `restore_newest` would restore, judged by its checks.
+
+    The one walk `restore_newest` runs, less the restore, so a readiness
+    check reads the same answer the restore acts on: system's hub failover
+    asks it for the backup age. It writes nothing outside its temporary
+    copies, so it runs off the hub too. A root it cannot read is a refusal,
+    not an empty root.
+    """
+    return _walk_newest(roots, report=report)[0]
+
+
+def _walk_newest(roots: Sequence[Path | str], *, report=None,
+                 install: Callable[[Path, Path], Path] | None = None) -> tuple[Restorable, Path | None]:
+    """Judge the candidates under `roots`, newest checkpoint first, and stop at the first that passes.
 
     Each candidate is copied off its share first and judged on the copied
     bytes: its manifest's hashes and its database's checkpoint
-    (`_check_backup`), then `restore`'s own validator (`check_restorable`). A
-    refused candidate is reported and the next is tried. A candidate newer
-    than this library stops the run: an older snapshot would lose what the
-    newer one holds. So does any failure of the restore itself, which may
-    already have changed live state, or conflicts with live evidence that an
-    older snapshot would conflict with too.
+    (`_check_backup`), then `restore`'s own validator (`check_restorable`).
+    `install` gets the passing copy and its origin while the copy exists,
+    and its answer is the second value; without it nothing is restored.
     """
-    home = Path(home)
-    refuse_hub_only(local_path(home), "the restore", home)
     refused: list[tuple[Path, str]] = []
 
     def refuse(path: Path, reason: str) -> None:
@@ -2111,8 +2138,7 @@ def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None
             check = check_restorable(local / "sd.db")
             # Before the full manifest check: this library cannot count a newer schema's tables.
             if check.version is not None and check.version > SCHEMA_VERSION:
-                raise BackupError(f"{path} is schema {check.version}, newer than this library ({SCHEMA_VERSION}); "
-                                  "update the pack and retry")
+                return Restorable(None, None, refused, [], newer=(path, check.version)), None
             try:
                 _check_backup(local, moved=True)
                 if not check.accepted:
@@ -2127,6 +2153,30 @@ def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None
             except (BackupError, sqlite3.Error) as error:
                 refuse(path, str(error))
                 continue
-            target = restore(local, home=home, origin=path, settle=True)
-            return Newest(path, taken_at, target, refused, released)
-    raise BackupError(f"no snapshot under {', '.join(map(str, roots))} restored ({len(refused)} refused)")
+            found = Restorable(path, taken_at, refused, released)
+            return found, (install(local, path) if install is not None else None)
+    return Restorable(None, None, refused, []), None
+
+
+def restore_newest(roots: Sequence[Path | str], *, home: Path | str, report=None) -> Newest:
+    """Restore the newest verified snapshot under `roots`, newest checkpoint first (sd:4011).
+
+    `newest_restorable`'s walk picks it. A refused candidate is reported and
+    the next is tried. A candidate newer than this library stops the run: an
+    older snapshot would lose what the newer one holds. So does any failure
+    of the restore itself, which may already have changed live state, or
+    conflicts with live evidence that an older snapshot would conflict with
+    too.
+    """
+    home = Path(home)
+    refuse_hub_only(local_path(home), "the restore", home)
+    found, target = _walk_newest(
+        roots, report=report,
+        install=lambda local, origin: restore(local, home=home, origin=origin, settle=True))
+    if found.newer is not None:
+        path, version = found.newer
+        raise BackupError(f"{path} is schema {version}, newer than this library ({SCHEMA_VERSION}); "
+                          "update the pack and retry")
+    if found.snapshot is None or found.taken_at is None or target is None:
+        raise BackupError(f"no snapshot under {', '.join(map(str, roots))} restored ({len(found.refused)} refused)")
+    return Newest(found.snapshot, found.taken_at, target, found.refused, found.released)

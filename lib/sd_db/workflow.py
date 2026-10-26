@@ -19,7 +19,7 @@ from typing import Any
 from . import repos
 from .database import transaction
 from .errors import SdDbError
-from .reads import BRIEF_KINDS, item_by_id, item_notes
+from .reads import item_by_id, item_notes
 from .recurrence import (
     ANCHORS,
     MAX_LEAD_DAYS,
@@ -767,9 +767,11 @@ def change_status(
                 set_item_fields(connection, item, fields=held)
         if target == "done":
             # sd:3505: what a done item still owed is no longer owed; the brief
-            # and Today read only open notes, so close them with the move.
+            # and Today read only open notes, so close them with the move. A
+            # question is not owed work: it waits on the operator's answer,
+            # which a close does not give (pack sd:6329).
             owed = [note["id"] for note in state["notes"]
-                    if note["kind"] in BRIEF_KINDS and not note["resolved_at"]]
+                    if note["kind"] == "followup" and not note["resolved_at"]]
             for note in owed:
                 resolve_note(connection, note)
             if owed:

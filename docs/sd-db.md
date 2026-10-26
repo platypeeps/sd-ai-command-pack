@@ -605,6 +605,20 @@ The row is the source of truth: no counter or time decides a difference, because
 - Every render records the `heartbeat` state row `brief-copies`; `routine_briefs.copies_state` reads the last one.
 - A hub `add` renders after its commit. A failed render prints `vault copy not written: <reason>`, and `add` still exits 0.
 
+## The newest restorable snapshot
+
+`sd_db.backup.newest_restorable(roots, report=None)` names the snapshot `restore --newest` would restore, and restores nothing (pack sd:6323).
+`restore_newest` calls the same walk, so a readiness check and the restore cannot disagree.
+
+- It takes the dated folders under `roots`, newest checkpoint first, and judges a local copy of each.
+  The checks run in order: the files against the manifest's hashes, the schema stop, `_check_backup`, then `check_restorable`.
+- It returns a `Restorable`: `snapshot` and `taken_at` of the first that passes, and `refused`, why each newer one failed.
+  `refused` also names an unreadable root and each run stopped before its manifest.
+- No snapshot passing is `snapshot=None`, not an error.
+- A snapshot of a schema newer than this library stops the walk, as it stops the restore: `newer` holds its path and version.
+- `released` lists the runs whose open leases a restore of that snapshot would release.
+- It writes only its temporary copies, so it runs off the hub; `restore_newest` still refuses there.
+
 ## Renaming a repository
 
 There is no rename verb (sd:3172).

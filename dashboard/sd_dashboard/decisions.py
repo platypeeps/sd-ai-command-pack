@@ -13,7 +13,8 @@ place of buttons. An old prose "Decision needed" comment stays a comment: it lis
 `question` note asks.
 
 - `document` is `/api/decisions`: every unresolved decision on an open item Tasks lists (`reads.backlog_items`,
-  `reads.brief_notes`), the item's priority first, then the oldest, each with the revision `workflow.item_state` gives,
+  `reads.brief_notes`), and on a done item (`reads.open_notes`): closing an item answers none of its questions
+  (pack sd:6329). The item's priority first, then the oldest, each with the revision `workflow.item_state` gives,
   read for every item in one `reads.revisions`.
   `recommended` is the index of the option the note recommends, or null (sd:5306): one option that ends
   "(Recommended)" or starts "(Recommended)" or "Recommended:", else a line "Recommendation: <text>" that names an
@@ -96,6 +97,9 @@ def recommended(body: str, options: list[str]) -> int | None:
 def document(connection, *, now: str | None = None) -> dict:
     open_items = {row["id"]: row for row in reads.backlog_items(connection, include_done_days=0, now=now)
                   if row["status"] != "done" and not is_scheduled(row)}
+    for note in reads.open_notes(connection, "question", batches=False):
+        if note["item_status"] == "done" and note["item"] not in open_items:
+            open_items[note["item"]] = reads.item_by_id(connection, note["item"])
     found, batched = [], 0
     for row in reads.brief_notes(connection, list(open_items)):
         question, options = parse(row["body"])
@@ -164,9 +168,7 @@ def reverse(connection, item: int, note: int, *, expected_revision: str, who: st
             raise workflow.WorkflowError(f"note {note} answered no question on sd:{item}; note the item to reverse it")
         if asked["resolved_at"] is None:
             raise workflow.WorkflowError(f"question #{asked['id']} is open already: answer it there")
-        # Decisions lists no question of a done item, so a reopened one would wait where no page shows it (sd:6281).
-        if state["item"]["status"] == "done":
-            raise workflow.WorkflowError(f"sd:{item} is done: reopen the item before you reverse its ruling")
+        # A done item's reopened question lists in Decisions too (pack sd:6329), so a done item reverses (was sd:6281).
         done = workflow.add_item_note(connection, item, kind="decision", who=who, expected_revision=expected_revision,
                                       body=f"Reversed ruling #{note}: question #{asked['id']} asks again.")
         writes.reopen_note(connection, asked["id"])
