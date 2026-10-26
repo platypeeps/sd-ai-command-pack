@@ -3,7 +3,8 @@
 
 A compacted session loses what it filed and ruled. The rows keep it: `sd task
 add` and `sd task note` record the harness session id (`CLAUDE_CODE_SESSION_ID`)
-as the note's session (sd:6023). This hook reads those rows back by that id --
+as the note's session (sd:6023); a CLI ruling keeps the user there and the id
+as its `harness_session` (pack sd:6046). This hook reads those rows back by that id --
 the items the session filed and the decisions and questions it wrote, newest
 first, at most `LIMIT` -- so the session continues from the database and needs
 no handoff file.
@@ -11,10 +12,12 @@ no handoff file.
 Register on the `compact` matcher only. `bin/sd-handoff-restore` owns `startup`
 and `clear`, and a fresh session has no trail of its own.
 
-The id is the payload's `session_id`, else the environment's. With neither, or
-no `sd_db` on the machine, it prints nothing. A failed read is unknown, not an
-empty trail, so it prints one line that says so. It exits 0 whatever happens:
-a hook never breaks a session.
+The id is the payload's `session_id`, else the environment's, with the
+payload's `agent_id` appended for a teammate, as `bin/sd-session-beat` marks
+a teammate's notes (pack sd:6046). With no id, or no `sd_db` on the
+machine, it prints nothing. A failed read is unknown, not an empty trail, so
+it prints one line that says so. It exits 0 whatever happens: a hook never
+breaks a session.
 """
 
 from __future__ import annotations
@@ -34,8 +37,11 @@ WIDTH = 160
 
 
 def session_of(payload: dict, environ: dict[str, str]) -> str:
+    """The session id, as `<session>:<agent>` for a teammate, whose notes carry that mark (pack sd:6046)."""
     found = payload.get("session_id")
-    return found if isinstance(found, str) and found else environ.get(SESSION_ENV, "")
+    session = found if isinstance(found, str) and found else environ.get(SESSION_ENV, "")
+    agent = payload.get("agent_id")
+    return f"{session}:{agent}" if session and isinstance(agent, str) and agent else session
 
 
 def first_line(text) -> str:

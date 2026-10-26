@@ -435,8 +435,13 @@ def add_note(
     ended: str | None = None,
     exit_code: int | None = None,
     output_path: str | None = None,
+    harness_session: str | None = None,
 ) -> int:
-    """Any note but a status change, which only `transition` writes."""
+    """Any note but a status change, which only `transition` writes.
+
+    `harness_session` is the harness session that wrote a note whose
+    `session` names someone else, as a CLI ruling does (pack sd:6046).
+    """
     if kind == STATUS_CHANGE:
         raise TransitionRefused(
             "a status_change note is written by `transition`, with the status, "
@@ -445,8 +450,8 @@ def add_note(
     with transaction(connection):
         cursor = connection.execute(
             "INSERT INTO note (item, timestamp, kind, body, session, started, "
-            "ended, exit_code, output_path) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (item, now(), kind, body, session, started, ended, exit_code, output_path),
+            "ended, exit_code, output_path, harness_session) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (item, now(), kind, body, session, started, ended, exit_code, output_path, harness_session),
         )
     return int(cursor.lastrowid)
 
