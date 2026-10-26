@@ -230,6 +230,7 @@ def _open_row(connection, run: dict, now: str) -> dict:
             "outcome": run["outcome"], "started": run["created_at"], "elapsed": _seconds(run["created_at"], now),
             "beat": beat, "quiet": quiet, "usd": round(build.run_spent(connection, run["id"]), 2),
             "log": run["log_path"] or "", "branch": run["branch"] or "", "worktree": run["work_path"] or "",
+            "pull": build.pull_url(connection, run["repo"], run["branch"], [member["item"] for member in members]),
             "cancel": cancel}
 
 
@@ -263,8 +264,10 @@ def panel(connection, *, now: str) -> dict:
         since = (_at(now) - timedelta(hours=RECENT_HOURS)).isoformat().replace("+00:00", "Z")
         recent = []
         for row in build.ended_runs(connection, since):
-            recent.append({"run": row["id"], "repo": row["repo"], "name": Path(row["repo"]).name,
-                           "items": _members(connection, row), "outcome": row["outcome"], "detail": row["detail"] or "",
+            members = _members(connection, row)
+            recent.append({"run": row["id"], "repo": row["repo"], "name": Path(row["repo"]).name, "items": members,
+                           "pull": build.pull_url(connection, row["repo"], row["branch"], [m["item"] for m in members]),
+                           "outcome": row["outcome"], "detail": row["detail"] or "",
                            "ended": row["released_at"], "step": row["step"] or "claimed", "model": row["model"] or "",
                            "usd": round(build.run_spent(connection, row["id"]), 2), "log": row["log_path"] or "",
                            "worktree": row["work_path"] or "", "retry": _retry_state(connection, row)})

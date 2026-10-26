@@ -1091,6 +1091,21 @@ R.after = ELS.builds.html;""")
         self.assertIn(["/api/queue/builds/retry", {"assignment": 5, "revision": "b" * 64}], [post[:2] for post in out["posts"]])
         self.assertIn("sd:5 queued again for build.", out["R"]["after"])
 
+    def test_a_build_row_with_a_pull_request_links_it_and_one_without_shows_nothing(self):
+        """Pack sd:6020 ruling #31553: no diff Review page; a row whose branch has a pull request opens it on GitHub."""
+        url = "https://github.com/example/alpha/pull/7"
+        builds = dict(self.BUILDS, runs=[dict(self.BUILDS["runs"][0], pull=url)],
+                      recent=[dict(self.BUILDS["recent"][0], pull=""),
+                              dict(self.BUILDS["recent"][0], run="r9", pull="https://github.com/example/alpha/pull/9")])
+        out = self.run_page(f"""const B = {json.dumps(builds)};
+window.ELSE = (p, b) => p === '/api/queue/builds' ? [200, B] : [404, {{ error: 'no' }}];
+await window.PAGE_AGAIN.run(); await flush(); await flush();
+R.builds = ELS.builds.html;""")
+        rows = re.findall(r'<li class="qrow".*?</li>', out["R"]["builds"], re.S)
+        links = [re.findall(r'<a class="btn quiet sm" href="([^"]+)" target="_blank" rel="noopener noreferrer" '
+                            r'aria-label="Open the pull request of run (\w+) on GitHub">Open PR</a>', row) for row in rows]
+        self.assertEqual(links, [[(url, "r1")], [], [("https://github.com/example/alpha/pull/9", "r9")]])
+
     def test_send_to_builder_asks_for_the_finding_and_posts_it_with_the_retry(self):
         """Pack sd:6020: a blocked or cancelled ended run offers Send to builder; it asks for the finding, then
         queues the bundle again with it, so the next builder resumes the same worktree with that note."""

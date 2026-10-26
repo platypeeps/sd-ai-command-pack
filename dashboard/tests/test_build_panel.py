@@ -5,7 +5,7 @@
 
 from unittest.mock import patch
 
-from sd_db import build, upsert_repo
+from sd_db import build, ship, upsert_repo
 from sd_db.writes import now as clock
 from sd_db.workflow import item_state
 from sd_dashboard import builds
@@ -151,6 +151,22 @@ class BuildsPanel(Fixture):
         row = self.panel()["runs"][0]
         self.assertEqual(row["state"], "waiting")
         self.assertIn("question note", row["why"])
+
+    def test_a_run_whose_branch_shipped_carries_its_pull_request_from_the_ship_receipt(self):
+        """Pack sd:6020 ruling #31553: the row's Open PR reads `sd-ship`'s receipt for the branch; nothing asks GitHub."""
+        items = [self.ready(), self.ready()]
+        run = self.claimed(items)
+        self.assertEqual(self.panel(run["created_at"])["runs"][0]["pull"], "")  # a remote that is not GitHub's
+        upsert_repo(self.connection, REPO, remote="https://github.com/example/alpha.git", managed=1)
+        self.assertEqual(self.panel(run["created_at"])["runs"][0]["pull"], "")  # never shipped
+        url = "https://github.com/example/alpha/pull/7"
+        # The lane names an entry by the first member the branch delivers, which need not be the lead.
+        ship.save(self.connection, ship.receipt_key("example/alpha", run["branch"], items[1]), 0, {
+            "repository": "example/alpha", "branch": run["branch"], "item": items[1],
+            "pull_request": {"number": 7, "repository": "example/alpha", "base": "main", "url": url}})
+        self.assertEqual(self.panel(run["created_at"])["runs"][0]["pull"], url)
+        build.end(self.connection, run["id"], "done", "landed")
+        self.assertEqual(self.panel(clock())["recent"][0]["pull"], url)
 
     def test_retry_on_a_blocked_run_queues_its_items_again(self):
         items = [self.ready(), self.ready()]

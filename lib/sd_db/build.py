@@ -441,6 +441,30 @@ def ended_runs(connection, since: str, *, limit: int = 50) -> list[dict]:
         (SCOPE, since, limit))]
 
 
+def pull_url(connection, repo: str, branch: str | None, items: list[int]) -> str:
+    """The pull request `sd-ship` opened for `branch`, from its ship receipt, or "" (pack sd:6020, Open PR).
+
+    The lane names an entry by the first member the branch delivers, so each member's receipt is read in turn. Nothing
+    asks GitHub: a branch never shipped, a repository with no GitHub remote or an unreadable receipt has none to show.
+    """
+    from . import ship
+    from .workflow import WorkflowError
+
+    row = connection.execute("SELECT remote FROM repo WHERE path = ?", (repo,)).fetchone()
+    if not branch or row is None or not row["remote"]:
+        return ""
+    try:
+        repository = ship._github_repository(row["remote"])
+        for item in items:
+            receipt = ship.read(connection, ship.receipt_key(repository, branch, item))[1]
+            url = (receipt.get("pull_request") or {}).get("url")
+            if isinstance(url, str) and url.startswith("https://github.com/"):
+                return url
+    except WorkflowError:
+        return ""
+    return ""
+
+
 def open_question(connection, items: list[int], since: str) -> dict | None:
     """The first `question` note on `items` since `since` that no `Ruling on note #<n>:` decision answers."""
     if not items:

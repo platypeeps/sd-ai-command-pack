@@ -140,11 +140,13 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
   const usd = n => `$${Number(n || 0).toFixed(2)}`;
   const names = r => r.items.length ? html`${r.items.map((m, i) => html`${i ? '; ' : ''}<code>sd:${String(m.item)}</code> ${m.title}`)}` : 'no items recorded';
   const bbtn = (act, r, label, aria, off) => html`<button class="btn quiet sm" type="button" data-build="${act}" data-run="${r.run}" aria-label="${aria}"${off ? html` disabled title="${off}"` : busy ? html` disabled` : ''}>${label}</button>`;
+  // Open PR (pack sd:6020 ruling #31553): the pull request `sd-ship` opened for the row's branch; none shows nothing.
+  const prLink = r => r.pull ? html`<a class="btn quiet sm" href="${r.pull}" target="_blank" rel="noopener noreferrer" aria-label="Open the pull request of run ${r.run} on GitHub">Open PR</a>` : '';
   const logBtn = r => r.log ? html`<button class="btn quiet sm" type="button" data-copy="${`tail -f ${window.shell.shq(r.log)}`}" aria-label="Copy the command that follows the log of run ${r.run}">Log</button>` : html`<span class="why">no log yet</span>`;
   function buildRow(r) {
     const [g, st] = BSTATE[r.state] || [G.unknown, r.state.toUpperCase()];
     const out = r.quiet == null ? 'no output yet' : `output ${dur(r.quiet)} ago`;
-    return html`<li class="qrow" data-state="${r.state}"><span class="g g-${g[0]}" aria-hidden="true">${g[1]}</span><span class="st">${st}</span><span class="s"><span><span class="sr">${st.toLowerCase()} · </span>${names(r)}</span><small><b>${r.name}</b> · ${r.model || 'model not recorded'} · step <b>${r.step}</b> · ${dur(r.elapsed)} · ${out} · ${usd(r.usd)} so far${r.why ? ` · ${r.why}` : ''}</small></span><span class="ends"><div class="ctl" role="group" aria-label="Run ${r.run}">${bbtn('cancel', r, 'Cancel…', `Cancel build run ${r.run}`, r.cancel.allowed ? '' : r.cancel.reason || 'cancel is off')}${logBtn(r)}</div></span></li>`;
+    return html`<li class="qrow" data-state="${r.state}"><span class="g g-${g[0]}" aria-hidden="true">${g[1]}</span><span class="st">${st}</span><span class="s"><span><span class="sr">${st.toLowerCase()} · </span>${names(r)}</span><small><b>${r.name}</b> · ${r.model || 'model not recorded'} · step <b>${r.step}</b> · ${dur(r.elapsed)} · ${out} · ${usd(r.usd)} so far${r.why ? ` · ${r.why}` : ''}</small></span><span class="ends"><div class="ctl" role="group" aria-label="Run ${r.run}">${bbtn('cancel', r, 'Cancel…', `Cancel build run ${r.run}`, r.cancel.allowed ? '' : r.cancel.reason || 'cancel is off')}${prLink(r)}${logBtn(r)}</div></span></li>`;
   }
   // A blocked or cancelled bundle keeps its worktree: Retry queues it again at once; Send to builder (pack sd:6020) asks
   // for a finding first, notes it on each item, and queues it again, so the next builder resumes that worktree with it.
@@ -152,7 +154,7 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
   function endedRow(r) {
     const g = r.outcome === 'done' ? G.ok : r.retry.bundle === 'blocked' ? G.warning : G.queued;
     const off = r.retry.allowed ? '' : r.retry.reason;
-    return html`<li class="qrow" data-state="ended"><span class="g g-${g[0]}" aria-hidden="true">${g[1]}</span><span class="st">${(r.retry.bundle === 'blocked' ? 'BLOCKED' : r.outcome || 'ended').toUpperCase()}</span><span class="s"><span>${names(r)}</span><small><b>${r.name}</b> · ${r.outcome} at ${r.step} · ended ${at(r.ended)} · ${usd(r.usd)}${r.detail ? ` · ${r.detail}` : ''}</small></span><span class="ends"><div class="ctl" role="group" aria-label="Run ${r.run}">${AGAIN.includes(r.retry.bundle) ? html`${bbtn('retry', r, 'Retry', `Retry build run ${r.run}: queue its items again`, off)}${bbtn('send', r, 'Send to builder…', `Send a finding to the builder of run ${r.run}`, off)}` : ''}${logBtn(r)}</div></span></li>`;
+    return html`<li class="qrow" data-state="ended"><span class="g g-${g[0]}" aria-hidden="true">${g[1]}</span><span class="st">${(r.retry.bundle === 'blocked' ? 'BLOCKED' : r.outcome || 'ended').toUpperCase()}</span><span class="s"><span>${names(r)}</span><small><b>${r.name}</b> · ${r.outcome} at ${r.step} · ended ${at(r.ended)} · ${usd(r.usd)}${r.detail ? ` · ${r.detail}` : ''}</small></span><span class="ends"><div class="ctl" role="group" aria-label="Run ${r.run}">${AGAIN.includes(r.retry.bundle) ? html`${bbtn('retry', r, 'Retry', `Retry build run ${r.run}: queue its items again`, off)}${bbtn('send', r, 'Send to builder…', `Send a finding to the builder of run ${r.run}`, off)}` : ''}${prLink(r)}${logBtn(r)}</div></span></li>`;
   }
   function drawBuilds() {
     const head = html`<h2 id="builds-h" class="times-h">Builds</h2>`;
