@@ -2336,6 +2336,29 @@ class SourceUrlTests(Fixture):
         self.assertEqual(request["source_url"],
                          "https://github.com/example-org/research-repo/blob/HEAD/10-x/a%20b.md")
 
+    LINKS = ("# A\n\nSee [DESIGN §5](DESIGN-x.md#five), [B](../20-y/b.md), [web](https://example.test/c.md),\n"
+             "[here](#anchor) and ![chart](img/c.png).\n\n```text\n[code](c.md)\n```\n")
+
+    def test_a_relative_link_points_at_its_github_file(self) -> None:
+        """sd:6156: Notion made `[x](DESIGN.md)` into `https://DESIGN.md`."""
+        (self.repo / "10-x" / "a.md").write_text(self.LINKS, encoding="utf-8")
+        self.origin("git@github.com:example-org/research-repo.git")
+        content = self.queued()["content"]
+        blob = "https://github.com/example-org/research-repo/blob/HEAD/"
+        self.assertIn("[DESIGN §5](%s10-x/DESIGN-x.md#five)" % blob, content)
+        self.assertIn("[B](%s20-y/b.md)" % blob, content)
+        self.assertIn("![chart](%s10-x/img/c.png)" % blob, content)
+        self.assertIn("[web](https://example.test/c.md)", content)
+        self.assertIn("[here](#anchor)", content)
+        self.assertIn("[code](c.md)", content)
+
+    def test_without_a_github_origin_a_relative_link_keeps_its_text(self) -> None:
+        (self.repo / "10-x" / "a.md").write_text(self.LINKS, encoding="utf-8")
+        content = self.queued()["content"]
+        self.assertIn("See DESIGN §5, B, [web](https://example.test/c.md)", content)
+        self.assertNotIn("DESIGN-x.md", content)
+        self.assertIn("[code](c.md)", content)
+
     def test_a_moved_origin_queues_the_delivered_document_again(self) -> None:
         """The pointer line is part of the mirror, so a new owner is a new
         generation: a delivered page naming the old owner is written again."""

@@ -50,7 +50,7 @@ import uuid
 from collections.abc import Iterator, Mapping
 from pathlib import Path
 from typing import Any, NamedTuple
-from urllib.parse import quote, urlsplit
+from urllib.parse import quote, unquote, urlsplit
 
 from sd_lib import git_output, import_sd_db, main_worktree_root
 
@@ -601,6 +601,35 @@ def source_url(repo: Path, src: str) -> str | None:
         return None
     return "https://github.com/%s/%s/blob/HEAD/%s" % (
         match[1], match[2], quote(path.as_posix(), safe="/"))
+
+
+#: A Markdown link or image whose target has no scheme and is no anchor or
+#: absolute path: one a mirror cannot follow.
+RELATIVE_LINK = re.compile(
+    r"(?P<bang>!?)\[(?P<label>[^\]\n]*)\]\((?![A-Za-z][A-Za-z0-9+.-]*:|#|/)(?P<path>[^)\s#]+)(?P<anchor>#[^)\s]*)?\)")
+
+
+def repo_links(text: str, repo: Path, src: str) -> str:
+    """`text` with each repo-relative link pointing at its file on GitHub.
+
+    A mirror has no repository beside it: Notion read `[x](DESIGN.md)` as
+    `https://DESIGN.md` (sd:6156). Without a GitHub origin the link keeps
+    its text only. Fenced code is left as written.
+    """
+    folder = Path(src).parent
+
+    def linked(match: re.Match[str]) -> str:
+        url = source_url(repo, (folder / unquote(match["path"])).as_posix())
+        if not url:
+            return match["label"]
+        return "%s[%s](%s%s)" % (match["bang"], match["label"], url, match["anchor"] or "")
+
+    lines, fenced = [], False
+    for line in text.split("\n"):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+        lines.append(line if fenced else RELATIVE_LINK.sub(linked, line))
+    return "\n".join(lines)
 
 
 def notion_target(
@@ -2285,7 +2314,7 @@ def mirror_request(repo: Path, home: Path, vault: Path | None, cfg: dict[str, An
         # above say where it came from and where the copies sit;
         # none of them is what gets published. Joined here, once, for
         # every destination and so for the fingerprint too (sd:5872).
-        "content": cfg["content"] if brief else source_text(repo / src) if src else "",
+        "content": cfg["content"] if brief else repo_links(source_text(repo / src), repo, src) if src else "",
     }
     # A Notion page shows the Archify diagram as an image, and only it
     # (sd:6066): Drive and the served page keep the text as written.
