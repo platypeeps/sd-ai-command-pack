@@ -910,6 +910,22 @@ box('no repo', true); R.two = ELS['view-board'].html; R.after = ELS.filters.html
         self.assertRegex(after, r'<details class="fpick" data-pick="repo" open><summary[^>]*><span id="f-repo-v">2 picked</span>')
         self.assertIn("repo=system%2Cno%20repo", out["R"]["url"])
 
+    def test_a_repo_pick_keeps_the_repo_control_its_size_so_its_menu_stays_under_the_pointer(self):
+        """sd:6254: the operator's Repo pick did not work. Picking a repo widened the summary from All to the repo's name;
+        the control wrapped to the bar's next line, the open menu went with it, and the next click closed it."""
+        box = "const box = (v, on) => ELS.filters.listeners.change[0]({ currentTarget: ELS.filters, target: { dataset: { pick: 'repo' }, type: 'checkbox', value: v, checked: on, getAttribute: () => null } });\n"
+        out = self.run_page(box + "R.before = ELS.filters.html; box('system', true); R.after = ELS.filters.html;")
+        size = r'<details class="fpick" data-pick="repo"[^>]*><summary[^>]*><span id="f-repo-v">[^<]*</span>(.*?)</summary>'
+        before, after = (re.search(size, out["R"][k], re.S).group(1) for k in ("before", "after"))
+        self.assertEqual(before, '<span class="fpick-size" aria-hidden="true"><span>All</span><span>2 picked</span>'
+                                 '<span>no repo</span><span>system</span></span>')
+        self.assertEqual(after, before)
+        # The address names both picks, and a reload of it shows both.
+        again = self.run_page("R.filters = ELS.filters.html; R.board = ELS['view-board'].html;", search="?repo=system,no%20repo")
+        self.assertEqual(re.findall(r'data-pick="repo" value="([^"]+)" checked', again["R"]["filters"]), ["no repo", "system"])
+        self.assertIn("Port the page", again["R"]["board"])
+        self.assertIn("Answer the question", again["R"]["board"])
+
     def test_the_board_done_column_shows_only_the_last_seven_days(self):
         """sd:5305: the board's Done column holds items done in the 7 days before the read; the list keeps every one."""
         import copy
