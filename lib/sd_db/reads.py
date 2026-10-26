@@ -304,7 +304,7 @@ def open_followups(connection: sqlite3.Connection, *, limit: int = 200) -> list[
 REVIEW_BATCH = "(item.source IS 'task-ref' AND substr(item.external_id, 1, 7) IS 'review:')"
 
 
-def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200,
+def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int | None = 200,
                batches: bool = True) -> list[sqlite3.Row]:
     """Unresolved `kind` notes on items that are not parked, oldest first (sd:3501).
 
@@ -315,7 +315,9 @@ def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200,
 
     `batches=False` leaves out the notes of review batches, in the query, so
     a batch of hundreds does not fill `limit`: the dashboard's Review page
-    labels those questions, one click each (sd:5130).
+    labels those questions, one click each (sd:5130). `limit=None` lists
+    them all: Decisions finds done items' questions here, and a cap filled by
+    older open-item questions hid them (pack sd:6338).
     """
     return list(
         connection.execute(
@@ -327,7 +329,7 @@ def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200,
              ORDER BY note.timestamp ASC, note.id ASC
              LIMIT ?
             """,
-            (kind, limit),
+            (kind, -1 if limit is None else limit),
         ).fetchall()
     )
 

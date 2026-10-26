@@ -97,7 +97,7 @@ def recommended(body: str, options: list[str]) -> int | None:
 def document(connection, *, now: str | None = None) -> dict:
     open_items = {row["id"]: row for row in reads.backlog_items(connection, include_done_days=0, now=now)
                   if row["status"] != "done" and not is_scheduled(row)}
-    for note in reads.open_notes(connection, "question", batches=False):
+    for note in reads.open_notes(connection, "question", batches=False, limit=None):
         if note["item_status"] == "done" and note["item"] not in open_items:
             open_items[note["item"]] = reads.item_by_id(connection, note["item"])
     found, batched = [], 0
