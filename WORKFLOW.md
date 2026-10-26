@@ -100,7 +100,7 @@ These run without being asked.
 These run only when asked by name.
 
 - A work item is a row: `sd task add`. Its status, notes and progress live on the row.
-  Write `docs/work/<date>-<slug>/design.md` only when the shape needs agreement before the work starts.
+  Write `docs/work/<date>-<slug>/design.md` only for a change that moves state in steps (pack sd:6358).
   The design names its row with `item: sd:<n>`; there is no `prd.md` or `implement.md` to write.
   An older item keeps its `prd.md`; an active one carries no `status:` line,
   and `sd-docs-lint` fails one that does. Every checkout reads status from the
@@ -270,7 +270,7 @@ a rebase rewrites the reviewed commits, and the next push no longer fast-forward
 the branch `sd-ship` pushed. `sd-ship prepare --catch-up` makes that merge.
 
 Change that earns a work item: `sd-plan` adds the row, and writes `design.md`
-only when the shape needs agreement; it asks only for missing decisions. Then the small-change
+only for a change that moves state in steps; it asks only for missing decisions. Then the small-change
 path runs with the applicable review points. An item can span several pull
 requests. `Item: <item>` associates a merge without closing the item;
 `Delivers: <item>` declares the delivering merge. Changes without an associated
@@ -384,6 +384,7 @@ Workers:
 - **Batch a repository's ready items into one pull request by default**, one commit per row; rows that change the same files always group.
   Keep a group near 300 changed lines. Name every grouped row in the pull request. Where goldens exist, bless them once per bundle.
   A change that moves state in steps still gets its own pull request.
+  Add a bundle's shadow columns in one schema migration, not one per feature (pack sd:6358).
 - **Repository work uses the existing `ready` status (pack sd:6000).** A second status would split one queue in two.
   A ruling with a clear spec moves its item to `ready`: nothing is left to ask before a build.
   The lane brief and "pick up open items" take `ready` items first: a builder can finish them without a question.

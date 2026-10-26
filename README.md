@@ -158,7 +158,7 @@ Two skills add paths of their own, both tracked. Invoking either is the approval
 to write, and neither writes anywhere else:
 
 - `sd-plan` — a work item is a row (`sd task add`); it writes
-  `docs/work/<YYYY-MM-DD>-<slug>/design.md` only when the shape needs agreement.
+  `docs/work/<YYYY-MM-DD>-<slug>/design.md` only for a change that moves state in steps.
   `--work-dir` selects a root other than `docs/work`; `--decision`
   writes `docs/decisions/<YYYY-MM-DD>-<slug>.md` instead of a work item.
 - `sd-spec` — `docs/spec/**`, rewritten in place on the branch so the

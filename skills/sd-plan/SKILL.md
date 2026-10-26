@@ -7,8 +7,8 @@ disable-model-invocation: true
 # sd-plan
 
 `sd-plan <slug>` turns an intention into one tracked work item: an sd row,
-plus `docs/work/<YYYY-MM-DD>-<slug>/design.md` **only when the shape needs
-agreement** (sd:3000). New items get no `prd.md` or `implement.md`. Invocation is explicit approval to write
+plus `docs/work/<YYYY-MM-DD>-<slug>/design.md` **only for a change that
+moves state in steps** (sd:3000, sd:6358). New items get no `prd.md` or `implement.md`. Invocation is explicit approval to write
 inside the selected work root, create the item's branch, and record that
 item's progress and decisions through `sd_db`. The work root defaults to
 `docs/work`; `--work-dir` selects another root within this repository. This
@@ -41,8 +41,8 @@ write a design just to record routine progress or work already merged.
    item and continue under `WORKFLOW.md`'s stop conditions.
 2. **Track the item as a row.** Use the row the work already has, or
    `sd task add`. Status, progress and decisions live on the row.
-3. **Write `design.md` from the template**, only when the shape needs
-   agreement. The templates are in `skills/sd-plan/templates/` (`design.md`,
+3. **Write `design.md` from the template**, only for a change that
+   moves state in steps. The templates are in `skills/sd-plan/templates/` (`design.md`,
    `decision.md`, `work-README.md`). Name the row in its frontmatter as
    `item: sd:<id>`, and add no `status:` field. Before writing it, run
    `sd-rules --for <work>/<item>/design.md` (or `--for docs/decisions/<record>.md`
@@ -215,7 +215,7 @@ written.
   upstream tree. The refusal fires after the files are written, not before —
   move them to the fork's integration branch and re-run.
 - **Never write a design to look thorough.** One page at most, and none
-  when the shape needs no agreement.
+  when no state moves in steps.
 
 ## Reattaching
 
