@@ -168,7 +168,7 @@ class ServerStartup(unittest.TestCase):
                     alive = thread.is_alive()
                     if alive:
                         old.shutdown()
-                self.assertEqual(status, 204)
+                self.assertEqual(status, 200)
                 self.assertLess(waited, 1, "the request waited for the restart probe")
                 if code:
                     self.assertTrue(alive, f"the old server stopped for a refused probe: {ended}")

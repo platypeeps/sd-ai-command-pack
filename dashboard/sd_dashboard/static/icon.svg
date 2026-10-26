@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+<!-- The dashboard mark (pack sd:6322): "sd" in ink on the dark paper tile. A favicon reads no
+     stylesheet, so the foundation tokens are sRGB here: paper #0b1015, rule #2f363e, ink #e3e8ee
+     (each the dark side). icon-32.png, apple-touch-icon.png and favicon.ico are renders of this
+     file; RUNTIME.md names the commands. -->
+<rect x="0.5" y="0.5" width="31" height="31" rx="6" fill="#0b1015" stroke="#2f363e"/>
+<g fill="none" stroke="#e3e8ee" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+<path d="M14 13.6C13.2 12.3 11.9 11.7 10.2 11.7C8 11.7 6.5 12.9 6.5 14.6C6.5 18.5 14.3 16.7 14.3 20.9C14.3 22.7 12.6 23.9 10.3 23.9C8.3 23.9 6.7 23.1 6 21.8"/>
+<circle cx="21.6" cy="17.8" r="5.2"/>
+<path d="M26.8 6.5V23.9"/>
+</g>
+</svg>

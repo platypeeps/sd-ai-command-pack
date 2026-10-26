@@ -123,7 +123,7 @@ class DeliberateWriteControls(ScreenCase):
 class NoBuildStep(unittest.TestCase):
     def test_one_javascript_file(self):
         served = sorted(path.name for path in STATIC.iterdir() if path.is_file())
-        self.assertEqual(served, ["dashboard.js"])
+        self.assertEqual([name for name in served if name.endswith(".js")], ["dashboard.js"])
         self.assertEqual(sorted(server.STATIC_FILES), served)
 
     def test_no_package_json_no_node_modules_no_bundler_config_under_this_folder(self):
@@ -227,7 +227,7 @@ class OnTheWire(ScreenCase):
     def fetch(self, path: str, timeout: float = 10):
         try:
             answer = urllib.request.urlopen(self.base + path, timeout=timeout)
-            return answer.status, answer.headers, answer.read().decode("utf-8")
+            return answer.status, answer.headers, answer.read().decode("utf-8", "replace")  # an icon is bytes
         except urllib.error.HTTPError as refused:
             with refused:
                 return refused.code, refused.headers, refused.read().decode("utf-8")

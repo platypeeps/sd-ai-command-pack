@@ -91,6 +91,16 @@ reading marked `stale` with its reason. `/api/usage` without `?month=` is kept t
 there a stale reading answers 503, not old bytes. A restart reads again, and starts these reads, Health's walkers and its
 doctor in the background as serving begins (`server._warm`, sd:5064).
 
+Every page links the dashboard's icons from `sd_dashboard/static/`
+(`caching.ICONS`, pack sd:6322): `icon.svg` for the tab, `icon-32.png` for a
+browser without SVG icons, `favicon.ico` at `/favicon.ico`, and the opaque
+180 px `apple-touch-icon.png` for Add to Home Screen. The policy refuses a
+data: icon, so a page with a warning count swaps the tab's mark for
+`icon-warning.svg`; the title carries the count. The PNGs and the ICO are
+renders of `icon.svg`; after an edit, render them again with `rsvg-convert`
+(`-w 32` for `icon-32.png`; `-w 180 -b '#0b1015'` for the home-screen icon,
+saved as RGB) and Pillow (`favicon.ico` at 16, 32 and 48 px).
+
 ## Private front door
 
 The runtime can also install a private route for the server's authenticated

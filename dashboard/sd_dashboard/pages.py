@@ -127,7 +127,7 @@ def shell_page(title: str, section: str, *body: object, subtitle: str, note: str
         ),
         lang="en",
     )
-    return "<!doctype html>" + caching.link(str(document), "/ui/", UI_VERSIONS)
+    return "<!doctype html>" + caching.with_icons(caching.link(str(document), "/ui/", UI_VERSIONS))
 
 
 def error_page(status: int, message: str) -> str:

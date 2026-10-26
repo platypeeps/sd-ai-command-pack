@@ -209,7 +209,8 @@ VERSIONS = digests()
 def page(path: str) -> str | None:
     """The page at a route, its asset links carrying `?v=`, or None when the path is not one."""
     name = PAGES.get(path)
-    return None if name is None else caching.link((HERE / name).read_text(encoding="utf-8"), "/ui/", VERSIONS)
+    return None if name is None else caching.with_icons(
+        caching.link((HERE / name).read_text(encoding="utf-8"), "/ui/", VERSIONS))
 
 
 def api(path: str):

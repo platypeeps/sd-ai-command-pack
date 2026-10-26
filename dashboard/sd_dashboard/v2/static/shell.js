@@ -138,6 +138,16 @@
   const baseTitle = document.title.replace(/^\(\d+\) /, '');
   function titleCount(n) {
     document.title = n ? `(${n}) ${baseTitle}` : baseTitle;
+    if (window.SHELL_PAGES) {
+      // build: the policy (default-src 'self') refuses a drawn data: icon, so a warning swaps the head's static
+      // mark for the static warning mark, and no warning puts it back (pack sd:6322).
+      const svg = document.querySelector('link[rel="icon"][type="image/svg+xml"]');
+      if (!svg) return;
+      svg.dataset.mark = svg.dataset.mark || svg.getAttribute('href');
+      const want = n ? '/static/icon-warning.svg' : svg.dataset.mark;
+      if (svg.getAttribute('href') !== want) svg.setAttribute('href', want);
+      return;
+    }
     let icon = document.querySelector('link[rel="icon"]');
     if (!icon) { icon = document.createElement('link'); icon.rel = 'icon'; document.head.append(icon); }
     const c = document.createElement('canvas'); c.width = c.height = 32; const g = c.getContext('2d');
@@ -146,8 +156,7 @@
     g.beginPath(); g.arc(16, 16, 15, 0, Math.PI * 2); g.fill();
     g.fillStyle = tok('--color-paper'); g.font = `700 ${n > 9 ? 17 : 20}px ${cs.getPropertyValue('--font-data') || 'monospace'}`;
     g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(n ? String(Math.min(n, 99)) : 'sd', 16, 17);
-    // build: a data: icon breaks the dashboard CSP (default-src 'self'), so the drawn count stays off.
-    if (!window.SHELL_PAGES) icon.href = c.toDataURL('image/png');
+    icon.href = c.toDataURL('image/png');
   }
   attention();
   window.addEventListener('load', () => attention());
