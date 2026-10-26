@@ -98,8 +98,11 @@ browser without SVG icons, `favicon.ico` at `/favicon.ico`, and the opaque
 data: icon, so a page with a warning count swaps the tab's mark for
 `icon-warning.svg`; the title carries the count. The PNGs and the ICO are
 renders of `icon.svg`; after an edit, render them again with `rsvg-convert`
-(`-w 32` for `icon-32.png`; `-w 180 -b '#0b1015'` for the home-screen icon,
-saved as RGB) and Pillow (`favicon.ico` at 16, 32 and 48 px).
+(`-w 32` for `icon-32.png`) and Pillow (`favicon.ico` at 16, 32 and 48 px).
+The home-screen icon is full bleed, since iOS masks its corners: render it
+at `-w 180` with `viewBox="-1.1 -2.3 35 35"` and the tile `<rect>` swapped
+for one paper fill over that box (no border, no rounding), which leaves 15%
+or more clear on each side; save it as RGB.
 
 ## Private front door
 

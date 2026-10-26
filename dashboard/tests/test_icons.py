@@ -12,6 +12,7 @@ import struct
 import subprocess
 import unittest
 import urllib.request
+import zlib
 
 from sd_dashboard import v2
 from test_v2_tasks import SHELL_JS
@@ -29,6 +30,29 @@ def png_size(body: bytes) -> tuple[int, int, int]:
     assert body[:8] == b"\x89PNG\r\n\x1a\n", body[:8]
     width, height, _, colour = struct.unpack(">IIBB", body[16:26])
     return width, height, colour
+
+
+def rgb_rows(body: bytes) -> list[list[tuple[int, int, int]]]:
+    """The pixels of an 8-bit RGB PNG, row by row: its IDAT chunks inflated and each row's filter undone."""
+    width, height, colour = png_size(body)
+    assert colour == 2 and body[24] == 8, "an 8-bit RGB PNG"
+    data, at = b"", 8
+    while at < len(body):
+        length, kind = struct.unpack(">I4s", body[at:at + 8])
+        if kind == b"IDAT":
+            data += body[at + 8:at + 8 + length]
+        at += 12 + length
+    raw, stride, rows, above = zlib.decompress(data), width * 3, [], bytearray(width * 3)
+    for y in range(height):
+        kind, line = raw[y * (stride + 1)], bytearray(raw[y * (stride + 1) + 1:(y + 1) * (stride + 1)])
+        for x in range(stride):
+            a, b, c = line[x - 3] if x >= 3 else 0, above[x], above[x - 3] if x >= 3 else 0
+            p = a + b - c
+            paeth = a if abs(p - a) <= abs(p - b) and abs(p - a) <= abs(p - c) else b if abs(p - b) <= abs(p - c) else c
+            line[x] = (line[x] + (0, a, b, (a + b) // 2, paeth)[kind]) & 0xFF
+        rows.append([tuple(line[x:x + 3]) for x in range(0, stride, 3)])
+        above = line
+    return rows
 
 
 class TheIcon(BrowserSession):
@@ -50,6 +74,18 @@ class TheIcon(BrowserSession):
     def test_the_home_screen_icon_is_180_px_and_opaque(self):
         # iOS fills a transparent pixel with black; colour type 2 is RGB with no alpha channel.
         self.assertEqual(png_size(self.fetch("/static/apple-touch-icon.png")[2]), (180, 180, 2))
+
+    def test_the_home_screen_icon_is_full_bleed_with_the_mark_inside_a_safe_margin(self):
+        """iOS masks the corners itself: a drawn tile, border or rounding shows as a second corner. Every pixel of
+        the outer 15% is the fill, so the corners equal it and the mark keeps clear of the mask."""
+        rows = rgb_rows(self.fetch("/static/apple-touch-icon.png")[2])
+        fill = rows[90][4]
+        self.assertEqual({rows[y][x] for y, x in ((0, 0), (0, 179), (179, 0), (179, 179))}, {fill})
+        margin = 27  # 15% of 180
+        frame = {rows[y][x] for y in range(180) for x in range(180)
+                 if not (margin <= x < 180 - margin and margin <= y < 180 - margin)}
+        self.assertEqual(frame, {fill})
+        self.assertGreater(len({pixel for row in rows for pixel in row}), 2, "the mark is drawn")
 
     def test_every_shell_page_head_links_the_icons(self):
         for path in v2.PAGES:
