@@ -22,6 +22,8 @@ mounted volume, a port number, a Home Assistant tile, a registered repo row, a c
 | skill.adopt        | an owner/repo[/path] source                  | claude `/sd-skill-adopt <source>` in herdr    |
 | contribution.nudge | a contribution row and its revision          | `gh pr|issue comment <url> --body-file -`     |
 | repo.pull          | `pull_refusal`, read again under the lock    | `git pull --ff-only`, under the lane's lock   |
+| watch.refresh      | an active market row, the vault's routine    | claude, one market-watch entity, in herdr     |
+| watch.add          | an http(s) URL, an optional name             | `sd store add sdw.market <name> ...`          |
 
 A step is bounded (`Step.seconds`), and its output is kept to its last `OUTPUT_CHARS` characters. The answer is
 `{action, line, exit, output, cut}` for a step that ran, whatever its exit. A refusal before the step ran is a
@@ -35,6 +37,7 @@ import json
 import os
 import re
 import subprocess
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -55,6 +58,10 @@ LOG_LINES = 200
 BIGGEST = 15
 #: The longest nudge, in characters: a comment, not a page.
 NUDGE_MAX = 4000
+#: The market-watch routine, under the vault: Refresh runs its per-entity step for one watch (sd:6264).
+WATCH_ROUTINE = "System/Scheduled Tasks/market-watch/SKILL.md"
+#: The longest URL Add watch takes.
+URL_MAX = 2000
 NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,99}")
 SKILL = re.compile(r"[a-z0-9][a-z0-9-]{0,79}")
 SOURCE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*")
@@ -499,6 +506,70 @@ def repo_pull(connection, values, jobs=None) -> Step:
     return Step(line=f"git -C {path} pull --ff-only", call=call, seconds=120)
 
 
+# ---------- Watches (sd:6264) ----------
+
+def watch_refresh(connection, values, jobs=None) -> Step:
+    """Refresh: claude in a new herdr workspace in the vault, told to run the market-watch routine's per-entity step for
+    one active market row only. The routine refreshes three a run from its own queue; this is the one-entity run it
+    lacks. The row's title is read from the store here, never taken from the page."""
+    from sd_db import records
+
+    from .notes_screen import _vault
+
+    item = _fields(values, {"item"})["item"]
+    if type(item) is not int:
+        raise ValueError("Name the watch by its item number; nothing ran.")
+    row = next((r for r in records.list_rows(connection, "market") if r["id"] == item), None)
+    if row is None:
+        raise ValueError(f"#{item} is not a market row; nothing ran.")
+    if row.get("stage") != "active":
+        raise ValueError(f"{row['title']} is {row.get('stage') or 'not active'}: the routine refreshes active watches only; nothing ran.")
+    vault = _vault(os.environ)
+    if not (vault / WATCH_ROUTINE).is_file():
+        raise ValueError(f"The market-watch routine is not at {vault / WATCH_ROUTINE}; nothing ran.")
+    title = row["title"]
+    text = (f"You are a one-entity run of the 'market-watch' routine, started from the dashboard's Watches page. Read "
+            f"'{WATCH_ROUTINE}' and carry out its per-entity refresh, with its lock, for the market row "
+            f"{json.dumps(title)} only: skip the newsletter sweep, the queue and the Sunday suggestions.")
+    return Step(line=f"cd {vault} && claude {json.dumps(text)}", call=_herdr(vault, f"watch-{item}", text), seconds=100)
+
+
+def _watch_title(url: str, name: str) -> str:
+    """The row's title: the name typed, else a repository's name or the site's host; the characters a vault file name
+    cannot hold go, as the routine strips them."""
+    parts = urllib.parse.urlsplit(url)
+    path = [p for p in parts.path.split("/") if p]
+    title = name or (path[1] if parts.hostname in ("github.com", "gitlab.com") and len(path) >= 2
+                     else (parts.hostname or "").removeprefix("www."))
+    return re.sub(r"\s+", " ", re.sub(r"[/\\:()~#\[\]|\"]", " ", title)).strip()
+
+
+def watch_add(connection, values, jobs=None) -> Step:
+    """Add watch: a candidate market row for a URL, through `sd store add`, as Capture idea files a blog idea. The URL is
+    its first source; the operator activates it, after which the routine writes its profile."""
+    import shlex
+    from datetime import date
+
+    given = _fields(values, {"url", "name"})
+    url = _text(given["url"], "URL")
+    name = given["name"].strip() if isinstance(given["name"], str) else ""
+    parts = urllib.parse.urlsplit(url)
+    if parts.scheme not in ("http", "https") or not parts.hostname or len(url) > URL_MAX or re.search(r"\s", url):
+        raise ValueError(f"A watch is an http or https URL of at most {URL_MAX} characters, with no spaces; nothing ran.")
+    title = _watch_title(url, name)
+    if not title or title.startswith("-") or len(title) > 120:
+        raise ValueError("Name the watch: a name starts with a letter or digit and has at most 120 characters; nothing ran.")
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    if not slug:
+        raise ValueError("Name the watch with at least one letter or digit; nothing ran.")
+    kind = "repository" if parts.hostname in ("github.com", "gitlab.com") else "company"
+    today = date.today().isoformat()
+    args = ["sdw.market", title, "--field", f"content-type={kind}", "--field", f"slug={slug}",
+            "--field", f"dateCreated={today}", "--field", "tags+=market-watch",
+            "--section", f"Sources=- {url}", "--section", f"Provenance=Added on the dashboard's Watches page, {today}."]
+    return Step(line="sd store add " + " ".join(shlex.quote(a) for a in args), argv=(_command("sd"), "store", "add", *args))
+
+
 #: Every action a page may post, by name: its label for the journal and Details, and its check.
 ACTIONS = {
     "job.log": ("Show log", job_log),
@@ -516,6 +587,8 @@ ACTIONS = {
     "skill.adopt": ("Adopt skill", skill_adopt),
     "contribution.nudge": ("Post nudge", contribution_nudge),
     "repo.pull": ("Pull", repo_pull),
+    "watch.refresh": ("Refresh watch", watch_refresh),
+    "watch.add": ("Add watch", watch_add),
 }
 
 

@@ -231,6 +231,40 @@ class Claim(Case):
         run = self.claim()
         self.assertEqual([m["id"] for m in run["members"]], [queued[0]["id"]])
 
+    def ineligible_after_press(self, change: str, reason: str):
+        """A repository that turns ineligible between press and claim: its builds end blocked, the next repo runs.
+
+        `change` is the SQL that turns repository A ineligible; `reason` the
+        refusal `queue` gives for it. The claim re-checks the repository in
+        its transaction (pack sd:6103), so A's queued builds end `blocked`
+        with that reason, their items stay `ready` for a later press, and the
+        same claim goes on to B.
+        """
+        items = [self.item(priority=1), self.item(priority=1)]
+        queued = build.queue(self.db, items, who="operator")
+        other = build.queue(self.db, [self.item(repo=B, priority=2)], who="operator")
+        self.db.execute(change, (A,))
+        run = self.claim()
+        self.assertIsNotNone(run, "the ineligible repository does not stall the claim")
+        self.assertEqual((run["repo"], [m["id"] for m in run["members"]]), (B, [other[0]["id"]]))
+        self.assertEqual(self.count("SELECT COUNT(*) FROM runner_run WHERE repo = ?", A), 0)
+        rows = self.db.execute("SELECT status, result FROM assignment WHERE id IN (?, ?) ORDER BY id",
+                               tuple(row["id"] for row in queued)).fetchall()
+        self.assertEqual([row["status"] for row in rows], ["blocked", "blocked"])
+        for row in rows:
+            self.assertRegex(row["result"], reason)
+        self.assertEqual(self.statuses(items), ["ready", "ready"])
+        self.assertIsNone(self.claim(), "nothing of A is left queued")
+
+    def test_claim_skips_a_repository_unmanaged_after_the_press(self):
+        self.ineligible_after_press("UPDATE repo SET managed = 0 WHERE path = ?", "is not managed")
+
+    def test_claim_skips_a_repository_without_a_remote_after_the_press(self):
+        self.ineligible_after_press("UPDATE repo SET remote = NULL WHERE path = ?", "has no remote")
+
+    def test_claim_skips_a_repository_moved_to_a_satellite_lane_after_the_press(self):
+        self.ineligible_after_press("UPDATE repo SET lane_host = 'work' WHERE path = ?", "builds run on the hub only")
+
     def test_claim_respects_exclusive_lease(self):
         """Guard: an exclusive lease of any other kind in the repository leaves it no room."""
         self.db.execute("INSERT INTO assignment (item, role, status, scope) VALUES (?, 'author', 'blocked', 'item')",
