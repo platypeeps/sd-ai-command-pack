@@ -1033,7 +1033,8 @@ def learning(connection, title, stage, **fields):
 
 
 def seed_learning(connection):
-    """A book, an article with a URL that is no link, a book with only a URL, a video and a course."""
+    """A book, an article with a URL that is no link, a book with only a URL, a video, a video only its title names,
+    and a course."""
     return {
         "book": learning(connection, "Agile Retrospectives", "in-progress", **{"content-type": "book", "author": ["A. Writer", "B. Writer"],
                          "subtitle": "Making Good Teams Great", "url": "https://books.example.test/retro", "published-date": "2006",
@@ -1042,7 +1043,10 @@ def seed_learning(connection):
                             "url": "javascript:alert(1)"}),
         "bare": learning(connection, "A Bare Book", "done", **{"content-type": "book", "url": "https://press.example.test/bare"}),
         "video": learning(connection, "2016-06-06 - YouTube - Example Channel - A Talk", "in-progress",
-                          **{"content-type": "youtube", "channel": "Example Channel", "url": "https://www.youtube.com/watch?v=x"}),
+                          **{"content-type": "youtube", "channel": "Example Channel", "url": "https://www.youtube.com/watch?v=x",
+                             "published-date": "2016-06-06T10:00:00Z", "duration": "534"}),
+        "named": learning(connection, "2024-02-03 - YouTube - Other Channel - Queues - A Primer", "queued",
+                          **{"url": "https://www.youtube.com/watch?v=y"}),
         "course": learning(connection, "A Course", "queued", **{"content-type": "course", "url": "https://course.example.test"}),
     }
 
@@ -1075,6 +1079,32 @@ class TheBooks(ScreenCase):
         self.assertEqual(sorted(r["title"] for r in doc["rows"]), ["A Bare Book", "Agile Retrospectives", "On Queues"])
 
 
+class TheVideos(ScreenCase):
+    """sd:6261: `/api/documents/videos` lists the learning rows that are videos, by content-type or by the
+    "YYYY-MM-DD - YouTube - <channel> - <title>" name, each with its title, channel, date, URL and watched state."""
+
+    def test_a_video_row_says_its_title_channel_date_url_and_watched_state(self):
+        ids = seed_learning(self.connection)
+        rows = {r["id"]: r for r in learning_screen.videos(self.connection, now=NOW)["rows"]}
+        self.assertEqual(sorted(rows), sorted([ids["video"], ids["named"]]), "a book or a course is no video")
+        video = rows[ids["video"]]
+        self.assertEqual((video["title"], video["channel"], video["date"], video["url"], video["host"], video["stage"], video["state"],
+                          video["duration"]),
+                         ("A Talk", "Example Channel", "2016-06-06", "https://www.youtube.com/watch?v=x", "www.youtube.com", "in-progress",
+                          "watching", "534"))
+        # A row with no content-type or channel is a video by its name, which gives the channel, the date and the title.
+        named = rows[ids["named"]]
+        self.assertEqual((named["title"], named["channel"], named["date"], named["state"]), ("Queues - A Primer", "Other Channel", "2024-02-03", "to watch"))
+
+    def test_the_route_reads_the_videos_and_writes_nothing(self):
+        ids = seed_learning(self.connection)
+        before = self.connection.execute("SELECT id, kind, status, stage FROM item ORDER BY id").fetchall()
+        doc = v2.pages.documents._videos(types.SimpleNamespace(connection=self.connection, now=NOW))
+        self.assertEqual(doc["read"], NOW)
+        self.assertEqual(sorted(r["id"] for r in doc["rows"]), sorted([ids["video"], ids["named"]]))
+        self.assertEqual(self.connection.execute("SELECT id, kind, status, stage FROM item ORDER BY id").fetchall(), before)
+
+
 class TheLearningScript(ScreenCase):
     """sd:6260: learning.js draws the Books view beside the Documents list, in the shared Details pane."""
 
@@ -1104,7 +1134,8 @@ R.details0 = ELS.details.html; window.shell.view.show('books'); await flush();
 R.rows = ELS['books-rows'].html; R.head = ELS['books-head'].html; R.filters = ELS['books-filters'].html; R.details = ELS.details.html;
 R.facets = ELS.facets.hidden; R.tally = ELS['books-tally'].html;""", self.books())
         r = out["R"]
-        self.assertEqual(r["views"], [["documents", "Documents", None], ["books", "Books", "/api/documents/books"]])
+        self.assertEqual(r["views"], [["documents", "Documents", None], ["books", "Books", "/api/documents/books"],
+                                      ["videos", "Videos", "/api/documents/videos"]])
         self.assertEqual(r["before"], ["/api/documents"], "Books reads only when it first shows")
         self.assertEqual(out["gets"], ["/api/documents", "/api/documents/books"])
         rows = r["rows"]
@@ -1153,6 +1184,37 @@ C.run(cmd('book.open'), book); C.run(cmd('book.open'), article); R.cli = cmd('bo
         self.assertIn(["off: no http or https URL on this row", False], out["toasts"])
         self.assertRegex(out["R"]["cli"], r"^sd task show \d+$")
 
+    def test_videos_is_a_view_with_channel_date_and_watched_state_newest_first(self):
+        seed_learning(self.connection)
+        docs = {"/api/documents/videos": [200, learning_screen.videos(self.connection, now=NOW)]}
+        out = self.run_view("""window.shell.view.show('videos'); await flush();
+R.rows = ELS['videos-rows'].html; R.head = ELS['videos-head'].html; R.details = ELS.details.html; R.tally = ELS['videos-tally'].html;
+const v = [...OBJ.values()].find(o => o.type === 'video' && o.title === 'A Talk');
+R.reg = REG.filter(c => c.on === 'video').map(c => c.id); C.run(cmd('video.open'), v);""", docs)
+        r = out["R"]
+        self.assertEqual(out["gets"], ["/api/documents", "/api/documents/videos"])
+        self.assertEqual(r["tally"], "2 videos")
+        self.assertEqual(out["counts"]["videos"], 2)
+        # Title, channel, date, URL and watched state; the newest date first.
+        self.assertLess(r["rows"].index("Queues - A Primer"), r["rows"].index("A Talk"))
+        for cell in ('>Example Channel</td>', '<td class="num">2016-06-06</td>', '<td class="kind">watching</td>', '<td class="kind">to watch</td>',
+                     '<a class="ext" href="https://www.youtube.com/watch?v=x" target="_blank" rel="noopener noreferrer">www.youtube.com</a>'):
+            self.assertIn(cell, r["rows"])
+        self.assertIn("Watched state", r["head"])
+        self.assertIn('data-sort="date"', r["head"])
+        self.assertIn("<h2>Queues - A Primer</h2>", r["details"])
+        self.assertEqual(r["reg"], ["video.open", "video.item"])
+        self.assertEqual(out["opened"], [["https://www.youtube.com/watch?v=x", "_blank", "noopener"]])
+
+    def test_a_videos_duration_reads_as_minutes(self):
+        seed_learning(self.connection)
+        docs = {"/api/documents/videos": [200, learning_screen.videos(self.connection, now=NOW)]}
+        out = self.run_view("""window.shell.view.show('videos'); await flush();
+const v = [...OBJ.values()].find(o => o.title === 'A Talk'); ELS['videos-rows'].listeners.click[0]({ target: { closest: s => s === 'tr[data-id]' ? { dataset: { id: v.id } } : null } });
+R.details = ELS.details.html;""", docs)
+        self.assertIn("<h2>A Talk</h2>", out["R"]["details"])
+        self.assertIn("<dt>Duration</dt><dd>8:54</dd>", out["R"]["details"])
+
     def test_a_failed_read_says_so_and_the_documents_list_keeps_its_details(self):
         out = self.run_view("""window.shell.view.show('books'); await flush(); R.details = ELS.details.html;""",
                             {"/api/documents/books": [500, {"error": "no such table: item"}]})
@@ -1162,7 +1224,7 @@ C.run(cmd('book.open'), book); C.run(cmd('book.open'), article); R.cli = cmd('bo
 
 
 class TheRegistration(Registers, unittest.TestCase):
-    page, section, route, api = "documents", "Documents", "/documents", ("/api/documents", "/api/documents/books", "/api/documents/view", "/api/documents/publish", "/api/documents/unpublish",
+    page, section, route, api = "documents", "Documents", "/documents", ("/api/documents", "/api/documents/books", "/api/documents/videos", "/api/documents/view", "/api/documents/publish", "/api/documents/unpublish",
                                                                          "/api/documents/publish-now", "/api/documents/publish-now/drain-x-20261018T000000Z")
 
 

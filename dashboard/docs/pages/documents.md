@@ -53,3 +53,11 @@ the read state (to read, reading, done, dropped, from the row's stage). The
 state chips and the search field filter it; the Documents facets hide while
 it shows. Details shows the row's facts with Open link and Open item. The
 view writes nothing: a row's kind and stage stay as the store holds them.
+
+Videos (sd:6261) is the sub tab beside Books. It reads
+`GET /api/documents/videos` (`learning_screen.videos`): the learning rows
+whose `content-type` is `youtube` or `video`, and any row titled
+`YYYY-MM-DD - YouTube - <channel> - <title>`. A row shows the title (less
+that prefix), the channel, the date, the URL and the watched state (to
+watch, watching, watched, dropped); the newest date sorts first. It reads
+and writes as Books does.

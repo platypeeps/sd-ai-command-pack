@@ -2,7 +2,7 @@
 this page took `/documents`, was retired in sd:3402. Pin, Hide and Tag post /api/documents/view (sd:3428), and so do
 Rename root and Hide root (sd:3986). Publish to posts /api/documents/publish, its untick /api/documents/unpublish (sd:5489), and Publish now /api/documents/publish-now,
 whose run state is read at /api/documents/publish-now/<id> (sd:5102). The Books view reads /api/documents/books
-(sd:6260): the vault's learning rows that are books or articles."""
+(sd:6260): the vault's learning rows that are books or articles; the Videos view reads /api/documents/videos (sd:6261)."""
 
 from __future__ import annotations
 
@@ -19,6 +19,12 @@ def _books(read):
     from ... import learning_screen
 
     return learning_screen.books(read.connection, now=read.now)
+
+
+def _videos(read):
+    from ... import learning_screen
+
+    return learning_screen.videos(read.connection, now=read.now)
 
 
 def _view(payload, principal):
@@ -56,7 +62,8 @@ PAGE = Page(
     routes=("/documents",),
     html="documents.html",
     item="sd:2114",
-    api=(Api("/api/documents", _read), Api("/api/documents/books", _books), Api("/api/documents/view", write=_view),
+    api=(Api("/api/documents", _read), Api("/api/documents/books", _books), Api("/api/documents/videos", _videos),
+         Api("/api/documents/view", write=_view),
          Api("/api/documents/publish", write=_publish), Api("/api/documents/unpublish", write=_unpublish),
          Api("/api/documents/publish-now", write=_drain),
          Api(pattern=r"/api/documents/publish-now/drain-[A-Za-z0-9._-]+",

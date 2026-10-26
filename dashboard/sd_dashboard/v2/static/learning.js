@@ -1,4 +1,4 @@
-// Books (sd:6260): a Documents view over the vault's learning rows (learning_screen.py), beside the Documents list.
+// Books (sd:6260) and Videos (sd:6261): Documents views over the vault's learning rows (learning_screen.py), beside the Documents list.
 // The view reads its document when it first shows (shell.read with its api, its own state slot and active only while it
 // shows), and draws the Documents list grammar: a filter bar, a sorted and paged ledger, and the one Details pane, which
 // the Documents list leaves alone while another view shows. Nothing here writes: a row's stage and kind stay as the
@@ -13,6 +13,8 @@
   // does not name is unknown. The words beside it say which.
   const GLYPH = { queued: ['queued', '◌'], 'in-progress': ['ok', '●'], done: ['ok', '●'], dropped: ['queued', '◌'] };
   const glyph = stage => GLYPH[stage] || ['unknown', '▨'];
+  // A video's duration is whole seconds; anything else shows as the row holds it.
+  const minutes = d => /^\d+$/.test(d || '') ? `${Math.floor(d / 60)}:${String(d % 60).padStart(2, '0')}` : d;
   // Each type: its view, read, object type, nouns, the stages in its words, and the facts its Details list.
   const TYPES = {
     books: { api: '/api/documents/books', what: 'the books and articles', type: 'book', noun: 'book or article', nouns: 'books and articles', counted: 'title',
@@ -21,6 +23,12 @@
       none: 'No book or article in the vault\'s Learning base: its content-type book or article rows show here.',
       facts: r => [['Author or source', r.by || '— none recorded'], ['Kind', r.kind], ['Subtitle', r.subtitle], ['Published', r.published],
         ['Pages', r.pages], ['ISBN', r.isbn]] },
+    // sd:6261: a video's date is the newest first.
+    videos: { api: '/api/documents/videos', what: 'the videos', type: 'video', noun: 'video', nouns: 'videos', counted: 'video',
+      states: [['queued', 'to watch'], ['in-progress', 'watching'], ['done', 'watched'], ['dropped', 'dropped']], stateName: 'Watched state',
+      by: ['channel', 'Channel'], when: ['date', 'Date'], sort: 'date', dir: -1,
+      none: 'No video in the vault\'s Learning base: its content-type youtube rows and its "YYYY-MM-DD - YouTube - …" notes show here.',
+      facts: r => [['Channel', r.channel || '— none recorded'], ['Date', r.date], ['Duration', minutes(r.duration)]] },
   };
   const COLS = t => [[null, html`<span class="sr">State</span>`, 'g'], ['title', 'Title'], [t.by[0], t.by[1], 'repo'],
     ...(t.when ? [[t.when[0], t.when[1], 'num']] : []), ['state', t.stateName, 'kind'], ['host', 'URL', 'mod'], [null, html`<span class="sr">Actions</span>`, 'acts']];
