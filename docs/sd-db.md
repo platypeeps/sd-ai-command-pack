@@ -43,17 +43,34 @@ The fence stops it (sd:4044): a machine with its own database holds the hub role
     sd config set sd.hub_name hub.example.test   # the hub's MagicDNS name, or its bare machine name
     bin/sd-db fence                             # sd-db: fence: holder: this node is hub.example.test, ...
 
-| Answer | When | `serve` on the tailnet, a lane on this machine's database | `bin/sd-db fence` |
-| --- | --- | --- | --- |
-| `holder` | this node's MagicDNS name matches | go on | exit 0 |
-| `off` | `sd.hub_name` is unset | go on, as before the fence | exit 0 |
-| `elsewhere` | another name, or a satellite | refuse, naming the holder | exit 1 |
-| `unknown` | the setting does not read, or Tailscale does not name this node | refuse | exit 1 |
+| Answer | When | `serve` on the tailnet, a lane on this machine's database | A write to this machine's database | `bin/sd-db fence` |
+| --- | --- | --- | --- | --- |
+| `holder` | this node's MagicDNS name matches | go on | go on | exit 0 |
+| `off` | `sd.hub_name` is unset | go on, as before the fence | go on | exit 0 |
+| `elsewhere` | another name, or a satellite | refuse, naming the holder | refuse with `Fenced`, naming the demotion | exit 1 |
+| `unknown` | the setting does not read, or Tailscale does not name this node | refuse | go on | exit 1 |
 
 The setting is read first, so `off` asks Tailscale nothing. Each check reads the name again; a failed read refuses again for 30 seconds without asking.
 `sd config set sd.hub_name` refuses on a machine with no database: the fence reads the row alone.
 `serve --loopback` is not fenced: it leaves the machine for nobody.
-Writes that stay on the machine stay allowed; scripts that write off the machine (the NAS copy, the `hub-pin` push) run `bin/sd-db fence` first.
+Scripts that write off the machine (the NAS copy, the `hub-pin` push) run `bin/sd-db fence` first.
+
+Every library write to this machine's own database asks the fence too (system sd:5986): each write statement, and its commit.
+A transaction open when the console renames the node rolls back at its commit.
+Only `elsewhere` refuses: a Tailscale outage must not stop a healthy hub, and nothing it writes then leaves the machine.
+Reads stay allowed, so the old hub's dashboard still shows its stale records.
+A write inside a transaction uses an answer held 5 seconds per process (`FENCE_SECONDS`); every boundary that makes a write persist asks afresh: COMMIT and the outer savepoint's RELEASE.
+A write outside a transaction (`execute`, `executemany`, a cursor's) runs in its own `BEGIN IMMEDIATE` ... `COMMIT`, so its commit is one that asks; a batch commits whole or not at all.
+A script's write outside a transaction refuses (sqlite3 commits before a script, so nothing can hold it): put `BEGIN IMMEDIATE` ... `COMMIT` inside the script. A writable `blobopen` needs a transaction.
+Another file, such as a test fixture or a backup target, is not the record and is not fenced.
+`sd-db restore` writes past it: promote restores before the machine takes the hub's name.
+
+Demote a returning old hub in this order, the order the refusal names:
+
+1. Copy `~/.config/sd/hub.json` from any satellite. Until step 2, every `sd` command refuses with `HubConflict`.
+2. Move `~/.local/share/sd/sd.db` aside as `sd.db.demoted-<date>`. `sd` commands then reach the hub.
+
+The other order leaves, after a cut between the steps, no `hub.json` and no database, and a fresh database reads `off` and writes.
 
 ### Peer identity on the tailnet
 

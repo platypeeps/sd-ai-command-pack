@@ -136,8 +136,8 @@ class PeerRefused(remote.RemoteError):
     """The session's TCP peer is not one this listener admits. Nothing opened."""
 
 
-class Fenced(remote.RemoteError):
-    """This machine no longer holds the hub role (hub failover, D5); the session closes and rolls back."""
+#: This machine no longer holds the hub role (hub failover, D5); the session closes and rolls back.
+Fenced = hub.Fenced
 
 
 #: The PRAGMAs a session may run, from a grep for `PRAGMA` across
@@ -172,8 +172,9 @@ IDLE_TIMEOUT = 4.0
 #: renames it, so the check at start is not enough: every frame asks again
 #: past this, or past a wall clock that moved `CLOCK_SLACK` more than the
 #: monotonic one, which does not count a sleep.
-FENCE_SECONDS = 5.0
-CLOCK_SLACK = 1.0
+#: One value with the write fence on the hub's own database (`hub.write_role`).
+FENCE_SECONDS = hub.FENCE_SECONDS
+CLOCK_SLACK = hub.CLOCK_SLACK
 #: What `Session._authorize` counts as a read, with `load_extension` left
 #: out of `SQLITE_FUNCTION` and a `PRAGMA` read only with no argument.
 #: SAVEPOINT, RELEASE and ROLLBACK TO move no data: the library's nested
