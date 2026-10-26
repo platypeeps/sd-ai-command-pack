@@ -1,0 +1,30 @@
+#!/bin/sh
+# A fake of local-herdr's own `herdr` double for the dashboard's tests
+# (sd:6044). It journals each argv line, tab-separated after the
+# HERDR_SESSION and HERDR_SOCKET_PATH it ran under, to $HERDR_DOUBLE_JOURNAL,
+# and answers from files under $HERDR_DOUBLE_FIXTURE: session-list.json,
+# agent-list.json and workspace-create.json, each with a default when absent;
+# agent-start-fail and agent-prompt-fail make those calls fail, and
+# on-agent-start runs before `agent start` answers.
+line="${HERDR_SESSION:-}	${HERDR_SOCKET_PATH:-}"
+for word in "$@"; do line="$line	$word"; done
+[ -z "${HERDR_DOUBLE_JOURNAL:-}" ] || printf '%s\n' "$line" >> "$HERDR_DOUBLE_JOURNAL"
+FIX="${HERDR_DOUBLE_FIXTURE:-/nonexistent}"
+
+answer() {
+  if [ -f "$FIX/$1" ]; then cat "$FIX/$1"; else printf '%s\n' "$2"; fi
+}
+
+case "${1:-} ${2:-}" in
+  "session list") answer session-list.json '{"sessions":[]}' ;;
+  "agent list") answer agent-list.json '{"result":{"agents":[],"type":"agent_list"}}' ;;
+  "workspace create") answer workspace-create.json '{"result":{"root_pane":{"pane_id":"w9:p1"}}}' ;;
+  "agent start"|"agent prompt")
+    if [ -f "$FIX/$1-$2-fail" ]; then
+      echo '{"error":{"code":"agent_not_ready","message":"double: refused"}}' >&2
+      exit 1
+    fi
+    [ "$2" = prompt ] || [ ! -x "$FIX/on-agent-start" ] || "$FIX/on-agent-start" > /dev/null
+    echo '{"result":{"agent":{"name":"'"${3:-}"'"}}}' ;;
+  *) echo '{"error":{"code":"unsupported","message":"double: '"$*"'"}}' >&2; exit 2 ;;
+esac

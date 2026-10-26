@@ -174,10 +174,11 @@ class Directives(unittest.TestCase):
         # It was already counted where it failed, and on a machine with no
         # archify nothing failed at all -- the prose still renders there.
         notes, failures = [], []
-        real = next(iter(sorted(
-            (design_docs.repo_root() / design_docs.SOURCES / "diagrams").glob("*.json"))))
-        design_docs.expand_diagrams(f"@diagram {real.stem}\n", {}, notes,
-                                    design_docs.repo_root(), failures)
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / design_docs.SOURCES / "diagrams").mkdir(parents=True)
+            (root / design_docs.SOURCES / "diagrams" / "flow.json").write_text("{}")
+            design_docs.expand_diagrams("@diagram flow\n", {}, notes, root, failures)
         self.assertEqual(failures, [])
 
     def test_a_directive_inside_a_fence_is_left_alone(self):
@@ -196,11 +197,20 @@ class Directives(unittest.TestCase):
 
 
 class JobsTable(unittest.TestCase):
-    """The table is generated from the filesystem, which is the whole point."""
+    """The table is generated from the filesystem, which is the whole point.
+
+    These read a fixture folder; the system checkout checks its own examples (sd:6044).
+    """
 
     def setUp(self):
-        self.root = design_docs.repo_root()
-        self.jobs = sorted((self.root / "local-cron-jobs" / "examples").glob("*.job"))
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.root = Path(tmp.name)
+        examples = self.root / "local-cron-jobs" / "examples"
+        examples.mkdir(parents=True)
+        (examples / "nightly.job").write_text('JOB_SCHEDULE="0 2 * * *"\nJOB_COMMAND="true"\n')
+        (examples / "digest.job").write_text('JOB_SCHEDULE="0 6 * * *"\nJOB_PROMPT="Write the digest"\n')
+        self.jobs = sorted(examples.glob("*.job"))
 
     def test_every_job_file_gets_a_row(self):
         table = design_docs.jobs_table(self.root)
@@ -574,73 +584,6 @@ class Hashes(unittest.TestCase):
 
         del outer
         return Capture()
-
-
-class Sources(unittest.TestCase):
-    """The documents this repository actually ships, against the converter."""
-
-    @classmethod
-    def setUpClass(cls):
-        cls.root = design_docs.repo_root()
-        cls.sources = sorted((cls.root / design_docs.SOURCES).glob("*.md"))
-
-    def test_there_are_documents_to_check(self):
-        self.assertTrue(self.sources, "docs/design/ has no documents; every test "
-                                      "below would pass over an empty set")
-
-    def test_every_document_has_a_title(self):
-        for path in self.sources:
-            meta, _ = design_docs.frontmatter(path.read_text())
-            self.assertTrue(meta.get("title"), f"{path.name} has no title")
-
-    def test_every_document_ends_with_a_status_section(self):
-        for path in self.sources:
-            _, body = design_docs.frontmatter(path.read_text())
-            self.assertIn("## Status", body,
-                          f"{path.name} states nothing about what was verified")
-
-    def test_no_markdown_survives_conversion(self):
-        # The failure this guards is a construct the subset does not support
-        # reaching a published page as literal punctuation.
-        for path in self.sources:
-            _, body = design_docs.frontmatter(path.read_text())
-            body = design_docs.expand_jobs(body, self.root, [])
-            body = design_docs.expand_diagrams(body, {}, [], self.root, [])
-            html, _ = design_docs.markdown_to_html(body)
-            outside = re.sub(r"<pre><code.*?</code></pre>", "", html, flags=re.S)
-            outside = re.sub(r"<code>.*?</code>", "", outside, flags=re.S)
-            for pattern, what in ((r"\*\*", "bold markers"),
-                                  (r"^\s*[-*] ", "a list marker"),
-                                  (r"^\s*\|", "a table row"),
-                                  (r"^#{1,6} ", "a heading marker")):
-                self.assertIsNone(re.search(pattern, outside, re.M),
-                                  f"{path.name} leaks {what} into the rendered page")
-
-    def test_every_diagram_directive_names_a_diagram_that_exists(self):
-        diagrams = self.root / design_docs.SOURCES / "diagrams"
-        for path in self.sources:
-            _, body = design_docs.frontmatter(path.read_text())
-            for line in body.split("\n"):
-                match = design_docs.DIAGRAM.match(line)
-                if match:
-                    self.assertTrue((diagrams / f"{match.group(1)}.json").is_file(),
-                                    f"{path.name} names diagram {match.group(1)}, "
-                                    f"which has no json")
-
-    def test_every_internal_link_names_a_document_in_the_set(self):
-        stems = {path.stem for path in self.sources}
-        for path in self.sources:
-            text = path.read_text()
-            for target in re.findall(r"\]\(([A-Za-z0-9._-]+)\.html\)", text):
-                self.assertIn(target, stems,
-                              f"{path.name} links {target}.html, which no source produces")
-
-    def test_no_line_citation_points_into_code(self):
-        # The repository-wide gate bans these in tracked markdown; catching it
-        # here names the document rather than the whole tree.
-        for path in self.sources:
-            for hit in re.findall(r"[\w./-]+\.(?:py|sh|js|yml):\d+", path.read_text()):
-                self.fail(f"{path.name} cites {hit}; cite an anchor instead")
 
 
 class Freshness(unittest.TestCase):
