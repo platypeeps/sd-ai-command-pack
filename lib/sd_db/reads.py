@@ -1470,6 +1470,18 @@ def session_trail(connection: sqlite3.Connection, session: str, *, limit: int) -
 __all__ += ["session_trail"]
 
 
+def items_by_ids(connection: sqlite3.Connection, items) -> dict[int, sqlite3.Row]:
+    """The id, title, status and repo of each of `items` that exists, by id (pack sd:6019, the 'why' search)."""
+    items = list(items)
+    if not items:
+        return {}
+    return {row["id"]: row for row in connection.execute(
+        f"SELECT id, title, status, repo FROM item WHERE id IN ({', '.join('?' for _ in items)})", items)}
+
+
+__all__ += ["items_by_ids"]
+
+
 #: The lane's key prefix, `sd_lane.KEY_PREFIX`; `;` is the character after `:`, so the two bound one index range.
 LANE_KEYS = ("lane:v1:", "lane:v1;")
 

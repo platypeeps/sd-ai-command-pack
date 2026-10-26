@@ -19,7 +19,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from sd_db import repos
+from sd_db import reads, repos
 
 __all__ = ["LOG_COMMITS", "MAX_ITEMS", "MIN_QUERY", "search"]
 
@@ -64,7 +64,7 @@ def _commits(folder: Path, relative: str) -> list[tuple[str, str]]:
 def _deliveries(connection) -> dict[str, list[tuple[int, str]]]:
     """Each merge commit a `Code delivery` note names, to its items and pull request."""
     out: dict[str, list[tuple[int, str]]] = {}
-    for row in connection.execute("SELECT item, body FROM note WHERE kind = 'comment' AND body LIKE 'Code delivery %'"):
+    for row in reads.delivery_notes(connection, since=""):
         found = _DELIVERY.match(row["body"])
         if found:
             out.setdefault(found[2], []).append((row["item"], found[1]))
@@ -147,8 +147,7 @@ def search(connection, query: str, *, home: Path | None = None) -> dict:
     for item, why in hits:
         seen.setdefault(item, why)
     numbers = list(seen)[:MAX_ITEMS]
-    rows = {row["id"]: row for row in connection.execute(
-        f"SELECT id, title, status, repo FROM item WHERE id IN ({','.join('?' * len(numbers))})", numbers)} if numbers else {}
+    rows = reads.items_by_ids(connection, numbers)
     found["items"] = [{"item": n, "title": rows[n]["title"] if n in rows else None,
                        "status": rows[n]["status"] if n in rows else None,
                        "repo": repos.short(rows[n]["repo"]) if n in rows else None, "why": seen[n]} for n in numbers]
