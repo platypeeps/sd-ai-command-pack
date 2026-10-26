@@ -36,7 +36,7 @@
       <td class="repo" data-meta="${` · ${r.stage} · ${word}`}">${r.kind || '—'}</td>
       <td class="kind">${r.stage}</td>
       <td class="num">${age(r)}${r.fresh === 'stale' ? html` <span class="g-caution">stale</span>` : ''}</td>
-      <td class="mod">${link(r.url) ? html`<a class="ext" href="${r.url}" target="_blank" rel="noopener noreferrer">${r.host}</a>` : '—'}</td>
+      <td class="mod">${link(r.url) ? html`<a class="ext" href="${r.url}" target="_blank" rel="noopener noreferrer">${r.host}</a>` : r.url_text || '—'}</td>
       <td class="acts">${window.shell.commands.rowActions(r.id)}</td></tr>`;
   }
   // The job's line: its last run and how it ended. A failed run says why, from the last line it printed.
@@ -85,7 +85,7 @@
       <dl><dt>Status</dt><dd>${r.stage}</dd>
         <dt>Last refresh</dt><dd>${age(r)} <span class="why">(${word}${r.fresh === 'stale' ? `: older than ${DOC.stale_days} days` : ''})</span></dd>
         ${facts.map(([k, x]) => html`<dt>${k}</dt><dd>${x}</dd>`)}
-        <dt>URL</dt><dd>${link(r.url) ? html`<a class="ext" href="${r.url}" target="_blank" rel="noopener noreferrer">${r.url}</a>` : '— none in its Sources'}</dd>
+        <dt>URL</dt><dd>${link(r.url) ? html`<a class="ext" href="${r.url}" target="_blank" rel="noopener noreferrer">${r.url}</a>` : r.url_text ? html`${r.url_text} <span class="why">(not a link that parses)</span>` : '— none in its Sources'}</dd>
         <dt>Item</dt><dd><a href="${window.shell.itemHref(r.item)}">#${r.item}</a></dd></dl>
       <p class="why">The date is the newest one market-watch wrote into the profile. Refresh starts claude on this one watch; the date moves when its run writes the profile. The status moves in Tasks.</p>`);
     window.shell.commands.select(r.id);

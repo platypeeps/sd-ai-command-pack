@@ -45,10 +45,15 @@ def _text(value) -> str:
 
 
 def _url(value) -> tuple[str, str]:
-    """The link and its host for an http(s) URL; else no link, so the page draws the text and never a javascript: href."""
+    """The link and its host for an http(s) URL; else no link, so the page draws the text and never a javascript: href.
+    A URL urlsplit refuses (`https://[broken`, a full-width colon) is no link either (sd:6280): one row never fails the read."""
     text = _text(value)
-    parts = urllib.parse.urlsplit(text)
-    return (text, parts.hostname or "") if parts.scheme in ("http", "https") and parts.hostname else ("", "")
+    try:
+        parts = urllib.parse.urlsplit(text)
+        host = parts.hostname or ""
+    except ValueError:
+        return "", ""
+    return (text, host) if parts.scheme in ("http", "https") and host else ("", "")
 
 
 def _base(row, words) -> dict:

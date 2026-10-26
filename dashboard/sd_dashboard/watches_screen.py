@@ -4,7 +4,7 @@ The page is `v2/watches.html`; it holds no rows. It reads one JSON document, `/a
 
 - `rows`: every `sdw.market` row (`records.list_rows(connection, "market")`). Each has its title, its status (the
   row's stage: candidate, active, paused or declined), its kind (`content-type`), area and description, the first
-  http(s) link in its `## Sources` section, and its last refresh: the newest `Last full refresh: YYYY-MM-DD` the
+  http(s) link in its `## Sources` section (`url_text` instead when it does not parse), and its last refresh: the newest `Last full refresh: YYYY-MM-DD` the
   market-watch routine writes into the body (`refreshed`, "" for none) and its age in days.
 - `fresh` says what that date is worth: `fresh` (active, refreshed within `STALE_DAYS`), `stale` (active, older),
   `never` (active, no refresh date: no profile yet) or `idle` (not active: the routine refreshes active watches only).
@@ -21,8 +21,9 @@ cause and the page says the watches were not read.
 from __future__ import annotations
 
 import re
-import urllib.parse
 from datetime import date, datetime
+
+from .learning_screen import _url
 
 __all__ = ["JOB", "STALE_DAYS", "document"]
 
@@ -32,7 +33,7 @@ JOB = "market-watch"
 # ponytail: a fixed bound; derive it from the active count if the roster outgrows it.
 STALE_DAYS = 14
 REFRESHED = re.compile(r"Last full refresh:\s*(\d{4}-\d{2}-\d{2})")
-LINK = re.compile(r"https?://[^\s<>()\[\]`*]+")
+LINK = re.compile(r"https?://[^\s<>()\]`*]+")
 
 
 def _text(value) -> str:
@@ -53,13 +54,12 @@ def _refreshed(body: str) -> str:
 
 
 def _source(body: str) -> str:
-    """The first http(s) link in the `## Sources` section, or ""."""
+    """The first http(s) link's text in the `## Sources` section, or ""; `_url` says whether it parses."""
     section = re.search(r"^## Sources\s*$(.*?)(?=^## |\Z)", body, re.M | re.S)
     found = LINK.search(section.group(1)) if section else None
     if not found:
         return ""
-    url = found.group(0).rstrip(".,;:")
-    return url if urllib.parse.urlsplit(url).hostname else ""
+    return found.group(0).rstrip(".,;:")
 
 
 def _row(row, today: date) -> dict:
@@ -68,10 +68,11 @@ def _row(row, today: date) -> dict:
     refreshed = _refreshed(body)
     age = (today - date.fromisoformat(refreshed)).days if refreshed else None
     fresh = ("idle" if stage != "active" else "never" if age is None else "stale" if age > STALE_DAYS else "fresh")
-    url = _source(body)
+    text = _source(body)
+    url, host = _url(text)
     return {"id": row["id"], "title": row["title"], "stage": stage, "kind": _text(fields.get("content-type")),
             "area": _text(fields.get("area")), "slug": _text(fields.get("slug")), "description": _text(fields.get("description")),
-            "added": _text(fields.get("dateCreated"))[:10], "url": url, "host": urllib.parse.urlsplit(url).hostname or "",
+            "added": _text(fields.get("dateCreated"))[:10], "url": url, "host": host, "url_text": "" if url else text,
             "refreshed": refreshed, "age": age, "fresh": fresh}
 
 

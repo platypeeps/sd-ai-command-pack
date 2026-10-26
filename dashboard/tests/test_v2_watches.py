@@ -118,6 +118,16 @@ class TheDocument(ScreenCase):
         self.assertEqual(self.connection.execute("SELECT id, kind, status, stage FROM item ORDER BY id").fetchall(), before)
 
 
+    def test_a_malformed_source_url_is_text_and_the_other_rows_still_read(self):
+        """sd:6280: a Sources link urlsplit refuses no longer fails the whole read; its row shows the text, unlinked."""
+        ids = seed(self.connection)
+        broken = market(self.connection, "Broken Co", "active", profile("2026-09-01", source="- https://[broken"))
+        wide = market(self.connection, "Wide Co", "active", profile("2026-09-01", source="- https://example.com\uff1a80"))
+        rows = {r["id"]: r for r in watches_screen.document(self.connection, now=NOW, jobs=self.jobs)["rows"]}
+        self.assertEqual((rows[broken]["url"], rows[broken]["host"], rows[broken]["url_text"]), ("", "", "https://[broken"))
+        self.assertEqual((rows[wide]["url"], rows[wide]["url_text"]), ("", "https://example.com\uff1a80"))
+        self.assertEqual((rows[ids["fresh"]]["url"], rows[ids["fresh"]]["url_text"]), ("https://logs.example.test/about", ""))
+
 class TheActions(Run):
     """watch.refresh and watch.add through `/api/actions/run`, with herdr patched and `sd` a stub on PATH."""
 
@@ -218,6 +228,14 @@ class TheScript(ScreenCase):
         out = json.loads(result.stdout)
         self.assertIsNone(out["error"])
         return out
+
+    def test_a_malformed_source_url_shows_as_text_and_no_link(self):
+        """sd:6280: the row and Details draw a URL the server could not parse as text, never as an href."""
+        row = dict(self.doc["rows"][0], id=999, title="Broken Co", url="", host="", url_text="https://[broken")
+        self.doc["rows"].insert(0, row)
+        out = self.run_page("R.rows = ELS.rows.html;")
+        self.assertIn('<td class="mod">https://[broken</td>', out["R"]["rows"])
+        self.assertNotIn('href="https://[broken', out["R"]["rows"])
 
     def test_each_watch_shows_its_status_and_last_refresh_and_a_stale_one_says_so(self):
         out = self.run_page("R.rows = ELS.rows.html; R.job = ELS.job.html; R.sub = ELS.sub.html; R.tally = ELS.tally.html; R.details = ELS.details.html;"

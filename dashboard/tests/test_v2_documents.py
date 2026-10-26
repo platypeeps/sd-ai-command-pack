@@ -1072,6 +1072,16 @@ class TheBooks(ScreenCase):
         # A URL that is not http or https is no link: the page shows its text.
         self.assertEqual((article["url"], article["url_text"]), ("", "javascript:alert(1)"))
 
+    def test_a_malformed_url_is_text_and_the_other_rows_still_read(self):
+        """sd:6280: a URL urlsplit refuses no longer fails the whole read; its row shows the text, unlinked."""
+        ids = seed_learning(self.connection)
+        broken = learning(self.connection, "Broken Link", "queued", **{"content-type": "book", "url": "https://[broken"})
+        wide = learning(self.connection, "Wide Colon", "queued", **{"content-type": "article", "url": "https://example.com\uff1a80"})
+        rows = {r["id"]: r for r in learning_screen.books(self.connection, now=NOW)["rows"]}
+        self.assertEqual((rows[broken]["url"], rows[broken]["host"], rows[broken]["url_text"]), ("", "", "https://[broken"))
+        self.assertEqual((rows[wide]["url"], rows[wide]["url_text"]), ("", "https://example.com\uff1a80"))
+        self.assertEqual(rows[ids["book"]]["url"], "https://books.example.test/retro")
+
     def test_the_route_reads_the_books(self):
         seed_learning(self.connection)
         doc = v2.pages.documents._books(types.SimpleNamespace(connection=self.connection, now=NOW))
@@ -1214,6 +1224,17 @@ const v = [...OBJ.values()].find(o => o.title === 'A Talk'); ELS['videos-rows'].
 R.details = ELS.details.html;""", docs)
         self.assertIn("<h2>A Talk</h2>", out["R"]["details"])
         self.assertIn("<dt>Duration</dt><dd>8:54</dd>", out["R"]["details"])
+
+    def test_read_again_reads_the_shown_view_so_a_failed_first_read_recovers(self):
+        """sd:6280: Read again on Books reads the books again, not only the Documents list."""
+        out = self.run_view("""const A = ANSWER; let n = 0;
+ANSWER = (p, b) => p === '/api/documents/books' && !n++ ? [500, { error: 'database is locked' }] : A(p, b);
+window.shell.view.show('books'); await flush(); R.failed = ELS['books-rows'].html;
+await window.PAGE_AGAIN.run(); await flush(); R.rows = ELS['books-rows'].html;
+window.shell.view.show('documents'); await flush(); await window.PAGE_AGAIN.run(); await flush();""", self.books())
+        self.assertNotIn("Agile Retrospectives", out["R"]["failed"])
+        self.assertIn("Agile Retrospectives", out["R"]["rows"])
+        self.assertEqual(out["gets"], ["/api/documents", "/api/documents/books", "/api/documents/books", "/api/documents"])
 
     def test_a_failed_read_says_so_and_the_documents_list_keeps_its_details(self):
         out = self.run_view("""window.shell.view.show('books'); await flush(); R.details = ELS.details.html;""",

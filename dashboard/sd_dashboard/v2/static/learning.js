@@ -160,4 +160,7 @@
     current: () => mine() ? V[mine()].selected : docs.current(),
     select: (key, n) => mine() ? select(mine(), key, false) : docs.select(key, n),
   };
+  // Read again reads the shown view (sd:6280): a Books or Videos read that failed recovers here, as the Documents list does.
+  const again = window.PAGE_AGAIN;
+  window.PAGE_AGAIN = { ...again, run: () => mine() ? (V[mine()].reader ||= reader(mine())).load() : again.run() };
 })();
