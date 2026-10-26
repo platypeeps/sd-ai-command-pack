@@ -11,13 +11,15 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sd_db import reads, workflow, upsert_repo, set_item_fields, upsert_shadow
+from sd_db.testing import patience
 from sd_dashboard import server
 
 from support import ScreenCase
 
 
 class BrowserSession(ScreenCase):
-    #: Seconds one request waits for the in-process server; a class whose server runs real subprocesses sets more.
+    #: Seconds one request waits for the in-process server on a quiet machine; a class whose server runs real
+    #: subprocesses sets more. `patience` scales it by the load at the request (sd:6158).
     http_timeout = 5
 
     def setUp(self):
@@ -42,7 +44,7 @@ class BrowserSession(ScreenCase):
             data=json.dumps(payload).encode() if payload is not None else None,
             headers=headers or {}, method=method)
         try:
-            answer = urllib.request.urlopen(request, timeout=self.http_timeout)
+            answer = urllib.request.urlopen(request, timeout=patience(self.http_timeout))
         except urllib.error.HTTPError as error:
             answer = error
         with answer:
@@ -371,3 +373,19 @@ class Unparking(BrowserSession):
         blank = re.search(r'\[([^\]]*)\]\.forEach\(function \(key\) \{\s*if \(Object\.prototype\.hasOwnProperty\.call\(values, key\) && values\[key\] === ""\)', script)
         self.assertIsNotNone(blank)
         self.assertIn('"parked_at"', blank.group(1))
+
+
+class TheWaitBudget(BrowserSession):
+    def test_a_request_waits_longer_on_a_loaded_machine(self):
+        """sd:6158: a fixed 5 s timed requests out at gate load 49-99; the budget grows with the load per core."""
+        seen = []
+        real = urllib.request.urlopen
+
+        def urlopen(request, timeout):
+            seen.append(timeout)
+            return real(request, timeout=timeout)
+
+        with patch("os.getloadavg", return_value=(80.0, 80.0, 80.0)), patch("os.cpu_count", return_value=16), \
+                patch.object(urllib.request, "urlopen", urlopen):
+            self.assertEqual(self.request("/health")[0], 200)
+        self.assertEqual(seen, [self.http_timeout * 5])

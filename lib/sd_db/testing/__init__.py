@@ -33,6 +33,8 @@ What each module holds:
 * `store` -- a real database, at today's shape or an older one, and the two
   shapes `restore` refuses. Not the outside world like the rest, but the one
   fixture only this library may build: nothing outside it opens the database.
+* `patience` -- a test's wall-clock budget, scaled by the machine's load, so a
+  wait that holds on a quiet machine holds under a shared gate too.
 
 Nothing here patches `subprocess`. A suite that patches it proves a call was
 made; a suite that puts the command on PATH proves the call was made and
@@ -43,6 +45,7 @@ from __future__ import annotations
 
 from .github import GH_SHIM, GitHubDouble, gh_environment, install_gh
 from .home import ENV_SH, HOME_DIRS, FixtureHome
+from .patience import patience
 from .providers import (
     START_PROVIDERS,
     URL_PROVIDERS,
@@ -84,6 +87,7 @@ __all__ = [
     "install_gh",
     "install_start_command",
     "make_store",
+    "patience",
     "provider_environment",
     "write_registry",
 ]
