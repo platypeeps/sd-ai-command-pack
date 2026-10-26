@@ -2500,7 +2500,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scope", choices=SCOPES, default="worktree", metavar="SCOPE",
                         help=f"{', '.join(SCOPES)} (default: worktree)")
     parser.add_argument("--database", type=pathlib.Path, metavar="FILE", help="provider-state database")
-    parser.add_argument("--reuse-check", action="store_true", help="reuse a matching full-check receipt")
+    parser.add_argument("--reuse-check", action="store_true",
+                        help="reuse a matching full-check receipt. Never reuses in sd-ai-command-pack itself, "
+                             "which tracks no reuse declaration (.github/sd-check-reuse.json)")
     parser.add_argument("--gate-check", metavar="BRANCH", help="run the gate's check against origin/BRANCH")
     parser.add_argument("--verify-report", metavar="FILE", help="prior branch review JSON to verify with --base")
     parser.add_argument("--resume-report", metavar="FILE", help="incomplete prior review JSON to resume")
