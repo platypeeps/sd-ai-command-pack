@@ -401,6 +401,8 @@ Gates and reviews:
   a builder may run only foreground commands under 10 minutes, and design reviews overran that cap.
   The lead sends blocking findings to the idle builder, which fixes them fail-first; the lead reviews again.
   `sd-review` records no pass the lane reuses, so the lane reviews the branch once more at prepare.
+  For a UI change the lead also looks at the builder's page shots, dark and light at desktop and phone width (sd:6007):
+  misaligned dropdowns, missing help icons, a missing Park and counts in labels passed review and tests.
   Then the lead runs the tests the change touches
   (`make check CHANGED=<paths>`, or a repo's `make test SUITE=<name>`) and enqueues on a pass; the lane's prepare gate is
   the one full run (system sd:5800). A pre-enqueue pass is reused only when main has not moved, so it doubled gate load;
