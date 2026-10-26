@@ -1112,14 +1112,33 @@ def _entry_time(steps: list[Any], start: float) -> dict[str, Any] | None:
     claimed, enqueued = _instant(steps[claim]["started"]), _instant(steps[claim]["enqueued"])
     if claimed is None or enqueued is None or claimed < start:
         return None
-    prepared = next((_instant(row["timestamp"]) for row in steps[claim + 1:]
-                     if row["status"] != "running" or row["step"] == "merge"), None)
+    prepared = _prepared(steps, claim)
     speculated = _speculated(steps)
     last = steps[-1]
     ended = _instant(last["finished"]) if last["status"] != "running" else None
     return {"item": last["item"], "title": last["title"] or "", "status": last["status"], "wait": claimed - enqueued,
-            "gate": None if prepared is None or speculated is None else speculated + prepared - claimed,
+            "gate": None if prepared is None or speculated is None else speculated + prepared,
             "total": None if ended is None else ended - enqueued}
+
+
+def _prepared(steps: list[Any], claim: int) -> float | None:
+    """The seconds of every prepare, from each claim to the row that set `step: merge` or ended that claim; None while
+    one runs. A reclaim or put-back returns the entry to pending, and its next claim prepares again (pack sd:6281)."""
+    total, n = 0.0, claim
+    while True:
+        began = _instant(steps[n]["started"]) or _instant(steps[n]["timestamp"])
+        stop = next((k for k in range(n + 1, len(steps))
+                     if steps[k]["status"] != "running" or steps[k]["step"] == "merge"), None)
+        if stop is None or began is None:
+            return None
+        stopped = _instant(steps[stop]["timestamp"])
+        if stopped is None:
+            return None
+        total += stopped - began
+        again = next((k for k in range(stop + 1, len(steps)) if steps[k]["status"] == "running"), None)
+        if (steps[stop]["step"] == "merge" and steps[stop]["status"] == "running") or again is None:
+            return total
+        n = again
 
 
 def entry_times(connection: Any, repository: str, *, now: float, days: int = TIMES_DAYS) -> list[dict[str, Any]]:
@@ -1127,7 +1146,7 @@ def entry_times(connection: Any, repository: str, *, now: float, days: int = TIM
 
     `wait` runs from `enqueued_at` to the first claim. `gate` is the lane's
     work before the merge: the speculative gate, from the row that set it
-    running to the row that ended it, plus the prepare step, from the first
+    running to the row that ended it, plus the prepare step, from each
     claim to the row that set `step: merge` or ended the claim; a speculative
     gate runs while the entry waits, so the two overlap. `total` runs from
     enqueue to the entry's end. A part that has not ended is None, never a

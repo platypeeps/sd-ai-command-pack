@@ -1183,6 +1183,18 @@ ELS.shift.value = 'writer kind:research'; ELS.shift.listeners.input.forEach(f =>
         self.assertIn("Agile Retrospectives", r["text"])
         self.assertNotIn("On Queues", r["text"])
 
+    def test_clear_filters_in_the_empty_view_clears_the_search_too(self):
+        """sd:6285: the empty state's Clear filters cleared the read state only, so a search that matched nothing stayed."""
+        out = self.run_view("""window.shell.view.show('books'); await flush();
+ELS.shift.value = 'nothing-matches-this'; ELS.shift.listeners.input.forEach(f => f({ target: ELS.shift })); await flush();
+R.before = ELS['books-rows'].html;
+ELS['books-empty'].listeners.click[0]({ target: { closest: s => s === '[data-fclear]' ? {} : null } }); await flush();
+R.after = ELS['books-rows'].html; R.shift = ELS.shift.value;""", self.books())
+        r = out["R"]
+        self.assertNotIn("Agile Retrospectives", r["before"])
+        self.assertIn("Agile Retrospectives", r["after"])
+        self.assertEqual(r["shift"], "", "the search field kept its text")
+
     def test_open_link_and_open_item_run_on_a_book(self):
         out = self.run_view("""window.shell.view.show('books'); await flush();
 const book = [...OBJ.values()].find(o => o.type === 'book' && o.title === 'Agile Retrospectives');

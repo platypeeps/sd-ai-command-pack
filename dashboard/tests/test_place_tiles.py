@@ -15,7 +15,9 @@ import socket
 import tempfile
 import threading
 import time
+import tracemalloc
 import unittest
+import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
@@ -129,9 +131,18 @@ class TheTiles(Case):
             probe = self.doc()["rows"][0]["probe"]
             self.assertEqual((probe["answers"], probe["status"]), answers, url)
         self.write("http://192.0.2.1:9/")
-        with mock.patch.object(place_tiles, "PROBE_SECONDS", 0.2):
-            probe = self.doc()["rows"][0]["probe"]
-        self.assertIsNone(probe["answers"], "a timeout is not a down app")
+        for timeout in (urllib.error.URLError(TimeoutError("timed out")), TimeoutError("timed out")):
+            with mock.patch.object(place_tiles._OPENER, "open", side_effect=timeout):
+                probe = self.doc()["rows"][0]["probe"]
+            self.assertIsNone(probe["answers"], f"a timeout is not a down app: {timeout!r}")
+
+    def test_a_url_http_refuses_to_send_is_that_tiles_unknown_not_the_overviews_failure(self):
+        for url in ("http://127.0.0.1:1/a b", "http://127.0.0.1:nope/"):
+            self.write(url)
+            doc = self.doc()
+            self.assertEqual([r["id"] for r in doc["rows"]], ["app", "far"], url)
+            probe = doc["rows"][0]["probe"]
+            self.assertEqual((probe["answers"], probe["status"]), (None, "not known: InvalidURL"), url)
 
 
 class TheRun(Case):
@@ -170,6 +181,24 @@ class TheRun(Case):
         (state / "exit").write_text("7 2026-09-05T08:01:00Z\n", encoding="utf-8")
         self.start("Say hi")
         self.assertEqual(self.wait_done("Say hi")["exit"], 0, "the old run's exit 7 was read as the new run's")
+
+    def test_a_long_logs_last_run_reads_only_its_tail(self):
+        self.write()
+        state = place_tiles.state_dir() / "acme" / "app" / "say-hi"
+        state.mkdir(parents=True)
+        log = state / "start.log"
+        log.write_bytes(b"2026-09-05T08:00:00+00:00 printf hi in /x\n")
+        with open(log, "r+b") as grown:
+            grown.truncate(64 << 20)
+            grown.seek(0, 2)
+            grown.write(b"the end")
+        tracemalloc.start()
+        self.addCleanup(tracemalloc.stop)
+        last = self.last("Say hi")
+        peak = tracemalloc.get_traced_memory()[1]
+        self.assertEqual((last["started"], last["output"][-7:], len(last["output"]), last["cut"]),
+                         ("2026-09-05T08:00:00+00:00", "the end", place_tiles.TAIL, True))
+        self.assertLess(peak, 1 << 20, "the read held the whole 64 MiB log")
 
     def test_a_name_no_line_holds_or_a_folder_not_here_runs_nothing(self):
         self.write()

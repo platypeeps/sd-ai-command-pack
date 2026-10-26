@@ -17,6 +17,16 @@
 // Show draws the active rows by default: merging, next (a held one keeps its place), building and blocked, each still
 // waiting on the runner, a builder or the operator. All adds the ended ones, cancelled and landed; ?show=all keeps it.
 // Each lane's counts read every row, whatever Show draws (Queue has no rail badge since sd:5921).
+// pack sd:6016: Tasks' realm tabs (sd:6263) narrow the lanes too: Personal, the dashboard.realms realms (SHELL_REALMS),
+// then All. A lane's realm is its checkout's (places.realm_of). A lane whose realm is unknown (no readable realm list) or
+// that was not read shows on every tab: a tab never hides what the page cannot place. Each tab counts its active rows.
+window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
+  ...(window.SHELL_REALMS || []).filter(r => /^[a-z0-9][a-z0-9-]*$/.test(r.id) && !['personal', 'all'].includes(r.id)).map(r => ({ id: r.id, label: r.label })),
+  { id: 'all', label: 'All', key: 'a' }];
+{
+  const used = new Set(['a']);
+  window.PAGE_VIEWS.forEach(v => { if (!v.key) { v.key = [...v.id].find(c => /[a-z]/.test(c) && !used.has(c)); used.add(v.key); } });
+}
 (() => {
   const { html, put, plural } = window.markup;
   const $ = id => document.getElementById(id);
@@ -29,6 +39,7 @@
   const ACTIVE = ['merging', 'next', 'building', 'blocked'];
   let DOC = null, busy = false, show = 'active', open = null; // open: the lane path Details shows
   const drawn = l => show === 'all' ? l.rows : l.rows.filter(r => ACTIVE.includes(r.state));
+  const inView = (l, v = window.shell.view.current() || 'all') => v === 'all' || l.realm == null || l.realm === v;
   const said = {}; // lane path -> { ok, text }: the last write's result, shown in its lane until the next one
 
   const btn = (lane, r, act, label, icon, off) => html`<button class="btn quiet sm" type="button" data-act="${act}" data-item="${String(r.item)}" data-repo="${lane.path}" aria-label="${label} sd:${String(r.item)}" title="${label}"${off || busy ? html` disabled` : ''}>${ICON(icon)}</button>`;
@@ -107,8 +118,8 @@
   // (speculative gate plus prepare), and its slowest entry, enqueue to end. A lane with no entry folds into one line; a
   // read that failed is its own row. A median wait past an hour says the lane run files the parallel-lanes question.
   const mins = s => s == null ? 'none ended' : dur(Math.round(s));
-  function timesTable() {
-    const read = DOC.lanes.filter(l => l.times && (l.times.error || l.times.entries)), quiet = DOC.lanes.length - read.length;
+  function timesTable(lanes) {
+    const read = lanes.filter(l => l.times && (l.times.error || l.times.entries)), quiet = lanes.length - read.length;
     const days = (read.find(l => l.times.days) || { times: { days: 7 } }).times.days;
     if (!read.length) return html`<p class="idle">No lane ran an entry in the last ${String(days)} days.</p>`;
     const cells = l => l.times.error ? html`<td colspan="4" class="why">▨ not read: ${l.times.error}</td>`
@@ -130,19 +141,21 @@
       <div><dt>gates running / cap</dt><dd>${gates.error ? html`▨ <small>${gates.error}</small>` : html`${gates.running} / ${gates.cap}<small>${gates.waiting} waiting</small>`}</dd></div>
       <div><dt>read</dt><dd>${at(DOC.read)}<small>${DOC.read.replace('T', ' ').replace('Z', ' UTC')}</small></dd></div>`);
     $('edits').textContent = DOC.edits;
-    const every = DOC.lanes.flatMap(l => l.rows), chip = (v, n) => html`<button type="button" class="chip" data-show="${v}" aria-pressed="${String(show === v)}">${v} <span class="n">${String(n)}</span></button>`;
+    const lanes = DOC.lanes.filter(l => inView(l)), every = lanes.flatMap(l => l.rows), chip = (v, n) => html`<button type="button" class="chip" data-show="${v}" aria-pressed="${String(show === v)}">${v} <span class="n">${String(n)}</span></button>`;
     put($('show'), html`<span class="label">Show</span><div class="chips">${chip('active', every.filter(r => ACTIVE.includes(r.state)).length)}${chip('all', every.length)}</div>`);
     // A lane with nothing to show (and no write result) folds into the Idle line (sd:5640, sd:5921).
-    const busyLanes = DOC.lanes.filter(l => drawn(l).length || said[l.path]), idle = DOC.lanes.filter(l => !busyLanes.includes(l));
+    const busyLanes = lanes.filter(l => drawn(l).length || said[l.path]), idle = lanes.filter(l => !busyLanes.includes(l));
     busyLanes.sort((a, b) => (count(b, 'blocked') > 0) - (count(a, 'blocked') > 0) || (count(b, 'merging') > 0) - (count(a, 'merging') > 0));
     if (!busyLanes.some(l => l.path === open)) open = busyLanes.length ? busyLanes[0].path : null;
     put($('lanes'), html`${DOC.problems.map(p => html`<p class="fail" role="alert">▨ ${p.repo}: lane not read. ${p.error}</p>`)}${busyLanes.length
       ? html`<table class="ledger lanes" aria-label="Active lanes"><thead><tr><th scope="col"><span class="sr">State</span></th><th scope="col">Lane</th><th scope="col">Merging · Next · Blocked</th><th scope="col">Head of lane</th><th scope="col" class="num">Landed</th><th scope="col"><span class="sr">Act</span></th></tr></thead>
       <tbody>${busyLanes.map(laneRow)}</tbody></table>`
       : !DOC.lanes.length ? html`<p class="done">No managed repository's lane was read. sd-db repo managed PATH yes adds one.</p>`
+      : !lanes.length ? html`<p class="done">No lane in this realm. All shows ${plural(DOC.lanes.length, 'lane')}.</p>`
       : html`<p class="done">No lane has a row to show.</p>`}`);
     put($('idle'), html`${idleLine(idle)}`);
-    put($('times'), timesTable());
+    put($('times'), timesTable(lanes));
+    window.PAGE_VIEWS.forEach(v => window.shell.view.count(v.id, DOC.lanes.filter(l => inView(l, v.id)).flatMap(l => l.rows).filter(r => ACTIVE.includes(r.state)).length));
     details();
   }
 
@@ -221,6 +234,7 @@
   });
 
   window.PAGE_ATTENTION = { state: 'ok', n: 0, what: 'blocked' };
+  document.addEventListener('shell:view', () => { if (DOC) draw(); });
   document.addEventListener('DOMContentLoaded', () => {
     window.shell.commands.register(window.commands.adversarialReview('entry', {
       payload: o => ({ kind: 'change', target: o.worktree, item: o.item }),

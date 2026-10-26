@@ -263,6 +263,18 @@ class TheScript(ScreenCase):
         self.assertIn("The last run failed", r["job"])
         self.assertIn("exit 1: Gmail tools unavailable: token expired", r["job"])
 
+    def test_clear_filters_in_the_empty_list_clears_the_search_too(self):
+        """sd:6285: the empty state's Clear filters cleared the status only, so a search that matched nothing stayed."""
+        out = self.run_page("""document.dispatchEvent(new CustomEvent('shell:filter', { detail: { q: 'nothing-matches-this' } })); await flush();
+R.before = ELS.rows.html; R.hidden = ELS.empty.hidden;
+ELS.empty.listeners.click[0]({ target: { closest: s => s === '[data-fclear]' ? {} : null } }); await flush();
+R.after = ELS.rows.html; R.shift = OUT.shift;""")
+        r = out["R"]
+        self.assertNotIn("New Agent", r["before"])
+        self.assertFalse(r["hidden"])
+        self.assertIn("New Agent", r["after"])
+        self.assertEqual(r["shift"], "", "the bar's text was not cleared")
+
     def test_refresh_all_runs_the_job_with_the_revision_the_page_read(self):
         out = self.run_page("const j = OBJ.get('job:market-watch'); R.label = cmd('jobs.retry').label; C.run(cmd('jobs.retry'), j); await flush();")
         self.assertEqual(out["R"]["label"], "Refresh all")

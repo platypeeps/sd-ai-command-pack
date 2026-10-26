@@ -47,6 +47,7 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
 4. Commit one item per commit. Add no attribution lines: no Co-Authored-By, session or generated-with lines.
    End a commit that delivers a whole item with a `Closes: sd:N` trailer; the lane closes only those (sd:5999).
    A subject or body that names an item closes nothing, so partial work just leaves the trailer out.
+   Title each commit and the PR as a Conventional Commit (`fix:`, `feat(scope):`, `chore:`); enqueue refuses another title.
    Wrap commit and PR body lines at 72 characters, merge subjects too, and keep the title at 63 or less: enqueue refuses longer ones.
    Follow the repository's `CLAUDE.md` for any trailer it requires.
 5. Run the focused tests for the files you touched in the machine gate queue, in turn with lane gates:

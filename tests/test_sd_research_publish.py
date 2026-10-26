@@ -2352,6 +2352,24 @@ class SourceUrlTests(Fixture):
         self.assertIn("[here](#anchor)", content)
         self.assertIn("[code](c.md)", content)
 
+    def test_code_spans_long_fences_and_balanced_parens(self) -> None:
+        """sd:6279: a link inside a code span or a four-backtick fence was
+        rewritten, and `report(2026).md` was cut at its first `)`."""
+        (self.repo / "10-x" / "a.md").write_text(
+            "Run `[x](c.md)` or ``a `[y](d.md)` b``; read [R](report(2026).md#p(1))"
+            " and [`cfg`](g.md).\n\n"
+            "````markdown\n```\n[fenced](e.md)\n```\n````\n[after](f.md)\n"
+            "~~~\n````\n[tilde](h.md)\n~~~~\n", encoding="utf-8")
+        self.origin("git@github.com:example-org/research-repo.git")
+        content = self.queued()["content"]
+        blob = "https://github.com/example-org/research-repo/blob/HEAD/10-x/"
+        self.assertIn("Run `[x](c.md)` or ``a `[y](d.md)` b``;", content)
+        self.assertIn("[R](%sreport%%282026%%29.md#p(1))" % blob, content)
+        self.assertIn("[`cfg`](%sg.md)" % blob, content)
+        self.assertIn("\n[fenced](e.md)\n", content)
+        self.assertIn("[after](%sf.md)" % blob, content)
+        self.assertIn("\n[tilde](h.md)\n", content)
+
     def test_without_a_github_origin_a_relative_link_keeps_its_text(self) -> None:
         (self.repo / "10-x" / "a.md").write_text(self.LINKS, encoding="utf-8")
         content = self.queued()["content"]
