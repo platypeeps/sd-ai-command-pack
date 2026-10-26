@@ -1457,14 +1457,15 @@ __all__ += ["status_change_notes"]
 def session_trail(connection: sqlite3.Connection, session: str, *, limit: int) -> list[sqlite3.Row]:
     """The items `session` filed and the decisions and questions it wrote, newest first, at most `limit` (sd:6023).
 
-    A filed item is its `opened as` status note. Behind `bin/sd-session-trail`, the compact hook.
+    A filed item is its `opened as` status note. A CLI ruling keeps the user as its `session` and the
+    session as its `harness_session` (pack sd:6046). Behind `bin/sd-session-trail`, the compact hook.
     """
     return connection.execute(
         "SELECT note.id, note.item, note.timestamp, note.kind, note.body, note.resolved_at, item.title, item.repo"
-        " FROM note JOIN item ON item.id = note.item WHERE note.session = ?"
+        " FROM note JOIN item ON item.id = note.item WHERE (note.session = ? OR note.harness_session = ?)"
         " AND (note.kind IN ('decision', 'question')"
         " OR (note.kind = 'status_change' AND substr(note.body, 1, 10) = 'opened as '))"
-        " ORDER BY note.id DESC LIMIT ?", (session, limit)).fetchall()
+        " ORDER BY note.id DESC LIMIT ?", (session, session, limit)).fetchall()
 
 
 __all__ += ["session_trail"]

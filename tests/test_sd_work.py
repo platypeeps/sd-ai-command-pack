@@ -462,6 +462,35 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual([note["session"] for note in filed["notes"]], ["session-under-test"])
         self.assertEqual({note["session"] for note in state["notes"] if note["id"] > asked}, {getpass.getuser()})
 
+    def test_a_cli_ruling_records_its_harness_session_and_shows_in_that_sessions_trail(self):
+        """pack sd:6046: a CLI ruling keeps the user as "ruled by"; its session went nowhere, so the session's
+        compact trail missed its own ruling. `harness_session` keeps it, a teammate's mark included."""
+        import sd_db.review as review
+
+        with sd_db.connect(home=self.home) as connection:
+            item = review.file(connection, {
+                "schema": 1, "queue": "nightly", "batch": "2026-10-18", "title": "Nightly review 2026-10-18",
+                "source": "system@6c4317b", "mode": "open",
+                "questions": [{"subject": f"cap-{number}", "text": f"Suggestion: cap {number}.",
+                               "options": ["Approve", "Reject"]} for number in range(3)]}, who="fixture")["item"]
+            connection.commit()
+            questions = [question["note"] for question in review.read(connection, item)["questions"]]
+        ruled = {}
+        for asked, (env, session) in zip(questions, (
+                (self.harness("session-under-test"), "session-under-test"),
+                (self.harness("session-under-test", mark="session-under-test:agent-1"), "session-under-test:agent-1"),
+                (self.harness(), None)), strict=True):
+            state = json.loads(self.call("task", "note", item, "Worth a try", "--kind", "decision", "--answers",
+                                         asked, "--option", "reject", "--json", env=env).stdout)
+            mine = [note for note in state["notes"] if note["id"] > max(*questions, *ruled.values())]
+            self.assertEqual([(note["kind"], note["session"], note["harness_session"]) for note in mine],
+                             [("comment", getpass.getuser(), session), ("decision", getpass.getuser(), session)])
+            ruled[session] = state["note"]["id"]
+        with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
+            for session in ("session-under-test", "session-under-test:agent-1"):
+                self.assertEqual([row["id"] for row in sd_db.reads.session_trail(connection, session, limit=10)],
+                                 [ruled[session]])
+
     def test_option_refuses_an_unknown_label_or_a_plain_question_and_writes_nothing(self):
         """sd:5065: an unknown label names the valid ones; `--option` needs `--answers` on a batch question."""
         item, asked = self.batch_question()

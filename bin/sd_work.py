@@ -1197,19 +1197,26 @@ SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
 AGENT_ENV = "SD_AGENT_SESSION"
 
 
-def _session(who: str) -> str:
-    """The session a note records: the harness session id when set, else `who` (sd:6023).
+def _harness() -> str | None:
+    """The harness session id, None outside a harness (sd:6023).
 
-    `bin/sd-session-trail` reads a session's own notes back by it after a compact.
-    A teammate shares its lead's id, so its notes record the `AGENT_ENV` mark
-    instead, when the mark names this session: one inherited from another
-    session marks nothing (pack sd:6046).
+    A teammate shares its lead's id, so it is the `AGENT_ENV` mark instead,
+    when the mark names this session: one inherited from another session
+    marks nothing (pack sd:6046).
     """
     session = os.environ.get(SESSION_ENV)
     if not session:
-        return who
+        return None
     mark = os.environ.get(AGENT_ENV, "")
     return mark if mark.startswith(f"{session}:") and len(mark) > len(session) + 1 else session
+
+
+def _session(who: str) -> str:
+    """The session a note records: the harness session when set, else `who` (sd:6023).
+
+    `bin/sd-session-trail` reads a session's own notes back by it after a compact.
+    """
+    return _harness() or who
 
 
 def _note(workflow: Any, connection: Any, args: argparse.Namespace, who: str, revision: str | None) -> dict:
@@ -1286,11 +1293,11 @@ def _rule_batch(review: Any, workflow: Any, connection: Any, args: argparse.Name
     if body.strip().casefold() != option.casefold():
         revision = workflow.add_item_note(connection, args.item, kind="comment", who=who,
                                           body=f"On note #{args.answers}: {body}",
-                                          expected_revision=revision)["revision"]
+                                          expected_revision=revision, harness_session=_harness())["revision"]
     if revision is None:
         revision = workflow.item_state(connection, args.item)["revision"]
     state = review.rule(connection, args.item, args.answers, option, expected_revision=revision, who=who,
-                        session=_session(who))
+                        session=_harness())
     state["note"] = state["ruling"]
     return state
 

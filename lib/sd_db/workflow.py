@@ -889,10 +889,13 @@ def _next_occurrence(connection: sqlite3.Connection, row: dict, *, who: str) -> 
 def add_item_note(
     connection: sqlite3.Connection, item: int, *, body: str, kind: str = "comment",
     who: str, expected_revision: str | None = None, session: str | None = None,
+    harness_session: str | None = None,
 ) -> dict:
     """Add a human note; status and execution history have their own writers.
 
     `session` is the note's session, `who` when not given (sd:6023).
+    `harness_session` is the harness session beside a `session` that names
+    the user, as a CLI ruling keeps (pack sd:6046).
     """
     who = _text(who, "who")
     body = _text(body, "body")
@@ -900,7 +903,7 @@ def add_item_note(
         raise WorkflowError(f"note kind must be one of {', '.join(NOTE_KINDS)}")
     with transaction(connection):
         _checked_state(connection, item, expected_revision)
-        note = add_note(connection, item, kind, body, session=session or who)
+        note = add_note(connection, item, kind, body, session=session or who, harness_session=harness_session)
         state = item_state(connection, item)
         state["note"] = next(row for row in state["notes"] if row["id"] == note)
         return state

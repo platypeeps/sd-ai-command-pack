@@ -3,7 +3,8 @@
 
 A compacted session loses what it filed and ruled. The rows keep it: `sd task
 add` and `sd task note` record the harness session id (`CLAUDE_CODE_SESSION_ID`)
-as the note's session (sd:6023). This hook reads those rows back by that id --
+as the note's session (sd:6023); a CLI ruling keeps the user there and the id
+as its `harness_session` (pack sd:6046). This hook reads those rows back by that id --
 the items the session filed and the decisions and questions it wrote, newest
 first, at most `LIMIT` -- so the session continues from the database and needs
 no handoff file.
