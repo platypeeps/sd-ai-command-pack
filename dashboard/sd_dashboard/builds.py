@@ -29,7 +29,7 @@ from sd_db import repos as sd_repos
 from sd_db.config import label_prefix
 from sd_db.database import transaction
 from sd_db.errors import SdDbError
-from sd_db.writes import add_note, transition
+from sd_db.writes import add_note, set_item_fields, transition
 
 __all__ = ["JOB", "QUIET_SECONDS", "RECENT_HOURS", "kickstart", "panel", "plan", "press", "retry"]
 
@@ -303,6 +303,8 @@ def retry(connection, assignment: int, *, expected_revision: str, who: str, find
             item = items.get(member["item"])
             if item is not None and item["status"] == "blocked":
                 transition(connection, member["item"], "ready", who=who, reason=f"Retry of build run {run['id']}")
+            if connection.execute("SELECT parked_at FROM item WHERE id = ?", (member["item"],)).fetchone()[0]:
+                set_item_fields(connection, member["item"], parked_at=None)  # the block parked it (pack sd:6132)
             try:
                 build._item(connection, member["item"])
             except build.BuildRefused as refusal:
