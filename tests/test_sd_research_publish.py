@@ -3499,6 +3499,16 @@ class UploadTests(ArchifyImageTests):
         self.assertIn(b"Content-Type: image/png", request.data)
         self.assertIn(PNG, request.data)
 
+    def test_an_answer_that_is_not_an_object_is_a_failure(self) -> None:
+        """sd:6082: a list, a string or null from Notion is no confirmation; the request stays."""
+        self.queued()
+        for answer in ([self.uploaded()], "uploaded", None):
+            with self.subTest(answer=answer):
+                _, urlopen = self.opener(answer)
+                status, said = PUBLISH.upload_image(self.NAME, self.URL, "Bearer t0k", opener=urlopen)
+                self.assertEqual(status, 1, said)
+                self.assertIn("did not confirm", said)
+
     def test_upload_refuses_a_url_off_notion(self) -> None:
         self.queued()
         for url in ("https://example.test/v1/mcp/file_uploads/402f52b1-5782-81d9-a476-00b2b0e0dd93/send",

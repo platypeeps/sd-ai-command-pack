@@ -2479,7 +2479,9 @@ def upload_image(name: str, url: str, authorization: str, *,
     except (OSError, ValueError) as problem:
         return 1, "upload: the send to Notion failed (%s); the request stays" % problem
     upload_id = str(said.get("file_upload_id", "")) if isinstance(said, dict) else ""
-    if said.get("status") != "uploaded" or upload_id.replace("-", "") != sent_to.group(1).replace("-", ""):
+    # A list, a string or null confirms nothing (sd:6082).
+    if (not isinstance(said, dict) or said.get("status") != "uploaded"
+            or upload_id.replace("-", "") != sent_to.group(1).replace("-", "")):
         return 1, "upload: Notion did not confirm upload %s (%r); the request stays" % (sent_to.group(1), said)
     caption = html.escape(str(image.get("caption") or ""), quote=False)
     return 0, '<image source="file-upload://%s">%s</image>' % (upload_id, caption)
