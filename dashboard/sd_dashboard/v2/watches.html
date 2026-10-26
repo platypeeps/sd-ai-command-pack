@@ -1,0 +1,78 @@
+<!doctype html>
+<!--
+  Watches (sd:6264), at /watches: the company and product watches, the store's market rows, which the market-watch job
+  refreshes three a run, daily at 03:00. It reuses the Documents page's grammar: one filter bar, a sorted and paged ledger
+  and the one Details pane.
+  Data: /api/watches (watches_screen.document: every sdw.market row with its status, its last refresh date read from its
+  profile and what that date is worth, fresh, stale, never or idle; and the market-watch job's launchd state, last run and
+  the last line it printed), read when the page opens. Nothing here is sample data.
+  Writes: Refresh all is Run now on the job, POST /api/jobs/market-watch/retry with the job's revision, as Management and
+  HOA run a job. Refresh (one watch) and Add watch post /api/actions/run, watch.refresh and watch.add (run_actions.py):
+  Refresh starts claude in herdr on the routine's per-entity step for that one row; Add watch files a candidate row
+  through sd store add. Details shows each answer. The status moves in Tasks (Open item): candidate to active is the
+  operator's call.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Watches · system</title>
+<link rel="stylesheet" href="/ui/fonts.css">
+<link rel="stylesheet" href="/ui/tokens.css">
+<script src="/ui/theme.js"></script>
+<script src="/ui/markup.js"></script>
+<link rel="stylesheet" href="/ui/shell.css">
+<link rel="stylesheet" href="/ui/documents.css">
+</head>
+<body data-page="Watches" data-scope="watches" data-scope-note="the store's market rows and the market-watch job">
+<script src="/ui/icons.js"></script>
+<div class="shell">
+  <main id="main">
+    <header class="head">
+      <div>
+        <h1>Watches</h1>
+        <p><span id="sub">Reading the watches…</span> · market-watch refreshes three active watches a day at 03:00</p>
+      </div>
+    </header>
+
+    <div id="state" hidden></div>
+    <section aria-labelledby="job-h">
+      <div class="sec-head">
+        <h2 id="job-h">Refresh</h2>
+        <div class="tools">
+          <button class="btn" type="button" data-cmd="jobs.retry" data-obj="job:market-watch">Refresh all</button>
+          <button class="btn quiet" type="button" data-cmd="watch.add" data-obj="watches">Add watch…</button>
+        </div>
+      </div>
+      <p id="job" aria-live="polite"></p>
+    </section>
+
+    <!-- The toolbar standard (sd:5281): one control row, the shell's Shapeshift bar (sd:5539), which filters the ledger. -->
+    <div class="toolbar" id="toolbar" data-shift></div>
+
+    <section aria-labelledby="list-h">
+      <div class="sec-head">
+        <h2 id="list-h">Watches <button class="help" type="button" aria-label="Help: Watches" data-help="<b>One row per market row in the store.</b> Status is the row's stage: candidate, active, paused or declined; the routine refreshes active watches only. Last refresh is the newest date the routine wrote into the profile. <b>▲</b> means an active watch is stale or has no profile yet.">
+          <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+        <p class="tally" id="tally"></p>
+      </div>
+      <div class="filters toolbar-2" id="filters"></div>
+      <table class="ledger" aria-labelledby="list-h" data-tfilter="page" data-toolbar="toolbar">
+        <thead id="rows-head"></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p class="empty" id="empty" hidden></p>
+      <div id="pager"></div>
+      <div id="help"></div>
+    </section>
+  </main>
+
+  <div class="details" id="details"><p class="why">Select a watch to see its profile date and its refresh.</p></div>
+</div>
+<script src="/ui/sections.js"></script>
+<script src="/ui/read.js"></script>
+<script src="/ui/commands.js"></script>
+<script src="/ui/watches.js"></script>
+<script src="/ui/shell.js"></script>
+</body>
+</html>
