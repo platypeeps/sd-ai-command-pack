@@ -219,7 +219,9 @@ window.PAGE_FILTER = { '': 'Needs you' };
     $('unread').hidden = !unread.length;
     $('unread').textContent = unread.map(([k, why]) => `${k} could not be read: ${why}. Refresh tries again.`).join(' ');
     motion();
+    digest();
     dayTrack();
+    spendLine();
     window.snooze.draw($('snoozed'), SNOOZED);
   }
 
@@ -241,11 +243,28 @@ window.PAGE_FILTER = { '': 'Needs you' };
         <td class="when">${top.started ? html`<time datetime="${top.started}" title="${top.started.slice(11, 16)} UTC">${clock(top.started)}</time>` : 'not known'}</td>
         <td class="num">${top.elapsed || 'not known'}</td></tr>`; })}${more ? html`<tr class="more"><td></td><td colspan="4"><button type="button" class="linkbtn" id="motion-more">${more} more: ${items.slice(SHOWN, SHOWN + 3).map(it => `sd:${it.item}`).join(', ')}${more > 3 ? ' …' : ''}</button></td></tr>` : ''}`
       : html`<tr class="empty"><td colspan="5">No open item has a live session.</td></tr>`);
-    const dark = Object.entries(a.sources || {}).filter(([, why]) => why);
-    put($('active-tally'), html`<span>${plural(items.length, 'item')} live</span><span>${L.merging ?? 0} merging</span><span>${L.landed ?? 0} landed today in ${plural(L.landed_lanes ?? 0, 'lane')}</span><a href="/queue?show=all">Queue</a>${dark.length ? html`<span class="g-caution">▲ ${dark.length} not read</span>` : ''}`);
+    const dark = Object.entries(a.sources || {}).filter(([, why]) => why), B = builds();
+    put($('active-tally'), html`${B.rows.length ? html`<span>${plural(B.rows.length, 'builder')}</span>` : ''}<span>${plural(items.length, 'item')} live</span><span>${L.merging ?? 0} merging</span><span>${L.landed ?? 0} landed today in ${plural(L.landed_lanes ?? 0, 'lane')}</span><a href="/queue?show=all">Queue</a>${dark.length ? html`<span class="g-caution">▲ ${dark.length} not read</span>` : ''}`);
     const note = $('active-note');
     note.hidden = !dark.length;
     note.textContent = dark.map(([k, why]) => `${SOURCE[k] || k} not read: ${why}`).join(' · ');
+  }
+
+  // The builder runs (sd:6003): the document's `builders`, each open headless build run above the sessions, with its
+  // items, stage, start and ETA (the median of past runs, or why there is none). Its state is the run row's: running ●,
+  // stalled ▲ (no supervisor beat), an outcome it holds ■. None open hides the table; a read that failed says so.
+  const BSTATE = { running: 'ok', stalled: 'caution' };
+  function builds() {
+    const B = DOC.builders || { rows: [], error: 'the document carried no builder runs' };
+    $('builds-table').hidden = !B.rows.length && !B.error;
+    put($('builds'), B.error ? html`<tr class="empty"><td colspan="5">Builder runs could not be read: ${B.error}. Refresh tries again.</td></tr>`
+      : html`${B.rows.map(b => { const s = BSTATE[b.state] || 'warning'; return html`<tr data-run="${b.run}">
+        <td class="g g-${s}" title="${b.state === 'stalled' ? `stalled: no beat for ${Math.round(b.quiet / 60)}m` : b.state}">${GLYPH[s]}</td>
+        <td class="what"><ul class="sessions">${b.items.map(it => html`<li><a href="${window.shell.itemHref(it.item)}">#${it.item} ${it.title}</a></li>`)}</ul><span class="via">${b.repo} · ${b.model || 'model not recorded'} · ${usd(b.usd)} so far</span></td>
+        <td class="detail"><b>${b.stage}</b><span class="via">step ${b.step} · ${b.state}</span></td>
+        <td class="when"><time datetime="${b.started}" title="${b.started.slice(11, 16)} UTC">${clock(b.started)}</time><span class="via">${b.elapsed} ago</span></td>
+        <td class="num" title="${b.eta_why}">${b.eta ? html`<time datetime="${b.eta}">${clock(b.eta)}</time>` : 'not known'}<span class="via">${b.eta ? 'ETA' : b.eta_why}</span></td></tr>`; })}`);
+    return B;
   }
 
   // The day track (sd:5921): the document's `track`, the last 24 hours as marks in four lanes, each linked to its row, with
@@ -268,7 +287,8 @@ window.PAGE_FILTER = { '': 'Needs you' };
     const mark = m => { const at = x(m.at), tip = html`<title>${hm(m.at)} UTC · ${m.what}</title>`;
       return html`<a href="${markHref(m.lane, m)}">${m.lane === 'landed' ? html`<line class="land" x1="${at}" y1="10" x2="${at}" y2="26">${tip}</line>`
         : m.lane === 'jobs' ? html`<rect class="fail" x="${(at - 4).toFixed(1)}" y="36" width="8" height="8">${tip}</rect>`
-        : m.lane === 'briefs' ? html`<circle class="brief" cx="${at}" cy="58" r="3.5">${tip}</circle>`
+        // sd:6232: a solid dot, a shape no other lane uses, inside a clear 24-unit square that takes the press.
+        : m.lane === 'briefs' ? html`<rect class="hit" x="${(at - 12).toFixed(1)}" y="46" width="24" height="24">${tip}</rect><circle class="brief" cx="${at}" cy="58" r="4.5"/>`
         : html`<rect class="sess" x="${at}" y="72" width="${Math.max(2, W - 8 - at).toFixed(1)}" height="3">${tip}</rect>`}</a>`; };
     put($('track-plot'), marks.length ? html`<svg viewBox="0 0 ${W} 100" role="img" aria-label="${said}">
       ${ticks.map(t => html`<line class="grid" x1="${x(new Date(t).toISOString())}" y1="6" x2="${x(new Date(t).toISOString())}" y2="80"/><text class="axis" x="${x(new Date(t).toISOString())}" y="94" text-anchor="middle">${String(new Date(t).getHours()).padStart(2, '0')}:00</text>`)}
@@ -282,6 +302,33 @@ window.PAGE_FILTER = { '': 'Needs you' };
       <li><a href="/tasks?view=list&amp;status=blocked&amp;realm=all">Blocked</a></li><li><b>${K2.blocked}</b></li>`);
     $('track-table').hidden = !marks.length;
     put($('track-rows'), html`${[...marks].sort((a, b) => a.at < b.at ? 1 : -1).map(m => html`<tr><td class="when"><time datetime="${m.at}">${clock(m.at)}</time></td><td>${m.label}</td><td class="what"><a href="${markHref(m.lane, m)}">${m.what}</a></td></tr>`)}`);
+  }
+
+  // Since yesterday (sd:6002): the document's `digest`, merged per repo with the PRs folded under the lines, failed with
+  // why and one fix each, and the questions waiting on Decide. A read that failed says so, never a quiet night.
+  function digest() {
+    const D = DOC.digest || { error: 'the document carried no digest' };
+    if (D.error) return put($('digest'), html`<p class="why">The digest was not read: ${D.error}. Refresh tries again.</p>`);
+    if (!D.merged.length && !D.failed.length && !D.questions) return put($('digest'), html`<p class="why">Nothing merged, failed or waiting since yesterday.</p>`);
+    put($('digest'), html`<ul class="lines">${D.merged.map(m => html`<li><b>${m.repo}</b>: ${m.n} merged · ${m.titles.join(', ')}${m.n > m.titles.length ? ', …' : ''}</li>`)}
+      ${D.more ? html`<li>and ${plural(D.more, 'more repo')}</li>` : ''}
+      ${D.failed.map(f => html`<li class="g-warning"><b>${f.what}</b> · ${f.why} · ${f.fix}</li>`)}
+      ${D.questions ? html`<li><a href="/decide">${plural(D.questions, 'question')} ${D.questions === 1 ? 'waits' : 'wait'}</a></li>` : ''}</ul>
+      ${D.prs.length ? html`<details><summary>${plural(D.prs.length, 'merged item')}</summary><ul class="prs">${D.prs.map(p => html`<li><a href="${shell.itemHref(p.item)}">#${p.item} ${p.title}</a> · ${p.repo}${p.pr ? ` · PR #${p.pr}` : ''}</li>`)}</ul></details>` : ''}`);
+  }
+
+  // The spend line (sd:6031): the document's `spend`, spent in the last 24 hours and in each of the last 7, as bars oldest
+  // first. Visibility only: no cap. A read that failed says so, never $0.00.
+  const usd = n => `$${Number(n).toFixed(2)}`;
+  function spendLine() {
+    const S = DOC.spend || { error: 'the document carried no spend' };
+    if (S.error) return put($('spend'), html`Spend not read: ${S.error}. Refresh tries again.`);
+    const top = Math.max(...S.days, 0.01), H = 16;
+    put($('spend'), html`<span class="lbl">Spend</span> 24h <b>${usd(S.day)}</b> · 7 days <b>${usd(S.week)}</b>
+      <svg class="spark" viewBox="0 0 ${S.days.length * 6} ${H}" role="img" aria-label="${`Spent per day, oldest first: ${S.days.map(usd).join(', ')}`}">${S.days.map((d, i) => {
+        const h = d > 0 ? Math.max(1, Math.round(H * d / top)) : 0;
+        return html`<rect x="${i * 6}" y="${H - h}" width="4" height="${h}"><title>${usd(d)}</title></rect>`; })}</svg>
+      <a href="/metrics">Metrics</a>`);
   }
 
   // The badge is the read's own (sd:3446, now_screen._attention): Needs you's broken rows, else its look rows.
@@ -317,9 +364,11 @@ window.PAGE_FILTER = { '': 'Needs you' };
     put($('tally'), html``); put($('intents'), html``);
     put($('rows'), html`<tr class="empty"><td colspan="6">Needs you could not be read: ${failed}</td></tr>`);
     put($('active'), html`<tr class="empty"><td colspan="5">Sessions could not be read: ${failed}. Refresh tries again.</td></tr>`);
-    put($('active-tally'), html``);
+    put($('active-tally'), html``); $('builds-table').hidden = true;
     $('active-note').hidden = true; $('unread').hidden = true;
     put($('track-plot'), html`<p class="why">The day track was not read: ${failed}.</p>`); put($('flowkey'), html``); $('track-table').hidden = true;
+    put($('spend'), html`Spend not read: ${failed}.`);
+    put($('digest'), html`<p class="why">The digest was not read: ${failed}.</p>`);
     window.snooze.draw($('snoozed'), []);
     attend();
   }
@@ -463,6 +512,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
       if (DOC) applyFilter();
     });
     put($('rows-head'), COLS); // drawn before the read, so a failed one keeps the columns
+    put($('builds-head'), html`<tr><th class="g">${SR('State')}</th><th>Builder run</th><th>Stage</th><th>Started</th><th class="num">ETA</th></tr>`);
     put($('active-head'), html`<tr><th class="g">${SR('State')}</th><th>Item</th><th>Session</th><th>Started</th><th class="num">Elapsed</th></tr>`);
 
     // The shell's Shapeshift bar (sd:5539) filters Needs you through shell:filter.
