@@ -1,10 +1,10 @@
 """Adversarial review (sd:5064): a task, a brief, a repository or a change, reviewed by codex in the background.
 
 Every test puts a `codex` of its own first on PATH: the double writes a fixed result to the `-o` path, or fails, or
-holds until released, and journals its argv and stdin. The real `local-adversarial-gate/adversarial-gate.sh` runs
-in front of it, with its Jev seam pointed at a path that does not exist. The runner files its outcome (a brief,
-review batches and a note) in the fixture's temporary database, the one the server under test reads. So no test
-reaches a model, the network, the judgment ledger or the live database. `test_the_double_is_what_the_run_finds`
+holds until released, and journals its argv and stdin. The suite's fake `local-adversarial-gate/adversarial-gate.sh`
+(sd:6044) runs in front of it, with the gate's Jev seam pointed at a path that does not exist. The runner files its
+outcome (a brief, review batches and a note) in the fixture's temporary database, the one the server under test reads.
+So no test reaches a model, the network, the judgment ledger or the live database. `test_the_double_is_what_the_run_finds`
 asserts which `codex` the server's PATH resolves.
 """
 

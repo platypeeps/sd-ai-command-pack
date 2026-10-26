@@ -22,6 +22,8 @@ else is the change that needs a decision record. `dashboard/dashboard.sh` is
 one: the operator moved the workflow dashboard here from the system checkout
 (sd:5987), and its entrypoint runs on the operator's machine, never through the
 installer. The bash 3.2 gate reads every tracked `*.sh`, so it covers it.
+`dashboard/tests/fake_system/` is another (sd:6044): the dashboard's tests run
+small fakes of the system checkout's tools there, and none is ever installed.
 """
 
 # This module reads the whole checkout, so no changed-files fast path may
@@ -39,8 +41,9 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Where this repository is allowed to keep shell it runs on itself. Prefixes,
 # matched against forward-slash paths as git reports them.
-# `dashboard/dashboard.sh` is the dashboard's entrypoint (sd:5987).
-TOOLING_PREFIXES = (".github/scripts/", "dashboard/dashboard.sh")
+# `dashboard/dashboard.sh` is the dashboard's entrypoint (sd:5987); `fake_system`
+# holds its tests' fakes of the system checkout's tools (sd:6044).
+TOOLING_PREFIXES = (".github/scripts/", "dashboard/dashboard.sh", "dashboard/tests/fake_system/")
 
 # What the installer copies onto a machine. Anything here reaches a consumer.
 RENDER_ROOT = "skills/"

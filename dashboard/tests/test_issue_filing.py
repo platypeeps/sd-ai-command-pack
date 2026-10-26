@@ -4,7 +4,7 @@
 `GH_BIN` names the pack harness's `gh` shim, answering from a `FixtureRemote` on loopback, so a test asserts on the
 issues and calls that remote holds. Jira is a transport double handed to `file_jira`, or `FILERS` patched, so nothing
 opens a socket. `HOME`, `XDG_STATE_HOME` and `SYSTEM_TOOLS_CONFIG` are disposable folders, the privacy
-patterns are synthetic, and the real `local-leak-guard/leak-guard.sh scan` reads them. No test reaches a model,
+patterns are synthetic, and the suite's fake `local-leak-guard/leak-guard.sh scan` reads them (sd:6044). No test reaches a model,
 GitHub, Jira or the live database.
 """
 

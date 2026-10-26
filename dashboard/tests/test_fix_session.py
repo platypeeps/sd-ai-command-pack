@@ -1,7 +1,7 @@
 """Fix (sd:3456): a task starts a builder session and a report a debug session, through herdr.sh launch.
 
-Every test runs the real `local-herdr/herdr.sh` against that tool's own `herdr` double (`local-herdr/tests/doubles`),
-first on PATH, and reads the argv lines it journals. No test reaches the installed herdr or starts claude:
+Every test runs the suite's fake `local-herdr/herdr.sh` against the fake of that tool's `herdr` double
+(`local-herdr/tests/doubles`, sd:6044), first on PATH, and reads the argv lines it journals. No test reaches the installed herdr or starts claude:
 `test_the_double_is_the_herdr_the_launch_finds` asserts which `herdr` the server's PATH resolves.
 """
 
