@@ -25,6 +25,7 @@ from sd_db.workflow import (
     change_status,
     edit_item,
     item_state,
+    next_occurrence_due,
 )
 
 
@@ -278,12 +279,32 @@ class RecurringTasks(unittest.TestCase):
         spawned = self.complete(item["id"], "2027-02-01")["next_occurrence"]
         self.assertEqual(self.row(spawned)["due"], "2030-02-01")
 
-    def test_an_early_completion_counts_from_the_day_it_was_done(self):
-        # "After the last time we did it": done a week early, the next one is
-        # due a week after that, which is the date the closed row carried.
+    def test_an_early_completion_moves_past_the_current_due(self):
+        # Done a week early, the next one is due a week after the closed
+        # row's due date, never on it again (pack sd:6230).
         item = self.capture(due="2026-09-30", recurrence="FREQ=WEEKLY", recurrence_anchor="completion")
         spawned = self.complete(item["id"], "2026-09-23")["next_occurrence"]
-        self.assertEqual(self.row(spawned)["due"], "2026-09-30")
+        self.assertEqual(self.row(spawned)["due"], "2026-10-07")
+
+    MONDAY = "FREQ=WEEKLY;BYDAY=MO"
+
+    def test_a_weekly_monday_done_the_sunday_before_is_due_the_next_monday(self):
+        item = self.capture(due="2026-10-26", recurrence=self.MONDAY, recurrence_anchor="completion")
+        self.assertEqual(next_occurrence_due(self.row(item["id"]), today=date(2026, 10, 25)), "2026-11-02")
+        spawned = self.complete(item["id"], "2026-10-25")["next_occurrence"]
+        self.assertEqual(self.row(spawned)["due"], "2026-11-02")
+
+    def test_a_weekly_monday_done_late_is_due_the_monday_after_the_completion(self):
+        item = self.capture(due="2026-10-26", recurrence=self.MONDAY, recurrence_anchor="completion")
+        self.assertEqual(next_occurrence_due(self.row(item["id"]), today=date(2026, 10, 28)), "2026-11-02")
+        spawned = self.complete(item["id"], "2026-10-28")["next_occurrence"]
+        self.assertEqual(self.row(spawned)["due"], "2026-11-02")
+
+    def test_a_weekly_monday_done_on_the_due_day_is_due_a_week_later(self):
+        item = self.capture(due="2026-10-26", recurrence=self.MONDAY, recurrence_anchor="completion")
+        self.assertEqual(next_occurrence_due(self.row(item["id"]), today=date(2026, 10, 26)), "2026-11-02")
+        spawned = self.complete(item["id"], "2026-10-26")["next_occurrence"]
+        self.assertEqual(self.row(spawned)["due"], "2026-11-02")
 
     # PR #542 reviews: restarted at the completion date, these rules can have
     # no occurrence at all, so they are refused when written. The first two

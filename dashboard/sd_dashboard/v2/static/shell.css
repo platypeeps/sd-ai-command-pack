@@ -74,7 +74,10 @@ html, body { overflow-x: clip; }
   background-position: right calc(var(--space-xs) + 5px) center, right var(--space-xs) center; background-size: 5px 5px; background-repeat: no-repeat;
 }
 .fpick > summary::-webkit-details-marker { display: none; }
-.fpick > summary > span { overflow: hidden; text-overflow: ellipsis; }
+.fpick > summary { display: grid; }
+/* Every label the summary can show sits in the shown one's cell, out of sight, so a pick does not resize it (sd:6254). */
+.fpick > summary > span, .fpick-size > span { grid-area: 1 / 1; overflow: hidden; text-overflow: ellipsis; }
+.fpick-size { display: contents; visibility: hidden; }
 .fpick > summary:hover, .fpick[open] > summary, button[aria-haspopup="listbox"]:hover, button[aria-haspopup="listbox"][aria-expanded="true"] { border-color: var(--color-ink-2); }
 .fpick:has(:checked) > summary, button[aria-haspopup="listbox"]:has(> .n) { border-color: var(--color-accent); background-color: var(--color-accent-bg); }
 .fpick > summary:focus-visible, button[aria-haspopup="listbox"]:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; }

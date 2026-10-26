@@ -18,6 +18,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sd_db import workflow
+from sd_db.testing import patience
 from sd_dashboard import email_draft
 
 from test_v2_notes import FakeWorkspace
@@ -28,11 +29,12 @@ printf '%s\\n' "$@" > "$DOUBLE_DIR/argv"
 cat > "$DOUBLE_DIR/stdin"
 printf '%s' "${DOUBLE_TOKEN-unset}" > "$DOUBLE_DIR/token"
 pwd -P > "$DOUBLE_DIR/cwd"
-if [ -f "$DOUBLE_DIR/escape" ]; then perl -e 'use POSIX; setsid(); sleep 8' & echo $! > "$DOUBLE_DIR/escaped"; fi
-if [ -f "$DOUBLE_DIR/hang" ]; then sleep 30 & echo $! > "$DOUBLE_DIR/pid"; wait; fi
+if [ -f "$DOUBLE_DIR/escape" ]; then perl -e 'use POSIX; setsid(); sleep 60' & echo $! > "$DOUBLE_DIR/escaped"; fi
+if [ -f "$DOUBLE_DIR/hang" ]; then sleep 60 & echo $! > "$DOUBLE_DIR/pid"; wait; fi
 cat "$DOUBLE_DIR/reply"
 exit "$(cat "$DOUBLE_DIR/exit" 2>/dev/null || echo 0)"
 """
+#: The double's hang and escape outlast every bound below at the most `patience` grows it (sd:6158).
 REPLY = "Subject: The review plan is ready\n\nHi,\n\nThe plan for the review is written down.\n\nThanks\n"
 DRAFTED = "Draft created! Draft ID: r-4242"
 
@@ -145,14 +147,15 @@ class TheFailures(DraftCase):
         began = time.monotonic()
         with patch.object(email_draft, "MODEL_TIMEOUT", 1):
             status, _, answer = self.draft(item)
-        self.assertLess(time.monotonic() - began, 4)
+        self.assertLess(time.monotonic() - began, patience(4))
         self.assertEqual(status, 504)
         said = "Draft email failed: claude -p gave no answer in 1 s. No Gmail draft was saved."
         self.assertEqual(answer["error"], said)
         self.assertEqual(self.tools(), [])
         self.assertEqual(self.last_note(item)["body"], said)
         pid = int((self.double / "pid").read_text())
-        for _ in range(40):
+        deadline = time.monotonic() + patience(2)
+        while time.monotonic() < deadline:
             try:
                 os.kill(pid, 0)
             except ProcessLookupError:
@@ -169,7 +172,7 @@ class TheFailures(DraftCase):
         with patch.object(email_draft, "MODEL_TIMEOUT", 1), patch.object(email_draft, "REAP_TIMEOUT", 1, create=True):
             with self.assertRaisesRegex(TimeoutError, "gave no answer in 1 s"):
                 email_draft._model("a question")
-        self.assertLess(time.monotonic() - began, 5)
+        self.assertLess(time.monotonic() - began, patience(5))
         os.kill(int((self.double / "escaped").read_text()), signal.SIGKILL)
 
     def test_a_reply_without_a_subject_line_saves_nothing(self):

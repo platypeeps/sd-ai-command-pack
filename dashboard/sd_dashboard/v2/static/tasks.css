@@ -10,6 +10,11 @@
 /* Kind and Repo comboboxes (sd:3441): the chip's height and rule, so the strip reads as one row. */
 /* Build (sd:2589): the text filter sits first in the strip; the chip groups after it stay in the strip's flex flow. */
 .fset { display: contents; }
+/* sd:6233: Show done, the board's checkbox in the filter strip. */
+.fset .chk { display: inline-flex; align-items: center; gap: var(--space-2xs); min-height: 2.25rem; font: 400 var(--text-xs)/1 var(--font-ui); color: var(--color-ink-2); cursor: pointer; }
+.fset .chk input { width: 1rem; height: 1rem; margin: 0; accent-color: var(--color-accent); }
+.fset .chk input:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+@media (pointer: coarse) { .fset .chk { min-height: var(--row-touch); } }
 .ffind { display: flex; align-items: center; gap: var(--space-xs); }
 .ffind input {
   appearance: none; width: 12rem; max-width: 100%; min-height: 1.75rem; padding: 0 var(--space-xs);
@@ -78,7 +83,10 @@
 #view-board { container-type: inline-size; }
 .board { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: var(--space-sm); overflow-x: auto; overscroll-behavior-x: contain; padding-bottom: var(--space-xs); }
 .board[data-other] { grid-template-columns: repeat(6, minmax(0, 1fr)); } /* build: the Other lane (review, PR #46) */
-@container (max-width: 65.5rem) { .board, .board[data-other] { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+/* sd:6233: Done shows only with Show done, so the board is one column short without it. */
+.board[data-nodone] { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.board[data-nodone][data-other] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+@container (max-width: 65.5rem) { .board, .board[data-other], .board[data-nodone], .board[data-nodone][data-other] { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 .col { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; border-radius: var(--radius-md); background: var(--color-well); border: var(--rule-hair) solid transparent; }
 .col header { display: flex; align-items: center; gap: var(--space-xs); padding: var(--space-xs) var(--space-sm); border-bottom: var(--rule-hair) solid var(--color-rule-2); }
 .col header .n { margin-left: auto; font: 500 var(--text-xs)/1 var(--font-data); color: var(--color-muted); }

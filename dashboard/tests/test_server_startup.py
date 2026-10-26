@@ -13,6 +13,7 @@ import time
 import unittest
 from unittest.mock import ANY, Mock, patch
 
+from sd_db.testing import patience
 from sd_dashboard import runtime, server
 
 
@@ -113,7 +114,12 @@ class ServerStartup(unittest.TestCase):
                         patch.object(runtime, "build_digests", return_value=dict(loaded, dashboard_digest="0" * 64)):
                     thread = threading.Thread(target=serve, daemon=True)
                     thread.start()
-                    thread.join(3)
+                    # The probe starts a Python for the launcher; at gate load that took more than the
+                    # 3 s join that stood here, so the wait is for the refusal itself (sd:6158).
+                    deadline = time.monotonic() + patience(10)
+                    while reason not in stderr.getvalue() and thread.is_alive() and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    thread.join(0.5)
                     alive = thread.is_alive()
                     if alive:
                         old.shutdown()

@@ -22,12 +22,16 @@ import time
 
 from sd_db import remote, ship
 from sd_db.database import transaction
+from sd_db.testing import patience
 
 from .test_outcome import OutcomeCase, count
 
-#: How long the double lets a session sit silent, and how long a test waits past it.
+#: How long the double lets a session sit silent on a quiet machine, and how
+#: many of those windows a test waits past it. `patience` scales the window by
+#: the load (sd:6158): at gate load 99 a call took longer than 0.2 s, so the
+#: double dropped a session the test had not yet left idle.
 IDLE = 0.2
-PAST_IDLE = 0.6
+PAST = 3
 
 
 class IdleDrop:
@@ -37,9 +41,9 @@ class IdleDrop:
     `dropped` counts the sessions it closed.
     """
 
-    def __init__(self, port: int, idle: float = IDLE) -> None:
+    def __init__(self, port: int, idle: float | None = None) -> None:
         self.target = port
-        self.idle = idle
+        self.idle = patience(IDLE) if idle is None else idle
         self.refusing = False
         self.dropped = 0
         self.listener = socket.create_server(("127.0.0.1", 0))
@@ -95,7 +99,7 @@ class ADroppedIdleSession(OutcomeCase):
         return relay, client
 
     def idle_past(self, relay: IdleDrop) -> None:
-        time.sleep(PAST_IDLE)
+        time.sleep(relay.idle * PAST)
         self.assertGreaterEqual(relay.dropped, 1, "the double did not drop the idle session")
 
     def test_the_receipt_save_after_the_gate_lands_on_a_fresh_session(self):

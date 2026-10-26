@@ -220,13 +220,14 @@ def transition(
     *,
     who: str,
     reason: str | None = None,
+    session: str | None = None,
 ) -> str:
     """The one function that writes `item.status`.
 
     The note goes in the same transaction. `who` is recorded because the
     kind's table -- which arrives with the kinds that have one -- decides by
     asker as much as by target, and a change with no asker cannot be judged
-    later.
+    later. `session` is the note's session, `who` when not given (pack sd:6046).
     """
     with transaction(connection):
         row = connection.execute(
@@ -238,7 +239,7 @@ def transition(
             )
         if row is not None:
             refuse_base_status(row)
-        return _transition(connection, item, target, who=who, reason=reason)
+        return _transition(connection, item, target, who=who, reason=reason, session=session)
 
 
 def refuse_base_status(row: Any) -> None:
@@ -264,7 +265,7 @@ def refuse_base_status(row: Any) -> None:
 
 def _transition(
     connection: sqlite3.Connection, item: int, target: str, *,
-    who: str, reason: str | None = None,
+    who: str, reason: str | None = None, session: str | None = None,
 ) -> str:
     """Trusted status primitive used by source imports and completion policy.
 
@@ -292,7 +293,7 @@ def _transition(
             note += f": {reason}"
         connection.execute(
             "INSERT INTO note (item, timestamp, kind, body, session) VALUES (?, ?, ?, ?, ?)",
-            (item, stamp, STATUS_CHANGE, note, who),
+            (item, stamp, STATUS_CHANGE, note, session or who),
         )
     return current
 

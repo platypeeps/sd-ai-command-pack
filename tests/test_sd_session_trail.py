@@ -85,6 +85,19 @@ class SessionTrail(unittest.TestCase):
         self.assertTrue(lines[1].endswith(f": Ruling {LIMIT + 1}"), lines[1])
         self.assertIn("Older entries not shown", lines[-1])
 
+    def test_a_long_or_multiline_title_keeps_one_bounded_line(self):
+        """pack sd:6046: a filed item's title skipped the first-line cut and the `WIDTH` bound notes get."""
+        workflow.capture_task(self.connection, title="Short head", who="operator", session="session-a")
+        self.connection.execute("UPDATE item SET title = ?", ("First line\nsecond line " + "x" * 400,))
+        self.connection.commit()
+        lines = self.hook({"session_id": "session-a"}).splitlines()
+        self.assertEqual(len(lines), 2, lines)
+        self.assertTrue(lines[1].endswith(": First line"), lines[1])
+        self.connection.execute("UPDATE item SET title = ?", ("y" * 400,))
+        self.connection.commit()
+        entry = self.hook({"session_id": "session-a"}).splitlines()[1]
+        self.assertTrue(entry.endswith("y" * 157 + "..."), entry)
+
     def test_a_session_with_no_trail_prints_nothing(self):
         self.file("Someone else's", "session-b")
         self.assertEqual(self.hook({"session_id": "session-a"}), "")

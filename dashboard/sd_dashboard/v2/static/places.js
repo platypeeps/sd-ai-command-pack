@@ -1,5 +1,5 @@
 // Places: the HOA and Home pages' views (Overview | Tasks | Briefs | Reports; HOA adds Alarms), a realm place's (sd:5663,
-// place.js: Tasks | Briefs | Reports) and Tasks' place views.
+// place.js: Overview | Tasks | Briefs | Reports) and Tasks' place views.
 // Data: a place view with data-api reads its own document when it is shown, /api/<place>/<view> (sd_dashboard/places.py).
 // Overview is the page's own read, and so is HOA's Tasks: hoa.js draws it from /api/hoa, which the annunciator and the badge
 // read anyway, with the Tasks page's Details (task-details.js, sd:5671). Which rows are a place's is decided once (places.area_of): Tasks' HOA and Home views filter on the `area` each
@@ -35,15 +35,71 @@
   const table = (head, rows, empty) => html`<table class="ledger place-rows"><thead><tr>${head.map(([label, cls = '']) => html`<th scope="col" class="${cls}">${label}</th>`)}</tr></thead>
     <tbody>${rows.length ? rows : html`<tr class="empty"><td colspan="${head.length}">${empty}</td></tr>`}</tbody></table>`;
 
+  // sd:6162, sd:6164: a realm place's Overview tile (place_tiles.py): its link, whether it answers, and a button per
+  // command with that command's last run. A tile whose folder is not on this machine shows why, and its buttons run nothing.
+  const t = s => s ? html`<time class="rel" datetime="${s}"></time>` : 'at a time not known';
+  const ANSWER = { true: ['ok', p => `answers, ${p.status}`], false: ['queued', p => `not answering: ${p.status}`], null: ['unknown', p => p.status] };
+  function lastHTML(l) {
+    const out = l.output ? html` <details class="pt-out"><summary>Output${l.cut ? ', the end' : ''}</summary><pre>${l.output}</pre></details>` : '';
+    if (l.state === 'none') return html`<span class="pt-last">Not run from here yet.</span>`;
+    if (l.state === 'running') return html`<span class="pt-last g queued"><span aria-hidden="true">${GLYPH.queued}</span> Running since ${t(l.started)}.</span>${out}`;
+    if (l.state === 'done') return html`<span class="pt-last g ${l.exit ? 'warning' : 'ok'}"><span aria-hidden="true">${GLYPH[l.exit ? 'warning' : 'ok']}</span> ${l.exit ? 'Failed' : 'Done'}, exit ${String(l.exit)}, ${t(l.ended)}.</span>${out}`;
+    return html`<span class="pt-last g unknown"><span aria-hidden="true">${GLYPH.unknown}</span> Not known: ${l.reason}.</span>${out}`;
+  }
+  function tileHTML(r) {
+    const [st, words] = r.probe ? ANSWER[String(r.probe.answers)] : ['', () => 'no link'];
+    const off = r.here ? '' : r.why;
+    return html`<li class="place-tile" data-tile="${r.id}" data-label="${r.label}">
+      <div class="pt-head"><h3>${r.label}</h3><span class="pt-st g ${st}">${st ? html`<span aria-hidden="true">${GLYPH[st]}</span> ` : ''}${words(r.probe)}</span></div>
+      ${r.url ? html`<p><a class="btn quiet sm" href="${r.url}" target="_blank" rel="noopener">${window.shell.ICON('arrow-up-right')} Visit</a></p>` : ''}
+      ${off ? html`<p class="why">${off}.</p>` : ''}
+      <ul class="pt-acts">${r.actions.map(a => html`<li>${off
+        ? html`<button class="btn sm" type="button" data-tile-act="${a.label}" aria-disabled="true" data-tip="${off}">${a.label}</button>`
+        : html`<button class="btn sm" type="button" data-tile-act="${a.label}" data-tip="Runs ${a.command} in the tile's folder.">${a.label}</button>`} ${lastHTML(a.last)}</li>`)}</ul>
+    </li>`;
+  }
+  // A button posts the tile's names; the server runs only the command its file names (POST /api/place/tiles). A start
+  // answers at once, so the toast says it started and the view reads again: Read again shows how it ended.
+  async function runTile(b) {
+    const li = b.closest('[data-tile]'), tile = li.dataset.tile, label = li.dataset.label, action = b.dataset.tileAct;
+    if (b.getAttribute('aria-disabled') === 'true') { window.shell.toast(`${label} · ${action} not run: ${b.dataset.tip}.`); return; }
+    b.setAttribute('aria-busy', 'true');
+    try {
+      await window.shell.post('/api/place/tiles', { realm: document.body.dataset.place, tile, action });
+      window.shell.toast(`${label} · ${action} started. Read again shows how it ended.`);
+    } catch (err) {
+      window.shell.toast(err.status ? `${label} · ${action} not run: ${err.message}` : `${label} · ${action}: no answer, so whether it started is not known: ${err.message}`);
+    }
+    await window.places.reread('overview');
+  }
+
+  // sd:6164: a realm place's Tasks also lists the realm's open GitHub and Jira issues (places.realm_issues), each marked by
+  // its source and linked to its tracker in a new tab. An issue Hide hid (sd:6175) stays off until Show hidden.
+  let hiddenShown = false;
+  function issuesHTML(doc) {
+    if (!doc.issues) return '';
+    const hidden = doc.issues.filter(r => r.hidden).length, rows = hiddenShown ? doc.issues : doc.issues.filter(r => !r.hidden);
+    const toggle = hidden ? html` <button class="btn quiet sm" type="button" data-issues-hidden>${hiddenShown ? 'Hide hidden' : `Show hidden (${hidden})`}</button>` : '';
+    const notes = [doc.issues_reason && `Not every issue was read: ${doc.issues_reason}.`, doc.issues_store?.reason && `Hide is off: ${doc.issues_store.reason}.`].filter(Boolean);
+    return html`<div class="place-issues-head"><h3>Issues</h3><p class="note">The realm's open GitHub and Jira issues assigned to you or filed by you, as GitHub's Your issues lists them.${toggle}</p></div>
+      ${notes.map(n => html`<p class="note">${n}</p>`)}
+      <table class="ledger place-issues"><thead><tr><th scope="col">Source</th><th scope="col">Issue</th><th scope="col">Title</th><th scope="col" class="hide-sm">Repo</th><th scope="col" class="hide-sm">Why</th></tr></thead>
+      <tbody>${rows.length ? rows.map(r => html`<tr${r.hidden ? html` class="hidden-row"` : ''}><td class="src">${r.tracker}</td>
+        <td class="ref">${r.url ? html`<a href="${r.url}" target="_blank" rel="noopener">${r.ref}</a>` : r.ref}</td>
+        <td class="what">${r.title}${r.hidden ? html` <span class="note">(hidden)</span>` : ''}</td><td class="hide-sm">${r.repo}</td><td class="hide-sm">${r.reason || '—'}</td></tr>`)
+        : html`<tr class="empty"><td colspan="5">${hidden ? `No issue shown: ${plural(hidden, 'hidden issue')}.` : 'No open issue of yours in this realm.'}</td></tr>`}</tbody></table>`;
+  }
+
   // Each place view: its table head, one row, the empty text and the tally.
   // The view's tab carries the row count (sd:5524, shell.view.auto), so a tally says only what the count does not.
   const DRAW = {
+    overview: (doc, rows) => [rows.length ? html`<ul class="place-tiles">${rows.map(tileHTML)}</ul>` : '', ''],
     // sd:5635: a task row is selected in place; Details is the Tasks page's (task-details.js), with a link to Tasks.
-    tasks: (doc, rows) => [table([['ID', 'num'], ['What'], ['Kind', 'hide-sm'], ['Status'], ['Due', 'hide-sm'], ACT],
+    tasks: (doc, rows) => [html`${table([['ID', 'num'], ['What'], ['Kind', 'hide-sm'], ['Status'], ['Due', 'hide-sm'], ACT],
       rows.map(r => html`<tr data-id="${r.id}" aria-selected="${String(String(r.id) === sel.tasks)}"><td class="ref num">sd:${r.id}</td><td class="what"><button type="button">${r.title}</button></td>
         <td class="hide-sm">${r.kind}</td><td>${r.status}</td><td class="hide-sm due">${day(r.due) || '—'}</td>${act(String(r.id))}</tr>`),
       rows.length || !doc.done?.length ? $('view-tasks')?.dataset.empty || 'No open item without a repo.'
-        : `No open item. All lists the ${plural(doc.done.length, 'item')} done this week.`), ''],
+        : `No open item. All lists the ${plural(doc.done.length, 'item')} done this week.`)}${issuesHTML(doc)}`, ''],
     // sd:5620: a brief row is selected in place; Details is the Briefs page's (brief-details.js), with a link to Briefs.
     briefs: (doc, rows) => [table([['Day'], ['Brief'], ['Words', 'num hide-sm'], ['Lead', 'hide-sm'], ACT],
       rows.map(r => html`<tr data-id="${r.id}" aria-selected="${String(r.id === sel.briefs)}"><td class="when">${r.day}</td><td class="what"><button type="button">${r.subj}</button></td>
@@ -65,6 +121,9 @@
   // browser's. sd:5620, sd:5636, sd:5635: a row with an id (a brief, a report or a task) is selected here instead, and its
   // Details fill the pane.
   document.addEventListener('click', e => {
+    const run = e.target.closest('[data-tile-act]');
+    if (run) { runTile(run); return; }
+    if (e.target.closest('[data-issues-hidden]')) { hiddenShown = !hiddenShown; if (RAW.tasks?.state === 'read') draw('tasks'); return; }
     // A view that reads its own document (data-api) has its Open | All here; HOA's Tasks is hoa.js's.
     const f = e.target.closest('.place-view[data-api] [data-f]');
     if (OPEN[f?.dataset?.f]) { show(f.dataset.f, f.dataset.v); return; }

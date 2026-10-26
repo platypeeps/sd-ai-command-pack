@@ -697,9 +697,12 @@ def _refuse_unlanded_branch(state: dict, item: int) -> None:
 
 def change_status(
     connection: sqlite3.Connection, item: int, target: str, *, who: str,
-    reason: str | None = None, expected_revision: str | None = None,
+    reason: str | None = None, expected_revision: str | None = None, session: str | None = None,
 ) -> dict:
-    """Move a task, personal, followup or active work item without bypassing delivery authority."""
+    """Move a task, personal, followup or active work item without bypassing delivery authority.
+
+    `session` is the status note's session, `who` when not given (pack sd:6046).
+    """
     who = _text(who, "who")
     if reason is not None:
         reason = _text(reason, "reason")
@@ -773,7 +776,7 @@ def change_status(
                 closed = (f"resolved open note{'s' if len(owed) > 1 else ''} "
                           + ", ".join(str(note) for note in owed))
                 reason = f"{reason}; {closed}" if reason else closed
-        transition(connection, item, target, who=who, reason=reason)
+        transition(connection, item, target, who=who, reason=reason, session=session)
         if target != "done" or row.get("recurrence") is None:
             return item_state(connection, item)
         spawned, ended = _next_occurrence(connection, row, who=who)
@@ -787,9 +790,14 @@ def _today() -> date:
 
 
 def _series_start(row: dict, rule, anchor: str, today: date) -> date:
-    """The date the next occurrence is searched from: the completion day, or the item's `due` for a schedule anchor."""
+    """The date the next occurrence is searched from.
+
+    A schedule anchor starts at the item's `due`. A completion anchor starts at the completion day,
+    or at `due` when that is later: `next_after` is strictly after its start, so an early completion
+    never finds the due date it closes again (pack sd:6230).
+    """
     if anchor == "completion":
-        return today
+        return max(today, date.fromisoformat(row["due"])) if row["due"] is not None else today
     if row["due"] is None:
         raise RecurrenceError(f"recurrence {rule.text()} is schedule-anchored and the item has no due date")
     return date.fromisoformat(row["due"])
@@ -833,8 +841,8 @@ def _next_occurrence(connection: sqlite3.Connection, row: dict, *, who: str) -> 
     takes the first occurrence after it. `completion` restarts the series at
     the completion date and takes the first occurrence after that, so it
     drifts by design: "every three years after the last time we did it". An
-    early completion therefore can produce a row due on the date of the one
-    it closed.
+    early completion restarts at the closed row's `due` instead, so the next
+    row never lands on the date of the one it closed (pack sd:6230).
 
     **The recurrence never blocks the completion.** When there is no next
     occurrence -- none within `HORIZON_YEARS`, a schedule-anchored row with

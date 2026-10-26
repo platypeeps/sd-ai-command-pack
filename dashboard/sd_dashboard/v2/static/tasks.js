@@ -94,12 +94,14 @@ addEventListener('DOMContentLoaded', () => {
   // build: Kind joins Repo, Priority and Due, as v1 /backlog filters by kind and repo (review 2026-09-29, item 17).
   // build (sd:2589): Status, In status (the reads.age_bucket key each row carries), Open only, the text filter and the list's
   // page take the query v1 /backlog took (status, age, active=1, q, page), so Operations' histogram bars and the capture
-  // check land here with their filter.
+  // check land here with their filter. sd:6233: Status has no dropdown now; an address's ?status= (Today's Landed 24h and
+  // Blocked) still narrows, and its chip clears it.
   // build (sd:3012): Parked swaps the listed rows for the ones the nightly prune parked, for triage's Unpark.
   // build (sd:3977): Base narrows to one vault base's rows; it shows once a row has a base.
   const F = { kind: new Set(), repo: new Set(), p: new Set(), due: new Set(), status: new Set(), age: new Set(), active: new Set() };
   // sd:5649: the list's optional columns the Columns menu shows, kept in the address as ?cols=.
-  const SHOW = { cols: new Set() }, COL_OPTS = [['lead', 'Lead (days)']];
+  // sd:6233: and whether the board shows its Done column, ?done=1; hidden by default (operator decision, note 30400).
+  const SHOW = { cols: new Set(), done: false }, COL_OPTS = [['lead', 'Lead (days)']];
   const FKEYS = Object.keys(F);
   const find = document.getElementById('find-in');
   let Q = '';
@@ -109,8 +111,6 @@ addEventListener('DOMContentLoaded', () => {
   function renderFilters() {
     const repos = [...new Set(tasks.map(t => t.repo))].sort(), kinds = [...new Set(tasks.map(t => t.kind))].sort();
     const bases = [...new Set(tasks.map(t => t.base).filter(Boolean))].sort();
-    // The board's statuses, then any other a row or the address names (ready_to_send has no column), so a chip shows it.
-    const statuses = [...STATUSES.map(([st]) => st), ...new Set([...tasks.map(t => t.status), ...F.status].filter(st => !SLABEL[st]))];
     // build (sd:3441, sd:5064, sd:5158): every filter is a dropdown (shell.list.pick), one value or All, and Repo a menu of
     // checkboxes, any repos at once; the active-filter chips under them are the only chips. Values the address names that no
     // row has are options too, and more than one (?p=1,2) shows as a count until one is picked. Each option is [value, label];
@@ -124,13 +124,14 @@ addEventListener('DOMContentLoaded', () => {
     put(document.getElementById('filters'), html`${realm}${combo('kind', 'Kind', [...same(kinds), ...bases.map(b => [`base:${b}`, kindWord(`base:${b}`)])])}${combo('repo', 'Repo', same(repos), '', 'All', true)}${
       combo('p', 'Priority', [['1', 'P1'], ['2', 'P2'], ['3', 'P3'], ['4', 'P4'], ['', 'unset']].map(([v, l]) => [v || 'unset', l]))}${
       combo('due', 'Due', DUE_OPTS, html`<button class="help" type="button" aria-label="Help: due filter" data-help="Buckets count from today. <b>≤ 7 days</b> is the same window the matrix calls urgent. An old link may name two buckets; they widen the view, and filters narrow it.">${ICON('circle-help')}</button>`)}${
-      combo('status', 'Status', statuses.map(st => [st, slabel(st)]))}${
       combo('age', 'In status', AGES.map(a => [a.key, a.label]), html`<button class="help" type="button" aria-label="Help: in status filter" data-help="Days since the task's last status change, in the buckets the Operations Progress histogram counts (<code>reads.age_bucket</code>). A bar there opens its bucket here.">${ICON('circle-help')}</button>`)}${
       // sd:5643: Scope holds Parked too, as one choice: open and done (the default), open only, or the parked rows only.
       // sd:5649: and Scheduled only, the repeating tasks' next rows that have not opened yet.
       combo('active', 'Scope', [['1', 'Open only'], ['parked', 'Parked only'], ['scheduled', 'Scheduled only']], html`<button class="help" type="button" aria-label="Help: scope filter" data-help="<b>Open only</b> hides Done tasks, as the Operations histogram counts only open ones. The nightly prune parks an open P4 task untouched for 30 days, and a planning task that never ran untouched for 90 days; parked tasks stay off every other scope. <b>Parked only</b> lists them, and <b>Unpark</b> brings one back with its fields and history. Completing a repeating task opens its next row at once; it stays off every other scope, and off Today, until its due date less its lead. <b>Scheduled only</b> lists those rows with the day each opens.">${ICON('circle-help')}</button>`, 'Open and done')}${
       // sd:5649: the list's optional columns, hidden by default. Not a filter: no chip, and Clear all keeps it.
       view === 'list' && LEAD ? window.shell.list.pick('cols', 'Columns', COL_OPTS, SHOW.cols, { all: 'Default', multi: true }) : ''}${
+      // sd:6233: the board's Done column, off by default. Not a filter either: the list and the matrix ignore it.
+      view === 'board' ? html`<div class="fgroup"><label class="chk"><input type="checkbox" id="f-done"${SHOW.done ? html` checked` : ''}> Show done</label></div>` : ''}${
       (on() ? window.shell.list.chips(activeFilters(), visible().length, placed().length) : html`<div class="fsum">${ICON('filter')}<span>${placed().length} tasks</span></div>`)}`);
   }
   // Active filters above the list (shell.list, sd:2682): one chip per value, keyed field:value, and one for the text.
@@ -146,8 +147,12 @@ addEventListener('DOMContentLoaded', () => {
     if (k === 'q') { Q = ''; find.value = ''; } else F[k].delete(v);
     L.page = 1; render();
   });
-  document.getElementById('filters').addEventListener('change', e => window.shell.list.pickChange(e, F, () => { L.page = 1; render(); }) || window.shell.list.pickChange(e, SHOW, render)
-    || window.shell.list.pickChange(e, AT, () => { L.page = 1; subhead(); render(); }));
+  document.getElementById('filters').addEventListener('change', e => {
+    // The redraw replaces the checkbox, so focus goes back to the new one.
+    if (e.target?.id === 'f-done') { SHOW.done = !!e.target.checked; render(); document.getElementById('f-done')?.focus(); return; }
+    window.shell.list.pickChange(e, F, () => { L.page = 1; render(); }) || window.shell.list.pickChange(e, SHOW, render)
+      || window.shell.list.pickChange(e, AT, () => { L.page = 1; subhead(); render(); });
+  });
   function clearFilters() { Object.values(F).forEach(s => s.clear()); Q = ''; find.value = ''; L.page = 1; render(); }
   // The text filter narrows on what a row shows: id, title, repo, status and kind, as v1's ?q= read the visible columns.
   find.addEventListener('input', () => { Q = find.value.trim().toLowerCase(); L.page = 1; render(); });
@@ -194,15 +199,15 @@ addEventListener('DOMContentLoaded', () => {
     </article>`;
   }
   // sd:5305: the board's Done column holds only what was done in the 7 days before the read; the list keeps every done item.
-  // A done item with no known time stays: unknown is not old.
+  // A done item with no known time stays: unknown is not old. sd:6233: the column shows only with Show done.
   const DONE_DAYS = 7, DONE_TIP = `done in the last ${DONE_DAYS} days`;
   const recent = t => t.status !== 'done' || !t.since || !READ || Date.parse(READ) - Date.parse(t.since) <= DONE_DAYS * 864e5;
   function renderBoard() {
     const v = visible().filter(recent);
     // build: backlog_items also returns statuses with no column (a message's ready_to_send); they get one lane, which
     // takes no drop and no key, so every row the page counts is on the board (review, PR #46).
-    const other = v.filter(t => !SLABEL[t.status]);
-    put(document.getElementById('view-board'), html`<div class="board" id="board" role="group" aria-label="Tasks by status"${other.length ? html` data-other` : ''}>${STATUSES.map(([s, name], i) => {
+    const other = v.filter(t => !SLABEL[t.status]), cols = STATUSES.filter(([s]) => SHOW.done || s !== 'done');
+    put(document.getElementById('view-board'), html`<div class="board" id="board" role="group" aria-label="Tasks by status"${other.length ? html` data-other` : ''}${SHOW.done ? '' : html` data-nodone`}>${cols.map(([s, name]) => { const i = STATUSES.findIndex(x => x[0] === s);
       const rows = v.filter(t => t.status === s);
       return html`<div class="col" data-drop="status:${s}" role="group" aria-label="${name}">
         <header><span class="label"${s === 'done' ? html` title="${DONE_TIP}"` : ''}>${name}</span><kbd>${i + 1}</kbd><span class="n">${rows.length}</span></header>
@@ -493,6 +498,7 @@ addEventListener('DOMContentLoaded', () => {
     if (q.get('parked') === '1') { F.active.clear(); F.active.add('parked'); }
     [...F.active].forEach(v => { if (!['1', 'parked', 'scheduled'].includes(v)) F.active.delete(v); });
     (q.get('cols') || '').split(',').filter(v => COL_OPTS.some(o => o[0] === v)).forEach(v => SHOW.cols.add(v));
+    SHOW.done = q.get('done') === '1';
     find.value = (q.get('q') || '').trim(); Q = find.value.toLowerCase();
     // sd:5753: ?realm=, else an older link's #view=<realm> (Metrics' bars linked #view=all), else Personal. The old hash
     // leaves the address, so the next write does not carry it.
@@ -509,6 +515,7 @@ addEventListener('DOMContentLoaded', () => {
     FKEYS.forEach(key => { if (F[key].size) q.set(key, [...F[key]].join(',')); });
     if (Q) q.set('q', Q);
     if (SHOW.cols.size) q.set('cols', [...SHOW.cols].join(','));
+    if (SHOW.done) q.set('done', '1');
     if (AT.realm !== 'personal') q.set('realm', place());
     if (view === 'list') window.shell.list.listQuery(q, L, LIST);
     shell.url(q); // the shell keeps ?row=

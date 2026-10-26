@@ -84,6 +84,60 @@ class Worktrees(Registry):
         self.assertEqual(sessions.touched(payload), ["/somewhere", "/a/b", "~/c", "/d/e"])
         self.assertEqual(sessions.touched({"tool_input": {"file_path": "/x/y.py"}}), ["/x/y.py"])
 
+    def test_a_quoted_or_relative_bash_path_is_read_whole(self):
+        """pack sd:6152: a quoted path with a space was cut at the space, a relative one was dropped.
+        A relative path resolves against the payload's cwd, or the folder a `cd` before it named."""
+        def paths(command: str, cwd: str | None = "/w/base") -> list[str]:
+            return sessions.touched({"cwd": cwd, "tool_input": {"command": command}})[1 if cwd else 0:]
+
+        self.assertEqual(paths('make -C "/tmp/work trees/pack" check'), ["/tmp/work trees/pack"])
+        self.assertEqual(paths("make -C ../worktrees/pack check"), ["/w/worktrees/pack"])
+        self.assertEqual(paths("cd /a/b && git -C ./c status"), ["/a/b", "/a/b/c"])
+        self.assertEqual(paths("PYTHONPATH=.ci/pack/lib:lib:/x/lib python3"), ["/w/base/.ci/pack/lib", "/x/lib"])
+        self.assertEqual(paths("git -C ../pack status", cwd=None), [])
+        self.assertEqual(paths("curl https://example.test/a/b"), [])
+        self.assertEqual(paths("pytest --rootdir=/r/s --co -k a/b"), ["/r/s", "/w/base/a/b"])
+
+    def test_a_quoted_script_is_read_for_its_paths(self):
+        """pack sd:6152 review: shlex made a quoted script one word, read whole as a relative filename, so
+        `sh -c 'cd <worktree> && ...'` held no worktree. A word that is a script is read as a command again."""
+        def paths(command: str) -> list[str]:
+            return sessions.touched({"cwd": "/w/base", "tool_input": {"command": command}})[1:]
+
+        self.assertEqual(paths("sh -c 'cd /tmp/worktrees/pack && make test'"), ["/tmp/worktrees/pack"])
+        self.assertEqual(paths('bash -lc "cd ../pack && make"'), ["/w/pack"])
+        self.assertEqual(paths("zsh -c 'make -C /a/b check'"), ["/a/b"])
+        self.assertEqual(paths("sh -c '/usr/bin/make -C /a/b'"), ["/usr/bin/make", "/a/b"])
+        self.assertEqual(paths("python3 -c \"import os; os.listdir('/p/q')\""), ["/p/q"])
+        self.assertEqual(paths("node -e \"require('fs').readdirSync('/n/m')\""), ["/n/m"])
+        self.assertEqual(paths('eval "cd /e/f && ls"'), ["/e/f"])
+        self.assertEqual(paths("python3 - <<'EOF'\nprint(open(\"/h/d x\").read())\nEOF"), ["/h/d x"])
+        self.assertEqual(paths("python3 - <<'EOF'\nprint(\"it's /h/e\")\nEOF"), ["/h/e"])
+        self.assertEqual(paths('git commit -m "fix the /a/b path"'), ["/a/b"])
+        self.assertEqual(paths("echo \"/a/b; cd /c\""), ["/a/b", "/c"])
+        self.assertEqual(paths('make -C "/tmp/work trees/pack" check'), ["/tmp/work trees/pack"])
+
+    def test_touched_holds_on_extreme_commands(self):
+        """Property: any command string returns bounded absolute or home paths and never raises."""
+        cases = ["", " ", "'", '"', "\\", "''\"\"", "'unclosed /a", '"a \'b\' "/c d"', "$(cd /e && ls ../f)",
+                 "/" * 5000, "x " * 20000 + "/late", "a" * 1_000_000, "'" + "/b" * 500_000,
+                 "cd /ü/ñ && ls ./日本 '/😀 x'", "a\x00b /n\x00ul",
+                 "echo \"'\\\"/q\\\"'\"", ";;&&||<<>>((", "cd", "cd ''", "-C", "=:=:", "~", "~/", "../" * 3000]
+        cases += ["".join(chr(c) for c in range(start, start + 400)) for start in (0, 0x2000, 0x10000)]
+        cases += ["sh -c '" + "cd /a && " * 3000 + "'", "bash -c " + "'(" * 8000, "eval " + "\"$(" * 4000,
+                  "sh -c \"sh -c 'sh -c \\\"sh -c /deep\\\"'\"", "python3 -c \"print('/ü x')\"",
+                  "node -e " + "'" + "x y " * 6000 + "'", "cat <<'EOF'\nit's /h\n" + "a b\n" * 5000 + "EOF",
+                  "sh -c ''", "eval", "-c", "sh -c '\x00/n'"]
+        for command in cases:
+            with self.subTest(command=command[:40]):
+                found = sessions.touched({"cwd": "/w/base", "tool_input": {"command": command}})
+                self.assertLessEqual(len(found), 1 + sessions.MAX_COMMAND_PATHS)
+                for path in found:
+                    self.assertIsInstance(path, str)
+                    self.assertTrue(path.startswith(("/", "~/")), path)
+        self.assertEqual(sessions.touched({"cwd": "/w", "tool_input": {"command": "cd /ü/ñ && ls ./日本 '/😀 x'"}}),
+                         ["/w", "/ü/ñ", "/ü/ñ/日本", "/😀 x"])
+
 
 class Beats(Registry):
     def test_a_beat_is_one_row_per_session(self):
