@@ -7,10 +7,10 @@ a clean run files no report since the quiet-run rule.
 
 import json
 
-from sd_db import reporting
 from sd_dashboard.reports_screen import report_controls
-
+from sd_db import reporting
 from support import ScreenCase
+
 
 class ReportControls(ScreenCase):
     """The single report's form, which the Item page keeps."""

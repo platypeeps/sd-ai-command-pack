@@ -34,18 +34,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_dashboard import health_collectors, health_screen, runtime, server, v2
 from sd_db import credentials, upsert_repo, writes
 from sd_db.writes import record_state, snooze
-
-from sd_dashboard import health_collectors, health_screen, runtime, server, v2
-
 from support import NOW, ScreenCase
-from test_v2_today import OSASCRIPT, Refused
 from test_v2_read import READ_SHELL
-from test_v2_tasks import SHELL, STAND_IN
-from test_workflow_actions import BrowserSession
 from test_v2_registry import Registers
 from test_v2_shell_shared import cell_grammar
+from test_v2_tasks import SHELL, STAND_IN
+from test_v2_today import OSASCRIPT, Refused
+from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent
 #: The real reader, before `Collectors` replaces it for every test.
@@ -557,7 +555,8 @@ class TheDocument(Collectors, ScreenCase):
         self.assertEqual(prot["extra"]["reasons"], ["token does not reach it"])
         self.assertEqual(prot["at"], "2026-09-05T08:00:00Z")
         self.assertEqual(len(prot["extra"]["checks"]), 11)
-        cells = lambda key: {cell[0]: cell[1:] for cell in rows[key]["cells"]}
+        def cells(key):
+            return {cell[0]: cell[1:] for cell in rows[key]["cells"]}
         alpha = cells("prot:/checkouts/alpha")
         self.assertEqual((alpha["Reviews"], alpha["Admins"], alpha["Squash message"], alpha["Required check"], alpha["Rebase merge"]),
                          (["gap", "no approving review is required"], ["ok"], ["ok"],
@@ -1827,7 +1826,8 @@ R.observed = document.body.dataset.observed;""")
         out = self.run_page("R.before = BODY().html;"
                             "PANEL().listeners.click[0]({ target: { closest: s => s === '[data-f]' ? { dataset: { f: 'state', v: 'caution' } } : null } });"
                             "R.after = BODY().html;")
-        tallies = lambda h: re.findall(r'<p class="tally"><span>(\d+ of \d+ rows?)</span>', h)
+        def tallies(h):
+            return re.findall(r'<p class="tally"><span>(\d+ of \d+ rows?)</span>', h)
         self.assertEqual(tallies(out["R"]["before"]), [])
         self.assertEqual(tallies(out["R"]["after"]), ["1 of 2 rows", "1 of 2 rows"], "caution leaves one of each area's two drawn rows")
         bar = re.search(r'<div class="fbar".*?<div class="fsum">.*?</div></div>', out["R"]["after"], re.S).group(0)

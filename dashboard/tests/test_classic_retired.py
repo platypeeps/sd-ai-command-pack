@@ -17,10 +17,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import runner_exec
-
 from sd_dashboard import activity_screen, operations_screen, pages, server, v2
-
+from sd_db import runner_exec
 from support import NOW, ScreenCase
 
 PACKAGE = Path(server.__file__).resolve().parent

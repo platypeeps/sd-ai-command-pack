@@ -13,7 +13,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sd_dashboard import job_failures, now_screen
-
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document, repo
 

@@ -1,8 +1,8 @@
 """HTTP operations proof using an in-memory observer; no launchctl calls."""
 
+import re
 import subprocess
 from unittest.mock import patch
-import re
 
 from sd_db import operations, record_state, workflow
 from sd_db.workflow import WorkflowError

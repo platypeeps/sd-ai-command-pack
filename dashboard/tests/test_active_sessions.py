@@ -12,12 +12,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_dashboard import active_sessions, fix_session, fleet, now_screen
-
+import test_v2_today_reader
 from fleet_support import FleetCase
+from sd_dashboard import active_sessions, fix_session, fleet, now_screen
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document
-import test_v2_today_reader
 
 
 def ARABIC(number):

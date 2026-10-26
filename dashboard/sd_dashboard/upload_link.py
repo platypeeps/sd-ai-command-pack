@@ -22,8 +22,6 @@ import functools
 import importlib.util
 import json
 import sqlite3
-import sys
-from pathlib import Path
 from urllib.parse import quote
 
 from . import fix_session

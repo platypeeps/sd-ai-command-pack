@@ -174,7 +174,8 @@ def _sizes(code: int, out: str) -> str:
     if not rows:
         return out
     rows.sort(key=lambda row: -row[0])
-    human = lambda kb: next(f"{kb / 1024 ** n:.1f} {unit}" for n, unit in ((3, "TiB"), (2, "GiB"), (1, "MiB"), (0, "KiB"))
+    def human(kb):
+        return next(f"{kb / 1024 ** n:.1f} {unit}" for n, unit in ((3, "TiB"), (2, "GiB"), (1, "MiB"), (0, "KiB"))
                             if kb >= 1024 ** n or n == 0)
     shown = "\n".join(f"{human(kb):>10}  {path}" for kb, path in rows[:BIGGEST + 1])
     shown += f"\n... {len(rows) - BIGGEST - 1} more" if len(rows) > BIGGEST + 1 else ""

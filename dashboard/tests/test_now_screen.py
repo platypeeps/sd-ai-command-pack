@@ -18,11 +18,18 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import contributions, operations, progress, reads, upsert_shadow, workflow, writes
-from sd_db.writes import snooze
-from sd_dashboard import fleet, now_screen
-
 from fleet_support import FleetCase
+from sd_dashboard import fleet, now_screen
+from sd_db import (
+    contributions,
+    operations,
+    progress,
+    reads,
+    upsert_shadow,
+    workflow,
+    writes,
+)
+from sd_db.writes import snooze
 from support import NOW, ScreenCase
 from test_workflow_actions import BrowserSession
 

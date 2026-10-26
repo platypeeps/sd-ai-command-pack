@@ -17,6 +17,7 @@ from unittest.mock import Mock
 
 from sd_dashboard import server
 from support import ScreenCase
+
 from . import test_client_disconnect
 
 #: More connections than the stdlib backlog, fewer than any kernel's SOMAXCONN.

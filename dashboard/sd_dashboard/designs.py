@@ -51,7 +51,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote
 
-
 #: The checkout the tab serves. `DESIGNS_ROOT` moves it; the default follows
 #: `REPO_ROOT` the way the collectors and the documents scan do.
 ROOT = Path(os.environ.get(

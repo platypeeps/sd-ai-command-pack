@@ -24,17 +24,16 @@ import re
 import subprocess
 import unittest
 from pathlib import Path
-from urllib.parse import quote, urlencode, urlsplit
 from unittest.mock import patch
+from urllib.parse import quote, urlencode, urlsplit
 
-from sd_db import connect, reads, set_item_fields, upsert_repo, workflow
 from sd_dashboard import server, tasks_screen, v2
-
+from sd_db import connect, reads, set_item_fields, upsert_repo, workflow
 from support import NOW, ScreenCase, transition, upsert_shadow
 from test_v2_read import READ_SHELL
+from test_v2_registry import Registers
 from test_v2_today import OSASCRIPT, Refused
 from test_workflow_actions import BrowserSession
-from test_v2_registry import Registers
 
 V2 = Path(v2.__file__).resolve().parent
 TASKS_JS = (V2 / "static" / "tasks.js").read_text(encoding="utf-8")
@@ -1562,7 +1561,7 @@ box.listeners.keydown.forEach(f => f({ key: 'Enter', preventDefault() {}, stopPr
         row = self.row("plan")
         enter = """var box = document.getElementById('shift-in'); box.value = %s;
 box.listeners.keydown.forEach(f => f({ key: 'Enter', preventDefault() {}, stopPropagation() {} })); await flush();"""
-        out = self.run_page(enter % "'Ship it'" + "\n" + enter % "'Ship that p1'" + f"""
+        out = self.run_page(enter % "'Ship it'" + "\n" + enter % "'Ship that p1'" + """
 R.filtered = window.PAGE_REPO(null);""", "(path, body) => [201, { item: { id: 99, title: body.title } }]", search=f"?repo={row['repo']}")
         self.assertEqual([p[1] for p in out["posts"][:2]], [{"title": "Ship it", "priority": 3, "repo": row["repo_path"]},
                                                            {"title": "Ship that", "priority": 1, "repo": row["repo_path"]}])
@@ -1658,7 +1657,7 @@ R.after = ELS.details.html; R.views2 = views(); R.obj = C.get(String(ITEM)) && C
         out = self.run_page(self.LEFT_OUT.replace("ASK", str(self.ids["ask"])).replace("ITEM", str(shown)), self.ECHO,
                             search=f"?view=list&row={shown}")
         kept = out["R"]["kept"]
-        self.assertEqual(set(zip(kept[::2], kept[1::2])), {(str(shown), True)})
+        self.assertEqual(set(zip(kept[::2], kept[1::2], strict=False)), {(str(shown), True)})
         self.assertIn(f"The view or filters hide #{shown}; it stays selected until you pick another.", out["R"]["after"])
 
     def test_a_linked_item_the_list_leaves_out_opens_in_details_and_in_no_view(self):
@@ -1680,7 +1679,7 @@ R.after = ELS.details.html; R.views2 = views(); R.obj = C.get(String(ITEM)) && C
                 self.assertTrue(out["R"]["sub"].startswith("read "), out["R"]["sub"])
                 # A filter change keeps it selected though no row shows it, and a reread after a write keeps it in Details.
                 kept = out["R"]["kept"]
-                self.assertEqual(set(zip(kept[::2], kept[1::2])), {(str(item), True)})
+                self.assertEqual(set(zip(kept[::2], kept[1::2], strict=False)), {(str(item), True)})
                 self.assertIn(f"The list, board and matrix leave #{item} out: {why}.", out["R"]["after"])
                 self.assertEqual(out["R"]["obj"], "item")
                 self.assertNotIn("not read again", out["R"]["after"])
@@ -2824,7 +2823,8 @@ class TheFilterAddress(ScreenCase):
         _, out = self.listed("?view=list&status=ready_to_send&active=1&q=reply",
                              f"R.chips = ELS.filters.html; {unfilter} R.chips2 = ELS.filters.html; R.url2 = OUT.urls[OUT.urls.length - 1];"
                              f" {clear} R.chips3 = ELS.filters.html; R.url3 = OUT.urls[OUT.urls.length - 1]; R.box = ELS['find-in'].value;")
-        chips = lambda key: re.findall(r'data-unfilter="([\w:]+)"', out["R"][key])
+        def chips(key):
+            return re.findall(r'data-unfilter="([\w:]+)"', out["R"][key])
         self.assertEqual(chips("chips"), ["status:ready_to_send", "active:1", "q"])
         self.assertIn("3 filters · 1 of 4", out["R"]["chips"])
         self.assertEqual(chips("chips2"), ["active:1", "q"])

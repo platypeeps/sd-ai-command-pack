@@ -24,18 +24,16 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import contributions, upsert_repo, writes
-
 from sd_dashboard import contribution_screen, server, v2
-
+from sd_db import contributions, upsert_repo, writes
 from support import NOW, ScreenCase
 from test_contribution_screen import contribution, seed_registered
-from test_v2_today import OSASCRIPT, Refused
 from test_v2_read import READ_SHELL
-from test_v2_tasks import SHELL, STAND_IN
-from test_workflow_actions import BrowserSession
 from test_v2_registry import Registers
 from test_v2_shell_shared import cell_grammar
+from test_v2_tasks import SHELL, STAND_IN
+from test_v2_today import OSASCRIPT, Refused
+from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent
 PAGE_JS = (V2 / "static" / "contributions.js").read_text(encoding="utf-8")
@@ -438,7 +436,8 @@ class ThePage(BrowserSession):
             "blocking_labels": [], "labels": [], "reviews": [], "events": []},
             expected_revision=contributions.snapshot(self.connection, "github:" + url)["revision"])
         self.connection.commit()
-        read = lambda: next(r for r in json.loads(self.request("/api/contributions/page", headers={"Cookie": self.cookie})[2])["rows"]
+        def read():
+            return next(r for r in json.loads(self.request("/api/contributions/page", headers={"Cookie": self.cookie})[2])["rows"]
                             if r["url"] == url)
         row = read()
         self.assertIsNone(row["item_id"])
@@ -460,7 +459,8 @@ class ThePage(BrowserSession):
             "blocking_labels": [], "labels": [], "reviews": [], "events": []},
             expected_revision=contributions.snapshot(self.connection, "github:" + url)["revision"])
         self.connection.commit()
-        read = lambda: json.loads(self.request("/api/contributions/page", headers={"Cookie": self.cookie})[2])
+        def read():
+            return json.loads(self.request("/api/contributions/page", headers={"Cookie": self.cookie})[2])
         [row] = [r for r in read()["rows"] if r["url"] == url]
         payload = {"key": row["key"], "revision": row["revision"]}
         before = self.snapshot()
@@ -495,7 +495,8 @@ class ThePage(BrowserSession):
     def test_hide_writes_the_view_state_the_page_reads_back_and_unhide_clears_it(self):
         # sd:5486: Hide persists until Unhide; a key the projection does not list writes nothing.
         seed_registered(self.connection)
-        read = lambda: json.loads(self.request("/api/contributions/page", headers={"Cookie": self.cookie})[2])
+        def read():
+            return json.loads(self.request("/api/contributions/page", headers={"Cookie": self.cookie})[2])
         [row] = read()["rows"]
         self.assertFalse(row["hidden"])
         before = self.snapshot()

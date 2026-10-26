@@ -4,18 +4,17 @@ The child server substitutes the socket peer address and binds an ephemeral
 loopback port. Pure auth tests separately reject non-Tailscale peer addresses.
 """
 
-from copy import deepcopy
 import http.client
-from http.server import ThreadingHTTPServer
 import json
 import re
 import threading
-from unittest.mock import Mock, patch
-
+from copy import deepcopy
+from http.server import ThreadingHTTPServer
+from unittest.mock import patch
 
 from sd_dashboard import auth, runtime, server
-
 from support import ScreenCase
+
 from . import test_remote_access
 
 
