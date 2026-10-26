@@ -77,7 +77,8 @@ def cmd_write(args, out, err) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="sd-note", description=__doc__)
+    parser = argparse.ArgumentParser(prog="sd-note", description=__doc__.splitlines()[0],
+                                     epilog="Exit codes: 0 done, 1 refused, 2 usage.")
     verbs = parser.add_subparsers(dest="verb", required=True)
     add = verbs.add_parser("add", help="write a followup against a work item")
     add.add_argument("body", help="what is left to do, in one line")

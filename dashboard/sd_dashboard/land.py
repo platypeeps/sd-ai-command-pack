@@ -12,8 +12,9 @@ item's commit, or the preview names the paths no item takes and Land refuses.
 The steps of `land`, each named so a later run can find what an earlier one left:
 
 1. Commits. One commit per item, built in a temporary index from the checkout's files on top of HEAD, so neither the
-   checkout's index nor its branch moves yet. Each message is the item's title, `(sd:<n>)`, and only the line
-   `Authored-with: claude/anthropic`.
+   checkout's index nor its branch moves yet. Each message is the item's title as a Conventional Commits header and
+   the trailers `Refs: sd:<n>` and `Authored-with: claude/anthropic`: the item stays out of the title (pack sd:6059),
+   and the enqueue's `--item` decides what closes.
 2. The branch. On a feature branch, `update-ref` moves it from the HEAD the preview read to the last commit (a moved
    HEAD refuses), then `reset -q` refreshes the index: the files already match. On the default branch, or a detached
    HEAD, Land never commits there: it makes `land/sd-<first item>` at the last commit and a worktree for it under
@@ -302,9 +303,7 @@ def _title(facts: dict) -> str:
     from .queue_screen import conventional
 
     groups = facts["groups"]
-    refs = ", ".join(f"sd:{g['item']}" for g in groups)
-    return conventional(f"{groups[0]['title']} ({refs})" if len(groups) == 1
-                        else f"{groups[0]['title']} and {len(groups) - 1} more ({refs})")
+    return conventional(groups[0]["title"] if len(groups) == 1 else f"{groups[0]['title']} and {len(groups) - 1} more")
 
 
 def _body(facts: dict) -> str:
@@ -359,6 +358,8 @@ def preview(connection, parameters: dict) -> dict | tuple[int, dict]:
 
 def _commit_chain(path: Path, parent: str, groups: list[dict], titles: dict[int, str]) -> list[dict]:
     """Step 1: one commit per item with files, from the checkout's files, in a temporary index; no ref moves."""
+    from .queue_screen import conventional
+
     made = []
     with tempfile.TemporaryDirectory(prefix="sd-land-") as scratch:
         env = {**os.environ, "GIT_INDEX_FILE": str(Path(scratch) / "index")}
@@ -370,7 +371,7 @@ def _commit_chain(path: Path, parent: str, groups: list[dict], titles: dict[int,
             tree = _git(path, "write-tree", env=env).stdout.strip()
             if tree == _out(path, "rev-parse", f"{parent}^{{tree}}"):
                 continue  # the files already match: a run stopped before `reset -q` left only the index behind
-            message = f"{titles[group['item']]} (sd:{group['item']})\n\n{TRAILER}\n"
+            message = f"{conventional(titles[group['item']])}\n\nRefs: sd:{group['item']}\n{TRAILER}\n"
             done = subprocess.run(["git", "-C", str(path), "commit-tree", tree, "-p", parent, "-F", "-"], input=message,
                                   capture_output=True, text=True, timeout=GIT_SECONDS, check=False, env=env)
             if done.returncode != 0:

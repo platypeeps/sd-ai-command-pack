@@ -26,6 +26,7 @@ start clears it first, so an `exit` is always the newest run's); `unknown` when 
 from __future__ import annotations
 
 import concurrent.futures
+import http.client
 import os
 import re
 import shlex
@@ -43,7 +44,7 @@ CONFIG = _config_dir() / "place-tiles.conf"
 EXAMPLE = Path(__file__).resolve().parents[1] / "place-tiles.conf.example"
 #: Seconds one URL probe may take; the probes run together, so the read waits about this long at most.
 PROBE_SECONDS = 2.0
-#: The bytes of `start.log` a run shows: its tail.
+#: The bytes of `start.log` a run shows: its tail. The read seeks there, so a long-lived server's log costs no more.
 TAIL = 4000
 #: Runs the command, then records its exit code and end time in the file `$1`.
 WRAP = 'f=$1; shift; "$@"; c=$?; printf "%s %s\\n" "$c" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$f"; exit "$c"'
@@ -102,7 +103,8 @@ def _probe(url: str) -> dict:
         if isinstance(error.reason, ConnectionRefusedError):
             return {"answers": False, "status": "nothing listens there"}
         return {"answers": None, "status": f"not known: {error.reason.__class__.__name__}"}
-    except (OSError, socket.timeout, ValueError) as error:
+    except (OSError, socket.timeout, ValueError, http.client.HTTPException) as error:
+        # HTTPException: `InvalidURL` (a space, a bad port) and a malformed answer are this tile's, not the Overview's.
         return {"answers": None, "status": f"not known: {error.__class__.__name__}"}
 
 
@@ -119,14 +121,18 @@ def _last(state: Path) -> dict:
     from .sweep import _held
 
     try:
-        log = (state / "start.log").read_bytes()
+        with (state / "start.log").open("rb") as log:
+            head = log.readline(TAIL)
+            body = log.tell()
+            end = log.seek(0, os.SEEK_END)
+            log.seek(max(body, end - TAIL))
+            tail = log.read(TAIL)
     except FileNotFoundError:
         return {"state": "none"}
     except OSError as error:
         return {"state": "unknown", "reason": f"start.log was not read: {error.__class__.__name__}"}
-    head, _, body = log.partition(b"\n")
-    out = {"started": head.decode("utf-8", "replace").split(" ", 1)[0], "output": body[-TAIL:].decode("utf-8", "replace"),
-           "cut": len(body) > TAIL}
+    out = {"started": head.decode("utf-8", "replace").split(" ", 1)[0], "output": tail.decode("utf-8", "replace"),
+           "cut": end - body > TAIL}
     held = _held(state)
     if held:
         return {**out, "state": "running"}
