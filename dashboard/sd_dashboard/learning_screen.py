@@ -4,9 +4,11 @@ The page is `v2/documents.html`; it holds no rows. Each view reads one JSON docu
 `/api/documents/videos`, built here from the vault's learning base rows (`records.list_rows(connection, "learning")`,
 the `sdw.learning` kind). Nothing here writes: a row's stage and kind stay as the store holds them.
 
-**Which rows.** Books are the rows whose `content-type` is `book` or `article`. Videos are the rows whose
-`content-type` is `youtube` or `video`, and any learning row titled `YYYY-MM-DD - YouTube - <channel> - <title>`, the
-name the vault's video notes carry. Other learning rows (courses) are in neither.
+**Which rows.** A row moved to a view (`fields.document-type`, pack sd:6262) is in that view and no other, whatever
+its content type: `sd-db records documents` moves it, and it then leaves Tasks and Today. Of the rest, Books are the
+rows whose `content-type` is `book` or `article`. Videos are the rows whose `content-type` is `youtube` or `video`, and
+any learning row titled `YYYY-MM-DD - YouTube - <channel> - <title>`, the name the vault's video notes carry. Other
+learning rows (courses) are in neither.
 
 **What one row says.** A book: its title, its author or source (the `author` list, else the `publisher`, else the
 URL's host), its URL and its read state. A video: its title less the dated prefix, its channel (the `channel` field,
@@ -19,8 +21,10 @@ A store that does not read raises, so the route answers 500 with the cause and t
 
 from __future__ import annotations
 
-import re
 import urllib.parse
+
+from sd_db.reads import document_view
+from sd_db.records import VIDEO_TITLE
 
 __all__ = ["READ", "WATCHED", "books", "videos"]
 
@@ -28,14 +32,18 @@ __all__ = ["READ", "WATCHED", "books", "videos"]
 READ = {"queued": "to read", "in-progress": "reading", "done": "done", "dropped": "dropped"}
 #: The learning stages in a video's words.
 WATCHED = {"queued": "to watch", "in-progress": "watching", "done": "watched", "dropped": "dropped"}
-#: A video note's title: its date, YouTube, the channel and the video's own title.
-VIDEO_TITLE = re.compile(r"^(\d{4}-\d{2}-\d{2}) - YouTube - (.+?) - (.+)$")
 
 
 def _rows(connection):
     from sd_db import records
 
     return records.list_rows(connection, "learning")
+
+
+def _in_view(row, view: str, matched: bool) -> bool:
+    """A moved row is in its own view only; any other row is where `matched`, its content type or title, puts it."""
+    held = document_view(row["fields"])
+    return held == view if held else matched
 
 
 def _text(value) -> str:
@@ -71,7 +79,7 @@ def books(connection, *, now: str) -> dict:
     for row in _rows(connection):
         fields = row["fields"]
         kind = _text(fields.get("content-type")).lower()
-        if kind not in ("book", "article"):
+        if not _in_view(row, "books", kind in ("book", "article")):
             continue
         item = _base(row, READ)
         item.update(kind=kind, by=_text(fields.get("author")) or _text(fields.get("publisher")) or item["host"],
@@ -87,7 +95,7 @@ def videos(connection, *, now: str) -> dict:
     for row in _rows(connection):
         fields = row["fields"]
         named = VIDEO_TITLE.match(row["title"] or "")
-        if _text(fields.get("content-type")).lower() not in ("youtube", "video") and not named:
+        if not _in_view(row, "videos", _text(fields.get("content-type")).lower() in ("youtube", "video") or bool(named)):
             continue
         item = _base(row, WATCHED)
         item.update(title=named.group(3) if named else row["title"],

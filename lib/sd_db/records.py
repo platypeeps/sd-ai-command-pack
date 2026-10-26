@@ -31,6 +31,12 @@ the vault too, until the notes were retired (sd:5133). It runs after each
 committed write, for that kind, and on demand (`sd-db records render`); a
 write never fails for its render.
 
+**A learning row can move to a Documents view (pack sd:6262).** `plan_documents`
+is the match list, `move_documents` writes `fields.document-type` (`books` or
+`videos`) for the plan the operator saw, and `return_documents` takes it off.
+The field is the row's, not the kind's, so `edit_row` keeps it and never sets
+it. A moved row leaves Tasks and Today (`reads.NOT_A_DOCUMENT`).
+
 **Only the `db` driver writes.** A plugin list that still reports the removed
 `vault` driver (an older installed pack) makes both writers refuse.
 """
@@ -40,6 +46,7 @@ from __future__ import annotations
 import contextlib
 import datetime
 import functools
+import hashlib
 import html
 import importlib.util
 import json
@@ -52,10 +59,11 @@ import tempfile
 import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Iterable
 
 from .database import refuse_hub_only, transaction
 from .publication_render import _fence_closer, md_to_html
+from .reads import DOCUMENT_TYPE, document_view
 from .sources import MigrationRefused
 from .sources.vault import DUE, NOT_FIELDS, SOURCE, plugin_entries, store_root
 from .workflow import MissingItem, WorkflowError, _checked_state, _text, item_state
@@ -408,6 +416,113 @@ def _refuse_duplicate(connection: sqlite3.Connection, rules: Rules, values: dict
             if row["id"] != skip and row["fields"].get(name) == value:
                 raise RecordRefused(f"`unique-fields` declares {name!r} unique and item {row['id']} "
                                     f"already holds {value!r}")
+
+
+# ---------------------------------------------------------------- documents
+
+
+#: The Documents views a learning row moves to (pack sd:6262), each with its label.
+DOCUMENT_VIEWS = {"books": "Books", "videos": "Videos"}
+#: A video note's title: its date, YouTube, the channel and the video's own title. The Videos view reads it too.
+VIDEO_TITLE = re.compile(r"^(\d{4}-\d{2}-\d{2}) - YouTube - (.+?) - (.+)$")
+
+
+@dataclass(frozen=True)
+class DocumentMove:
+    id: int
+    view: str
+    title: str
+
+
+@dataclass(frozen=True)
+class DocumentPlan:
+    """The match list a dry run prints and a move applies.
+
+    `moves` are the rows to move, videos first, each in id order. `moved` are
+    the learning rows already in a view (id, view, title). `skipped` are rows
+    titled as a video that are no learning row, which no Documents view reads
+    (id, title). `candidates` are the learning books and articles the list does
+    not name (id, content-type, title), for the operator to add with `--book`.
+    """
+
+    moves: tuple[DocumentMove, ...]
+    moved: tuple[tuple[int, str, str], ...]
+    skipped: tuple[tuple[int, str], ...]
+    candidates: tuple[tuple[int, str, str], ...]
+
+    @property
+    def digest(self) -> str:
+        """What the operator approved: the ids and their views, so `move_documents` moves that list or nothing."""
+        names = json.dumps(sorted([move.id, move.view] for move in self.moves), separators=(",", ":"))
+        return hashlib.sha256(names.encode()).hexdigest()[:16]
+
+
+def plan_documents(connection: sqlite3.Connection, *, books: Iterable[int]) -> DocumentPlan:
+    """The match list: learning rows titled as a YouTube video go to Videos, the rows `books` names go to Books.
+
+    Books and articles carry no title to match, so only the operator's list moves one. A `books` id that is no
+    learning row refuses the whole plan: the Books view reads learning rows only, so the row would show nowhere.
+    """
+    listed = list(dict.fromkeys(int(item) for item in books))
+    rows = {row["id"]: row for row in list_rows(connection, "learning")}
+    stray = [item for item in listed if item not in rows]
+    if stray:
+        raise RecordRefused(f"item {stray[0]} is not a learning row; the Books view reads learning rows only, "
+                            f"so it would show nowhere")
+    videos, named, moved, candidates = [], [], [], []
+    for item, row in rows.items():
+        held = document_view(row["fields"])
+        if held:
+            moved.append((item, held, row["title"]))
+        elif item in listed:
+            named.append(DocumentMove(item, "books", row["title"]))
+        elif VIDEO_TITLE.match(row["title"] or ""):
+            videos.append(DocumentMove(item, "videos", row["title"]))
+        elif str(row["fields"].get("content-type") or "").lower() in ("book", "article"):
+            candidates.append((item, str(row["fields"]["content-type"]).lower(), row["title"]))
+    skipped = tuple((row["id"], row["title"]) for row in connection.execute("SELECT id, title FROM item ORDER BY id")
+                    if row["id"] not in rows and VIDEO_TITLE.match(row["title"] or ""))
+    return DocumentPlan(tuple(videos + named), tuple(moved), skipped, tuple(candidates))
+
+
+def move_documents(connection: sqlite3.Connection, *, books: Iterable[int], plan: str,
+                   who: str) -> DocumentPlan:
+    """Move the rows `plan_documents` lists to their views, when its digest is still `plan`.
+
+    One transaction: the plan is read again inside it, so a row filed or a list changed since the dry run refuses
+    and moves nothing, and a write that fails partway rolls every row back. Each row gets `fields.document-type`
+    and a `comment` note; its id, notes, stage and status stay.
+    """
+    with transaction(connection):
+        found = plan_documents(connection, books=books)
+        if found.digest != plan:
+            raise RecordRefused(f"the match list changed since the dry run: plan {plan}, now {found.digest}; "
+                                f"run the dry run again and check its list")
+        for move in found.moves:
+            held = json.loads(connection.execute("SELECT fields FROM item WHERE id = ?", (move.id,)).fetchone()[0])
+            set_item_fields(connection, move.id, fields={**held, DOCUMENT_TYPE: move.view})
+            add_note(connection, move.id, "comment",
+                     f"Moved to Documents > {DOCUMENT_VIEWS[move.view]} by {who} (pack sd:6262): it leaves Tasks "
+                     f"and Today; `sd-db records documents --undo {move.id}` moves it back", session=who)
+    return found
+
+
+def return_documents(connection: sqlite3.Connection, items: Iterable[int], *, who: str) -> list[int]:
+    """Take `items` out of their Documents views, back to Tasks; refuse them all if one is in no view."""
+    wanted = list(dict.fromkeys(int(item) for item in items))
+    with transaction(connection):
+        rows = {row["id"]: row for row in list_rows(connection, "learning")}
+        for item in wanted:
+            if item not in rows or not document_view(rows[item]["fields"]):
+                raise RecordRefused(f"item {item} is in no Documents view; nothing moved back")
+        for item in wanted:
+            held = dict(rows[item]["fields"])
+            view = held.pop(DOCUMENT_TYPE)
+            set_item_fields(connection, item, fields=held)
+            add_note(connection, item, "comment",
+                     f"Moved back from Documents > {DOCUMENT_VIEWS.get(view, view)} by {who} (pack sd:6262)",
+                     session=who)
+    return wanted
 
 
 # ---------------------------------------------------------------- the render

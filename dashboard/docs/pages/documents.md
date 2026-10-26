@@ -61,3 +61,7 @@ whose `content-type` is `youtube` or `video`, and any row titled
 that prefix), the channel, the date, the URL and the watched state (to
 watch, watching, watched, dropped); the newest date sorts first. It reads
 and writes as Books does.
+
+A row `sd-db records documents` moved (pack sd:6262) carries
+`fields.document-type`, `books` or `videos`. It shows in that view and in
+no other, whatever its content type, and it leaves Tasks and Today.
