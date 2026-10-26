@@ -24,7 +24,8 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from sd_db import workflow
+from sd_db import draft, workflow
+from sd_db.writes import create_assignment
 from sd_dashboard import decisions, v2
 
 from support import NOW, ScreenCase, before_5648
@@ -134,6 +135,43 @@ class TheDocument(ScreenCase):
 
     def test_no_decisions_is_an_empty_list(self):
         self.assertEqual(decisions.document(self.connection)["decisions"], [])
+
+
+class TheDrafts(ScreenCase):
+    """Pack sd:6361: a planning item whose newest draft assignment is done lists with its spec and open questions."""
+
+    def drafted(self, item, status="done", ended="2026-10-26T20:00:00Z"):
+        assignment = create_assignment(self.connection, role="author", status=status, item=item)
+        self.connection.execute("UPDATE assignment SET scope = ?, ended = ? WHERE id = ?", (draft.SCOPE, ended, assignment))
+        self.connection.commit()
+        return assignment
+
+    def test_a_drafted_planning_item_lists_with_its_spec_and_open_draft_questions(self):
+        item = self.item("Drafted <work>", repo=self.repo(), status="planning")
+        self.drafted(item)
+        self.note(item, "Draft spec:\n\n## Problem\nCaptures wait <b>.", kind="comment", session="draft:9")
+        self.note(item, "Which?\nOption: A\nOption: B", kind="question", session="draft:9")
+        settled = self.note(item, "Done?\nOption: Yes\nOption: No", kind="question", session="draft:9")
+        self.connection.execute("UPDATE note SET resolved_at = ? WHERE id = ?", ("2026-10-26T21:00:00Z", settled))
+        self.note(item, "The operator's own?\nOption: A\nOption: B", kind="question")
+        self.connection.commit()
+        doc = decisions.document(self.connection)
+        self.assertEqual(doc["drafts"], [{
+            "item": item, "title": "Drafted <work>", "repo": "/repos/system", "drafted": "2026-10-26T20:00:00Z",
+            "spec": "## Problem\nCaptures wait <b>.", "questions": 1,
+            "revision": workflow.item_state(self.connection, item)["revision"]}])
+
+    def test_only_a_planning_item_whose_newest_draft_is_done_lists(self):
+        ready = self.item("Ready already", status="ready")
+        self.drafted(ready)
+        retried = self.item("Drafted, then blocked", status="planning")
+        self.drafted(retried)
+        self.drafted(retried, status="blocked")
+        running = self.item("Drafting now", status="planning")
+        self.drafted(running, status="running", ended=None)
+        plain = self.item("Never drafted", status="planning")
+        self.note(plain, "Draft spec:\n\nnot from a draft run", kind="comment")
+        self.assertEqual(decisions.document(self.connection)["drafts"], [])
 
 
 class TheAnswer(ScreenCase):
@@ -438,6 +476,59 @@ class TheScript(unittest.TestCase):
         self.assertEqual(out["gets"], ["/api/decisions"])
         self.assertIn("Not recorded: note 7 offers no option Option lines", out["R"]["rows"])
         self.assertEqual(out["R"]["rows"].count('data-option="'), 2)
+
+
+def draft_row(**changes):
+    return {"item": 6361, "title": "Lead drafts <specs>", "repo": "/repos/pack", "drafted": "2026-10-26T20:00:00Z",
+            "spec": "## Problem\n<b>not markup</b>", "questions": 0, "revision": "a" * 64, **changes}
+
+
+class TheDraftsScript(unittest.TestCase):
+    """Pack sd:6361: Drafts above the questions, one row per drafted item; Mark ready posts the status and revision."""
+
+    run_page = TheScript.run_page
+
+    TAP = ("const tap = (item, disabled) => ELS.drafts.listeners.click[0]({ target: { closest: s => s === 'button[data-ready]'"
+           " ? { dataset: { ready: String(item) }, disabled } : null } });\n")
+
+    def test_a_drafted_items_mark_ready_posts_status_and_revision(self):
+        doc = json.dumps({"decisions": [], "drafts": [draft_row()]})
+        out = self.run_page(self.TAP + "R.rows = ELS.drafts.html; R.hidden = ELS['drafts-sec'].hidden; tap(6361, false); await flush();"
+                            " R.after = ELS.drafts.html;",
+                            f"""(path, body) => path === '/api/decisions' ? [200, {doc}] : [200, {{ revision: '{"b" * 64}' }}]""")
+        self.assertEqual(out["posts"], [["/api/items/6361/status", {"status": "ready", "revision": "a" * 64}, 64]])
+        rows = out["R"]["rows"]
+        self.assertFalse(out["R"]["hidden"])
+        self.assertIn('<button type="button" class="btn sm" data-ready="6361">Mark ready</button>', rows)
+        self.assertIn("&lt;b&gt;not markup&lt;/b&gt;", rows)
+        self.assertIn("Lead drafts &lt;specs&gt;", rows)
+        self.assertIn("Ready", out["R"]["after"])
+        self.assertNotIn("data-ready=", out["R"]["after"])
+
+    def test_mark_ready_is_off_while_a_draft_question_is_open(self):
+        doc = json.dumps({"decisions": [], "drafts": [draft_row(questions=2)]})
+        out = self.run_page(self.TAP + "R.rows = ELS.drafts.html; tap(6361, true); tap(6361, false); await flush();",
+                            f"(path, body) => [200, {doc}]")
+        self.assertIn('data-ready="6361" disabled>Mark ready</button>', out["R"]["rows"])
+        self.assertIn("2 open questions: answer below", out["R"]["rows"])
+        self.assertEqual(out["posts"], [])
+
+    def test_a_stale_mark_ready_reads_again_and_a_refusal_stays_in_its_row(self):
+        doc = json.dumps({"decisions": [], "drafts": [draft_row()]})
+        stale = self.run_page(self.TAP + "tap(6361, false); await flush(); R.note = ELS['decisions-note'].textContent;",
+                              f"""(path, body) => path === '/api/decisions' ? [200, {doc}]
+                                  : [409, {{ error: 'item 6361 changed; reload it', reload: true }}]""")
+        self.assertEqual(stale["gets"], ["/api/decisions", "/api/decisions"])
+        self.assertIn("Not marked ready: item 6361 changed", stale["R"]["note"])
+        refused = self.run_page(self.TAP + "tap(6361, false); await flush(); R.rows = ELS.drafts.html;",
+                                f"""(path, body) => path === '/api/decisions' ? [200, {doc}]
+                                    : [400, {{ error: 'item 6361 has 1 open draft question(s)' }}]""")
+        self.assertEqual(refused["gets"], ["/api/decisions"])
+        self.assertIn("Not marked: item 6361 has 1 open draft question(s)", refused["R"]["rows"])
+
+    def test_no_draft_hides_the_group(self):
+        out = self.run_page("R.hidden = ELS['drafts-sec'].hidden;", "(path, body) => [200, { decisions: [] }]")
+        self.assertTrue(out["R"]["hidden"])
 
 
 def ruling_group(**changes):
