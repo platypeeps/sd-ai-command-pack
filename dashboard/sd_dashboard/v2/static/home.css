@@ -54,6 +54,11 @@ html[data-kiosk] .tiles-edit { display: none; }
   border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer;
 }
 .tile .open:hover { background: var(--color-well); }
+/* sd:6163: the web UI tile is a link, or a plain box naming why it cannot open. */
+.tile.web a.open { text-decoration: none; }
+.tile.web .open.off { cursor: default; }
+.tile.web .open.off:hover { background: transparent; }
+.tile.web .why { grid-column: 2; font-size: var(--text-xs); color: var(--color-muted); overflow-wrap: anywhere; }
 .tile .open .i { grid-row: 1 / span 3; margin-top: 2px; }
 .tile .nm { font: 600 var(--text-2xs)/1.25 var(--font-label); letter-spacing: 0.09em; text-transform: uppercase; }
 .tile .st { font: 500 var(--text-md)/1.25 var(--font-data); color: var(--color-ink); overflow-wrap: anywhere; }

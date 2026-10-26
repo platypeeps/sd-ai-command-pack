@@ -1038,6 +1038,34 @@ class PipelineTests(ReviewFixture):
         self.assertNotIn("no check ran", stream.getvalue())
         self.assertIn("test ran", stream.getvalue())
 
+    def test_a_plain_gate_failure_names_the_failing_check_and_its_log(self) -> None:
+        """sd:6075: a gate that failed with no missing tool or timeout named
+        neither the failing check nor where sd-check kept its output. The
+        record comes from the real sd-check, so the path is one it wrote."""
+        root = self.make_repo()
+        self.prepare(root)
+        (root / "gate.sh").write_text("#!/bin/sh\necho 'FAIL: test_widget' >&2\nexit 1\n", encoding="utf-8")
+        self.local_block(root, "test: sh gate.sh", "lint: sh -c 'echo lint passed'")
+        report = sd_review.run_check(root, sd_review.subprocess_runner, self.environment(), 60)
+        failed = next(record for record in report["checks"] if record["name"] == "test")
+        self.assertTrue(pathlib.Path(failed["output_path"]).is_file(), failed)
+        runner = FakeRunner({"sd-check": sd_review.Completed(1, json.dumps({"checks": report["checks"]}), "")})
+        result = self.run_review(root, runner)
+        self.assertEqual(result["status"], "gate_failed")
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        text = stream.getvalue()
+        self.assertIn(f"failed check: test: test exit 1; output: {failed['output_path']}", text)
+        self.assertNotIn("failed check: lint", text)
+        # A failed record with no kept output says so, and a gate with no
+        # record at all says that, rather than naming nothing.
+        bare = [{"name": "check", "status": "fail", "exit_code": 2, "failed_steps": ["make target check"],
+                 "reason": "output not kept: disk full"}]
+        self.assertEqual(sd_review.gate_failed_checks({"checks": bare}),
+                         ["  failed check: check: make target check; output not kept: disk full"])
+        self.assertEqual(sd_review.gate_failed_checks({"checks": None, "detail": "x\nsd-check: bad config"}),
+                         ["  failed check: none recorded; sd-check said: sd-check: bad config"])
+
     def test_a_gate_that_timed_out_names_the_timeout_flag(self) -> None:
         """sd:1560: a gate stopped at its bound says so and names the flag that
         gives it longer, whether sd-check killed one entrypoint, no gate slot

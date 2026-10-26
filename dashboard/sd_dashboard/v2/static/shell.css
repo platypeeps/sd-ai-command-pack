@@ -694,6 +694,9 @@ body[data-only-new] [data-changed]:not([data-new]) { display: none; }
 .ledger th { text-align: left; font: 600 var(--text-2xs)/1 var(--font-label); letter-spacing: 0.09em; text-transform: uppercase; color: var(--color-muted); padding: var(--space-xs); border-bottom: var(--rule-hair) solid var(--color-rule); white-space: nowrap; }
 .ledger td { padding: var(--space-2xs) var(--space-xs); height: var(--row); border-bottom: var(--rule-hair) solid var(--color-rule-2); vertical-align: middle; }
 .ledger .g { text-align: center; font-family: var(--font-data); }
+/* A date cell (sd:6185): every Due and When cell, in a ledger or Tasks' list, keeps its date on one line; the title
+ * column takes the wrap. No page sets a width for it. */
+td:is(.due, .when) { white-space: nowrap; }
 /* A row that opens something answers the pointer; a band or a heading row does not. */
 .ledger tbody tr[data-id] { cursor: pointer; }
 .ledger tbody tr[data-id]:hover td { background: var(--color-well); }

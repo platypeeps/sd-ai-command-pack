@@ -257,8 +257,12 @@ class IdempotencyTests(InstallerHarness):
         `UserPromptSubmit` sees the bare slash form, which reaches no tool
         call at all. The last names the two tools that file a GitHub issue,
         and nothing wider (sd:2256). `sd-session-beat` keeps the session
-        registry: the tools that name a path, and the end (sd:6024). Pinned whole, because what the pack registers in
-        somebody else's settings file is not a detail to drift.
+        registry: the tools that name a path, and the end (sd:6024). The
+        readers sit in their own group, so a reading session holds its
+        worktree too, and an older install gains them on the next run with
+        no second entry under the Bash group (sd:6152). Pinned whole,
+        because what the pack registers in somebody else's settings file is
+        not a detail to drift.
         """
         self.assertEqual(
             sd_install.HOOK_SPECS,
@@ -269,10 +273,26 @@ class IdempotencyTests(InstallerHarness):
                 ("bin/sd-skill-use", "UserPromptSubmit", ("",)),
                 ("bin/sd-issue-guard", "PreToolUse",
                  ("Bash|mcp__github__issue_write",)),
-                ("bin/sd-session-beat", "PreToolUse", ("Bash|Edit|Write|NotebookEdit",)),
+                ("bin/sd-session-beat", "PreToolUse", ("Bash|Edit|Write|NotebookEdit", "Read|Grep|Glob")),
                 ("bin/sd-session-beat", "SessionEnd", ("",)),
             ),
         )
+
+    def test_an_older_install_gains_the_reader_group_once(self):
+        """sd:6152: a settings file written before the readers holds the beat under the Bash group alone.
+        A run adds the reader group and leaves one beat entry in the Bash group."""
+        self.install()
+        settings = self.home / ".claude" / "settings.json"
+        data = json.loads(settings.read_text(encoding="utf-8"))
+        data["hooks"]["PreToolUse"] = [group for group in data["hooks"]["PreToolUse"]
+                                       if group["matcher"] != "Read|Grep|Glob"]
+        settings.write_text(json.dumps(data), encoding="utf-8")
+        self.install()
+        groups = {group["matcher"]: [entry["command"] for entry in group["hooks"]]
+                  for group in self.settings["hooks"]["PreToolUse"]}
+        beat = [command for command in groups["Bash|Edit|Write|NotebookEdit"] if command.endswith("sd-session-beat")]
+        self.assertEqual(len(beat), 1)
+        self.assertEqual(groups["Read|Grep|Glob"], beat)
 
 
 class OtherPeoplesFilesTests(InstallerHarness):

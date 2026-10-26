@@ -515,7 +515,7 @@ def _open_batch(connection: sqlite3.Connection, item: int, expected_revision: st
 
 
 def rule(connection: sqlite3.Connection, item: int, note: int, option: str, *,
-         expected_revision: str, who: str) -> dict:
+         expected_revision: str, who: str, session: str | None = None) -> dict:
     """Label question `note` of batch `item` with `option`: the Decisions ruling, under the item revision.
 
     Approve on an Approve-or-Reject question files the task `apply` would,
@@ -523,6 +523,9 @@ def rule(connection: sqlite3.Connection, item: int, note: int, option: str, *,
     task that ref already names (a withdrawn approval's) is named instead. The
     state's `filed` is `{"item", "created"}`, or None when nothing was filed.
     So `apply` finds the ref and files nothing more (sd:4924).
+
+    `session` is the filed task's session, `who` when not given (pack sd:6046); the
+    ruling keeps `who`, which the Review page shows as "ruled by".
     """
     with transaction(connection):
         _, found = _open_batch(connection, item, expected_revision)
@@ -538,7 +541,7 @@ def rule(connection: sqlite3.Connection, item: int, note: int, option: str, *,
         if option == APPROVE and question["options"] == [APPROVE, REJECT]:
             held = writes.item_by_external(connection, REF_SOURCE, f"{APPROVED}:{note}")
             filed = ({"item": held["id"], "created": False} if held is not None
-                     else {"item": _approval_task(connection, found, question, who), "created": True})
+                     else {"item": _approval_task(connection, found, question, who, session=session), "created": True})
         tail = "" if filed is None else f" -> sd:{filed['item']}"
         ruled = workflow.add_item_note(connection, item, kind="decision", who=who,
                                        body=f"Ruling on note #{note}: {option}{tail}",
@@ -823,14 +826,15 @@ def _approval_body(batch: dict, question: dict, ruling: int) -> str:
                       f"of sd:{batch['item']['id']} ({batch['ref']})."])
 
 
-def _approval_task(connection: sqlite3.Connection, batch: dict, question: dict, who: str, body: str = "") -> int:
+def _approval_task(connection: sqlite3.Connection, batch: dict, question: dict, who: str, body: str = "", *,
+                   session: str | None = None) -> int:
     """File an approval's task under `review-approved:<note>`; the caller checked the ref is free.
 
     Its repo is the batch's, else the one the header's Source names (`_source_repo`).
     """
     repo = batch["item"]["repo"] or _source_repo(connection, batch["header"]["source"])
     task = workflow.capture_task(connection, title=question["text"].splitlines()[0], body=body,
-                                 repo=repo, who=who)["item"]["id"]
+                                 repo=repo, who=who, session=session)["item"]["id"]
     writes.set_item_fields(connection, task, source=REF_SOURCE, external_id=f"{APPROVED}:{question['note']}")
     return task
 

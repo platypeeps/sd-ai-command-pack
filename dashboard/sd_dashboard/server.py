@@ -819,6 +819,8 @@ class Dashboard(BaseHTTPRequestHandler):
             return self._design(path[len("/designs/") :])
         if path.startswith("/research/deck/"):
             return self._research_deck(context, path[len("/research/deck/") :])
+        if path == "/home/assistant":
+            return self._home_assistant(context)
         if path.startswith("/api/adversarial/") and not split.query:
             from . import adversarial
 
@@ -1211,6 +1213,18 @@ class Dashboard(BaseHTTPRequestHandler):
             )
         # A `*.app.html` page gets a sandbox and its own script; every other page gets none (sd:1502).
         self._send(200, body, "text/html; charset=utf-8", policy=policy(root, name, body))
+
+    def _home_assistant(self, context) -> None:
+        """Home's web UI tile (sd:6163): a 302 to Home Assistant from local-ha-mcp's settings, or a 503 naming why not."""
+        from .home_screen import web
+
+        if not self._session(context):
+            return self._send(403, error_page(403, f"Reload the page to open Home Assistant: {SESSION_ENDED}").encode("utf-8"),
+                              "text/html; charset=utf-8")
+        location, why = web()
+        if location is None:
+            return self._send(503, error_page(503, f"Home Assistant cannot open: {why}.").encode("utf-8"), "text/html; charset=utf-8")
+        return self._send(302, b"", "text/plain; charset=utf-8", overrides={"Location": location})
 
     def _research_deck(self, context, key: str) -> None:
         """One experiment's built status deck, `docs/dashboard/deck.pptx` in its checkout, as a download (pack sd:5525)."""
