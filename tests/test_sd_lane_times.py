@@ -77,6 +77,27 @@ class Times(unittest.TestCase):
         [found] = sd_lane.entry_times(self.connection, REPOSITORY, now=NOW)
         self.assertEqual((found["gate"], found["total"]), (600, 1200))
 
+    def test_a_reclaimed_entry_sums_the_prepare_of_each_claim(self):
+        """pack sd:6281: a reclaim back to pending ended the gate at the first claim's 60 s."""
+        base = {"item": 1, "title": "item 1", "enqueued_at": at(130)}
+        self.row("e1", 130, status="pending", **base)
+        self.row("e1", 125, status="running", step="prepare", started_at=at(125), **base)
+        self.row("e1", 124, status="pending", **base)
+        self.row("e1", 70, status="running", step="prepare", started_at=at(70), **base)
+        self.row("e1", 10, status="running", step="merge", started_at=at(70), **base)
+        self.row("e1", 9, status="merged", step="merge", started_at=at(70), finished_at=at(9), **base)
+        [found] = sd_lane.entry_times(self.connection, REPOSITORY, now=NOW)
+        self.assertEqual((found["wait"], found["gate"], found["total"]), (300, 3660, 7260))
+
+    def test_a_reclaimed_entry_still_in_its_second_prepare_has_no_gate_yet(self):
+        base = {"item": 1, "title": "item 1", "enqueued_at": at(130)}
+        self.row("e1", 130, status="pending", **base)
+        self.row("e1", 125, status="running", step="prepare", started_at=at(125), **base)
+        self.row("e1", 124, status="pending", **base)
+        self.row("e1", 70, status="running", step="prepare", started_at=at(70), **base)
+        [found] = sd_lane.entry_times(self.connection, REPOSITORY, now=NOW)
+        self.assertIsNone(found["gate"])
+
     def test_the_page_reads_medians_the_slowest_entry_and_seven_days_only(self):
         self.entry("e1", 1, enqueued=100, claimed=90, merge=80, ended=79)
         self.entry("e2", 2, enqueued=300, claimed=200, merge=190, ended=185)

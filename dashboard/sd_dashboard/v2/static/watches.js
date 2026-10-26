@@ -117,7 +117,8 @@
   });
   // The shell's bar filters the ledger by its words.
   document.addEventListener('shell:filter', e => { if (e.detail.q === F.q) return; F.q = e.detail.q || ''; redraw(); });
-  $('empty').addEventListener('click', e => { if (e.target.closest('[data-fclear]')) { F.stage = ''; redraw(); } });
+  // The empty state's Clear filters clears the bar's words too: a search that matched nothing kept the list empty (sd:6285).
+  $('empty').addEventListener('click', e => { if (e.target.closest('[data-fclear]')) { F.stage = ''; F.q = ''; window.shell.filter(''); redraw(); } });
   $('rows-head').addEventListener('click', e => { if (window.shell.list.sortBy(e, L)) window.shell.list.keepFocus(e, draw); });
   $('pager').addEventListener('click', e => { if (window.shell.list.paging(e, L)) window.shell.list.keepFocus(e, draw); });
   $('rows').addEventListener('click', e => {
