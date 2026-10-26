@@ -14,6 +14,7 @@ before the promoted machine takes the hub's name, and passes.
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import subprocess
 import sys
@@ -470,6 +471,49 @@ class TheCommitBoundaries(FenceCase):
         connection.execute("COMMIT")
         self.assertEqual(len(self.asked()), 2)
         self.assertEqual(self.items(), 2)
+
+
+class TheAutocommitWindow(FenceCase):
+    """Lane review of 0bff04f7d: an autocommit write asks at prepare, so it must commit in that same call.
+
+    SQLite commits an autocommit statement when it runs to its end. Every
+    library write runs to its end inside `execute`; only `RETURNING`, read
+    partly, would hold the commit until a later fetch, past the fence.
+    """
+
+    def test_an_autocommit_write_has_committed_when_its_call_returns(self):
+        self.node()
+        self.name_hub(HUB_NAME)
+        connection = self.open()
+        reader = database.connect(write=False)
+        self.addCleanup(reader.close)
+        insert = "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', ?, '{}', '2026')"
+        writes_ = {
+            "execute": lambda: connection.execute(insert, ("a",)),
+            "cursor": lambda: connection.cursor().execute(insert, ("b",)),
+            "executemany": lambda: connection.executemany(insert, [("c",), ("d",)]),
+            "executescript": lambda: connection.executescript(
+                "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'e', '{}', '2026')"),
+        }
+        seen = 0
+        for name, write in writes_.items():
+            with self.subTest(path=name):
+                write()
+                count = reader.execute("SELECT count(*) FROM state WHERE kind = 'x'").fetchone()[0]
+                self.assertGreater(count, seen, "committed before the call returned")
+                seen = count
+
+    def test_no_library_statement_uses_returning(self):
+        """The one way a library write could commit after its call returns."""
+        found = [
+            f"{path.relative_to(support.PACK)}:{number}"
+            for folder in ("lib", "bin", "dashboard/sd_dashboard")
+            for path in sorted((support.PACK / folder).rglob("*"))
+            if path.suffix == ".py" or (path.parent.name == "bin" and path.is_file() and not path.suffix)
+            for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1)
+            if re.search(r"\bRETURNING\b", line)
+        ]
+        self.assertEqual(found, [], "a RETURNING write commits at its last fetch, which no authorizer sees")
 
 
 class TheRestore(FenceCase):
