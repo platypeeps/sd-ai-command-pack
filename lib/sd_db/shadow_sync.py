@@ -56,7 +56,8 @@ from .writes import (
     record_state,
     resolve_state,
     see_shadow,
-    stale_shadow_issues,
+    settle_shadow,
+    stale_shadow_rows,
     upsert_shadow,
 )
 
@@ -107,10 +108,14 @@ BUCKETS = (
 INTAKE = "intake"
 #: Repositories per intake sweep: GitHub refuses a long search query.
 INTAKE_GROUP = 5
-#: How long an open issue row outside intake goes unseen before `sync` reads
-#: it directly (pack sd:5415). A bucket sees a closure in its window; a week
-#: unseen means no bucket will, and an open answer starts the week again.
+#: How long an open row goes unseen before `sync` reads it directly: an
+#: issue outside intake (pack sd:5415) or a pull request (sd:6091). A bucket
+#: sees a closure in its window; a week unseen means no bucket will, and an
+#: open answer starts the week again.
 STALE_AFTER = timedelta(days=7)
+#: The stale rows one run reads at most (sd:6091, the operator's ruling of
+#: 2026-10-25: about 20 a run). 85 stale rows clear in five runs.
+REVISIT_LIMIT = 20
 
 #: `shadow.reason` (migration 34), strongest first, with the `why` words that
 #: give each: GitHub's buckets and Jira's `normalize`. Any other word is
@@ -725,19 +730,14 @@ def _observe_protection(connection: sqlite3.Connection, client, observed_at: str
     return summary
 
 
-def confirm_absent(connection: sqlite3.Connection, swept, client, *, tracker: str = TRACKER,
-                   stale=()) -> tuple[dict[str, str | None], list[str], list[str]]:
-    """Read each stored open issue a complete sweep missed, then each url of `stale`.
+def confirm_absent(connection: sqlite3.Connection, swept, client, *,
+                   tracker: str = TRACKER) -> tuple[dict[str, str | None], list[str], list[str]]:
+    """Read each stored open issue a complete sweep missed.
 
     Returns `(close, unknown, open)`. `close` maps each url to close to the
     `closed_at` its read gave, or None when that read gave none it could
     parse, read another issue (sd:5303), or answered 410 (pack sd:5415).
     `open` names the urls whose read said open.
-
-    `stale` names stored open issues outside intake that no search has seen
-    for `STALE_AFTER`, oldest first (pack sd:5415): a windowed bucket sees a
-    closure only while the issue is still the operator's, so these are read
-    by the same rules, on the same budget.
 
     Absence from a search is no proof of a closure: GitHub's index can omit
     an open issue for a while (sd:4880 lane review). So each one is read
@@ -761,7 +761,7 @@ def confirm_absent(connection: sqlite3.Connection, swept, client, *, tracker: st
     close: dict[str, str | None] = {}
     unknown: list[str] = []
     opened: list[str] = []
-    for url in dict.fromkeys([*urls, *stale]):
+    for url in dict.fromkeys(urls):
         match = ISSUE.fullmatch(url)
         if not match:
             unknown.append(f"{url}: not an issue url")
@@ -787,6 +787,117 @@ def confirm_absent(connection: sqlite3.Connection, swept, client, *, tracker: st
         else:
             opened.append(url)
     return close, unknown, opened
+
+
+def identity(url) -> tuple[str, str, int] | None:
+    """`(kind, owner/name, number)` of a GitHub pull request or issue url, lowered, or None."""
+    from .contribution_github import ISSUE, PULL
+
+    for kind, pattern in (("pull", PULL), ("issue", ISSUE)):
+        match = pattern.fullmatch(url) if isinstance(url, str) else None
+        if match:
+            return kind, f"{match[1]}/{match[2]}".lower(), int(match[3])
+    return None
+
+
+def _revisit_unsettled(connection: sqlite3.Connection, tracker: str) -> list[str]:
+    """The urls revisits read and left as they were, longest deferred first, from the last heartbeat (sd:6091)."""
+    row = connection.execute("SELECT body FROM state WHERE kind = 'heartbeat' AND key = ? ORDER BY id DESC LIMIT 1",
+                             (f"tracker-sync:{tracker}",)).fetchone()
+    try:
+        unsettled = json.loads(row["body"]).get("revisit_unsettled") if row else None
+    except (TypeError, ValueError, AttributeError, RecursionError):
+        return []
+    return [url for url in unsettled if isinstance(url, str)] if isinstance(unsettled, list) else []
+
+
+def revisit_rows(connection: sqlite3.Connection, planned: dict, *, tracker: str, intake, before: datetime,
+                 seen, unsettled=()) -> list[dict]:
+    """The stale open rows in the order a run reads them directly, oldest first (pack sd:5415, sd:6091).
+
+    A shadow row no search has seen since `before`, an issue outside intake
+    or a pull request, and a queued contribution whose last complete
+    observation is older than `before`: a windowed bucket stops returning a
+    row once it leaves the operator's searches, and a repository that moved
+    answers no read under the old name. One url read serves both stores.
+    Each row is `{url, shadow, key}`: the url to read, the stored shadow url
+    or None, and the contribution key or None. A url this run's search saw
+    is current and is left out. One in `unsettled`, which a run read and
+    left as it was -- a failed read, or a contribution's unmoved answer --
+    goes after the rest, in the order it was deferred, so rows that always
+    fail cannot starve the others, nor the oldest of them the rest. The
+    caller reads the first `REVISIT_LIMIT`.
+    """
+    floor = datetime.min.replace(tzinfo=timezone.utc)
+    current = {identity(url) or url for url in seen}
+    rows: dict = {}
+    for row in stale_shadow_rows(connection, tracker=tracker, outside=tuple(intake),
+                                 before=before.isoformat(timespec="seconds")):
+        name = identity(row["url"]) or row["url"]
+        if name not in current:
+            rows.setdefault(name, {"url": row["url"], "shadow": row["url"], "key": None,
+                                   "at": parse_iso(row["last_seen"]) or floor})
+    for entry in planned["pending"]:
+        snapshot = planned["snapshots"].get(entry["key"]) or {}
+        observed = parse_iso((snapshot.get("observation") or {}).get("observed_at"))
+        name = identity(entry.get("url"))
+        if name is None or observed is None or observed >= before or name in current:
+            continue
+        rows.setdefault(name, {"url": entry["url"], "shadow": None, "key": None, "at": observed})["key"] = entry["key"]
+    # By identity: a shadow row and a contribution can spell one url two ways.
+    turn = {identity(url) or url: index for index, url in enumerate(unsettled)}
+    ordered = sorted(rows.values(), key=lambda row: (turn.get(identity(row["url"]) or row["url"], -1),
+                                                     row["at"], row["url"]))
+    return [{name: row[name] for name in ("url", "shadow", "key")} for row in ordered]
+
+
+def revisit(client, url: str) -> dict:
+    """What one direct read says of a stale row (sd:6091).
+
+    `{state, closed_at, merged_at}`, plus `url`, `repo` and `number` when
+    GitHub answered under another url of the same kind: a transferred or
+    renamed repository redirects the old one, and the row moves there. Or
+    `{unknown: reason}`, with `unread` when the budget stopped the read.
+    An issue read follows `confirm_absent`'s rules: a 410, a pull request
+    or, unmoved, another number closes it. A pull request read settles it
+    `merged` or `closed` on its own answer. Any other failed, refused or
+    malformed read is unknown, a 404 too.
+    """
+    from .contribution_github import Exhausted, Gone, Unavailable
+
+    name = identity(url)
+    if name is None:
+        return {"unknown": f"{url}: not a pull request or issue url"}
+    kind, slug, number = name
+    try:
+        payload = client.get(f"repos/{slug}/{'pulls' if kind == 'pull' else 'issues'}/{number}")
+    except Gone:
+        return {"state": "closed", "closed_at": None}
+    except Exhausted as error:
+        return {"unknown": f"{url}: {error}", "unread": True}
+    except Unavailable as error:
+        return {"unknown": f"{url}: {error}"}
+    if not isinstance(payload, dict):
+        return {"unknown": f"{url}: the read is not an object"}
+    if kind == "issue" and "pull_request" in payload:
+        return {"state": "closed", "closed_at": settled_at(payload.get("closed_at"))}
+    if type(payload.get("number")) is not int:
+        return {"unknown": f"{url}: the read has no number"}
+    answer: dict = {}
+    moved = identity(payload.get("html_url"))
+    if moved is not None and moved[0] == kind and moved != name and moved[2] == payload["number"]:
+        answer = {"url": payload["html_url"], "repo": "/".join(payload["html_url"].split("/")[3:5]),
+                  "number": moved[2]}
+    elif payload["number"] != number:
+        return {"state": "closed", "closed_at": None} if kind == "issue" else {
+            "unknown": f"{url}: the read answers another number"}
+    state = payload.get("state")
+    if state not in ("open", "closed") or (kind == "pull" and type(payload.get("merged")) is not bool):
+        return {"unknown": f"{url}: the read says state {state!r}"}
+    if kind == "pull" and payload["merged"]:
+        state = "merged"
+    return {**answer, "state": state, "closed_at": None if state == "open" else settled_at(payload.get("closed_at")),
+            "merged_at": settled_at(payload.get("merged_at")) if state == "merged" else None}
 
 
 @dataclass
@@ -937,14 +1048,48 @@ def _sync(
     result = collect(previous, moment, runner, since=since,
                      max_requests=max_requests, max_seconds=max_seconds, budget=search_budget, intake=intake)
     # Stale rows wait for a run whose buckets completed: one that failed may fail these reads too.
-    seen = {row["url"] for row in result.issues}
-    stale = [row["url"] for row in stale_shadow_issues(
-        connection, tracker=tracker, outside=intake, before=(moment - STALE_AFTER).isoformat(timespec="seconds"))
-        if row["url"] not in seen] if result.ok else []
-    closing, unconfirmed, opened = confirm_absent(connection, result.swept, Client(search_budget, runner=runner),
-                                                  tracker=tracker, stale=stale)
+    reader = Client(search_budget, runner=runner)
+    closing, unconfirmed, opened = confirm_absent(connection, result.swept, reader, tracker=tracker)
     if unconfirmed:
         result.incomplete.append(f"{len(unconfirmed)} absent issue(s) left open unread, first {unconfirmed[0]}")
+    unsettled = _revisit_unsettled(connection, tracker)
+    stale = revisit_rows(connection, planned, tracker=tracker, intake=intake, before=moment - STALE_AFTER,
+                         seen={row["url"] for row in result.issues}, unsettled=unsettled) if result.ok else []
+    settled: dict[str, dict] = {}
+    unread: list[str] = []
+    read: set[str] = set()
+    deferred: list[str] = []
+    for row in stale[:REVISIT_LIMIT]:
+        answer = revisit(reader, row["url"])
+        if "unknown" in answer:
+            unread.append(answer["unknown"])
+            if not answer.get("unread"):
+                read.add(row["url"])
+                deferred.append(row["url"])
+            continue
+        read.add(row["url"])
+        folded = False
+        if row["key"] and answer.get("url"):
+            refused = contribution_sync.fold(connection, planned, row["key"], answer["url"])
+            if refused:
+                result.incomplete.append(f"{row['key']}: {refused}")
+            folded = not refused
+        if row["shadow"] and (answer.get("url") or answer["state"] != "open"):
+            settled[row["shadow"]] = answer
+        elif row["shadow"]:
+            opened.append(row["shadow"])
+        if row["key"] and not folded:
+            # The contribution stays stale: its own queue read settles an unmoved one, and an item refused the fold.
+            deferred.append(row["url"])
+    if stale:
+        # A deferral lasts while its row is stale. A row read this run goes to the back of the line or leaves
+        # it; one the budget did not reach keeps its place. Urls compare by identity, as `revisit_rows` orders them.
+        current = {identity(row["url"]) or row["url"] for row in stale}
+        done = {identity(url) or url for url in read}
+        unsettled = [url for url in unsettled if (identity(url) or url) in current
+                     and (identity(url) or url) not in done] + deferred
+    if unread:
+        result.incomplete.append(f"{len(unread)} stale row(s) left open unread, first {unread[0]}")
     budget.remaining -= search_budget.requests
     budget.requests = search_budget.requests
     search_complete = result.ok
@@ -972,6 +1117,7 @@ def _sync(
     with transaction(connection):
         written = store(connection, result.issues)
         close_shadow(connection, tracker=tracker, closed=closing)
+        settle_shadow(connection, tracker=tracker, settled=settled)
         see_shadow(connection, tracker=tracker, urls=opened)
         previous_time = parse_iso(read_watermark(connection, tracker))
         # A complete explicit recovery can still leave an uncovered prefix.
@@ -988,7 +1134,7 @@ def _sync(
                   "window_start": result.window_start, "window_end": result.window_end,
                   "requests": result.requests, "coverage": result.coverage,
                   "queued": detail["queued"], "incomplete": detail["incomplete"],
-                  "intake_incomplete": result.incomplete},
+                  "intake_incomplete": result.incomplete, "revisit_unsettled": unsettled},
         )
     contribution_sync.dispatch_pending(connection, notifier=notifier, keys=detail["completed_keys"],
                                        deadline=budget.deadline)

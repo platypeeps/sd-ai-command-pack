@@ -143,7 +143,32 @@ def plan(connection):
                               "depends_on": row["depends_on"], "explicit": True})
     pending = _merge(queued["pending"], additions)
     snapshots = {row["key"]: core.snapshot(connection, row["key"]) for row in pending}
-    return {"pending": pending, "revision": queued["revision"], "snapshots": snapshots}
+    # A key `fold` moved stays in a queue saved before the fold (sd:6091); its new key is queued instead.
+    pending = [row for row in pending if not snapshots[row["key"]].get("moved_to")]
+    return {"pending": pending, "revision": queued["revision"],
+            "snapshots": {row["key"]: snapshots[row["key"]] for row in pending}}
+
+
+def fold(connection, planned, key, url):
+    """Move a queued contribution to `url`, where GitHub now answers for it (sd:6091).
+
+    `contributions.fold` moves its state; here the queue entry `planned`
+    holds takes the new key, so `refresh` reads the new url this run. Both
+    snapshots are dropped: the fold wrote both keys, and `refresh` reads
+    them again. Returns "" or the refusal's reason, such as an item that
+    names the old url.
+    """
+    from . import contributions as core
+
+    try:
+        moved = core.fold(connection, key, url)
+    except WorkflowError as error:
+        return str(error)
+    entries = [{**row, "key": moved, "url": url} if row["key"] == key else row for row in planned["pending"]]
+    planned["pending"] = _merge(entries, [])
+    for name in (key, moved):
+        planned["snapshots"].pop(name, None)
+    return ""
 
 
 def refresh(connection, planned, issues, *, client, observed_at, search_complete=False, reserve=0,
