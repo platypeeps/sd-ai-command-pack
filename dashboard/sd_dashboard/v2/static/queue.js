@@ -124,7 +124,7 @@
   // on me (the run is held, or an open question note asks); stalled (the builder's log has not grown for 15 min, shown
   // only); lost (no supervisor beat for 3 min, which the dispatcher's next reap settles). Cancel asks first and posts the
   // assignment cancel route; Log copies a `tail -f` of the run's log. Under them, the runs that ended in the last 24 hours
-  // with their outcome, and Retry on a blocked bundle, which queues its items again at once.
+  // with their outcome, and Retry and Send to builder on a blocked or cancelled bundle (below).
   const BSTATE = { working: [G.live, 'WORKING'], waiting: [G.warning, 'WAITING ON ME'], stalled: [G.caution, 'STALLED'], lost: [G.unknown, 'LOST'] };
   const usd = n => `$${Number(n || 0).toFixed(2)}`;
   const names = r => r.items.length ? html`${r.items.map((m, i) => html`${i ? '; ' : ''}<code>sd:${String(m.item)}</code> ${m.title}`)}` : 'no items recorded';
@@ -135,9 +135,13 @@
     const out = r.quiet == null ? 'no output yet' : `output ${dur(r.quiet)} ago`;
     return html`<li class="qrow" data-state="${r.state}"><span class="g g-${g[0]}" aria-hidden="true">${g[1]}</span><span class="st">${st}</span><span class="s"><span><span class="sr">${st.toLowerCase()} · </span>${names(r)}</span><small><b>${r.name}</b> · ${r.model || 'model not recorded'} · step <b>${r.step}</b> · ${dur(r.elapsed)} · ${out} · ${usd(r.usd)} so far${r.why ? ` · ${r.why}` : ''}</small></span><span class="ends"><div class="ctl" role="group" aria-label="Run ${r.run}">${bbtn('cancel', r, 'Cancel…', `Cancel build run ${r.run}`, r.cancel.allowed ? '' : r.cancel.reason || 'cancel is off')}${logBtn(r)}</div></span></li>`;
   }
+  // A blocked or cancelled bundle keeps its worktree: Retry queues it again at once; Send to builder (pack sd:6020) asks
+  // for a finding first, notes it on each item, and queues it again, so the next builder resumes that worktree with it.
+  const AGAIN = ['blocked', 'cancelled'];
   function endedRow(r) {
     const g = r.outcome === 'done' ? G.ok : r.retry.bundle === 'blocked' ? G.warning : G.queued;
-    return html`<li class="qrow" data-state="ended"><span class="g g-${g[0]}" aria-hidden="true">${g[1]}</span><span class="st">${(r.retry.bundle === 'blocked' ? 'BLOCKED' : r.outcome || 'ended').toUpperCase()}</span><span class="s"><span>${names(r)}</span><small><b>${r.name}</b> · ${r.outcome} at ${r.step} · ended ${at(r.ended)} · ${usd(r.usd)}${r.detail ? ` · ${r.detail}` : ''}</small></span><span class="ends"><div class="ctl" role="group" aria-label="Run ${r.run}">${r.retry.bundle === 'blocked' ? bbtn('retry', r, 'Retry', `Retry build run ${r.run}: queue its items again`, r.retry.allowed ? '' : r.retry.reason) : ''}${logBtn(r)}</div></span></li>`;
+    const off = r.retry.allowed ? '' : r.retry.reason;
+    return html`<li class="qrow" data-state="ended"><span class="g g-${g[0]}" aria-hidden="true">${g[1]}</span><span class="st">${(r.retry.bundle === 'blocked' ? 'BLOCKED' : r.outcome || 'ended').toUpperCase()}</span><span class="s"><span>${names(r)}</span><small><b>${r.name}</b> · ${r.outcome} at ${r.step} · ended ${at(r.ended)} · ${usd(r.usd)}${r.detail ? ` · ${r.detail}` : ''}</small></span><span class="ends"><div class="ctl" role="group" aria-label="Run ${r.run}">${AGAIN.includes(r.retry.bundle) ? html`${bbtn('retry', r, 'Retry', `Retry build run ${r.run}: queue its items again`, off)}${bbtn('send', r, 'Send to builder…', `Send a finding to the builder of run ${r.run}`, off)}` : ''}${logBtn(r)}</div></span></li>`;
   }
   function drawBuilds() {
     const head = html`<h2 id="builds-h" class="times-h">Builds</h2>`;
@@ -160,14 +164,24 @@
     if (act === 'cancel' && !(await S.confirm({ title: `Cancel build run ${r.run} (${what})?`,
       body: `The supervisor stops the ${r.step} step at its next beat, keeps the worktree, ends the bundle cancelled and moves ${r.items.length > 1 ? 'its items' : 'the item'} back to ready. Nothing is enqueued.`,
       cli: `sd assignments cancel ${r.cancel.assignment} --if-revision ${r.cancel.revision}`, ok: 'Cancel build', keep: 'Keep it running' }))) return;
+    let finding = '';
+    if (act === 'send') {
+      const { yes, values } = await S.ask({ title: `Send to builder: run ${r.run} (${what})?`, ok: 'Send', keep: 'Cancel', danger: false,
+        body: `The finding goes on ${r.items.length > 1 ? 'each item' : 'the item'} as a note, and the bundle queues again. Its next builder resumes ${r.worktree || 'the same worktree'} on its branch and fixes the finding first.`,
+        fields: [{ name: 'finding', label: 'Finding', required: true, placeholder: 'What the builder should fix' }] });
+      finding = (values && values.finding || '').trim();
+      if (!yes || !finding) return;
+    }
+    const done = act === 'cancel' ? 'cancelled' : act === 'send' ? 'sent to the builder' : 'retried';
     busy = true; drawBuilds();
     try {
       if (act === 'cancel') await S.post(`/api/assignments/${r.cancel.assignment}/cancel`, { revision: r.cancel.revision });
-      else await S.post('/api/queue/builds/retry', { assignment: r.retry.assignment, revision: r.retry.revision });
-      builtSaid = { ok: true, text: act === 'cancel' ? `Run ${r.run} (${what}): cancel requested; it stops at its next beat.` : `${what} queued again for build.` };
+      else await S.post('/api/queue/builds/retry', { assignment: r.retry.assignment, revision: r.retry.revision, ...(finding ? { finding } : {}) });
+      builtSaid = { ok: true, text: act === 'cancel' ? `Run ${r.run} (${what}): cancel requested; it stops at its next beat.`
+        : act === 'send' ? `${what} sent to the builder with your finding.` : `${what} queued again for build.` };
     } catch (err) {
-      builtSaid = { ok: false, text: err.status >= 400 && err.status < 500 ? `Run ${r.run} not ${act === 'cancel' ? 'cancelled' : 'retried'}: ${err.message}`
-        : `Not known whether run ${r.run} was ${act === 'cancel' ? 'cancelled' : 'retried'}: ${err.message} Read the panel before you act again.` };
+      builtSaid = { ok: false, text: err.status >= 400 && err.status < 500 ? `Run ${r.run} not ${done}: ${err.message}`
+        : `Not known whether run ${r.run} was ${done}: ${err.message} Read the panel before you act again.` };
     }
     busy = false;
     await loadBuilds();

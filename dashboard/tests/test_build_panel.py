@@ -178,7 +178,7 @@ class BuildsPanel(Fixture):
         status, _, body = self.post("/api/queue/builds/retry", {"assignment": run["assignment"],
                                                                "revision": recent["retry"]["revision"]})
         self.assertEqual(status, 400, body)
-        self.assertIn("Retry takes a blocked one", body["error"])
+        self.assertIn("Retry takes a blocked or cancelled one", body["error"])
 
     def test_retry_with_a_stale_revision_is_a_409_and_writes_nothing(self):
         items = [self.ready()]
@@ -188,3 +188,43 @@ class BuildsPanel(Fixture):
         self.assertEqual(item_state(self.connection, items[0])["item"]["status"], "blocked")
         self.assertEqual(self.connection.execute(
             "SELECT COUNT(*) FROM assignment WHERE scope = 'build' AND status = 'queued'").fetchone()[0], 0)
+
+
+class SendToBuilder(Fixture):
+    claimed, panel = BuildsPanel.claimed, BuildsPanel.panel
+
+    def cancelled(self, items):
+        run = self.claimed(items)
+        build.end(self.connection, run["id"], "cancelled", "cancelled by the operator")
+        return run
+
+    def test_send_to_builder_notes_the_finding_and_queues_the_bundle_for_its_worktree(self):
+        """Pack sd:6020: a cancelled bundle takes a finding; each item gets the note, the bundle queues again under
+        its lead, and the next claim names the same branch and worktree."""
+        items = [self.ready(), self.ready()]
+        run = self.cancelled(items)
+        recent = self.panel(clock())["recent"][0]
+        self.assertEqual((recent["outcome"], recent["retry"]["allowed"]), ("cancelled", True))
+        status, _, body = self.post("/api/queue/builds/retry", {"assignment": run["assignment"],
+                                                               "revision": recent["retry"]["revision"],
+                                                               "finding": "  The label reads wrong on phones "})
+        self.assertEqual(status, 200, body)
+        for item in items:
+            notes = [row["body"] for row in self.connection.execute("SELECT body FROM note WHERE item = ?", (item,))]
+            self.assertIn("Send to builder: The label reads wrong on phones", notes)
+        again = build.claim(self.connection, owner="fixture", root=self.path.parent / "worktrees", **IDLE)
+        self.assertEqual((again["assignment"], again["branch"], again["work_path"]),
+                         (run["assignment"], run["branch"], run["work_path"]))
+        self.assertEqual(len(self.kicks), 1)
+
+    def test_send_to_builder_refuses_an_empty_or_long_finding_and_writes_nothing(self):
+        run = self.cancelled([self.ready()])
+        revision = self.panel(clock())["recent"][0]["retry"]["revision"]
+        for finding in ("", "   ", 7, "x" * (builds.FINDING_MAX + 1)):
+            status, _, body = self.post("/api/queue/builds/retry", {"assignment": run["assignment"],
+                                                                   "revision": revision, "finding": finding})
+            self.assertEqual(status, 400, (finding, body))
+        self.assertEqual(self.connection.execute(
+            "SELECT COUNT(*) FROM assignment WHERE scope = 'build' AND status = 'queued'").fetchone()[0], 0)
+        self.assertEqual(self.connection.execute(
+            "SELECT COUNT(*) FROM note WHERE body LIKE 'Send to builder:%'").fetchone()[0], 0)

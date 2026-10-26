@@ -1079,6 +1079,30 @@ R.after = ELS.builds.html;""")
         self.assertIn(["/api/queue/builds/retry", {"assignment": 5, "revision": "b" * 64}], [post[:2] for post in out["posts"]])
         self.assertIn("sd:5 queued again for build.", out["R"]["after"])
 
+    def test_send_to_builder_asks_for_the_finding_and_posts_it_with_the_retry(self):
+        """Pack sd:6020: a blocked or cancelled ended run offers Send to builder; it asks for the finding, then
+        queues the bundle again with it, so the next builder resumes the same worktree with that note."""
+        cancelled = dict(self.BUILDS["recent"][0], run="r2", outcome="cancelled", detail="cancelled by dashboard",
+                         items=[{"item": 6, "assignment": 6, "status": "cancelled", "title": "Six"}],
+                         retry={"assignment": 6, "revision": "c" * 64, "allowed": True, "reason": "", "bundle": "cancelled"})
+        builds = dict(self.BUILDS, recent=[*self.BUILDS["recent"], cancelled])
+        out = self.run_page(f"""const B = {json.dumps(builds)};
+window.ELSE = (p, b) => p === '/api/queue/builds' ? [200, B] : p === '/api/queue/builds/retry' ? [200, {{ run: 'r2', queued: [] }}] : [404, {{ error: 'no' }}];
+window.shell.ask = a => {{ OUT.asked = a; return Promise.resolve({{ yes: true, values: {{ finding: 'The label reads wrong on phones' }} }}); }};
+await window.PAGE_AGAIN.run(); await flush(); await flush();
+R.builds = ELS.builds.html;
+await window.queueBuildAct({{ dataset: {{ build: 'send', run: 'r2' }} }}); await flush();
+R.after = ELS.builds.html;""")
+        shown = out["R"]["builds"]
+        self.assertIn('data-build="send" data-run="r0"', shown)
+        self.assertIn('data-build="send" data-run="r2"', shown)
+        self.assertIn('data-build="retry" data-run="r2"', shown)
+        self.assertEqual([field["name"] for field in out["asked"]["fields"]], ["finding"])
+        self.assertIn("/w/r0", out["asked"]["body"])
+        self.assertEqual([post[:2] for post in out["posts"]], [["/api/queue/builds/retry", {
+            "assignment": 6, "revision": "c" * 64, "finding": "The label reads wrong on phones"}]])
+        self.assertIn("sd:6 sent to the builder with your finding.", out["R"]["after"])
+
     def test_each_state_renders_its_glyph_and_label(self):
         lanes = self.run_page("R.lanes = ELS.details.html;")["R"]["lanes"]
         found = re.findall(r'data-state="(\w+)".*?<span class="g g-(\w+)" aria-hidden="true">(.)</span><span class="st">([A-Z]+)', lanes)

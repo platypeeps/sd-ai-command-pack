@@ -57,6 +57,8 @@ STALE_SECONDS = 180
 RETRIES = 1
 #: The steps a run walks, each written before it starts.
 STEPS = ("claimed", "worktree", "building", "reviewing", "fixing", "enqueuing", "enqueued", "checking", "cleaning")
+#: A note that sends the operator's finding to a bundle's next builder: Send to builder (pack sd:6020).
+FINDING = "Send to builder: "
 #: The model a bundle runs on (Q60): Sonnet only when every member's `fields.work_kind` is `mechanical`.
 OPUS, SONNET = "opus", "sonnet"
 #: The fields a supervisor may write on its own open run.
@@ -315,14 +317,15 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
         if available["why"]:
             return None
         queued = connection.execute(
-            "SELECT assignment.id, assignment.item, item.repo FROM assignment JOIN item ON item.id = assignment.item "
+            "SELECT assignment.id, assignment.item, assignment.parent, assignment.run_count, item.repo "
+            "FROM assignment JOIN item ON item.id = assignment.item "
             "WHERE assignment.status = 'queued' AND assignment.scope = ? AND item.repo IS NOT NULL "
             "ORDER BY item.priority IS NULL, item.priority, assignment.queued_at, assignment.id", (SCOPE,)).fetchall()
         queued = [row for row in queued if not _refused_repo(connection, row)]
         repo = next((row["repo"] for row in queued if room_for(available, row["repo"]) > 0), None)
         if repo is None:
             return None
-        bundle = [row for row in queued if row["repo"] == repo][:BUNDLE_MAX]
+        bundle = _bundle([row for row in queued if row["repo"] == repo])
         lead = bundle[0]["id"]
         ids = [row["id"] for row in bundle]
         marks = ", ".join("?" for _ in ids)
@@ -351,6 +354,20 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
                         or f"item {row['item']} moved to {row['status']} after the press")
             return None
         return run(connection, ident)
+
+
+def _bundle(rows: list) -> list:
+    """The queued rows of one repository a claim takes, best first.
+
+    A bundle that ran before claims alone, its old lead first, so its run
+    gets the lead's branch and worktree back (pack sd:6020); fresh rows
+    bundle with fresh rows only, up to `BUNDLE_MAX`.
+    """
+    best = rows[0]
+    group = best["parent"] or (best["id"] if best["run_count"] else None)
+    if group is None:
+        return [row for row in rows if row["parent"] is None and not row["run_count"]][:BUNDLE_MAX]
+    return sorted((row for row in rows if group in (row["id"], row["parent"])), key=lambda row: row["id"] != group)
 
 
 def _refuse(connection, row, reason: str) -> None:

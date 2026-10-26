@@ -23,12 +23,12 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from sd_db import build, build_run, operations, sessions
+from sd_db import build, build_run, operations, runner, sessions
 from sd_db.database import connect
 from sd_db.migrate import initialise
 from sd_db.ship import this_host
 from sd_db.workflow import item_state
-from sd_db.writes import create_item, upsert_repo
+from sd_db.writes import add_note, create_item, upsert_repo
 
 from . import support
 
@@ -537,6 +537,27 @@ class Supervise(Case):
         self.assertEqual(ended["outcome"], "blocked")
         self.assertIn("limit 72", ended["blocked"])
         self.assertIn("72 characters or less outside a code fence", build_run.BRIEF)
+
+    def test_a_requeued_bundle_briefs_the_findings_sent_to_its_branch(self):
+        """Pack sd:6020: Send to builder writes a finding note and queues the bundle again; the fresh builder's brief
+        names the finding and the branch it resumes, and leaves out a note from before the bundle's first run."""
+        self.press()
+        item = self.items[0]
+        add_note(self.db, item, "comment", "Send to builder: an older finding for another branch")
+        self.db.execute("UPDATE note SET timestamp = '2000-01-01T00:00:00+00:00' WHERE body LIKE '%older finding%'")
+        build.end(self.db, self.bundle["id"], "cancelled", "the operator cancelled it")
+        add_note(self.db, item, "comment", "Send to builder: the Retry label reads wrong on phones")
+        lead = self.bundle["assignment"]
+        runner.requeue(self.db, lead, expected_revision=runner.queue_state(self.db, lead)["revision"], who="operator")
+        again = build.claim(self.db, owner="fixture", load=1.0, load_cap=40.0, interactive=[],
+                            root=self.root / "worktrees")
+        assert again is not None
+        prompt = build_run.BRIEF.format(**self.supervisor(again["id"]).brief())
+        self.assertIn(f"- sd:{item}: the Retry label reads wrong on phones", prompt)
+        self.assertIn(f"already holds the commits of an earlier run on {self.bundle['branch']}", prompt)
+        self.assertNotIn("older finding", prompt)
+        first = build_run.BRIEF.format(**self.supervisor(self.bundle["id"]).brief())
+        self.assertNotIn("Send to builder", first)
 
     def test_enqueue_resume_no_duplicate(self):
         """Failure table, Enqueuing (pack sd:6094 (a)): a run lost after the lane wrote its entry resumes at

@@ -181,7 +181,11 @@ reviewer's identity. The reviewer never shares a vendor with any of the latest a
 
 The dashboard queues one kind of run: Build on Tasks (pack sd:6095) posts
 `/api/tasks/build`, which is `sd assignments build`, then kickstarts the
-`build-dispatch` job. A queued or running assignment is cancelled through
+`build-dispatch` job. Queue's Builds panel queues a blocked or cancelled
+bundle again at `/api/queue/builds/retry`: Retry, or Send to builder
+(pack sd:6020), which first notes a finding on each item; the bundle keeps
+its lead, so its builder resumes the same worktree. A queued or running
+assignment is cancelled through
 `/api/assignments/<id>/cancel`, the route `sd assignments cancel` matches,
 bound to the assignment's revision; Queue's Builds panel posts it.
 
