@@ -16,6 +16,8 @@ from unittest.mock import Mock, patch
 
 import sd_db
 
+from tests.clean_env import clean_environment
+
 ROOT = Path(__file__).resolve().parents[1]
 with patch.object(sys, "path", [str(ROOT / "bin"), *sys.path]):
     cli = importlib.import_module("sd_operations")
@@ -203,11 +205,22 @@ class OperationsCLI(unittest.TestCase):
             root = Path(tmp).resolve()
             checkout, linked, plain = root / "repos" / "a", root / "worktrees" / "a-branch", root / "plain"
             plain.mkdir()
+            # sd:6136: the fixture's git reads no operator config. A global
+            # config that signs with a failing program and runs a failing hook
+            # stands in for the operator's; the shared clean environment hides it.
+            hooks = root / "hooks"
+            hooks.mkdir()
+            (hooks / "pre-commit").write_text("#!/bin/sh\nexit 1\n")
+            (hooks / "pre-commit").chmod(0o755)
+            hostile = root / "gitconfig"
+            hostile.write_text(f"[commit]\n\tgpgsign = true\n[gpg]\n\tprogram = false\n[core]\n\thooksPath = {hooks}\n")
             git = ["git", "-c", "user.name=Test", "-c", "user.email=test@example.test"]
-            cli.subprocess.run([*git, "init", "-q", str(checkout)], check=True)
-            cli.subprocess.run([*git, "-C", str(checkout), "commit", "-q", "--allow-empty", "-m", "start"], check=True)
-            cli.subprocess.run([*git, "-C", str(checkout), "worktree", "add", "-q", "-b", "branch", str(linked)],
-                               check=True)
+            with patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(hostile)}):
+                cli.subprocess.run([*git, "init", "-q", str(checkout)], check=True, env=clean_environment())
+                cli.subprocess.run([*git, "-C", str(checkout), "commit", "-q", "--allow-empty", "-m", "start"],
+                                   check=True, env=clean_environment())
+                cli.subprocess.run([*git, "-C", str(checkout), "worktree", "add", "-q", "-b", "branch", str(linked)],
+                                   check=True, env=clean_environment())
             (linked / "src").mkdir()
             listed = [{"id": ident, "name": ident, "cwd": str(cwd), "status": "busy", "builder": True, "age": 5,
                        "safe": {"state": "yes", "why": []}, "agents": []}

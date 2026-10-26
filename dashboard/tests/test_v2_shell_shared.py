@@ -369,6 +369,99 @@ R.text = String(list.help('Drag a card.')); R.none = String(list.help(''));""")
         self.assertIn(".list-help {", SHELL_CSS)
 
 
+# The shell's keys, as shell.js has them: the Keys section's keydown handler, after its chord counter.
+KEYS_JS = re.search(r"^  let chord = 0;\n(  document\.addEventListener\('keydown', .*?^  \}\);)$", SHELL_JS, re.S | re.M).group(1)
+# What the handler reads from the rest of the shell: no overlay open, one selected row (selId), and a record of what ran.
+KEYS_STUBS = r"""
+const pal = { open: false }, pop = { hidden: true }, menuEl = { hidden: true, contains: () => false }, pane = { hasAttribute: () => false };
+const rail = { hasAttribute: () => false }, body = { dataset: {} }, keys = {}, t = { querySelector: () => null }, CHORDS = {};
+let chord = 0, pinned = null, tUndo = null, selId = 'row-1';
+const ran = n => () => { OUT.ran = (OUT.ran || []).concat(n); };
+const openPal = ran('palette'), hideHelp = ran('hideHelp'), closeMenu = ran('closeMenu'), closePane = ran('closePane'), setMenu = () => {};
+const shiftClear = () => false, go = ran('go'), step = () => false, flipTime = ran('flipTime'), openMenu = ran('menu'), openCapture = ran('capture');
+const openChat = ran('chat'), setRail = ran('rail'), setPane = ran('pane'), openPane = ran('pane'), modal = ran('keys'), wide = () => true;
+const commands = { pick: ran('pick') };
+document.addEventListener('shell:open', e => { OUT.opened = e.detail; });
+// An element of tag with attributes attrs: matches() reads the simple selectors the handler names (tag, .class, [attr], [attr="v"]).
+const el = (tag, attrs = {}, cls = []) => ({ tagName: tag.toUpperCase(), closest: () => null,
+  matches: list => list.split(',').some(s => { const m = /^([a-z]*)((?:\.[\w-]+)*)((?:\[[^\]]+\])*)$/.exec(s.trim()); if (!m) throw new Error('selector ' + s);
+    return (!m[1] || m[1] === tag) && (m[2].match(/[\w-]+/g) || []).every(c => cls.includes(c))
+      && (m[3].match(/\[[^\]]+\]/g) || []).every(a => { const [, k, v] = /^\[([\w-]+)(?:="([^"]*)")?\]$/.exec(a); return k in attrs && (v === undefined || attrs[k] === v); }); }) });
+const press = (key, target) => { const e = { key, target, prevented: false, preventDefault() { e.prevented = true; } };
+  OUT.opened = null; DOC_LISTENERS.keydown.forEach(f => f(e)); return { prevented: e.prevented, opened: OUT.opened }; };
+"""
+
+
+def run_keys(body):
+    """The shell's keydown handler over the stand-in document, with KEYS_STUBS; body sets R."""
+    script = (STAND_IN + KEYS_STUBS + KEYS_JS + "\nvar R = {};\ntry {\n" + body + "\n} catch (e) { OUT.error = String(e) + ' ' + e.stack; }\n"
+              + "function run() { OUT.R = R; return JSON.stringify(OUT); }\n")
+    result = subprocess.run([OSASCRIPT, "-l", "JavaScript", "-e", script], capture_output=True, text=True, timeout=60, check=False)
+    if result.returncode:
+        raise AssertionError(result.stderr)
+    out = json.loads(result.stdout)
+    if out["error"]:
+        raise AssertionError(out["error"])
+    return out["R"]
+
+
+class TheFilterPick(unittest.TestCase):
+    """sd:6254: the operator's Repo pick on Tasks did not work. A pick's summary grew with the picked name, so the control
+    wrapped to the next line of the filter bar and its open menu left the pointer: the next click landed outside and closed
+    it. And Enter on a focused summary opened the selected row, not the menu, on every page with a selected row."""
+
+    def test_a_multi_pick_keeps_its_size_whatever_is_picked(self):
+        R = run_js("""const opts = [['system', 'system'], ['sd-ai-command-pack', 'sd-ai-command-pack'], ['hoa', 'hoa']];
+R.none = String(list.pick('repo', 'Repo', opts, new Set(), { multi: true }));
+R.one = String(list.pick('repo', 'Repo', opts, new Set(['sd-ai-command-pack']), { multi: true }));
+R.two = String(list.pick('repo', 'Repo', opts, new Set(['system', 'hoa']), { multi: true }));""")
+        summary = {k: re.search(r"<summary[^>]*>(.*?)</summary>", v, re.S).group(1) for k, v in R.items()}
+        shown = {k: re.search(r'<span id="f-repo-v">([^<]*)</span>', s).group(1) for k, s in summary.items()}
+        self.assertEqual(shown, {"none": "All", "one": "sd-ai-command-pack", "two": "2 picked"})
+        # Beside the shown label, every summary holds the same labels out of sight: each one it can show, as a select's
+        # options size it, so the pill is as wide as its widest label whatever is picked.
+        rest = {k: s.replace(f'<span id="f-repo-v">{shown[k]}</span>', "") for k, s in summary.items()}
+        self.assertEqual(rest["none"], rest["one"])
+        self.assertEqual(rest["none"], rest["two"])
+        self.assertEqual(rest["none"], '<span class="fpick-size" aria-hidden="true"><span>All</span><span>3 picked</span>'
+                                       '<span>system</span><span>sd-ai-command-pack</span><span>hoa</span></span>')
+        # They share the shown label's one grid cell and take no space or paint of their own.
+        self.assertIn(".fpick > summary { display: grid; }", SHELL_CSS)
+        self.assertIn(".fpick > summary > span, .fpick-size > span { grid-area: 1 / 1; overflow: hidden; text-overflow: ellipsis; }", SHELL_CSS)
+        self.assertIn(".fpick-size { display: contents; visibility: hidden; }", SHELL_CSS)
+
+    def test_enter_on_a_pick_summary_opens_its_menu_not_the_selected_row(self):
+        R = run_keys("""R.summary = press('Enter', el('summary'));
+R.row = press('Enter', el('div', { 'data-id': 'row-1' }));
+R.button = press('Enter', el('button'));""")
+        self.assertEqual(R["row"], {"prevented": True, "opened": "row-1"}, "the stand-in reaches the shell's Enter")
+        self.assertEqual(R["button"], {"prevented": False, "opened": None})
+        self.assertEqual(R["summary"], {"prevented": False, "opened": None})
+
+    # The shell's open-menu rules, as shell.js has them: toggle, a press outside, focus leaving.
+    MENU_JS = re.search(r"^  // A filter dropdown in use stays open across a redraw;.*?\n\n", SHELL_JS, re.S | re.M).group(0)
+
+    def test_a_tap_on_a_box_keeps_the_menu_open_where_the_browser_focuses_an_ancestor(self):
+        """sd:6254, the operator's iPad: WebKit does not focus a checkbox on a press. A tap on a box moved focus from the
+        summary to <main tabindex="-1">, its focusable ancestor; the focusout rule read that as focus leaving the menu and
+        shut it on mousedown, so the click fell on what lay under it and nothing was picked. Chrome focuses the box."""
+        R = run_keys(self.MENU_JS + r"""
+// A tree: main > details.fpick[open] > summary, input; and a button outside the menu.
+const node = (name, parent, extra = {}) => Object.assign({ name, parent,
+  contains(n) { for (; n; n = n.parent) if (n === this) return true; return false; },
+  closest(sel) { for (let n = this; n; n = n.parent) if (sel === 'details.fpick[open]' && n.name === 'details' && n.open) return n; return null; } }, extra);
+const main = node('main', null), menu = node('details', main, { open: true }), summary = node('summary', menu), box = node('input', menu);
+const outside = node('button', main);
+const blur = (target, relatedTarget) => { menu.open = true; DOC_LISTENERS.focusout.forEach(f => f({ target, relatedTarget })); return menu.open; };
+R.toMain = blur(summary, main); R.fromBoxToMain = blur(box, main); R.toBox = blur(summary, box); R.toNothing = blur(summary, null);
+R.toOutside = blur(summary, outside);""")
+        self.assertTrue(R["toMain"], "a press on a box moved focus to an ancestor and shut the menu")
+        self.assertTrue(R["fromBoxToMain"])
+        self.assertTrue(R["toBox"])
+        self.assertTrue(R["toNothing"])
+        self.assertFalse(R["toOutside"], "focus leaving for a control outside still shuts it")
+
+
 class TheSharedRules(unittest.TestCase):
     """sd:2588: shell.css holds each shared annunciator and ledger rule once; no page repeats one."""
 
