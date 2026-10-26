@@ -801,7 +801,7 @@ def identity(url) -> tuple[str, str, int] | None:
 
 
 def _revisit_unsettled(connection: sqlite3.Connection, tracker: str) -> list[str]:
-    """The urls the last run's revisit read and left as they were, from its heartbeat (sd:6091)."""
+    """The urls revisits read and left as they were, longest deferred first, from the last heartbeat (sd:6091)."""
     row = connection.execute("SELECT body FROM state WHERE kind = 'heartbeat' AND key = ? ORDER BY id DESC LIMIT 1",
                              (f"tracker-sync:{tracker}",)).fetchone()
     try:
@@ -813,7 +813,7 @@ def _revisit_unsettled(connection: sqlite3.Connection, tracker: str) -> list[str
 
 def revisit_rows(connection: sqlite3.Connection, planned: dict, *, tracker: str, intake, before: datetime,
                  seen, unsettled=()) -> list[dict]:
-    """The stale open rows this run reads directly, `REVISIT_LIMIT` at most, oldest first (pack sd:5415, sd:6091).
+    """The stale open rows in the order a run reads them directly, oldest first (pack sd:5415, sd:6091).
 
     A shadow row no search has seen since `before`, an issue outside intake
     or a pull request, and a queued contribution whose last complete
@@ -822,10 +822,11 @@ def revisit_rows(connection: sqlite3.Connection, planned: dict, *, tracker: str,
     answers no read under the old name. One url read serves both stores.
     Each row is `{url, shadow, key}`: the url to read, the stored shadow url
     or None, and the contribution key or None. A url this run's search saw
-    is current and is left out. One in `unsettled`, which the last run read
-    and left as it was -- a failed read, or a contribution's unmoved answer
-    -- goes after the rest, so `REVISIT_LIMIT` rows that always fail cannot
-    starve the others.
+    is current and is left out. One in `unsettled`, which a run read and
+    left as it was -- a failed read, or a contribution's unmoved answer --
+    goes after the rest, in the order it was deferred, so rows that always
+    fail cannot starve the others, nor the oldest of them the rest. The
+    caller reads the first `REVISIT_LIMIT`.
     """
     floor = datetime.min.replace(tzinfo=timezone.utc)
     current = {identity(url) or url for url in seen}
@@ -843,9 +844,9 @@ def revisit_rows(connection: sqlite3.Connection, planned: dict, *, tracker: str,
         if name is None or observed is None or observed >= before or name in current:
             continue
         rows.setdefault(name, {"url": entry["url"], "shadow": None, "key": None, "at": observed})["key"] = entry["key"]
-    unsettled = set(unsettled)
-    ordered = sorted(rows.values(), key=lambda row: (row["url"] in unsettled, row["at"], row["url"]))
-    return [{name: row[name] for name in ("url", "shadow", "key")} for row in ordered[:REVISIT_LIMIT]]
+    turn = {url: index for index, url in enumerate(unsettled)}
+    ordered = sorted(rows.values(), key=lambda row: (turn.get(row["url"], -1), row["at"], row["url"]))
+    return [{name: row[name] for name in ("url", "shadow", "key")} for row in ordered]
 
 
 def revisit(client, url: str) -> dict:
@@ -1054,15 +1055,17 @@ def _sync(
                          seen={row["url"] for row in result.issues}, unsettled=unsettled) if result.ok else []
     settled: dict[str, dict] = {}
     unread: list[str] = []
-    if stale:
-        unsettled = []
-    for row in stale:
+    read: set[str] = set()
+    deferred: list[str] = []
+    for row in stale[:REVISIT_LIMIT]:
         answer = revisit(reader, row["url"])
         if "unknown" in answer:
             unread.append(answer["unknown"])
             if not answer.get("unread"):
-                unsettled.append(row["url"])
+                read.add(row["url"])
+                deferred.append(row["url"])
             continue
+        read.add(row["url"])
         if row["key"] and answer.get("url"):
             refused = contribution_sync.fold(connection, planned, row["key"], answer["url"])
             if refused:
@@ -1072,7 +1075,12 @@ def _sync(
         elif row["shadow"]:
             opened.append(row["shadow"])
         elif not answer.get("url"):
-            unsettled.append(row["url"])  # the queue's own read settles a contribution; this one moved nothing
+            deferred.append(row["url"])  # the queue's own read settles a contribution; this one moved nothing
+    if stale:
+        # A deferral lasts while its row is stale. A row read this run goes to the back of the line or leaves
+        # it; one the budget did not reach keeps its place.
+        current = {row["url"] for row in stale}
+        unsettled = [url for url in unsettled if url in current and url not in read] + deferred
     if unread:
         result.incomplete.append(f"{len(unread)} stale row(s) left open unread, first {unread[0]}")
     budget.remaining -= search_budget.requests

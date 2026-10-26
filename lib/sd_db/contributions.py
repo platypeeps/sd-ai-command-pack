@@ -347,6 +347,11 @@ def configure(connection, item, changes, *, who, expected_revision=None) -> dict
             fields = json.loads(current["item"]["fields"] or "{}")
             fields["contribution"] = value
             set_item_fields(connection, item, fields=fields)
+            # The item's url is the operator's word: a `fold` tombstone on it would hide it from the queue (sd:6091).
+            for prefix, name in OBSERVED.items():
+                state = snapshot(connection, prefix + value[name]) if value.get(name) else {}
+                if state.pop("moved_to", None):
+                    _save(connection, state)
             add_note(connection, item, "comment", f"Updated contribution metadata by {who}", session=who)
             if old.get("depends_on", []) != value.get("depends_on", []):
                 key = f"item:{item}"
@@ -1019,10 +1024,11 @@ def fold(connection, key, url) -> str:
 
     A transferred or renamed repository answers the old url under the new
     one, and the old key's reads never settle. The new key takes the old
-    one's state when it has none, so an acknowledged event stays
-    acknowledged; the old key keeps `moved_to`, which `projection` and the
-    refresh queue skip. A row with an item is refused: its url is the
-    operator's configuration.
+    one's state when it has none or holds only a tombstone, so an
+    acknowledged event stays acknowledged and a repository renamed back
+    reactivates its first key; the old key keeps `moved_to`, which
+    `projection` and the refresh queue skip. A row with an item is
+    refused: its url is the operator's configuration.
     """
     key = _key(key)
     old = _observed_url(key)
@@ -1036,8 +1042,9 @@ def fold(connection, key, url) -> str:
             raise WorkflowError(f"GitHub answers {old} as {_observed_url(moved)}; an item names the old url, "
                                 "so set its pull_url or issue_url")
         state = snapshot(connection, key)
-        if not connection.execute("SELECT 1 FROM state WHERE kind='checkpoint' AND key=?",
-                                  ("contribution:" + moved,)).fetchone():
+        state.pop("moved_to", None)
+        if snapshot(connection, moved).get("moved_to") or not connection.execute(
+                "SELECT 1 FROM state WHERE kind='checkpoint' AND key=?", ("contribution:" + moved,)).fetchone():
             _save(connection, {**state, "key": moved})
         state["moved_to"] = _observed_url(moved)
         _save(connection, state)

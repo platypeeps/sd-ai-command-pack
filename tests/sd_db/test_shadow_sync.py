@@ -1772,6 +1772,58 @@ class TheRevisit(SyncCase):
                 self.assertEqual(runner.paths, [f"repos/{self.REPO}/pulls/{number}"])
         self.assertNotIn("moved_to", contributions.snapshot(self.connection, "github:" + first))
 
+    def test_a_fold_back_into_a_moved_key_reactivates_it(self):
+        """Lane review of 4658ee59d: a repository renamed A to B and back to A
+        must leave one live row, not two tombstones."""
+        from sd_db import contribution_sync, contributions
+
+        first = f"https://github.com/{self.OLD}/pull/6"
+        second = f"https://github.com/{self.NEW}/pull/6"
+        self.observed(first, acknowledged=["event:1"])
+        contributions.fold(self.connection, "github:" + first, second)
+        contributions.fold(self.connection, "github:" + second, first)
+        self.assertEqual([row["url"] for row in contributions.projection(self.connection)], [first])
+        self.assertNotIn("moved_to", contributions.snapshot(self.connection, "github:" + first))
+        self.assertEqual(contributions.snapshot(self.connection, "github:" + first)["acknowledged"], ["event:1"])
+        self.assertEqual([row["key"] for row in contribution_sync.plan(self.connection)["pending"]],
+                         ["github:" + first])
+
+    def test_a_shadow_row_moved_and_moved_back_stays_one_open_row(self):
+        """The shadow fold renames the row and leaves no tombstone: A to B and back to A is one row at A."""
+        first = self.stored(6, repo=self.OLD)
+        second = f"https://github.com/{self.NEW}/pull/6"
+        for hours, target in ((0, second), (1, first)):
+            sync(self.connection, now=self.now + timedelta(hours=hours),
+                 runner=QueryGh(lambda query: [], read=lambda path, target=target: pull(6, url=target)))
+            self.connection.execute("UPDATE shadow SET last_seen = ?", (self.STALE,))
+        self.assertEqual(self.states(), {first: ("open", None, None)})
+
+    def test_an_item_set_to_a_moved_url_is_scheduled(self):
+        """A sibling of the fold: the operator points an item at a url a fold
+        left a tombstone on. The item's key must be read, not skipped."""
+        from sd_db import contribution_sync, contributions
+
+        first = f"https://github.com/{self.OLD}/pull/6"
+        second = f"https://github.com/{self.NEW}/pull/6"
+        self.observed(first)
+        contributions.fold(self.connection, "github:" + first, second)
+        contributions.capture(self.connection, title="Fix", changes={"pull_url": first}, who="test")
+        self.assertNotIn("moved_to", contributions.snapshot(self.connection, "github:" + first))
+        self.assertIn("github:" + first, [row["key"] for row in contribution_sync.plan(self.connection)["pending"]])
+
+    def test_rows_that_always_fail_take_turns_with_every_other_row(self):
+        """Lane review of 4658ee59d: deferred rows stay deferred until every
+        other stale row has had a turn, then the oldest deferral goes first."""
+        from sd_db import shadow_sync
+
+        for number in range(1, 7):
+            self.stored(number, last_seen=f"2026-08-{number:02d}T00:00:00+00:00")
+        with patch.object(shadow_sync, "REVISIT_LIMIT", 2):
+            for hours, numbers in ((0, [1, 2]), (1, [3, 4]), (2, [5, 6]), (3, [1, 2]), (4, [3, 4])):
+                runner = QueryGh(lambda query: [], read=lambda path: (404, {"message": "Not Found"}))
+                sync(self.connection, now=self.now + timedelta(hours=hours), runner=runner)
+                self.assertEqual(runner.paths, [f"repos/{self.REPO}/pulls/{number}" for number in numbers], hours)
+
     def test_an_item_that_names_the_old_url_is_not_folded_and_is_named(self):
         """The item's url is the operator's configuration: the fold is named, not done."""
         from sd_db import contributions
