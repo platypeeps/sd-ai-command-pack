@@ -500,6 +500,12 @@ const lastUndo = () => OUT.toasts.filter(t => t.undo).pop();
 """
 # What Tasks adds to the shared stand-in: shell.row() as shell.js answers it, and the real reader (sd:2484).
 TASKS_SHELL = """window.shell.row = () => new URLSearchParams(location.search).get('row');
+// The view switch as shell.js answers a page with PAGE_VIEWS (sd:6263): the shown view is #view=<id> when the page
+// declares it, else the first; show(id) shows a declared view and fires shell:view.
+window.shell.view = { now: null, ids: () => (window.PAGE_VIEWS || []).map(v => v.id),
+  current() { if (!this.now) { const h = (/^#view=([a-z0-9-]+)$/.exec(location.hash || '') || [])[1]; this.now = this.ids().includes(h) ? h : this.ids()[0] || null; } return this.now; },
+  show(id) { if (!this.ids().includes(id)) return false; if (this.current() !== id) { this.now = id; document.dispatchEvent(new CustomEvent('shell:view', { detail: { id, first: true, api: null } })); } return true; },
+  hide() {}, count: (id, n) => { (OUT.counts = OUT.counts || {})[id] = n; } };
 """ + READ_SHELL
 # A landed write's readback moves the stored row with it, as the server's next read lists it: the page rereads after each
 # landed write, and a reread that brought back the row as it was before would undo the write on the page.
@@ -744,7 +750,7 @@ class TheScript(ScreenCase):
         """Load tasks.js at `search` and `hash`, fire DOMContentLoaded, run `body` (async), and return OUT plus what `body`
         set on R.
 
-        Each address the page writes is in OUT.urls, as shell.url() received it. Personal is the default Realm, and a repo
+        Each address the page writes is in OUT.urls, as shell.url() received it. Personal is the first realm tab, and a repo
         row is in no realm without realms.conf, so a page opens at `realm` (All) unless the address names one or `realm` is None.
         """
         if realm and "realm=" not in search and not hash:
@@ -870,7 +876,7 @@ R.pick = [menu.hidden, btn.attrs['aria-label'], OUT.focus.at(-1)];""")
         self.assertIn('<select id="f-p" class="fsel" data-pick="p"><option value="" selected>All</option><option value="1">P1</option>', filters)
         self.assertIn('<option value="unset">unset</option></select>', filters)
         self.assertIn("Port the page", out["R"]["board"])
-        self.assertIn('<option value="" selected>All · 3</option>', filters, "sd:5524, sd:5753: Realm's All choice carries the count")
+        self.assertEqual(out["counts"]["all"], 3, "sd:5524, sd:6263: the All tab carries the count")
         self.assertNotIn("3 tasks", out["R"]["sub"])
         # The badge is the read's own (sd:3446): at NOW the seeded due date is 3 days off, so nothing is due yet.
         self.assertEqual(out["attention"][-1], {"state": "ok", "n": 0, "what": "nothing due"})
@@ -1676,7 +1682,7 @@ R.after = ELS.details.html; R.views2 = views(); R.obj = C.get(String(ITEM)) && C
 ELS.filters.listeners.change[0]({ target: { dataset: { pick: 'active' }, value: 'parked' } });
 R.parked = ELS['view-board'].html; R.url = OUT.urls[OUT.urls.length - 1];""")
         self.assertIn("1 parked · read", out["R"]["sub"])
-        self.assertIn('<option value="" selected>All · 3</option>', out["R"]["filters"])
+        self.assertEqual(out["counts"]["all"], 3)
         self.assertNotIn("Parked by the prune", out["R"]["board"])
         self.assertIn("Plan the review", out["R"]["board"])
         # sd:5643: Scope and Parked are one dropdown, each option starting with a capital; sd:5649 adds Scheduled only.
@@ -1783,7 +1789,7 @@ ELS.filters.listeners.change[0]({ target: { dataset: { pick: 'active' }, value: 
 R.scheduled = ELS['view-board'].html; R.url = OUT.urls[OUT.urls.length - 1]; R.chips = ELS.filters.html;
 document.dispatchEvent(new CustomEvent('tasks:view', { detail: 'list' })); await flush(); R.list = ELS['view-list'].html;""")
         self.assertIn("1 scheduled · read", out["R"]["sub"])
-        self.assertIn('<option value="" selected>All · 2</option>', out["R"]["chips"], "a scheduled row is not counted in a Realm choice")
+        self.assertEqual(out["counts"]["all"], 2, "a scheduled row is not counted on a realm tab")
         self.assertNotIn("Plan the review", out["R"]["board"])
         self.assertIn("Plan the review", out["R"]["scheduled"])
         self.assertIn('<span class="opens">opens Sep 7</span>', out["R"]["scheduled"])
@@ -2701,11 +2707,11 @@ class TheFilterAddress(ScreenCase):
         shown, out = self.listed("?view=list", "const box = document.getElementById('find-in'); box.value = ' Trip ';\n"
                                  "box.listeners.input[0]({ target: box }); await flush();")
         self.assertEqual(shown, {904})
-        self.assertEqual(out["urls"][-1], "view=list&q=trip&realm=all")
+        self.assertEqual(out["urls"][-1], "view=list&q=trip")
 
     def test_the_address_carries_every_filter(self):
         _, out = self.listed("?view=list&status=ready_to_send&age=3&active=1&q=reply")
-        self.assertEqual(out["urls"][-1], "view=list&status=ready_to_send&age=3&active=1&q=reply&realm=all")
+        self.assertEqual(out["urls"][-1], "view=list&status=ready_to_send&age=3&active=1&q=reply")
 
     def test_the_list_pages_fifty_and_the_address_keeps_the_page(self):
         self.doc["rows"] = [self.made(1000 + n, f"row {n}", "planning", "0") for n in range(60)]
@@ -2719,13 +2725,13 @@ class TheFilterAddress(ScreenCase):
         click = "ELS['view-list'].listeners.click[0]({ target: { id: '', closest: s => s === '.list-pager [data-page]' ? { dataset: { page: '2' } } : null } }); await flush();"
         shown, out = self.listed("?view=list", click)
         self.assertEqual(shown, {1000 + n for n in range(50, 60)})
-        self.assertEqual(out["urls"][-1], "view=list&realm=all&page=2")
+        self.assertEqual(out["urls"][-1], "view=list&page=2")
         self.assertIn('data-page="2" aria-label="Page 2" aria-current="page"', out["R"]["list"])
         self.assertEqual(re.findall(r'data-size="(\d+)"', out["R"]["list"]), ["25", "50", "100", "200"])
         # A filter change starts the list at its first page again.
         chip = "ELS.filters.listeners.change[0]({ target: { dataset: { pick: 'age' }, value: '0' } }); await flush();"
         _, out = self.listed("?view=list&page=2", chip)
-        self.assertEqual(out["urls"][-1], "view=list&age=0&realm=all")
+        self.assertEqual(out["urls"][-1], "view=list&age=0")
         # A short list draws its range and no page numbers; the board shows every filtered card, whatever the page.
         short = self.listed("?view=list&q=row%2059")[1]["R"]["list"]
         self.assertIn('<span class="range">1–1 of 1</span>', short)
@@ -2743,8 +2749,8 @@ class TheFilterAddress(ScreenCase):
         self.assertEqual(chips("chips"), ["status:ready_to_send", "active:1", "q"])
         self.assertIn("3 filters · 1 of 4", out["R"]["chips"])
         self.assertEqual(chips("chips2"), ["active:1", "q"])
-        self.assertEqual(out["R"]["url2"], "view=list&active=1&q=reply&realm=all")
-        self.assertEqual((chips("chips3"), out["R"]["url3"], out["R"]["box"]), ([], "view=list&realm=all", ""), "Clear all keeps the Realm, as it kept the view")
+        self.assertEqual(out["R"]["url2"], "view=list&active=1&q=reply")
+        self.assertEqual((chips("chips3"), out["R"]["url3"], out["R"]["box"]), ([], "view=list", ""), "Clear all keeps the view")
 
     def test_a_linked_row_opens_the_page_that_holds_it(self):
         self.doc["rows"] = [self.made(1000 + n, f"row {n}", "planning", "0") for n in range(60)]

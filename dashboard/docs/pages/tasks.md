@@ -42,12 +42,11 @@ A v1 `/backlog` address answers 301 to `/tasks` with the query v1 read
 Tasks filters on. v1's screen and its run selection were deleted in sd:2622;
 `/classic/backlog` is a 404.
 
-Realm, the first pick in the filter bar (sd:5753), narrows every layout to the rows of one realm or place:
-Personal (the default), each realm `dashboard.realms` names, HOA or Home; All shows every row, and each choice
-carries its count. Each row carries `realm` from `places.realm_of` and `area` from `places.area_of`, the rule the
-HOA and Home pages' Tasks views use: the hoa checkout's items, or items with no repo. A report is in neither.
-The address keeps a choice other than Personal as `?realm=<id>`; an older `#view=<id>` link lands on that choice.
-Clear all keeps the Realm. Tasks declares no `PAGE_VIEWS`, so the rail lists no views under it.
+Realm sub tabs (sd:6263; sd:5753 had made Realm a filter) narrow every layout to the rows of one realm or place:
+Personal (the first tab), each realm `dashboard.realms` names, HOA or Home; All shows every row, and each tab carries
+its count. The filters apply inside each tab. Each row carries `realm` from `places.realm_of` and `area` from
+`places.area_of`, the rule the HOA and Home pages' Tasks views use: the hoa checkout's items, or items with no repo. A
+report is in neither. The shell keeps the tab as `#view=<id>`; an older `?realm=<id>` link (Metrics, Today) shows that tab.
 
 Personal and Work carry Run sweep (sd:5096, sd:5097) in their subhead, with the realm's last run.
 It posts `/api/tasks/sweep {"realm"}`, which starts `realm_sweep run <realm>` in the background, one run per realm

@@ -1,4 +1,4 @@
-"""The HOA and Home sub-views (Tasks, Briefs, Reports) and Tasks' Realm filter (sd:5753).
+"""The HOA and Home sub-views (Tasks, Briefs, Reports) and Tasks' realm sub tabs (sd:6263).
 
 What this slice promises: one rule places a row in an area (`places.area_of`): an item of the hoa checkout is HOA, an
 item with no repo is Home, and a report is in neither, since an area's Reports view holds it. The place pages' Tasks
@@ -845,13 +845,13 @@ await window.places.again(); await flush(); R.overview = OUT.gets.slice(before);
 
 
 class TheTasksRealm(Fixture):
-    """sd:5753: Tasks' Realm filter (Personal, <realms>, HOA, Home or All, once its views): tasks.js against the rows
-    `tasks_screen` builds."""
+    """sd:6263: Tasks' realm sub tabs (Personal, <realms>, HOA, Home and All), in place of sd:5753's Realm filter: tasks.js
+    against the rows `tasks_screen` builds."""
 
     #: The realms /ui/sections.js hands the page, and the realms.conf line that puts /repos/system in Work.
     REALMS = "globalThis.SHELL_REALMS = [{ id: 'work', label: 'Work' }];\n"
-    #: A pick of the Realm select, as shell.list.pickChange reads the change: '' is All.
-    PICK = "const realm = async v => { ELS.filters.listeners.change[0]({ target: { dataset: { pick: 'realm' }, value: v } }); await flush(); };\n"
+    #: A realm tab shown, as the shell's switch shows it: '' is All.
+    PICK = "const realm = async v => { window.shell.view.show(v || 'all'); await flush(); };\n"
     TITLES = ("Fix the valve log", "Clean the gutters", "Tune the gate")
 
     def realm_doc(self):
@@ -864,33 +864,31 @@ class TheTasksRealm(Fixture):
         kw.setdefault("prelude", self.REALMS)
         return test_v2_tasks.TheScript.run_page(self, self.PICK + body, realm=None, **kw)
 
-    def test_realm_narrows_the_board_to_its_realm_or_area_and_the_address_keeps_it(self):
+    def test_each_realm_is_a_sub_tab_that_narrows_the_board_and_counts_its_tasks(self):
         self.doc, self.details = self.realm_doc(), {}
-        out = self.run_tasks("""R.first = ELS['view-board'].html; R.views = window.PAGE_VIEWS || null; R.urls = [OUT.urls[OUT.urls.length - 1]];
+        out = self.run_tasks("""R.first = ELS['view-board'].html; R.filters = ELS.filters.html; R.urls = [OUT.urls[OUT.urls.length - 1]];
+R.views = window.PAGE_VIEWS.map(v => [v.id, v.label, v.key]);
 for (const v of ['work', 'hoa', 'home', '', 'personal']) { await realm(v); R[v || 'all'] = ELS['view-board'].html; R.urls.push(OUT.urls[OUT.urls.length - 1]); }""")
         r = out["R"]
-        # Tasks declares no views: the shell draws no switch and the rail lists none under Tasks.
-        self.assertIsNone(r["views"])
-        # sd:5064: Personal, the default, is every row no realm claims: the hoa checkout's and the one with no repo.
+        # The tabs: Personal, each dashboard.realms realm, HOA, Home and All, each with its v key off l, b and m.
+        self.assertEqual(r["views"], [["personal", "Personal", "p"], ["work", "Work", "w"], ["hoa", "HOA", "h"],
+                                      ["home", "Home", "o"], ["all", "All", "a"]])
+        # Realm is no filter now: the bar holds Kind, Repo and the rest, in every tab.
+        self.assertNotIn('data-pick="realm"', r["filters"])
+        self.assertIn('data-pick="kind"', r["filters"])
+        # sd:5064: Personal, the first tab, is every row no realm claims: the hoa checkout's and the one with no repo.
         self.assertEqual([t in r["first"] for t in self.TITLES], [True, True, False])
         self.assertEqual([t in r["work"] for t in self.TITLES], [False, False, True])
         self.assertEqual([t in r["hoa"] for t in self.TITLES], [True, False, False])
         self.assertEqual([t in r["home"] for t in self.TITLES], [False, True, False])
         self.assertEqual([t in r["all"] for t in self.TITLES], [True, True, True])
         self.assertEqual([t in r["personal"] for t in self.TITLES], [True, True, False])
-        self.assertEqual(r["urls"], ["view=board", "view=board&realm=work", "view=board&realm=hoa", "view=board&realm=home",
-                                     "view=board&realm=all", "view=board"])
+        # Each tab carries its tasks (sd:5524); the shell keeps the tab in #view=, so the query names no realm.
+        self.assertEqual(out["counts"], {"personal": 3, "work": 1, "hoa": 2, "home": 1, "all": 5})
+        self.assertEqual(r["urls"], ["view=board"] * 6)
 
-    def test_the_realm_is_a_pick_in_the_filter_bar_with_each_choice_counted(self):
-        self.doc, self.details = self.realm_doc(), {}
-        f = self.run_tasks("R.filters = ELS.filters.html;")["R"]["filters"]
-        self.assertRegex(f, r'^<div class="fgroup"><label class="label" for="f-realm">Realm</label><select id="f-realm" class="fsel" data-pick="realm">')
-        self.assertEqual(re.findall(r'<option value="(\w*)"( selected)?>([^<]*)</option>', f.split("</select>")[0]),
-                         [("", "", "All · 5"), ("personal", " selected", "Personal · 3"), ("work", "", "Work · 1"),
-                          ("hoa", "", "HOA · 2"), ("home", "", "Home · 1")])
-
-    def test_an_address_or_an_older_view_link_lands_on_its_realm(self):
-        """The Metrics bars linked /tasks?...#view=all, and a bookmark may hold #view=hoa or #view=home."""
+    def test_an_address_or_an_older_link_lands_on_its_realm(self):
+        """Metrics and Today link /tasks?...&realm=all, and a bookmark may hold #view=hoa or #view=home."""
         self.doc, self.details = self.realm_doc(), {}
         for search, hash_, shown in (("?realm=hoa", "", [True, False, False]), ("", "#view=all", [True, True, True]),
                                      ("", "#view=hoa", [True, False, False]), ("", "#view=home", [False, True, False]),
@@ -901,11 +899,12 @@ for (const v of ['work', 'hoa', 'home', '', 'personal']) { await realm(v); R[v |
                 self.assertEqual([t in out["R"]["board"] for t in self.TITLES], shown)
 
     def test_a_realm_with_a_taken_id_is_dropped(self):
+        """A realm named for a tab Tasks owns, or for a layout panel (list, board, matrix, btn, menu), takes no tab."""
         self.doc, self.details = self.realm_doc(), {}
         prelude = ("globalThis.SHELL_REALMS = [{ id: 'all', label: 'Sneaky' }, { id: 'hoa', label: 'Hoa2' }, { id: 'list', label: 'List' },"
-                   " { id: 'Bad id', label: 'Bad' }, { id: 'work', label: 'Work' }];\n")
-        f = self.run_tasks("R.filters = ELS.filters.html;", prelude=prelude)["R"]["filters"]
-        self.assertEqual(re.findall(r'<option value="(\w*)"', f.split("</select>")[0]), ["", "personal", "list", "work", "hoa", "home"])
+                   " { id: 'Bad id', label: 'Bad' }, { id: 'work', label: 'Work' }, { id: 'menu', label: 'Menu' }];\n")
+        views = self.run_tasks("R.views = window.PAGE_VIEWS.map(v => v.id);", prelude=prelude)["R"]["views"]
+        self.assertEqual(views, ["personal", "work", "hoa", "home", "all"])
 
     def test_without_realms_conf_a_realm_holds_the_no_repo_rows_and_says_why(self):
         with mock.patch.object(places, "REALMS_CONFIG", self.dir / "realms.conf"):
@@ -1048,13 +1047,13 @@ class ThePages(unittest.TestCase):
             self.assertLess(text.index(f'src="/ui/{script}"'), text.index('src="/ui/shell.js"'), page)
             self.assertEqual(text.count('id="viewswitch"'), 1, page)
 
-    def test_tasks_has_no_view_switch(self):
-        """sd:5753: Tasks' realms are a filter, so the page has no switch host and does not load places.js."""
+    def test_tasks_hosts_its_realm_tabs_before_shell_js(self):
+        """sd:6263: Tasks' realms are sub tabs that filter one board, so the switch goes in its #viewswitch host, and
+        tasks.js declares PAGE_VIEWS before shell.js reads it."""
         text = (STATIC.parent / "tasks.html").read_text(encoding="utf-8")
-        self.assertNotIn('id="viewswitch"', text)
-        self.assertNotIn('src="/ui/places.js"', text)
-        self.assertNotIn("PAGE_VIEWS", (STATIC / "tasks.js").read_text(encoding="utf-8"))
-
+        self.assertEqual(text.count('id="viewswitch"'), 1)
+        self.assertLess(text.index('src="/ui/tasks.js"'), text.index('src="/ui/shell.js"'))
+        self.assertIn("window.PAGE_VIEWS = [", (STATIC / "tasks.js").read_text(encoding="utf-8"))
 
     def test_the_overviews_read_state_shows_with_the_overview_only(self):
         # The page's #state names the Overview's read (/api/hoa, /api/home); on Briefs it would describe another read.
