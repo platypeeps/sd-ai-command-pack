@@ -1,0 +1,30 @@
+# The Overview tiles of the realm places (/places?realm=<id>): an app or a
+# staging site, its link, and the commands that run it (sd:6162, sd:6164).
+#
+# Copy this file to <config>/project-dashboard/place-tiles.conf and edit it
+# (<config> is $SYSTEM_TOOLS_CONFIG, default ~/.config/system); the lines
+# below are examples. Folders, hosts and commands are this machine's, so
+# they live here, never in the checkout or in a setting the page writes.
+#
+#   tile|<realm>|<tile>|<label>|<folder>|<url or ->
+#   act|<tile>|<label>|<command>
+#
+# <realm> is an id in dashboard.realms; <tile> is a lower-case id of your
+# own. Visit opens <url>; each Overview read asks it once and says whether
+# it answers. Each act line is a button. Its command is split as a shell
+# would split it, with no shell: no pipe, no $VAR, no ~. It runs in
+# <folder>, in its own session, with its output in
+# ~/.local/state/system/place-tiles/<realm>/<tile>/<action>/start.log.
+# Wrap a command that needs a shell or a login PATH: /bin/zsh -lc "...".
+# A folder that is not on this machine shows the tile, its link and the
+# reason, and runs nothing.
+
+tile|work|simulator|World simulator|~/repos/example-org/example-simulator|http://127.0.0.1:8740/studio
+act|simulator|Start|./example-simulator.sh studio
+act|simulator|Stop|./example-simulator.sh studio-stop
+act|simulator|Update|git pull --ff-only
+
+tile|acme|staging|Staging site|~/deploy/acme-website|https://staging.example.test
+act|staging|Deploy|/bin/zsh -lc "npm run staging:deploy"
+act|staging|Tear down|/bin/zsh -lc "npm run staging:down"
+act|staging|Refresh|/bin/zsh -lc "npm run staging:up"

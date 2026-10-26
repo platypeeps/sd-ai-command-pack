@@ -871,7 +871,7 @@ open('binary_sensor.wan_degraded'); R.det = ELS.details.html; R.groups = ELS.gro
         groups = out["R"]["groups"]
         for name in ("House alarm", "Front door", "Water leak", "Guest mode", "Water &amp; safety"):
             self.assertIn(name, groups)
-        self.assertEqual(len(re.findall(r'data-state="unknown"', groups)), 8)
+        self.assertEqual(len(re.findall(r'data-id="[^"]+" data-state="unknown"', groups)), 8)
         self.assertNotRegex(groups, r'data-state="(ok|caution|warning)"')
         self.assertEqual(groups.count("HA not configured"), 8 * 2, "each tile names the error in its words and its label")
         self.assertIn("Problems active", out["R"]["head"])
@@ -911,7 +911,7 @@ open('binary_sensor.wan_degraded'); R.det = ELS.details.html; R.groups = ELS.gro
         doc = self.live(lambda path: (401, {"message": "Unauthorized"}, {}))
         out = self.run_page("R.groups = ELS.groups.html; open('lock.front_door'); R.det = ELS.details.html;",
                             answer=f"() => [200, {json.dumps(doc)}]")
-        self.assertEqual(len(re.findall(r'data-state="unknown"', out["R"]["groups"])), 8)
+        self.assertEqual(len(re.findall(r'data-id="[^"]+" data-state="unknown"', out["R"]["groups"])), 8)
         self.assertIn("HA refused the token", out["R"]["groups"])
         last = out["states"][-1] or {}
         self.assertEqual(last.get("kind"), "partial")
@@ -924,7 +924,7 @@ open('binary_sensor.wan_degraded'); R.det = ELS.details.html; R.groups = ELS.gro
         last = out["states"][-1]
         self.assertEqual((last["kind"], last["title"], last["source"]), ("empty", "No tile list", "<config>/project-dashboard/home-tiles.conf"))
         self.assertIn("project-dashboard/home-tiles.conf.example", last["text"])
-        self.assertEqual(out["R"]["groups"], "", "a missing tile list drew a grid")
+        self.assertNotIn("data-id=", out["R"]["groups"], "a missing tile list drew a grid")
         out = self.run_page("", answer="() => [500, { error: 'boom' }]")
         self.assertEqual(out["states"][-1]["kind"], "error")
         self.assertIn("boom", out["states"][-1]["text"])
@@ -937,7 +937,7 @@ open('binary_sensor.wan_degraded'); R.det = ELS.details.html; R.groups = ELS.gro
             tile.update(state=None, error=None)
         out = self.run_page("R.groups = ELS.groups.html; R.head = ELS.headline.html;", answer=f"() => [200, {json.dumps(doc)}]")
         self.assertNotRegex(out["R"]["groups"] + out["R"]["head"], r'data-state="(ok|caution|warning)"|●')
-        self.assertEqual(len(re.findall(r'data-state="unknown"', out["R"]["groups"])), 8)
+        self.assertEqual(len(re.findall(r'data-id="[^"]+" data-state="unknown"', out["R"]["groups"])), 8)
 
 
     # sd:4959: a binary sensor reads by its Home Assistant device_class, never "detected" for every on.
@@ -1152,6 +1152,64 @@ class TheEditor(TheScript):
         self.assertTrue(out["R"]["off"])
         self.assertEqual(out["states"][-1]["text"], "The tile list was not read: OperationalError: database is locked. Home Assistant was not called.")
         self.assertTrue(self.run_page("R.off = ELS['edit-tiles'].disabled;", answer="() => [500, { error: 'boom' }]")["R"]["off"])
+
+
+class TheWebUI(BrowserSession):
+    """sd:6163: a tile opens Home Assistant's web UI. The page links to `home_screen.WEB`; the server answers 302 to the
+    REST base local-ha-mcp's settings name, so no document holds the host."""
+
+    ENV = {"HA_TOKEN": HA_TOKEN, "HA_MCP_URL": "https://ha.example.test:8123/mcp_server/sse"}
+
+    def follow(self, path, cookie=True):
+        """The answer to one GET, its redirect not followed: status, Location, body."""
+        import http.client
+
+        host, port = self.base.removeprefix("http://").rsplit(":", 1)
+        connection = http.client.HTTPConnection(host, int(port), timeout=30)
+        self.addCleanup(connection.close)
+        connection.request("GET", path, headers={"Cookie": self.cookie} if cookie else {})
+        answer = connection.getresponse()
+        return answer.status, answer.getheader("Location"), answer.read().decode("utf-8")
+
+    def test_the_document_says_whether_the_web_ui_opens_and_never_holds_its_host(self):
+        doc = home_screen.document(self.connection, now=NOW, config=EXAMPLE)
+        self.assertEqual((doc["web"]["path"], doc["web"]["available"]), ("/home/assistant", False))
+        self.assertIn("HA_MCP_URL", doc["web"]["reason"])
+        # No tile list, so Home Assistant itself is not called.
+        with mock.patch.object(home_screen, "CONFIG", Path(_CONFIG.name) / "none.conf"), mock.patch.dict("os.environ", self.ENV):
+            status, _, body = self.request("/api/home", headers={"Cookie": self.cookie})
+        self.assertEqual((status, json.loads(body)["web"]), (200, {"path": "/home/assistant", "available": True, "reason": ""}))
+        self.assertNotIn("ha.example.test", body)
+
+    def test_the_link_answers_302_to_home_assistant_with_a_session_only(self):
+        with mock.patch.dict("os.environ", self.ENV):
+            self.assertEqual(self.follow("/home/assistant")[:2], (302, "https://ha.example.test:8123/"))
+            status, location, _ = self.follow("/home/assistant", cookie=False)
+        self.assertEqual((status, location), (403, None))
+
+    def test_without_settings_the_link_names_why_and_goes_nowhere(self):
+        status, location, body = self.follow("/home/assistant")
+        self.assertEqual((status, location), (503, None))
+        self.assertIn("HA_MCP_URL", body)
+
+
+class TheWebTile(TheScript):
+    """sd:6163: home.js draws the Home Assistant tile first: a link that opens in a new tab, or the reason it cannot."""
+
+    def test_the_tile_links_to_the_web_ui_in_a_new_tab(self):
+        doc = {**self.doc, "web": {"path": "/home/assistant", "available": True, "reason": ""}}
+        out = self.run_page("R.groups = ELS.groups.html;", answer=f"() => [200, {json.dumps(doc)}]")
+        web = out["R"]["groups"].split("</section>")[0]
+        self.assertIn("Home Assistant", web)
+        self.assertIn('<a class="open" href="/home/assistant" target="_blank" rel="noopener"', web)
+
+    def test_without_settings_the_tile_is_unknown_with_the_reason_and_no_link(self):
+        out = self.run_page("R.groups = ELS.groups.html;")
+        web = out["R"]["groups"].split("</section>")[0]
+        self.assertIn("Home Assistant", web)
+        self.assertIn('data-state="unknown"', web)
+        self.assertIn(html.escape(self.doc["web"]["reason"], quote=False), web)
+        self.assertNotIn("/home/assistant", web)
 
 
 class TheRegistration(Registers, unittest.TestCase):

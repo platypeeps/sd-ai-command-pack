@@ -31,6 +31,12 @@ reaches the page, and no redirect is followed. Under launchd the server's
 interpreter may need macOS Local Network permission to reach a LAN host, as
 local-ha-mcp's Node does.
 
+The first tile, Home Assistant's Web UI (sd:6163), links to `/home/assistant`
+on the dashboard in a new tab. With a session, that path answers 302 to the
+REST base above, the scheme and host of `HA_MCP_URL`; without the settings it
+answers 503 with the reason, and the tile shows "Cannot open" with it. The
+document carries `web` (`{path, available, reason}`), never the host.
+
 A tile's Act section and row menu offer the Home Assistant services its domain
 allows (sd:4966), from `home_screen.SERVICES`, which the document carries as
 `writes.services`: light, switch, fan and input_boolean turn on, off or toggle
