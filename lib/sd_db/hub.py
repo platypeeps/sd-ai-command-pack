@@ -349,12 +349,18 @@ _PRAGMA_READ_OR_CONNECTION = frozenset({
 })
 #: Pragmas that write the file with no value given.
 _PRAGMA_WRITES = frozenset({"incremental_vacuum", "wal_checkpoint"})
-#: Write pragmas that fail inside a transaction, so they cannot run inside
-#: BEGIN IMMEDIATE ... COMMIT: `journal_mode` to or from WAL ("cannot change
-#: out of wal mode from within a transaction") and `wal_checkpoint`
-#: ("database table is locked"). Each writes all it writes before its one
-#: row, so execute() has finished the write when it returns.
-_PRAGMA_UNWRAPPED = frozenset({"journal_mode", "wal_checkpoint"})
+#: Write pragmas a ROLLBACK does not undo, so each asks afresh before it
+#: runs, inside a transaction or not (lane review of 8a5f0f243). BEGIN and
+#: SAVEPOINT open no storage transaction, so `wal_checkpoint` runs there at
+#: once, and `journal_mode` may. Outside one they cannot be wrapped: they
+#: fail inside BEGIN IMMEDIATE ("cannot change out of wal mode from within
+#: a transaction", "database table is locked"). Each writes all it writes
+#: before its one row. VACUUM is the same, authorized as SQLITE_ATTACH.
+_PRAGMA_UNDONE_BY_NOTHING = frozenset({"journal_mode", "wal_checkpoint"})
+#: Why `incremental_vacuum` never runs on the record: no fence check holds it.
+_INCREMENTAL_VACUUM = ("refused: PRAGMA incremental_vacuum frees pages as its rows are fetched, after any "
+                       "fence check and past a ROLLBACK, so it never runs on this machine's own database; "
+                       "run it with sqlite3 on the hub (pack sd:6328)")
 
 _answers: dict[str, tuple[float, float, Role]] = {}
 _answers_guard = threading.Lock()
@@ -434,7 +440,9 @@ class _WriteFence:
     A pragma that changes the file is a write (pack sd:6328). Outside a
     transaction it runs again inside one, as other writes do:
     `incremental_vacuum` frees a page per row fetched, after execute().
-    Only those that fail inside one (`_PRAGMA_UNWRAPPED`) ask afresh at prepare.
+    Those no ROLLBACK undoes (`_PRAGMA_UNDONE_BY_NOTHING`, VACUUM) ask
+    afresh before they run, in a transaction or not; `incremental_vacuum`
+    never runs (`_INCREMENTAL_VACUUM`).
     Only SQLite's own state ends a transaction here: the write flag and the
     outer savepoint clear when a statement is prepared outside one, never on
     a BEGIN, ROLLBACK or RELEASE that may yet fail (review of f716079a9).
@@ -455,6 +463,8 @@ class _WriteFence:
         self.refusal: str | None = None
         #: The last statement was denied as a write outside a transaction.
         self.unwrapped = False
+        #: Why the last statement was denied whatever the role, for an `SdDbError`.
+        self.forbidden: str | None = None
 
     def _open(self) -> bool:
         """Whether a transaction is open before the statement being prepared."""
@@ -475,13 +485,19 @@ class _WriteFence:
             if arg1 == "RELEASE" and opened and name == self.outer and self.wrote:
                 return self._ask(fresh=True)
             return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_ATTACH:
+            # VACUUM, VACUUM INTO and ATTACH: VACUUM commits itself.
+            return self._ask(fresh=True)
         pragma = (arg1 or "").lower() if action == sqlite3.SQLITE_PRAGMA else None
         writes = action in _WRITES or pragma is not None and (
             pragma in _PRAGMA_WRITES or arg2 is not None and pragma not in _PRAGMA_READ_OR_CONNECTION)
         if writes and database != "temp":
+            if pragma == "incremental_vacuum":
+                self.forbidden = _INCREMENTAL_VACUUM
+                return sqlite3.SQLITE_DENY
+            if pragma in _PRAGMA_UNDONE_BY_NOTHING:
+                return self._ask(fresh=True)
             if not opened:
-                if pragma in _PRAGMA_UNWRAPPED:
-                    return self._ask(fresh=True)
                 self.unwrapped = True
                 return sqlite3.SQLITE_DENY
             self.wrote = True
@@ -504,10 +520,13 @@ def _fenced(connection: sqlite3.Connection, run, *args):
     """`run(*args)`, with a fence denial raised as `Fenced` after its transaction rolls back."""
     fence: _WriteFence | None = getattr(connection, "fence", None)
     if fence is not None:
-        fence.refusal, fence.unwrapped = None, False
+        fence.refusal, fence.unwrapped, fence.forbidden = None, False, None
     try:
         return run(*args)
     except sqlite3.DatabaseError as error:
+        if fence is not None and fence.forbidden is not None:
+            forbidden, fence.forbidden = fence.forbidden, None
+            raise SdDbError(forbidden) from error
         if fence is not None and fence.unwrapped:
             fence.unwrapped = False
             raise _Unwrapped() from error

@@ -574,7 +574,7 @@ class ThePragmaWrites(FenceCase):
         connection = self.open()
         before = self.header()
         writes_ = ("PRAGMA user_version = 7", "PRAGMA main.application_id = 7", "pragma JOURNAL_MODE = delete",
-                   "PRAGMA wal_checkpoint(TRUNCATE)", "PRAGMA wal_checkpoint", "PRAGMA incremental_vacuum")
+                   "PRAGMA wal_checkpoint(TRUNCATE)", "PRAGMA wal_checkpoint")
         paths: dict[str, Callable[[], object]] = {
             statement: functools.partial(connection.execute, statement) for statement in writes_}
         paths["executescript"] = lambda: connection.executescript("BEGIN IMMEDIATE; PRAGMA user_version = 8; COMMIT;")
@@ -718,46 +718,79 @@ class ThePragmaWrites(FenceCase):
         self.assertGreater(free, 1)
         return free
 
-    def test_autocommit_vacuum_demoted_mid_fetch_frees_nothing(self):
-        """Lane review of cae42071c: it frees one page per row fetched, after execute() has returned."""
+    def test_incremental_vacuum_never_runs_on_the_record(self):
+        """Lane reviews of cae42071c and 8a5f0f243: its cursor frees pages as it is fetched, past a ROLLBACK.
+
+        The next commit on the connection writes those pages, so no fence
+        check before or after it holds; it is refused on every path.
+        """
         self.name_hub(HUB_NAME)
         self.node()
         before = self.vacuumable()
-        connection = self.open()
-        cursor = connection.cursor()
-        refused = None
-        try:
-            cursor.execute("PRAGMA incremental_vacuum")
-        except sqlite3.OperationalError as error:
-            refused = error
-        self.node(OLD_HUB)
-        self.later()
-        with contextlib.suppress(sqlite3.Error):
-            cursor.fetchall()
-        cursor.close()
-        self.assertFalse(connection.in_transaction)
-        self.assertEqual(self.free_pages(), before)
-        self.assertIsNotNone(refused, "no commit could ask after the last row")
+        insert = "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', ?, '{}', '2026')"
+        openings = {"autocommit": None, "BEGIN": "BEGIN", "BEGIN IMMEDIATE": "BEGIN IMMEDIATE",
+                    "SAVEPOINT": "SAVEPOINT outer"}
+        for name, opening in openings.items():
+            with self.subTest(opening=name):
+                connection = self.open()
+                cursor = connection.cursor()
+                if opening is not None:
+                    connection.execute(opening)
+                with self.assertRaises(SdDbError) as refused:
+                    cursor.execute("PRAGMA incremental_vacuum")
+                self.assertIn("incremental_vacuum", str(refused.exception))
+                with contextlib.suppress(sqlite3.Error):
+                    cursor.fetchall()
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                connection.execute(insert, (name,))
+                self.assertEqual(self.free_pages(), before)
 
-    def test_vacuum_in_a_transaction_frees_after_a_fresh_ask(self):
+    def wal_bytes(self) -> int:
+        wal = Path(f"{self.path}-wal")
+        return wal.stat().st_size if wal.exists() else -1
+
+    def test_an_operation_no_rollback_undoes_asks_afresh_before_it_runs(self):
+        """Lane review of 8a5f0f243: BEGIN and SAVEPOINT open no storage transaction, so these run at once.
+
+        A held `holder` answer would let them run after the rename, and the
+        fenced COMMIT that follows cannot undo them.
+        """
+        insert = "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', ?, '{}', '2026')"
+        operations = ("PRAGMA wal_checkpoint", "PRAGMA wal_checkpoint(TRUNCATE)", "PRAGMA journal_mode = DELETE",
+                      "PRAGMA journal_mode = OFF", "VACUUM", "VACUUM main")
+        for opening in (None, "BEGIN", "SAVEPOINT outer"):
+            for operation in operations:
+                with self.subTest(opening=opening, operation=operation):
+                    hub._answers.clear()
+                    self.node()
+                    self.name_hub(HUB_NAME)
+                    connection = self.open()
+                    connection.execute(insert, ("held",))
+                    if opening is not None:
+                        connection.execute(opening)
+                    wal = self.wal_bytes()
+                    self.node(OLD_HUB)
+                    if operation.startswith("VACUUM") and opening is not None:
+                        # SQLite refuses it before it asks the authorizer.
+                        with self.assertRaisesRegex(sqlite3.OperationalError, "cannot VACUUM from within"):
+                            connection.execute(operation)
+                        connection.execute("ROLLBACK")
+                    else:
+                        with self.assertRaises(hub.Fenced):
+                            connection.execute(operation)
+                    self.assertFalse(connection.in_transaction)
+                    self.assertEqual(self.wal_bytes(), wal)
+                    self.assertEqual(self.header()[2], "wal")
+                    connection.close()
+
+    def test_vacuum_runs_on_the_live_hub(self):
         self.name_hub(HUB_NAME)
         self.node()
-        before = self.vacuumable()
         connection = self.open()
-        connection.execute("BEGIN IMMEDIATE")
-        connection.execute("PRAGMA incremental_vacuum").fetchall()
-        self.node(OLD_HUB)
-        self.later()
-        with self.assertRaises(hub.Fenced):
-            connection.execute("COMMIT")
-        self.assertEqual(self.free_pages(), before)
-        self.node()
-        self.later()
-        connection.execute("BEGIN IMMEDIATE")
-        connection.execute("PRAGMA incremental_vacuum").fetchall()
-        connection.execute("COMMIT")
-        self.assertEqual(self.free_pages(), 0)
-
+        before = len(self.asked())
+        connection.execute("VACUUM")
+        self.assertEqual(len(self.asked()), before + 1, "one fresh ask")
 
 class TheRestore(FenceCase):
     def test_restore_writes_before_the_name_is_taken(self):
