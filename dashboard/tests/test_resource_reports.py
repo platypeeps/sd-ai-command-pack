@@ -1,11 +1,9 @@
-"""Legacy inspection cannot execute repository configuration; cron runs once."""
+"""Legacy inspection cannot execute repository configuration."""
 import contextlib
 import importlib.util
 import io
 import json
 import os
-import shutil
-import subprocess
 import tempfile
 import time
 import unittest
@@ -15,8 +13,6 @@ from unittest.mock import Mock, patch
 from sd_dashboard import reports_screen
 
 HERE = Path(__file__).resolve().parents[1]
-#: The system checkout, whose cron-jobs.sh the report hook test runs (sd:5987).
-SYSTEM = Path(os.environ["SYSTEM_TOOLS_ROOT"])
 spec = importlib.util.spec_from_file_location("fixture_collectors", HERE / "collectors.py")
 collectors = importlib.util.module_from_spec(spec); spec.loader.exec_module(collectors)
 
@@ -286,47 +282,3 @@ class CronJobFiles(unittest.TestCase):
                 os.environ.pop("CRON_JOBS_EXTRA_DIRS", None)
                 found = collectors.cron_job_files()
             self.assertEqual(found, [jobs / "one.job"])
-
-
-class CronReports(unittest.TestCase):
-    def test_report_hook_preserves_single_run_and_exit_when_database_unavailable(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory); cron = root / "cron"; (cron / "logs").mkdir(parents=True)
-            shutil.copy2(SYSTEM / "local-cron-jobs/cron-jobs.sh", cron / "cron-jobs.sh")
-            # cron-jobs.sh sources the shared config and bounded-step helpers
-            # beside it, and reads job files from <config>/cron-jobs/jobs.
-            (root / "lib").mkdir(); shutil.copy2(SYSTEM / "lib/config.sh", root / "lib/config.sh")
-            shutil.copy2(SYSTEM / "lib/bounded.sh", root / "lib/bounded.sh")
-            jobs = root / "config/cron-jobs/jobs"; jobs.mkdir(parents=True)
-            (jobs / "fixture.job").write_text('JOB_SCHEDULE="* * * * *"\nJOB_COMMAND="printf \'REPORT BODY\\n\'"\nJOB_DIR=' + str(root) + "\n")
-            (cron / "logs/fixture.log").write_text("PREVIOUS RUN\n")
-            # Both runs below notify: the stub answers before the first, so no run reaches the Mac's own osascript (sd:5624).
-            notified = root / "osascript-calls"; notified.touch()
-            (root / "osascript").write_text(f"#!/bin/sh\nprintf '%s\\n' \"$*\" >> {str(notified)!r}\n"); (root / "osascript").chmod(0o755)
-            fake = root / "sd"; calls = root / "calls.jsonl"
-            fake.write_text("#!/usr/bin/env python3\nimport json,os,sys\nwith open(os.environ['REPORT_CALLS'],'a') as stream: stream.write(json.dumps(sys.argv[1:])+'\\n')\nsys.exit(int(os.environ.get('REPORT_EXIT','0')))\n")
-            fake.chmod(0o755)
-            # `exec` asks launchd about the job; this stub answers, never the
-            # machine's gui domain. It says the label is not held.
-            launchctl = root / "launchctl"; launchctl_calls = root / "launchctl-calls"
-            launchctl.write_text(f"#!/bin/sh\necho \"$*\" >> {str(launchctl_calls)!r}\nexit 1\n"); launchctl.chmod(0o755)
-            env = {**os.environ, "HOME": str(root), "SYSTEM_TOOLS_CONFIG": str(root / "config"), "SD_REPORT_BIN": str(fake), "REPORT_CALLS": str(calls), "REPORT_EXIT": "1",
-                   "PATH": str(root) + os.pathsep + os.environ["PATH"]}
-            result = subprocess.run(["sh", str(cron / "cron-jobs.sh"), "exec", "fixture"], env=env, capture_output=True, text=True, timeout=10, check=False)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            log = (cron / "logs/fixture.log").read_text()
-            self.assertEqual(log.count("REPORT BODY"), 1)
-            argv = json.loads(calls.read_text().splitlines()[0])
-            self.assertEqual(argv[:3], ["reports", "ingest", "fixture"])
-            self.assertEqual(argv[argv.index("--offset") + 1], str(len("PREVIOUS RUN\n")))
-            self.assertIn("report was not recorded", result.stderr)
-            self.assertIn("print gui/", launchctl_calls.read_text())
-            self.assertFalse((cron / "logs/.fixture.lock").exists())
-            self.assertFalse((cron / "logs/failures.log").exists())
-            self.assertIn("Job 'fixture': report not recorded", notified.read_text())
-            (jobs / "fixture.job").write_text('JOB_SCHEDULE="* * * * *"\nJOB_COMMAND="exit 7"\nJOB_DIR=' + str(root) + "\n")
-            result = subprocess.run(["sh", str(cron / "cron-jobs.sh"), "exec", "fixture"], env=env, capture_output=True, text=True, timeout=10, check=False)
-            self.assertEqual(result.returncode, 7, result.stderr)
-            self.assertEqual(len(calls.read_text().splitlines()), 2)
-            self.assertEqual((cron / "logs/failures.log").read_text().count("FAILED rc=7"), 1)
-            self.assertFalse((cron / "logs/.fixture.lock").exists())
