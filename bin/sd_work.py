@@ -1193,12 +1193,23 @@ def _note_text(args: argparse.Namespace) -> str:
 SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
 
 
+#: `<session>:<agent>`, which `bin/sd-session-beat` exports into a teammate's Bash call (pack sd:6046).
+AGENT_ENV = "SD_AGENT_SESSION"
+
+
 def _session(who: str) -> str:
     """The session a note records: the harness session id when set, else `who` (sd:6023).
 
     `bin/sd-session-trail` reads a session's own notes back by it after a compact.
+    A teammate shares its lead's id, so its notes record the `AGENT_ENV` mark
+    instead, when the mark names this session: one inherited from another
+    session marks nothing (pack sd:6046).
     """
-    return os.environ.get(SESSION_ENV) or who
+    session = os.environ.get(SESSION_ENV)
+    if not session:
+        return who
+    mark = os.environ.get(AGENT_ENV, "")
+    return mark if mark.startswith(f"{session}:") and len(mark) > len(session) + 1 else session
 
 
 def _note(workflow: Any, connection: Any, args: argparse.Namespace, who: str, revision: str | None) -> dict:

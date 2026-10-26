@@ -8,6 +8,7 @@ import importlib.util
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -270,12 +271,14 @@ class TaskCLI(unittest.TestCase):
             self.assertEqual(sd_db.reads.open_followups(connection), [])
         self.assertNotIn("advisory", self.call("task", "note", item, "--body", "Again").stderr)
 
-    def harness(self, session: str | None = None, agent: str | None = None) -> dict[str, str]:
-        """This environment with the harness's session id and agent marker set as given, else unset."""
+    def harness(self, session: str | None = None, agent: str | None = None,
+                mark: str | None = None) -> dict[str, str]:
+        """This environment with the harness's session id, agent marker and teammate mark set as given,
+        else unset."""
         bare = {key: value for key, value in self.environment.items()
-                if key not in ("CLAUDE_CODE_SESSION_ID", "AI_AGENT")}
+                if key not in ("CLAUDE_CODE_SESSION_ID", "AI_AGENT", "SD_AGENT_SESSION")}
         return {**bare, **({"CLAUDE_CODE_SESSION_ID": session} if session else {}),
-                **({"AI_AGENT": agent} if agent else {})}
+                **({"AI_AGENT": agent} if agent else {}), **({"SD_AGENT_SESSION": mark} if mark else {})}
 
     def test_add_and_note_record_the_harness_session_id(self):
         """pack sd:6023: add, note and an answer record `CLAUDE_CODE_SESSION_ID`; unset, the user as before."""
@@ -305,6 +308,39 @@ class TaskCLI(unittest.TestCase):
         state = json.loads(self.call("task", "note", item, "Lead ruling", "--kind", "decision", "--json",
                                      env=lead).stdout)
         self.assertEqual([note["session"] for note in state["notes"]], ["session-under-test", "session-under-test"])
+
+    def test_a_teammate_records_its_mark_and_a_mark_from_another_session_marks_nothing(self):
+        """pack sd:6046: a teammate shares its lead's session id; `bin/sd-session-beat` exports
+        `SD_AGENT_SESSION=<session>:<agent>` into its Bash call, and add, note and status record it."""
+        mate = self.harness("session-under-test", mark="session-under-test:agent-1")
+        item = json.loads(self.call("task", "add", "Filed by a teammate", "--json", env=mate).stdout)["item"]["id"]
+        self.call("task", "note", item, "Teammate ruling", "--kind", "decision", env=mate)
+        self.call("task", "status", item, "in_progress", env=mate)
+        stray = self.harness("session-under-test", mark="session-other:agent-1")
+        state = json.loads(self.call("task", "note", item, "Lead note", "--json", env=stray).stdout)
+        self.assertEqual([note["session"] for note in state["notes"]],
+                         ["session-under-test:agent-1"] * 3 + ["session-under-test"])
+
+    def test_the_beat_hooks_rewrite_runs_sd_under_the_teammates_mark(self):
+        """pack sd:6046: the command `bin/sd-session-beat` hands back, run by a shell as Claude Code
+        runs it, records the teammate's mark; the lead's call comes back unchanged."""
+        item = json.loads(self.call("task", "add", "Shared", "--json", env=self.harness()).stdout)["item"]["id"]
+        command = f"{shlex.quote(sys.executable)} {ROOT / 'bin' / 'sd'} task note {item} Marked --json"
+
+        def rewritten(payload: dict) -> str:
+            done = subprocess.run([sys.executable, str(ROOT / "bin" / "sd-session-beat")], check=False,
+                                  input=json.dumps({"hook_event_name": "PreToolUse", "session_id": "session-under-test",
+                                                    "tool_name": "Bash", "tool_input": {"command": command},
+                                                    **payload}),
+                                  capture_output=True, text=True, env=clean_environment(HOME=str(self.home)))
+            self.assertEqual((done.returncode, done.stderr), (0, ""))
+            return json.loads(done.stdout)["hookSpecificOutput"]["updatedInput"]["command"] if done.stdout else ""
+
+        self.assertEqual(rewritten({}), "")
+        ran = subprocess.run(["/bin/sh", "-c", rewritten({"agent_id": "agent-1"})], capture_output=True, text=True,
+                             env=clean_environment(HOME=str(self.home), CLAUDE_CODE_SESSION_ID="session-under-test"),
+                             check=True)
+        self.assertEqual(json.loads(ran.stdout)["note"]["session"], "session-under-test:agent-1")
 
     def done_item(self, *merge_note):
         """A task closed by hand, optionally carrying a merge comment first."""
