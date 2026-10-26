@@ -1852,7 +1852,7 @@ class TheRevisit(SyncCase):
                      contribution_client=Offline())
                 self.assertEqual(runner.paths, [path], hours)
 
-    def test_a_settled_shadow_row_with_a_stale_contribution_goes_after_the_rest(self):
+    def test_a_settled_row_with_a_stale_contribution_is_deferred(self):
         """The shadow row settles, but the contribution of the same url stays
         stale until its queue read completes: the url is deferred, whatever
         spelling each store keeps."""
