@@ -16,13 +16,15 @@ import os
 import random
 import re
 import subprocess
+import threading
 import time
+import unittest
 from pathlib import Path
 from unittest.mock import patch
 
 from sd_db import repos, workflow, writes
 from sd_db.testing import FixtureRemote, GitHubDouble, gh_environment, install_gh, patience
-from sd_dashboard import issue_filing, management_screen, tasks_screen
+from sd_dashboard import command_journal, issue_filing, management_screen, tasks_screen
 from sd_dashboard.issue_filing import REMOVED, findings, sanitize, scan
 
 from test_workflow_actions import BrowserSession
@@ -696,3 +698,17 @@ class TheConfirm(FilingCase):
                 issue_filing.file_jira(target, "t", "b", transport=lambda *a, e=error: (None, e), environ=env)
         with self.assertRaises(issue_filing.Unknown):
             issue_filing.file_jira(target, "t", "b", transport=lambda *a: ({"key": "OTHER-1"}, ""), environ=env)
+
+
+class TheCleanup(unittest.TestCase):
+    def test_a_case_that_started_a_run_leaves_no_journal_watch_running(self):
+        """sd:6324: the start's journal watch looked every 5 s, and a look while the case's folder was removed wrote
+        into it: 'Directory not empty'. A minute's poll keeps the watch asleep past the case on any machine."""
+        before = set(threading.enumerate())
+        result = unittest.TestResult()
+        with patch.object(command_journal, "POLL_SECONDS", 60):
+            TheConfirm("test_confirm_calls_gh_once_with_the_sanitized_text_and_links_back").run(result)
+        self.assertEqual(result.errors + result.failures, [])
+        left = [thread.name for thread in threading.enumerate()
+                if thread not in before and thread.name.startswith("sd-journal ")]
+        self.assertEqual(left, [], "a journal watch outlived its case, free to write into the folder being removed")

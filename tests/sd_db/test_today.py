@@ -156,6 +156,16 @@ class TheSections(TodayCase):
         self.assertEqual([(row["id"], row["why"]) for row in today.attention(self.connection)],
                          [(report, "two stale rows")])
 
+    def test_closing_an_item_keeps_its_unanswered_question_in_decisions(self):
+        """Pack sd:6329: a close answers no question; the followups it owed go."""
+        asked = self.item("Asked")
+        decision = add_note(self.connection, asked, "question", "Move all 45?\nOption: Approve all\nOption: Videos only")
+        add_note(self.connection, asked, "followup", "Chase the vendor")
+        workflow.change_status(self.connection, asked, "done", who="operator", reason="landed")
+        self.assertEqual([(row["id"], row["note"], row["status"]) for row in today.decisions(self.connection)],
+                         [(asked, decision, "done")])
+        self.assertEqual(today.followups(self.connection), [])
+
     def batch(self, name, questions=1, repo=APP):
         """A review batch filed by the review store itself, so the marker is the one it writes."""
         return review.file(self.connection, {

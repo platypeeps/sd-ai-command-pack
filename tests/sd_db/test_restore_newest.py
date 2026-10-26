@@ -931,5 +931,71 @@ class TheNewest(Case):
         self.assertEqual(self.items(home), ["only"])
 
 
+
+@hub_only
+class NewestRestorable(Case):
+    """`newest_restorable`: the snapshot `restore_newest` would restore, restoring nothing (pack sd:6323)."""
+
+    def newer_schema(self, copy):
+        """What a newer library writes: its schema, its new table counted, a manifest that matches."""
+        raw = sqlite3.connect(copy / "sd.db")
+        raw.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+        raw.execute("CREATE TABLE future (id INTEGER PRIMARY KEY)")
+        raw.close()
+        manifest = json.loads((copy / BACKUP_MANIFEST).read_text())
+        manifest["counts"]["future"] = 0
+        manifest["entries"]["sd.db"] = hashlib.sha256((copy / "sd.db").read_bytes()).hexdigest()
+        (copy / BACKUP_MANIFEST).write_text(json.dumps(manifest))
+        return copy
+
+    def test_it_names_what_restore_newest_restores_and_installs_nothing(self):
+        good = self.mirror(self.snapshot(datetime(2026, 10, 12, 9, 0, tzinfo=UTC), title="first"))
+        bad = self.mirror(self.snapshot(NOW, title="second"))
+        (bad / "runner-recovery-note").write_text("written on the share\n")
+        before = sorted(str(path.relative_to(self.base)) for path in self.base.rglob("*"))
+        lines: list[str] = []
+
+        found = backup.newest_restorable([self.base / "missing", self.nas], report=lines.append)
+
+        self.assertEqual((found.snapshot, found.taken_at, found.newer), (good, datetime(2026, 10, 12, 9, 0, tzinfo=UTC), None))
+        self.assertEqual([path for path, _ in found.refused], [self.base / "missing", bad])
+        self.assertIn("differ from its manifest", found.refused[1][1])
+        self.assertEqual(len(lines), 2, lines)
+        self.assertEqual(found.released, [])
+        self.assertEqual(sorted(str(path.relative_to(self.base)) for path in self.base.rglob("*")), before)
+        self.assertEqual(unresolved_state(self.open(), "restore"), [])
+        home = self.fresh_home()
+        restored = backup.restore_newest([self.base / "missing", self.nas], home=home)
+        self.assertEqual((restored.snapshot, restored.taken_at, restored.refused),
+                         (found.snapshot, found.taken_at, found.refused))
+
+    def test_it_asks_for_no_hub(self):
+        only = self.mirror(self.snapshot(NOW, title="only"))
+        with mock.patch.object(backup, "refuse_hub_only", side_effect=AssertionError("asked for the hub")):
+            found = backup.newest_restorable([self.nas])
+        self.assertEqual(found.snapshot, only)
+
+    def test_none_passing_is_no_snapshot_with_each_reason(self):
+        copies = []
+        for when in (datetime(2026, 10, 12, 9, 0, tzinfo=UTC), NOW):
+            copy = self.mirror(self.snapshot(when))
+            (copy / "sd.db").write_bytes((copy / "sd.db").read_bytes() + b"tail")
+            copies.append(copy)
+
+        found = backup.newest_restorable([self.nas])
+
+        self.assertEqual((found.snapshot, found.taken_at, found.newer), (None, None, None))
+        self.assertEqual([path for path, _ in found.refused], copies[::-1])
+
+    def test_a_newer_schema_stops_the_walk_and_names_its_version(self):
+        self.mirror(self.snapshot(datetime(2026, 10, 12, 9, 0, tzinfo=UTC)))
+        newest = self.newer_schema(self.mirror(self.snapshot(NOW)))
+
+        found = backup.newest_restorable([self.nas])
+
+        self.assertEqual((found.snapshot, found.newer), (None, (newest, SCHEMA_VERSION + 1)))
+        self.assertEqual(found.refused, [])
+
+
 if __name__ == "__main__":
     unittest.main()
