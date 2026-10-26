@@ -15,8 +15,10 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_db.testing import patience
 from sd_dashboard import chat, email_draft
 
+from support import bound_from
 from test_email_draft import DOUBLE
 from test_workflow_actions import BrowserSession
 
@@ -49,6 +51,11 @@ class ChatCase(BrowserSession):
                 os.kill(int((self.double / name).read_text()), signal.SIGKILL)
             except (OSError, ValueError):
                 pass
+
+    def hung(self):
+        """The double hangs, and a run's bound counts from its child's pid file (sd:6299)."""
+        (self.double / "hang").write_text("")
+        return bound_from(email_draft, self.double / "pid")
 
     def ask(self, **body):
         return self.post("/api/chat", {"scope": "fleet", "page": "Today", "text": "What is next?", **body})
@@ -148,15 +155,14 @@ class TheContext(ChatCase):
 
 class OneAtATime(ChatCase):
     def test_a_second_question_while_one_runs_is_refused(self):
-        (self.double / "hang").write_text("")
         first = {}
-        with patch.object(email_draft, "MODEL_TIMEOUT", 3):
+        with self.hung(), patch.object(email_draft, "MODEL_TIMEOUT", 3):
             thread = threading.Thread(target=lambda: first.update(answer=self.ask()))
             thread.start()
-            for _ in range(100):
-                if (self.double / "pid").exists():
-                    break
+            deadline = time.monotonic() + patience(10)
+            while not (self.double / "pid").exists() and time.monotonic() < deadline:
                 time.sleep(0.05)
+            self.assertTrue((self.double / "pid").exists(), "the first run never reached its hang")
             status, _, answer = self.ask(text="And then?")
             thread.join()
         self.assertEqual(status, 409)
@@ -164,11 +170,11 @@ class OneAtATime(ChatCase):
         self.assertEqual(first["answer"][0], 504)
 
     def test_a_timeout_kills_the_run_and_frees_the_lock(self):
-        (self.double / "hang").write_text("")
-        with patch.object(email_draft, "MODEL_TIMEOUT", 1):
+        with self.hung(), patch.object(email_draft, "MODEL_TIMEOUT", 1):
             status, _, answer = self.ask()
         self.assertEqual(status, 504)
         self.assertEqual(answer["error"], "No answer: claude -p gave no answer in 1 s.")
+        self.assertTrue((self.double / "pid").exists(), "the run never reached its hang, so it wrote no pid file")
         pid = int((self.double / "pid").read_text())
         for _ in range(40):
             try:

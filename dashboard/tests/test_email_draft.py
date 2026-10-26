@@ -21,6 +21,7 @@ from sd_db import workflow
 from sd_db.testing import patience
 from sd_dashboard import email_draft
 
+from support import bound_from
 from test_v2_notes import FakeWorkspace
 from test_workflow_actions import BrowserSession
 
@@ -29,12 +30,16 @@ printf '%s\\n' "$@" > "$DOUBLE_DIR/argv"
 cat > "$DOUBLE_DIR/stdin"
 printf '%s' "${DOUBLE_TOKEN-unset}" > "$DOUBLE_DIR/token"
 pwd -P > "$DOUBLE_DIR/cwd"
-if [ -f "$DOUBLE_DIR/escape" ]; then perl -e 'use POSIX; setsid(); sleep 60' & echo $! > "$DOUBLE_DIR/escaped"; fi
-if [ -f "$DOUBLE_DIR/hang" ]; then sleep 60 & echo $! > "$DOUBLE_DIR/pid"; wait; fi
+if [ -f "$DOUBLE_DIR/escape" ]; then
+  perl -e 'use POSIX; setsid(); sleep 60' & echo $! > "$DOUBLE_DIR/escaped.new"; mv "$DOUBLE_DIR/escaped.new" "$DOUBLE_DIR/escaped"
+fi
+if [ -f "$DOUBLE_DIR/stall" ]; then sleep 2; fi
+if [ -f "$DOUBLE_DIR/hang" ]; then sleep 60 & echo $! > "$DOUBLE_DIR/pid.new"; mv "$DOUBLE_DIR/pid.new" "$DOUBLE_DIR/pid"; wait; fi
 cat "$DOUBLE_DIR/reply"
 exit "$(cat "$DOUBLE_DIR/exit" 2>/dev/null || echo 0)"
 """
-#: The double's hang and escape outlast every bound below at the most `patience` grows it (sd:6158).
+#: The double's hang and escape outlast every bound below at the most `patience` grows it (sd:6158). Each pid file
+#: appears whole, with `escaped` before `pid`; `hung` counts a run's bound from `pid` (sd:6299). `stall` delays the hang.
 REPLY = "Subject: The review plan is ready\n\nHi,\n\nThe plan for the review is written down.\n\nThanks\n"
 DRAFTED = "Draft created! Draft ID: r-4242"
 
@@ -95,6 +100,27 @@ class DraftCase(BrowserSession):
     def last_note(self, item):
         return workflow.item_state(self.connection, item)["notes"][-1]
 
+    def hung(self):
+        """The double hangs, and a run's bound counts from its child's pid file (sd:6299)."""
+        (self.double / "hang").write_text("")
+        return bound_from(email_draft, self.double / "pid")
+
+    def written(self, name="pid") -> int:
+        """A pid the hung double wrote; a failure that says so when it never reached its hang."""
+        path = self.double / name
+        self.assertTrue(path.exists(), f"the double never reached its hang, so it wrote no {name} file")
+        return int(path.read_text())
+
+    def assert_gone(self, pid):
+        deadline = time.monotonic() + patience(2)
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.05)
+        self.fail(f"the model's child {pid} outlived the timeout")
+
 
 class TheDraft(DraftCase):
     def test_a_task_saves_a_gmail_draft_and_nothing_sends_it(self):
@@ -142,10 +168,9 @@ class TheDraft(DraftCase):
 
 class TheFailures(DraftCase):
     def test_a_model_timeout_leaves_no_draft_kills_the_run_and_records_the_failure(self):
-        (self.double / "hang").write_text("")
         item = self.task()
         began = time.monotonic()
-        with patch.object(email_draft, "MODEL_TIMEOUT", 1):
+        with self.hung(), patch.object(email_draft, "MODEL_TIMEOUT", 1):
             status, _, answer = self.draft(item)
         self.assertLess(time.monotonic() - began, patience(4))
         self.assertEqual(status, 504)
@@ -153,27 +178,26 @@ class TheFailures(DraftCase):
         self.assertEqual(answer["error"], said)
         self.assertEqual(self.tools(), [])
         self.assertEqual(self.last_note(item)["body"], said)
-        pid = int((self.double / "pid").read_text())
-        deadline = time.monotonic() + patience(2)
-        while time.monotonic() < deadline:
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
-                break
-            time.sleep(0.05)
-        else:
-            self.fail(f"the model's child {pid} outlived the timeout")
+        self.assert_gone(self.written())
+
+    def test_a_run_slow_to_reach_its_hang_still_loses_its_child(self):
+        # sd:6299: under load the double reached its hang after the 1 s bound; the stall makes that certain.
+        (self.double / "stall").write_text("")
+        with self.hung(), patch.object(email_draft, "MODEL_TIMEOUT", 1):
+            status, _, _ = self.draft(self.task())
+        self.assertEqual(status, 504)
+        self.assert_gone(self.written())
 
     def test_a_descendant_that_left_the_group_does_not_hold_the_timeout(self):
         # It keeps the run's stdout and stderr open past the group kill; the runner stops reading them.
-        (self.double / "hang").write_text("")
         (self.double / "escape").write_text("")
-        began = time.monotonic()
-        with patch.object(email_draft, "MODEL_TIMEOUT", 1), patch.object(email_draft, "REAP_TIMEOUT", 1, create=True):
-            with self.assertRaisesRegex(TimeoutError, "gave no answer in 1 s"):
-                email_draft._model("a question")
-        self.assertLess(time.monotonic() - began, patience(5))
-        os.kill(int((self.double / "escaped").read_text()), signal.SIGKILL)
+        with self.hung():
+            began = time.monotonic()
+            with patch.object(email_draft, "MODEL_TIMEOUT", 1), patch.object(email_draft, "REAP_TIMEOUT", 1, create=True):
+                with self.assertRaisesRegex(TimeoutError, "gave no answer in 1 s"):
+                    email_draft._model("a question")
+            self.assertLess(time.monotonic() - began, patience(5))
+        os.kill(self.written("escaped"), signal.SIGKILL)
 
     def test_a_reply_without_a_subject_line_saves_nothing(self):
         (self.double / "reply").write_text("Sure! Here is an email you could send.\n")
