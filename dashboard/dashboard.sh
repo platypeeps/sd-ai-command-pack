@@ -7,7 +7,7 @@
 # for Toolbox, Briefs, Vault, Research and Queues, and Ports calls one of
 # them, `collectors.collect_ports`, in-process -- not the whole tile set.
 # `tile` runs one view from a shell.
-# Usage: dashboard.sh tile <tab> | serve | preflight | install | health | pages | test
+# Usage: dashboard.sh tile <tab> | serve | preflight | install | health | shots | pages | test
 set -e
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
@@ -193,6 +193,18 @@ cmd_runtime() {
   exec "$runtime_python" -I "$DIR/sd_dashboard/bootstrap.py" runtime "$@"
 }
 
+cmd_shots() {
+  # Screenshots for the lead's review before enqueue (sd:6007): this checkout,
+  # served on a copy of the database, each page dark and light at desktop and
+  # phone width. Under the server's interpreter, so the pages are this build's.
+  runtime_python="${SD_DASHBOARD_PYTHON:-$RUNTIME_PYTHON_DEFAULT}"
+  if [ ! -x "$runtime_python" ]; then
+    echo "dashboard: missing installed runtime $runtime_python" >&2
+    exit 1
+  fi
+  exec "$runtime_python" -I "$DIR/sd_dashboard/bootstrap.py" shots "$@"
+}
+
 cmd_docs() {
   # The design documents: docs/design/*.md rendered into docs/design's sibling
   # docs/dashboard/, which `documents.py` already serves for any checkout that
@@ -227,12 +239,13 @@ case "${1:-}" in
   serve) shift; cmd_serve "$@" ;;
   preflight|install|health) cmd_runtime "$@" ;;
   grants) shift; cmd_grants "$@" ;;
+  shots) shift; cmd_shots "$@" ;;
   docs) shift; cmd_docs "$@" ;;
   pages) shift; cmd_pages "$@" ;;
   test|check) shift; cmd_test "$@" ;;
   -h|--help|help)
     cat <<'HELPEOF'
-usage: dashboard.sh tile <tab> | serve | preflight | install | health | grants | docs | pages | test
+usage: dashboard.sh tile <tab> | serve | preflight | install | health | grants | shots | docs | pages | test
 
   tile <tab>       one tab as JSON on stdout — toolbox, vault, research,
                    ports or queues. The Resources views are
@@ -268,6 +281,12 @@ usage: dashboard.sh tile <tab> | serve | preflight | install | health | grants |
                    read nobody can grant looks like. Run it from launchd,
                    where a child's access is its own, for a conclusive 0 when
                    both hold the grant
+  shots            --out DIR PAGE... draws each page (such as /tasks)
+                   dark and light, 1440 and 375 wide, from this checkout
+                   served on a copy of the database; prints one PNG path
+                   per line. --database names the store to copy. Needs
+                   Chrome (CHROME names its binary). Exits 1 naming a page
+                   that did not answer 200 or did not settle
   docs             render docs/design/*.md into docs/dashboard/, diagrams
                    included, where the Documents tab already serves them.
                    --check lists stale outputs and exits 1 if any; --hashes
@@ -317,7 +336,7 @@ HELPEOF
     exit 0
     ;;
   *)
-    echo "usage: $(basename "$0") tile <tab> | serve | preflight | install | health | grants | docs | pages | test" >&2
+    echo "usage: $(basename "$0") tile <tab> | serve | preflight | install | health | grants | shots | docs | pages | test" >&2
     exit 1
     ;;
 esac

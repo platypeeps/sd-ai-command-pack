@@ -302,6 +302,28 @@ class TheTrack(ReaderCase):
         landed = parse_qs(urlsplit(links["Landed 24h"]).query)
         self.assertEqual((landed["status"], landed["age"], landed["realm"]), (["done"], ["0"], ["all"]))
 
+    def test_a_brief_mark_is_solid_with_a_24_unit_hit_area(self):
+        """sd:6232: the brief mark was a hollow ring, 3.5 units, and only the ring took the pointer. It is a solid dot now,
+        a shape no other lane uses, inside a clear 24 x 24 square in the same link that takes the press; at the track's
+        900-unit width that square is 24 px. The square sits between the Jobs (36-44) and Live (72-75) lanes."""
+        self.doc["track"] = {**self.TRACK, "briefs": [{"at": "2026-09-06T08:00:00Z", "id": "brief:3", "what": "brief 3 filed"}]}
+        plot = self.run_page(self.DRAWN)["R"]["plot"]
+        link = re.search(r'<a href="\?row=brief%3A3">(.*?)</a>', plot, re.S).group(1)
+        hit = re.search(r'<rect class="hit" x="([\d.]+)" y="(\d+)" width="(\d+)" height="(\d+)">', link)
+        dot = re.search(r'<circle class="brief" cx="([\d.]+)" cy="(\d+)" r="([\d.]+)"', link)
+        self.assertIsNotNone(hit, link)
+        self.assertIsNotNone(dot, link)
+        self.assertEqual((int(hit[3]), int(hit[4])), (24, 24))
+        self.assertAlmostEqual(float(hit[1]) + 12, float(dot[1]), places=1)
+        self.assertEqual(int(hit[2]) + 12, int(dot[2]))
+        self.assertTrue(44 < int(hit[2]) and int(hit[2]) + 24 < 72, "the hit square overlaps another lane")
+        self.assertGreaterEqual(float(dot[3]), 4)
+        css = (V2 / "static" / "today.css").read_text(encoding="utf-8")
+        brief = re.search(r"^\.daytrack \.brief \{([^}]*)\}", css, re.M).group(1)
+        self.assertRegex(brief, r"fill: var\(--color-[a-z0-9-]+\)")
+        self.assertIn("pointer-events: none", brief)
+        self.assertRegex(css, r"(?m)^\.daytrack \.hit \{ fill: transparent; \}")
+
     def test_a_day_with_no_mark_is_one_line_not_an_empty_axis(self):
         self.doc["track"] = {**self.TRACK, "landed": [], "jobs": [], "live": [], "key": {**self.TRACK["key"], "landed": 0}}
         out = self.run_page(self.DRAWN)

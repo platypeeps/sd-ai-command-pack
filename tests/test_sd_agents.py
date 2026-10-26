@@ -264,6 +264,24 @@ class SliceBuilderDecisionNote(unittest.TestCase):
         self.assertNotIn("Decision needed", body)
 
 
+class SliceBuilderPageShots(unittest.TestCase):
+    """sd:6007. Misaligned dropdowns, missing help icons, a missing Park and
+    counts in labels passed review and tests: a builder that touches a page
+    captures it dark and light, desktop and phone width, and the lead looks
+    before enqueue. The command the builder is told to run must exist."""
+
+    def test_the_slice_builder_captures_touched_pages_for_the_lead(self) -> None:
+        _, body = (AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8").split("\n---\n", 1)
+        for needle in ("dark and light, at desktop and phone width", "dashboard/dashboard.sh shots --out",
+                       "Name each PNG in the report", "any page shots"):
+            with self.subTest(needle=needle):
+                self.assertIn(needle, body)
+        launcher = (REPO_ROOT / "dashboard" / "dashboard.sh").read_text(encoding="utf-8")
+        self.assertIn('  shots) shift; cmd_shots "$@" ;;', launcher)
+        workflow = (REPO_ROOT / "WORKFLOW.md").read_text(encoding="utf-8")
+        self.assertIn("the lead also looks at the builder's page shots", workflow)
+
+
 class SliceBuilderClaimsItems(unittest.TestCase):
     """sd:5961. Items read `planning` while builders worked them: only the
     retired runner's assignment claim moved one to `in_progress`. A builder

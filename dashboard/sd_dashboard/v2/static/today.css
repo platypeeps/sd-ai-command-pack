@@ -6,13 +6,16 @@
 /* The day track (sd:5921): the last 24 hours in four lanes, its key beside it; one column on a phone. */
 .daytrack { margin-top: var(--space-md); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-xs) var(--space-md);
   align-items: center; border: var(--rule-hair) solid var(--color-rule-2); border-radius: var(--radius-md); padding: var(--space-sm) var(--space-md); }
-.daytrack svg { display: block; width: 100%; height: auto; }
+.daytrack .track-plot svg { display: block; width: 100%; height: auto; }
 .daytrack .axis { font: 400 12px var(--font-data); fill: var(--color-muted); }
 .daytrack .lane-l { font: 600 11px var(--font-label); letter-spacing: .09em; text-transform: uppercase; fill: var(--color-muted); }
 .daytrack .grid { stroke: var(--color-grid); stroke-width: 1; }
 .daytrack .land { stroke: var(--color-series-1); stroke-width: 2; }
 .daytrack .fail { fill: var(--color-warning); }
-.daytrack .brief { fill: none; stroke: var(--color-muted); stroke-width: 1.2; }
+/* sd:6232: the brief mark is a solid dot; its clear .hit square (24 units, 24px at the 900px track) takes the press. */
+.daytrack .brief { fill: var(--color-ink-2); pointer-events: none; }
+.daytrack .hit { fill: transparent; }
+.daytrack a:hover .brief { fill: var(--color-ink); }
 .daytrack .sess { fill: var(--color-accent); }
 .daytrack .now { stroke: var(--color-accent); stroke-width: 1.5; }
 .daytrack a:focus-visible > * { outline: 2px solid var(--color-focus); }
@@ -148,7 +151,9 @@ section[aria-labelledby="motion-h"] { margin-top: var(--space-xl); }
 @media (pointer: coarse) { .st-sec .more { min-height: var(--row-touch); } }
 @media (max-width: 899px) {
   .st tbody tr { grid-template-columns: 2rem minmax(0, 1fr) auto; grid-template-areas: "g what when" ". detail detail"; }
-  .st .what { grid-area: what; width: auto; } .st .detail { grid-area: detail; } .st .when { grid-area: when; }
+  .st .what { grid-area: what; width: auto; } .st .detail { grid-area: detail; } .st .when { grid-area: when;   #github-sections .st tbody tr { grid-template-areas: "g what act" ". src when" ". detail detail"; }
+}
+  #github-sections .st tbody tr { grid-template-areas: "g what act" ". src when" ". detail detail"; }
 }
 
 /* GitHub (sd:5608; the GitHub page's Pull requests since sd:5781, which links this sheet): Status's parts and rows (.st-sec, .st) for pull requests and issues. The title links to GitHub, the
@@ -156,6 +161,7 @@ section[aria-labelledby="motion-h"] { margin-top: var(--space-xl); }
  * Hallmark · component: github view · genre: modern-minimal · theme: design.md instrument panel
  * states: default · hover (links) · focus · active · empty (one shared line) · error (could not be read) · not read (▨ line) */
 .st .detail .sub a { color: var(--color-ink-2); }
+#github-sections .st .what { width: 38%; }
 .st .detail a:focus-visible, #github-tally a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; border-radius: var(--radius-sm); }
 #github-tally a { display: inline-flex; align-items: center; color: var(--color-caution); text-decoration: none; white-space: nowrap; }
 #github-tally a:hover { text-decoration: underline; }
