@@ -7,8 +7,11 @@ world -- GitHub, launchd, a home directory -- comes from `sd_db.testing`.
 
 from __future__ import annotations
 
+import contextlib
 import os
+import subprocess
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -28,6 +31,7 @@ from sd_db import (
     upsert_shadow,
 )
 from sd_db.migrate import initialise
+from sd_db.testing import patience
 
 NOW = "2026-09-06T12:00:00Z"
 
@@ -122,6 +126,43 @@ class ScreenCase(unittest.TestCase):
         return route(self.connection, path, parameters or {}, now=self.now)
 
 
+class _Subprocess:
+    """A module's `subprocess` with one `Popen` swapped in; every other name is the real module's."""
+
+    def __init__(self, popen):
+        self.Popen = popen
+
+    def __getattr__(self, name):
+        return getattr(subprocess, name)
+
+
+def bound_from(module, ready: Path, *, wait: float = 10):
+    """Count `module`'s bounded `communicate` from the moment `ready` exists (sd:6299).
+
+    A test of what a timeout kills needs that child to exist first. Under load a double took longer than a 1 s bound
+    to start its child and write `ready`, so the kill came first and the test found no pid file. The run's stdin is
+    sent and closed before the wait, so a double that reads it first still gets there. The wait ends after
+    `patience(wait)` seconds or when the run exits; the test's own read of `ready` then says what went wrong.
+    """
+
+    class Popen(subprocess.Popen):
+        def communicate(self, input=None, timeout=None):
+            if timeout is not None and not self._communication_started:
+                if self.stdin:
+                    with contextlib.suppress(BrokenPipeError):
+                        if input:
+                            self.stdin.write(input)
+                    with contextlib.suppress(BrokenPipeError):
+                        self.stdin.close()
+                    input = None
+                deadline = time.monotonic() + patience(wait)
+                while not ready.exists() and self.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.01)
+            return super().communicate(input, timeout)
+
+    return mock.patch.object(module, "subprocess", _Subprocess(Popen))
+
+
 def before_5648():
     """`reads.backlog_items` as a pack before sd:5648 reads it: rows with no `opens_on` and no `scheduled`."""
     real = reads.backlog_items
@@ -137,6 +178,7 @@ __all__ = [
     "NOW",
     "ScreenCase",
     "before_5648",
+    "bound_from",
     "record_cost",
     "transition",
     "update_assignment",
