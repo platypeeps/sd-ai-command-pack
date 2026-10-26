@@ -13,17 +13,20 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import subprocess
 from pathlib import Path
 from unittest import mock
 
-from sd_db import progress, repos, upsert_shadow, writes
+from sd_db import progress, repos, upsert_shadow, workflow, writes
 
 from sd_dashboard import issues, now_screen, tasks_screen, v2
 from sd_dashboard.v2.pages import Read
 
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document
-from test_v2_today import run_js
+from test_v2_tasks import MARKUP_JS, SHELL, STAND_IN
+from test_v2_today import OSASCRIPT, run_js
+from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent
 ISSUES_JS = (V2 / "static" / "issues.js").read_text(encoding="utf-8") if (V2 / "static" / "issues.js").exists() else ""
@@ -42,10 +45,19 @@ FOUND = {
 }
 
 
-def github_issues(connection):
+class NoJobs:
+    """An operations backend with no job installed, as on a machine without the sync job: no launchctl call is made."""
+
+    cron_root = None
+
+    def inspect(self, name):
+        raise workflow.WorkflowError("job is not supported: trusted regular files are required")
+
+
+def github_issues(connection, jobs=None):
     """What the GitHub page's Your issues and Intake tabs read: /api/github/issues."""
     _, route = v2.api("/api/github/issues")
-    return route.read(Read(connection=connection, now=NOW, path="/api/github/issues"))
+    return route.read(Read(connection=connection, now=NOW, path="/api/github/issues", jobs=jobs or NoJobs()))
 
 
 def stub(**kwargs):
@@ -289,7 +301,8 @@ window.shell = { itemHref: n => `/tasks?item=${n}`, openItem: n => `#${n} opens 
         self.assertIn("<dt>Priority</dt>", details)
         self.assertIn("sd shadow sync keeps no labels, priority or description", details)
         self.assertEqual((out["selected"], out["panes"]), (["iss:github:example/project#12"], ["tab-details"]))
-        self.assertEqual(out["ids"], ["jira issue.open", "jira issue.item", "github issue.open", "github issue.item"])
+        self.assertEqual(out["ids"], ["jira issue.open", "jira issue.item", "jira issue.hide", "jira issue.unhide",
+                                      "github issue.open", "github issue.item", "github issue.hide", "github issue.unhide"])
         self.assertEqual(sorted(set(out["types"])), ["github issue", "jira issue"])
 
     def test_a_jira_row_says_open_in_jira_and_a_fact_not_stored_says_so(self):
@@ -397,3 +410,229 @@ window.shell = { post: (path, body) => { posted.push([path, body]); return new P
         self.assertIn("Issue intake could not be read: database is locked. Refresh tries again.", failed["intake"])
         empty = dict(self.drawn({"intake": [], "error": ""})["sunk"])
         self.assertIn("No third-party issue waits for an item", empty["intake"])
+
+
+class TheHideState(ScreenCase):
+    """sd:6175: each Your issues and Intake row carries `hidden`, the view state Contributions' and Designs' Hide write,
+    keyed `issue:<row key>`; a view store that does not read hides nothing and says why Hide is off."""
+
+    def test_a_hidden_row_carries_hidden_and_the_rest_do_not(self):
+        writes.set_view(self.connection, issues.view_key("jira:EXAMPLE-8"), hidden=True)
+        writes.set_view(self.connection, issues.view_key("github:example/project#21"), hidden=True)
+        with stub(return_value=FOUND), stub_intake(return_value=INTAKE):
+            found = github_issues(self.connection)
+        self.assertEqual([(row["ref"], row["hidden"]) for row in found["issues"]], [("EXAMPLE-8", True), ("#12", False), ("#3", False)])
+        self.assertEqual([(row["key"], row["hidden"]) for row in found["intake"]],
+                         [("github:example/project#21", True), ("github:example/project#22", False)])
+        self.assertEqual(found["store"], {"available": True, "reason": ""})
+
+    def test_the_key_ignores_case_so_a_renamed_slug_stays_hidden(self):
+        self.assertEqual(issues.view_key("github:Example/Project#21"), issues.view_key("github:example/project#21"))
+        self.assertTrue(issues.view_key("jira:EXAMPLE-8").startswith("issue:"))
+
+    def test_a_view_store_that_does_not_read_hides_nothing_and_says_why(self):
+        writes.set_view(self.connection, issues.view_key("jira:EXAMPLE-8"), hidden=True)
+        with stub(return_value=FOUND), stub_intake(return_value=INTAKE), \
+                mock.patch.object(writes, "views", side_effect=sqlite3.OperationalError("database is locked")):
+            found = github_issues(self.connection)
+        self.assertEqual({row["hidden"] for row in found["issues"] + found["intake"]}, {False})
+        self.assertEqual(found["store"], {"available": False, "reason": "the view store was not read: database is locked"})
+
+
+class TheSyncJob(ScreenCase):
+    """sd:6175: the issue read carries Sync now's job, shadow-sync-nightly, as the jobs inventory reads it: the revision
+    the retry route checks and the retry capability that turns Sync now off."""
+
+    def test_the_read_carries_the_jobs_state_revision_and_retry_capability(self):
+        backend = JobsBackend(self.tmp.name, jobs=[("shadow-sync-nightly", "idle", 0, None)])
+        with stub(return_value={}), stub_intake(return_value={}):
+            sync = github_issues(self.connection, jobs=backend)["sync"]
+        self.assertEqual((sync["name"], sync["service"], sync["state"]), ("shadow-sync-nightly", "fixture/shadow-sync-nightly", "idle"))
+        self.assertRegex(sync["revision"], r"^[0-9a-f]{64}$")
+        self.assertEqual(sync["capabilities"]["retry"]["allowed"], True)
+        running = JobsBackend(self.tmp.name, jobs=[("shadow-sync-nightly", "running", None, None)])
+        with stub(return_value={}), stub_intake(return_value={}):
+            sync = github_issues(self.connection, jobs=running)["sync"]
+        self.assertEqual((sync["state"], sync["capabilities"]["retry"]["reason"]), ("running", "the job is already running"))
+
+    def test_a_job_that_is_not_installed_is_said_with_the_line_that_installs_it(self):
+        with stub(return_value={}), stub_intake(return_value={}):
+            sync = github_issues(self.connection)["sync"]
+        self.assertEqual(sync, {"name": "shadow-sync-nightly", "error": "shadow-sync-nightly is not an installed job (job is not "
+                                "supported: trusted regular files are required); local-cron-jobs/cron-jobs.sh install "
+                                "shadow-sync-nightly installs it"})
+
+    def test_a_job_read_that_fails_is_said_not_a_job_that_is_off(self):
+        class Broken(NoJobs):
+            def inspect(self, name):
+                raise OSError("launchctl: no answer")
+        with stub(return_value={}), stub_intake(return_value={}):
+            sync = github_issues(self.connection, jobs=Broken())["sync"]
+        self.assertEqual(sync, {"name": "shadow-sync-nightly", "error": "shadow-sync-nightly was not read: launchctl: no answer"})
+
+
+GITHUB_JS = (V2 / "static" / "github.js").read_text(encoding="utf-8")
+COMMANDS_JS = (V2 / "static" / "commands.js").read_text(encoding="utf-8")
+JOB = {"name": "shadow-sync-nightly", "service": "gui/501/local.sd.shadow-sync-nightly", "state": "idle", "last_exit": 0,
+       "revision": "r1", "capabilities": {"retry": {"allowed": True, "reason": "", "label": "Run now"}}, "last_request": None}
+
+
+class TheGitHubPage(ScreenCase):
+    """github.js and issues.js on the stand-in page with the shared commands: Hide, Show hidden and Sync now (sd:6175).
+    The stand-in server keeps the hidden keys a view POST writes and answers each read with them."""
+
+    def run_page(self, body, *, issues_rows=None, intake_rows=None, sync=None, states=("idle",), store=None):
+        doc = {"issues": issues_rows if issues_rows is not None else [
+                   {"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix the widget",
+                    "reason": "filed", "url": None, "state": None, "hidden": False},
+                   {"repo": "anvil", "tracker": "GitHub", "ref": "#12", "key": "github:example/project#12", "title": "Crash on start",
+                    "reason": "assigned", "url": None, "state": "open", "hidden": False}],
+               "issues_error": "", "github_error": "",
+               "intake": intake_rows if intake_rows is not None else [
+                   {"repo": "anvil", "repo_path": "/home/example/repos/acme/anvil", "ref": "#21", "key": "github:example/project#21",
+                    "title": "Docs typo", "author": "octocat", "url": None, "hidden": False}],
+               "intake_error": "", "store": store or {"available": True, "reason": ""}, "sync": sync or JOB}
+        answer = """(() => { const HID = new Set(), DOC = %s, STATES = %s; let reads = 0;
+  return (path, body) => {
+    if (path === '/api/github/issues/view') { if (body.hidden) HID.add(body.key); else HID.delete(body.key); return [200, { key: body.key, hidden: body.hidden }]; }
+    if (path.startsWith('/api/jobs/')) return [200, { request: { status: 'accepted', message: 'kickstarted' } }];
+    const state = STATES[Math.min(reads++, STATES.length - 1)];
+    const mark = r => ({ ...r, hidden: HID.has(r.key) || r.hidden });
+    return [200, { ...DOC, issues: DOC.issues.map(mark), intake: DOC.intake.map(mark), sync: DOC.sync.error ? DOC.sync : { ...DOC.sync, state } }];
+  }; })()""" % (json.dumps(doc), json.dumps(list(states)))
+        script = (STAND_IN + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL + COMMANDS_JS
+                  + "\nANSWER = " + answer + ";\n"
+                  + "window.shell.row = () => null; window.shell.url = q => { location.search = q ? '?' + q : ''; };\n"
+                  + GITHUB_JS + ISSUES_JS
+                  + "\nvar R = {};\nconst show = id => document.dispatchEvent(new CustomEvent('shell:view', { detail: { id } }));\n"
+                  + "const click = f => (DOC_LISTENERS.click || []).forEach(h => h({ target: { closest: s => s.includes(`[data-f=\"${f}\"]`)"
+                    " ? { dataset: { f, v: '1' } } : null } }));\n"
+                  + "const act = (id, obj) => C.run(cmd(id), C.get(obj));\n"
+                  + "(async () => { try {\n(DOC_LISTENERS.DOMContentLoaded || []).forEach(f => f());\nawait flush();\n"
+                  + body + "\n} catch (e) { OUT.error = String(e) + ' ' + e.stack; } })();\n"
+                  + "function run() { OUT.R = R; return JSON.stringify(OUT); }\n")
+        result = subprocess.run([OSASCRIPT, "-l", "JavaScript", "-e", script], capture_output=True, text=True, timeout=60, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertIsNone(out["error"])
+        return out
+
+    def test_hide_removes_the_row_and_its_count_and_undo_restores_it(self):
+        out = self.run_page("show('issues'); await flush(); R.before = ELS.issues.html; R.n0 = OUT.counts.issues;"
+                            " act('jira issue.hide', 'iss:jira:EXAMPLE-8'); await flush(); R.after = ELS.issues.html; R.n1 = OUT.counts.issues;"
+                            " R.tally = ELS['issues-tally'].html; R.bar = ELS['issues-filters'].html; R.toast = lastToast().msg;"
+                            " lastUndo().undo(); await flush(); R.back = ELS.issues.html; R.n2 = OUT.counts.issues;")
+        r = out["R"]
+        self.assertIn("Fix the widget", r["before"])
+        self.assertNotIn("Fix the widget", r["after"])
+        self.assertIn("Crash on start", r["after"])
+        self.assertEqual((r["n0"], r["n1"], r["n2"]), (2, 1, 2))
+        self.assertIn("<span>1 open</span>", r["tally"])
+        self.assertIn('data-f="hidden"', r["bar"])
+        self.assertIn('Show hidden <span class="n">1</span>', r["bar"])
+        self.assertIn("Hidden · Jira EXAMPLE-8", r["toast"])
+        self.assertIn("Fix the widget", r["back"])
+        self.assertEqual([p[:2] for p in out["posts"]], [["/api/github/issues/view", {"key": "jira:EXAMPLE-8", "hidden": True}],
+                                                         ["/api/github/issues/view", {"key": "jira:EXAMPLE-8", "hidden": False}]])
+
+    def test_show_hidden_lists_only_the_hidden_rows_with_unhide_and_keeps_it_in_the_url(self):
+        out = self.run_page("show('issues'); await flush(); act('jira issue.hide', 'iss:jira:EXAMPLE-8'); await flush();"
+                            " click('hidden'); await flush(); R.shown = ELS.issues.html; R.search = location.search;"
+                            " R.unhide = C.offWhy(cmd('jira issue.unhide'), C.get('iss:jira:EXAMPLE-8'));"
+                            " R.hide = C.offWhy(cmd('jira issue.hide'), C.get('iss:jira:EXAMPLE-8'));"
+                            " act('jira issue.unhide', 'iss:jira:EXAMPLE-8'); await flush(); R.after = ELS.issues.html;")
+        r = out["R"]
+        self.assertIn("Fix the widget", r["shown"])
+        self.assertNotIn("Crash on start", r["shown"])
+        self.assertEqual(r["search"], "?hidden=1")
+        self.assertEqual((r["unhide"], r["hide"]), ("", "already hidden"))
+        self.assertNotIn("Fix the widget", r["after"])
+
+    def test_a_page_opened_with_hidden_1_shows_the_hidden_rows(self):
+        rows = [{"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix the widget",
+                 "reason": "filed", "url": None, "state": None, "hidden": True}]
+        out = self.run_page("location.search = '?hidden=1'; show('issues'); await flush(); R.shown = ELS.issues.html; R.n = OUT.counts.issues;",
+                            issues_rows=rows)
+        self.assertIn("Fix the widget", out["R"]["shown"])
+        self.assertEqual(out["R"]["n"], 0)
+
+    def test_an_intake_row_hides_and_leaves_the_waiting_count(self):
+        out = self.run_page("show('intake'); await flush(); R.n0 = OUT.counts.intake;"
+                            " act('github issue.hide', 'iss:github:example/project#21'); await flush();"
+                            " R.after = ELS.intake.html; R.n1 = OUT.counts.intake; R.bar = ELS['intake-filters'].html;"
+                            " click('hidden'); await flush(); R.shown = ELS.intake.html;")
+        r = out["R"]
+        self.assertEqual((r["n0"], r["n1"]), (1, 0))
+        self.assertNotIn("Docs typo", r["after"])
+        self.assertIn('Show hidden <span class="n">1</span>', r["bar"])
+        self.assertIn("Docs typo", r["shown"])
+
+    def test_an_unread_view_store_turns_hide_off_with_the_reason(self):
+        out = self.run_page("show('issues'); await flush(); R.off = C.offWhy(cmd('jira issue.hide'), C.get('iss:jira:EXAMPLE-8'));"
+                            " R.rows = ELS.issues.html;", store={"available": False, "reason": "the view store was not read: locked"})
+        self.assertEqual(out["R"]["off"], "Hide is off: the view store was not read: locked")
+        self.assertIn("Fix the widget", out["R"]["rows"])
+
+    def test_sync_now_appears_and_runs_the_jobs_retry_command_then_reads_again_when_the_run_ends(self):
+        out = self.run_page("show('issues'); await flush(); R.line = ELS['issues-sync'].html; R.intake = ELS['intake-sync'].html;"
+                            " R.label = cmd('jobs.retry').label; R.cli = cmd('jobs.retry').cli(C.get('job:shadow-sync-nightly'));"
+                            " act('jobs.retry', 'job:shadow-sync-nightly'); await flush(); R.toast = lastToast().msg;",
+                            states=("idle", "running", "idle"))
+        r = out["R"]
+        self.assertIn('data-cmd="jobs.retry" data-obj="job:shadow-sync-nightly"', r["line"])
+        self.assertIn(">Sync now<", r["line"])
+        self.assertIn("runs in the background", r["line"])
+        self.assertIn(">Sync now<", r["intake"])
+        self.assertEqual((r["label"], r["cli"]), ("Sync now", "sd jobs retry shadow-sync-nightly"))
+        self.assertEqual([p[:2] for p in out["posts"]], [["/api/jobs/shadow-sync-nightly/retry", {"revision": "r1"}]])
+        # The first read, then one while the run is going, then the one after it ends; then no more.
+        self.assertEqual(out["gets"], ["/api/github/issues"] * 3)
+        self.assertIn("Sync started in the background", r["toast"])
+
+    def test_sync_now_is_off_with_the_reason_while_the_job_runs_or_is_not_installed(self):
+        # The stand-in's timers run at once; a run that never ends would read forever, so this one holds its poll.
+        out = self.run_page("setTimeout = f => 1; show('issues'); await flush(); R.line = ELS['issues-sync'].html;"
+                            " R.off = C.offWhy(cmd('jobs.retry'), C.get('job:shadow-sync-nightly'));",
+                            sync={**JOB, "state": "running", "capabilities": {"retry": {"allowed": False, "reason": "the job is already running"}}},
+                            states=("running",))
+        self.assertEqual(out["R"]["off"], "the job is already running")
+        self.assertIn("disabled", out["R"]["line"])
+        self.assertIn("running in the background", out["R"]["line"])
+        missing = {"name": "shadow-sync-nightly", "error": "shadow-sync-nightly is not an installed job (x); local-cron-jobs/cron-jobs.sh install shadow-sync-nightly installs it"}
+        out = self.run_page("show('issues'); await flush(); R.line = ELS['issues-sync'].html;"
+                            " R.off = C.offWhy(cmd('jobs.retry'), C.get('job:shadow-sync-nightly'));", sync=missing)
+        self.assertEqual(out["R"]["off"], missing["error"])
+        self.assertIn("Sync now is off: shadow-sync-nightly is not an installed job", out["R"]["line"])
+
+    def test_github_draws_the_sync_lines_and_the_intake_filter_bar(self):
+        html = (V2 / "github.html").read_text(encoding="utf-8")
+        for found in ('id="issues-sync"', 'id="intake-sync"', 'id="intake-filters"'):
+            self.assertIn(found, html)
+
+
+class TheViewRoute(BrowserSession):
+    """sd:6175: POST /api/github/issues/view writes a listed row's view state, as /api/contributions/view does; a key the
+    issue read no longer lists writes nothing."""
+
+    def test_hide_writes_the_view_state_the_read_carries_back_and_unhide_clears_it(self):
+        job = {"name": "shadow-sync-nightly", "error": "not installed here"}
+        with stub(return_value=FOUND), stub_intake(return_value=INTAKE), mock.patch.object(issues, "sync_job", return_value=job):
+            read = lambda: json.loads(self.request("/api/github/issues", headers={"Cookie": self.cookie})[2])
+            self.assertFalse(read()["issues"][0]["hidden"])
+            before = self.snapshot()
+            for payload in ({"key": "jira:EXAMPLE-8"}, {"key": "jira:EXAMPLE-8", "hidden": "yes"}, {"key": 3, "hidden": True},
+                            {"key": "jira:EXAMPLE-8", "hidden": True, "extra": 1}):
+                self.assertEqual(self.post("/api/github/issues/view", payload)[0], 400, payload)
+            self.assertEqual(self.post("/api/github/issues/view", {"key": "jira:EXAMPLE-8", "hidden": True}, **{"X-SD-CSRF": "0" * 64})[0], 403)
+            status, _, refused = self.post("/api/github/issues/view", {"key": "github:example/gone#9", "hidden": True})
+            self.assertEqual((status, refused.get("reload")), (409, True))
+            self.assertEqual(self.snapshot(), before)
+            status, _, out = self.post("/api/github/issues/view", {"key": "jira:EXAMPLE-8", "hidden": True})
+            self.assertEqual((status, out), (200, {"key": "jira:EXAMPLE-8", "pinned": False, "hidden": True, "tags": []}))
+            self.assertEqual([row["hidden"] for row in read()["issues"]], [True, False, False])
+            self.assertEqual(writes.views(self.connection)["issue:jira:example-8"]["hidden"], True)
+            status, _, out = self.post("/api/github/issues/view", {"key": "github:example/project#21", "hidden": True})
+            self.assertEqual(status, 200, out)
+            self.assertEqual([row["hidden"] for row in read()["intake"]], [True, False])
+            self.assertEqual(self.post("/api/github/issues/view", {"key": "jira:EXAMPLE-8", "hidden": False})[0], 200)
+            self.assertEqual([row["hidden"] for row in read()["issues"]], [False, False, False])

@@ -16,6 +16,10 @@ A read of them that fails is the row's `unread`, so the page says the facts are 
 sd:5899: Your issues is one Jira and GitHub list. `with_github` adds the GitHub issues the Pull requests view used to
 list: each issue `today_github.document` holds open, or closed in its window, that is the operator's (`mine`) and no
 issue source already lists. A closed row carries its `state`; the page shows it under its closed filter only.
+
+sd:6175: Hide is the workflow database's `view` state, the store Contributions' and Designs' Hide write, keyed
+`issue:<row key>` (`view_key`); `with_views` marks each row of both lists `hidden`, and a store that does not read hides
+nothing and says why. Sync now starts `SYNC_JOB` through the route Run now posts; `sync_job` is its launchd state.
 """
 
 from __future__ import annotations
@@ -31,6 +35,11 @@ FACTS = {"slug": "repo", "state": "state", "status": "status", "assignee": "assi
          "created_at": "created_at", "updated_at": "updated_at"}
 #: The source of an item filed under a tracker ref (`review.REF_SOURCE`).
 REF_SOURCE = "task-ref"
+#: The key prefix of an issue row's view state (sd:6175). A Contributions key starts `contribution:`, a Designs key
+#: `designs/` and a Documents key is `<root key>/<file>`, so none meets `issue:`.
+VIEW_ROOT = "issue"
+#: The job Sync now starts (sd:6175): the nightly `sd shadow sync`, through `/api/jobs/<name>/retry`.
+SYNC_JOB = "shadow-sync-nightly"
 
 
 def fallback(entry: dict, row: dict) -> str:
@@ -145,3 +154,64 @@ def intake(connection: sqlite3.Connection) -> dict:
             pairs.append((rows[-1], row))
     _details(connection, pairs)
     return {"intake": rows, "intake_error": ""}
+
+
+def view_key(key: str) -> str:
+    """A row's view-state key; lower case, as `_details` matches a ref, so a slug GitHub spells another way keeps it."""
+    return f"{VIEW_ROOT}:{key.lower()}"
+
+
+def with_views(document: dict, connection) -> dict:
+    """`document` with each Your issues and Intake row's `hidden`, and `store` saying whether the view state was read.
+
+    A read that fails hides nothing: every row shows, and `store.reason` says why Hide is off.
+    """
+    from .documents_screen import views
+
+    kept, unread = views(connection)
+    for row in (*document.get("issues", ()), *document.get("intake", ())):
+        row["hidden"] = bool(kept.get(view_key(row["key"]), {}).get("hidden"))
+    return {**document, "store": {"available": not unread, "reason": unread}}
+
+
+def sync_job(connection: sqlite3.Connection, backend) -> dict:
+    """Sync now's job as the jobs inventory reads it (`hoa_screen.JOB_KEYS`): the revision the retry route checks and the
+    retry capability. A job that is not installed says the line that installs it; a read that fails says so, never off."""
+    from sd_db import operations, workflow
+
+    from .hoa_screen import JOB_KEYS
+
+    try:
+        job = operations.job_state(connection, SYNC_JOB, backend=backend)
+    except workflow.WorkflowError as error:
+        return {"name": SYNC_JOB, "error": f"{SYNC_JOB} is not an installed job ({error}); "
+                                           f"local-cron-jobs/cron-jobs.sh install {SYNC_JOB} installs it"}
+    except (OSError, SdDbError, sqlite3.Error) as failure:
+        return {"name": SYNC_JOB, "error": f"{SYNC_JOB} was not read: {failure}"}
+    return {key: job.get(key) for key in JOB_KEYS}
+
+
+def view(payload: dict):
+    """`POST /api/github/issues/view` (sd:6175): `{"key", "hidden"}`, as `designs.request` and
+    `contribution_screen.view` take; the write as `action_route` returns one. The write reads both lists again, so a key
+    they no longer list is refused as stale and nothing is written."""
+    from datetime import datetime, timezone
+
+    from sd_db import workflow
+
+    from . import today_github
+
+    key, hidden = payload.get("key"), payload.get("hidden")
+    if set(payload) != {"key", "hidden"} or not isinstance(key, str) or not isinstance(hidden, bool):
+        raise ValueError("Send the issue's key and hidden, true or false.")
+    if not hasattr(writes, "set_view"):
+        raise ValueError("The command pack has no view store yet (sd:3430): pull it and restart the dashboard.")
+
+    def write(connection):
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        listed = with_github(document(connection), today_github.document(connection, now=now))["issues"]
+        if key.lower() not in {str(row["key"]).lower() for row in (*listed, *intake(connection)["intake"])}:
+            raise workflow.StaleItem(f"No issue {key} is listed. Nothing was hidden or shown. Read GitHub again.")
+        return {"key": key, **writes.set_view(connection, view_key(key), hidden=hidden)}
+
+    return write

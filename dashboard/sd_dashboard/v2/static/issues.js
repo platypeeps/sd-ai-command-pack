@@ -10,32 +10,47 @@
 // sd:5899: one Jira and GitHub list: the operator's GitHub issues the Pull requests view listed are here too
 // (issues.with_github), and `github` names that read when it failed. State open, the default, hides a closed row; with
 // closed (?iss=closed) shows it, as the Pull requests view's State does.
+// sd:6175: Hide and Unhide on a row of either list post /api/github/issues/view, the view state Contributions' Hide writes,
+// each with Undo. A hidden row leaves its list, the tally and the tab count; Show hidden, in each list's filter bar and kept
+// as ?hidden=1, lists the hidden rows instead, with Unhide. A view store the read could not read hides nothing and turns
+// both commands off with its reason.
 (() => {
   const { html, put } = window.markup;
   const $ = id => document.getElementById(id);
-  let ISSUES = [];
+  const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+  let ISSUES = [], STORE = '';
+  const showHidden = () => new URLSearchParams(location.search).get('hidden') === '1';
+  const inView = r => !!r.hidden === showHidden();
+  // The read's view state: why Hide is off, or '' when it read.
+  const storeOff = store => !store ? 'the read carried no view state' : store.available ? '' : store.reason || 'the view store was not read';
+  const hiddenSeg = n => window.shell.list.fseg('hidden', 'Hidden',
+    [{ v: '1', pressed: showHidden(), label: html`${I('eye-off')}Show hidden <span class="n">${String(n)}</span>` }]);
   const oid = r => `iss:${r.key}`;
   const title = r => html`<button type="button" data-iss-open="${oid(r)}">${r.title || r.ref}</button>`;
   const selected = r => html` data-id="${oid(r)}" aria-selected="${String(window.shell?.row?.() === oid(r))}"`;
   let READ = {};
   const isOpen = r => (r.state || 'open') === 'open';
   const closedToo = () => new URLSearchParams(location.search).get('iss') === 'closed';
-  function draw({ issues = [], error = '', github = '' } = READ) {
-    READ = { issues, error, github };
-    ISSUES = error ? [] : issues;
-    const open = ISSUES.filter(isOpen), rows = closedToo() ? ISSUES : open, L = window.shell?.list;
+  function draw({ issues = [], error = '', github = '', store } = READ) {
+    READ = { issues, error, github, store };
+    ISSUES = error ? [] : issues; STORE = storeOff(store);
+    // Every count below is of the rows in view: the unhidden ones, or the hidden ones under Show hidden.
+    const pool = ISSUES.filter(inView), open = pool.filter(isOpen), rows = closedToo() ? pool : open, L = window.shell?.list;
+    const hiddenN = ISSUES.filter(r => r.hidden && (closedToo() || isOpen(r))).length;
     put($('issues'), error ? html`<tr class="empty"><td colspan="4">Issues could not be read: ${error}. Refresh tries again.</td></tr>`
       : html`${rows.length ? rows.map(r => html`<tr${selected(r)}>
         <td class="ref">${r.url ? html`<a href="${r.url}">${r.tracker} ${r.ref}</a>` : html`${r.tracker} ${r.ref}`}</td>
         <td class="what">${title(r)}</td>
         <td class="repo">${r.repo}</td>
         <td class="why">${isOpen(r) ? r.reason : `${r.state} · ${r.reason}`}</td></tr>`)
-      : html`<tr class="empty"><td colspan="4">No ${closedToo() ? '' : 'open '}issue is assigned to you or filed by you.</td></tr>`}${
+      : html`<tr class="empty"><td colspan="4">${showHidden() ? `No ${closedToo() ? '' : 'open '}issue is hidden.`
+        : `No ${closedToo() ? '' : 'open '}issue is assigned to you or filed by you.`}</td></tr>`}${
         github ? html`<tr class="empty"><td colspan="4">Your GitHub issues outside the repos' issue sources were not read: ${github}. Refresh tries again.</td></tr>` : ''}`);
-    put($('issues-tally'), ISSUES.length && !error ? html`<span>${open.length} open</span>${closedToo() ? html`<span>${ISSUES.length - open.length} closed in 7 d</span>` : ''}` : html``);
-    if (L) put($('issues-filters'), error ? html`` : L.fbar(L.fseg('iss', 'State', [['open', open.length], ['closed', ISSUES.length]].map(([v, n]) =>
-      ({ v, pressed: closedToo() === (v === 'closed'), label: html`${v === 'open' ? 'open' : 'with closed'} <span class="n">${String(n)}</span>` })))));
-    window.shell?.view?.count('issues', error ? null : open.length); // the Your issues tab (sd:5080)
+    put($('issues-tally'), pool.length && !error ? html`<span>${open.length} ${showHidden() ? 'hidden' : 'open'}</span>${closedToo() ? html`<span>${pool.length - open.length} closed in 7 d</span>` : ''}` : html``);
+    if (L) put($('issues-filters'), error ? html`` : L.fbar(html`${L.fseg('iss', 'State', [['open', open.length], ['closed', pool.length]].map(([v, n]) =>
+      ({ v, pressed: closedToo() === (v === 'closed'), label: html`${v === 'open' ? 'open' : 'with closed'} <span class="n">${String(n)}</span>` })))}${hiddenSeg(hiddenN)}`));
+    // The Your issues tab (sd:5080): the open rows not hidden, whichever list shows.
+    window.shell?.view?.count('issues', error ? null : ISSUES.filter(r => isOpen(r) && !r.hidden).length);
     objects();
   }
   document.addEventListener('issues:read', e => draw(e.detail));
@@ -46,6 +61,21 @@
     window.shell.url(p.toString()); draw();
     $('issues-filters').querySelector?.(`[data-v="${v}"]`)?.focus();
   }
+  // Show hidden (sd:6175): one ?hidden=1 for both lists, as Contributions keeps it.
+  function pickHidden(bar) {
+    const p = new URLSearchParams(location.search);
+    if (showHidden()) p.delete('hidden'); else p.set('hidden', '1');
+    window.shell.url(p.toString()); draw(); drawIntake();
+    $(bar).querySelector?.('[data-f="hidden"]')?.focus();
+  }
+  // A Hide or Unhide that landed moves its row at once; the page then reads again (github.js), and a refusal reads again too.
+  function landed(key, hidden) {
+    [...ISSUES, ...INTAKE].filter(r => r.key === key).forEach(r => { r.hidden = hidden; });
+    draw(); drawIntake();
+  }
+  const NO_VIEW_CLI = 'no CLI: view state; the dashboard writes it (POST /api/github/issues/view)';
+  const view = (o, hidden) => window.shell.post('/api/github/issues/view', { key: o.key, hidden })
+    .then(v => { landed(o.key, hidden); window.githubIssues?.again(); return v; }, e => { window.githubIssues?.again(); throw e; });
 
   // Issue intake (sd:4840), on GitHub: each github_issues repo's open third-party issues no item carries (issues.intake over
   // sd_db.repos.intake_issues). File as item posts /api/items with the issue's title, repo and ref, the item `sd task add
@@ -60,15 +90,17 @@
   }
   function drawIntake() {
     put($('intake'), FAILED ? html`<tr class="empty"><td colspan="5">Issue intake could not be read: ${FAILED}. Refresh tries again.</td></tr>`
-      : INTAKE.length ? html`${INTAKE.map(r => html`<tr${selected(r)}${BUSY.has(r.key) ? html` aria-busy="true"` : ''}>
+      : INTAKE.filter(inView).length ? html`${INTAKE.filter(inView).map(r => html`<tr${selected(r)}${BUSY.has(r.key) ? html` aria-busy="true"` : ''}>
         <td class="ref">${r.url ? html`<a href="${r.url}">GitHub ${r.ref}</a>` : html`GitHub ${r.ref}`}</td>
         <td class="what">${title(r)}</td>
         <td class="repo">${r.repo}</td>
         <td class="why">${r.author}</td>
         <td class="act">${control(r)}</td></tr>`)}`
-      : html`<tr class="empty"><td colspan="5">No third-party issue waits for an item in a repo with GitHub issues on.</td></tr>`);
-    const waiting = INTAKE.filter(r => !FILED.has(r.key)).length;
-    put($('intake-tally'), INTAKE.length && !FAILED ? html`<span>${waiting} waiting</span>` : html``);
+      : html`<tr class="empty"><td colspan="5">${showHidden() ? 'No intake issue is hidden.' : 'No third-party issue waits for an item in a repo with GitHub issues on.'}</td></tr>`);
+    const waiting = INTAKE.filter(r => !FILED.has(r.key) && !r.hidden).length, hiddenN = INTAKE.filter(r => r.hidden).length;
+    put($('intake-tally'), INTAKE.length && !FAILED ? html`<span>${showHidden() ? `${hiddenN} hidden` : `${waiting} waiting`}</span>` : html``);
+    const L = window.shell?.list;
+    if (L) put($('intake-filters'), FAILED ? html`` : L.fbar(hiddenSeg(hiddenN)));
     window.shell?.view?.count('intake', FAILED ? null : waiting); // the Intake tab
     objects();
   }
@@ -81,12 +113,14 @@
       .finally(() => { BUSY.delete(key); drawIntake(); });
   }
   document.addEventListener('intake:read', e => {
-    const { intake = [], error = '' } = e.detail || {};
-    INTAKE = intake; FAILED = error; FILED.clear(); REFUSED.clear(); BUSY.clear(); drawIntake();
+    const { intake = [], error = '', store } = e.detail || {};
+    INTAKE = intake; FAILED = error; STORE = storeOff(store); FILED.clear(); REFUSED.clear(); BUSY.clear(); drawIntake();
   });
   document.addEventListener('click', e => {
     const s = e.target?.closest?.('#issues-filters [data-f="iss"]');
     if (s) return pickState(s.dataset.v);
+    const h = e.target?.closest?.('#issues-filters [data-f="hidden"], #intake-filters [data-f="hidden"]');
+    if (h) return pickHidden(h.closest?.('#intake-filters') ? 'intake-filters' : 'issues-filters');
     const b = e.target && e.target.closest && e.target.closest('#intake button[data-key]');
     if (b) return file(b.dataset.key);
     const opened = e.target?.closest?.('[data-iss-open]');
@@ -107,7 +141,7 @@
     const C = window.shell?.commands; if (!C) return;
     const keep = new Set();
     rows().forEach(r => { keep.add(oid(r)); C.put({ id: oid(r), type: typeOf(r), label: `${r.tracker || 'GitHub'} ${r.ref} ${r.title}`.trim(),
-      url: r.url, item: r.item, ref: r.ref, slug: r.slug }); });
+      url: r.url, item: r.item, ref: r.ref, slug: r.slug, key: r.key, hidden: !!r.hidden }); });
     PUT.forEach(id => { if (!keep.has(id)) C.put({ id, type: 'not listed', label: `${C.get(id)?.label || id} (no longer listed)` }); });
     PUT = keep;
   }
@@ -141,10 +175,18 @@
     const opens = (on, label, cli) => ({ id: `${on}.open`, on, label, does: `${label}: the issue in a new tab.`, key: 'o', icon: 'arrow-up-right',
       risk: 'safe', primary: () => true, when: o => !!o.url || 'the stored address is not a web address', cli,
       run: o => { window.open(o.url, '_blank', 'noopener'); return `${label} in a new tab`; } });
+    // sd:6175: Hide and Unhide, the view state Contributions' Hide writes; Undo posts the other value. Nothing expires it.
+    const hides = on => [[true, 'hide', 'Hide', 'Hides this issue from its list and counts; Undo shows it again.', 'eye-off', 'Hidden', '. Show hidden lists it.'],
+      [false, 'unhide', 'Unhide', 'Shows this issue in its list again; Undo hides it.', 'eye', 'Unhidden', '']].map(([hidden, id, label, does, icon, done, after]) => (
+      { id: `${on}.${id}`, on, label, does, key: 'h', icon, risk: 'undo',
+        when: o => o.hidden === hidden ? (hidden ? 'already hidden' : 'not hidden') : STORE ? `Hide is off: ${STORE}` : true,
+        cli: () => NO_VIEW_CLI,
+        run: o => view(o, hidden).then(() => `${done} · ${o.label}${after}`),
+        undo: o => view(o, !hidden) }));
     C.register(
-      opens('jira issue', 'Open in Jira', o => `open ${window.shell.shq(o.url || '')}`), item('jira issue'),
+      opens('jira issue', 'Open in Jira', o => `open ${window.shell.shq(o.url || '')}`), item('jira issue'), ...hides('jira issue'),
       opens('github issue', 'Open on GitHub', o => o.slug ? `gh issue view ${o.ref.replace('#', '')} --repo ${o.slug} --web` : `open ${window.shell.shq(o.url || '')}`),
-      item('github issue'));
+      item('github issue'), ...hides('github issue'));
   }
   document.addEventListener('DOMContentLoaded', () => {
     register();
