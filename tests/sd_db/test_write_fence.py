@@ -14,7 +14,6 @@ before the promoted machine takes the hub's name, and passes.
 from __future__ import annotations
 
 import os
-import re
 import sqlite3
 import subprocess
 import sys
@@ -180,7 +179,8 @@ class TheWriteFence(FenceCase):
         paths = {
             "execute": lambda: connection.execute(insert, ("a",)),
             "executemany": lambda: connection.executemany(insert, [("b",)]),
-            "executescript": lambda: connection.executescript("CREATE TABLE stale (id INTEGER)"),
+            "executescript": lambda: connection.executescript(
+                "BEGIN IMMEDIATE; CREATE TABLE stale (id INTEGER); COMMIT;"),
             "cursor": lambda: connection.cursor().execute(insert, ("c",)),
             "execute's cursor": lambda: connection.execute("SELECT 1").execute(insert, ("e",)),
             "inside BEGIN": lambda: (connection.execute("BEGIN IMMEDIATE"), connection.execute(insert, ("d",))),
@@ -322,7 +322,7 @@ class TheCommitBoundaries(FenceCase):
             "executemany": lambda: connection.executemany(insert, [("b",)]),
             "cursor": lambda: connection.cursor().execute(insert, ("c",)),
             "executescript": lambda: connection.executescript(
-                "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'd', '{}', '2026')"),
+                "BEGIN; INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'd', '{}', '2026'); COMMIT;"),
         }
         for name, write in writes_.items():
             with self.subTest(path=name), self.assertRaises(hub.Fenced):
@@ -379,18 +379,45 @@ class TheCommitBoundaries(FenceCase):
         connection.execute("ROLLBACK")
         self.assertEqual(self.rows(), 0)
 
-    def test_each_autocommit_statement_of_a_script_asks_again(self):
-        """`executescript` prepares, so authorizes, each statement just before it runs."""
+    def test_a_script_write_outside_a_transaction_refuses(self):
+        """sqlite3 commits an open transaction before a script, so nothing outside can hold its writes."""
         self.node()
         self.name_hub(HUB_NAME)
         connection = self.open()
         script = "".join(f"INSERT INTO state (kind, key, body, timestamp) VALUES ('x', '{key}', '{{}}', '2026');"
                          for key in ("a", "b"))
-        names = mock.patch.object(hub.tailnet, "this_name", side_effect=[HUB_NAME, OLD_HUB])
-        with names as asked, self.assertRaises(hub.Fenced):
+        with self.assertRaises(SdDbError) as refused:
             connection.executescript(script)
-        self.assertEqual(asked.call_count, 2)
-        self.assertEqual(self.rows(), 1, "the first statement committed while this node held the name")
+        self.assertIn("BEGIN IMMEDIATE ... COMMIT inside the script", str(refused.exception))
+        self.assertEqual(self.rows(), 0)
+        connection.executescript(f"BEGIN IMMEDIATE; {script} COMMIT;")
+        self.assertEqual(self.rows(), 2)
+
+    def test_a_rename_between_prepare_and_commit_persists_nothing(self):
+        """Lane review of 7953e175d: the role flips while the write runs, after its prepare asked."""
+        insert = "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', flip(), '{}', '2026')"
+        writes_ = {
+            "execute": lambda connection: connection.execute(insert),
+            "cursor": lambda connection: connection.cursor().execute(insert),
+            "executemany": lambda connection: connection.executemany(insert, [()]),
+            "executescript": lambda connection: connection.executescript(f"BEGIN; {insert}; COMMIT;"),
+        }
+
+        def flip() -> str:
+            self.node(OLD_HUB)
+            return "flipped"
+
+        for name, write in writes_.items():
+            with self.subTest(path=name):
+                hub._answers.clear()
+                self.node()
+                self.name_hub(HUB_NAME)
+                connection = self.open()
+                connection.create_function("flip", 0, flip)
+                with self.assertRaises(hub.Fenced):
+                    write(connection)
+                self.assertFalse(connection.in_transaction)
+                self.assertEqual(self.rows(), 0)
 
     def test_a_writable_blob_outside_a_transaction_refuses(self):
         """A blob write passes no authorizer and commits on each write, so it needs a transaction."""
@@ -474,11 +501,10 @@ class TheCommitBoundaries(FenceCase):
 
 
 class TheAutocommitWindow(FenceCase):
-    """Lane review of 0bff04f7d: an autocommit write asks at prepare, so it must commit in that same call.
+    """Lane reviews of 0bff04f7d and 7953e175d: no write commits where the authorizer cannot see it.
 
-    SQLite commits an autocommit statement when it runs to its end. Every
-    library write runs to its end inside `execute`; only `RETURNING`, read
-    partly, would hold the commit until a later fetch, past the fence.
+    A write outside a transaction runs inside BEGIN IMMEDIATE ... COMMIT, so
+    it has committed when its call returns, through a COMMIT that asked.
     """
 
     def test_an_autocommit_write_has_committed_when_its_call_returns(self):
@@ -493,7 +519,7 @@ class TheAutocommitWindow(FenceCase):
             "cursor": lambda: connection.cursor().execute(insert, ("b",)),
             "executemany": lambda: connection.executemany(insert, [("c",), ("d",)]),
             "executescript": lambda: connection.executescript(
-                "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'e', '{}', '2026')"),
+                "BEGIN; INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'e', '{}', '2026'); COMMIT;"),
         }
         seen = 0
         for name, write in writes_.items():
@@ -503,17 +529,23 @@ class TheAutocommitWindow(FenceCase):
                 self.assertGreater(count, seen, "committed before the call returned")
                 seen = count
 
-    def test_no_library_statement_uses_returning(self):
-        """The one way a library write could commit after its call returns."""
-        found = [
-            f"{path.relative_to(support.PACK)}:{number}"
-            for folder in ("lib", "bin", "dashboard/sd_dashboard")
-            for path in sorted((support.PACK / folder).rglob("*"))
-            if path.suffix == ".py" or (path.parent.name == "bin" and path.is_file() and not path.suffix)
-            for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1)
-            if re.search(r"\bRETURNING\b", line)
-        ]
-        self.assertEqual(found, [], "a RETURNING write commits at its last fetch, which no authorizer sees")
+    def test_an_autocommit_returning_write_fails_closed(self):
+        """A RETURNING write holds its statement open, so its wrapping COMMIT cannot run: nothing persists."""
+        self.node()
+        self.name_hub(HUB_NAME)
+        connection = self.open()
+        with self.assertRaises(sqlite3.OperationalError):
+            connection.execute("INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'r', '{}', '2026') "
+                               "RETURNING id")
+        self.assertFalse(connection.in_transaction)
+        self.assertEqual(self.rows(), 0)
+
+    def rows(self) -> int:
+        reader = database.connect(write=False)
+        try:
+            return reader.execute("SELECT count(*) FROM state WHERE kind = 'x'").fetchone()[0]
+        finally:
+            reader.close()
 
 
 class TheRestore(FenceCase):

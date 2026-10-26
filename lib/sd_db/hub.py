@@ -399,9 +399,11 @@ class _WriteFence:
 
     Write unless fenced (#31093): only `elsewhere` refuses. `holder`, `off`
     and `unknown` write, so a Tailscale outage does not stop a healthy hub.
-    Each boundary that makes a write persist asks afresh: COMMIT, the RELEASE
-    of a savepoint opened outside a transaction, and a write outside one,
-    which commits when it ends (`executescript` runs each statement so). A
+    Each boundary that makes a write persist asks afresh: COMMIT, and the
+    RELEASE of a savepoint opened outside a transaction. A write outside a
+    transaction commits when SQLite ends it, which no authorizer sees, so it
+    is refused at prepare (`unwrapped`); the cursor runs it again inside
+    BEGIN IMMEDIATE ... COMMIT (`_batched`), as it runs `executemany`. A
     transaction that wrote nothing commits without asking, so reads keep working.
     Only SQLite's own state ends a transaction here: the write flag and the
     outer savepoint clear when a statement is prepared outside one, never on
@@ -421,6 +423,8 @@ class _WriteFence:
         self.outer: str | None = None
         #: Why the last statement was denied, for the `Fenced` the connection raises.
         self.refusal: str | None = None
+        #: The last statement was denied as a write outside a transaction.
+        self.unwrapped = False
 
     def _open(self) -> bool:
         """Whether a transaction is open before the statement being prepared."""
@@ -442,8 +446,11 @@ class _WriteFence:
                 return self._ask(fresh=True)
             return sqlite3.SQLITE_OK
         if action in _WRITES and database != "temp":
+            if not opened:
+                self.unwrapped = True
+                return sqlite3.SQLITE_DENY
             self.wrote = True
-            return self._ask(fresh=not opened)
+            return self._ask(fresh=False)
         return sqlite3.SQLITE_OK
 
     def _ask(self, *, fresh: bool) -> int:
@@ -454,14 +461,21 @@ class _WriteFence:
         return sqlite3.SQLITE_DENY
 
 
+class _Unwrapped(Exception):
+    """A write prepared outside a transaction: run it again inside one (`_batched`)."""
+
+
 def _fenced(connection: sqlite3.Connection, run, *args):
     """`run(*args)`, with a fence denial raised as `Fenced` after its transaction rolls back."""
     fence: _WriteFence | None = getattr(connection, "fence", None)
     if fence is not None:
-        fence.refusal = None
+        fence.refusal, fence.unwrapped = None, False
     try:
         return run(*args)
     except sqlite3.DatabaseError as error:
+        if fence is not None and fence.unwrapped:
+            fence.unwrapped = False
+            raise _Unwrapped() from error
         if fence is None or fence.refusal is None:
             raise
         refusal, fence.refusal = fence.refusal, None
@@ -472,10 +486,10 @@ def _fenced(connection: sqlite3.Connection, run, *args):
 
 
 def _batched(connection: sqlite3.Connection, run, *args):
-    """`executemany` in its own transaction outside one, so its COMMIT asks the fence afresh.
+    """A write in its own transaction outside one, so its COMMIT asks the fence afresh.
 
-    SQLite authorizes the statement once and, in autocommit, commits each
-    parameter set; a batch spanning a rename would keep writing.
+    In autocommit SQLite commits a write when it ends, and `executemany`
+    after each parameter set, with no authorizer call between.
     """
     if connection.in_transaction:
         return _fenced(connection, run, *args)
@@ -492,13 +506,24 @@ def _batched(connection: sqlite3.Connection, run, *args):
 
 class _FencedCursor(sqlite3.Cursor):
     def execute(self, *args):
-        return _fenced(self.connection, super().execute, *args)
+        # A read runs as it is; a write outside a transaction is refused at
+        # prepare, before it runs, and runs again inside one.
+        try:
+            return _fenced(self.connection, super().execute, *args)
+        except _Unwrapped:
+            return _batched(self.connection, super().execute, *args)
 
     def executemany(self, *args):
         return _batched(self.connection, super().executemany, *args)
 
     def executescript(self, *args):
-        return _fenced(self.connection, super().executescript, *args)
+        # sqlite3 commits an open transaction before a script, so none can
+        # hold it, and a script half run cannot run again.
+        try:
+            return _fenced(self.connection, super().executescript, *args)
+        except _Unwrapped:
+            raise SdDbError("refused: a script's write outside a transaction commits unfenced; "
+                            "put BEGIN IMMEDIATE ... COMMIT inside the script (system sd:5986)") from None
 
 
 class FencedConnection(sqlite3.Connection):
