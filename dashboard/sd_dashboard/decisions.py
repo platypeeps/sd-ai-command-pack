@@ -108,30 +108,28 @@ def document(connection, *, now: str | None = None) -> dict:
         found.append({"note": row["id"], "item": row["item"], "title": item["title"], "repo": item["repo"],
                       "priority": item["priority"], "asked": row["timestamp"], "question": question,
                       "options": options, "recommended": recommended(row["body"], options)})
-    # One batched revision read for every item asking, not an `item_state` per item (sd:3531).
-    revisions = reads.revisions(connection, [decision["item"] for decision in found])
-    for decision in found:
-        decision["revision"] = revisions[decision["item"]]
+    ruled = rulings(connection, now=now)
+    # One batched revision read for every item asking or ruled on, not an `item_state` per item (sd:3531).
+    rows = [*found, *(ruling for group in ruled for ruling in group["rulings"])]
+    revisions = reads.revisions(connection, sorted({row["item"] for row in rows}))
+    for row in rows:
+        row["revision"] = revisions[row["item"]]
     found.sort(key=lambda d: (d["priority"] is None, d["priority"] or 0, d["asked"], d["note"]))
-    return {"decisions": found, "review": batched, "rulings": rulings(connection, now=now)}
+    return {"decisions": found, "review": batched, "rulings": ruled}
 
 
 def rulings(connection, *, now: str | None = None) -> list[dict]:
     """The last `RULINGS_DAYS` of `decision` notes, one group per session, newest group first (pack sd:6015).
 
-    Each ruling names its item, the item's state and revision, the question it answered (`answers`, else None) and
+    Each ruling names its item, the item's state, the question it answered (`answers`, else None) and
     whether a later note reversed it. A reversal is not a ruling of its own: it marks the one it reversed.
+    `document` adds each ruling's item revision in its one batched read.
     """
     from datetime import datetime, timedelta, timezone
 
     clock = datetime.fromisoformat(now.replace("Z", "+00:00")) if now else datetime.now(timezone.utc)
     since = (clock - timedelta(days=RULINGS_DAYS)).isoformat(timespec="seconds")
-    rows = connection.execute(
-        "SELECT note.id, note.item, note.timestamp, note.body, note.session, item.title, item.repo, item.status, "
-        "asked.body AS question FROM note JOIN item ON item.id = note.item "
-        "LEFT JOIN note AS asked ON asked.id = CAST(substr(note.body, 17, instr(note.body, ':') - 17) AS INTEGER) "
-        "AND asked.item = note.item AND asked.kind = 'question' AND note.body LIKE 'Ruling on note #%' "
-        "WHERE note.kind = 'decision' AND note.timestamp >= ? ORDER BY note.timestamp, note.id", (since,)).fetchall()
+    rows = reads.ruling_notes(connection, since=since)
     reversed_ = {int(found[1]) for found in (REVERSAL.match(row["body"]) for row in rows) if found}
     groups: dict[str, dict] = {}
     for row in rows:
@@ -146,10 +144,6 @@ def rulings(connection, *, now: str | None = None) -> list[dict]:
                                  "ruling": ruled[2].strip() if ruled else row["body"].strip(), "answers": answers,
                                  "question": parse(row["question"])[0] if answers else None,
                                  "reversed": row["id"] in reversed_})
-    revisions = reads.revisions(connection, sorted({r["item"] for g in groups.values() for r in g["rulings"]}))
-    for group in groups.values():
-        for ruling in group["rulings"]:
-            ruling["revision"] = revisions[ruling["item"]]
     return sorted(groups.values(), key=lambda group: group["at"], reverse=True)
 
 
