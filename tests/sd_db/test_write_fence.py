@@ -23,6 +23,7 @@ from unittest import mock
 from sd_db import create_item, database, hub, initialise, writes
 from sd_db.backup import restore
 from sd_db.backup import run as backup
+from sd_db.errors import SdDbError
 
 from . import support
 from .test_fence import HUB_NAME, StubCase
@@ -305,6 +306,92 @@ class TheCommitBoundaries(FenceCase):
             with self.subTest(path=name), self.assertRaises(hub.Fenced):
                 write()
         self.assertEqual(self.rows(), 1, "only the write before the rename")
+
+    def test_an_autocommit_batch_spanning_the_rename_persists_nothing(self):
+        """Lead review of f349b44ce: SQLite authorizes `executemany` once, then commits each set."""
+        insert = "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', ?, '{}', '2026')"
+
+        def sets():
+            yield ("a",)
+            self.node(OLD_HUB)
+            yield ("b",)
+
+        batches = {
+            "connection": lambda connection: connection.executemany(insert, sets()),
+            "cursor": lambda connection: connection.cursor().executemany(insert, sets()),
+        }
+        for name, batch in batches.items():
+            with self.subTest(wrapper=name):
+                hub._answers.clear()
+                self.node()
+                self.name_hub(HUB_NAME)
+                connection = self.open()
+                with self.assertRaises(hub.Fenced):
+                    batch(connection)
+                self.assertFalse(connection.in_transaction)
+                self.assertEqual(self.rows(), 0)
+
+    def test_an_autocommit_batch_on_the_live_hub_writes_every_set(self):
+        self.node()
+        self.name_hub(HUB_NAME)
+        connection = self.open()
+        insert = "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', ?, '{}', '2026')"
+        connection.executemany(insert, [("a",), ("b",)])
+        connection.cursor().executemany(insert, [("c",)])
+        self.assertFalse(connection.in_transaction)
+        self.assertEqual(self.rows(), 3)
+
+    def test_a_batch_inside_a_transaction_commits_with_it(self):
+        self.node()
+        self.name_hub(HUB_NAME)
+        connection = self.open()
+        insert = "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', ?, '{}', '2026')"
+        connection.execute("BEGIN IMMEDIATE")
+        connection.executemany(insert, [("a",), ("b",)])
+        self.assertTrue(connection.in_transaction)
+        connection.execute("ROLLBACK")
+        self.assertEqual(self.rows(), 0)
+
+    def test_each_autocommit_statement_of_a_script_asks_again(self):
+        """`executescript` prepares, so authorizes, each statement just before it runs."""
+        self.node()
+        self.name_hub(HUB_NAME)
+        connection = self.open()
+        script = "".join(f"INSERT INTO state (kind, key, body, timestamp) VALUES ('x', '{key}', '{{}}', '2026');"
+                         for key in ("a", "b"))
+        names = mock.patch.object(hub.tailnet, "this_name", side_effect=[HUB_NAME, OLD_HUB])
+        with names as asked, self.assertRaises(hub.Fenced):
+            connection.executescript(script)
+        self.assertEqual(asked.call_count, 2)
+        self.assertEqual(self.rows(), 1, "the first statement committed while this node held the name")
+
+    def test_a_writable_blob_outside_a_transaction_refuses(self):
+        """A blob write passes no authorizer and commits on each write, so it needs a transaction."""
+        self.node()
+        self.name_hub(HUB_NAME)
+        connection = self.open()
+        connection.execute("INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'b', 'abcd', '2026')")
+        row = connection.execute("SELECT max(id) FROM state").fetchone()[0]
+        with self.assertRaises(SdDbError):
+            connection.blobopen("state", "body", row)
+        with connection.blobopen("state", "body", row, readonly=True) as blob:
+            self.assertEqual(blob.read(), b"abcd")
+
+    def test_a_blob_write_commits_only_after_a_fresh_ask(self):
+        self.node()
+        self.name_hub(HUB_NAME)
+        connection = self.open()
+        connection.execute("INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'b', 'abcd', '2026')")
+        row = connection.execute("SELECT max(id) FROM state").fetchone()[0]
+        connection.execute("BEGIN IMMEDIATE")
+        with connection.blobopen("state", "body", row) as blob:
+            blob.write(b"wxyz")
+        self.node(OLD_HUB)
+        with self.assertRaises(hub.Fenced):
+            connection.execute("COMMIT")
+        reader = database.connect(write=False)
+        self.addCleanup(reader.close)
+        self.assertEqual(reader.execute("SELECT body FROM state WHERE id = ?", (row,)).fetchone()[0], "abcd")
 
     def test_an_inner_release_does_not_probe(self):
         """A nested savepoint's RELEASE commits nothing, so it costs no probe."""

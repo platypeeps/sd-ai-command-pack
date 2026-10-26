@@ -466,12 +466,31 @@ def _fenced(connection: sqlite3.Connection, run, *args):
         raise Fenced(refusal) from error
 
 
+def _batched(connection: sqlite3.Connection, run, *args):
+    """`executemany` in its own transaction outside one, so its COMMIT asks the fence afresh.
+
+    SQLite authorizes the statement once and, in autocommit, commits each
+    parameter set; a batch spanning a rename would keep writing.
+    """
+    if connection.in_transaction:
+        return _fenced(connection, run, *args)
+    sqlite3.Connection.execute(connection, "BEGIN IMMEDIATE")
+    try:
+        cursor = _fenced(connection, run, *args)
+        _fenced(connection, sqlite3.Connection.execute, connection, "COMMIT")
+    except BaseException:
+        if connection.in_transaction:
+            sqlite3.Connection.execute(connection, "ROLLBACK")
+        raise
+    return cursor
+
+
 class _FencedCursor(sqlite3.Cursor):
     def execute(self, *args):
         return _fenced(self.connection, super().execute, *args)
 
     def executemany(self, *args):
-        return _fenced(self.connection, super().executemany, *args)
+        return _batched(self.connection, super().executemany, *args)
 
     def executescript(self, *args):
         return _fenced(self.connection, super().executescript, *args)
@@ -493,7 +512,17 @@ class FencedConnection(sqlite3.Connection):
         return _fenced(self, super().execute, *args)
 
     def executemany(self, *args):
-        return _fenced(self, super().executemany, *args)
+        return _batched(self, super().executemany, *args)
+
+    def blobopen(self, *args, readonly: bool = False, name: str = "main"):
+        # A blob write passes no authorizer and commits on each write outside
+        # a transaction, so it is held to one whose COMMIT asks afresh.
+        if not readonly and name != "temp":
+            if not self.in_transaction:
+                raise SdDbError("a writable blob needs a transaction (BEGIN IMMEDIATE ... COMMIT)")
+            if self.fence is not None:
+                self.fence.wrote = True
+        return super().blobopen(*args, readonly=readonly, name=name)
 
     def executescript(self, *args):
         return _fenced(self, super().executescript, *args)
