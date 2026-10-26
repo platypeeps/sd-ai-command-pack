@@ -89,6 +89,27 @@ class TheWriteFence(FenceCase):
         second = text.index(f"2. move {self.path} aside as sd.db.demoted-<date>")
         self.assertLess(first, second)
 
+    def test_the_refusal_names_the_raw_fix_for_a_mistyped_hub_name(self):
+        """Decision on #31345: no exception for `sd.hub_name`; the refusal names the fix, and the fix works."""
+        typo = "hub-typo.example.test"
+        self.name_hub(typo)
+        self.node()
+        connection = self.open()
+        with self.assertRaises(hub.Fenced) as caught:
+            create_item(connection, kind="work", title="locked out")
+        text = str(caught.exception)
+        self.assertIn(f"If this machine is the hub and sd.hub_name is mistyped, no sd command can fix it: "
+                      f"run sqlite3 {self.path} \"", text)
+        self.assertIn(f"or rename this node in Tailscale to {typo}", text)
+        fix = text.split(f"run sqlite3 {self.path} \"", 1)[1].split("\"", 1)[0]
+        raw = sqlite3.connect(self.path)
+        raw.execute(fix.replace("<this node>", HUB_NAME))
+        raw.commit()
+        raw.close()
+        self.later()
+        create_item(connection, kind="work", title="fixed")
+        self.assertEqual(self.items(), 1)
+
     def test_the_live_hub_writes_as_today(self):
         self.name_hub(HUB_NAME)
         self.node()

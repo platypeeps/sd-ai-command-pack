@@ -374,14 +374,24 @@ def write_role(path: Path, *, fresh: bool = False) -> Role:
         return found
 
 
+#: The raw fix for a mistyped `sd.hub_name` on the real hub: the fence stays
+#: strict, so `sd config set` cannot write it (decision on #31345). The newest
+#: `setting` row is the answer (`writes.read_settings`).
+HUB_NAME_FIX = ("UPDATE state SET body = json_object('value', '<this node>') WHERE id = "
+                f"(SELECT max(id) FROM state WHERE kind = 'setting' AND key = '{HUB_NAME}')")
+
+
 def demotion(path: Path, found: Role) -> str:
-    """The `Fenced` text for a local write: the holder, then the two demotion steps, `hub.json` first."""
+    """The `Fenced` text for a local write: the holder, the two demotion steps, `hub.json` first, then the typo fix."""
     return (f"refused: this machine is not the hub, so it writes nothing to {path}: {found.reason}. "
             f"Reads still work. Demote it in this order: "
             f"1. copy ~/{CONFIG_RELATIVE} from any satellite into this home "
             f"(until step 2, every sd command refuses with HubConflict); "
             f"2. move {path} aside as {Path(path).name}.demoted-<date>; "
-            f"sd commands then reach the hub, {found.holder}")
+            f"sd commands then reach the hub, {found.holder}. "
+            f"If this machine is the hub and {HUB_NAME} is mistyped, no sd command can fix it: "
+            f"run sqlite3 {path} \"{HUB_NAME_FIX}\" with this node's tailnet name, "
+            f"or rename this node in Tailscale to {found.holder}")
 
 
 class _WriteFence:
