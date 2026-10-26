@@ -203,6 +203,52 @@ class Hook(Registry):
         self.hook({"hook_event_name": "SessionEnd", "session_id": "session-a"})
         self.assertEqual(sessions.live(self.db), [])
 
+    def teammate_call(self, command: str, **fields) -> dict:
+        return {"hook_event_name": "PreToolUse", "session_id": "session-a", "agent_id": "agent-1",
+                "cwd": str(self.root), "tool_name": "Bash",
+                "tool_input": {"command": command, "description": "Note it", "timeout": 600000}, **fields}
+
+    def test_a_teammates_sd_call_gets_its_mark_and_keeps_the_rest_of_its_input(self):
+        """pack sd:6046: a teammate shares its lead's session id; the payload's `agent_id` tells it apart."""
+        done = self.hook(self.teammate_call("cd /tmp && sd task note 7 'Done' --kind decision"))
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        printed = json.loads(done.stdout)["hookSpecificOutput"]
+        self.assertEqual(printed, {"hookEventName": "PreToolUse", "updatedInput": {
+            "command": "export SD_AGENT_SESSION=session-a:agent-1; cd /tmp && sd task note 7 'Done' --kind decision",
+            "description": "Note it", "timeout": 600000}})
+        self.assertEqual([entry["session"] for entry in sessions.live(self.db)], ["session-a"])
+
+    def test_the_mark_names_sd_and_sd_commands_by_name_or_path_only(self):
+        """pack sd:6046: a call that runs no `sd` is not rewritten, so its permission check is the same."""
+        for command in ("sd task show 7", "bin/sd task note 7 x", "~/.local/bin/sd-ship lane status",
+                        "make test; sd-review -C /tmp", "(sd today)"):
+            with self.subTest(command=command):
+                self.assertTrue(self.hook(self.teammate_call(command)).stdout)
+        for command in ("ls ~/repos/platypeeps/sd-ai-command-pack/bin", "git log --grep sd:6046", "echo sdx",
+                        "cat sd_work.py"):
+            with self.subTest(command=command):
+                self.assertEqual(self.hook(self.teammate_call(command)).stdout, "")
+
+    def test_the_lead_another_tool_or_an_unsafe_id_gets_no_mark(self):
+        """pack sd:6046: the lead's payload has no `agent_id`; an id outside the safe set never reaches a shell."""
+        lead = self.teammate_call("sd task note 7 x")
+        del lead["agent_id"]
+        for payload in (lead, self.teammate_call("sd task note 7 x", tool_name="Edit"),
+                        self.teammate_call("sd task note 7 x", agent_id="a1; rm -rf ~"),
+                        self.teammate_call("sd task note 7 x", session_id="s$(id)"),
+                        self.teammate_call("sd task note 7 x", hook_event_name="SessionEnd")):
+            with self.subTest(payload=payload):
+                done = self.hook(payload)
+                self.assertEqual((done.returncode, done.stdout, done.stderr), (0, "", ""))
+
+    def test_an_unreadable_database_still_marks_a_teammates_call(self):
+        """pack sd:6046: the mark needs no database; a failed beat leaves it in place."""
+        empty = self.root / "empty-home"
+        empty.mkdir()
+        done = self.hook(self.teammate_call("sd task show 7"), home=empty)
+        self.assertEqual((done.returncode, done.stderr), (0, ""))
+        self.assertIn("SD_AGENT_SESSION=session-a:agent-1", done.stdout)
+
     def test_an_unreadable_database_is_silent(self):
         empty = self.root / "empty-home"
         empty.mkdir()

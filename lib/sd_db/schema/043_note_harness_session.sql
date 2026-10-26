@@ -1,0 +1,23 @@
+-- `note.harness_session` (pack sd:6046): the harness session that wrote a
+-- note whose `session` names someone else. A CLI ruling on a review batch
+-- question keeps the user as `session`, because the Review page shows that
+-- as "ruled by"; this column keeps the session id beside it, so the ruling
+-- shows in that session's compact trail (`reads.session_trail`). NULL is
+-- no harness session, or a note written before 43.
+--
+-- One column, by the operator's ruling on note #30714: every other note
+-- already records the harness session as `session` (sd:6023).
+--
+-- `ADD COLUMN`, as 041: SQLite adds a nullable column in place, touches no
+-- other table and moves no row. Every existing row reads NULL, so an older
+-- ruling stays out of its session's trail, as it was before 43.
+-- The reverse, run by hand with the runner, the dashboard and the serve agent
+-- stopped. It drops every stored harness session, so each CLI ruling leaves
+-- its session's trail again; take `bin/sd-db backup` first:
+--
+--   BEGIN;
+--   ALTER TABLE note DROP COLUMN harness_session;
+--   PRAGMA user_version = 42;
+--   COMMIT;
+
+ALTER TABLE note ADD COLUMN harness_session TEXT;

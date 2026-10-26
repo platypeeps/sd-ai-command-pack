@@ -13,9 +13,10 @@ import functools
 import os
 import tempfile
 
-#: Variables that steer a run under test; each is set by a gate, a CI runner or `make`.
+#: Variables that steer a run under test; each is set by a gate, a CI runner or `make`,
+#: or, for `SD_AGENT_SESSION`, by `bin/sd-session-beat` in a teammate's Bash call.
 DROPPED = {"SD_SKIP_HOOKS", "SD_COVERAGE_PROCESS_START", "PYTHONPATH", "CI", "GITHUB_ACTIONS",
-           "TEST_CHANGED_FILES", "CHANGED", "MAKEFLAGS", "MFLAGS", "MAKELEVEL"}
+           "TEST_CHANGED_FILES", "CHANGED", "MAKEFLAGS", "MFLAGS", "MAKELEVEL", "SD_AGENT_SESSION"}
 
 
 @functools.cache

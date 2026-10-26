@@ -2785,5 +2785,78 @@ class TheJiraProjectColumn(SchemaCase):
                          self._reference(self.VERSION - 1).execute("PRAGMA table_info(repo)").fetchall())
         self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
 
+
+class TheNoteHarnessSessionColumn(SchemaCase):
+    """Migration 43 (pack sd:6046). `note.harness_session`: the harness session
+    that wrote a note whose `session` names the user, as a CLI ruling does.
+    Added, not rebuilt: every existing note reads NULL and keeps its other
+    values; a failed file leaves 42; the reverse returns 42's shape."""
+
+    VERSION = 43
+    COLUMNS = "id, item, timestamp, kind, body, session, resolved_at"
+    ROWS = [(1, 1, "t1", "status_change", "opened as planning by operator", "session-a", None),
+            (2, 1, "t2", "question", "Which?", "session-a", "t3"),
+            (3, 1, "t3", "decision", "Ruling on note #2: This one", "operator", None)]
+
+    def _before(self):
+        self.migrate_through(self.VERSION - 1)
+        raw = sqlite3.connect(self.path)
+        raw.execute("INSERT INTO item (id, kind, title, status, created_at, updated_at)"
+                    " VALUES (1, 'task', 'A task', 'planning', 't1', 't1')")
+        raw.executemany(f"INSERT INTO note ({self.COLUMNS}) VALUES ({', '.join('?' * 7)})", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(f"SELECT {self.COLUMNS} FROM note ORDER BY id")]
+
+    def test_every_existing_note_arrives_at_null_and_keeps_its_values_and_a_rerun_applies_nothing(self):
+        """Failure table, rows "old database" and "second run"."""
+        self._before()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied),
+                         (self.VERSION - 1, list(range(self.VERSION, SCHEMA_VERSION + 1))))
+        self.assertEqual(migrate(self.path).applied, [])
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.ROWS)
+        self.assertEqual([row[0] for row in connection.execute("SELECT harness_session FROM note ORDER BY id")],
+                         [None, None, None])
+
+    def test_a_failed_file_leaves_the_store_at_42_and_a_rerun_finishes_it(self):
+        """Failure table, row "interrupted migration"."""
+        self._before()
+        raw = sqlite3.connect(self.path)
+        raw.execute("ALTER TABLE note ADD COLUMN harness_session TEXT")
+        raw.commit()
+        raw.close()
+        with self.assertRaises(sqlite3.OperationalError):
+            self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        raw.execute("ALTER TABLE note DROP COLUMN harness_session")
+        raw.commit()
+        raw.close()
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+    def test_the_reverse_returns_the_file_to_the_prior_version(self):
+        """Failure table, row "rollback to the previous commit"."""
+        self._before()
+        self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        raw.execute("UPDATE note SET harness_session = 'session-a' WHERE id = 3")
+        raw.commit()
+        raw.close()
+        text = dict(schema_module.migrations())[self.VERSION].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        self.assertNotIn("harness_session", [row[1] for row in raw.execute("PRAGMA table_info(note)")])
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+
 if __name__ == "__main__":
     unittest.main()

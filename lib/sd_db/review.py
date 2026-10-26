@@ -524,8 +524,10 @@ def rule(connection: sqlite3.Connection, item: int, note: int, option: str, *,
     state's `filed` is `{"item", "created"}`, or None when nothing was filed.
     So `apply` finds the ref and files nothing more (sd:4924).
 
-    `session` is the filed task's session, `who` when not given (pack sd:6046); the
-    ruling keeps `who`, which the Review page shows as "ruled by".
+    `session` is the harness session that rules, None outside one (pack sd:6046).
+    The filed task records it as its session, `who` when None; the ruling keeps
+    `who`, which the Review page shows as "ruled by", and records `session` as
+    its `harness_session`, so the ruling shows in that session's trail.
     """
     with transaction(connection):
         _, found = _open_batch(connection, item, expected_revision)
@@ -545,7 +547,7 @@ def rule(connection: sqlite3.Connection, item: int, note: int, option: str, *,
         tail = "" if filed is None else f" -> sd:{filed['item']}"
         ruled = workflow.add_item_note(connection, item, kind="decision", who=who,
                                        body=f"Ruling on note #{note}: {option}{tail}",
-                                       expected_revision=expected_revision)
+                                       expected_revision=expected_revision, harness_session=session)
         if filed is not None and filed["created"]:
             # The ruling's id exists only now, so the body is written last.
             writes.set_item_fields(connection, filed["item"],
