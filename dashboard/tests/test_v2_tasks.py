@@ -987,6 +987,15 @@ open({port}); await flush(); R.port = ELS.details.html;""")
         self.assertIn("<b>running</b>", port_html)
         self.assertIn("docs/work/port/prd.md", port_html)
 
+    def test_details_show_what_each_assignment_and_the_item_cost(self):
+        """sd:6031: an item page shows its cost, each assignment's spent cost rows, `~` when one is an estimate."""
+        port = self.ids["port"]
+        (asg,) = self.details[str(port)]["assignments"]
+        asg.update(usd=1.25, estimated=True)
+        out = self.run_page(f"open({port}); await flush(); R.port = ELS.details.html;")
+        self.assertIn('Assignments <span class="n">~$1.25 spent</span>', out["R"]["port"])
+        self.assertIn("<b>running</b> · ~$1.25", out["R"]["port"])
+
     # sd:3439: the Details fields edit in place. A field's change is the write its command makes, with the same toast and Undo.
     ECHO = """(path, body) => { const row = DOC.rows.find(r => path.startsWith('/api/items/' + r.id)); window.WROTE = (window.WROTE || 0) + 1;
   const item = { id: row.id, status: body.status || row.status, priority: 'priority' in body ? body.priority : row.priority,

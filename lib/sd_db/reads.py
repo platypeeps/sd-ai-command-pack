@@ -1424,7 +1424,18 @@ def skill_use_days(connection: sqlite3.Connection, *, since: str) -> list[sqlite
         " WHERE substr(timestamp, 1, 10) >= ? GROUP BY day, skill ORDER BY day, skill", (since[:10],)).fetchall()
 
 
-__all__ += ["meter_days", "skill_use_days"]
+def spent_since(connection: sqlite3.Connection, *, since: str) -> list[sqlite3.Row]:
+    """The spent cost rows, `run` and `bound` with a `usd`, stamped on or after the day of `since`: `timestamp`, `usd`.
+
+    A coarse bound, as `delivery_notes`; the caller compares each stamp exactly. `run` and `bound` are what Metrics
+    counts as spent (`usage`). Behind Today's spend line (sd:6031).
+    """
+    return connection.execute(
+        "SELECT timestamp, usd FROM cost WHERE source IN ('run', 'bound') AND usd IS NOT NULL"
+        " AND substr(timestamp, 1, 10) >= ? ORDER BY timestamp, id", (since[:10],)).fetchall()
+
+
+__all__ += ["meter_days", "skill_use_days", "spent_since"]
 
 
 def status_change_notes(connection: sqlite3.Connection, *, since: str, until: str) -> list[sqlite3.Row]:

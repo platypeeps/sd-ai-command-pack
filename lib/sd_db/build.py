@@ -381,6 +381,25 @@ def open_runs(connection) -> list[dict]:
         (SCOPE,))]
 
 
+def finished_seconds(connection, *, limit: int = 20) -> list[float]:
+    """Claim to release, in seconds, of the last `limit` build runs that ended `done`, newest first.
+
+    The past runs Today's builder ETA reads (sd:6003). A retried bundle's runs count each on its own.
+    """
+    rows = connection.execute(
+        "SELECT runner_run.created_at, runner_run.released_at FROM runner_run "
+        "JOIN assignment ON assignment.id = runner_run.assignment WHERE assignment.scope = ? "
+        "AND runner_run.outcome = 'done' AND runner_run.released_at IS NOT NULL "
+        "ORDER BY runner_run.released_at DESC, runner_run.id DESC LIMIT ?", (SCOPE, limit)).fetchall()
+    return [seconds for row in rows if (seconds := _age(row["created_at"], row["released_at"])) >= 0]
+
+
+def run_spent(connection, ident: str) -> float:
+    """What one build run spent so far: its `run` and `bound` cost rows, which carry the run as their pass."""
+    return float(connection.execute(
+        "SELECT COALESCE(SUM(usd), 0.0) FROM cost WHERE pass = ? AND source IN ('run', 'bound')", (ident,)).fetchone()[0])
+
+
 def write(connection, ident: str, **fields) -> bool:
     """One supervisor write on its own run; False, with nothing written, once the run ended or was released."""
     if not fields or set(fields) - RUN_FIELDS:
