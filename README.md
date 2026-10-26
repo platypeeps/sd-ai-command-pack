@@ -87,7 +87,9 @@ other halves are, is in [domain packs](docs/domain-packs.md).
   `PreToolUse` on `Bash`, `Edit`, `Write`, `NotebookEdit`, `Read`,
   `Grep` and `Glob`, and
   `SessionEnd`, for `sd-session-beat`, which keeps the session's heartbeat
-  row and the worktrees it holds (`sd assignments sessions`).
+  row and the worktrees it holds (`sd assignments sessions`), and puts a
+  teammate's `agent_id` in front of each of its Bash calls that runs `sd`,
+  so its notes leave its lead's trail.
   `bin/sd_install.py`'s `HOOK_SPECS` is the one list; this
   line describes it and does not govern it.
 - one line — `CLAUDE.local.md` — in the global git excludes

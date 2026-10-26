@@ -64,7 +64,7 @@ COLUMNS = {
                          "override_source override_at server_ms probabilities threshold run_id "
                          "prompt_hash load_avg parent error_class error_detail"},
     "note": {"history": "body", "hub-only": "output_path",
-             "none": "id item timestamp kind session resolved_at started ended exit_code"},
+             "none": "id item timestamp kind session resolved_at started ended exit_code harness_session"},
     "provider": {"none": "name enabled reason author_rank reviewer_rank"},
     "publication_claim": {"history": "payload",
                           "none": "id item active_item state created_at updated_at"},
@@ -212,6 +212,9 @@ class TheMigration(AThirteenStore):
         self.assertEqual(sorted(found - set(known)), [], "classify these columns in COLUMNS")
         self.assertEqual(sorted(set(known) - found), [], "COLUMNS names a column the schema lacks")
         after = rows(self.database)
+        # 043 appends `note.harness_session` after 014, NULL on every row.
+        self.assertEqual({row[-1] for row in after["note"]}, {None})
+        after["note"] = sorted((row[:-1] for row in after["note"]), key=repr)
         for (table, column), kind in known.items():
             values = [value[0] for value in connection.execute(f"SELECT {column} FROM {table}")]
             if kind == "key":
@@ -258,7 +261,8 @@ class TheMigration(AThirteenStore):
         # `status_source` back at `row`, which every row here held, and 025's
         # puts `satellite_gate` back so 020's can drop it. 041's goes first of
         # all: the one later column on `item`, whose rows this compares, after
-        # 042's build columns on `runner_run`.
+        # 043's `note.harness_session` and 042's build columns on `runner_run`.
+        connection.executescript(reverse_script("043_note_harness_session.sql"))
         connection.executescript(reverse_script("042_runner_run_build.sql"))
         connection.executescript(reverse_script("041_recurrence_lead.sql"))
         connection.executescript(reverse_script("026_repo_drop_status_source.sql"))

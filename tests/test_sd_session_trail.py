@@ -76,6 +76,28 @@ class SessionTrail(unittest.TestCase):
         self.assertIn("Filed by this session", self.hook({"source": "compact"}, CLAUDE_CODE_SESSION_ID="session-a"))
         self.assertEqual(self.hook({"source": "compact"}, CLAUDE_CODE_SESSION_ID=""), "")
 
+    def test_a_ruling_that_keeps_the_user_shows_by_its_harness_session(self):
+        """pack sd:6046: a CLI ruling records the user as `session`, the Review page's "ruled by"."""
+        item = self.file("Someone else's batch", "fixture")
+        workflow.add_item_note(self.connection, item, body="Ruling on note #1: Approve", kind="decision",
+                               who="operator", harness_session="session-a")
+        workflow.add_item_note(self.connection, item, body="Ruling on note #2: Reject", kind="decision",
+                               who="operator")
+        lines = self.hook({"session_id": "session-a"}).splitlines()
+        self.assertEqual(len(lines), 2, lines)
+        self.assertTrue(lines[1].endswith(": Ruling on note #1: Approve"), lines[1])
+
+    def test_a_teammate_reads_its_own_marked_trail_and_the_lead_its_own(self):
+        """pack sd:6046: a teammate shares its lead's session id; its notes carry `:<agent_id>`."""
+        self.file("Filed by the lead", "session-a")
+        self.file("Filed by a teammate", "session-a:agent-1")
+        lead = self.hook({"session_id": "session-a"})
+        mate = self.hook({"session_id": "session-a", "agent_id": "agent-1"})
+        self.assertIn("Filed by the lead", lead)
+        self.assertNotIn("Filed by a teammate", lead)
+        self.assertIn("Filed by a teammate", mate)
+        self.assertNotIn("Filed by the lead", mate)
+
     def test_the_trail_is_capped_and_says_so(self):
         item = self.file("Busy", "session-a")
         for number in range(LIMIT + 2):
