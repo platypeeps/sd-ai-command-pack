@@ -884,6 +884,26 @@ class AQuietTickWritesNoItem(unittest.TestCase):
         self.assertEqual([row["title"] for row in self.items()],
                          ["watchdog: data safe, one step failed: nas copy", "watchdog: data at risk"])
 
+    def test_a_replay_of_a_report_filed_before_the_grades_answers_with_it(self):
+        """pack sd:6151: a failed run with a safe line filed before sd:6080 holds the ungraded basis.
+        Its replay must answer with that report, not refuse it as different evidence."""
+        first = self.tick("safe", exit_code=1, text=START + SAFE)
+        fields = json.loads(self.db.execute("SELECT fields FROM item WHERE id=?", (first["item"]["id"],)).fetchone()[0])
+        graded = fields["report"]["attention_basis"]
+        old = graded.replace(" (data safe, one step failed: nas copy)", "", 1)
+        self.assertNotEqual(old, graded)
+        fields["report"]["attention_basis"] = old
+        self.db.execute("UPDATE item SET fields=? WHERE id=?", (json.dumps(fields), first["item"]["id"]))
+        self.db.commit()
+        replay = reporting.ingest_log(
+            self.db, job="watchdog", run_id="safe", started="2026-09-13T00:00:00Z",
+            ended="2026-09-13T00:00:30Z", exit_code=1, log_path=self.log, offset=0)
+        self.assertEqual((replay["recorded"], replay["item"]["id"]), ("report", first["item"]["id"]))
+        # Only that identity takes the old basis: a changed run still refuses.
+        with self.assertRaisesRegex(reporting.workflow.WorkflowError, "different evidence"):
+            reporting.ingest_log(self.db, job="watchdog", run_id="safe", started="2026-09-13T00:00:00Z",
+                                 ended="2026-09-13T00:00:30Z", exit_code=2, log_path=self.log, offset=0)
+
     def test_a_failure_without_a_safe_line_keeps_the_basis_older_reports_hold(self):
         """Open reports filed before the grades still take the folds of their failure."""
         state = self.tick("risk", exit_code=1, text=START + "SD_REPORT_ATTENTION: snapshot failed\n")

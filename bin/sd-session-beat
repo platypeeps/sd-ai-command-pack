@@ -2,7 +2,8 @@
 """Hook: keep this session's heartbeat row, the worktrees it holds (pack sd:6024).
 
 Registered on PreToolUse for the tools that name a path (Bash, Edit,
-Write, NotebookEdit) and on SessionEnd. PreToolUse beats `sd_db.sessions`:
+Write, NotebookEdit, and the readers Read, Grep and Glob, so a reading
+session holds its worktree too: pack sd:6152) and on SessionEnd. PreToolUse beats `sd_db.sessions`:
 the machine, the cwd, and each linked worktree the payload names, at most
 once a `BEAT_SECONDS` unless a new worktree appears. PreToolUse, not
 PostToolUse, so a hold starts before a long test run does. SessionEnd

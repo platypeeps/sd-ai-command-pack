@@ -659,11 +659,13 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
     # so a failure with a safe line names its grade too, and a fold never
     # moves it under another grade's title. Without one the basis is as it
     # was, so an open report filed before the grades still takes its folds.
+    # The ungraded basis is the one a run filed before the grades holds: its
+    # replay is answered against it (pack sd:6151).
     graded = f" ({grade})" if exit_code and any(mark.startswith(SAFE) for mark in marks) else ""
-    basis = (f"job exited {exit_code} on {host}{graded}" + (f": {declared}" if declared else "")
-             if exit_code else declared or "not supplied by the job")
-    if len(basis) > 2000:
-        basis = f"{basis[:1900]} [sha256 {hashlib.sha256(basis.encode()).hexdigest()[:16]}]"
+    basis, ungraded = ((f"job exited {exit_code} on {host}{suffix}" + (f": {declared}" if declared else "")
+                        if exit_code else declared or "not supplied by the job") for suffix in (graded, ""))
+    basis, ungraded = (value if len(value) <= 2000 else f"{value[:1900]} [sha256 {hashlib.sha256(value.encode()).hexdigest()[:16]}]"
+                       for value in (basis, ungraded))
     # Each invalid byte decodes to a three-byte replacement character, so
     # this second cut can drop text the first kept: that body is cut too.
     truncated = truncated or len(text.encode()) > MAX_REPORT
@@ -672,8 +674,10 @@ def ingest_log(connection, *, job, run_id, started, ended, exit_code, log_path, 
         # A run that already filed a report is answered with that report, the
         # way `ingest` answers an attention replay: a recovery's own heartbeat
         # makes the job read healthy, so its replay cannot be told by health.
-        filed = connection.execute("SELECT 1 FROM item WHERE source='cron-report' AND external_id=?",
+        filed = connection.execute("SELECT fields FROM item WHERE source='cron-report' AND external_id=?",
                                    (job + ":" + run_id,)).fetchone()
+        if filed and basis != ungraded and (json.loads(filed["fields"]).get("report") or {}).get("attention_basis") == ungraded:
+            basis = ungraded
         # Read the previous health before this tick overwrites it, or a
         # recovery reads as a run that was always fine. And only a tick that
         # became the current health can recover from anything: an older run

@@ -1293,7 +1293,9 @@
   // keeps aria-disabled and the tab order, and describes itself by the reason. on is the page's Set (multi) or string
   // (single); a value in on that no option has is still an option, so an address from another day can be unpicked.
   // Every control carries data-pick="key"; pickChange applies a change event to the page's F, redraws, and keeps the menu
-  // open (PICKS) and focus on the same control.
+  // open (PICKS) and focus on the same control. A multi summary holds every label it can show out of sight (.fpick-size),
+  // so it is as wide as its widest, as a select is: a pick that widened it wrapped Tasks' Repo to the bar's next line, and
+  // the open menu left the pointer (sd:6254).
   const PICKS = new Set();
   function pick(key, name, opts, on, { multi = false, all = 'All', help = '' } = {}) {
     const set = on instanceof Set ? on : new Set(on ? [on] : []);
@@ -1303,7 +1305,8 @@
         vals.map(([v, l, n]) => html`<option value="${v}"${set.size === 1 && set.has(v) ? html` selected` : ''}>${l}${n != null ? ` · ${n}` : ''}</option>`)}${set.size > 1 ? html`<option value="" disabled selected>${set.size} picked</option>` : ''}</select>${help}</div>`;
     }
     const one = set.size === 1 && vals.find(o => set.has(o[0]));
-    return html`<div class="fgroup"><span class="label" id="f-${key}-l">${name}</span><details class="fpick" data-pick="${key}"${PICKS.has(key) ? html` open` : ''}><summary aria-labelledby="f-${key}-l f-${key}-v"><span id="f-${key}-v">${!set.size ? all : one ? one[1] : `${set.size} picked`}</span></summary><div class="fpick-menu" role="group" aria-labelledby="f-${key}-l">${
+    return html`<div class="fgroup"><span class="label" id="f-${key}-l">${name}</span><details class="fpick" data-pick="${key}"${PICKS.has(key) ? html` open` : ''}><summary aria-labelledby="f-${key}-l f-${key}-v"><span id="f-${key}-v">${!set.size ? all : one ? one[1] : `${set.size} picked`}</span><span class="fpick-size" aria-hidden="true">${
+      [all, `${vals.length} picked`, ...vals.map(o => o[1])].map(l => html`<span>${l}</span>`)}</span></summary><div class="fpick-menu" role="group" aria-labelledby="f-${key}-l">${
       vals.map(([v, l, n, off], i) => { const why = `f-${key}-off-${i}`;
         return html`<label class="fpick-opt"><input type="checkbox" data-pick="${key}" value="${v}"${set.has(v) ? html` checked` : ''}${off ? html` aria-disabled="true" aria-describedby="${why}"` : ''}><span class="nm">${l}</span>${n != null ? html`<span class="n">${n}</span>` : ''}${off ? html`<small class="why" id="${why}">${off}</small>` : ''}</label>`; })}</div></details>${help}</div>`;
   }
@@ -1378,10 +1381,12 @@
   }
   // viewpick:end
   // A filter dropdown in use stays open across a redraw; a press outside it or focus leaving it closes it, and so does Esc
-  // (Keys, below). toggle does not bubble, so it is heard on the way down.
+  // (Keys, below). toggle does not bubble, so it is heard on the way down. Focus moving to an ancestor is a press inside:
+  // WebKit (Safari, the iPad) does not focus a box it taps, and focuses its focusable ancestor (<main tabindex="-1">)
+  // instead, which shut the menu before the click landed (sd:6254).
   document.addEventListener('toggle', e => { const d = e.target; if (d.matches?.('details.fpick')) { if (d.open) PICKS.add(d.dataset.pick); else PICKS.delete(d.dataset.pick); } }, true);
   document.addEventListener('pointerdown', e => document.querySelectorAll('details.fpick[open]').forEach(d => { if (!d.contains(e.target)) d.open = false; }));
-  document.addEventListener('focusout', e => { const d = e.target.closest?.('details.fpick[open]'); if (d && e.relatedTarget && !d.contains(e.relatedTarget)) d.open = false; });
+  document.addEventListener('focusout', e => { const d = e.target.closest?.('details.fpick[open]'); if (d && e.relatedTarget && !d.contains(e.relatedTarget) && !e.relatedTarget.contains(d)) d.open = false; });
 
   // ---------- Table grammar: every table sorts, filters and folds (sd:5064) ----------
   // tables:start
@@ -1702,7 +1707,7 @@
     if ((e.key === 'j' || e.key === 'k') && step(e.key === 'j' ? 1 : -1)) { e.preventDefault(); return; }
     // A time cell is a toggle: Enter or Space shows the exact time, again the relative one.
     if ((e.key === 'Enter' || e.key === ' ') && e.target.matches('time.rel[data-rel]')) { e.preventDefault(); flipTime(e.target); return; }
-    if (e.key === 'Enter' && selId && !e.target.matches('a, button, [role="button"], [role="menuitem"], [role="tab"]')) { e.preventDefault(); document.dispatchEvent(new CustomEvent('shell:open', { detail: selId })); return; }
+    if (e.key === 'Enter' && selId && !e.target.matches('a, button, summary, [role="button"], [role="menuitem"], [role="tab"]')) { e.preventDefault(); document.dispatchEvent(new CustomEvent('shell:open', { detail: selId })); return; }
     if (e.key === '.' && selId) { e.preventDefault(); openMenu(selId, document.querySelector(`[data-menu-for="${CSS.escape(selId)}"]`)); return; }
     if (e.key === 'x' && selId) { e.preventDefault(); commands.pick(selId); return; }
     if (e.key === 'n') { e.preventDefault(); openCapture(); return; }

@@ -900,7 +900,7 @@ def _change_status(workflow: Any, connection: Any, args: argparse.Namespace,
             f"item {args.item} is a report, and a report closes by acknowledgement: "
             f"`sd reports acknowledge {args.item} --resolve-followups` also resolves its open followups")
     result = workflow.change_status(
-        connection, args.item, args.status, who=who,
+        connection, args.item, args.status, who=who, session=_session(who),
         expected_revision=getattr(args, "if_revision", None), reason=reason)
     spawned = result.get("next_occurrence")
     following = None if spawned is None else workflow.item_state(connection, spawned)["item"]
@@ -1278,7 +1278,8 @@ def _rule_batch(review: Any, workflow: Any, connection: Any, args: argparse.Name
                                           expected_revision=revision)["revision"]
     if revision is None:
         revision = workflow.item_state(connection, args.item)["revision"]
-    state = review.rule(connection, args.item, args.answers, option, expected_revision=revision, who=who)
+    state = review.rule(connection, args.item, args.answers, option, expected_revision=revision, who=who,
+                        session=_session(who))
     state["note"] = state["ruling"]
     return state
 

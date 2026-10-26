@@ -15,9 +15,11 @@ file, is.
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import re
+import shlex
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -37,8 +39,13 @@ MAX_WORKTREES = 24
 MAX_DEPTH = 64
 #: An item number in a branch name: `session-registry-6024`, `build/sd-6024`, `b5106-sessions`.
 BRANCH_ITEM = re.compile(r"(?:^|[-_/])(?:sd-?|b)?(\d{1,9})(?=$|[-_/])", re.ASCII)
-#: An absolute or home path in a shell command.
+#: An absolute or home path in a shell command, for one the shell lexer cannot read (an unclosed quote).
 COMMAND_PATH = re.compile(r"""(?:^|(?<=[\s'"=:(]))(~?/[^\s'";|&()<>`$]+)""")
+#: The paths one command adds, and the words and characters of it read: a hook pays this on each tool call.
+MAX_COMMAND_PATHS, MAX_COMMAND_WORDS, MAX_COMMAND_CHARS = 32, 512, 16384
+#: A word that is a script, not a path: after `-c`, `-lc`, `-e` or `eval`, holding a shell operator, quote or
+#: bracket, or with a space and not starting as a path. It is read as a command again, at most this deep.
+SCRIPT_FLAG, SCRIPT_MARK, MAX_SCRIPT_DEPTH = re.compile(r"-[a-z]*[ce]|eval"), re.compile(r"[;&|<>`$'\"()\n]"), 3
 
 
 def _key(path: str) -> str:
@@ -89,8 +96,42 @@ def touched(payload: dict) -> list[str]:
     found += [tool.get("file_path"), tool.get("notebook_path"), tool.get("path")]
     command = tool.get("command")
     if isinstance(command, str):
-        found += COMMAND_PATH.findall(command)[:32]
+        found += command_paths(command, payload.get("cwd"))
     return [entry for entry in found if isinstance(entry, str) and entry.startswith(("/", "~/"))]
+
+
+def command_paths(command: str, cwd: object, depth: int = 0) -> list[str]:
+    """The paths in a shell command, read as the shell splits its words (pack sd:6152).
+
+    A quoted path keeps its spaces. A relative one (`../pack`, `lib/x`) resolves against `cwd`, or against
+    the folder a `cd` before it named; without an absolute `cwd` it is dropped. `NAME=a:b` names `a` and `b`,
+    and `--flag=a` names `a`. A quoted script (`sh -c '...'`, `python -c`, `eval`, a message) is read again
+    for its own paths; a `cd` in it moves no later word.
+    """
+    lexer = shlex.shlex(command[:MAX_COMMAND_CHARS], posix=True, punctuation_chars=True)
+    lexer.whitespace_split = True
+    try:
+        words = list(itertools.islice(lexer, MAX_COMMAND_WORDS))
+    except ValueError:  # an unclosed quote: the absolute paths alone, as a plain scan finds them
+        return COMMAND_PATH.findall(command)[:MAX_COMMAND_PATHS]
+    base = cwd if isinstance(cwd, str) and cwd.startswith("/") else None
+    found: list[str] = []
+    for before, word in itertools.pairwise(["", *words]):
+        if SCRIPT_FLAG.fullmatch(before) or SCRIPT_MARK.search(word) or (
+                any(char.isspace() for char in word) and not word.startswith(("/", "~/"))):
+            found += (command_paths(word, base, depth + 1) if depth < MAX_SCRIPT_DEPTH
+                      else COMMAND_PATH.findall(word))
+            continue
+        for part in [] if "://" in word else re.split(r"[=:]", word)[word.startswith("-"):]:
+            if part.startswith(("/", "~/")):
+                path = part
+            elif base and (part in (".", "..") or "/" in part):
+                path = os.path.normpath(os.path.join(base, part))
+            else:
+                continue
+            found.append(path)
+            base = path if before == "cd" and path.startswith("/") else base
+    return found[:MAX_COMMAND_PATHS]
 
 
 def worktrees(candidates: list[str]) -> list[dict]:
