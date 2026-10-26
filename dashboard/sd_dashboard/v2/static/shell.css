@@ -503,6 +503,10 @@ dialog.palette::backdrop { background: var(--color-scrim); }
 .palette .grp.out { display: none; }
 .palette li code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--text-2xs)/1 var(--font-data); color: var(--color-muted); }
 .palette li > span { white-space: nowrap; }
+/* The why search (pack sd:6019): an item's title gives way to the window before its icon does; a note line is not an option. */
+.palette li[data-why] > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.palette .why-note { padding: var(--space-2xs) var(--space-sm); min-height: 0; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-muted); cursor: default; }
+.palette .why-note:hover { background: transparent; }
 .confirm-body { display: grid; gap: var(--space-sm); padding: var(--space-md); }
 .confirm-body h2 { margin: 0; font: 600 var(--text-md)/1.25 var(--font-ui); overflow-wrap: anywhere; }
 .confirm-body p { margin: 0; font-size: var(--text-sm); color: var(--color-ink-2); }
@@ -605,7 +609,8 @@ body[data-rail="min"] .rail nav .subnav { display: none; }
   .rail[data-menu] nav a { min-height: var(--row-touch); }
   .rail .foot { margin: 0 0 0 auto; display: flex; align-items: center; gap: var(--space-xs); }
   .rail #fold-rail { display: none; }
-  body[data-rail="min"] .shell { grid-template-columns: minmax(0, 1fr); }
+  /* Every wider column rule, a folded pane's too (pack sd:6017): its specificity outranks the plain `.shell` above. */
+  body[data-rail="min"] .shell, body[data-pane="min"] .shell { grid-template-columns: minmax(0, 1fr); }
   body[data-rail="min"][data-pane="min"] .shell { grid-template-columns: minmax(0, 1fr); }
   body[data-rail="min"] .rail { padding: var(--space-xs) var(--space-md); }
   body[data-rail="min"] .rail .mark span, body[data-rail="min"] .cmd .txt { display: initial; }
@@ -828,12 +833,14 @@ th[aria-sort] > .sorter .i { opacity: 1; }
 /* Important: a page's mobile `.ledger tbody tr { display: grid }` outranks a plain rule, and a shut fold must hide on every page (sd:5490). */
 tr[data-tout] { display: none !important; }
 /* A band row's fold: the band keeps its look; the chevron turns down while the rows under it show. */
-td > .tfold { all: unset; display: inline-flex; align-items: center; gap: var(--space-2xs); width: 100%; min-height: 1.75rem; cursor: pointer; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; }
-td > .tfold:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; border-radius: var(--radius-sm); }
-td > .tfold > .i:first-child { flex: none; transition: transform var(--dur-fast) var(--ease-out); }
-td > .tfold[aria-expanded="true"] > .i:first-child { transform: rotate(90deg); }
-@media (prefers-reduced-motion: reduce) { td > .tfold > .i:first-child { transition: none; } }
+/* A band's cell is a <td> or, as on Today, a <th> (pack sd:6017). */
+:is(td, th) > .tfold { all: unset; display: inline-flex; align-items: center; gap: var(--space-2xs); width: 100%; min-height: 1.75rem; cursor: pointer; font: inherit; color: inherit; letter-spacing: inherit; text-transform: inherit; }
+:is(td, th) > .tfold:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 1px; border-radius: var(--radius-sm); }
+:is(td, th) > .tfold > .i:first-child { flex: none; transition: transform var(--dur-fast) var(--ease-out); }
+:is(td, th) > .tfold[aria-expanded="true"] > .i:first-child { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { :is(td, th) > .tfold > .i:first-child { transition: none; } }
 @media (pointer: coarse) {
-  .tgrid select, td > .tfold { min-height: var(--row-touch); }
+  .tgrid select { min-height: var(--row-touch); }
+  :is(td, th) > .tfold { min-height: var(--row-touch); }
   .tgrid .tfolds .linkbtn { min-height: var(--row-touch); display: inline-flex; align-items: center; }
 }

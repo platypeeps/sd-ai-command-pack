@@ -911,9 +911,11 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
     # one names its lamp, so the lamp still reads unknown (sd:5939).
     dark, dark_snoozed = snooze.split("today", [*([dark_row("lane", sources["lane"])] if sources["lane"] else []),
                                                 *unread_rows(sources, kept, queue, active, reported, mail)], snoozes)
+    # The Grill ready row snoozes as a work item does: its seen is its question count (pack sd:6235).
+    grills, grill_snoozed = snooze.split("today", grill_rows(connection), snoozes)
     held = [{**row, "lamp": LAMP.get(row["source"], "")} if row["kind"] == "dark" else row
-            for row in snoozed + dark_snoozed + work_snoozed + reports_snoozed + mail_snoozed]
-    listed = needs([*shown, *dark, *reports, *threads, *grill_rows(connection)], work=work, live=live, today=now[:10],
+            for row in snoozed + dark_snoozed + work_snoozed + reports_snoozed + mail_snoozed + grill_snoozed]
+    listed = needs([*shown, *dark, *reports, *threads, *grills], work=work, live=live, today=now[:10],
                    lanes=queue.get("lanes") or [], briefs=reported["briefs"])
     summary = lane_summary(queue)
     return {"now": now, "sources": sources, "observed": observed, "rows": shown, "active": active,

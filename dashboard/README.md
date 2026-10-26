@@ -90,6 +90,7 @@ Now and Work rows share one selection (sd:5654): pressing a row in either marks 
 
 **Decide**, at `/decide` in the rail's Now group (sd:5781), has two tabs: **Decisions** and **Scoring**, the review
 queue that was the Review page (`/review` opens Scoring). Its rail badge counts both. **Decisions** list the questions that wait on the operator, one button per option (sd:3012).
+Under them, **Rulings by session** groups the last 7 days of `decision` notes by the session that wrote them, each with its item's state (pack sd:6015); Reverse reopens the question a ruling answered.
 Ask one with a `question` note that carries one `Option: <text>` line per choice, at least two:
 `sd task note N $'Which store?\nOption: Pack store kind\nOption: Database rows' --kind question`.
 Keep each option short; the rest of the body is the question. A button writes the ruling as a `decision` note,
@@ -137,6 +138,14 @@ or screen; a section in none of the three, such as Notes or HOA, has no old
 screen, and the rail says it is not built yet. The classic screens' own nav links
 each ported section to its new page, read from the same registry (sd:2473); the
 palette still opens the kept classic screens.
+
+"Why is it like this?" starts in the palette (pack sd:6019). Type a file path
+and it lists the items the commits on that path cite (their `Closes:`,
+`Delivers:` or `Item:` trailers) or deliver (`Code delivery` notes). Type a
+rule's words and it lists the `sd:N` each matching line of a `CLAUDE.md`,
+`AGENTS.md` or `.claude/rules/` file cites. Each item opens its page, where
+its decisions, design and pull requests are. `/api/why?q=` serves it
+(`why_search.py`).
 
 The same script carries each page's rail badge, so every page shows every
 badge (sd:3446). The server writes it on each request, unversioned and never
@@ -197,6 +206,8 @@ The page reads each lane in-process with the pack's own `sd_lane`, the read `lan
 The header shows load5 with its 1- and 15-minute neighbours, and the gate slots in use against `sd gate status`'s cap.
 Each item is one row: merging (step, holder host, claim age, lease end; a passed lease lights caution), next (order, gate, head), building, blocked (status, step, the reason's first line, who acts), cancelled (when, head), or landed today (pull request, merge commit).
 Blocked and cancelled entries show for three days; older ones drop off.
+Under the lanes, Last 7 days shows each lane's median wait (enqueue to claim), median gate time (the speculative gate plus prepare) and slowest entry, enqueue to end, read from the entries' history rows (pack sd:6006).
+When a lane's median wait passes an hour, the hosted lane run files the parallel-lanes question on that repository's `Decide: parallel lanes` item, once a week at most.
 Building rows are the builder gate logs, `gate-*.log`, in the lane folder `lane list` names, `<lane root>/<checkout name>/lane`; set `sd.lane_root` where builders write them.
 Up, down, top, hold, release and cancel run `sd-ship lane move|hold|release|cancel` and nothing else.
 Cancel asks first. A cancelled row offers Re-queue (sd:3398): `lane retry <item> --expected-head <head>` queues the cancelled entry again, last, at the head the row showed (pack sd:3389).
@@ -404,7 +415,10 @@ The page is `/documents`, the v2 Documents page (sd:2114). It reads
 (research or report) and render state. Its facets, search and paged ledger come
 from the design source. Pin, hide and tag keep the workflow database's `view`
 state through `POST /api/documents/view` (sd:3428); render and request are
-copy-only lines the dashboard does not run. The classic listing was retired in sd:3402;
+copy-only lines the dashboard does not run. Its Books and Videos sub tabs read
+`GET /api/documents/books` and `GET /api/documents/videos`, the vault's
+book, article and video rows (sd:6260, sd:6261).
+The classic listing was retired in sd:3402;
 the page reads the roots through `documents.py`'s readers, so the rules below hold for it.
 
 A domain repository that publishes reports here follows
@@ -579,6 +593,16 @@ The tab answers that one path live, with `designs.ledger_script()`, instead of t
 A v2 screenshot is stale when `shots/inputs.json` lacks it or records another inputs hash.
 `designs.inputs_hash()` ports `tools/inputs.mjs` byte for byte; `test_designs.py` pins Node's output.
 Every page and screenshot the ledger names passes `designs.resolve()`.
+
+## Watches
+
+The page is `/watches`, the v2 Watches page (sd:6264). It reads
+`GET /api/watches` (`watches_screen.document`): every `sdw.market` row with
+its status and its last refresh date, read from its profile, and the
+`market-watch` job's state and last run. Refresh all runs that job now;
+Refresh and Add watch run `watch.refresh` and `watch.add` through
+`/api/actions/run`. [`docs/pages/watches.md`](docs/pages/watches.md) has
+the detail.
 
 ## Legacy collector reference
 

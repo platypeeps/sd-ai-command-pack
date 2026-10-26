@@ -73,6 +73,23 @@ class TheBadge(ReportsCase):
             dark = [row for row in self.today()["needs"] if row["id"] == "dark:grill"]
         self.assertEqual([(row["band"], row["detail"]) for row in dark], [("broken", "database is locked")])
 
+    def test_a_snoozed_grill_row_carries_a_seen_and_leaves_the_list(self):
+        """pack sd:6235: the Grill ready row joined Needs you after the snooze, so it had no seen and never hid."""
+        from sd_db import create_item
+        from sd_db.writes import add_note
+
+        grilled = create_item(self.connection, kind="task", title="Weekly grill", source="task-ref",
+                              external_id="grill:2026-09-07")
+        add_note(self.connection, grilled, "question", "Keep mechanism?\nOption: Keep\nOption: Drop")
+        row = next(row for row in self.today()["needs"] if row["id"] == f"grill:{grilled}")
+        self.assertTrue(row.get("seen"), "the Grill ready row carries no seen, so Snooze posts none")
+        self.post_snooze(f"grill:{grilled}", row["seen"])
+        doc = self.today()
+        self.assertNotIn(f"grill:{grilled}", [row["id"] for row in doc["needs"]])
+        self.assertIn(f"grill:{grilled}", [row["id"] for row in doc["snoozed"]])
+        add_note(self.connection, grilled, "question", "Keep another?\nOption: Keep\nOption: Drop")
+        self.assertIn(f"grill:{grilled}", [row["id"] for row in self.today()["needs"]])
+
     def test_a_blocked_lane_entry_is_a_broken_row_and_outranks_a_report(self):
         self.report("nas-prune", "r1")
         doc = self.today(queue(lane(rows=[blocked(5780)])))

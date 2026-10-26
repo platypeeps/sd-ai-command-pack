@@ -4,7 +4,8 @@
   decide.js opens it on Scoring with its query.
   Decisions (sd:3012, Today's view until sd:5781): /api/decisions, read by decisions.js when the page opens and on Read
   again; a choice posts /api/decisions/answer. A review batch's questions (sd:3709) are not rows here: one line under the
-  table counts them and opens Scoring.
+  table counts them and opens Scoring. Rulings by session (pack sd:6015): the same read's last 7 days of decision notes,
+  one group per session; Reverse posts /api/decisions/reverse and reopens the question.
   Scoring (sd:3709, the Review page until sd:5781): the labelling queue (design docs/work/2026-10-12-review-queue, Queue
   UX). No design source page: built on the v2 shell from ui-design products/system/design.md (Keys: digits 1-9 on Scoring)
   and foundation/. Data: /api/review (review_screen.document: each open batch and its questions, open or reviewed; a blind
@@ -56,6 +57,14 @@
       </table>
       <p class="filtered" id="decisions-review" hidden></p>
       <p class="filtered" id="decisions-note" role="status" hidden></p>
+    </section>
+    <section aria-labelledby="rulings-h">
+      <div class="sec-head">
+        <h2 id="rulings-h">Rulings by session <button class="help" type="button" aria-label="Help: Rulings by session" data-help="&lt;b&gt;What each session ruled in the last 7 days.&lt;/b&gt; Each &lt;code&gt;decision&lt;/code&gt; note, grouped by the session that wrote it, with its item&#39;s state. Reverse notes the reversal and reopens the question the ruling answered; it then waits under Decisions again.">
+          <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+        <p class="tally" id="rulings-tally"></p>
+      </div>
+      <div id="rulings"></div>
     </section>
   </div>
   <div id="view-scoring" aria-label="Scoring" hidden>

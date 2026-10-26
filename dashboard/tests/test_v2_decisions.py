@@ -19,6 +19,7 @@ look at 375 px, focus order -- is a manual check recorded on the pull request.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -181,7 +182,87 @@ class TheAnswer(ScreenCase):
         self.assertEqual([row["note"] for row in decisions.document(self.connection)["decisions"]], [self.ids["asked"]])
 
 
+class TheRulings(ScreenCase):
+    """Pack sd:6015: the last week's rulings, one group per session, each with its item, state and question; Reverse
+    reopens the question a ruling answered (operator ruling, grill Q36)."""
+
+    def setUp(self):
+        super().setUp()
+        self.ids = seed(self)
+
+    def rule(self, note, option, session):
+        revision = workflow.item_state(self.connection, self.ids["item"])["revision"]
+        return decisions.answer(self.connection, self.ids["item"], note, option, expected_revision=revision,
+                                who=session)["ruling"]["id"]
+
+    def test_rulings_group_by_session_with_item_state_and_question(self):
+        first = self.rule(self.ids["asked"], "A pack store kind", "grill-session")
+        second = self.rule(self.ids["free"], "Notes", "grill-session")
+        other = self.rule(self.ids["single"], "Approve", "other-session")
+        bare = self.note(self.ids["item"], "Operator ruling (grill Q36).", kind="decision", session="grill-session")
+        groups = decisions.document(self.connection)["rulings"]
+        self.assertEqual({group["session"]: [r["note"] for r in group["rulings"]] for group in groups},
+                         {"grill-session": [first, second, bare], "other-session": [other]})
+        ruling = next(group for group in groups if group["session"] == "grill-session")["rulings"][0]
+        self.assertEqual((ruling["item"], ruling["title"], ruling["state"], ruling["ruling"], ruling["answers"]),
+                         (self.ids["item"], "Notes quick capture", "planning", "A pack store kind", self.ids["asked"]))
+        self.assertEqual(ruling["question"], "Which store holds quick notes?\nThe page keeps them for the visit today.")
+        self.assertEqual(ruling["revision"], workflow.item_state(self.connection, self.ids["item"])["revision"])
+        unlinked = next(group for group in groups if group["session"] == "grill-session")["rulings"][2]
+        self.assertEqual((unlinked["ruling"], unlinked["answers"], unlinked["question"]),
+                         ("Operator ruling (grill Q36).", None, None))
+
+    def test_reverse_notes_the_reversal_and_the_question_waits_again(self):
+        ruling = self.rule(self.ids["asked"], "A pack store kind", "grill-session")
+        revision = workflow.item_state(self.connection, self.ids["item"])["revision"]
+        state = decisions.reverse(self.connection, self.ids["item"], ruling, expected_revision=revision, who="dashboard")
+        self.assertEqual(state["reversal"]["body"], f"Reversed ruling #{ruling}: question #{self.ids['asked']} asks again.")
+        doc = decisions.document(self.connection)
+        self.assertIn(self.ids["asked"], [row["note"] for row in doc["decisions"]])
+        [group] = [group for group in doc["rulings"] if group["session"] == "grill-session"]
+        self.assertEqual([(r["note"], r["reversed"]) for r in group["rulings"]], [(ruling, True)])
+
+    def test_reverse_refuses_a_stale_page_a_ruling_with_no_question_and_an_open_question(self):
+        ruling = self.rule(self.ids["asked"], "A pack store kind", "grill-session")
+        bare = self.note(self.ids["item"], "Operator ruling (grill Q36).", kind="decision")
+        old = workflow.item_state(self.connection, self.ids["item"])["revision"]
+        workflow.add_item_note(self.connection, self.ids["item"], body="a later comment", who="cli")
+        before = tuple(self.connection.iterdump())
+        with self.assertRaises(workflow.StaleItem):
+            decisions.reverse(self.connection, self.ids["item"], ruling, expected_revision=old, who="dashboard")
+        revision = workflow.item_state(self.connection, self.ids["item"])["revision"]
+        with self.assertRaises(workflow.WorkflowError) as refused:
+            decisions.reverse(self.connection, self.ids["item"], bare, expected_revision=revision, who="dashboard")
+        self.assertIn("answered no question", str(refused.exception))
+        self.connection.execute("UPDATE note SET resolved_at = NULL WHERE id = ?", (self.ids["asked"],))
+        self.connection.commit()
+        before = tuple(self.connection.iterdump())
+        revision = workflow.item_state(self.connection, self.ids["item"])["revision"]
+        with self.assertRaises(workflow.WorkflowError) as refused:
+            decisions.reverse(self.connection, self.ids["item"], ruling, expected_revision=revision, who="dashboard")
+        self.assertIn("is open already", str(refused.exception))
+        self.assertEqual(tuple(self.connection.iterdump()), before)
+
+
 class TheRoutes(BrowserSession):
+    def test_reverse_goes_through_the_server_and_a_second_tap_is_stale(self):
+        """Pack sd:6015: /api/decisions/reverse with the item revision the page read."""
+        ids = seed(self)
+        revision = workflow.item_state(self.connection, ids["item"])["revision"]
+        ruling = decisions.answer(self.connection, ids["item"], ids["asked"], "A pack store kind",
+                                  expected_revision=revision, who="cli")["ruling"]["id"]
+        self.connection.commit()
+        status, _, body = self.request("/api/decisions", headers={"Cookie": self.cookie})
+        row = json.loads(body)["rulings"][0]["rulings"][0]
+        payload = {"item": ids["item"], "note": ruling, "revision": row["revision"]}
+        status, _, state = self.post("/api/decisions/reverse", payload)
+        self.assertEqual(status, 200, state)
+        self.assertEqual(self.post("/api/decisions/reverse", payload)[0], 409)
+        for bad in ({**payload, "revision": "x"}, {k: v for k, v in payload.items() if k != "note"}, {**payload, "who": 1}):
+            with self.subTest(payload=bad):
+                self.assertEqual(self.post("/api/decisions/reverse", bad)[0], 400)
+
+
     def test_the_list_and_the_answer_go_through_the_server_and_a_second_click_is_stale(self):
         ids = seed(self)
         status, _, body = self.request("/api/decisions", headers={"Cookie": self.cookie})
@@ -334,6 +415,50 @@ class TheScript(unittest.TestCase):
         self.assertEqual(out["gets"], ["/api/decisions"])
         self.assertIn("Not recorded: note 7 offers no option Option lines", out["R"]["rows"])
         self.assertEqual(out["R"]["rows"].count('data-option="'), 2)
+
+
+def ruling_group(**changes):
+    return {"session": "6668b6c0-2dbb-4a22-a0f7-9975ed7dba82", "at": "2026-10-24T21:00:00+00:00", "rulings": [
+        {"note": 41, "item": 6015, "title": "Decisions groups <rulings>", "repo": "/repos/pack", "state": "ready",
+         "at": "2026-10-24T20:00:00+00:00", "ruling": "Group by session", "answers": 40, "question": "Group how?",
+         "reversed": False, "revision": "a" * 64},
+        {"note": 43, "item": 6017, "title": "Phone layout", "repo": "/repos/pack", "state": "in_progress",
+         "at": "2026-10-24T21:00:00+00:00", "ruling": "Operator ruling (grill Q38).", "answers": None,
+         "question": None, "reversed": False, "revision": "b" * 64}], **changes}
+
+
+class TheRulingsScript(TheScript):
+    """Pack sd:6015: each session's rulings as one group under Decisions; Reverse posts in one tap."""
+
+    def test_a_session_is_one_group_with_ruling_item_and_state(self):
+        doc = json.dumps({"decisions": [], "rulings": [ruling_group()]})
+        out = self.run_page("R.rulings = ELS.rulings.html;", f"(path, body) => [200, {doc}]")
+        rulings = out["R"]["rulings"]
+        self.assertIn("Session 6668b6c0 · 2 rulings", rulings)
+        self.assertIn('aria-label="Rulings of session 6668b6c0"', rulings)
+        self.assertIn("Decisions groups &lt;rulings&gt;", rulings)
+        self.assertIn("Group how? → <b>Group by session</b>", rulings)
+        self.assertIn("in_progress", rulings)
+        self.assertEqual(rulings.count('data-reverse="'), 1)
+        self.assertIn('data-reverse="41"', rulings)
+        self.assertIn("answered no question", rulings)
+
+    def test_each_session_is_a_fold_and_only_the_newest_opens(self):
+        # Pack sd:6017: a week held 1071 rulings in 11 sessions; on a phone only the newest session shows its rows.
+        doc = json.dumps({"decisions": [], "rulings": [ruling_group(), ruling_group(session="older", at="2026-10-20T00:00:00Z")]})
+        out = self.run_page("R.rulings = ELS.rulings.html;", f"(path, body) => [200, {doc}]")
+        folds = re.findall(r'<details class="ruling-group"( open)?><summary', out["R"]["rulings"])
+        self.assertEqual(folds, [" open", ""])
+
+    def test_reverse_posts_the_ruling_and_reads_again(self):
+        doc = json.dumps({"decisions": [], "rulings": [ruling_group()]})
+        out = self.run_page(
+            "ELS.rulings.listeners.click[0]({ target: { closest: s => s === 'button[data-reverse]'"
+            " ? { dataset: { reverse: '41' }, disabled: false } : null } }); await flush(); await flush();",
+            f"(path, body) => path === '/api/decisions' ? [200, {doc}] : [200, {{ revision: 'c', reversal: {{ id: 50 }} }}]")
+        self.assertEqual([post[:2] for post in out["posts"]],
+                         [["/api/decisions/reverse", {"item": 6015, "note": 41, "revision": "a" * 64}]])
+        self.assertEqual(out["gets"], ["/api/decisions", "/api/decisions"])
 
 
 if __name__ == "__main__":
