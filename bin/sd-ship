@@ -2719,8 +2719,8 @@ def whole_option_names(parser: argparse.ArgumentParser) -> argparse.ArgumentPars
 
 
 def parser():
-    command = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
-                                      epilog=BODY_EPILOG)
+    command = argparse.ArgumentParser(description=__doc__.splitlines()[0],
+                                      epilog="Exit codes: 0 done, 2 usage, 3 refusal.")
     command.add_argument("-C", dest="chdir", metavar="DIR", action=sd_lib.DirectoryAction, help=sd_lib.DIRECTORY_OPTION_HELP)
     commands = command.add_subparsers(dest="command", required=True)
     body = commands.add_parser("body", help="print the body prepare would publish, and its body lint; no state",

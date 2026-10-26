@@ -2492,46 +2492,37 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sd-review",
-        description=(
-            "Review this repository's change with local providers and dispose of "
-            "the findings locally. Nothing is ever posted."
-        ),
+        description="Review this repository's change locally; nothing is posted.",
+        epilog="Exit codes: 0 clean, 1 blocking findings, 2 usage, 3 refusal, 4 rate limit, 5 gate or provider "
+               "unavailable.",
     )
     parser.add_argument("-C", dest="chdir", metavar="DIR", action=sd_lib.DirectoryAction, help=sd_lib.DIRECTORY_OPTION_HELP)
-    parser.add_argument("--scope", choices=SCOPES, default="worktree", help="what to review (default: worktree)")
-    parser.add_argument("--database", type=pathlib.Path, help="explicit provider-state database for an owned runner")
-    parser.add_argument("--reuse-check", action="store_true",
-                        help="reuse a matching explicit full-check receipt; otherwise rerun. Never reuses in "
-                             "sd-ai-command-pack itself, which tracks no reuse declaration (.github/sd-check-reuse.json)")
-    parser.add_argument("--gate-check", metavar="BRANCH",
-                        help="branch scope: run the check as the local gate does, against origin/BRANCH, "
-                             "leaving a gate receipt at HEAD for the merge gate")
-    parser.add_argument("--verify-report", help="prior branch review JSON to verify with --base")
-    parser.add_argument("--resume-report", help="incomplete prior review JSON whose findings must survive a full-branch retry")
-    parser.add_argument("--base", help="branch-only exact ancestor SHA for one fix verification")
-    parser.add_argument("--challenge", action="store_true", help="add the adversarial design-challenge stance")
-    parser.add_argument("--lens", choices=sorted(sd_lib.REVIEW_LENSES), help="re-aim the prompt at a non-code subject; the chain is unchanged")
-    parser.add_argument(
-        "--provider",
-        default=None,
-        metavar="NAME",
-        help="review with this one registry entry instead of the tier's share of the chain",
-    )
-    parser.add_argument("--item", default=None, metavar="NAME", help="planning scope only: review the one active work item whose directory is NAME")
-    parser.add_argument("--preflight", action="store_true", help="one synthetic URL schema probe with --provider; counts as a provider call, not a review")
-    parser.add_argument("--explain", action="store_true", help="print the routing decision and why, then exit without running anything")
-    parser.add_argument("--dry-run", action="store_true", help="print the exact invocations, run nothing")
-    parser.add_argument("--json", action="store_true", help="emit one machine-readable object")
+    parser.add_argument("--scope", choices=SCOPES, default="worktree", metavar="SCOPE",
+                        help=f"{', '.join(SCOPES)} (default: worktree)")
+    parser.add_argument("--database", type=pathlib.Path, metavar="FILE", help="provider-state database")
+    parser.add_argument("--reuse-check", action="store_true", help="reuse a matching full-check receipt")
+    parser.add_argument("--gate-check", metavar="BRANCH", help="run the gate's check against origin/BRANCH")
+    parser.add_argument("--verify-report", metavar="FILE", help="prior branch review JSON to verify with --base")
+    parser.add_argument("--resume-report", metavar="FILE", help="incomplete prior review JSON to resume")
+    parser.add_argument("--base", metavar="SHA", help="exact ancestor for one fix verification")
+    parser.add_argument("--challenge", action="store_true", help="add the design-challenge stance")
+    parser.add_argument("--lens", choices=sorted(sd_lib.REVIEW_LENSES), metavar="LENS",
+                        help=f"{', '.join(sorted(sd_lib.REVIEW_LENSES))}: a non-code subject")
+    parser.add_argument("--provider", default=None, metavar="NAME", help="review with this one registry entry")
+    parser.add_argument("--item", default=None, metavar="NAME", help="planning scope: the work item directory")
+    parser.add_argument("--preflight", action="store_true", help="one schema probe with --provider")
+    parser.add_argument("--explain", action="store_true", help="print the routing decision, run nothing")
+    parser.add_argument("--dry-run", action="store_true", help="print the invocations, run nothing")
+    parser.add_argument("--json", action="store_true", help="emit one JSON object")
     parser.add_argument("--expected-timing", help=argparse.SUPPRESS)
     # No network call means draft state cannot be read from GitHub; it is stated.
-    parser.add_argument("--draft", action="store_true", help="treat the change as a draft pull request; routing reduces the tier")
+    parser.add_argument("--draft", action="store_true", help="review as a draft pull request")
     parser.add_argument(
         "--timeout",
         type=int,
         default=None,
         metavar="SECONDS",
-        help=f"per-phase timeout: the repository gate, then each provider (default: {sd_lib.GATE_CHECK_SECONDS} "
-             f"for the gate, {DEFAULT_TIMEOUT_SECONDS} for each provider)",
+        help=f"per phase (default: gate {sd_lib.GATE_CHECK_SECONDS}, provider {DEFAULT_TIMEOUT_SECONDS})",
     )
     return parser
 

@@ -45,81 +45,30 @@ HERE = Path(__file__).resolve().parent
 CHECKOUT = HERE.parent
 CONVENTIONS = CHECKOUT / "skills" / "sd-research-repo" / "references" / "conventions.md"
 
-USAGE = """usage: sd-research-kit render|publish|checklinks|review|pins|fleet-pins|
-                          init-hook|init-claude-md|conventions|delivered|upload|
-                          project|deck
+USAGE = """usage: sd-research-kit <verb> [arguments]
 
-  render        render research.conf.py into docs/dashboard/, with the
-                manifest research.json, write the vault
-                copies, register with the dashboard, queue outward mirrors
-                for the documents that changed since they were last queued
-                (SD_MIRROR_REQUEUE=1 queues every designated document;
-                SD_MIRROR_DRY_RUN=1 prints what it would queue or write
-                to the vault, and does neither). From
-                a linked worktree: docs/dashboard/ only, no vault copy and no
-                mirror, unless SD_PUBLISH_FROM_WORKTREE=1 is set; off the
-                default branch, no mirror under the same switch
-  publish       the registration and queueing half on its own, without
-                re-rendering
-  init-hook     install the hook that re-renders this repo and then runs
-                checklinks, reporting broken links, under all three
-                triggers at once -- post-commit, post-merge and post-checkout,
-                so a pull and a branch switch render too; upgrades an earlier
-                install of its own. The hook renders only a research.conf.py
-                that a render by hand has executed here
-  delivered <request file name> <fingerprint> [--url <url>]
-                the drain's last step: record that generation of the request
-                as delivered and remove the request only while it is still
-                that generation. --url records where the mirror landed, with
-                the item= the document names. The one verb with arguments:
-                it acts on the machine's queue, not on a checkout
-  upload <request file name> <upload_url> <authorization>
-                the drain's image step: send the request's Archify PNG to the
-                upload notion-create-file-upload opened, and print the
-                <image> line that replaces the request's {{archify-image}}
-                marker. Acts on the machine's queue, not on a checkout
+Each verb acts on the research repo at the current directory, except the three
+marked (queue), which act on the machine's mirror queue. There is no repo argument.
+
+  render          render research.conf.py into docs/dashboard/ and the vault,
+                  and queue changed mirrors (SD_MIRROR_REQUEUE=1,
+                  SD_MIRROR_DRY_RUN=1, SD_PUBLISH_FROM_WORKTREE=1)
+  publish         register and queue mirrors without a render
+  checklinks      check relative links and backticked in-repo paths
+  review          the mechanical pre-publication review, then its checklist
+  pins            whether each asserted `source` @ `sha` moved upstream
+  fleet-pins      pack and system pins across the sibling checkouts
+  init-hook       install the render-and-checklinks git hook
+  init-claude-md  lay the template CLAUDE.md into a repo that has none
+  conventions     print the path of the research repo standard
+  deck            lay out 30-brief/deck.json as docs/dashboard/deck.pptx
+  delivered <request> <fingerprint> [--url <url>]           (queue)
+  upload <request> <upload_url> <authorization>             (queue)
   project [--plan <request> --live <file>|--missing] [--writing <request>]
-                queue one notion-row request per item designated with
-                `sd task edit N --experiment`, for the items whose row would
-                change; needs sd.notion_experiments and
-                sd.notion_experiment_tasks (`sd config set`). --plan is the drain's guard: it
-                reads the request, the item and the row the drain fetched,
-                records the intent on the item and prints what to write.
-                --writing marks a planned create just before the drain's
-                create call, so a stop after it is searched for, not redone.
-                Acts on the machine's queue, not on a checkout
-  checklinks    verify every relative markdown link and backticked in-repo path
-                resolves; exit 1 if anything is broken
-  review        the mechanical half of the pre-publication adversarial review:
-                provenance block, Status section separating verified from not,
-                build freshness, the one `START HERE -- ` main document across
-                the configured H1s and rendered titles, this repo's
-                CLAUDE.md against the pack's template, stable row IDs and
-                a gaps section in each 20-map/ map, and a configured
-                05-architecture/architecture.md (both warnings only). Then prints
-                the checklist for the half no script can do. Exit 1 if a check
-                fails, 2 outside a research repo
-  pins          for every `source` @ `sha` the markdown asserts, say whether
-                upstream has moved past it. The list is read out of the
-                documents each run, never maintained
-  fleet-pins    every pack and system pin across the checkouts beside this one
-                -- `uses:`, `ref:`, `<NAME>_REVISION:`, a tarball manifest's
-                `source_commit` -- current or behind N. Report only; exit 0.
-                This is the one surface that prints it
-  init-claude-md
-                lay skills/sd-research-repo/templates/CLAUDE.md into this repo,
-                once, when it has none. Never overwrites an existing copy: from
-                then on `review` reports the disagreements and the repo's own
-                `## Local overrides of the shared template` records the ones
-                that are deliberate
-  conventions   print the path of the standard every research repo follows
-  deck          lay out 30-brief/deck.json, the status brief's slides, into
-                docs/dashboard/deck.pptx. Needs python-pptx, resolved as render
-                resolves markdown
+                                                            (queue)
 
-Every verb acts on the current working directory. There is no repo argument;
-`delivered`, `upload`, `project --plan` and `project --writing` name a request
-in the machine's queue, which is not a repository.
+Exit codes: 0 done; 1 a check failed or the verb is unknown; 2 bad arguments,
+or review outside a research repo.
 """
 
 
