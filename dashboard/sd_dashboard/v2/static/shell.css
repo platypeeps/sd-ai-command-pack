@@ -500,6 +500,10 @@ dialog.palette::backdrop { background: var(--color-scrim); }
 .palette .grp.out { display: none; }
 .palette li code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 400 var(--text-2xs)/1 var(--font-data); color: var(--color-muted); }
 .palette li > span { white-space: nowrap; }
+/* The why search (pack sd:6019): an item's title gives way to the window before its icon does; a note line is not an option. */
+.palette li[data-why] > span { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.palette .why-note { padding: var(--space-2xs) var(--space-sm); min-height: 0; font: 400 var(--text-xs)/1.35 var(--font-data); color: var(--color-muted); cursor: default; }
+.palette .why-note:hover { background: transparent; }
 .confirm-body { display: grid; gap: var(--space-sm); padding: var(--space-md); }
 .confirm-body h2 { margin: 0; font: 600 var(--text-md)/1.25 var(--font-ui); overflow-wrap: anywhere; }
 .confirm-body p { margin: 0; font-size: var(--text-sm); color: var(--color-ink-2); }

@@ -139,6 +139,14 @@ screen, and the rail says it is not built yet. The classic screens' own nav link
 each ported section to its new page, read from the same registry (sd:2473); the
 palette still opens the kept classic screens.
 
+"Why is it like this?" starts in the palette (pack sd:6019). Type a file path
+and it lists the items the commits on that path cite (their `Closes:`,
+`Delivers:` or `Item:` trailers) or deliver (`Code delivery` notes). Type a
+rule's words and it lists the `sd:N` each matching line of a `CLAUDE.md`,
+`AGENTS.md` or `.claude/rules/` file cites. Each item opens its page, where
+its decisions, design and pull requests are. `/api/why?q=` serves it
+(`why_search.py`).
+
 The same script carries each page's rail badge, so every page shows every
 badge (sd:3446). The server writes it on each request, unversioned and never
 cached, and only for a signed-in page. A page's `count` names the read whose
