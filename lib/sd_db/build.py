@@ -450,7 +450,9 @@ def pull_url(connection, repo: str, branch: str | None, items: list[int]) -> str
     from . import ship
     from .workflow import WorkflowError
 
-    row = connection.execute("SELECT remote FROM repo WHERE path = ?", (repo,)).fetchone()
+    probe = paths.keys(repo)  # a run row written before migration 014 holds the absolute form
+    row = connection.execute(
+        f"SELECT remote FROM repo WHERE path IN ({paths.placeholders(probe)})", probe).fetchone()
     if not branch or row is None or not row["remote"]:
         return ""
     try:

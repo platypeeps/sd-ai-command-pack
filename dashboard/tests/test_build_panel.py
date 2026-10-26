@@ -3,6 +3,7 @@
 `builds.kickstart` is replaced, so nothing reaches launchctl; the room's gate and sessions are seams of `plan`.
 """
 
+from pathlib import Path
 from unittest.mock import patch
 
 from sd_db import build, ship, upsert_repo
@@ -167,6 +168,16 @@ class BuildsPanel(Fixture):
         self.assertEqual(self.panel(run["created_at"])["runs"][0]["pull"], url)
         build.end(self.connection, run["id"], "done", "landed")
         self.assertEqual(self.panel(clock())["recent"][0]["pull"], url)
+
+    def test_the_pull_request_lookup_matches_every_stored_form_of_the_repository(self):
+        """A repository registered by its `~/` key still finds its remote from the absolute form a run may hold."""
+        absolute = str(Path.home() / "repos" / "example-beta")
+        upsert_repo(self.connection, "~/repos/example-beta", remote="https://github.com/example/beta.git", managed=1)
+        url = "https://github.com/example/beta/pull/9"
+        ship.save(self.connection, ship.receipt_key("example/beta", "build-1", 1), 0, {
+            "repository": "example/beta", "branch": "build-1", "item": 1,
+            "pull_request": {"number": 9, "repository": "example/beta", "base": "main", "url": url}})
+        self.assertEqual(build.pull_url(self.connection, absolute, "build-1", [1]), url)
 
     def test_retry_on_a_blocked_run_queues_its_items_again(self):
         items = [self.ready(), self.ready()]
