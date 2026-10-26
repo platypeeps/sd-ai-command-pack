@@ -230,14 +230,22 @@ def command_credentials(argv: list[str]) -> int:
     return 0
 
 
+RECORDS_USAGE = ("sd-db records: expected render [KIND ...], or documents [--book ID ...] [--apply PLAN], "
+                 "or documents --undo ID ...")
+
+
 def command_records(argv: list[str]) -> int:
     """`records render [KIND ...]`: write the HTML page of each base (sd:3976, sd:5133).
 
     Every kind a plugin on the `db` driver declares, or the kinds named.
     Exit 1 on a render that stopped; the heartbeat says the same to the dashboard.
+
+    `records documents` moves learning rows to their Documents view (pack sd:6262): see `command_documents`.
     """
+    if argv and argv[0] == "documents":
+        return command_documents(argv[1:])
     if not argv or argv[0] != "render" or any(word.startswith("-") for word in argv[1:]):
-        print("sd-db records: expected render [KIND ...]", file=sys.stderr)
+        print(RECORDS_USAGE, file=sys.stderr)
         return 1
     connection = _open_for_write()
     try:
@@ -251,6 +259,82 @@ def command_records(argv: list[str]) -> int:
     if mirror.reason is not None:
         print(f"sd-db: records render stopped: {mirror.reason}", file=sys.stderr)
     return 0 if mirror.ok else 1
+
+
+def _documents_args(argv: list[str]) -> tuple[list[int], str | None, list[int]] | None:
+    """`--book ID` (repeated), `--apply PLAN` and `--undo ID ...`, or None for anything else."""
+    books: list[int] = []
+    plan: str | None = None
+    undo: list[int] | None = None
+    rest = list(argv)
+    try:
+        while rest:
+            word = rest.pop(0)
+            if word == "--book" and rest:
+                books.append(int(rest.pop(0)))
+            elif word == "--apply" and rest and plan is None:
+                plan = rest.pop(0)
+            elif word == "--undo" and rest and undo is None:
+                undo = [int(item) for item in rest]
+                rest = []
+            else:
+                return None
+    except ValueError:
+        return None
+    if undo is not None and (books or plan is not None):
+        return None
+    return books, plan, undo or []
+
+
+def command_documents(argv: list[str]) -> int:
+    """`records documents [--book ID ...] [--apply PLAN]`, `records documents --undo ID ...` (pack sd:6262).
+
+    With no `--apply` it is the dry run: it opens the database read-only, prints
+    each row it would move and the plan digest, and moves nothing. `--apply`
+    with that digest and the same `--book` list moves exactly that list, or
+    nothing when the list changed. `--undo` moves the rows named back to Tasks.
+    """
+    parsed = _documents_args(argv)
+    if parsed is None:
+        print(RECORDS_USAGE, file=sys.stderr)
+        return 1
+    books, plan, undo = parsed
+    try:
+        if undo:
+            connection = _open_for_write()
+            try:
+                returned = records.return_documents(connection, undo, who=getpass.getuser())
+            finally:
+                connection.close()
+            print(f"sd-db: records documents: moved {len(returned)} row(s) back to Tasks: "
+                  + ", ".join(f"sd:{item}" for item in returned))
+            return 0
+        connection = _open_for_read() if plan is None else _open_for_write()
+        try:
+            found = (records.plan_documents(connection, books=books) if plan is None
+                     else records.move_documents(connection, books=books, plan=plan, who=getpass.getuser()))
+        finally:
+            connection.close()
+    except records.RecordRefused as error:
+        print(f"sd-db: records documents: {error}", file=sys.stderr)
+        return 1
+    for move in found.moves:
+        print(f"move  {move.view:<6}  sd:{move.id}  {move.title}")
+    for item, view, title in found.moved:
+        print(f"already  {view:<6}  sd:{item}  {title}")
+    for item, kind, title in found.candidates:
+        print(f"not on the list  {kind}  sd:{item}  {title}  (--book {item} moves it)")
+    for item, title in found.skipped:
+        print(f"skip  not a learning row  sd:{item}  {title}")
+    counts = {view: sum(1 for move in found.moves if move.view == view) for view in ("videos", "books")}
+    summary = f"{len(found.moves)} to move ({counts['videos']} videos, {counts['books']} books); plan {found.digest}"
+    if plan is None:
+        again = " ".join(f"--book {item}" for item in dict.fromkeys(books))
+        print(f"sd-db: records documents: dry run, nothing moved. {summary}")
+        print(f"sd-db: apply with: sd-db records documents {again + ' ' if again else ''}--apply {found.digest}")
+    else:
+        print(f"sd-db: records documents: moved {len(found.moves)} row(s). {summary}")
+    return 0
 
 
 def command_judgments(argv: list[str]) -> int:
