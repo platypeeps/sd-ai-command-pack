@@ -1,5 +1,6 @@
 """Decide (sd:5781): what waits on a ruling, in two views. Decisions (sd:3012, Today's view until sd:5781) lists each open
-question note: `/api/decisions` reads them and `/api/decisions/answer` records a ruling (`decisions`). Scoring (sd:3709,
+question note: `/api/decisions` reads them and `/api/decisions/answer` records a ruling (`decisions`); under them the
+last week's rulings group by session, and `/api/decisions/reverse` reopens the question a ruling answered (pack sd:6015). Scoring (sd:3709,
 the Review page until sd:5781) is the labelling queue: `/api/review` lists the open batches and their open questions; a
 label posts `/api/review/rule` and its undo `/api/review/withdraw`; a batch's labels download from
 `/api/review/<item>/export`. Each is `sd_db.review`, the code `sd-db review` runs (`review_screen`). `/review`, the old
@@ -27,6 +28,12 @@ def _answer(payload, principal):
     from ... import decisions
 
     return decisions.request(payload)
+
+
+def _reverse(payload, principal):
+    from ... import decisions
+
+    return decisions.reverse_request(payload)
 
 
 def _read(read):
@@ -64,6 +71,7 @@ PAGE = Page(
     html="decide.html",
     item="sd:5781",
     api=(Api("/api/decisions", _decisions), Api("/api/decisions/answer", write=_answer),
+         Api("/api/decisions/reverse", write=_reverse),
          Api("/api/review", _read), Api(pattern=EXPORT, example="/api/review/7/export", read=_export),
          Api("/api/review/rule", write=_rule), Api("/api/review/withdraw", write=_withdraw)),
     count="/api/decisions",

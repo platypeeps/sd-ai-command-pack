@@ -90,6 +90,7 @@ Now and Work rows share one selection (sd:5654): pressing a row in either marks 
 
 **Decide**, at `/decide` in the rail's Now group (sd:5781), has two tabs: **Decisions** and **Scoring**, the review
 queue that was the Review page (`/review` opens Scoring). Its rail badge counts both. **Decisions** list the questions that wait on the operator, one button per option (sd:3012).
+Under them, **Rulings by session** groups the last 7 days of `decision` notes by the session that wrote them, each with its item's state (pack sd:6015); Reverse reopens the question a ruling answered.
 Ask one with a `question` note that carries one `Option: <text>` line per choice, at least two:
 `sd task note N $'Which store?\nOption: Pack store kind\nOption: Database rows' --kind question`.
 Keep each option short; the rest of the body is the question. A button writes the ruling as a `decision` note,
