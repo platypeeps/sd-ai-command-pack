@@ -189,14 +189,15 @@ class TheWriteFence(FenceCase):
         create_item(connection, kind="work", title="not the record")
         self.assertEqual(self.asked(), [])
 
-    def test_one_probe_per_writer_per_window(self):
-        """The design's cost bound: one Tailscale probe per writing process per `FENCE_SECONDS`."""
+    def test_writes_inside_a_transaction_share_one_probe_and_its_commit_asks_again(self):
+        """The cost bound: statements inside one transaction share the held answer; the commit asks afresh."""
         self.name_hub(HUB_NAME)
         self.node()
         connection = self.open()
-        for title in ("one", "two", "three"):
-            create_item(connection, kind="work", title=title)
-        self.assertEqual(len(self.asked()), 1)
+        with database.transaction(connection):
+            for title in ("one", "two", "three"):
+                create_item(connection, kind="work", title=title)
+        self.assertEqual(len(self.asked()), 2, "one for the writes, one for the commit")
         self.assertEqual(hub.FENCE_SECONDS, 5.0)
 
     def test_hub_json_beside_the_database_still_refuses_an_open_writer(self):
@@ -211,6 +212,91 @@ class TheWriteFence(FenceCase):
             create_item(connection, kind="work", title="stale")
         with self.assertRaises(hub.HubConflict):
             database.connect()
+
+
+class TheCommitBoundaries(FenceCase):
+    """Lead review of 59dbc8cf0: a boundary that makes a write persist never trusts a held answer.
+
+    Each test renames the node inside the `FENCE_SECONDS` window and keeps the held
+    `holder` answer; the boundary must ask Tailscale again and refuse.
+    """
+
+    def begun(self, opening: str) -> sqlite3.Connection:
+        self.node()
+        self.name_hub(HUB_NAME)
+        connection = self.open()
+        connection.execute(opening)
+        connection.execute("INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'held', '{}', '2026')")
+        self.node(OLD_HUB)
+        return connection
+
+    def rows(self) -> int:
+        connection = database.connect(write=False)
+        try:
+            return connection.execute("SELECT count(*) FROM state WHERE kind = 'x'").fetchone()[0]
+        finally:
+            connection.close()
+
+    def test_a_commit_inside_the_window_asks_again(self):
+        endings = {
+            "COMMIT": ("BEGIN IMMEDIATE", lambda connection: connection.execute("COMMIT")),
+            "END": ("BEGIN", lambda connection: connection.execute("END")),
+            "commit()": ("BEGIN IMMEDIATE", lambda connection: connection.commit()),
+            "with": ("BEGIN IMMEDIATE", lambda connection: connection.__exit__(None, None, None)),
+            "outer RELEASE": ("SAVEPOINT outer", lambda connection: connection.execute("RELEASE outer")),
+            "executescript COMMIT": ("BEGIN IMMEDIATE", lambda connection: connection.executescript("COMMIT")),
+        }
+        for name, (opening, end) in endings.items():
+            with self.subTest(end=name):
+                hub._answers.clear()
+                connection = self.begun(opening)
+                with self.assertRaises(hub.Fenced):
+                    end(connection)
+                self.assertFalse(connection.in_transaction)
+                self.assertEqual(self.rows(), 0)
+
+    def test_a_library_transaction_inside_the_window_rolls_back(self):
+        self.name_hub(HUB_NAME)
+        self.node()
+        connection = self.open()
+        with self.assertRaises(hub.Fenced):
+            with database.transaction(connection):
+                create_item(connection, kind="work", title="held across the rename")
+                self.node(OLD_HUB)
+        self.assertEqual(self.items(), 0)
+
+    def test_an_autocommit_write_inside_the_window_asks_again(self):
+        """A write outside a transaction commits when it ends, so it is a boundary too."""
+        self.name_hub(HUB_NAME)
+        self.node()
+        connection = self.open()
+        insert = "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', ?, '{}', '2026')"
+        connection.execute(insert, ("live",))
+        self.node(OLD_HUB)
+        writes_ = {
+            "execute": lambda: connection.execute(insert, ("a",)),
+            "executemany": lambda: connection.executemany(insert, [("b",)]),
+            "cursor": lambda: connection.cursor().execute(insert, ("c",)),
+            "executescript": lambda: connection.executescript(
+                "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'd', '{}', '2026')"),
+        }
+        for name, write in writes_.items():
+            with self.subTest(path=name), self.assertRaises(hub.Fenced):
+                write()
+        self.assertEqual(self.rows(), 1, "only the write before the rename")
+
+    def test_an_inner_release_does_not_probe(self):
+        """A nested savepoint's RELEASE commits nothing, so it costs no probe."""
+        self.name_hub(HUB_NAME)
+        self.node()
+        connection = self.open()
+        connection.execute("BEGIN IMMEDIATE")
+        for title in ("one", "two"):
+            create_item(connection, kind="work", title=title)
+        self.assertEqual(len(self.asked()), 1)
+        connection.execute("COMMIT")
+        self.assertEqual(len(self.asked()), 2)
+        self.assertEqual(self.items(), 2)
 
 
 class TheRestore(FenceCase):

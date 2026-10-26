@@ -59,7 +59,7 @@ Every library write to this machine's own database asks the fence too (system sd
 A transaction open when the console renames the node rolls back at its commit.
 Only `elsewhere` refuses: a Tailscale outage must not stop a healthy hub, and nothing it writes then leaves the machine.
 Reads stay allowed, so the old hub's dashboard still shows its stale records.
-An answer stands 5 seconds per process (`FENCE_SECONDS`), so a writer probes Tailscale at most once in that window.
+A write inside a transaction uses an answer held 5 seconds per process (`FENCE_SECONDS`); every boundary that makes a write persist asks afresh: COMMIT, the outer savepoint's RELEASE, and a write outside a transaction.
 Another file, such as a test fixture or a backup target, is not the record and is not fenced.
 `sd-db restore` writes past it: promote restores before the machine takes the hub's name.
 

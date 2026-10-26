@@ -37,6 +37,7 @@ import os
 import sqlite3
 import threading
 import time
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -312,10 +313,11 @@ def role_at(path: Path, name=None) -> Role:
 
 # ------------------------------------------------------- the write fence
 
-#: Seconds a process trusts its last fence answer for one database: one
-#: Tailscale probe per writer per 5 s, as the tailnet listener asks
-#: (`serve.FENCE_SECONDS`). A wall clock that moved `CLOCK_SLACK` more than
-#: the monotonic one, which does not count a sleep, asks again.
+#: Seconds a write inside a transaction trusts the last fence answer for one
+#: database, as a tailnet frame does (`serve.FENCE_SECONDS`). A commit
+#: never trusts it: it asks afresh, as the listener's commit does. A wall
+#: clock that moved `CLOCK_SLACK` more than the monotonic one, which does
+#: not count a sleep, asks again.
 FENCE_SECONDS = 5.0
 CLOCK_SLACK = 1.0
 #: SQLite's action codes for a statement that writes a database file. A
@@ -341,12 +343,13 @@ class Fenced(remote.RemoteError):
     """
 
 
-def write_role(path: Path) -> Role:
+def write_role(path: Path, *, fresh: bool = False) -> Role:
     """`role` of the database at `path`, read from that file and held `FENCE_SECONDS`.
 
     The file itself, never through `hub.json`: during demotion `hub.json`
     sits beside the database, and a `HubConflict` read as `unknown` would let
-    a writer that is already open go on.
+    a writer that is already open go on. `fresh` asks again whatever is
+    held, as a commit does: a held `holder` may predate the rename.
     """
     from .database import open_local
 
@@ -354,7 +357,7 @@ def write_role(path: Path) -> Role:
     with _answers_guard:
         ticks, wall = time.monotonic(), time.time()
         held = _answers.get(key)
-        if held is not None:
+        if held is not None and not fresh:
             since, at, found = held
             if ticks - since < FENCE_SECONDS and abs((wall - at) - (ticks - since)) <= CLOCK_SLACK:
                 return found
@@ -384,37 +387,52 @@ def demotion(path: Path, found: Role) -> str:
 class _WriteFence:
     """SQLite's authorizer on this machine's own write connection (system sd:5986).
 
-    Write unless fenced (#31093): each write and each commit after one asks
-    `write_role`; only `elsewhere` refuses. `holder`, `off` and `unknown`
-    write, so a Tailscale outage does not stop a healthy hub. The commit
-    asks too, so a transaction open across the console rename rolls back.
+    Write unless fenced (#31093): only `elsewhere` refuses. `holder`, `off`
+    and `unknown` write, so a Tailscale outage does not stop a healthy hub.
+    Each boundary that makes a write persist asks afresh: COMMIT, the RELEASE
+    of a savepoint opened outside a transaction, and a write outside one,
+    which commits when it ends (`executescript` runs each statement so).
+    A write inside a transaction asks the held answer, to stop early; its
+    commit decides. So a transaction open across the console rename rolls back.
     The connection caches no statement: Python does not authorize a cached one again.
-    It holds no reference to its connection, so the pair makes no cycle.
+    It holds its connection weakly, so the pair makes no cycle.
     """
 
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, connection: sqlite3.Connection) -> None:
         self.path = path
+        self.connection = weakref.ref(connection)
         #: This transaction, or an autocommit write since the last BEGIN, prepared a write.
         self.wrote = False
+        #: The savepoint opened outside a transaction: its RELEASE commits.
+        self.outer: str | None = None
         #: Why the last statement was denied, for the `Fenced` the connection raises.
         self.refusal: str | None = None
+
+    def _open(self) -> bool:
+        """Whether a transaction is open before the statement being prepared."""
+        connection = self.connection()
+        return connection is not None and connection.in_transaction
 
     def __call__(self, action: int, arg1, arg2, database, trigger) -> int:
         if action == sqlite3.SQLITE_TRANSACTION:
             if arg1 == "COMMIT":
-                return self._ask() if self.wrote else sqlite3.SQLITE_OK
-            self.wrote = False
+                return self._ask(fresh=True) if self.wrote else sqlite3.SQLITE_OK
+            self.wrote, self.outer = False, None
             return sqlite3.SQLITE_OK
         if action == sqlite3.SQLITE_SAVEPOINT:
-            # RELEASE of the outer savepoint commits.
-            return self._ask() if arg1 == "RELEASE" and self.wrote else sqlite3.SQLITE_OK
+            name = (arg2 or "").lower()
+            if arg1 == "BEGIN" and not self._open():
+                self.wrote, self.outer = False, name
+            if arg1 == "RELEASE" and name == self.outer and self.wrote:
+                return self._ask(fresh=True)
+            return sqlite3.SQLITE_OK
         if action in _WRITES and database != "temp":
             self.wrote = True
-            return self._ask()
+            return self._ask(fresh=not self._open())
         return sqlite3.SQLITE_OK
 
-    def _ask(self) -> int:
-        found = write_role(self.path)
+    def _ask(self, *, fresh: bool) -> int:
+        found = write_role(self.path, fresh=fresh)
         if found.state != "elsewhere":
             return sqlite3.SQLITE_OK
         self.refusal = demotion(self.path, found)
@@ -455,7 +473,7 @@ class FencedConnection(sqlite3.Connection):
     fence: _WriteFence | None = None
 
     def arm(self, path: Path) -> None:
-        self.fence = _WriteFence(Path(path))
+        self.fence = _WriteFence(Path(path), self)
         self.set_authorizer(self.fence)
 
     def cursor(self, factory=_FencedCursor):
