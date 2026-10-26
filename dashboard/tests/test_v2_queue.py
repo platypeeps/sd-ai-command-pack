@@ -1059,7 +1059,76 @@ class TheScript(Lane, ScreenCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         out = json.loads(result.stdout)
         self.assertIsNone(out["error"])
+        # The Builds panel (pack sd:6095) reads beside the lanes on each load; its own test reads it, the lane tests do not.
+        out["gets"] = [path for path in out.get("gets", []) if path != "/api/queue/builds"]
         return out
+
+    BUILDS = {"error": "", "read": NOW, "hours": 24, "quiet_seconds": 900, "stale_seconds": 180,
+              "runs": [{"run": "r1", "attempt": 1, "repo": "/repos/alpha", "name": "alpha", "model": "opus", "step": "building",
+                        "state": "stalled", "why": "", "outcome": None, "started": NOW, "elapsed": 1200, "beat": 20,
+                        "quiet": 960, "usd": 0.42, "log": "/logs/r1.jsonl", "branch": "build/sd-7", "worktree": "/w/r1",
+                        "items": [{"item": 7, "assignment": 7, "status": "running", "title": "Seven"}],
+                        "cancel": {"assignment": 7, "allowed": True, "reason": "", "revision": "a" * 64}}],
+              "recent": [{"run": "r0", "repo": "/repos/alpha", "name": "alpha", "outcome": "interrupted", "detail": "lost twice",
+                          "ended": NOW, "step": "building", "model": "opus", "usd": 1.1, "log": "", "worktree": "/w/r0",
+                          "items": [{"item": 5, "assignment": 5, "status": "blocked", "title": "Five"}],
+                          "retry": {"assignment": 5, "revision": "b" * 64, "allowed": True, "reason": "", "bundle": "blocked"}}]}
+
+    def test_the_builds_panel_draws_each_run_with_cancel_and_log_and_retry_posts_the_blocked_run(self):
+        """Pack sd:6095: a run row carries its state, Cancel and Log; a blocked ended run's Retry posts its lead."""
+        out = self.run_page(f"""const B = {json.dumps(self.BUILDS)};
+window.ELSE = (p, b) => p === '/api/queue/builds' ? [200, B] : p === '/api/queue/builds/retry' ? [200, {{ run: 'r0', queued: [] }}] : [404, {{ error: 'no' }}];
+await window.PAGE_AGAIN.run(); await flush(); await flush();
+R.builds = ELS.builds.html;
+await window.queueBuildAct({{ dataset: {{ build: 'retry', run: 'r0' }} }}); await flush();
+R.after = ELS.builds.html;""")
+        builds = out["R"]["builds"]
+        self.assertIn('data-state="stalled"', builds)
+        self.assertIn("STALLED", builds)
+        self.assertIn('data-build="cancel" data-run="r1"', builds)
+        self.assertIn("tail -f &#39;/logs/r1.jsonl&#39;", builds)
+        self.assertIn('data-build="retry" data-run="r0"', builds)
+        self.assertIn(["/api/queue/builds/retry", {"assignment": 5, "revision": "b" * 64}], [post[:2] for post in out["posts"]])
+        self.assertIn("sd:5 queued again for build.", out["R"]["after"])
+
+    def test_a_build_row_with_a_pull_request_links_it_and_one_without_shows_nothing(self):
+        """Pack sd:6020 ruling #31553: no diff Review page; a row whose branch has a pull request opens it on GitHub."""
+        url = "https://github.com/example/alpha/pull/7"
+        builds = dict(self.BUILDS, runs=[dict(self.BUILDS["runs"][0], pull=url)],
+                      recent=[dict(self.BUILDS["recent"][0], pull=""),
+                              dict(self.BUILDS["recent"][0], run="r9", pull="https://github.com/example/alpha/pull/9")])
+        out = self.run_page(f"""const B = {json.dumps(builds)};
+window.ELSE = (p, b) => p === '/api/queue/builds' ? [200, B] : [404, {{ error: 'no' }}];
+await window.PAGE_AGAIN.run(); await flush(); await flush();
+R.builds = ELS.builds.html;""")
+        rows = re.findall(r'<li class="qrow".*?</li>', out["R"]["builds"], re.S)
+        links = [re.findall(r'<a class="btn quiet sm" href="([^"]+)" target="_blank" rel="noopener noreferrer" '
+                            r'aria-label="Open the pull request of run (\w+) on GitHub">Open PR</a>', row) for row in rows]
+        self.assertEqual(links, [[(url, "r1")], [], [("https://github.com/example/alpha/pull/9", "r9")]])
+
+    def test_send_to_builder_asks_for_the_finding_and_posts_it_with_the_retry(self):
+        """Pack sd:6020: a blocked or cancelled ended run offers Send to builder; it asks for the finding, then
+        queues the bundle again with it, so the next builder resumes the same worktree with that note."""
+        cancelled = dict(self.BUILDS["recent"][0], run="r2", outcome="cancelled", detail="cancelled by dashboard",
+                         items=[{"item": 6, "assignment": 6, "status": "cancelled", "title": "Six"}],
+                         retry={"assignment": 6, "revision": "c" * 64, "allowed": True, "reason": "", "bundle": "cancelled"})
+        builds = dict(self.BUILDS, recent=[*self.BUILDS["recent"], cancelled])
+        out = self.run_page(f"""const B = {json.dumps(builds)};
+window.ELSE = (p, b) => p === '/api/queue/builds' ? [200, B] : p === '/api/queue/builds/retry' ? [200, {{ run: 'r2', queued: [] }}] : [404, {{ error: 'no' }}];
+window.shell.ask = a => {{ OUT.asked = a; return Promise.resolve({{ yes: true, values: {{ finding: 'The label reads wrong on phones' }} }}); }};
+await window.PAGE_AGAIN.run(); await flush(); await flush();
+R.builds = ELS.builds.html;
+await window.queueBuildAct({{ dataset: {{ build: 'send', run: 'r2' }} }}); await flush();
+R.after = ELS.builds.html;""")
+        shown = out["R"]["builds"]
+        self.assertIn('data-build="send" data-run="r0"', shown)
+        self.assertIn('data-build="send" data-run="r2"', shown)
+        self.assertIn('data-build="retry" data-run="r2"', shown)
+        self.assertEqual([field["name"] for field in out["asked"]["fields"]], ["finding"])
+        self.assertIn("/w/r0", out["asked"]["body"])
+        self.assertEqual([post[:2] for post in out["posts"]], [["/api/queue/builds/retry", {
+            "assignment": 6, "revision": "c" * 64, "finding": "The label reads wrong on phones"}]])
+        self.assertIn("sd:6 sent to the builder with your finding.", out["R"]["after"])
 
     def test_each_state_renders_its_glyph_and_label(self):
         lanes = self.run_page("R.lanes = ELS.details.html;")["R"]["lanes"]
@@ -1480,7 +1549,8 @@ R.det = ELS.adv.html;""")
 
 
 class TheRegistration(Registers, unittest.TestCase):
-    page, section, route, api = "queue", "Queue", "/queue", ("/api/queue", "/api/queue/move")
+    page, section, route, api = "queue", "Queue", "/queue", ("/api/queue", "/api/queue/move", "/api/queue/builds",
+                                                           "/api/queue/builds/retry")
 
     def test_queue_ends_now_and_has_left_fleet(self):
         now = re.search(r"\['Now',\s*\[(.*?)\]\],", GROUP_BLOCK).group(1)

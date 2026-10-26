@@ -810,6 +810,7 @@ class TheScript(ScreenCase):
             ["note.resolve", "note", "confirm", "v", None, True, False],
             ["asg.cancel", "assignment", "confirm", "x", None, True, False],
             ["asg.get", "assignment", "safe", "o", False, True, False],  # copy only: Details show it (sd:3524)
+            ["item.build", "item", "safe", None, True, True, False],  # Build (pack sd:6095)
             ["realm-sweep.run", "sweep", "safe", None, True, True, False],  # Realm Personal and Work (sd:5096, sd:5097)
         ])
 
@@ -2043,6 +2044,54 @@ R.shown = D.html; R.before = OUT.posts.length; D.returnValue = 'start'; D.onclos
         out = self.start_next(self.START_PLAN, "Promise.reject(new Error('Load failed'))")
         self.assertIn("got no answer, so what started is not known", out["toasts"][-1][0])
 
+    # Build (pack sd:6095): the plan builds.plan answers for one ready item, read before anything is written.
+    def build_plan(self, item, refused=()):
+        return {"read": NOW, "budget_minutes": 60, "refused": list(refused),
+                "room": {"machine": 4, "why": "", "cap": 6, "repo_cap": 3},
+                "bundles": [] if refused else [{"repo": "/r/alpha", "name": "alpha", "room": 2, "model": "opus",
+                                                 "branch": "build/sd-<lead assignment>",
+                                                 "items": [{"id": item, "title": "Plan <the> review", "revision": "c" * 64}]}]}
+
+    BUILD = """shellRun(cmd('item.build'), C.get('ITEM')); await flush();
+const D = MADE.find(e => /id="build-h"/.test(e.html || '')); R.shown = D ? D.html : null; R.before = OUT.posts.length;
+if (D) { D.returnValue = 'build'; D.onclose(); await flush(); }"""
+
+    def test_build_shows_the_bundles_first_then_posts_the_items_with_the_revisions_it_read(self):
+        """Pack sd:6095. Build on a ready row reads the plan, shows its bundle, and posts only on Build."""
+        plan, port = self.ids["plan"], self.ids["port"]
+        queued = f"[200, {{ queued: [{{ id: 9, item: {plan}, status: 'queued' }}], kickstart: {{ ok: true, why: '' }} }}]"
+        answer = (f"(path, body) => path.startsWith('/api/tasks/build/plan') ? [200, {json.dumps(self.build_plan(plan))}] : "
+                  f"path === '/api/tasks/build' ? {queued} : [404, {{ error: 'no answer' }}]")
+        out = self.run_page(f"R.on = cmd('item.build').when(C.get('{plan}')); R.off = cmd('item.build').when(C.get('{port}'));\n"
+                            + self.BUILD.replace("ITEM", str(plan)), answer)
+        self.assertTrue(out["R"]["on"])
+        self.assertIn("a build takes a ready task", out["R"]["off"])
+        shown = out["R"]["shown"]
+        self.assertIn("4 of 6 builders free now", shown)
+        self.assertIn("alpha <small>opus · branch build/sd-&lt;lead assignment&gt; · 2 may start now</small>", shown)
+        self.assertIn(f"<code>#{plan}</code> Plan &lt;the&gt; review", shown)
+        self.assertIn('value="build"', shown)
+        self.assertEqual(out["R"]["before"], 0)
+        self.assertIn(f"/api/tasks/build/plan?items={plan}", out["gets"])
+        self.assertEqual([post[:2] for post in out["posts"]],
+                         [["/api/tasks/build", {"items": [plan], "revisions": {str(plan): "c" * 64}}]])
+        self.assertEqual(out["toasts"][-1][0], f"Queued #{plan} for build · the dispatcher was started")
+
+    def test_build_with_a_refused_item_offers_no_build_and_a_409_says_nothing_queued(self):
+        plan = self.ids["plan"]
+        refused = self.build_plan(plan, refused=[{"id": plan, "why": f"item {plan} is held by build run r1"}])
+        answer = (f"(path, body) => path.startsWith('/api/tasks/build/plan') ? [200, {json.dumps(refused)}] : "
+                  f"[500, {{ error: 'not called' }}]")
+        out = self.run_page(self.BUILD.replace("ITEM", str(plan)), answer)
+        self.assertIn("Nothing can be queued while one item is refused", out["R"]["shown"])
+        self.assertIn(f"item {plan} is held by build run r1", out["R"]["shown"])
+        self.assertNotIn('value="build"', out["R"]["shown"])
+        self.assertEqual(out["posts"], [])
+        answer = (f"(path, body) => path.startsWith('/api/tasks/build/plan') ? [200, {json.dumps(self.build_plan(plan))}] : "
+                  f"[409, {{ error: 'Nothing queued: item {plan} changed; refresh the selection.' }}]")
+        out = self.run_page(self.BUILD.replace("ITEM", str(plan)), answer)
+        self.assertEqual(out["toasts"][-1][0], f"Nothing queued: item {plan} changed; refresh the selection.")
+
     def test_draft_email_asks_first_posts_the_row_revision_and_names_the_draft(self):
         """sd:3463. Draft email asks first, naming a Gmail draft that is not sent; the post carries only the row's revision."""
         plan = self.ids["plan"]
@@ -2855,7 +2904,7 @@ class TheLinksIntoTasks(unittest.TestCase):
 
 class TheRegistration(Registers, unittest.TestCase):
     page, section, route, api = "tasks", "Tasks", "/tasks", ("/api/tasks", "/api/tasks/start-next", "/api/tasks/start-next/run",
-                                                           "/api/tasks/1", "/api/tasks/sweep", "/api/tasks/sweep/status",
+                                                           "/api/tasks/build/plan", "/api/tasks/build", "/api/tasks/1", "/api/tasks/sweep", "/api/tasks/sweep/status",
                                                            "/api/why")
 
 

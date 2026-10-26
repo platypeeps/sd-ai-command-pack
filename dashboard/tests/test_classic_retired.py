@@ -101,7 +101,9 @@ class TheClassicStylesheetIsGone(ScreenCase):
 
     def test_dashboard_css_is_gone_and_nothing_names_it(self):
         self.assertFalse((PACKAGE / "static" / "dashboard.css").exists())
-        self.assertEqual(server.STATIC_FILES, ("dashboard.js",))
+        # The icons joined the script in pack sd:6322.
+        self.assertEqual(server.STATIC_FILES, ("dashboard.js", "icon.svg", "icon-warning.svg", "icon-32.png",
+                                               "apple-touch-icon.png", "favicon.ico"))
         for name in ("page", "navigation", "SECTIONS", "Section"):
             self.assertFalse(hasattr(pages, name), name)
         found = [path.relative_to(PACKAGE.parent).as_posix()

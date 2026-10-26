@@ -23,10 +23,21 @@ from pathlib import Path
 #: A year, private to the browser: the dashboard sits behind its own sign-in.
 IMMUTABLE = "private, max-age=31536000, immutable"
 
-#: v1's folder and its one file, which `pages.shell_page` links and `/static/` serves. Its stylesheet went with the last
-#: classic page (sd:3586); `/ui/classic.css` styles those screens.
+#: v1's folder, which `/static/` serves: `dashboard.js`, which `pages.shell_page` links, and the dashboard's icons (pack
+#: sd:6322). Its stylesheet went with the last classic page (sd:3586); `/ui/classic.css` styles those screens.
 STATIC = Path(__file__).resolve().parent / "static"
-STATIC_FILES = ("dashboard.js",)
+STATIC_FILES = ("dashboard.js", "icon.svg", "icon-warning.svg", "icon-32.png", "apple-touch-icon.png", "favicon.ico")
+#: Every page's icon links (pack sd:6322), files from 'self': the policy refuses a data: icon. A browser that takes
+#: the SVG skips the PNG before it; iOS takes the opaque 180 px PNG for Add to Home Screen.
+ICONS = ('<link rel="icon" href="/static/icon-32.png" type="image/png" sizes="32x32">'
+         '<link rel="icon" href="/static/icon.svg" type="image/svg+xml">'
+         '<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">'
+         '<meta name="apple-mobile-web-app-title" content="sd">')
+
+
+def with_icons(page: str) -> str:
+    """`page` with `ICONS` at the end of its head."""
+    return page.replace("</head>", ICONS + "</head>", 1)
 
 
 def digest(body: bytes) -> str:

@@ -59,6 +59,8 @@ import tempfile
 import types
 import unittest
 
+from tests.clean_env import clean_environment
+
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 # This module is inside the surface it scans, so the subcommand's name is
@@ -271,7 +273,12 @@ def scan(root: pathlib.Path = REPO_ROOT) -> tuple[list[Site], list[str]]:
     unreadable: list[str] = []
     for name in surface(root):
         try:
-            text = (root / name).read_text(encoding="utf-8")
+            raw = (root / name).read_bytes()
+            # A NUL byte is git's own binary test: such a file holds no
+            # call. A text file that does not decode still comes back.
+            if b"\0" in raw:
+                continue
+            text = raw.decode("utf-8")
         except (OSError, UnicodeDecodeError) as error:
             unreadable.append(f"{name}: {error}")
             continue
@@ -534,14 +541,29 @@ class TheGuardAgainstTheGuard(unittest.TestCase):
         # Spelled through `SUBJECT` for the reason given at the top: written
         # out, this line would be a bare call in a tracked file, and the guard
         # would be right to say so -- it did, when it was.
+        # No NUL byte, so git and the walk both take it for text.
         (root / "blob.bin").write_bytes(
-            b"\xff\xfe\x00 git " + SUBJECT.encode() + b" -- bin\n")
+            b"\xff\xfe git " + SUBJECT.encode() + b" -- bin\n")
         subprocess.run(["git", "add", "-A"], cwd=root, check=True,
                        capture_output=True)
         found, unreadable = scan(root)
         self.assertEqual(found, [], "the unreadable bytes must not be parsed")
         self.assertEqual([entry.split(":", 1)[0] for entry in unreadable],
                          ["blob.bin"])
+
+    def test_a_binary_file_is_skipped_not_reported(self) -> None:
+        """An icon is not code, and a walk that fails on it fails the gate.
+
+        The dashboard's PNG icons were the first binary files the walk met;
+        each one came back unreadable and failed the precheck.
+        """
+
+        root = self.repository(**{"tool.py": "x = 1\n"})
+        (root / "icon.png").write_bytes(
+            b"\x89PNG\r\n\x1a\n\x00\x00 git " + SUBJECT.encode() + b"\n")
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True,
+                       capture_output=True, env=clean_environment())
+        self.assertEqual(scan(root), ([], []))
 
     def test_an_untracked_file_is_not_scanned(self) -> None:
         root = self.repository(**{"tool.py": "x = 1\n"})

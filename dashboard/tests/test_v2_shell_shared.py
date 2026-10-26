@@ -560,8 +560,8 @@ class EveryDialogHasAClose(unittest.TestCase):
                 if not self.X.search(m.group(0)) or len(cancels) != 1:
                     wrong.append(f"{name}: {m.group(0)[:100]}")
         self.assertEqual(wrong, [])
-        # Confirm and capture, Start next, Writing's correction, the three Tasks prompts and Quick notes.
-        self.assertEqual(sorted(forms), sorted(["shell.js"] * 2 + ["tasks.js", "writing.js", "notes.html"] + ["task-details.js"] * 3))
+        # Confirm and capture, Start next, Build, Writing's correction, the three Tasks prompts and Quick notes.
+        self.assertEqual(sorted(forms), sorted(["shell.js"] * 2 + ["tasks.js"] * 2 + ["writing.js", "notes.html"] + ["task-details.js"] * 3))
         # The key sheet is the shell's one dialog without a form; its Close is the Cancel the X presses.
         keys = re.search(r"put\(keys, html`(.*?)`\);", SHELL_JS, re.S).group(1)
         self.assertRegex(keys, self.X)

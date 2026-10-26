@@ -80,3 +80,8 @@ section.lane > header .src { margin-left: 0; flex-basis: 100%; font: 400 var(--t
   .lanes tbody tr[aria-selected="true"] td { background: transparent; box-shadow: none; }
 }
 @media (forced-colors: active) { .qrow .g-live { color: Highlight; } }
+/* Builds (pack sd:6095): the panel above the lanes reuses the entry rows; its heading sits close under the toolbar. */
+#builds { margin: 0 0 var(--space-lg); }
+#builds .times-h { margin-top: var(--space-md); }
+#builds details.ended { margin-top: var(--space-xs); }
+#builds details.ended summary { font: 400 var(--text-xs)/1.6 var(--font-data); color: var(--color-muted); cursor: pointer; }

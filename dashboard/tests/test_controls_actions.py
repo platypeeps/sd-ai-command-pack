@@ -258,7 +258,7 @@ class WorkflowControls(BrowserSession):
         with patch("subprocess.run", side_effect=AssertionError("catalog invoked a process")):
             self.assertEqual(self.request("/api/skills", headers={"Cookie": self.cookie})[0], 200)
             self.assertEqual(self.request("/operations?area=usage")[0], 200)
-        self.assertEqual(self.request("/favicon.ico")[0], 204)
+        self.assertEqual(self.request("/static/icon.svg")[0], 200)
         self.assertEqual(before, self.snapshot())
         skill = skills_catalog.catalog(self.connection)["skills"][0]
         status, _, _ = self.post("/api/skills/sd-fixture/try", {"revision": skill["revision"]})

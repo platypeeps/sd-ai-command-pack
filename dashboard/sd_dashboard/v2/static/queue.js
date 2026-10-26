@@ -41,6 +41,8 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
   const drawn = l => show === 'all' ? l.rows : l.rows.filter(r => ACTIVE.includes(r.state));
   const inView = (l, v = window.shell.view.current() || 'all') => v === 'all' || l.realm == null || l.realm === v;
   const said = {}; // lane path -> { ok, text }: the last write's result, shown in its lane until the next one
+  // Builds (pack sd:6095): /api/queue/builds, read beside the lanes; BUILT is its document, BUILT_ERR why it was not read.
+  let BUILT = null, BUILT_ERR = '', builtSaid = null;
 
   const btn = (lane, r, act, label, icon, off) => html`<button class="btn quiet sm" type="button" data-act="${act}" data-item="${String(r.item)}" data-repo="${lane.path}" aria-label="${label} sd:${String(r.item)}" title="${label}"${off || busy ? html` disabled` : ''}>${ICON(icon)}</button>`;
   function controls(lane, r, last) {
@@ -129,6 +131,75 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
       <tbody>${read.map(l => html`<tr><td class="what">${l.repo}</td>${cells(l)}</tr>`)}</tbody></table>
       ${over.map(l => html`<p class="over">▲ ${l.repo}: median wait past 1 h. The lane run files the parallel-lanes question.</p>`)}${quiet ? html`<p class="idle">No entry in ${String(days)} days: ${plural(quiet, 'lane')}.</p>` : ''}`;
   }
+  // Builds panel (pack sd:6095): one row per open build run, above the lanes. Its state is one of four: working; waiting
+  // on me (the run is held, or an open question note asks); stalled (the builder's log has not grown for 15 min, shown
+  // only); lost (no supervisor beat for 3 min, which the dispatcher's next reap settles). Cancel asks first and posts the
+  // assignment cancel route; Log copies a `tail -f` of the run's log. Under them, the runs that ended in the last 24 hours
+  // with their outcome, and Retry and Send to builder on a blocked or cancelled bundle (below).
+  const BSTATE = { working: [G.live, 'WORKING'], waiting: [G.warning, 'WAITING ON ME'], stalled: [G.caution, 'STALLED'], lost: [G.unknown, 'LOST'] };
+  const usd = n => `$${Number(n || 0).toFixed(2)}`;
+  const names = r => r.items.length ? html`${r.items.map((m, i) => html`${i ? '; ' : ''}<code>sd:${String(m.item)}</code> ${m.title}`)}` : 'no items recorded';
+  const bbtn = (act, r, label, aria, off) => html`<button class="btn quiet sm" type="button" data-build="${act}" data-run="${r.run}" aria-label="${aria}"${off ? html` disabled title="${off}"` : busy ? html` disabled` : ''}>${label}</button>`;
+  // Open PR (pack sd:6020 ruling #31553): the pull request `sd-ship` opened for the row's branch; none shows nothing.
+  const prLink = r => r.pull ? html`<a class="btn quiet sm" href="${r.pull}" target="_blank" rel="noopener noreferrer" aria-label="Open the pull request of run ${r.run} on GitHub">Open PR</a>` : '';
+  const logBtn = r => r.log ? html`<button class="btn quiet sm" type="button" data-copy="${`tail -f ${window.shell.shq(r.log)}`}" aria-label="Copy the command that follows the log of run ${r.run}">Log</button>` : html`<span class="why">no log yet</span>`;
+  function buildRow(r) {
+    const [g, st] = BSTATE[r.state] || [G.unknown, r.state.toUpperCase()];
+    const out = r.quiet == null ? 'no output yet' : `output ${dur(r.quiet)} ago`;
+    return html`<li class="qrow" data-state="${r.state}"><span class="g g-${g[0]}" aria-hidden="true">${g[1]}</span><span class="st">${st}</span><span class="s"><span><span class="sr">${st.toLowerCase()} · </span>${names(r)}</span><small><b>${r.name}</b> · ${r.model || 'model not recorded'} · step <b>${r.step}</b> · ${dur(r.elapsed)} · ${out} · ${usd(r.usd)} so far${r.why ? ` · ${r.why}` : ''}</small></span><span class="ends"><div class="ctl" role="group" aria-label="Run ${r.run}">${bbtn('cancel', r, 'Cancel…', `Cancel build run ${r.run}`, r.cancel.allowed ? '' : r.cancel.reason || 'cancel is off')}${prLink(r)}${logBtn(r)}</div></span></li>`;
+  }
+  // A blocked or cancelled bundle keeps its worktree: Retry queues it again at once; Send to builder (pack sd:6020) asks
+  // for a finding first, notes it on each item, and queues it again, so the next builder resumes that worktree with it.
+  const AGAIN = ['blocked', 'cancelled'];
+  function endedRow(r) {
+    const g = r.outcome === 'done' ? G.ok : r.retry.bundle === 'blocked' ? G.warning : G.queued;
+    const off = r.retry.allowed ? '' : r.retry.reason;
+    return html`<li class="qrow" data-state="ended"><span class="g g-${g[0]}" aria-hidden="true">${g[1]}</span><span class="st">${(r.retry.bundle === 'blocked' ? 'BLOCKED' : r.outcome || 'ended').toUpperCase()}</span><span class="s"><span>${names(r)}</span><small><b>${r.name}</b> · ${r.outcome} at ${r.step} · ended ${at(r.ended)} · ${usd(r.usd)}${r.detail ? ` · ${r.detail}` : ''}</small></span><span class="ends"><div class="ctl" role="group" aria-label="Run ${r.run}">${AGAIN.includes(r.retry.bundle) ? html`${bbtn('retry', r, 'Retry', `Retry build run ${r.run}: queue its items again`, off)}${bbtn('send', r, 'Send to builder…', `Send a finding to the builder of run ${r.run}`, off)}` : ''}${prLink(r)}${logBtn(r)}</div></span></li>`;
+  }
+  function drawBuilds() {
+    const head = html`<h2 id="builds-h" class="times-h">Builds</h2>`;
+    const note = builtSaid ? (builtSaid.ok ? html`<p class="done" role="status">${builtSaid.text}</p>` : html`<p class="fail" role="alert">${builtSaid.text}</p>`) : '';
+    if (!BUILT) { put($('builds'), html`${head}${note}<p class="fail" role="alert">▨ The builds were not read: ${BUILT_ERR || 'no answer yet'}.</p>`); return; }
+    if (BUILT.error) { put($('builds'), html`${head}${note}<p class="fail" role="alert">▨ The builds were not read: ${BUILT.error}.</p>`); return; }
+    put($('builds'), html`${head}${note}${BUILT.runs.length ? html`<ul class="qrows builds">${BUILT.runs.map(buildRow)}</ul>` : html`<p class="idle">No build runs now. Build on Tasks queues one.</p>`}
+      ${BUILT.recent.length ? html`<details class="ended"><summary>Ended in the last ${String(BUILT.hours)} hours <span class="n">${String(BUILT.recent.length)}</span></summary><ul class="qrows">${BUILT.recent.map(endedRow)}</ul></details>` : ''}`);
+  }
+  async function loadBuilds() {
+    try { BUILT = await window.shell.getJSON('/api/queue/builds'); BUILT_ERR = ''; }
+    catch (err) { BUILT = null; BUILT_ERR = err.message; }
+    drawBuilds();
+  }
+  async function buildAct(b) {
+    if (busy || !BUILT) return;
+    const S = window.shell, act = b.dataset.build, r = BUILT.runs.concat(BUILT.recent).find(x => x.run === b.dataset.run);
+    if (!r) return;
+    const what = r.items.map(m => `sd:${m.item}`).join(', ');
+    if (act === 'cancel' && !(await S.confirm({ title: `Cancel build run ${r.run} (${what})?`,
+      body: `The supervisor stops the ${r.step} step at its next beat, keeps the worktree, ends the bundle cancelled and moves ${r.items.length > 1 ? 'its items' : 'the item'} back to ready. Nothing is enqueued.`,
+      cli: `sd assignments cancel ${r.cancel.assignment} --if-revision ${r.cancel.revision}`, ok: 'Cancel build', keep: 'Keep it running' }))) return;
+    let finding = '';
+    if (act === 'send') {
+      const { yes, values } = await S.ask({ title: `Send to builder: run ${r.run} (${what})?`, ok: 'Send', keep: 'Cancel', danger: false,
+        body: `The finding goes on ${r.items.length > 1 ? 'each item' : 'the item'} as a note, and the bundle queues again. Its next builder resumes ${r.worktree || 'the same worktree'} on its branch and fixes the finding first.`,
+        fields: [{ name: 'finding', label: 'Finding', required: true, placeholder: 'What the builder should fix' }] });
+      finding = (values && values.finding || '').trim();
+      if (!yes || !finding) return;
+    }
+    const done = act === 'cancel' ? 'cancelled' : act === 'send' ? 'sent to the builder' : 'retried';
+    busy = true; drawBuilds();
+    try {
+      if (act === 'cancel') await S.post(`/api/assignments/${r.cancel.assignment}/cancel`, { revision: r.cancel.revision });
+      else await S.post('/api/queue/builds/retry', { assignment: r.retry.assignment, revision: r.retry.revision, ...(finding ? { finding } : {}) });
+      builtSaid = { ok: true, text: act === 'cancel' ? `Run ${r.run} (${what}): cancel requested; it stops at its next beat.`
+        : act === 'send' ? `${what} sent to the builder with your finding.` : `${what} queued again for build.` };
+    } catch (err) {
+      builtSaid = { ok: false, text: err.status >= 400 && err.status < 500 ? `Run ${r.run} not ${done}: ${err.message}`
+        : `Not known whether run ${r.run} was ${done}: ${err.message} Read the panel before you act again.` };
+    }
+    busy = false;
+    await loadBuilds();
+  }
+  window.queueBuildAct = buildAct; // for the page test
   function details() {
     const l = DOC && DOC.lanes.find(x => x.path === open);
     put($('details'), l ? lane(l) : html`<p class="why">${DOC ? 'No lane is open: no lane has a row to show.' : 'No lane is open: the lanes were not read.'}</p>`);
@@ -161,6 +232,7 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
 
   async function load() {
     const S = window.shell;
+    loadBuilds();
     if (!DOC) S.state({ kind: 'loading', text: 'Reading the lanes. Rows appear when /api/queue answers.', source: '/api/queue' });
     try {
       DOC = await S.getJSON('/api/queue');
@@ -254,6 +326,7 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
       const r = !e.target.closest('button, a') && e.target.closest('tr[data-lane]'); if (r) { open = r.dataset.lane; draw(); window.shell.openPane('tab-details'); }
     };
     $('lanes').addEventListener('click', press); $('details').addEventListener('click', press);
+    $('builds').addEventListener('click', e => { const b = e.target.closest('button[data-build]'); if (b && !b.disabled) buildAct(b); });
     if (typeof setInterval === 'function') setInterval(() => { if (!document.hidden && !busy) load(); }, 30000);
     load();
   });

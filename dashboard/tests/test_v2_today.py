@@ -204,8 +204,8 @@ class TheShellPort(BrowserSession):
             self.assertNotIn("createElement('style')", source)
             self.assertNotIn("setAttribute('style'", source)
             self.assertNotRegex(source, r"style=\\?\"")
-        # The favicon count draws a data: URL; the build leaves it to the mockups.
-        self.assertIn("if (!window.SHELL_PAGES) icon.href = c.toDataURL", SHELL_JS)
+        # The favicon count draws a data: URL; the build returns before it and swaps static marks (pack sd:6322).
+        self.assertLess(SHELL_JS.index("if (window.SHELL_PAGES) {"), SHELL_JS.index("icon.href = c.toDataURL"))
 
     def test_today_maps_every_band_source_and_kind_now_can_send(self):
         state = re.search(r"const STATE = \{([^}]*)\}", TODAY_JS).group(1)
@@ -221,7 +221,8 @@ class TheShellPort(BrowserSession):
         self.assertEqual(set(re.findall(r"(\w+):", types)), {a or b for a, b in kinds})
 
     def test_the_v1_files_are_unchanged_and_no_page_names_a_v2_address(self):
-        self.assertEqual(server.STATIC_FILES, ("dashboard.js",))
+        # The icons joined the v1 folder in pack sd:6322; its one script is still v1's.
+        self.assertEqual([name for name in server.STATIC_FILES if name.endswith(".js")], ["dashboard.js"])
         for path in ("/", "/today", "/operations", "/static/dashboard.js"):
             status, headers, body = self.request(path)
             self.assertEqual(status, 200, path)

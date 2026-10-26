@@ -804,7 +804,7 @@ class Dashboard(BaseHTTPRequestHandler):
         if path == "/health":
             return self._health()
         if path == "/favicon.ico":
-            return self._send(204, b"", "image/x-icon")
+            return self._static("favicon.ico")
         if path.startswith("/static/"):
             return self._static(path[len("/static/") :], split.query)
         if path == "/ui/sections.js":
@@ -1297,7 +1297,8 @@ class Dashboard(BaseHTTPRequestHandler):
             )
         body = (STATIC / name).read_bytes()
         guessed = mimetypes.guess_type(name)[0] or "application/octet-stream"
-        self._send(200, body, f"{guessed}; charset=utf-8",
+        kind = f"{guessed}; charset=utf-8" if guessed.startswith("text/") or guessed.endswith("+xml") else guessed
+        self._send(200, body, kind,
                    cache=caching.cache_control(body, parse_qs(query)), compress=True)
 
 

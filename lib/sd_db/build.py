@@ -57,6 +57,8 @@ STALE_SECONDS = 180
 RETRIES = 1
 #: The steps a run walks, each written before it starts.
 STEPS = ("claimed", "worktree", "building", "reviewing", "fixing", "enqueuing", "enqueued", "checking", "cleaning")
+#: A note that sends the operator's finding to a bundle's next builder: Send to builder (pack sd:6020).
+FINDING = "Send to builder: "
 #: The model a bundle runs on (Q60): Sonnet only when every member's `fields.work_kind` is `mechanical`.
 OPUS, SONNET = "opus", "sonnet"
 #: The fields a supervisor may write on its own open run.
@@ -315,14 +317,15 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
         if available["why"]:
             return None
         queued = connection.execute(
-            "SELECT assignment.id, assignment.item, item.repo FROM assignment JOIN item ON item.id = assignment.item "
+            "SELECT assignment.id, assignment.item, assignment.parent, assignment.run_count, item.repo "
+            "FROM assignment JOIN item ON item.id = assignment.item "
             "WHERE assignment.status = 'queued' AND assignment.scope = ? AND item.repo IS NOT NULL "
             "ORDER BY item.priority IS NULL, item.priority, assignment.queued_at, assignment.id", (SCOPE,)).fetchall()
         queued = [row for row in queued if not _refused_repo(connection, row)]
         repo = next((row["repo"] for row in queued if room_for(available, row["repo"]) > 0), None)
         if repo is None:
             return None
-        bundle = [row for row in queued if row["repo"] == repo][:BUNDLE_MAX]
+        bundle = _bundle([row for row in queued if row["repo"] == repo])
         lead = bundle[0]["id"]
         ids = [row["id"] for row in bundle]
         marks = ", ".join("?" for _ in ids)
@@ -351,6 +354,20 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
                         or f"item {row['item']} moved to {row['status']} after the press")
             return None
         return run(connection, ident)
+
+
+def _bundle(rows: list) -> list:
+    """The queued rows of one repository a claim takes, best first.
+
+    A bundle that ran before claims alone, its old lead first, so its run
+    gets the lead's branch and worktree back (pack sd:6020); fresh rows
+    bundle with fresh rows only, up to `BUNDLE_MAX`.
+    """
+    best = rows[0]
+    group = best["parent"] or (best["id"] if best["run_count"] else None)
+    if group is None:
+        return [row for row in rows if row["parent"] is None and not row["run_count"]][:BUNDLE_MAX]
+    return sorted((row for row in rows if group in (row["id"], row["parent"])), key=lambda row: row["id"] != group)
 
 
 def _refuse(connection, row, reason: str) -> None:
@@ -413,6 +430,54 @@ def open_runs(connection) -> list[dict]:
         "SELECT runner_run.* FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
         "WHERE runner_run.released_at IS NULL AND assignment.scope = ? ORDER BY runner_run.created_at, runner_run.id",
         (SCOPE,))]
+
+
+def ended_runs(connection, since: str, *, limit: int = 50) -> list[dict]:
+    """The build runs released at or after `since`, newest first (Queue's Builds panel, pack sd:6095)."""
+    return [dict(row) for row in connection.execute(
+        "SELECT runner_run.* FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
+        "WHERE assignment.scope = ? AND runner_run.released_at IS NOT NULL AND runner_run.released_at >= ? "
+        "ORDER BY runner_run.released_at DESC, runner_run.run DESC, runner_run.rowid DESC LIMIT ?",
+        (SCOPE, since, limit))]
+
+
+def pull_url(connection, repo: str, branch: str | None, items: list[int]) -> str:
+    """The pull request `sd-ship` opened for `branch`, from its ship receipt, or "" (pack sd:6020, Open PR).
+
+    The lane names an entry by the first member the branch delivers, so each member's receipt is read in turn. Nothing
+    asks GitHub: a branch never shipped, a repository with no GitHub remote or an unreadable receipt has none to show.
+    """
+    from . import ship
+    from .workflow import WorkflowError
+
+    probe = paths.keys(repo)  # a run row written before migration 014 holds the absolute form
+    row = connection.execute(
+        f"SELECT remote FROM repo WHERE path IN ({paths.placeholders(probe)})", probe).fetchone()
+    if not branch or row is None or not row["remote"]:
+        return ""
+    try:
+        repository = ship._github_repository(row["remote"])
+        for item in items:
+            receipt = ship.read(connection, ship.receipt_key(repository, branch, item))[1]
+            url = (receipt.get("pull_request") or {}).get("url")
+            if isinstance(url, str) and url.startswith("https://github.com/"):
+                return url
+    except WorkflowError:
+        return ""
+    return ""
+
+
+def open_question(connection, items: list[int], since: str) -> dict | None:
+    """The first `question` note on `items` since `since` that no `Ruling on note #<n>:` decision answers."""
+    if not items:
+        return None
+    marks = ", ".join("?" for _ in items)
+    row = connection.execute(
+        f"SELECT asked.id, asked.item FROM note asked WHERE asked.kind = 'question' AND asked.item IN ({marks}) "
+        f"AND asked.timestamp >= ? AND NOT EXISTS (SELECT 1 FROM note ruling WHERE ruling.item = asked.item "
+        f"AND ruling.kind = 'decision' AND ruling.body LIKE 'Ruling on note #' || asked.id || ':%') "
+        f"ORDER BY asked.id LIMIT 1", (*items, since)).fetchone()
+    return dict(row) if row else None
 
 
 def finished_seconds(connection, *, limit: int = 20) -> list[float]:

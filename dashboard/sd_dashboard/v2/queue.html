@@ -11,6 +11,10 @@
   Writes: /api/queue/move, which runs sd-ship lane move|hold|release|cancel|retry and nothing else; cancel, a running
   row's Release (lane cancel --expected-claim) and approve ask first; a cancelled row's Re-queue (lane retry
   --expected-head) runs at once, as Retry does. An entry's Adversarial review posts /api/adversarial (sd:5064).
+  Builds (pack sd:6095): /api/queue/builds (builds.panel), above the lanes: one row per open build run (items, repo,
+  model, step, elapsed, last output, cost, Cancel, Log) in its state, working, waiting on me, stalled or lost, and the
+  last 24 hours' ended runs with Retry on a blocked one. Cancel posts /api/assignments/<lead>/cancel and asks first;
+  Retry posts /api/queue/builds/retry and runs at once.
   Nothing here is sample data.
 -->
 <html lang="en">
@@ -44,6 +48,7 @@
     <div id="viewswitch"></div>
     <div class="fgroup" id="show" role="group" aria-label="Show"></div>
   </div>
+  <section id="builds" aria-labelledby="builds-h"></section>
   <div id="lanes"></div>
   <p class="idle" id="idle"></p>
   <section id="times" aria-label="Lane times"></section>

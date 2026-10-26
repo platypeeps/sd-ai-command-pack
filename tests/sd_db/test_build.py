@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from sd_db import build, operations, recovery, workflow
+from sd_db import build, operations, recovery, runner, workflow
 from sd_db.database import connect
 from sd_db.errors import BackupError
 from sd_db.migrate import initialise
@@ -255,6 +255,26 @@ class Claim(Case):
             self.assertRegex(row["result"], reason)
         self.assertEqual(self.statuses(items), ["ready", "ready"])
         self.assertIsNone(self.claim(), "nothing of A is left queued")
+
+    def test_a_requeued_bundle_claims_alone_under_its_lead_and_gets_its_worktree_back(self):
+        """Pack sd:6020: Send to builder queues a bundle again; its claim keeps the lead, so branch and worktree match."""
+        items = [self.item(), self.item()]
+        queued = build.queue(self.db, items, who="operator")
+        lead = queued[0]["id"]
+        first = self.claim()
+        build.end(self.db, first["id"], "cancelled", "the operator cancelled it")
+        newer = self.item()
+        build.queue(self.db, [newer], who="operator")  # queued before the requeue, so it ranks first
+        for row in reversed(queued):
+            state = runner.queue_state(self.db, row["id"])
+            runner.requeue(self.db, row["id"], expected_revision=state["revision"], who="operator")
+        runs = [self.claim(), self.claim()]
+        self.assertEqual([len(run["members"]) if run else 0 for run in runs].count(0), 0, "two bundles, not one")
+        claims = {run["assignment"]: run for run in runs}
+        again = claims.pop(lead)
+        self.assertEqual((again["branch"], again["work_path"], again["run"]), (first["branch"], first["work_path"], 2))
+        self.assertEqual(sorted(member["item"] for member in again["members"]), sorted(items))
+        self.assertEqual([member["item"] for member in claims.popitem()[1]["members"]], [newer])
 
     def test_claim_skips_a_repository_unmanaged_after_the_press(self):
         self.ineligible_after_press("UPDATE repo SET managed = 0 WHERE path = ?", "is not managed")

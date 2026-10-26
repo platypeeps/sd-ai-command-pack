@@ -200,7 +200,7 @@ addEventListener('DOMContentLoaded', () => {
         <span class="id">${label(t)}</span>${issueLink(t)}
         ${tileF(t) ? html`<select class="tile-f pri" data-edit="p" data-key="${t.key}" data-p="${String(t.p || '')}" aria-label="Priority of ${label(t)}">${t.p ? '' : html`<option value="" selected>P–</option>`}${[1, 2, 3, 4].map(n => html`<option value="${n}"${t.p === n ? html` selected` : ''}>P${n}</option>`)}</select>`
           : html`<span class="pri" data-p="${String(t.p || '')}" title="Priority">${t.p ? 'P' + t.p : 'P–'}</span>`}
-        ${t.assignment === 'running' ? html`<span class="lock" title="Runner assignment running">${ICON('lock')}</span>` : ''}
+        ${t.assignment === 'running' ? html`<span class="lock" title="Runner assignment running">${ICON('lock')}</span>` : t.assignment === 'queued' ? html`<span class="queued" title="Build queued: the dispatcher claims it when there is room">queued</span>` : ''}
         ${doneBtn(t)}${C.rowActions(t.key)}
       </div>
       <div class="t">${t.title}</div>
@@ -386,6 +386,58 @@ addEventListener('DOMContentLoaded', () => {
   }
   document.addEventListener('tasks:start-next', askStart);
   document.getElementById('start-next')?.addEventListener('click', askStart);
+  // Build (pack sd:6095): the press queues a headless build of each picked ready item (`sd assignments build`). The
+  // dialog reads the server's plan first (builds.plan): each repository's bundles of up to 3 items, the model, the
+  // room now, and every item the press would refuse with why. One refusal refuses the whole press, so the dialog then
+  // offers no Build. Build posts the items with the revisions the plan read; a 409 changed nothing. The dispatcher claims
+  // a bundle when there is room; until then each row shows its assignment as queued.
+  const buildDlg = document.createElement('dialog');
+  buildDlg.className = 'palette date-dlg start-dlg'; buildDlg.setAttribute('aria-labelledby', 'build-h');
+  document.body.append(buildDlg);
+  const kickText = k => !k ? '' : k.ok ? ' · the dispatcher was started' : ` · the dispatcher starts at its next slot (${k.why})`;
+  async function askBuild(objs, done) {
+    const rows = objs.map(o => byKey(o.id)).filter(Boolean);
+    if (!rows.length) { toast('Build: no listed task is selected'); return; }
+    let P;
+    try { P = await window.shell.getJSON(`/api/tasks/build/plan?items=${rows.map(t => t.id).join(',')}`); }
+    catch (err) { toast(`Build plan not read: ${err.message}`); return; }
+    const room = P.room.why ? `No builder starts now: ${P.room.why}. The press still queues; a claim waits for room.`
+      : `${P.room.machine} of ${P.room.cap} builders free now · at most ${P.room.repo_cap} per repository`;
+    const items = P.bundles.flatMap(b => b.items), ok = !P.refused.length && items.length;
+    put(buildDlg, html`<form method="dialog" class="date-form">
+      <h2 id="build-h">Build ${plural(rows.length, 'task')}</h2>${window.shell.closeX}
+      <p class="why">${room}</p>
+      ${P.refused.length ? html`<p class="why">▲ Nothing can be queued while one item is refused:</p>
+        <ul class="start-list">${P.refused.map(r => html`<li><code>#${String(r.id)}</code> ${r.why}</li>`)}</ul>` : ''}
+      ${P.bundles.map(b => html`<section class="build-bundle" aria-label="Bundle in ${b.name}"><h3>${b.name} <small>${b.model} · branch ${b.branch} · ${b.room ? `${b.room} may start now` : 'waits for room'}</small></h3>
+        <ol class="start-list">${b.items.map(r => html`<li><code>#${String(r.id)}</code> ${r.title}</li>`)}</ol></section>`)}
+      <p class="why">One run per bundle, ${String(P.budget_minutes)} min each. The items lock until each run ends; Cancel on Queue › Builds stops one.</p>
+      <div class="actions">
+        ${ok ? html`<button class="btn" value="build" type="submit">Build</button>` : ''}
+        <button class="btn quiet" value="cancel" type="submit" formnovalidate data-cancel>Cancel</button>
+      </div></form>`);
+    buildDlg.onclose = () => {
+      if (buildDlg.returnValue !== 'build' || !ok) return;
+      const revisions = Object.fromEntries(items.map(r => [String(r.id), r.revision]));
+      window.shell.post('/api/tasks/build', { items: items.map(r => r.id), revisions }).then(out => {
+        toast(`Queued ${out.queued.map(q => `#${q.item}`).join(', ')} for build${kickText(out.kickstart)}`); done?.(); reread();
+      }, err => {
+        // A 409 is a refused press that changed nothing; no status is no answer, so whether it queued is not known.
+        toast(err.status === 409 ? err.message : err.status ? `Nothing queued: ${err.message}` : `Build got no answer, so what queued is not known: read the tasks again (${err.message})`);
+        reread();
+      });
+    };
+    buildDlg.returnValue = '';
+    buildDlg.showModal(); (buildDlg.querySelector('[value="build"]') || buildDlg.querySelector('[value="cancel"]'))?.focus();
+  }
+  C.register({ id: 'item.build', on: 'item', label: 'Build', icon: 'rocket', risk: 'safe', bulk: true, executes: true,
+    does: 'Queues a headless build per item; the dispatcher bundles them by repository.',
+    when: o => { const t = byKey(o.id); return !t ? 'the task is no longer listed' : t.status !== 'ready' ? `a build takes a ready task; this one is ${slabel(t.status).toLowerCase()}`
+      : !t.repo ? 'a build needs a repository' : t.assignment === 'running' || t.assignment === 'queued' ? `a runner assignment is ${t.assignment}` : true; },
+    cli: o => `sd assignments build ${byKey(o.id)?.id ?? o.id}`,
+    sends: () => 'POST /api/tasks/build {items, revisions}',
+    batch: (objs, done) => askBuild(objs, done),
+    run: o => { askBuild([o]); return null; } });
   // ---------- Pointer drag (mouse and pen; touch uses Move to) ----------
   let drag = null, suppressClick = false;
   const verdict = (t, target) => {

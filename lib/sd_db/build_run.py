@@ -70,7 +70,7 @@ BRIEF = """You are a headless builder run by the build dispatcher (pack sd:6094)
 
 Build these items, one commit per item, in the worktree {worktree} on branch {branch}:
 {items}
-
+{findings}
 Rules:
 - Work only in {worktree}. Read each item with `sd task show N` and the repository's CLAUDE.md first.
 - The dispatcher owns every item's status: never run `sd task status`, never push, never open a pull request.
@@ -513,7 +513,26 @@ class Supervisor:
         titles = {row["id"]: row["title"] for row in self.db.execute(
             f"SELECT id, title FROM item WHERE id IN ({', '.join('?' for _ in items)})", items)}
         return {"worktree": self.work, "branch": self.row["branch"], "title": self.title, "body": self.body,
-                "title_max": TITLE_MAX, "items": "\n".join(f"- sd:{item} {titles.get(item, '')}" for item in items)}
+                "title_max": TITLE_MAX, "items": "\n".join(f"- sd:{item} {titles.get(item, '')}" for item in items),
+                "findings": self.findings(items)}
+
+    def findings(self, items: list[int]) -> str:
+        """The Send to builder notes on `items` since the lead's first run, up to this run (pack sd:6020); "" for none.
+
+        A bundle queued again keeps its lead, so this run resumes the branch an earlier run left.
+        """
+        first = self.db.execute("SELECT MIN(created_at) FROM runner_run WHERE assignment = ?",
+                                (self.row["assignment"],)).fetchone()[0]
+        notes = self.db.execute(
+            f"SELECT item, body FROM note WHERE item IN ({', '.join('?' for _ in items)}) AND body LIKE ? "
+            f"AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp, id",
+            (*items, build.FINDING + "%", first, self.row["created_at"])).fetchall()
+        if not notes:
+            return ""
+        sent = "\n".join(f"- sd:{note['item']}: {note['body'][len(build.FINDING):].strip()}" for note in notes)
+        return (f"\nThe worktree already holds the commits of an earlier run on {self.row['branch']}: build on them.\n"
+                f"The operator sent these findings to the branch, oldest first. Fix each one the branch does not\n"
+                f"fix yet, fail-first, as a new commit:\n{sent}\n")
 
     def claude(self, prompt: str, *, session: str | None, then: str) -> str | dict:
         argv = [*self.tools.claude, "-p", prompt, "--output-format", "stream-json", "--verbose",
