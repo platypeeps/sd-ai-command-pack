@@ -97,6 +97,7 @@ from . import reporting, sessions
 from .backup import Snapshot, passed
 from .database import refuse_hub_only, transaction
 from .errors import SdDbError
+from .reads import NOT_A_DOCUMENT
 from .repos import item_refs
 from .writes import add_note, set_item_fields, transition
 
@@ -321,12 +322,13 @@ def settle_clean_reports(connection, *, now: datetime) -> int:
     return len(rows)
 
 
-#: An item's last touch: its own `updated_at` or its newest note, whichever is later.
+#: An item's last touch: its own `updated_at` or its newest note, whichever is later. A row in a
+#: Documents view is not work that went stale (pack sd:6262), so it is never parked.
 _UNTOUCHED = """
 SELECT id FROM item
  WHERE status != 'done' AND parked_at IS NULL AND piece IS NULL AND due IS NULL AND recurrence IS NULL
    AND max(updated_at, coalesce((SELECT max(timestamp) FROM note WHERE note.item = item.id), '')) < ?
-   AND {rule}
+   AND """ + NOT_A_DOCUMENT + """ AND {rule}
  ORDER BY id
 """
 

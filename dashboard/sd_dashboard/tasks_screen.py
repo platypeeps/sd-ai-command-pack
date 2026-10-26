@@ -54,6 +54,7 @@ from pathlib import Path
 
 from sd_db import reads, repos, workflow
 from sd_db.protection import github_slug
+from sd_db.records import DOCUMENT_VIEWS
 from sd_db.sources.vault import SOURCE as VAULT
 from sd_db.workflow import WorkflowError
 
@@ -205,15 +206,18 @@ def _left_out(row, *, now: str) -> str | None:
     """Why `/api/tasks` leaves the item out, for Details to say when a link opens it there (sd:5462); None if it lists it.
 
     These are `reads.backlog_items`' rules: no report without `attention` (`_NOT_A_QUIET_REPORT`), nothing done before
-    the week (`include_done_days`), and no parked writing piece. `test_v2_tasks` checks them against the rows it lists.
+    the week (`include_done_days`), no parked writing piece, and no row in a Documents view (`reads.NOT_A_DOCUMENT`,
+    pack sd:6262). `test_v2_tasks` checks them against the rows it lists.
     """
-    if row["kind"] == "report":
-        try:
-            fields = json.loads(row["fields"] or "{}")
-        except (TypeError, ValueError):
-            fields = None
-        if not (isinstance(fields, dict) and fields.get("attention") is True):
-            return "a report that needs no attention"
+    try:
+        fields = json.loads(row["fields"] or "{}")
+    except (TypeError, ValueError):
+        fields = None
+    if row["kind"] == "report" and not (isinstance(fields, dict) and fields.get("attention") is True):
+        return "a report that needs no attention"
+    view = reads.document_view(fields)
+    if view:
+        return f"a document: it shows under Documents > {DOCUMENT_VIEWS.get(view, view)}"
     cutoff = (datetime.fromisoformat(now.replace("Z", "+00:00")) - timedelta(days=7)).strftime("%Y-%m-%d")
     if row["status"] == "done" and not (row["status_since"] and row["status_since"] >= cutoff):
         return "done before the week"

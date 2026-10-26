@@ -25,7 +25,8 @@ Tasks queues no runs since the runner stopped (sd:3041). An assignment's Cancel
 posts `/api/assignments/<id>/cancel` with the revision the Details read.
 Every page opens an item at `/tasks?row=<id>` (`shell.itemHref`, sd:3526); an
 item the read does not list, a quiet report or one done before the week,
-goes on to its item page, `/item/<id>`.
+goes on to its item page, `/item/<id>`. A learning row moved to a Documents
+view (pack sd:6262) is not listed, under Parked either; its Details say so.
 
 A vault base row (sd:3977) also carries its `base` (`fields.kind`), `stage` and `score`; other rows have none.
 The Base filter and the list's Stage and Score columns show once a row has a base; Score sorts highest first.

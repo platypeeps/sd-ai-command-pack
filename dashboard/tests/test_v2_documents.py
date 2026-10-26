@@ -32,7 +32,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import connect, create_item, writes
+from sd_db import connect, create_item, records, writes
 
 from sd_dashboard import documents, documents_screen, learning_screen, research_screen, server, v2
 
@@ -1113,6 +1113,23 @@ class TheVideos(ScreenCase):
         self.assertEqual(doc["read"], NOW)
         self.assertEqual(sorted(r["id"] for r in doc["rows"]), sorted([ids["video"], ids["named"]]))
         self.assertEqual(self.connection.execute("SELECT id, kind, status, stage FROM item ORDER BY id").fetchall(), before)
+
+
+class TheMovedRows(ScreenCase):
+    """pack sd:6262: a row `sd-db records documents` moved is in its own view and no other, whatever its content type."""
+
+    def test_a_moved_row_shows_only_in_its_own_view(self):
+        ids = seed_learning(self.connection)
+        bare = learning(self.connection, "A Listed Note", "queued")
+        listed = [bare, ids["video"]]
+        plan = records.plan_documents(self.connection, books=listed)
+        records.move_documents(self.connection, books=listed, plan=plan.digest, who="operator")
+        books = {r["id"] for r in learning_screen.books(self.connection, now=NOW)["rows"]}
+        videos = {r["id"] for r in learning_screen.videos(self.connection, now=NOW)["rows"]}
+        # The note with no content type shows in Books; the listed video moved to Books and leaves Videos.
+        self.assertEqual(books, {ids["book"], ids["article"], ids["bare"], bare, ids["video"]})
+        self.assertEqual(videos, {ids["named"]})
+        self.assertNotIn(ids["course"], books | videos)
 
 
 class TheLearningScript(ScreenCase):

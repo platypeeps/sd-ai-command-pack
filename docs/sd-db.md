@@ -556,6 +556,15 @@ Every render records the `heartbeat` state row `records-mirror`, body `{at, ok, 
 `records.mirror_state(connection)` reads the last one, `(timestamp, body)` or None; the dashboard's Health shows it.
 The verb exits 1 on a render that stopped.
 
+`records documents` moves learning rows to their Documents view (pack sd:6262), so they leave Tasks, Today and the counts.
+
+- With no `--apply` it is the dry run. It opens the database read-only, prints each row it would move, and ends with the plan digest.
+- Videos match by their title, `YYYY-MM-DD - YouTube - <channel> - <title>`. Books and articles match only by the list the operator gives, `--book ID` each.
+- `--apply PLAN`, with the same `--book` list, moves that list in one transaction. A list that changed since the dry run refuses and moves nothing.
+- A moved row gets `fields.document-type` (`books` or `videos`) and a `comment` note. Its id, notes, stage and status stay.
+- `--undo ID ...` takes the field off and moves the rows back. It refuses them all when one was never moved.
+- `reads.NOT_A_DOCUMENT` is the rule every Tasks, Today and count read applies, through `reads._unparked_clause`. Open notes stay in Decide.
+
 ## `sd reports brief`: routine briefs
 
 A routine brief is one `item` row of kind `report`, source `brief`, keyed by its stem, `<YYYY-MM-DD> - <Series>` (sd:3459).
