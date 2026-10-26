@@ -13,10 +13,12 @@ before the promoted machine takes the hub's name, and passes.
 
 from __future__ import annotations
 
+import functools
 import os
 import sqlite3
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -546,6 +548,77 @@ class TheAutocommitWindow(FenceCase):
             return reader.execute("SELECT count(*) FROM state WHERE kind = 'x'").fetchone()[0]
         finally:
             reader.close()
+
+
+class ThePragmaWrites(FenceCase):
+    """pack sd:6328: a PRAGMA that changes the file is a write; one that reads or sets this connection is not.
+
+    SQLite authorizes a pragma as SQLITE_PRAGMA, its value as `arg2`.
+    """
+
+    def header(self) -> tuple:
+        reader = database.connect(write=False)
+        try:
+            return tuple(reader.execute(f"PRAGMA {name}").fetchone()[0]
+                         for name in ("user_version", "application_id", "journal_mode"))
+        finally:
+            reader.close()
+
+    def test_a_pragma_write_on_a_fenced_hub_refuses(self):
+        self.name_hub(HUB_NAME)
+        self.node(OLD_HUB)
+        connection = self.open()
+        before = self.header()
+        writes_ = ("PRAGMA user_version = 7", "PRAGMA main.application_id = 7", "pragma JOURNAL_MODE = delete",
+                   "PRAGMA wal_checkpoint(TRUNCATE)", "PRAGMA wal_checkpoint", "PRAGMA incremental_vacuum")
+        paths: dict[str, Callable[[], object]] = {
+            statement: functools.partial(connection.execute, statement) for statement in writes_}
+        paths["executescript"] = lambda: connection.executescript("PRAGMA user_version = 8;")
+        paths["inside BEGIN"] = lambda: (connection.execute("BEGIN IMMEDIATE"),
+                                         connection.execute("PRAGMA user_version = 9"))
+        for name, write in paths.items():
+            with self.subTest(path=name), self.assertRaises(hub.Fenced):
+                write()
+            self.assertFalse(connection.in_transaction)
+        self.assertEqual(self.header(), before)
+
+    def test_a_pragma_write_in_a_transaction_across_the_rename_rolls_back(self):
+        self.name_hub(HUB_NAME)
+        self.node()
+        connection = self.open()
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("PRAGMA application_id = 7")
+        self.node(OLD_HUB)
+        self.later()
+        with self.assertRaises(hub.Fenced):
+            connection.execute("COMMIT")
+        self.assertFalse(connection.in_transaction)
+        self.assertEqual(self.header()[1], 0)
+
+    def test_pragma_reads_and_connection_settings_stay_allowed_with_no_probe(self):
+        self.name_hub(HUB_NAME)
+        self.node(OLD_HUB)
+        connection = self.open()
+        before = len(self.asked())
+        reads = ("PRAGMA user_version", "PRAGMA journal_mode", "PRAGMA table_info(item)", "PRAGMA index_list(item)",
+                 "PRAGMA foreign_key_check(item)", "PRAGMA integrity_check(1)", "PRAGMA busy_timeout = 100",
+                 "PRAGMA foreign_keys = ON", "PRAGMA temp.user_version = 3")
+        for statement in reads:
+            with self.subTest(statement=statement):
+                connection.execute(statement).fetchall()
+        self.assertEqual(len(self.asked()), before)
+
+    def test_a_pragma_write_on_the_live_hub_runs_outside_a_transaction(self):
+        """`journal_mode` and `wal_checkpoint` cannot run inside one, so the fence asks at prepare instead."""
+        self.name_hub(HUB_NAME)
+        self.node()
+        connection = self.open()
+        connection.execute("PRAGMA application_id = 7")
+        self.assertEqual(connection.execute("PRAGMA journal_mode = DELETE").fetchone()[0], "delete")
+        self.assertEqual(connection.execute("PRAGMA journal_mode = WAL").fetchone()[0], "wal")
+        self.assertEqual(connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0], 0)
+        self.assertFalse(connection.in_transaction)
+        self.assertEqual(self.header()[1:], (7, "wal"))
 
 
 class TheRestore(FenceCase):
