@@ -1181,8 +1181,8 @@ class QueryGh(Gh):
     def __call__(self, argv):
         if argv[:2] == ["gh", "auth"]:
             return super().__call__(argv)
-        if argv[:3] == ["gh", "api", "--include"] and "/issues/" in argv[-1]:
-            # A direct issue read: `read(path)` answers `(status, payload)`, or None for a gh failure.
+        if argv[:3] == ["gh", "api", "--include"] and ("/issues/" in argv[-1] or "/pulls/" in argv[-1]):
+            # A direct issue or pull read: `read(path)` answers `(status, payload)`, or None for a gh failure.
             self.paths.append(argv[-1])
             answer = self.read(argv[-1]) if self.read else None
             if answer is None:
@@ -1492,9 +1492,13 @@ class TheStaleRead(SyncCase):
     def row(self, number, repo=OTHER):
         return self.shadow()[self.url(number, repo)]
 
+    def read(self, number, **extra):
+        """The read's answer under the stored url: another url folds the row (sd:6091)."""
+        return issue(number, url=self.url(number), **extra)
+
     def test_a_stale_row_outside_intake_is_read_and_closed(self):
         answers = (
-            ("closed", issue(3, state="closed", closed_at="2026-08-20T09:00:00Z"), "2026-08-20T09:00:00Z"),
+            ("closed", self.read(3, state="closed", closed_at="2026-08-20T09:00:00Z"), "2026-08-20T09:00:00Z"),
             ("issues disabled", (410, {"message": "Issues are disabled for this repo"}), None),
         )
         for name, answer, closed_at in answers:
@@ -1517,11 +1521,11 @@ class TheStaleRead(SyncCase):
 
     def test_an_open_answer_is_a_sighting_and_is_not_read_again_at_once(self):
         self.stored(3)
-        result = sync(self.connection, now=self.now, runner=QueryGh(lambda query: [], read=lambda path: issue(3)))
+        result = sync(self.connection, now=self.now, runner=QueryGh(lambda query: [], read=lambda path: self.read(3)))
         self.assertTrue(result.ok, result.reason)
         self.assertEqual(self.row(3)["state"], "open")
         self.assertGreater(self.row(3)["last_seen"], self.STALE)
-        runner = QueryGh(lambda query: [], read=lambda path: issue(3))
+        runner = QueryGh(lambda query: [], read=lambda path: self.read(3))
         sync(self.connection, now=self.now + timedelta(hours=1), runner=runner)
         self.assertEqual(runner.paths, [])
 
@@ -1538,7 +1542,7 @@ class TheStaleRead(SyncCase):
         """Four bucket pages, the intake sweep and one read fit in six requests."""
         self.stored(6, last_seen="2026-08-02T00:00:00+00:00")
         self.stored(7, last_seen="2026-08-01T00:00:00+00:00")
-        runner = QueryGh(lambda query: [], read=lambda path: issue(7, state="closed"))
+        runner = QueryGh(lambda query: [], read=lambda path: self.read(7, state="closed"))
         result = sync(self.connection, now=self.now, runner=runner, max_requests=6)
         self.assertEqual(runner.paths, [f"repos/{self.OTHER}/issues/7"])
         self.assertEqual((self.row(6)["state"], self.row(7)["state"]), ("open", "closed"))
@@ -1559,6 +1563,228 @@ class TheStaleRead(SyncCase):
         self.assertFalse(result.ok)
         self.assertEqual(runner.paths, [])
         self.assertEqual(self.row(9)["state"], "open")
+
+
+def pull(number, *, state="open", merged=False, url=None, **extra):
+    """A direct pull read's 200 answer."""
+    return 200, {"html_url": url or f"https://github.com/example-org/other/pull/{number}", "number": number,
+                 "state": state, "merged": merged, **extra}
+
+
+class Offline:
+    """A contribution client whose every read fails, so `refresh` observes nothing."""
+
+    def __init__(self):
+        self.budget = None
+        self.floor = 0
+
+    def get(self, path, **_):
+        from sd_db.contribution_github import Unavailable
+
+        raise Unavailable("offline")
+
+
+class TheRevisit(SyncCase):
+    """Sd:6091. A pull request no search returns any more, or one whose
+    repository was transferred or renamed, kept state open for good: the
+    window stops returning a row once it leaves the operator's searches, and
+    no read named the old url again. A run reads at most `REVISIT_LIMIT`
+    stale rows, oldest first; a closed or merged answer settles the row, and
+    an answer under another url folds the row into it."""
+
+    REPO = "example-org/other"
+    OLD = "example-user/prism-research"
+    NEW = "example-org/prism-research"
+    STALE = "2026-08-01T00:00:00+00:00"
+
+    def stored(self, number, *, kind="pull", repo=REPO, last_seen=STALE):
+        url = f"https://github.com/{repo}/{'pull' if kind == 'pull' else 'issues'}/{number}"
+        self.connection.execute(
+            "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, first_seen, last_seen) "
+            "VALUES ('github', ?, ?, ?, ?, 'old', 'open', ?, ?)", (repo, url, number, kind, last_seen, last_seen))
+        return url
+
+    def states(self):
+        return {url: (row["state"], row["closed_at"], row["merged_at"]) for url, row in self.shadow().items()}
+
+    def test_a_stale_pull_is_read_and_settled_by_its_own_answer(self):
+        url = f"https://github.com/{self.REPO}/pull/3"
+        answers = (
+            ("merged", pull(3, state="closed", merged=True, closed_at="2026-08-20T09:00:00Z",
+                            merged_at="2026-08-20T09:00:00Z"), ("merged", "2026-08-20T09:00:00Z", "2026-08-20T09:00:00Z")),
+            ("closed", pull(3, state="closed", closed_at="2026-08-21T09:00:00Z"), ("closed", "2026-08-21T09:00:00Z", None)),
+            ("open", pull(3), ("open", None, None)),
+        )
+        for name, answer, expected in answers:
+            with self.subTest(name):
+                self.connection.execute("DELETE FROM shadow")
+                self.stored(3)
+                runner = QueryGh(lambda query: [], read=lambda path, answer=answer: answer)
+                result = sync(self.connection, now=self.now, runner=runner)
+                self.assertTrue(result.ok, result.reason)
+                self.assertEqual(runner.paths, [f"repos/{self.REPO}/pulls/3"])
+                self.assertEqual(self.states(), {url: expected})
+                self.assertEqual(self.shadow()[url]["last_seen"] > self.STALE, name == "open")
+
+    def test_a_pull_read_that_cannot_settle_stays_open_and_is_named(self):
+        for name, answer in (("not found", (404, {"message": "Not Found"})), ("no merged flag", (200, {
+                "html_url": f"https://github.com/{self.REPO}/pull/3", "number": 3, "state": "closed"})),
+                             ("odd state", pull(3, state="draft"))):
+            with self.subTest(name):
+                self.connection.execute("DELETE FROM shadow")
+                url = self.stored(3)
+                result = sync(self.connection, now=self.now,
+                              runner=QueryGh(lambda query: [], read=lambda path, answer=answer: answer))
+                self.assertEqual(self.states(), {url: ("open", None, None)})
+                self.assertTrue(any(url in line for line in result.report()), result.report())
+
+    def test_a_redirect_folds_the_row_into_the_new_url(self):
+        """A transferred repository answers the old url under the new one."""
+        self.stored(6, repo=self.OLD)
+        new = f"https://github.com/{self.NEW}/pull/6"
+        runner = QueryGh(lambda query: [], read=lambda path: pull(6, state="closed", url=new,
+                                                                  closed_at="2026-09-24T10:00:00Z"))
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(runner.paths, [f"repos/{self.OLD}/pulls/6"])
+        self.assertEqual(self.states(), {new: ("closed", "2026-09-24T10:00:00Z", None)})
+        self.assertEqual((self.shadow()[new]["repo"], self.shadow()[new]["number"]), (self.NEW, 6))
+
+    def test_a_redirect_to_a_stored_url_drops_the_old_row(self):
+        """The search already found the pull under its new url: one row stays."""
+        self.stored(6, repo=self.OLD)
+        new = f"https://github.com/{self.NEW}/pull/6"
+        found = {**node(6, url=new, kind="PullRequest"), "repository": {"nameWithOwner": self.NEW}}
+        runner = QueryGh(lambda query: [found] if "mentions:@me" in query else [],
+                         read=lambda path: pull(6, url=new.replace("example-org", "Example-Org")))
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.states(), {new: ("open", None, None)})
+
+    def test_another_spelling_of_the_stored_url_is_no_move(self):
+        """Round 2 of the sd:4880 lane review: REST answers a canonical
+        `html_url`, so case and a trailing slash name the same row."""
+        stored = "https://github.com/Example-Org/Other/pull/3/"
+        self.connection.execute(
+            "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, first_seen, last_seen) "
+            "VALUES ('github', ?, ?, 3, 'pull', 'old', 'open', ?, ?)", (self.REPO, stored, self.STALE, self.STALE))
+        result = sync(self.connection, now=self.now,
+                      runner=QueryGh(lambda query: [], read=lambda path: pull(3, state="closed")))
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.states(), {stored: ("closed", None, None)})
+
+    def test_a_transferred_issue_folds_into_its_new_number(self):
+        self.stored(9, kind="issue")
+        new = "https://github.com/example-org/elsewhere/issues/40"
+        result = sync(self.connection, now=self.now,
+                      runner=QueryGh(lambda query: [], read=lambda path: issue(40, url=new)))
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.states(), {new: ("open", None, None)})
+        self.assertEqual(self.shadow()[new]["number"], 40)
+
+    def test_a_run_reads_at_most_the_limit_oldest_first(self):
+        from sd_db import shadow_sync
+
+        urls = [self.stored(number, last_seen=f"2026-08-{number:02d}T00:00:00+00:00") for number in range(1, 26)]
+        runner = QueryGh(lambda query: [], read=lambda path: pull(int(path.rsplit("/", 1)[1])))
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(shadow_sync.REVISIT_LIMIT, 20)
+        self.assertEqual(runner.paths, [f"repos/{self.REPO}/pulls/{number}" for number in range(1, 21)])
+        self.assertEqual([url for url in urls if self.shadow()[url]["last_seen"] > "2026-09"], urls[:20])
+
+    def test_a_row_whose_read_failed_goes_after_the_rest(self):
+        """Twenty rows that always fail must not starve the others; a read the
+        budget never reached is no failure and keeps its place."""
+        from sd_db import shadow_sync
+
+        first = self.stored(1, last_seen="2026-08-01T00:00:00+00:00")
+        self.stored(2, last_seen="2026-08-02T00:00:00+00:00")
+        with patch.object(shadow_sync, "REVISIT_LIMIT", 1):
+            runner = QueryGh(lambda query: [], read=lambda path: (404, {"message": "Not Found"}))
+            sync(self.connection, now=self.now, runner=runner, max_requests=4)
+            self.assertEqual(runner.paths, [])
+            runner = QueryGh(lambda query: [], read=lambda path: (404, {"message": "Not Found"}))
+            sync(self.connection, now=self.now + timedelta(hours=1), runner=runner)
+            self.assertEqual(runner.paths, [f"repos/{self.REPO}/pulls/1"])
+            runner = QueryGh(lambda query: [], read=lambda path: pull(int(path.rsplit("/", 1)[1])))
+            sync(self.connection, now=self.now + timedelta(hours=2), runner=runner)
+            self.assertEqual(runner.paths, [f"repos/{self.REPO}/pulls/2"])
+            self.assertEqual(self.shadow()[first]["state"], "open")
+
+    def observed(self, url, *, observed_at="2026-08-01T00:00:00Z", acknowledged=()):
+        """An observed contribution, last read completely at `observed_at`."""
+        from sd_db.database import transaction
+        from sd_db.writes import record_state
+
+        with transaction(self.connection):
+            record_state(self.connection, "checkpoint", key="contribution:github:" + url, body={
+                "observation": {"observed_at": observed_at, "state": "open", "title": "old",
+                                "repo": "/".join(url.split("/")[3:5])},
+                "attention": [], "notifications": {}, "acknowledged": list(acknowledged)})
+
+    def queued(self):
+        from sd_db import contribution_sync
+
+        return [row["key"] for row in contribution_sync._queue(self.connection)["pending"]]
+
+    def test_a_redirect_folds_an_observed_contribution(self):
+        from sd_db import contributions
+
+        old = f"https://github.com/{self.OLD}/pull/6"
+        new = f"https://github.com/{self.NEW}/pull/6"
+        self.observed(old, acknowledged=["event:1"])
+        runner = QueryGh(lambda query: [], read=lambda path: pull(6, url=new))
+        sync(self.connection, now=self.now, runner=runner, contribution_client=Offline())
+        self.assertEqual(runner.paths, [f"repos/{self.OLD}/pulls/6"])
+        self.assertEqual([row["url"] for row in contributions.projection(self.connection)], [new])
+        self.assertEqual(contributions.snapshot(self.connection, "github:" + new)["acknowledged"], ["event:1"])
+        self.assertEqual(contributions.snapshot(self.connection, "github:" + old)["moved_to"], new)
+        self.assertEqual(self.queued(), ["github:" + new])
+
+    def test_a_moved_key_a_queue_kept_is_dropped(self):
+        """Steps: a run that stopped after the fold, before `refresh` saved
+        the queue, leaves the old key queued. The next plan drops it."""
+        from sd_db import contribution_sync, contributions
+
+        old = f"https://github.com/{self.OLD}/pull/6"
+        new = f"https://github.com/{self.NEW}/pull/6"
+        self.observed(old)
+        planned = contribution_sync.plan(self.connection)
+        contribution_sync._save_queue(self.connection, planned["pending"], planned["revision"])
+        contributions.fold(self.connection, "github:" + old, new)
+        self.assertEqual(self.queued(), ["github:" + old])
+        self.assertEqual([row["key"] for row in contribution_sync.plan(self.connection)["pending"]], ["github:" + new])
+
+    def test_a_contribution_read_that_moved_nothing_goes_after_the_rest(self):
+        """The queue's own read settles a contribution; one whose url still
+        answers must not take a revisit slot every run."""
+        from sd_db import contributions, shadow_sync
+
+        first = f"https://github.com/{self.REPO}/pull/1"
+        self.observed(first, observed_at="2026-08-01T00:00:00Z")
+        self.observed(f"https://github.com/{self.REPO}/pull/2", observed_at="2026-08-02T00:00:00Z")
+        with patch.object(shadow_sync, "REVISIT_LIMIT", 1):
+            for hours, number in ((0, 1), (1, 2), (2, 1)):
+                runner = QueryGh(lambda query: [], read=lambda path: pull(int(path.rsplit("/", 1)[1])))
+                sync(self.connection, now=self.now + timedelta(hours=hours), runner=runner,
+                     contribution_client=Offline())
+                self.assertEqual(runner.paths, [f"repos/{self.REPO}/pulls/{number}"])
+        self.assertNotIn("moved_to", contributions.snapshot(self.connection, "github:" + first))
+
+    def test_an_item_that_names_the_old_url_is_not_folded_and_is_named(self):
+        """The item's url is the operator's configuration: the fold is named, not done."""
+        from sd_db import contributions
+
+        old = f"https://github.com/{self.OLD}/pull/6"
+        new = f"https://github.com/{self.NEW}/pull/6"
+        item = contributions.capture(self.connection, title="Fix", changes={"pull_url": old}, who="test")["item"]["id"]
+        self.observed(old)
+        result = sync(self.connection, now=self.now, contribution_client=Offline(),
+                      runner=QueryGh(lambda query: [], read=lambda path: pull(6, url=new)))
+        self.assertNotIn("moved_to", contributions.snapshot(self.connection, "github:" + old))
+        self.assertEqual([row["item_id"] for row in contributions.projection(self.connection)], [item])
+        self.assertTrue(any("an item names the old url" in line for line in result.report()), result.report())
 
 
 class PaginationIntegrity(unittest.TestCase):

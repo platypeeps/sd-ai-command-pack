@@ -950,7 +950,10 @@ def projection(connection, *, repo=None) -> list[dict]:
             key = entry["key"][len("contribution:"):]
             if _observed_url(key) in registered_urls:
                 continue
-            value = _projection_row(heartbeats, {}, {}, [snapshot(connection, key, checkpoints)])
+            source = snapshot(connection, key, checkpoints)
+            if source.get("moved_to"):
+                continue  # `fold` moved it; its new key is the row (sd:6091)
+            value = _projection_row(heartbeats, {}, {}, [source])
             if filters is None or value["repo"] in filters:
                 result.append(value)
         _with_shadow(result, connection)
@@ -1009,6 +1012,36 @@ def _acknowledge(connection, state, event_ids, who) -> None:
         notice["acknowledged_at"] = now()
     state["acknowledged"] = sorted(set(state["acknowledged"]) | set(event_ids))
     state["attention"] = [event for event in state["attention"] if event["id"] not in event_ids]
+
+
+def fold(connection, key, url) -> str:
+    """Move an observed row with no item to `url`, where GitHub now answers for it (sd:6091). Returns the new key.
+
+    A transferred or renamed repository answers the old url under the new
+    one, and the old key's reads never settle. The new key takes the old
+    one's state when it has none, so an acknowledged event stays
+    acknowledged; the old key keeps `moved_to`, which `projection` and the
+    refresh queue skip. A row with an item is refused: its url is the
+    operator's configuration.
+    """
+    key = _key(key)
+    old = _observed_url(key)
+    if old is None:
+        raise WorkflowError("fold takes an observed github: or issue: key")
+    moved = _key(key.split(":", 1)[0] + ":" + url)
+    if moved == key:
+        return key
+    with transaction(connection):
+        if any(old in (metadata.get("pull_url"), metadata.get("issue_url")) for _, metadata in _registered(connection)):
+            raise WorkflowError(f"GitHub answers {old} as {_observed_url(moved)}; an item names the old url, "
+                                "so set its pull_url or issue_url")
+        state = snapshot(connection, key)
+        if not connection.execute("SELECT 1 FROM state WHERE kind='checkpoint' AND key=?",
+                                  ("contribution:" + moved,)).fetchone():
+            _save(connection, {**state, "key": moved})
+        state["moved_to"] = _observed_url(moved)
+        _save(connection, state)
+    return moved
 
 
 def dismiss(connection, key, *, who, expected_revision) -> dict:

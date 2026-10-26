@@ -897,16 +897,19 @@ def open_shadow_issues(connection: sqlite3.Connection, *, tracker: str, repos: t
         f"AND lower(repo) IN ({', '.join('?' * len(lowered))}) ORDER BY id", (tracker, *lowered)).fetchall()
 
 
-def stale_shadow_issues(connection: sqlite3.Connection, *, tracker: str, outside: tuple[str, ...],
-                        before: str) -> list[sqlite3.Row]:
-    """The stored open issue rows last seen before `before`, outside the repositories `outside`, oldest first.
+def stale_shadow_rows(connection: sqlite3.Connection, *, tracker: str, outside: tuple[str, ...],
+                      before: str) -> list[sqlite3.Row]:
+    """The stored open rows last seen before `before`, oldest first: issues outside the repositories
+    `outside`, and pull requests (pack sd:5415, sd:6091).
 
-    Pack sd:5415: the rows only the operator's windowed buckets keep current.
+    The rows only the operator's windowed buckets keep current; the intake
+    sweep reads the open issues of `outside`, and no sweep reads a pull request.
     """
     lowered = [repo.lower() for repo in outside]
     return connection.execute(
-        "SELECT id, url FROM shadow WHERE tracker = ? AND kind = 'issue' AND state = 'open' AND last_seen < ? "
-        f"AND lower(coalesce(repo, '')) NOT IN ({', '.join('?' * len(lowered))}) ORDER BY last_seen, id",
+        "SELECT id, url, kind, last_seen FROM shadow WHERE tracker = ? AND state = 'open' AND last_seen < ? "
+        f"AND (kind = 'pull' OR (kind = 'issue' AND lower(coalesce(repo, '')) NOT IN "
+        f"({', '.join('?' * len(lowered))}))) ORDER BY last_seen, id",
         (tracker, before, *lowered)).fetchall()
 
 
@@ -931,6 +934,39 @@ def close_shadow(connection: sqlite3.Connection, *, tracker: str, closed: dict[s
             "UPDATE shadow SET state = 'closed', closed_at = ? WHERE tracker = ? AND url = ? AND state = 'open'",
             [(at, tracker, url) for url, at in closed.items()])
     return cursor.rowcount
+
+
+def settle_shadow(connection: sqlite3.Connection, *, tracker: str, settled: dict[str, dict]) -> int:
+    """Write what a direct read said of each open row of `settled`'s urls (pack sd:6091). Returns the count.
+
+    Each url maps to `{state, closed_at, merged_at}`, and `url`, `repo` and
+    `number` when the read answered under another url: the row moved there,
+    so it takes that url, or is dropped when a row already holds it. A row
+    that is no longer open was written since the read, and is left alone.
+    """
+    stamp = now()
+    count = 0
+    with transaction(connection):
+        for url, answer in settled.items():
+            moved = answer.get("url")
+            if moved and connection.execute(
+                    "SELECT 1 FROM shadow WHERE tracker = ? AND url != ? AND lower(rtrim(url, '/')) = ?",
+                    (tracker, url, moved.lower().rstrip("/"))).fetchone():
+                cursor = connection.execute(
+                    "DELETE FROM shadow WHERE tracker = ? AND url = ? AND state = 'open'", (tracker, url))
+            elif moved:
+                cursor = connection.execute(
+                    "UPDATE shadow SET url = ?, repo = ?, number = ?, state = ?, closed_at = ?, merged_at = ?, "
+                    "last_seen = ? WHERE tracker = ? AND url = ? AND state = 'open'",
+                    (moved, answer["repo"], answer["number"], answer["state"], answer.get("closed_at"),
+                     answer.get("merged_at"), stamp, tracker, url))
+            else:
+                cursor = connection.execute(
+                    "UPDATE shadow SET state = ?, closed_at = ?, merged_at = ? "
+                    "WHERE tracker = ? AND url = ? AND state = 'open'",
+                    (answer["state"], answer.get("closed_at"), answer.get("merged_at"), tracker, url))
+            count += cursor.rowcount
+    return count
 
 
 # ----------------------------------------------------------- assignment
