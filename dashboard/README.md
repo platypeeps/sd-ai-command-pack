@@ -415,7 +415,10 @@ The page is `/documents`, the v2 Documents page (sd:2114). It reads
 (research or report) and render state. Its facets, search and paged ledger come
 from the design source. Pin, hide and tag keep the workflow database's `view`
 state through `POST /api/documents/view` (sd:3428); render and request are
-copy-only lines the dashboard does not run. The classic listing was retired in sd:3402;
+copy-only lines the dashboard does not run. Its Books and Videos sub tabs read
+`GET /api/documents/books` and `GET /api/documents/videos`, the vault's
+book, article and video rows (sd:6260, sd:6261).
+The classic listing was retired in sd:3402;
 the page reads the roots through `documents.py`'s readers, so the rules below hold for it.
 
 A domain repository that publishes reports here follows
@@ -590,6 +593,16 @@ The tab answers that one path live, with `designs.ledger_script()`, instead of t
 A v2 screenshot is stale when `shots/inputs.json` lacks it or records another inputs hash.
 `designs.inputs_hash()` ports `tools/inputs.mjs` byte for byte; `test_designs.py` pins Node's output.
 Every page and screenshot the ledger names passes `designs.resolve()`.
+
+## Watches
+
+The page is `/watches`, the v2 Watches page (sd:6264). It reads
+`GET /api/watches` (`watches_screen.document`): every `sdw.market` row with
+its status and its last refresh date, read from its profile, and the
+`market-watch` job's state and last run. Refresh all runs that job now;
+Refresh and Add watch run `watch.refresh` and `watch.add` through
+`/api/actions/run`. [`docs/pages/watches.md`](docs/pages/watches.md) has
+the detail.
 
 ## Legacy collector reference
 
