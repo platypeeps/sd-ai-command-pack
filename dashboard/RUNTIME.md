@@ -220,6 +220,8 @@ A refusal is a 4xx and ran nothing; a run past its bound is a 504 whose outcome 
 Local writes (sd:5887) use the same route: Capture idea runs `sd store add`, Write runs `repos.set_declaration` at the reading the page showed (409 when the row changed), and Post nudge runs `gh ... comment --body-file -` with the URL from the contribution row and the draft on stdin.
 Pull on Management (sd:5888) runs `git pull --ff-only` in a registered checkout under the lane's runner lock; it checks again there that the checkout is not pinned or a linked worktree, is on its default branch and is clean.
 Run and Adopt on Skills start claude in a new herdr workspace through `fix_session._launch`; the session is the operator's.
+Watches (sd:6264): Refresh starts claude the same way, in the vault `OBSIDIAN_VAULT` names, on the market-watch routine's per-entity step for one active market row; Add watch runs `sd store add sdw.market` for a candidate row.
+Refresh all on Watches is Run now on the `market-watch` job, `/api/jobs/market-watch/retry`, as Management runs a job.
 Document Request and Research Run file through `/api/items`, as Capture does, and their Undo is `cancel-task`.
 Three stay copy only, each with its reason in the UI: Publish posts outside, Kickstart would end its own request, and Schedule needs a launchd agent sd does not add.
 

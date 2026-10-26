@@ -583,6 +583,16 @@ A v2 screenshot is stale when `shots/inputs.json` lacks it or records another in
 `designs.inputs_hash()` ports `tools/inputs.mjs` byte for byte; `test_designs.py` pins Node's output.
 Every page and screenshot the ledger names passes `designs.resolve()`.
 
+## Watches
+
+The page is `/watches`, the v2 Watches page (sd:6264). It reads
+`GET /api/watches` (`watches_screen.document`): every `sdw.market` row with
+its status and its last refresh date, read from its profile, and the
+`market-watch` job's state and last run. Refresh all runs that job now;
+Refresh and Add watch run `watch.refresh` and `watch.add` through
+`/api/actions/run`. [`docs/pages/watches.md`](docs/pages/watches.md) has
+the detail.
+
 ## Legacy collector reference
 
 Until 2026-09-01 this directory ran an earlier HTML dashboard on
