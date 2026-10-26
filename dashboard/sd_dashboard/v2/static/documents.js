@@ -7,8 +7,12 @@ const { html, put, plural } = window.markup;
 const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 const shq = s => `'${String(s ?? '').replace(/'/g, "'\\''")}'`; // shell-safe: single quotes, so $(), backticks and \ stay literal
 const shPath = p => (p.startsWith('~/') ? `~/${shq(p.slice(2))}` : shq(p)); // ~ stays outside the quotes, so the shell expands it
-// One view, so the tab carries the list's count (sd:5524); the panel is the list's section, view-documents.
-window.PAGE_VIEWS = [{ id: 'documents', label: 'Documents' }];
+// The tab carries the list's count (sd:5524); the panel is the list's section, view-documents. Books (sd:6260) reads its
+// own document when it first shows; learning.js draws it.
+window.PAGE_VIEWS = [{ id: 'documents', label: 'Documents' }, { id: 'books', label: 'Books', api: '/api/documents/books' },
+  { id: 'videos', label: 'Videos', api: '/api/documents/videos' }];
+// sd:6260: Books shares #details, so this list draws Details only while its view shows, and again when it shows again.
+const onDocs = () => (window.shell?.view?.current?.() || 'documents') === 'documents';
 // build: the page claims nothing for the rail until /api/documents answers; load() sets it from the rows.
 window.PAGE_ATTENTION = { state: 'unknown', n: 0, what: 'documents not read' };
 // build: the reading arrives by fetch, not as data/documents-data.js globals. OBSERVED is its time; ROOTS and DOCS its rows.
@@ -163,7 +167,7 @@ function render() {
   window.shell?.view.count('documents', list.length);
   // A filter that hides the selected row moves the selection to the first shown row, or clears it (design.md, Page contract).
   // No selection counts too: after an empty filter clears it, the next non-empty list selects its first row again.
-  shell.reconcile({ rows: tbody.querySelectorAll('tr[data-id]'), current: selected, select: id => show(id),
+  if (onDocs()) shell.reconcile({ rows: tbody.querySelectorAll('tr[data-id]'), current: selected, select: id => show(id),
     clear: () => { selected = null; put(details, html`<p class="why">No document matches these filters, so nothing is selected.</p>`); } });
   writeURL();
   const stale = DOCS.filter(d => d.stale && !d.hidden).length;
@@ -294,6 +298,11 @@ function registerCommands() {
   );
 }
 document.addEventListener('shell:open', e => { if (DOCS.some(d => d.id === e.detail)) select(e.detail, true); });
+document.addEventListener('shell:view', e => {
+  if (e.detail.id !== 'documents' || !DOC) return;
+  const id = DOCS.some(d => d.id === selected) && ordered().some(d => d.id === selected) ? selected : shownPage()[0]?.id;
+  if (id) show(id); else unselect();
+});
 document.addEventListener('publish:run', e => { if (selected === e.detail.key) show(selected); });
 document.addEventListener('shell:picked', e => { picked = e.detail; tbody.querySelectorAll('tr[data-id]').forEach(tr => tr.toggleAttribute('data-picked', picked.includes(tr.dataset.id))); });
 
@@ -543,6 +552,7 @@ document.addEventListener('DOMContentLoaded', () => {
     first: () => shownPage()[0]?.id,
     select: id => select(id, false),
     unselect,
+    active: onDocs,
   });
   load();
 });

@@ -11,6 +11,19 @@ window.PAGE_COMMANDS = [
   { label: 'Show the matrix', icon: 'grid-2x2', key: 'v m', run: tasksView('matrix') },
   { label: 'Start next ready tasks', icon: 'play', run: () => document.dispatchEvent(new CustomEvent('tasks:start-next')) },
 ];
+// sd:6263: each realm is a sub tab, in place of sd:5753's Realm filter. The tabs narrow the one board, matrix and list, so
+// they have no view-<id> panel: the shell draws the switch in #viewswitch. Personal, then the realms the dashboard.realms
+// row names (SHELL_REALMS, from /ui/sections.js), then HOA, Home and All. A realm named for one of those tabs, or for a
+// layout panel (list, board, matrix) or the layout menu's view-btn and view-menu (sd:5641), takes no tab: the shell
+// would hide that panel. Home takes v o (g o opens the Home page), since v h is HOA's; a realm takes the first letter
+// of its id that no other tab, and not the layouts' v l, v b and v m, holds.
+window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
+  ...(window.SHELL_REALMS || []).filter(r => /^[a-z0-9][a-z0-9-]*$/.test(r.id) && !['personal', 'hoa', 'home', 'all', 'list', 'board', 'matrix', 'btn', 'menu'].includes(r.id)).map(r => ({ id: r.id, label: r.label })),
+  { id: 'hoa', label: 'HOA', key: 'h' }, { id: 'home', label: 'Home', key: 'o' }, { id: 'all', label: 'All', key: 'a' }];
+{
+  const used = new Set(['l', 'b', 'm', ...window.PAGE_VIEWS.map(v => v.key).filter(Boolean)]);
+  window.PAGE_VIEWS.forEach(v => { if (!v.key) { v.key = [...v.id].find(c => /[a-z]/.test(c) && !used.has(c)); used.add(v.key); } });
+}
 addEventListener('DOMContentLoaded', () => {
   const { ICON, toast, suggest, openPane } = window.shell;
   const C = window.shell.commands;
@@ -58,15 +71,14 @@ addEventListener('DOMContentLoaded', () => {
   // repeating task's next row before due minus its lead (reads.opens_on_clause, pack sd:5648), under Scheduled only.
   const listed = () => tasks.filter(t => !t.parked && !t.scheduled);
   const scoped = t => F.active.has('parked') ? !!t.parked : !t.parked && !!t.scheduled === F.active.has('scheduled');
-  // sd:5753: Realm, a filter in the bar, not a view: Personal, then the realms the dashboard.realms row names (SHELL_REALMS,
-  // from /ui/sections.js), then HOA and Home; its empty choice is All. Personal is the default and ?realm= keeps another.
-  // A row's area is the server's (places.area_of), the rule the HOA and Home pages' Tasks views use, so HOA and Home hold
-  // their rows; its realm is places.realm_of (sd:5064). A realm named personal, hoa, home or all is dropped: those ids are taken.
-  const REALM_OPTS = [['personal', 'Personal'],
-    ...(window.SHELL_REALMS || []).filter(r => /^[a-z0-9][a-z0-9-]*$/.test(r.id) && !['personal', 'hoa', 'home', 'all'].includes(r.id)).map(r => [r.id, r.label]),
-    ['hoa', 'HOA'], ['home', 'Home']];
-  const AT = { realm: 'personal' }, place = () => AT.realm || 'all';
-  let REALMS = null;
+  // sd:6263: the shown realm tab (PAGE_VIEWS above). A row's area is the server's (places.area_of), the rule the HOA and
+  // Home pages' Tasks views use, so HOA and Home hold their rows; its realm is places.realm_of (sd:5064). Metrics' and
+  // Today's links name ?realm=all, as sd:5753's filter kept it: an address's ?realm= shows that tab.
+  const asked = new URLSearchParams(location.search).get('realm');
+  if (asked) window.shell.view.show(asked);
+  let PLACE = window.shell.view.current() || window.PAGE_VIEWS[0].id, REALMS = null;
+  const place = () => PLACE;
+  document.addEventListener('shell:view', e => { if (e.detail.id === PLACE) return; PLACE = e.detail.id; L.page = 1; if (READ) { subhead(); render(); } });
   // sd:5096, sd:5097: the Personal and Work sweeps, as /api/tasks' `sweeps` reads them (sweep.status): running, the last run.
   let SWEEPS = null, sweepTimer = 0;
   const SWEEP_NAME = { personal: 'Personal', work: 'Work' }, SWEEP_POLL = 15000;
@@ -119,9 +131,7 @@ addEventListener('DOMContentLoaded', () => {
       [...new Map([...opts, ...[...F[key]].map(v => [v, fvalue(key, v)])])], F[key], { all, help, multi });
     const same = vs => vs.map(v => [v, v]);
     // sd:5644: one Kind filter. A plugin kind (the row's base: lead, blog-idea…) is a `base:` value after the item kinds.
-    // sd:5753: Realm, first; each choice carries its tasks, as its tab did (sd:5524).
-    const realm = window.shell.list.pick('realm', 'Realm', REALM_OPTS.map(([v, l]) => [v, l, listed().filter(t => inPlace(t, v)).length]), AT.realm, { all: `All · ${listed().length}` });
-    put(document.getElementById('filters'), html`${realm}${combo('kind', 'Kind', [...same(kinds), ...bases.map(b => [`base:${b}`, kindWord(`base:${b}`)])])}${combo('repo', 'Repo', same(repos), '', 'All', true)}${
+    put(document.getElementById('filters'), html`${combo('kind', 'Kind', [...same(kinds), ...bases.map(b => [`base:${b}`, kindWord(`base:${b}`)])])}${combo('repo', 'Repo', same(repos), '', 'All', true)}${
       combo('p', 'Priority', [['1', 'P1'], ['2', 'P2'], ['3', 'P3'], ['4', 'P4'], ['', 'unset']].map(([v, l]) => [v || 'unset', l]))}${
       combo('due', 'Due', DUE_OPTS, html`<button class="help" type="button" aria-label="Help: due filter" data-help="Buckets count from today. <b>≤ 7 days</b> is the same window the matrix calls urgent. An old link may name two buckets; they widen the view, and filters narrow it.">${ICON('circle-help')}</button>`)}${
       combo('age', 'In status', AGES.map(a => [a.key, a.label]), html`<button class="help" type="button" aria-label="Help: in status filter" data-help="Days since the task's last status change, in the buckets the Operations Progress histogram counts (<code>reads.age_bucket</code>). A bar there opens its bucket here.">${ICON('circle-help')}</button>`)}${
@@ -150,8 +160,7 @@ addEventListener('DOMContentLoaded', () => {
   document.getElementById('filters').addEventListener('change', e => {
     // The redraw replaces the checkbox, so focus goes back to the new one.
     if (e.target?.id === 'f-done') { SHOW.done = !!e.target.checked; render(); document.getElementById('f-done')?.focus(); return; }
-    window.shell.list.pickChange(e, F, () => { L.page = 1; render(); }) || window.shell.list.pickChange(e, SHOW, render)
-      || window.shell.list.pickChange(e, AT, () => { L.page = 1; subhead(); render(); });
+    window.shell.list.pickChange(e, F, () => { L.page = 1; render(); }) || window.shell.list.pickChange(e, SHOW, render);
   });
   function clearFilters() { Object.values(F).forEach(s => s.clear()); Q = ''; find.value = ''; L.page = 1; render(); }
   // The text filter narrows on what a row shows: id, title, repo, status and kind, as v1's ?q= read the visible columns.
@@ -473,7 +482,8 @@ addEventListener('DOMContentLoaded', () => {
       ? ` · repos in no realm: ${REALMS.state === 'missing' ? 'no realm list; set dashboard.realms on Settings' : `${REALMS.source} ${REALMS.problems[0] || 'was not read'}`}` : '';
     // Personal and Work name their sweep's last run and carry Run sweep (sd:5096, sd:5097).
     const w = SWEEP_NAME[place()] && SWEEPS?.[place()];
-    // Each Realm choice carries its tasks, so the line under the title counts none.
+    // Each realm tab carries its tasks (sd:5524), so the line under the title counts none.
+    window.PAGE_VIEWS.forEach(v => window.shell.view.count(v.id, listed().filter(t => inPlace(t, v.id)).length));
     put(document.getElementById('subhead'), html`${parked ? `${parked} parked · ` : ''}${scheduled ? `${scheduled} scheduled · ` : ''}read ${READ ? html`<time class="rel" datetime="${READ}"></time>` : 'not yet'} · ${SUB[view]}${why}${w ? html` · <span class="sweep" data-sweep="${place()}">${SWEEP_NAME[place()]} ${sweepText(w)} ${C.rowActions('sweep:' + place())}</span>` : ''}`);
   }
   // The view menu (sd:5064): one button shows the current view's icon; its menu lists the three, one checked. The shell
@@ -500,12 +510,6 @@ addEventListener('DOMContentLoaded', () => {
     (q.get('cols') || '').split(',').filter(v => COL_OPTS.some(o => o[0] === v)).forEach(v => SHOW.cols.add(v));
     SHOW.done = q.get('done') === '1';
     find.value = (q.get('q') || '').trim(); Q = find.value.toLowerCase();
-    // sd:5753: ?realm=, else an older link's #view=<realm> (Metrics' bars linked #view=all), else Personal. The old hash
-    // leaves the address, so the next write does not carry it.
-    const old = /^#view=([a-z0-9-]+)$/.exec(location.hash || '')?.[1], known = v => v === 'all' || REALM_OPTS.some(o => o[0] === v);
-    const realm = [q.get('realm'), old].find(known) || 'personal';
-    AT.realm = realm === 'all' ? '' : realm;
-    if (old) try { history.replaceState(history.state, '', location.pathname + location.search); } catch (_) {}
     // A page is decimal digits, as on Documents (sd:2427).
     window.shell.list.listParams(q, L, { sorts: Object.keys(SORTS), size: LIST.size });
     if (!/^[1-9]\d*$/.test(q.get('page') || '')) seek = !!selected;
@@ -516,7 +520,6 @@ addEventListener('DOMContentLoaded', () => {
     if (Q) q.set('q', Q);
     if (SHOW.cols.size) q.set('cols', [...SHOW.cols].join(','));
     if (SHOW.done) q.set('done', '1');
-    if (AT.realm !== 'personal') q.set('realm', place());
     if (view === 'list') window.shell.list.listQuery(q, L, LIST);
     shell.url(q); // the shell keeps ?row=
     shell.filter(Q); // the shell's bar shows the same text (sd:5539)

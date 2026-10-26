@@ -5,8 +5,8 @@
   statuses and age bucket), read when the page opens and after a write; /api/tasks/<id> (tasks_screen.details: the sd task show <id> JSON split into
   status history and notes, the item's assignments, and its external context), read when a task is selected.
   The operator's issues (sd:4628) moved to Today's Issues view (sd:5645): this page keeps no copy.
-  Realm, a filter in the bar (sd:5753): Personal, each realm, HOA or Home narrows the rows to the realm or area each row carries
-  (places.realm_of, places.area_of), the HOA and Home pages' rule; All shows every row.
+  Realm sub tabs (sd:6263): Personal, each realm, HOA or Home narrows the rows to the realm or area each row carries
+  (places.realm_of, places.area_of), the HOA and Home pages' rule; All shows every row. The filters apply inside each tab.
   Writes: the v1 action routes (status, edit, note resolve, capture) and task cancel (Close, sd:3012). Nothing here is sample data.
   A task's Details, commands and writes are task-details.js's (sd:5635), which the Home and realm place pages draw too.
 -->
@@ -34,8 +34,9 @@
   </div>
 
   <div id="state" hidden></div>
-  <!-- The toolbar standard (sd:5281): row 1, add or find and the layouts; row 2, the filters, Realm first (sd:5753). -->
+  <!-- The toolbar standard (sd:5281): row 1, the realm tabs, add or find and the layouts; row 2, the filters. -->
   <div class="toolbar" id="toolbar">
+    <div id="viewswitch"></div>
     <div class="shift" id="shift">
       <label class="sr" for="shift-in">Add or find a task</label>
       <div class="field">

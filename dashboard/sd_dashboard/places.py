@@ -19,10 +19,10 @@ are the same `tasks_screen._rows` (sd:5671).
 
 **A realm's place page (sd:5663).** A realm whose id is also a `dashboard.report_families` key is a place, at
 `/places?realm=<id>`, its views at `/api/place/<id>/<view>`. Its Tasks are the open items `realm_of` puts in it, as
-Tasks' Realm filter; its Briefs are those whose repo is in it or whose series is a job of its family; its Reports are its
+Tasks' realm tab; its Briefs are those whose repo is in it or whose series is a job of its family; its Reports are its
 family's. `realm_places` says which realms are places, for the rail: a realm or family line that did not read makes none.
 
-**Which realm a row is in (sd:5064).** Tasks' Realm filter, Personal, Work and the others: the `dashboard.realms` setting row
+**Which realm a row is in (sd:5064).** Tasks' realm tabs, Personal, Work and the others: the `dashboard.realms` setting row
 (sd:5109; Settings edits it) names each realm and the checkout path globs that are its (`realms`); `realm_of` gives a row the first realm whose glob matches its repo path. A
 row with no repo, or a repo no line claims, is Personal; a report is in no realm. Without a readable row a repo row's
 realm is unknown (None), so Personal holds only the rows with no repo and the page says why.
