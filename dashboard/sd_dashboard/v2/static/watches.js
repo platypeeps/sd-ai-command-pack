@@ -21,8 +21,9 @@
   const JOB = () => DOC?.job || {};
   const order = s => { const i = STAGES.findIndex(x => x[0] === s); return i < 0 ? STAGES.length : i; };
   function shown() {
-    // The oldest refresh first: what needs a refresh leads; a watch with no date sorts before any date.
-    const key = { title: r => r.title.toLowerCase(), stage: r => order(r.stage), refreshed: r => r.refreshed || '', host: r => r.host }[L.sort] || (r => String(r[L.sort] || '').toLowerCase());
+    // The oldest refresh first: what needs a refresh leads, active watches before the rest, and within each a watch with no
+    // date before any date.
+    const key = { title: r => r.title.toLowerCase(), stage: r => order(r.stage), refreshed: r => `${r.stage === 'active' ? 0 : 1}${r.refreshed || ''}`, host: r => r.host }[L.sort] || (r => String(r[L.sort] || '').toLowerCase());
     const q = F.q.toLowerCase().split(/\s+/).filter(Boolean);
     return ROWS.filter(r => (!F.stage || r.stage === F.stage) && q.every(w => `${r.title} ${r.kind} ${r.area} ${r.description} ${r.host}`.toLowerCase().includes(w))).sort((a, b) => (key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0) * L.dir);
   }

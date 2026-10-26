@@ -236,6 +236,8 @@ class TheScript(ScreenCase):
         self.assertIn('<a class="ext" href="https://logs.example.test/about" target="_blank" rel="noopener noreferrer">logs.example.test</a>', rows)
         # The oldest refresh first, a watch with no date before any: the first row is the one that needs a refresh.
         self.assertLess(rows.index("New Agent"), rows.index("Widget Ops"))
+        # Active watches lead: a candidate with no date is not refreshed, so it follows them.
+        self.assertLess(rows.index("Example Logs"), rows.index("Maybe Co"))
         self.assertIn("<h2>New Agent</h2>", r["details"])
         self.assertIn('data-f="stage" data-v="active"', r["filters"])
         self.assertIn("Last refresh", r["head"])

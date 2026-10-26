@@ -106,3 +106,5 @@
 
 /* sd:6260: the facets are the Documents list's; they hide while Books shows. */
 .facets[hidden] { display: none; }
+/* sd:6261: an author or a channel is free text; it wraps, so a long one cannot push the ledger under Details. */
+#view-books .ledger .repo, #view-videos .ledger .repo { white-space: normal; overflow-wrap: anywhere; }
