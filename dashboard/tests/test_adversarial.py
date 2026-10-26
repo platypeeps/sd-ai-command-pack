@@ -27,7 +27,7 @@ from unittest.mock import patch
 from sd_db import review, routine_briefs, upsert_shadow, workflow, writes
 from sd_db.testing import patience
 
-from sd_dashboard import adversarial, command_journal
+from sd_dashboard import adversarial
 
 from test_workflow_actions import BrowserSession
 
@@ -110,11 +110,10 @@ def _gone(pid):
 class AdversarialCase(BrowserSession):
     def setUp(self):
         super().setUp()
-        # sd:6106: what a case starts ends before its folder goes. A released runner files into the case's database,
-        # and the execution journal's watch writes its log beside it: one writing while the folder was removed failed
-        # the case with 'Directory not empty'. The watch looks often here, so the drain below waits little.
-        self.enterContext(patch.object(command_journal, "POLL_SECONDS", 0.1))
-        self.addCleanup(self.drain, set(threading.enumerate()))
+        # sd:6106: what a case starts ends before its folder goes. A released runner files into the case's database:
+        # one writing while the folder was removed failed the case with 'Directory not empty'. Its journal watch is
+        # `ScreenCase.end_journal_watches`'s, which runs after this one, once the runners are gone (sd:6324).
+        self.addCleanup(self.drain)
         # Resolved, as git names a checkout: macOS's temporary folder is a symlink.
         root = Path(self.tmp.name).resolve()
         self.root = root
@@ -146,9 +145,8 @@ class AdversarialCase(BrowserSession):
         # A run still holding the lock when a case ends would hold it into the next case's state folder: release it.
         self.addCleanup(self.release.write_text, "")
 
-    def drain(self, before):
-        """Wait for each runner the case started, then move the database aside, so each journal watch it started
-        returns at its next look (`command_journal.watch`), and wait for those too."""
+    def drain(self):
+        """Wait for each runner the case started; `ScreenCase.end_journal_watches` then ends its journal watches."""
         deadline = time.monotonic() + patience(SETTLE)
         # A case that runs the runner in this process records this process.
         pids = ({json.loads(path.read_text()).get("pid") for path in self.runs.glob("*.json")} if self.runs.exists()
@@ -156,14 +154,7 @@ class AdversarialCase(BrowserSession):
         for pid in pids:
             while not _gone(pid) and time.monotonic() < deadline:
                 time.sleep(0.05)
-        watches = [thread for thread in threading.enumerate()
-                   if thread not in before and thread.name.startswith("sd-journal ")]
-        if watches and self.path.exists():
-            os.replace(self.path, self.path.with_name(self.path.name + ".ended"))
-        for thread in watches:
-            thread.join(max(0.0, deadline - time.monotonic()))
         self.assertEqual([pid for pid in pids if not _gone(pid)], [], "a runner outlived its case")
-        self.assertEqual([thread.name for thread in watches if thread.is_alive()], [], "a journal watch outlived its case")
 
     def review(self, kind, target, **extra):
         return self.post("/api/adversarial", {"kind": kind, "target": target, **extra})

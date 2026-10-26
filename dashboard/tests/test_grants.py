@@ -33,6 +33,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import sd_tile
+from support import bound_from
 
 HERE = Path(__file__).resolve().parents[1]
 
@@ -329,12 +330,14 @@ class Control(unittest.TestCase):
         (self.root / "vault").mkdir()
         pids = self.root / "pids"
         slow = self.root / "slow"
-        slow.write_text(f'#!/bin/sh\nsleep 60 &\necho $! > "{pids}"\nwait\n')
+        slow.write_text(f'#!/bin/sh\nsleep 60 &\necho $! > "{pids}.new"\nmv "{pids}.new" "{pids}"\nwait\n')
         slow.chmod(0o755)
-        started = time.monotonic()
-        with patch.object(self.module, "VAULT_CONTROL", str(slow)):
+        # The 1 s counts from the grandchild's pid file: under load the script took longer to start it (sd:6299).
+        with patch.object(self.module, "VAULT_CONTROL", str(slow)), bound_from(self.module, pids):
+            started = time.monotonic()
             self.assertEqual(self.module.control_listing(timeout=1), "waited")
         self.assertLess(time.monotonic() - started, 10)
+        self.assertTrue(pids.exists(), "the control never started its grandchild, so it wrote no pid file")
         grandchild = int(pids.read_text())
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
