@@ -32,14 +32,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import connect, writes
+from sd_db import connect, create_item, writes
 
-from sd_dashboard import documents, documents_screen, research_screen, server, v2
+from sd_dashboard import documents, documents_screen, learning_screen, research_screen, server, v2
 
 from support import NOW, ScreenCase
 from test_v2_read import READ_SHELL
 from test_v2_today import OSASCRIPT, Refused
-from test_v2_tasks import SHELL, STAND_IN
+from test_v2_tasks import SHELL, STAND_IN, VIEW_SHELL
 from test_workflow_actions import BrowserSession
 from test_v2_registry import Registers
 
@@ -47,6 +47,7 @@ V2 = Path(v2.__file__).resolve().parent
 DOCUMENTS_JS = (V2 / "static" / "documents.js").read_text(encoding="utf-8")
 MARKUP_JS = (V2 / "static" / "markup.js").read_text(encoding="utf-8")
 COMMANDS_JS = (V2 / "static" / "commands.js").read_text(encoding="utf-8")
+LEARNING_JS = (V2 / "static" / "learning.js").read_text(encoding="utf-8")
 
 #: The design's Documents commands (design source products/system/designs/pages/documents.js): id, object type, label, key, risk.
 COMMANDS = [
@@ -397,7 +398,7 @@ class ThePage(BrowserSession):
         self.assertIn("<title>Documents · system</title>", body)
         self.assertEqual(Refused(body).found, [])
         scripts = re.findall(r'<script src="/ui/([^"?]+)', body)
-        self.assertEqual(scripts, ["theme.js", "markup.js", "icons.js", "sections.js", "read.js", "commands.js", "documents.js", "shell.js"])
+        self.assertEqual(scripts, ["theme.js", "markup.js", "icons.js", "sections.js", "read.js", "commands.js", "documents.js", "learning.js", "shell.js"])
         for path in re.findall(r'(?:src|href)="(/ui/[^"]+)"', body):
             self.assertEqual(self.request(path)[0], 200, path)
 
@@ -1024,8 +1025,144 @@ R.rows = ELS.rows.html; R.type = C.get('lab/plan.html').type; R.att = window.PAG
         self.assertIn("window.PAGE_LIST", DOCUMENTS_JS)
 
 
+def learning(connection, title, stage, **fields):
+    """One `sdw.learning` base row, as the vault import files it: an idea item of source vault whose fields name its kind."""
+    return create_item(connection, kind="idea", title=title, status={"queued": "planning", "in-progress": "ready"}.get(stage, "done"),
+                       source="vault", external_id=f"learning:Learning/{title}.md", path=f"Learning/{title}.md", stage=stage,
+                       fields={"kind": "learning", "dateCreated": "2026-01-06", **fields}, body={"markdown": ""})
+
+
+def seed_learning(connection):
+    """A book, an article with a URL that is no link, a book with only a URL, a video and a course."""
+    return {
+        "book": learning(connection, "Agile Retrospectives", "in-progress", **{"content-type": "book", "author": ["A. Writer", "B. Writer"],
+                         "subtitle": "Making Good Teams Great", "url": "https://books.example.test/retro", "published-date": "2006",
+                         "total-pages": "170", "isbn": "9780000000000", "description": "Retrospectives that work."}),
+        "article": learning(connection, "On Queues", "queued", **{"content-type": "article", "publisher": "Example Weekly",
+                            "url": "javascript:alert(1)"}),
+        "bare": learning(connection, "A Bare Book", "done", **{"content-type": "book", "url": "https://press.example.test/bare"}),
+        "video": learning(connection, "2016-06-06 - YouTube - Example Channel - A Talk", "in-progress",
+                          **{"content-type": "youtube", "channel": "Example Channel", "url": "https://www.youtube.com/watch?v=x"}),
+        "course": learning(connection, "A Course", "queued", **{"content-type": "course", "url": "https://course.example.test"}),
+    }
+
+
+class TheBooks(ScreenCase):
+    """sd:6260: `/api/documents/books` lists the learning rows that are books or articles, each with its title, author or
+    source, URL and read state, and nothing else."""
+
+    def test_a_book_row_says_its_title_author_or_source_url_and_read_state(self):
+        ids = seed_learning(self.connection)
+        rows = {r["id"]: r for r in learning_screen.books(self.connection, now=NOW)["rows"]}
+        self.assertEqual(sorted(rows), sorted([ids["book"], ids["article"], ids["bare"]]), "a video or a course is no book")
+        book = rows[ids["book"]]
+        self.assertEqual((book["title"], book["by"], book["url"], book["host"], book["stage"], book["state"], book["kind"]),
+                         ("Agile Retrospectives", "A. Writer, B. Writer", "https://books.example.test/retro", "books.example.test",
+                          "in-progress", "reading", "book"))
+        self.assertEqual((book["subtitle"], book["published"], book["pages"], book["isbn"], book["added"]),
+                         ("Making Good Teams Great", "2006", "170", "9780000000000", "2026-01-06"))
+        # The source is the publisher when no author is named, else the URL's host.
+        article, bare = rows[ids["article"]], rows[ids["bare"]]
+        self.assertEqual((article["by"], article["state"], article["kind"]), ("Example Weekly", "to read", "article"))
+        self.assertEqual((bare["by"], bare["state"]), ("press.example.test", "done"))
+        # A URL that is not http or https is no link: the page shows its text.
+        self.assertEqual((article["url"], article["url_text"]), ("", "javascript:alert(1)"))
+
+    def test_the_route_reads_the_books(self):
+        seed_learning(self.connection)
+        doc = v2.pages.documents._books(types.SimpleNamespace(connection=self.connection, now=NOW))
+        self.assertEqual(doc["read"], NOW)
+        self.assertEqual(sorted(r["title"] for r in doc["rows"]), ["A Bare Book", "Agile Retrospectives", "On Queues"])
+
+
+class TheLearningScript(ScreenCase):
+    """sd:6260: learning.js draws the Books view beside the Documents list, in the shared Details pane."""
+
+    def run_view(self, body, docs):
+        """documents.js and learning.js with the shell's view switch; /api/documents answers with no roots, each view's api with `docs`."""
+        answer = ("(p) => p === '/api/documents' ? [200, { read: '2026-09-06T12:00:00Z', roots: [], documents: [], store: { available: true } }]"
+                  f" : ({json.dumps(docs)})[p] || [404, {{ error: 'no ' + p }}]")
+        script = (STAND_IN + "location.search = ''; location.origin = 'http://dash.example.test';\nvar ROW = null;\n"
+                  + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL + SHELL_MORE + VIEW_SHELL + "\n" + READ_SHELL
+                  + f"\nANSWER = {answer};\n" + COMMANDS_JS + DOCUMENTS_JS + LEARNING_JS
+                  + "\nvar R = {};\n(async () => { try {\n(DOC_LISTENERS.DOMContentLoaded || []).forEach(f => f());\nawait flush();\n"
+                  + body + "\n} catch (e) { OUT.error = String(e) + ' ' + e.stack; } })();\n"
+                  + "function run() { OUT.R = R; OUT.toasts = OUT.toasts.map(t => [t.msg, !!t.undo]); return JSON.stringify(OUT); }\n")
+        result = subprocess.run([OSASCRIPT, "-l", "JavaScript", "-e", script], capture_output=True, text=True, timeout=60, check=False)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        out = json.loads(result.stdout)
+        self.assertIsNone(out["error"])
+        return out
+
+    def books(self):
+        seed_learning(self.connection)
+        return {"/api/documents/books": [200, learning_screen.books(self.connection, now=NOW)]}
+
+    def test_books_is_a_view_that_reads_when_it_first_shows(self):
+        out = self.run_view("""R.views = window.PAGE_VIEWS.map(v => [v.id, v.label, v.api || null]); R.before = OUT.gets.slice();
+R.details0 = ELS.details.html; window.shell.view.show('books'); await flush();
+R.rows = ELS['books-rows'].html; R.head = ELS['books-head'].html; R.filters = ELS['books-filters'].html; R.details = ELS.details.html;
+R.facets = ELS.facets.hidden; R.tally = ELS['books-tally'].html;""", self.books())
+        r = out["R"]
+        self.assertEqual(r["views"], [["documents", "Documents", None], ["books", "Books", "/api/documents/books"]])
+        self.assertEqual(r["before"], ["/api/documents"], "Books reads only when it first shows")
+        self.assertEqual(out["gets"], ["/api/documents", "/api/documents/books"])
+        rows = r["rows"]
+        # Title, author or source, URL and read state, each row.
+        self.assertIn("<button type=\"button\">Agile Retrospectives</button><span class=\"file\">Making Good Teams Great</span>", rows)
+        self.assertIn(">A. Writer, B. Writer</td>", rows)
+        self.assertIn('<a class="ext" href="https://books.example.test/retro" target="_blank" rel="noopener noreferrer">books.example.test</a>', rows)
+        self.assertIn('<td class="kind">reading</td>', rows)
+        self.assertIn('<td class="kind">to read</td>', rows)
+        self.assertIn(">Example Weekly</td>", rows)
+        self.assertNotIn('href="javascript', rows)
+        self.assertIn('<td class="mod">javascript:alert(1)</td>', rows)
+        self.assertNotIn("A Talk", rows)
+        self.assertIn('data-sort="by"', r["head"])
+        self.assertIn("Read state", r["head"])
+        self.assertIn('data-f="state" data-v="in-progress"', r["filters"])
+        self.assertEqual(r["tally"], "3 titles")
+        self.assertEqual(out["counts"]["books"], 3)
+        # The first row by title shows in the one Details pane, with its facts and item link.
+        self.assertIn("<h2>A Bare Book</h2>", r["details"])
+        self.assertIn("<dt>Item</dt><dd><a href=\"/tasks?row=", r["details"])
+        # The facets are the Documents list's: they hide while Books shows.
+        self.assertTrue(r["facets"])
+
+    def test_the_state_filter_and_the_search_fields_words_narrow_the_books(self):
+        """The page's one search field filters the shown view by its plain words; repo: and kind: are the list's tokens."""
+        out = self.run_view("""window.shell.view.show('books'); await flush();
+ELS['books-filters'].listeners.click[0]({ target: { closest: s => s === '[data-f="state"]' ? { dataset: { f: 'state', v: 'queued' } } : null } });
+R.queued = ELS['books-rows'].html;
+ELS['books-filters'].listeners.click[0]({ target: { closest: s => s === '[data-fclear]' ? {} : null } });
+ELS.shift.value = 'writer kind:research'; ELS.shift.listeners.input.forEach(f => f({ target: ELS.shift })); await flush(); R.text = ELS['books-rows'].html;""", self.books())
+        r = out["R"]
+        self.assertIn("On Queues", r["queued"])
+        self.assertNotIn("Agile Retrospectives", r["queued"])
+        self.assertIn("Agile Retrospectives", r["text"])
+        self.assertNotIn("On Queues", r["text"])
+
+    def test_open_link_and_open_item_run_on_a_book(self):
+        out = self.run_view("""window.shell.view.show('books'); await flush();
+const book = [...OBJ.values()].find(o => o.type === 'book' && o.title === 'Agile Retrospectives');
+const article = [...OBJ.values()].find(o => o.type === 'book' && o.title === 'On Queues');
+R.reg = REG.filter(c => c.on === 'book').map(c => [c.id, c.label, c.key, c.risk]);
+C.run(cmd('book.open'), book); C.run(cmd('book.open'), article); R.cli = cmd('book.item').cli(book);""", self.books())
+        self.assertEqual(out["R"]["reg"], [["book.open", "Open link", "o", "safe"], ["book.item", "Open item", "i", "safe"]])
+        self.assertEqual(out["opened"], [["https://books.example.test/retro", "_blank", "noopener"]])
+        self.assertIn(["off: no http or https URL on this row", False], out["toasts"])
+        self.assertRegex(out["R"]["cli"], r"^sd task show \d+$")
+
+    def test_a_failed_read_says_so_and_the_documents_list_keeps_its_details(self):
+        out = self.run_view("""window.shell.view.show('books'); await flush(); R.details = ELS.details.html;""",
+                            {"/api/documents/books": [500, {"error": "no such table: item"}]})
+        self.assertIn({"kind": "error", "text": "The books and articles were not read: no such table: item. Reload retries it.", "source": "/api/documents/books"},
+                      out["states"])
+        self.assertIn("The books and articles were not read, so nothing is selected.", out["R"]["details"])
+
+
 class TheRegistration(Registers, unittest.TestCase):
-    page, section, route, api = "documents", "Documents", "/documents", ("/api/documents", "/api/documents/view", "/api/documents/publish", "/api/documents/unpublish",
+    page, section, route, api = "documents", "Documents", "/documents", ("/api/documents", "/api/documents/books", "/api/documents/view", "/api/documents/publish", "/api/documents/unpublish",
                                                                          "/api/documents/publish-now", "/api/documents/publish-now/drain-x-20261018T000000Z")
 
 

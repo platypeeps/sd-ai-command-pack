@@ -103,3 +103,6 @@
 @media (max-width: 399px) {
   .ledger .acts .rowact .btn { display: none; } /* the row keeps ⋯; the primary command stays in Details */
 }
+
+/* sd:6260: the facets are the Documents list's; they hide while Books shows. */
+.facets[hidden] { display: none; }

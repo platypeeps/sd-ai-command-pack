@@ -6,6 +6,9 @@
   /documents/<key>/<file> serves, with its title, h1 and stand line, its derived kind and its render state), read when the page opens.
   Pin, Hide and Tag write the workflow database's view state through POST /api/documents/view (sd:3428), and so do Rename
   root and Hide root (sd:3986). Nothing here is sample data.
+  Books (sd:6260) is a view beside the list: /api/documents/books (learning_screen.books: the vault's learning rows
+  whose content-type is book or article), read when the view first shows, drawn by learning.js into the one Details pane.
+  The search field above filters the shown view; the facets are the Documents list's and hide while Books shows.
 -->
 <html lang="en">
 <head>
@@ -70,6 +73,23 @@
       <div id="pager"></div>
       <div id="list-help"></div>
     </section>
+
+    <section id="view-books" aria-labelledby="books-h">
+      <div id="state-books" hidden></div>
+      <div class="sec-head">
+        <h2 id="books-h">Books and articles <button class="help" type="button" aria-label="Help: Books and articles" data-help="<b>The vault's Learning base.</b> Each row is a learning note whose content-type is book or article. Its read state is the row's stage: to read, reading, done or dropped. Open item moves it in Tasks; nothing here writes.">
+          <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+        <p class="tally" id="books-tally"></p>
+      </div>
+      <div class="filters toolbar-2" id="books-filters"></div>
+      <table class="ledger" aria-labelledby="books-h" data-tfilter="page" data-toolbar="toolbar">
+        <thead id="books-head"></thead>
+        <tbody id="books-rows"></tbody>
+      </table>
+      <p class="empty" id="books-empty" hidden></p>
+      <div id="books-pager"></div>
+      <div id="books-help"></div>
+    </section>
   </main>
 
   <div class="details" id="details"><p class="why">Select a document to see its facts and what can be done with it.</p></div>
@@ -78,6 +98,7 @@
 <script src="/ui/read.js"></script>
 <script src="/ui/commands.js"></script>
 <script src="/ui/documents.js"></script>
+<script src="/ui/learning.js"></script>
 <script src="/ui/shell.js"></script>
 </body>
 </html>

@@ -44,3 +44,12 @@ first, queues the copy for the trash (sd:5489), then removes the key; Undo ticks
 the vault copy into the vault's `.trash` (sd:5500). In the vault's own repository Obsidian stays the repo's channels
 setting, and the pane says so. Publish now drains that row's requests;
 RUNTIME.md names the run.
+
+Books (sd:6260) is a sub tab beside Documents. It reads
+`GET /api/documents/books` (`learning_screen.books`): the vault's learning
+rows whose `content-type` is `book` or `article`. A row shows the title, the
+author or source (author, else publisher, else the URL's host), the URL and
+the read state (to read, reading, done, dropped, from the row's stage). The
+state chips and the search field filter it; the Documents facets hide while
+it shows. Details shows the row's facts with Open link and Open item. The
+view writes nothing: a row's kind and stage stay as the store holds them.
