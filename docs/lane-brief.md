@@ -18,7 +18,10 @@ for the controls a run passes through.
 ## Which items
 
 Fill a brief from `ready` items first, ranked by value per hour: they need no further question.
-Put one repository's ready items in one brief; there is no intake cap.
+Bundle one pull request per repository per wave: a wave is the round of lanes you start together,
+and each repository gets one brief, one branch and one pull request in it, one commit per item.
+There is no intake cap; items that change the same files always share the brief.
+A change that moves state in steps still gets its own brief.
 [WORKFLOW.md § Parallel work](../WORKFLOW.md#parallel-work) holds the rule.
 
 ## The template
@@ -45,14 +48,18 @@ Put one repository's ready items in one brief; there is no intake cap.
 >
 > Remove the worktree when the lane ends, after the branch is pushed.
 >
-> ### Your item
+> ### Your items
 >
-> **<repo> sd:<N>** — `<title>`. Read it in full from the store; it is the authority,
-> not this brief:
+> **<repo> sd:<N>** — `<title>`, one line per item of this repository's
+> wave; the first is the lead item that names the branch. Read each in full
+> from the store; it is the authority, not this brief:
 >
 > ```
 > <pack checkout>/bin/sd store item <N> --json
 > ```
+>
+> Deliver them on the one branch as one pull request, one commit per item,
+> each commit ending `Closes: sd:<N>` for the item it completes.
 >
 > That is the canonical read — the row, every note, and the revision, in one
 > call. It is a read verb; it writes nothing. Do not hand-roll a `sqlite3`
