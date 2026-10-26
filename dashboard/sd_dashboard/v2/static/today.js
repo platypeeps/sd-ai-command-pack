@@ -287,7 +287,8 @@ window.PAGE_FILTER = { '': 'Needs you' };
     const mark = m => { const at = x(m.at), tip = html`<title>${hm(m.at)} UTC · ${m.what}</title>`;
       return html`<a href="${markHref(m.lane, m)}">${m.lane === 'landed' ? html`<line class="land" x1="${at}" y1="10" x2="${at}" y2="26">${tip}</line>`
         : m.lane === 'jobs' ? html`<rect class="fail" x="${(at - 4).toFixed(1)}" y="36" width="8" height="8">${tip}</rect>`
-        : m.lane === 'briefs' ? html`<circle class="brief" cx="${at}" cy="58" r="3.5">${tip}</circle>`
+        // sd:6232: a solid dot, a shape no other lane uses, inside a clear 24-unit square that takes the press.
+        : m.lane === 'briefs' ? html`<rect class="hit" x="${(at - 12).toFixed(1)}" y="46" width="24" height="24">${tip}</rect><circle class="brief" cx="${at}" cy="58" r="4.5"/>`
         : html`<rect class="sess" x="${at}" y="72" width="${Math.max(2, W - 8 - at).toFixed(1)}" height="3">${tip}</rect>`}</a>`; };
     put($('track-plot'), marks.length ? html`<svg viewBox="0 0 ${W} 100" role="img" aria-label="${said}">
       ${ticks.map(t => html`<line class="grid" x1="${x(new Date(t).toISOString())}" y1="6" x2="${x(new Date(t).toISOString())}" y2="80"/><text class="axis" x="${x(new Date(t).toISOString())}" y="94" text-anchor="middle">${String(new Date(t).getHours()).padStart(2, '0')}:00</text>`)}

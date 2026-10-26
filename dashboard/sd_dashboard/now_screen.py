@@ -599,6 +599,24 @@ def brief_needs(briefs: list[dict]) -> list[dict]:
                    QUIET, rows, source="briefs")]
 
 
+def grill_rows(connection: sqlite3.Connection) -> list[dict]:
+    """Each weekly grill the KISS audit filed with questions open, as one queued Needs you row (pack sd:6022).
+
+    The operator starts it by saying 'grill' in a fresh session, which walks its questions; a read that failed is a
+    dark row, never a week with no grill.
+    """
+    from sd_db import today
+
+    try:
+        found = today.grill(connection)
+    except (SdDbError, sqlite3.Error) as failure:
+        return [dark_row("grill", str(failure) or "the grill items could not be read")]
+    return [{"id": f"grill:{row['id']}", "kind": "item", "rank": QUIET, "item": row["id"], "repo": row["repo"],
+             "state": "grill ready", "what": f"Grill ready: {row['questions']} "
+             f"{'question' if row['questions'] == 1 else 'questions'}", "detail": "say 'grill' in a fresh session",
+             "source": "tasks", "at": row["at"]} for row in found]
+
+
 def needs(rows: list[dict], *, work: list[dict], live: set[int], today: str, lanes: list[dict],
           briefs: list[dict]) -> list[dict]:
     """Needs you (sd:5921): every fact that asks the operator to act, ranked in the bands, as one list.
@@ -880,7 +898,7 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
                                                 *unread_rows(sources, kept, queue, active, reported, mail)], snoozes)
     held = [{**row, "lamp": LAMP.get(row["source"], "")} if row["kind"] == "dark" else row
             for row in snoozed + dark_snoozed + work_snoozed + reports_snoozed + mail_snoozed]
-    listed = needs([*shown, *dark, *reports, *threads], work=work, live=live, today=now[:10],
+    listed = needs([*shown, *dark, *reports, *threads, *grill_rows(connection)], work=work, live=live, today=now[:10],
                    lanes=queue.get("lanes") or [], briefs=reported["briefs"])
     summary = lane_summary(queue)
     return {"now": now, "sources": sources, "observed": observed, "rows": shown, "active": active,

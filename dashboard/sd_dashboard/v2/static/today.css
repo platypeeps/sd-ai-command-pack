@@ -12,7 +12,10 @@
 .daytrack .grid { stroke: var(--color-grid); stroke-width: 1; }
 .daytrack .land { stroke: var(--color-series-1); stroke-width: 2; }
 .daytrack .fail { fill: var(--color-warning); }
-.daytrack .brief { fill: none; stroke: var(--color-muted); stroke-width: 1.2; }
+/* sd:6232: the brief mark is a solid dot; its clear .hit square (24 units, 24px at the 900px track) takes the press. */
+.daytrack .brief { fill: var(--color-ink-2); pointer-events: none; }
+.daytrack .hit { fill: transparent; }
+.daytrack a:hover .brief { fill: var(--color-ink); }
 .daytrack .sess { fill: var(--color-accent); }
 .daytrack .now { stroke: var(--color-accent); stroke-width: 1.5; }
 .daytrack a:focus-visible > * { outline: 2px solid var(--color-focus); }

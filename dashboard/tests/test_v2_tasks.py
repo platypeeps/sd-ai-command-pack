@@ -922,7 +922,7 @@ box('no repo', true); R.two = ELS['view-board'].html; R.after = ELS.filters.html
                        status_since=(read - dt.timedelta(days=days)).isoformat().replace("+00:00", "Z"))
         saved, self.doc = self.doc, doc
         try:
-            out = self.run_page("R.board = ELS['view-board'].html;")
+            out = self.run_page("R.board = ELS['view-board'].html;", search="?done=1")
         finally:
             self.doc = saved
         board = out["R"]["board"]
@@ -930,6 +930,40 @@ box('no repo', true); R.two = ELS['view-board'].html; R.after = ELS.filters.html
         self.assertIn("Done this week", done)
         self.assertNotIn("Done long ago", board)
         self.assertIn('title="done in the last 7 days"', done)
+
+    def test_the_board_hides_done_until_show_done_and_the_status_filter_is_gone(self):
+        """sd:6233: Tasks has no Status dropdown; the board's Show done checkbox shows its Done column, hidden by default
+        (operator decision, note 30400), and the address keeps it as done=1. The list ignores it and keeps its done rows;
+        the matrix never shows done ones."""
+        import copy
+        import datetime as dt
+        read = dt.datetime.fromisoformat(self.doc["read"].replace("Z", "+00:00"))
+        doc = copy.deepcopy(self.doc)
+        doc["rows"][0].update(status="done", title="Done yesterday", status_since=(read - dt.timedelta(days=1)).isoformat().replace("+00:00", "Z"))
+        saved, self.doc = self.doc, doc
+        try:
+            out = self.run_page("""R.filters = ELS.filters.html; R.board = ELS['view-board'].html;
+ELS.filters.listeners.change.forEach(f => f({ target: { id: 'f-done', checked: true } })); await flush();
+R.board2 = ELS['view-board'].html; R.filters2 = ELS.filters.html; R.url = OUT.urls[OUT.urls.length - 1];
+document.dispatchEvent(new CustomEvent('tasks:view', { detail: 'list' })); await flush(); R.listFilters = ELS.filters.html; R.list = ELS['view-list'].html;""")
+            linked = self.run_page("R.board = ELS['view-board'].html; R.filters = ELS.filters.html;", search="?done=1")
+        finally:
+            self.doc = saved
+        R = out["R"]
+        self.assertNotIn('id="f-status"', R["filters"])
+        self.assertIn('<label class="chk"><input type="checkbox" id="f-done"> Show done</label>', R["filters"])
+        self.assertNotIn('aria-label="Done"', R["board"])
+        self.assertNotIn("Done yesterday", R["board"])
+        self.assertIn("data-nodone", R["board"])
+        self.assertIn('aria-label="Done"', R["board2"])
+        self.assertIn("Done yesterday", R["board2"])
+        self.assertNotIn("data-nodone", R["board2"])
+        self.assertIn('<input type="checkbox" id="f-done" checked>', R["filters2"])
+        self.assertIn("done=1", R["url"])
+        self.assertNotIn('id="f-done"', R["listFilters"])
+        self.assertIn("Done yesterday", R["list"])
+        self.assertIn("Done yesterday", linked["R"]["board"])
+        self.assertIn('<input type="checkbox" id="f-done" checked>', linked["R"]["filters"])
 
     def test_the_kind_filter_narrows_the_rows(self):
         out = self.run_page("""ELS.filters.listeners.change[0]({ target: { dataset: { pick: 'kind' }, value: 'work' } });
@@ -992,7 +1026,7 @@ open({port}); await flush(); R.port = ELS.details.html;""")
         self.details[str(plan)]["experiment"] = {"value": "yes", "row": None, "choices": [], "reason": None}
         out = self.run_page(f"open({plan}); await flush(); R.plan = ELS.details.html; open({port}); await flush(); R.port = ELS.details.html;")
         fields = field_help(out["R"]["plan"]) + field_help(out["R"]["port"])
-        self.assertEqual({name for name, _ in fields}, {"Id", "Title", "Status", "Priority", "Due", "Repeat", "Lead", "Repo",
+        self.assertEqual({name for name, _ in fields}, {"Id", "Title", "Status", "Kind", "Priority", "Due", "Repeat", "Lead", "Repo",
                                                         "Urgent", "Quadrant", "Row", "Assignment"})
         self.assertEqual([name for name, helped in fields if not helped], [])
 
@@ -1022,6 +1056,53 @@ change('det-p', '1'); change('det-p', '1'); await flush();""", self.ECHO)
         self.assertIn(f"#{plan} priority P2 → P1 · sd task edit {plan} --priority 1", msgs)
         self.assertIn(f"#{plan} repo → none · sd task edit {plan} --no-repo", msgs)
         self.assertIn(f"#{plan} due removed · sd task edit {plan} --clear-due", msgs)
+
+    # sd:6231: the write moves the stored row's kind and repo too, so the reread after it lists the row as the server would.
+    KIND_ECHO = """(path, body) => { const row = DOC.rows.find(r => path.startsWith('/api/items/' + r.id)); window.WROTE = (window.WROTE || 0) + 1;
+  if ('kind' in body) row.kind = body.kind; if ('repo' in body) { row.repo_path = body.repo; if (!body.repo) row.repo = 'no repo'; }
+  const item = { id: row.id, status: row.status, priority: row.priority, due: row.due, recurrence: row.recurrence, title: row.title, kind: row.kind, repo: row.repo_path };
+  return [200, { item, notes: [], revision: String(window.WROTE % 10).repeat(64) }]; }"""
+    ASKED = "window.shell.confirm = a => { OUT.asked = (OUT.asked || []).concat([[a.title, a.body, a.cli]]); return Promise.resolve(YES.shift()); };\n"
+
+    def test_the_kind_field_changes_the_kind_and_a_repo_less_kind_confirms_clearing_the_repo(self):
+        """sd:6231: Task Details' Kind select writes what `sd task edit --kind` writes; a move to personal or an idea kind
+        clears the repo in the same edit, after a confirm that says so. A kind with a producer is off with the reason."""
+        plan, ask, port = self.ids["plan"], self.ids["ask"], self.ids["port"]
+        out = self.run_page(self.CHANGE + self.ASKED + f"""var YES = [false, true];
+open({plan}); await flush(); R.plan = ELS.details.html; open({port}); await flush(); R.port = ELS.details.html;
+open({ask}); await flush(); change('det-kind', 'task'); await flush(); R.askUndo = !!lastUndo(); await lastUndo().undo(); await flush();
+open({plan}); await flush(); change('det-kind', 'personal'); await flush(); R.declined = OUT.posts.length;
+change('det-kind', 'personal'); await flush(); R.kind = DOC.rows.find(r => r.id === {plan}).kind;""", self.KIND_ECHO)
+        self.assertRegex(out["R"]["plan"], r'<select id="det-kind" class="fld"><option value="task" selected>task</option>'
+                                           r'<option value="personal">personal</option><option value="followup">followup</option>'
+                                           r'<option value="work-idea">work-idea</option><option value="personal-idea">personal-idea</option></select>')
+        self.assertIn('<select id="det-kind" class="fld" disabled title="work items are owned by their producer; their kind cannot be changed here">'
+                      '<option value="work" selected>work</option>', out["R"]["port"])
+        bodies = [(p[0], {k: v for k, v in p[1].items() if k != "revision"}) for p in out["posts"]]
+        self.assertEqual(bodies, [(f"/api/items/{ask}", {"kind": "task"}), (f"/api/items/{ask}", {"kind": "followup"}),
+                                  (f"/api/items/{plan}", {"kind": "personal", "repo": None})])
+        self.assertTrue(out["R"]["askUndo"])
+        self.assertEqual(out["R"]["declined"], 2, "a declined confirm wrote nothing")
+        self.assertEqual(len(out["asked"]), 2)
+        title, body, cli = out["asked"][0]
+        self.assertEqual(title, f"Kind → personal: #{plan}?")
+        self.assertIn("clears its repo", body)
+        self.assertEqual(cli, f"sd task edit {plan} --kind personal --no-repo")
+        msgs = [t[0] for t in out["toasts"]]
+        self.assertIn(f"#{ask} kind followup → task · sd task edit {ask} --kind task", msgs)
+        self.assertIn(f"#{plan} kind task → personal, repo cleared · sd task edit {plan} --kind personal --no-repo", msgs)
+        self.assertEqual(out["R"]["kind"], "personal")
+
+    def test_the_kind_changes_the_page_sends_are_ones_edit_item_takes(self):
+        """sd:6231: the posts above, through `workflow.edit_item`: a followup becomes a task, and a task with a repo becomes
+        personal only with the repo cleared in the same edit, as the confirm says; its Undo, the kind alone, is taken too."""
+        plan, ask = self.ids["plan"], self.ids["ask"]
+        self.assertEqual(workflow.edit_item(self.connection, ask, {"kind": "task"}, who="test")["item"]["kind"], "task")
+        with self.assertRaises(workflow.WorkflowError):
+            workflow.edit_item(self.connection, plan, {"kind": "personal"}, who="test")
+        state = workflow.edit_item(self.connection, plan, {"kind": "personal", "repo": None}, who="test")
+        self.assertEqual((state["item"]["kind"], state["item"]["repo"]), ("personal", None))
+        self.assertEqual(workflow.edit_item(self.connection, plan, {"kind": "task"}, who="test")["item"]["kind"], "task")
 
     def test_the_published_section_links_each_url_under_its_documents_title(self):
         # sd:3465: the Details link where the item's work was published; an address that is not a link stays text, and an
@@ -2614,7 +2695,10 @@ class TheFilterAddress(ScreenCase):
             with self.subTest(search=search):
                 self.assertEqual(self.listed(search)[0], expected)
         _, out = self.listed("?view=list&status=ready_to_send&age=3&active=1")
-        for key, value in (("status", "ready_to_send"), ("age", "3"), ("active", "1")):
+        # sd:6233: Status has no dropdown; an address's status (Today's Landed 24h and Blocked) narrows, with its chip.
+        self.assertNotIn('id="f-status"', out["R"]["filters"])
+        self.assertIn('data-unfilter="status:ready_to_send"', out["R"]["filters"])
+        for key, value in (("age", "3"), ("active", "1")):
             self.assertRegex(out["R"]["filters"], rf'<select id="f-{key}"[^>]*>(?:(?!</select>).)*<option value="{value}" selected>', key)
         self.assertIn('<option value="14">14-29d</option>', out["R"]["filters"])
 
@@ -2648,9 +2732,9 @@ class TheFilterAddress(ScreenCase):
         self.assertIn('data-page="2" aria-label="Page 2" aria-current="page"', out["R"]["list"])
         self.assertEqual(re.findall(r'data-size="(\d+)"', out["R"]["list"]), ["25", "50", "100", "200"])
         # A filter change starts the list at its first page again.
-        chip = "ELS.filters.listeners.change[0]({ target: { dataset: { pick: 'status' }, value: 'planning' } }); await flush();"
+        chip = "ELS.filters.listeners.change[0]({ target: { dataset: { pick: 'age' }, value: '0' } }); await flush();"
         _, out = self.listed("?view=list&page=2", chip)
-        self.assertEqual(out["urls"][-1], "view=list&status=planning&realm=all")
+        self.assertEqual(out["urls"][-1], "view=list&age=0&realm=all")
         # A short list draws its range and no page numbers; the board shows every filtered card, whatever the page.
         short = self.listed("?view=list&q=row%2059")[1]["R"]["list"]
         self.assertIn('<span class="range">1–1 of 1</span>', short)
