@@ -2147,13 +2147,7 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
     if refused:
         return [refused]
     home = repo_home(repo)
-    reports = stale_requests(home, channels)
-    wanted: list[tuple[dict[str, Any], dict[str, str]]] = []
-    for cfg in docs:
-        targets, problems = mirror_targets(cfg, home, channels)
-        problems += designated_item(cfg)[1]
-        reports += ["mirror: %s in %s" % (p, cfg.get("out", "?")) for p in problems]
-        wanted += [(cfg, target) for target in targets]
+    wanted, reports = wanted_targets(docs, home, channels)
     if not wanted:
         return reports
 
@@ -2197,7 +2191,22 @@ def enqueue(repo: Path, docs: list[dict[str, Any]],
                 queued=digest, revision=rev, repo=str(home), document=out,
                 destination=target["destination"], identity=identity if isinstance(cfg.get("content"), str) else None))
             reports.append(queued_report(out, target["target"], what, carried, reverted))
+        if not dry:
+            prune_images()
     return reports
+
+
+def wanted_targets(docs: list[dict[str, Any]], home: Path, channels: dict[str, dict[str, str]] | None
+                   ) -> tuple[list[tuple[dict[str, Any], dict[str, str]]], list[str]]:
+    """Each `(document, target)` pair `enqueue` writes, and its reports so far."""
+    reports = stale_requests(home, channels)
+    wanted: list[tuple[dict[str, Any], dict[str, str]]] = []
+    for cfg in docs:
+        targets, problems = mirror_targets(cfg, home, channels)
+        problems += designated_item(cfg)[1]
+        reports += ["mirror: %s in %s" % (p, cfg.get("out", "?")) for p in problems]
+        wanted += [(cfg, target) for target in targets]
+    return wanted, reports
 
 
 def unchanged_report(state: str, out: str, target: str, rev: str) -> str:
@@ -2310,6 +2319,34 @@ def images() -> Path:
     it was queued with, whatever a later render writes.
     """
     return QUEUE.with_name(QUEUE.name + "-images")
+
+
+#: What `drawn` leaves in `images()`: a PNG, or one a killed draw left partial.
+IMAGE_FILE = re.compile(r"[0-9a-f]{32}\.png(?:\.partial)?")
+
+
+def prune_images() -> None:
+    """Remove each PNG in `images()` no pending request names (sd:6081).
+
+    Called under the queue lock, so no render writes or draws meanwhile,
+    and after a render's draws, so an unchanged diagram is not drawn again.
+    A request that cannot be read may name any PNG, so then nothing goes.
+    """
+    named = set()
+    for path in QUEUE.glob("*.json"):
+        try:
+            image = json.loads(path.read_text(encoding="utf-8")).get("image")
+        except (OSError, ValueError, AttributeError):
+            return
+        if isinstance(image, dict) and isinstance(image.get("path"), str):
+            named.add(Path(image["path"]).name)
+    try:
+        found = list(images().iterdir())
+    except OSError:
+        return
+    for png in found:
+        if IMAGE_FILE.fullmatch(png.name) and png.name not in named:
+            png.unlink(missing_ok=True)
 
 
 def notion_diagram(text: str) -> tuple[str, dict[str, str]]:

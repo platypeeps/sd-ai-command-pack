@@ -3419,6 +3419,41 @@ class ArchifyImageTests(ReceiptFixture):
             PUBLISH.enqueue(self.repo, self.doc())
         self.assertEqual(self.rendered, [])
 
+    def test_an_image_no_pending_request_names_goes_on_the_next_render(self) -> None:
+        """sd:6081: each changed diagram left its PNG behind for good."""
+        self.source(ARCHIFY)
+        PUBLISH.enqueue(self.repo, self.doc())
+        old = Path(self.request()["image"]["path"])
+        self.drain()
+        stray = PUBLISH.images() / ("%s.png.partial" % ("f" * 32))
+        stray.write_bytes(b"half")
+        other = PUBLISH.images() / "notes.txt"
+        other.write_text("not an image")
+        self.source(ARCHIFY.replace('height="20"/>', 'height="10"/>'))
+        PUBLISH.enqueue(self.repo, self.doc())
+        new = Path(self.request()["image"]["path"])
+        self.assertTrue(new.is_file())
+        self.assertFalse(old.exists())
+        self.assertFalse(stray.exists())
+        self.assertTrue(other.exists())
+
+    def test_an_image_a_pending_request_names_stays(self) -> None:
+        self.source(ARCHIFY)
+        PUBLISH.enqueue(self.repo, self.doc())
+        PUBLISH.enqueue(self.repo, [dict(src="10-x/a.md", out="a", title="A", drive=dict())])
+        self.assertTrue(Path(self.request()["image"]["path"]).is_file())
+
+    def test_an_unreadable_request_keeps_every_image(self) -> None:
+        """Failures: a request that cannot be read may name any image, so nothing goes."""
+        self.source(ARCHIFY)
+        PUBLISH.enqueue(self.repo, self.doc())
+        old = Path(self.request()["image"]["path"])
+        self.drain()
+        (PUBLISH.QUEUE / "other.b.notion.json").write_text("{not json")
+        self.source(ARCHIFY.replace('height="20"/>', 'height="10"/>'))
+        PUBLISH.enqueue(self.repo, self.doc())
+        self.assertTrue(old.is_file())
+
     def test_a_trash_request_drops_the_image(self) -> None:
         self.source(ARCHIFY)
         PUBLISH.enqueue(self.repo, self.doc())
