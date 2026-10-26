@@ -2492,7 +2492,7 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="sd-review",
-        description="Review this repository's change locally; nothing is posted.",
+        description="Review this repository's change locally. Nothing is ever posted.",
         epilog="Exit codes: 0 clean, 1 blocking findings, 2 usage, 3 refusal, 4 rate limit, 5 gate or provider "
                "unavailable.",
     )
