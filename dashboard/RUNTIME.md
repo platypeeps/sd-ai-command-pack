@@ -194,7 +194,9 @@ The dashboard queues one kind of run: Build on Tasks (pack sd:6095) posts
 `build-dispatch` job. Queue's Builds panel queues a blocked or cancelled
 bundle again at `/api/queue/builds/retry`: Retry, or Send to builder
 (pack sd:6020), which first notes a finding on each item; the bundle keeps
-its lead, so its builder resumes the same worktree. A queued or running
+its lead, so its builder resumes the same worktree. A row whose branch has
+a pull request links it (Open PR), read from `sd-ship`'s receipt, not from
+GitHub. A queued or running
 assignment is cancelled through
 `/api/assignments/<id>/cancel`, the route `sd assignments cancel` matches,
 bound to the assignment's revision; Queue's Builds panel posts it.
