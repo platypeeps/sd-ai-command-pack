@@ -1,21 +1,24 @@
-"""Tasks > Start next (sd:5107): start builders on the next ready items, within the builder and load caps.
+"""Tasks > Start next (sd:5107): queue a headless build of the next ready items, within the builder and load caps.
 
-`plan` is what the dialog shows before anything starts. The next items are the `ready` rows of `reads.backlog_items`,
-in its order, less reports, items a Fix note says were started already, items a live Claude session names
-(`claude_sessions`), and items with no checkout on this Mac (`fix_session.checkout`); each one left out is in
-`skipped` with its reason. The room is the builder cap, `CAP` per machine, less the builders running now
-(`claude_sessions.builders`), and none while the five-minute load is above `sd gate status --json`'s `load_max`;
-a `load_max` of 0 is the load rule off (`build.over_load`, pack sd:6111).
+`plan` is what the dialog shows before anything is queued. The next items are the `ready` rows of
+`reads.backlog_items`, in its order, less reports, items a Fix note says were started already, items a live Claude
+session names (`claude_sessions`), items a Build press would refuse (`build._item`: an active assignment, a repository
+that is not managed, has no remote or runs its lane elsewhere), and items whose repository is no directory on this Mac;
+each one left out is in `skipped` with its reason. The room is the builder cap, `CAP` per machine, less the builders
+running now (`claude_sessions.builders`), and none while the five-minute load is above `sd gate status --json`'s
+`load_max`; a `load_max` of 0 is the load rule off (`build.over_load`, pack sd:6111).
 A count or a load that could not be read is a refusal with its reason, never room.
 
-`run` is the start, in steps, under `STARTING`:
+`run` is the press, in steps, under `STARTING` (Build step 5, pack sd:6096; design: system
+`docs/work/2026-10-24-build-dispatcher/design.md`):
 
 1. A fresh `plan`. A refusal, any item asked for that is no longer in it, or more items than the room: nothing
-   starts, and the answer says why (a 400, `WorkflowError`).
-2. For each item in turn, `fix_session.start` with the revision the dialog read: a herdr workspace with claude as a
-   builder, then the Fix note on the item. The first item that does not start stops the run; the items after it are
-   `not_started`. Each started item has its note, so a second run leaves it out (step 1's plan), and a session whose
-   note was not written still names its item in its first prompt, which `claude_sessions` reads.
+   is queued, and the answer says why (a 400, `WorkflowError`).
+2. `build.queue` with the revisions the dialog read: one queued build assignment per item, in one transaction, or
+   none and a 409 naming the item it refused. A queued item has an active assignment, so a second run's plan leaves
+   it out (step 1).
+3. `builds.kickstart`, so the dispatcher claims in seconds. A kickstart that fails only says so; the job's next
+   slot claims the rows. Herdr starts nothing here: Fix alone launches a session (operator, note #29486).
 """
 
 from __future__ import annotations
@@ -23,15 +26,13 @@ from __future__ import annotations
 import json
 import math
 import shutil
-import sqlite3
 import subprocess
 import threading
 from datetime import datetime, timezone
 
-from sd_db import build, reads, workflow
-from sd_db.errors import SdDbError
+from sd_db import build, paths, reads, workflow
 
-from . import claude_sessions, fix_session
+from . import builds, claude_sessions, fix_session
 from .active_sessions import Unread, _reason, elapsed
 from .tasks_screen import is_scheduled
 
@@ -87,7 +88,7 @@ def _holders(holders: list[dict]) -> str:
 
 
 def plan(connection, *, now: str, sessions=None, gate=None) -> dict:
-    """What Start next would start now: `start`, the items in order with their revisions; `room`; `refusal`.
+    """What Start next would queue now: `start`, the items in order with their revisions; `room`; `refusal`.
 
     `sessions` is `claude_sessions.document` and `gate` is `gate_status`, the seams a test fills.
     """
@@ -95,7 +96,8 @@ def plan(connection, *, now: str, sessions=None, gate=None) -> dict:
     running, why = claude["builders"]["running"], claude["builders"]["why"]
     named = {task["item"] for row in claude["sessions"] or [] for task in row["tasks"]}
     launched = {row["item"] for row in reads.launch_notes(connection, fix_session.NOTE.split("{", 1)[0])}
-    eligible, skipped = [], []
+    eligible: list[dict] = []
+    skipped: list[dict] = []
     for row in reads.backlog_items(connection, status="ready", now=now):
         if row["kind"] == "report" or is_scheduled(row):
             continue
@@ -103,14 +105,16 @@ def plan(connection, *, now: str, sessions=None, gate=None) -> dict:
                   else "a live Claude session works on it" if row["id"] in named else "")
         if not reason:
             try:
-                fix_session.checkout(dict(row))
-            except workflow.WorkflowError as problem:
+                build._item(connection, row["id"])  # the press's own check, so step 2 never refuses what step 1 offered
+            except build.BuildRefused as problem:
                 reason = str(problem)
+        if not reason and not paths.expand(row["repo"]).is_dir():
+            reason = f"{row['repo']} is not a directory on this machine, so a build has no checkout to start from"
         (skipped if reason else eligible).append({"id": row["id"], "title": row["title"], "repo": row["repo"]}
                                                  | ({"why": reason} if reason else {}))
-    revisions = reads.revisions(connection, [row["id"] for row in eligible]) if eligible else {}
-    for row in eligible:
-        row["revision"] = revisions[row["id"]]
+    revisions = reads.revisions(connection, [entry["id"] for entry in eligible]) if eligible else {}
+    for entry in eligible:
+        entry["revision"] = revisions[entry["id"]]
     load = load_max = None
     refusal = ""
     try:
@@ -131,31 +135,28 @@ def plan(connection, *, now: str, sessions=None, gate=None) -> dict:
             "holders": claude["builders"].get("holders") or [] if running is not None and running >= CAP else []}
 
 
-def run(connection, *, now: str, items: list[dict], who: str, sessions=None, gate=None, launch=None) -> dict:
-    """Steps 1 and 2 above: `started`, `failed` (the item and the reason, or None) and `not_started`."""
+def run(connection, *, now: str, items: list[dict], who: str, sessions=None, gate=None, start=None):
+    """Steps 1 to 3 above: `queued`, each item's build assignment, and `kickstart`; or a 409 when the queue refused."""
     with STARTING:
         fresh = plan(connection, now=now, sessions=sessions, gate=gate)
         if fresh["refusal"]:
-            raise workflow.WorkflowError(f"Nothing started: {fresh['refusal']}.")
+            raise workflow.WorkflowError(f"Nothing queued: {fresh['refusal']}.")
         ready = {row["id"] for row in fresh["eligible"]}
         gone = [item["id"] for item in items if item["id"] not in ready]
         if gone:
             why = {row["id"]: row["why"] for row in fresh["skipped"]}
-            raise workflow.WorkflowError("Nothing started: " + "; ".join(
+            raise workflow.WorkflowError("Nothing queued: " + "; ".join(
                 f"#{item} {why.get(item, 'is not ready')}" for item in gone) + "; read the plan again.")
         if len(items) > fresh["room"]:
-            raise workflow.WorkflowError(f"Nothing started: {fresh['room']} builders fit now, not {len(items)}; read the plan again.")
-        started, failed = [], None
-        for index, item in enumerate(items):
-            try:
-                out = (launch or fix_session.start)(connection, item["id"], expected_revision=item["revision"], who=who)
-            except (workflow.WorkflowError, SdDbError, sqlite3.Error, OSError) as problem:
-                out = (409 if isinstance(problem, workflow.StaleItem) else 400, {"error": str(problem)})
-            if isinstance(out, tuple):
-                failed = {"id": item["id"], "status": out[0], "error": out[1].get("error") or "it did not start"}
-                return {"started": started, "failed": failed, "not_started": [rest["id"] for rest in items[index + 1:]]}
-            started.append({"id": item["id"]} | out.get("fix", {}))
-        return {"started": started, "failed": None, "not_started": []}
+            raise workflow.WorkflowError(f"Nothing queued: {fresh['room']} builders fit now, not {len(items)}; read the plan again.")
+        try:
+            queued = build.queue(connection, [item["id"] for item in items], who=who,
+                                 expected_revisions={item["id"]: item["revision"] for item in items})
+        except build.BuildRefused as refusal:
+            # `build.queue` is one transaction: a refusal wrote nothing, so the page reads the plan again.
+            return 409, {"error": f"Nothing queued: {refusal}.", "reload": True}
+        return {"queued": [{"id": row["id"], "item": row["item"], "status": row["status"]} for row in queued],
+                "kickstart": (start or builds.kickstart)()}
 
 
 def request(values: dict):

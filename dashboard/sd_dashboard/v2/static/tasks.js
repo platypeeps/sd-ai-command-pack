@@ -341,16 +341,15 @@ addEventListener('DOMContentLoaded', () => {
     if (on.length) C.runBulk(c, on);
     if (off.length) toast(`Skipped ${off.map(o => `${label(byKey(o.id))}: ${c.when(o)}`).join('; ')}`);
   }
-  // Start next (sd:5107): the server's plan first (start_next.plan), then Start posts the first N it listed, each with the
-  // revision it read; the server plans again and starts nothing when the plan moved. A refusal leaves no Start button.
+  // Start next (sd:5107): the server's plan first (start_next.plan), then Build posts the first N it listed, each with the
+  // revision it read; the server plans again and queues nothing when the plan moved. A refusal leaves no Build button.
+  // Since Build step 5 (pack sd:6096) the post queues a headless build of each, as Build does; herdr is Fix's alone.
   const startDlg = document.createElement('dialog');
   startDlg.className = 'palette date-dlg start-dlg'; startDlg.setAttribute('aria-labelledby', 'start-h');
   document.body.append(startDlg);
   const unread = v => v === null || v === undefined ? '▨' : v;
-  const startedText = out => [
-    out.started.length ? `Started ${out.started.map(s => `#${s.id}`).join(', ')} · builder sessions in herdr` : 'Nothing started',
-    out.failed ? `#${out.failed.id} did not start: ${out.failed.error}` : '',
-    out.not_started.length ? `not tried: ${out.not_started.map(n => `#${n}`).join(', ')}` : ''].filter(Boolean).join(' · ');
+  const kickText = k => !k ? '' : k.ok ? ' · the dispatcher was started' : ` · the dispatcher starts at its next slot (${k.why})`;
+  const queuedText = out => `Queued ${out.queued.map(q => `#${q.item}`).join(', ')} for build${kickText(out.kickstart)}`;
   async function askStart() {
     let P;
     try { P = await window.shell.getJSON('/api/tasks/start-next'); } catch (err) { toast(`Start next not read: ${err.message}`); return; }
@@ -359,25 +358,26 @@ addEventListener('DOMContentLoaded', () => {
       <p class="why">${unread(P.running)} of ${P.cap} builders run · five-minute load ${unread(P.load)} of ${unread(P.load_max)}</p>
       ${P.refusal ? html`<p class="why">▲ Nothing can start: ${P.refusal}.</p>
         ${P.holders?.length ? html`<p><a class="btn quiet" href="/management?view=sessions">Open Management › Sessions</a></p>` : ''}` : html`
-        <label class="label" for="start-n">Builders to start (1–${P.room})</label>
+        <label class="label" for="start-n">Tasks to build (1–${P.room})</label>
         <input id="start-n" type="number" min="1" max="${P.room}" value="${P.room}" required>
-        <ol class="start-list">${P.start.map((r, i) => html`<li data-i="${i}"><code>#${r.id}</code> ${r.title}</li>`)}</ol>`}
+        <ol class="start-list">${P.start.map((r, i) => html`<li data-i="${i}"><code>#${r.id}</code> ${r.title}</li>`)}</ol>
+        <p class="why">Each queues a headless build; the dispatcher bundles them by repository. Cancel on Queue › Builds stops one.</p>`}
       ${P.skipped.length ? html`<details><summary>${plural(P.skipped.length, 'ready task')} left out</summary>
         <ul class="start-list">${P.skipped.map(r => html`<li><code>#${r.id}</code> ${r.title}: ${r.why}</li>`)}</ul></details>` : ''}
       <div class="actions">
-        ${P.refusal ? '' : html`<button class="btn" value="start" type="submit">Start</button>`}
+        ${P.refusal ? '' : html`<button class="btn" value="start" type="submit">Build</button>`}
         <button class="btn quiet" value="cancel" type="submit" formnovalidate data-cancel>Cancel</button>
       </div></form>`);
     const n = () => Math.max(1, Math.min(P.room, parseInt(startDlg.querySelector('#start-n')?.value, 10) || 0));
-    // The list marks what Start would start now, so the count and the items never disagree.
+    // The list marks what Build would queue now, so the count and the items never disagree.
     const mark = () => startDlg.querySelectorAll('.start-list li[data-i]').forEach(li => li.classList.toggle('off', +li.dataset.i >= n()));
     startDlg.querySelector('form')?.addEventListener('input', mark);
     startDlg.onclose = () => {
       if (startDlg.returnValue !== 'start' || P.refusal) return;
       const items = P.start.slice(0, n()).map(r => ({ id: r.id, revision: r.revision }));
-      window.shell.post('/api/tasks/start-next/run', { items }).then(out => { toast(startedText(out)); reread(); }, err => {
-        // No status: no answer, so whether a builder started is not known; the next plan says, so it asks for that.
-        toast(err.status ? err.message : `Start next got no answer, so what started is not known: open Start next again (${err.message})`);
+      window.shell.post('/api/tasks/start-next/run', { items }).then(out => { toast(queuedText(out)); reread(); }, err => {
+        // A 400 or 409 queued nothing. No status: no answer, so what queued is not known; the next plan says, so it asks for that.
+        toast(err.status ? err.message : `Start next got no answer, so what queued is not known: open Start next again (${err.message})`);
         reread();
       });
     };
@@ -394,7 +394,6 @@ addEventListener('DOMContentLoaded', () => {
   const buildDlg = document.createElement('dialog');
   buildDlg.className = 'palette date-dlg start-dlg'; buildDlg.setAttribute('aria-labelledby', 'build-h');
   document.body.append(buildDlg);
-  const kickText = k => !k ? '' : k.ok ? ' · the dispatcher was started' : ` · the dispatcher starts at its next slot (${k.why})`;
   async function askBuild(objs, done) {
     const rows = objs.map(o => byKey(o.id)).filter(Boolean);
     if (!rows.length) { toast('Build: no listed task is selected'); return; }
