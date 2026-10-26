@@ -27,6 +27,9 @@ from sd_db import create_item, database, hub, initialise, writes
 from sd_db.backup import restore
 from sd_db.backup import run as backup
 from sd_db.errors import SdDbError
+from sd_db.migrate import migrate
+from sd_db.schema import SCHEMA_VERSION
+from sd_db.testing.store import make_store
 
 from . import support
 from .test_fence import HUB_NAME, StubCase
@@ -623,6 +626,75 @@ class ThePragmaWrites(FenceCase):
         self.assertEqual(connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0], 0)
         self.assertFalse(connection.in_transaction)
         self.assertEqual(self.header()[1:], (7, "wal"))
+
+    #: SQLite's pragmas that set this connection, or this process, and write
+    #: nothing to the file, from its pragma list; each with a value to set
+    #: when reading it answers nothing.
+    CONNECTION = {
+        "analysis_limit": None, "automatic_index": None, "busy_timeout": None, "cache_size": None,
+        "cache_spill": None, "case_sensitive_like": "OFF", "cell_size_check": None, "checkpoint_fullfsync": None,
+        "count_changes": None, "defer_foreign_keys": None, "empty_result_callbacks": None, "foreign_keys": None,
+        "full_column_names": None, "fullfsync": None, "hard_heap_limit": None, "ignore_check_constraints": None,
+        "journal_size_limit": None, "legacy_alter_table": None, "locking_mode": None, "max_page_count": None,
+        "mmap_size": "0", "query_only": None, "read_uncommitted": None, "recursive_triggers": None,
+        "reverse_unordered_selects": None, "secure_delete": None, "short_column_names": None,
+        "soft_heap_limit": None, "synchronous": None, "temp_store": None, "temp_store_directory": "''",
+        "threads": None, "trusted_schema": None, "wal_autocheckpoint": None, "writable_schema": None,
+    }
+
+    def settings(self, connection: sqlite3.Connection) -> dict[str, str]:
+        """Each connection pragma set to the value it holds, so setting it changes nothing."""
+        found = {}
+        for name, default in self.CONNECTION.items():
+            row = connection.execute(f"PRAGMA {name}").fetchone()
+            found[name] = str(default) if row is None else repr(row[0])
+        return found
+
+    def test_connection_pragmas_set_outside_a_transaction_with_no_probe(self):
+        """Lead review of e1f565757: `synchronous` fails inside a transaction, so none may enter the wrapper."""
+        for role in ("holder", "elsewhere"):
+            hub._answers.clear()
+            self.name_hub(HUB_NAME)
+            self.node(OLD_HUB if role == "elsewhere" else HUB_NAME + ".")
+            connection = self.open()
+            before = len(self.asked())
+            for name, value in self.settings(connection).items():
+                with self.subTest(role=role, pragma=name):
+                    connection.execute(f"PRAGMA {name} = {value}").fetchall()
+                    self.assertFalse(connection.in_transaction)
+            with self.subTest(role=role, probes=True):
+                self.assertEqual(len(self.asked()), before)
+
+    def test_the_open_paths_pragmas_run_on_an_armed_connection(self):
+        """`database.connect` arms the fence after its own pragmas; the library's later ones still run."""
+        self.name_hub(HUB_NAME)
+        self.node(OLD_HUB)
+        connection = self.open()
+        self.assertIsInstance(connection, hub.FencedConnection)
+        for statement in ("PRAGMA busy_timeout = 100", "PRAGMA foreign_keys = ON", "PRAGMA synchronous = NORMAL",
+                          "PRAGMA query_only = ON", "PRAGMA query_only = OFF", "PRAGMA journal_mode = WAL"):
+            with self.subTest(statement=statement):
+                if statement.endswith("journal_mode = WAL"):
+                    # It may change the file, so on a fenced node it asks and refuses.
+                    with self.assertRaises(hub.Fenced):
+                        connection.execute(statement)
+                else:
+                    connection.execute(statement).fetchall()
+
+    def test_a_migration_with_writable_schema_runs_on_the_fenced_live_hub(self):
+        """009, 018, 031 and 032 set `writable_schema` inside the script's own transaction."""
+        for suffix in ("", "-wal", "-shm"):
+            Path(f"{self.path}{suffix}").unlink(missing_ok=True)
+        # Version 8 has no `setting` kind to name the hub, so the fence reads
+        # `off`; the migration still runs on the armed connection.
+        make_store(self.path, version=8)
+        self.node()
+        with mock.patch.object(hub.FencedConnection, "arm", autospec=True,
+                               side_effect=hub.FencedConnection.arm) as arm:
+            applied = migrate(self.path)
+        arm.assert_called_once()
+        self.assertEqual(applied.after, SCHEMA_VERSION)
+        self.assertIn(32, applied.applied)
 
     def free_pages(self) -> int:
         reader = database.connect(write=False)

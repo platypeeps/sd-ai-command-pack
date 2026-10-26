@@ -330,11 +330,22 @@ _WRITES = frozenset({
     sqlite3.SQLITE_DROP_VTABLE,
 })
 #: Pragmas whose value names a table or index to read, or sets this
-#: connection only. Any other pragma given a value writes the file, or may:
-#: `user_version`, `application_id`, `journal_mode` (pack sd:6328).
-_PRAGMA_READS = frozenset({
-    "busy_timeout", "foreign_key_check", "foreign_key_list", "foreign_keys", "index_info", "index_list",
-    "index_xinfo", "integrity_check", "query_only", "quick_check", "table_info", "table_list", "table_xinfo",
+#: connection or process only: SQLite's pragma list less those that may
+#: change the file. Any other pragma given a value writes the file, or may:
+#: `user_version`, `application_id`, `journal_mode` (pack sd:6328). Some of
+#: these fail inside a transaction (`synchronous`), so none may be wrapped.
+_PRAGMA_READ_OR_CONNECTION = frozenset({
+    # Reads that take a table, an index or a limit.
+    "foreign_key_check", "foreign_key_list", "index_info", "index_list", "index_xinfo", "integrity_check",
+    "quick_check", "table_info", "table_list", "table_xinfo",
+    # Settings of this connection, or this process.
+    "analysis_limit", "automatic_index", "busy_timeout", "cache_size", "cache_spill", "case_sensitive_like",
+    "cell_size_check", "checkpoint_fullfsync", "count_changes", "defer_foreign_keys", "empty_result_callbacks",
+    "foreign_keys", "full_column_names", "fullfsync", "hard_heap_limit", "ignore_check_constraints",
+    "journal_size_limit", "legacy_alter_table", "locking_mode", "max_page_count", "mmap_size", "query_only",
+    "read_uncommitted", "recursive_triggers", "reverse_unordered_selects", "secure_delete", "short_column_names",
+    "soft_heap_limit", "synchronous", "temp_store", "temp_store_directory", "threads", "trusted_schema",
+    "wal_autocheckpoint", "writable_schema",
 })
 #: Pragmas that write the file with no value given.
 _PRAGMA_WRITES = frozenset({"incremental_vacuum", "wal_checkpoint"})
@@ -466,7 +477,7 @@ class _WriteFence:
             return sqlite3.SQLITE_OK
         pragma = (arg1 or "").lower() if action == sqlite3.SQLITE_PRAGMA else None
         writes = action in _WRITES or pragma is not None and (
-            pragma in _PRAGMA_WRITES or arg2 is not None and pragma not in _PRAGMA_READS)
+            pragma in _PRAGMA_WRITES or arg2 is not None and pragma not in _PRAGMA_READ_OR_CONNECTION)
         if writes and database != "temp":
             if not opened:
                 if pragma in _PRAGMA_UNWRAPPED:
