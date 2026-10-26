@@ -730,13 +730,17 @@ def find_jira(target: dict, token: str, since: datetime.datetime, transport=None
     jql = f'project = "{target["project"]}" AND created >= -{minutes}m ORDER BY created DESC'
     payload, error = shadow_jira._request(config["base"] + "/rest/api/3/search/jql", config,
                                           {"jql": jql, "maxResults": 50, "fields": ["description"]}, transport)
-    if error or not isinstance((payload or {}).get("issues"), list):
+    if error or not isinstance(payload, dict) or not isinstance(payload.get("issues"), list):
         raise Unknown(f"the check failed: {error or 'Jira answered without an issue list'}")
+    # An issue or its fields not an object is an answer of another shape, not "not filed" (sd:6061).
+    if any(not isinstance(issue, dict) or not isinstance(issue.get("fields") or {}, dict)
+           for issue in payload["issues"]):
+        raise Unknown("the check failed: Jira listed an issue that is not an object")
     line = TOKEN_LINE["jira"].format(token=token)
     for issue in payload["issues"]:
-        key = str((issue or {}).get("key", ""))
+        key = str(issue.get("key", ""))
         # The description is an Atlassian document; the token line is one text node in it.
-        description = json.dumps(((issue or {}).get("fields") or {}).get("description"))
+        description = json.dumps((issue.get("fields") or {}).get("description"))
         if line in description and re.fullmatch(re.escape(target["project"]) + r"-[1-9][0-9]*", key):
             return f"{config['base']}/browse/{key}", f"jira:{key}"
     return None
