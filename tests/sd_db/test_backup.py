@@ -195,7 +195,8 @@ class TheConcurrentWriter(BackupCase):
             "        if sql == 'PRAGMA journal_mode = DELETE':\n"
             "            os._exit(9)\n"
             "        return super().execute(sql, *args)\n"
-            "sqlite3.connect = lambda *a, **k: real(*a, factory=Killed, **k)\n"
+            # In place of any factory: the library's own write open names one (system sd:5986).
+            "sqlite3.connect = lambda *a, **k: real(*a, **{**k, 'factory': Killed})\n"
             "run(home=sys.argv[1])\n"
         )
         self.assertEqual(self.killed(script, self.home).returncode, 9)

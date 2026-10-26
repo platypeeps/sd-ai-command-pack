@@ -35,6 +35,7 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -231,7 +232,9 @@ class Role:
     """Whether this machine holds the hub role: `holder`, `off`, `elsewhere` or `unknown`.
 
     `holder` is the name `sd.hub_name` holds, `None` when unset; `reason`
-    is one line a refusal can quote. Callers refuse on `elsewhere` and `unknown`.
+    is one line a refusal can quote. Callers that act off this machine refuse
+    on `elsewhere` and `unknown`; a write to its own database refuses on
+    `elsewhere` alone (`write_role`).
     """
 
     state: str
@@ -305,3 +308,170 @@ def role_at(path: Path, name=None) -> Role:
         return role(connection, name)
     finally:
         connection.close()
+
+
+# ------------------------------------------------------- the write fence
+
+#: Seconds a process trusts its last fence answer for one database: one
+#: Tailscale probe per writer per 5 s, as the tailnet listener asks
+#: (`serve.FENCE_SECONDS`). A wall clock that moved `CLOCK_SLACK` more than
+#: the monotonic one, which does not count a sleep, asks again.
+FENCE_SECONDS = 5.0
+CLOCK_SLACK = 1.0
+#: SQLite's action codes for a statement that writes a database file. A
+#: pragma is left out: migrate's DDL asks, and a pragma alone moves no row.
+_WRITES = frozenset({
+    sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE, sqlite3.SQLITE_ALTER_TABLE,
+    sqlite3.SQLITE_ANALYZE, sqlite3.SQLITE_REINDEX, sqlite3.SQLITE_CREATE_INDEX, sqlite3.SQLITE_CREATE_TABLE,
+    sqlite3.SQLITE_CREATE_TRIGGER, sqlite3.SQLITE_CREATE_VIEW, sqlite3.SQLITE_CREATE_VTABLE,
+    sqlite3.SQLITE_DROP_INDEX, sqlite3.SQLITE_DROP_TABLE, sqlite3.SQLITE_DROP_TRIGGER, sqlite3.SQLITE_DROP_VIEW,
+    sqlite3.SQLITE_DROP_VTABLE,
+})
+
+_answers: dict[str, tuple[float, float, Role]] = {}
+_answers_guard = threading.Lock()
+
+
+class Fenced(remote.RemoteError):
+    """This machine no longer holds the hub role (hub failover, D5).
+
+    On the tailnet the session closes and rolls back. On a returning hub's
+    own database the write refuses and its transaction rolls back (system
+    sd:5986).
+    """
+
+
+def write_role(path: Path) -> Role:
+    """`role` of the database at `path`, read from that file and held `FENCE_SECONDS`.
+
+    The file itself, never through `hub.json`: during demotion `hub.json`
+    sits beside the database, and a `HubConflict` read as `unknown` would let
+    a writer that is already open go on.
+    """
+    from .database import open_local
+
+    key = str(path)
+    with _answers_guard:
+        ticks, wall = time.monotonic(), time.time()
+        held = _answers.get(key)
+        if held is not None:
+            since, at, found = held
+            if ticks - since < FENCE_SECONDS and abs((wall - at) - (ticks - since)) <= CLOCK_SLACK:
+                return found
+        try:
+            connection = open_local(Path(path), write=False, create=False)
+        except Exception as error:  # noqa: BLE001 -- no answer is unknown, named
+            found = Role("unknown", None, f"the database at {path} did not open: {type(error).__name__}: {error}")
+        else:
+            try:
+                found = role(connection)
+            finally:
+                connection.close()
+        _answers[key] = (ticks, wall, found)
+        return found
+
+
+def demotion(path: Path, found: Role) -> str:
+    """The `Fenced` text for a local write: the holder, then the two demotion steps, `hub.json` first."""
+    return (f"refused: this machine is not the hub, so it writes nothing to {path}: {found.reason}. "
+            f"Reads still work. Demote it in this order: "
+            f"1. copy ~/{CONFIG_RELATIVE} from any satellite into this home "
+            f"(until step 2, every sd command refuses with HubConflict); "
+            f"2. move {path} aside as {Path(path).name}.demoted-<date>; "
+            f"sd commands then reach the hub, {found.holder}")
+
+
+class _WriteFence:
+    """SQLite's authorizer on this machine's own write connection (system sd:5986).
+
+    Write unless fenced (#31093): each write and each commit after one asks
+    `write_role`; only `elsewhere` refuses. `holder`, `off` and `unknown`
+    write, so a Tailscale outage does not stop a healthy hub. The commit
+    asks too, so a transaction open across the console rename rolls back.
+    The connection caches no statement: Python does not authorize a cached one again.
+    It holds no reference to its connection, so the pair makes no cycle.
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        #: This transaction, or an autocommit write since the last BEGIN, prepared a write.
+        self.wrote = False
+        #: Why the last statement was denied, for the `Fenced` the connection raises.
+        self.refusal: str | None = None
+
+    def __call__(self, action: int, arg1, arg2, database, trigger) -> int:
+        if action == sqlite3.SQLITE_TRANSACTION:
+            if arg1 == "COMMIT":
+                return self._ask() if self.wrote else sqlite3.SQLITE_OK
+            self.wrote = False
+            return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_SAVEPOINT:
+            # RELEASE of the outer savepoint commits.
+            return self._ask() if arg1 == "RELEASE" and self.wrote else sqlite3.SQLITE_OK
+        if action in _WRITES and database != "temp":
+            self.wrote = True
+            return self._ask()
+        return sqlite3.SQLITE_OK
+
+    def _ask(self) -> int:
+        found = write_role(self.path)
+        if found.state != "elsewhere":
+            return sqlite3.SQLITE_OK
+        self.refusal = demotion(self.path, found)
+        return sqlite3.SQLITE_DENY
+
+
+def _fenced(connection: sqlite3.Connection, run, *args):
+    """`run(*args)`, with a fence denial raised as `Fenced` after its transaction rolls back."""
+    fence: _WriteFence | None = getattr(connection, "fence", None)
+    if fence is not None:
+        fence.refusal = None
+    try:
+        return run(*args)
+    except sqlite3.DatabaseError as error:
+        if fence is None or fence.refusal is None:
+            raise
+        refusal, fence.refusal = fence.refusal, None
+        if connection.in_transaction:
+            # Nothing a fenced transaction wrote may commit.
+            sqlite3.Connection.execute(connection, "ROLLBACK")
+        raise Fenced(refusal) from error
+
+
+class _FencedCursor(sqlite3.Cursor):
+    def execute(self, *args):
+        return _fenced(self.connection, super().execute, *args)
+
+    def executemany(self, *args):
+        return _fenced(self.connection, super().executemany, *args)
+
+    def executescript(self, *args):
+        return _fenced(self.connection, super().executescript, *args)
+
+
+class FencedConnection(sqlite3.Connection):
+    """This machine's own write connection to its default database (`database.open_local`)."""
+
+    fence: _WriteFence | None = None
+
+    def arm(self, path: Path) -> None:
+        self.fence = _WriteFence(Path(path))
+        self.set_authorizer(self.fence)
+
+    def cursor(self, factory=_FencedCursor):
+        return super().cursor(factory)
+
+    def execute(self, *args):
+        return _fenced(self, super().execute, *args)
+
+    def executemany(self, *args):
+        return _fenced(self, super().executemany, *args)
+
+    def executescript(self, *args):
+        return _fenced(self, super().executescript, *args)
+
+    def commit(self):
+        return _fenced(self, super().commit)
+
+    def __exit__(self, *args):
+        return _fenced(self, super().__exit__, *args)
