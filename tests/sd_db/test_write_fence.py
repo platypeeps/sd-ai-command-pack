@@ -13,10 +13,13 @@ before the promoted machine takes the hub's name, and passes.
 
 from __future__ import annotations
 
+import contextlib
+import functools
 import os
 import sqlite3
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
 
@@ -24,6 +27,9 @@ from sd_db import create_item, database, hub, initialise, writes
 from sd_db.backup import restore
 from sd_db.backup import run as backup
 from sd_db.errors import SdDbError
+from sd_db.migrate import migrate
+from sd_db.schema import SCHEMA_VERSION
+from sd_db.testing.store import make_store
 
 from . import support
 from .test_fence import HUB_NAME, StubCase
@@ -547,6 +553,244 @@ class TheAutocommitWindow(FenceCase):
         finally:
             reader.close()
 
+
+class ThePragmaWrites(FenceCase):
+    """pack sd:6328: a PRAGMA that changes the file is a write; one that reads or sets this connection is not.
+
+    SQLite authorizes a pragma as SQLITE_PRAGMA, its value as `arg2`.
+    """
+
+    def header(self) -> tuple:
+        reader = database.connect(write=False)
+        try:
+            return tuple(reader.execute(f"PRAGMA {name}").fetchone()[0]
+                         for name in ("user_version", "application_id", "journal_mode"))
+        finally:
+            reader.close()
+
+    def test_a_pragma_write_on_a_fenced_hub_refuses(self):
+        self.name_hub(HUB_NAME)
+        self.node(OLD_HUB)
+        connection = self.open()
+        before = self.header()
+        writes_ = ("PRAGMA user_version = 7", "PRAGMA main.application_id = 7", "pragma JOURNAL_MODE = delete",
+                   "PRAGMA wal_checkpoint(TRUNCATE)", "PRAGMA wal_checkpoint")
+        paths: dict[str, Callable[[], object]] = {
+            statement: functools.partial(connection.execute, statement) for statement in writes_}
+        paths["executescript"] = lambda: connection.executescript("BEGIN IMMEDIATE; PRAGMA user_version = 8; COMMIT;")
+        paths["inside BEGIN"] = lambda: (connection.execute("BEGIN IMMEDIATE"),
+                                         connection.execute("PRAGMA user_version = 9"))
+        for name, write in paths.items():
+            with self.subTest(path=name), self.assertRaises(hub.Fenced):
+                write()
+            self.assertFalse(connection.in_transaction)
+        self.assertEqual(self.header(), before)
+        with self.assertRaises(SdDbError):
+            connection.executescript("PRAGMA user_version = 8;")
+        self.assertEqual(self.header(), before)
+
+    def test_a_pragma_write_in_a_transaction_across_the_rename_rolls_back(self):
+        self.name_hub(HUB_NAME)
+        self.node()
+        connection = self.open()
+        connection.execute("BEGIN IMMEDIATE")
+        connection.execute("PRAGMA application_id = 7")
+        self.node(OLD_HUB)
+        self.later()
+        with self.assertRaises(hub.Fenced):
+            connection.execute("COMMIT")
+        self.assertFalse(connection.in_transaction)
+        self.assertEqual(self.header()[1], 0)
+
+    def test_pragma_reads_and_connection_settings_stay_allowed_with_no_probe(self):
+        self.name_hub(HUB_NAME)
+        self.node(OLD_HUB)
+        connection = self.open()
+        before = len(self.asked())
+        reads = ("PRAGMA user_version", "PRAGMA journal_mode", "PRAGMA table_info(item)", "PRAGMA index_list(item)",
+                 "PRAGMA foreign_key_check(item)", "PRAGMA integrity_check(1)", "PRAGMA busy_timeout = 100",
+                 "PRAGMA foreign_keys = ON", "PRAGMA temp.user_version = 3")
+        for statement in reads:
+            with self.subTest(statement=statement):
+                connection.execute(statement).fetchall()
+        self.assertEqual(len(self.asked()), before)
+
+    def test_a_pragma_write_on_the_live_hub_runs_outside_a_transaction(self):
+        """`journal_mode` and `wal_checkpoint` cannot run inside one, so the fence asks at prepare instead."""
+        self.name_hub(HUB_NAME)
+        self.node()
+        connection = self.open()
+        connection.execute("PRAGMA application_id = 7")
+        self.assertEqual(connection.execute("PRAGMA journal_mode = DELETE").fetchone()[0], "delete")
+        self.assertEqual(connection.execute("PRAGMA journal_mode = WAL").fetchone()[0], "wal")
+        self.assertEqual(connection.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0], 0)
+        self.assertFalse(connection.in_transaction)
+        self.assertEqual(self.header()[1:], (7, "wal"))
+
+    #: SQLite's pragmas that set this connection, or this process, and write
+    #: nothing to the file, from its pragma list; each with a value to set
+    #: when reading it answers nothing.
+    CONNECTION = {
+        "analysis_limit": None, "automatic_index": None, "busy_timeout": None, "cache_size": None,
+        "cache_spill": None, "case_sensitive_like": "OFF", "cell_size_check": None, "checkpoint_fullfsync": None,
+        "count_changes": None, "defer_foreign_keys": None, "empty_result_callbacks": None, "foreign_keys": None,
+        "full_column_names": None, "fullfsync": None, "hard_heap_limit": None, "ignore_check_constraints": None,
+        "journal_size_limit": None, "legacy_alter_table": None, "locking_mode": None, "max_page_count": None,
+        "mmap_size": "0", "query_only": None, "read_uncommitted": None, "recursive_triggers": None,
+        "reverse_unordered_selects": None, "secure_delete": None, "short_column_names": None,
+        "soft_heap_limit": None, "synchronous": None, "temp_store": None, "temp_store_directory": "''",
+        "threads": None, "trusted_schema": None, "wal_autocheckpoint": None, "writable_schema": None,
+    }
+
+    def settings(self, connection: sqlite3.Connection) -> dict[str, str]:
+        """Each connection pragma set to the value it holds, so setting it changes nothing."""
+        found = {}
+        for name, default in self.CONNECTION.items():
+            row = connection.execute(f"PRAGMA {name}").fetchone()
+            found[name] = str(default) if row is None else repr(row[0])
+        return found
+
+    def test_connection_pragmas_set_outside_a_transaction_with_no_probe(self):
+        """Lead review of e1f565757: `synchronous` fails inside a transaction, so none may enter the wrapper."""
+        for role in ("holder", "elsewhere"):
+            hub._answers.clear()
+            self.name_hub(HUB_NAME)
+            self.node(OLD_HUB if role == "elsewhere" else HUB_NAME + ".")
+            connection = self.open()
+            before = len(self.asked())
+            for name, value in self.settings(connection).items():
+                with self.subTest(role=role, pragma=name):
+                    connection.execute(f"PRAGMA {name} = {value}").fetchall()
+                    self.assertFalse(connection.in_transaction)
+            with self.subTest(role=role, probes=True):
+                self.assertEqual(len(self.asked()), before)
+
+    def test_the_open_paths_pragmas_run_on_an_armed_connection(self):
+        """`database.connect` arms the fence after its own pragmas; the library's later ones still run."""
+        self.name_hub(HUB_NAME)
+        self.node(OLD_HUB)
+        connection = self.open()
+        self.assertIsInstance(connection, hub.FencedConnection)
+        for statement in ("PRAGMA busy_timeout = 100", "PRAGMA foreign_keys = ON", "PRAGMA synchronous = NORMAL",
+                          "PRAGMA query_only = ON", "PRAGMA query_only = OFF", "PRAGMA journal_mode = WAL"):
+            with self.subTest(statement=statement):
+                if statement.endswith("journal_mode = WAL"):
+                    # It may change the file, so on a fenced node it asks and refuses.
+                    with self.assertRaises(hub.Fenced):
+                        connection.execute(statement)
+                else:
+                    connection.execute(statement).fetchall()
+
+    def test_a_migration_with_writable_schema_runs_on_the_fenced_live_hub(self):
+        """009, 018, 031 and 032 set `writable_schema` inside the script's own transaction."""
+        for suffix in ("", "-wal", "-shm"):
+            Path(f"{self.path}{suffix}").unlink(missing_ok=True)
+        # Version 8 has no `setting` kind to name the hub, so the fence reads
+        # `off`; the migration still runs on the armed connection.
+        make_store(self.path, version=8)
+        self.node()
+        with mock.patch.object(hub.FencedConnection, "arm", autospec=True,
+                               side_effect=hub.FencedConnection.arm) as arm:
+            applied = migrate(self.path)
+        arm.assert_called_once()
+        self.assertEqual(applied.after, SCHEMA_VERSION)
+        self.assertIn(32, applied.applied)
+
+    def free_pages(self) -> int:
+        reader = database.connect(write=False)
+        try:
+            return reader.execute("PRAGMA freelist_count").fetchone()[0]
+        finally:
+            reader.close()
+
+    def vacuumable(self) -> int:
+        """Switch the record to incremental auto-vacuum and leave free pages for `incremental_vacuum`."""
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        try:
+            raw.execute("PRAGMA auto_vacuum = INCREMENTAL")
+            raw.execute("VACUUM")
+            raw.execute("CREATE TABLE filler (body TEXT)")
+            raw.executemany("INSERT INTO filler VALUES (?)", [("x" * 1000,) for _ in range(200)])
+            raw.execute("DELETE FROM filler")
+        finally:
+            raw.close()
+        free = self.free_pages()
+        self.assertGreater(free, 1)
+        return free
+
+    def test_incremental_vacuum_never_runs_on_the_record(self):
+        """Lane reviews of cae42071c and 8a5f0f243: its cursor frees pages as it is fetched, past a ROLLBACK.
+
+        The next commit on the connection writes those pages, so no fence
+        check before or after it holds; it is refused on every path.
+        """
+        self.name_hub(HUB_NAME)
+        self.node()
+        before = self.vacuumable()
+        insert = "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', ?, '{}', '2026')"
+        openings = {"autocommit": None, "BEGIN": "BEGIN", "BEGIN IMMEDIATE": "BEGIN IMMEDIATE",
+                    "SAVEPOINT": "SAVEPOINT outer"}
+        for name, opening in openings.items():
+            with self.subTest(opening=name):
+                connection = self.open()
+                cursor = connection.cursor()
+                if opening is not None:
+                    connection.execute(opening)
+                with self.assertRaises(SdDbError) as refused:
+                    cursor.execute("PRAGMA incremental_vacuum")
+                self.assertIn("incremental_vacuum", str(refused.exception))
+                with contextlib.suppress(sqlite3.Error):
+                    cursor.fetchall()
+                if connection.in_transaction:
+                    connection.execute("ROLLBACK")
+                connection.execute(insert, (name,))
+                self.assertEqual(self.free_pages(), before)
+
+    def wal_bytes(self) -> int:
+        wal = Path(f"{self.path}-wal")
+        return wal.stat().st_size if wal.exists() else -1
+
+    def test_an_operation_no_rollback_undoes_asks_afresh_before_it_runs(self):
+        """Lane review of 8a5f0f243: BEGIN and SAVEPOINT open no storage transaction, so these run at once.
+
+        A held `holder` answer would let them run after the rename, and the
+        fenced COMMIT that follows cannot undo them.
+        """
+        insert = "INSERT INTO state (kind, key, body, timestamp) VALUES ('x', ?, '{}', '2026')"
+        operations = ("PRAGMA wal_checkpoint", "PRAGMA wal_checkpoint(TRUNCATE)", "PRAGMA journal_mode = DELETE",
+                      "PRAGMA journal_mode = OFF", "VACUUM", "VACUUM main")
+        for opening in (None, "BEGIN", "SAVEPOINT outer"):
+            for operation in operations:
+                with self.subTest(opening=opening, operation=operation):
+                    hub._answers.clear()
+                    self.node()
+                    self.name_hub(HUB_NAME)
+                    connection = self.open()
+                    connection.execute(insert, ("held",))
+                    if opening is not None:
+                        connection.execute(opening)
+                    wal = self.wal_bytes()
+                    self.node(OLD_HUB)
+                    if operation.startswith("VACUUM") and opening is not None:
+                        # SQLite refuses it before it asks the authorizer.
+                        with self.assertRaisesRegex(sqlite3.OperationalError, "cannot VACUUM from within"):
+                            connection.execute(operation)
+                        connection.execute("ROLLBACK")
+                    else:
+                        with self.assertRaises(hub.Fenced):
+                            connection.execute(operation)
+                    self.assertFalse(connection.in_transaction)
+                    self.assertEqual(self.wal_bytes(), wal)
+                    self.assertEqual(self.header()[2], "wal")
+                    connection.close()
+
+    def test_vacuum_runs_on_the_live_hub(self):
+        self.name_hub(HUB_NAME)
+        self.node()
+        connection = self.open()
+        before = len(self.asked())
+        connection.execute("VACUUM")
+        self.assertEqual(len(self.asked()), before + 1, "one fresh ask")
 
 class TheRestore(FenceCase):
     def test_restore_writes_before_the_name_is_taken(self):
