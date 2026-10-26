@@ -1661,6 +1661,17 @@ class TheRevisit(SyncCase):
         self.assertTrue(result.ok, result.reason)
         self.assertEqual(self.states(), {new: ("open", None, None)})
 
+    def test_a_redirect_to_a_stored_url_settles_that_row(self):
+        """Lane review of 135950aae: the read's lifecycle reaches the row that
+        holds the new url before the old row goes."""
+        self.stored(6, repo=self.OLD)
+        new = self.stored(6, repo=self.NEW, last_seen="2026-09-06T00:00:00+00:00")
+        runner = QueryGh(lambda query: [], read=lambda path: pull(
+            6, url=new, state="closed", merged=True, closed_at="2026-09-01T10:00:00Z", merged_at="2026-09-01T10:00:00Z"))
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        self.assertEqual(self.states(), {new: ("merged", "2026-09-01T10:00:00Z", "2026-09-01T10:00:00Z")})
+
     def test_another_spelling_of_the_stored_url_is_no_move(self):
         """Round 2 of the sd:4880 lane review: REST answers a canonical
         `html_url`, so case and a trailing slash name the same row."""
@@ -1823,6 +1834,56 @@ class TheRevisit(SyncCase):
                 runner = QueryGh(lambda query: [], read=lambda path: (404, {"message": "Not Found"}))
                 sync(self.connection, now=self.now + timedelta(hours=hours), runner=runner)
                 self.assertEqual(runner.paths, [f"repos/{self.REPO}/pulls/{number}" for number in numbers], hours)
+
+    def test_a_refused_fold_goes_after_the_rest(self):
+        """Lane review of 135950aae: a fold an item refuses leaves the row stale,
+        so it is deferred like a failed read, or twenty such rows hold every slot."""
+        from sd_db import contributions, shadow_sync
+
+        old = f"https://github.com/{self.OLD}/pull/6"
+        contributions.capture(self.connection, title="Fix", changes={"pull_url": old}, who="test")
+        self.observed(old, observed_at="2026-08-01T00:00:00Z")
+        self.observed(f"https://github.com/{self.REPO}/pull/2", observed_at="2026-08-02T00:00:00Z")
+        with patch.object(shadow_sync, "REVISIT_LIMIT", 1):
+            for hours, path in ((0, f"repos/{self.OLD}/pulls/6"), (1, f"repos/{self.REPO}/pulls/2")):
+                runner = QueryGh(lambda query: [], read=lambda path: pull(
+                    int(path.rsplit("/", 1)[1]), url=f"https://github.com/{self.NEW}/pull/6" if self.OLD in path else None))
+                sync(self.connection, now=self.now + timedelta(hours=hours), runner=runner,
+                     contribution_client=Offline())
+                self.assertEqual(runner.paths, [path], hours)
+
+    def test_a_settled_shadow_row_with_a_stale_contribution_goes_after_the_rest(self):
+        """The shadow row settles, but the contribution of the same url stays
+        stale until its queue read completes: the url is deferred, whatever
+        spelling each store keeps."""
+        from sd_db import shadow_sync
+
+        stored = "https://github.com/Example-Org/Other/pull/1"
+        self.connection.execute(
+            "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, first_seen, last_seen) "
+            "VALUES ('github', ?, ?, 1, 'pull', 'old', 'open', ?, ?)", (self.REPO, stored, self.STALE, self.STALE))
+        self.observed(f"https://github.com/{self.REPO}/pull/1", observed_at="2026-08-01T00:00:00Z")
+        self.observed(f"https://github.com/{self.REPO}/pull/2", observed_at="2026-08-02T00:00:00Z")
+        with patch.object(shadow_sync, "REVISIT_LIMIT", 1):
+            for hours, number in ((0, 1), (1, 2)):
+                runner = QueryGh(lambda query: [], read=lambda path: pull(int(path.rsplit("/", 1)[1]), state="closed"))
+                sync(self.connection, now=self.now + timedelta(hours=hours), runner=runner,
+                     contribution_client=Offline())
+                self.assertEqual([path.lower() for path in runner.paths],
+                                 [f"repos/{self.REPO}/pulls/{number}"], hours)
+        self.assertEqual(self.states()[stored][0], "closed")
+
+    def test_a_fold_into_a_live_key_keeps_that_key_state(self):
+        """The search already observed the pull under its new url: its state wins, the old key is a tombstone."""
+        from sd_db import contributions
+
+        old = f"https://github.com/{self.OLD}/pull/6"
+        new = f"https://github.com/{self.NEW}/pull/6"
+        self.observed(old, acknowledged=["event:old"])
+        self.observed(new, observed_at="2026-09-06T00:00:00Z", acknowledged=["event:new"])
+        contributions.fold(self.connection, "github:" + old, new)
+        self.assertEqual(contributions.snapshot(self.connection, "github:" + new)["acknowledged"], ["event:new"])
+        self.assertEqual([row["url"] for row in contributions.projection(self.connection)], [new])
 
     def test_an_item_that_names_the_old_url_is_not_folded_and_is_named(self):
         """The item's url is the operator's configuration: the fold is named, not done."""

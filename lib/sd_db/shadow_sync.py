@@ -844,8 +844,10 @@ def revisit_rows(connection: sqlite3.Connection, planned: dict, *, tracker: str,
         if name is None or observed is None or observed >= before or name in current:
             continue
         rows.setdefault(name, {"url": entry["url"], "shadow": None, "key": None, "at": observed})["key"] = entry["key"]
-    turn = {url: index for index, url in enumerate(unsettled)}
-    ordered = sorted(rows.values(), key=lambda row: (turn.get(row["url"], -1), row["at"], row["url"]))
+    # By identity: a shadow row and a contribution can spell one url two ways.
+    turn = {identity(url) or url: index for index, url in enumerate(unsettled)}
+    ordered = sorted(rows.values(), key=lambda row: (turn.get(identity(row["url"]) or row["url"], -1),
+                                                     row["at"], row["url"]))
     return [{name: row[name] for name in ("url", "shadow", "key")} for row in ordered]
 
 
@@ -1066,21 +1068,26 @@ def _sync(
                 deferred.append(row["url"])
             continue
         read.add(row["url"])
+        folded = False
         if row["key"] and answer.get("url"):
             refused = contribution_sync.fold(connection, planned, row["key"], answer["url"])
             if refused:
                 result.incomplete.append(f"{row['key']}: {refused}")
+            folded = not refused
         if row["shadow"] and (answer.get("url") or answer["state"] != "open"):
             settled[row["shadow"]] = answer
         elif row["shadow"]:
             opened.append(row["shadow"])
-        elif not answer.get("url"):
-            deferred.append(row["url"])  # the queue's own read settles a contribution; this one moved nothing
+        if row["key"] and not folded:
+            # The contribution stays stale: its own queue read settles an unmoved one, and an item refused the fold.
+            deferred.append(row["url"])
     if stale:
         # A deferral lasts while its row is stale. A row read this run goes to the back of the line or leaves
-        # it; one the budget did not reach keeps its place.
-        current = {row["url"] for row in stale}
-        unsettled = [url for url in unsettled if url in current and url not in read] + deferred
+        # it; one the budget did not reach keeps its place. Urls compare by identity, as `revisit_rows` orders them.
+        current = {identity(row["url"]) or row["url"] for row in stale}
+        done = {identity(url) or url for url in read}
+        unsettled = [url for url in unsettled if (identity(url) or url) in current
+                     and (identity(url) or url) not in done] + deferred
     if unread:
         result.incomplete.append(f"{len(unread)} stale row(s) left open unread, first {unread[0]}")
     budget.remaining -= search_budget.requests

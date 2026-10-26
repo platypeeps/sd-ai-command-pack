@@ -941,19 +941,25 @@ def settle_shadow(connection: sqlite3.Connection, *, tracker: str, settled: dict
 
     Each url maps to `{state, closed_at, merged_at}`, and `url`, `repo` and
     `number` when the read answered under another url: the row moved there,
-    so it takes that url, or is dropped when a row already holds it. A row
-    that is no longer open was written since the read, and is left alone.
+    so it takes that url; when a row already holds it, that row takes the
+    read's lifecycle and this one is dropped. A row that is no longer open
+    was written since the read, and is left alone.
     """
     stamp = now()
     count = 0
     with transaction(connection):
         for url, answer in settled.items():
             moved = answer.get("url")
-            if moved and connection.execute(
-                    "SELECT 1 FROM shadow WHERE tracker = ? AND url != ? AND lower(rtrim(url, '/')) = ?",
-                    (tracker, url, moved.lower().rstrip("/"))).fetchone():
+            target = connection.execute(
+                "SELECT id FROM shadow WHERE tracker = ? AND url != ? AND lower(rtrim(url, '/')) = ?",
+                (tracker, url, moved.lower().rstrip("/"))).fetchone() if moved else None
+            if target:
                 cursor = connection.execute(
                     "DELETE FROM shadow WHERE tracker = ? AND url = ? AND state = 'open'", (tracker, url))
+                if cursor.rowcount:
+                    connection.execute(
+                        "UPDATE shadow SET state = ?, closed_at = ?, merged_at = ?, last_seen = ? WHERE id = ?",
+                        (answer["state"], answer.get("closed_at"), answer.get("merged_at"), stamp, target["id"]))
             elif moved:
                 cursor = connection.execute(
                     "UPDATE shadow SET url = ?, repo = ?, number = ?, state = ?, closed_at = ?, merged_at = ?, "
