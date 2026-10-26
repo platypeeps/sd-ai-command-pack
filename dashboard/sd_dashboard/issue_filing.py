@@ -558,10 +558,15 @@ def _read(run_id: str):
         return None, (503, {"error": f"The state of run {run_id} could not be read: {problem}"})
 
 
-def _settled(document: dict, now: datetime.datetime) -> dict:
+def _settled(record: Path, document: dict, now: datetime.datetime) -> dict:
     """The run as a reader should take it: a gone runner is failed, a gone filing server is unknown."""
     document = dict(document)
     if document["state"] == "drafting" and not _alive(document.get("pid")):
+        # The runner writes its outcome, then exits: a read before the write and a probe after the exit see a
+        # drafting run with no runner, so the record is read again before the run counts as failed (sd:6158).
+        _, again = _read(record.stem)
+        if isinstance(again, dict) and again.get("state") != "drafting":
+            return _settled(record, again, now)
         document.update(state="failed", reason=f"the runner (pid {document.get('pid')}) stopped without a draft; "
                                                f"nothing was filed")
     elif document["state"] == "queued":
@@ -582,7 +587,7 @@ def status(run_id: str, *, now: datetime.datetime | None = None):
     record, document = _read(run_id)
     if record is None:
         return document
-    return 200, public(_settled(document, now or _now()))
+    return 200, public(_settled(record, document, now or _now()))
 
 
 # -- step 5 and 6: confirm, file, link back --------------------------------------------------------------------------
@@ -799,7 +804,7 @@ def confirm(connection, run_id: str, posted: str, *, filers=None):
     record, document = _read(run_id)
     if record is None:
         return document
-    document = _settled(document, _now())
+    document = _settled(record, document, _now())
     if document["state"] == "filed":
         return _linked(connection, record, document)
     if document["state"] != "ready":
@@ -876,7 +881,7 @@ def check(connection, run_id: str, *, finders=None):
     record, document = _read(run_id)
     if record is None:
         return document
-    document = _settled(document, _now())
+    document = _settled(record, document, _now())
     if document["state"] != "unknown":
         return 409, {"error": f"Run {run_id} is {document['state']}; only a run whose outcome is not known is "
                               f"checked."}
@@ -897,7 +902,7 @@ def discard(run_id: str):
     record, document = _read(run_id)
     if record is None:
         return document
-    document = _settled(document, _now())
+    document = _settled(record, document, _now())
     if document["state"] in ("queued", "drafting", "filing", "filed", "linked"):
         return 409, {"error": f"Run {run_id} is {document['state']}; it cannot be discarded now."}
     document.update(state="discarded")

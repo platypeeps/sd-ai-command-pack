@@ -35,6 +35,10 @@ roles:
 
 class Controls(unittest.TestCase):
     def setUp(self):
+        # sd:6138: a note records the harness session id in place of the user
+        # (sd:6023), so a run from a Claude Code session must not leak it in.
+        self.enterContext(patch.dict(os.environ))
+        os.environ.pop(sd_work.SESSION_ENV, None)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name).resolve()
