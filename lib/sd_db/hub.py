@@ -35,7 +35,9 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
 import time
+import weakref
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -231,7 +233,9 @@ class Role:
     """Whether this machine holds the hub role: `holder`, `off`, `elsewhere` or `unknown`.
 
     `holder` is the name `sd.hub_name` holds, `None` when unset; `reason`
-    is one line a refusal can quote. Callers refuse on `elsewhere` and `unknown`.
+    is one line a refusal can quote. Callers that act off this machine refuse
+    on `elsewhere` and `unknown`; a write to its own database refuses on
+    `elsewhere` alone (`write_role`).
     """
 
     state: str
@@ -305,3 +309,264 @@ def role_at(path: Path, name=None) -> Role:
         return role(connection, name)
     finally:
         connection.close()
+
+
+# ------------------------------------------------------- the write fence
+
+#: Seconds a write inside a transaction trusts the last fence answer for one
+#: database, as a tailnet frame does (`serve.FENCE_SECONDS`). A commit
+#: never trusts it: it asks afresh, as the listener's commit does. A wall
+#: clock that moved `CLOCK_SLACK` more than the monotonic one, which does
+#: not count a sleep, asks again.
+FENCE_SECONDS = 5.0
+CLOCK_SLACK = 1.0
+#: SQLite's action codes for a statement that writes a database file. A
+#: pragma is left out: migrate's DDL asks, and a pragma alone moves no row.
+_WRITES = frozenset({
+    sqlite3.SQLITE_INSERT, sqlite3.SQLITE_UPDATE, sqlite3.SQLITE_DELETE, sqlite3.SQLITE_ALTER_TABLE,
+    sqlite3.SQLITE_ANALYZE, sqlite3.SQLITE_REINDEX, sqlite3.SQLITE_CREATE_INDEX, sqlite3.SQLITE_CREATE_TABLE,
+    sqlite3.SQLITE_CREATE_TRIGGER, sqlite3.SQLITE_CREATE_VIEW, sqlite3.SQLITE_CREATE_VTABLE,
+    sqlite3.SQLITE_DROP_INDEX, sqlite3.SQLITE_DROP_TABLE, sqlite3.SQLITE_DROP_TRIGGER, sqlite3.SQLITE_DROP_VIEW,
+    sqlite3.SQLITE_DROP_VTABLE,
+})
+
+_answers: dict[str, tuple[float, float, Role]] = {}
+_answers_guard = threading.Lock()
+
+
+class Fenced(remote.RemoteError):
+    """This machine no longer holds the hub role (hub failover, D5).
+
+    On the tailnet the session closes and rolls back. On a returning hub's
+    own database the write refuses and its transaction rolls back (system
+    sd:5986).
+    """
+
+
+def write_role(path: Path, *, fresh: bool = False) -> Role:
+    """`role` of the database at `path`, read from that file and held `FENCE_SECONDS`.
+
+    The file itself, never through `hub.json`: during demotion `hub.json`
+    sits beside the database, and a `HubConflict` read as `unknown` would let
+    a writer that is already open go on. `fresh` asks again whatever is
+    held, as a commit does: a held `holder` may predate the rename.
+    """
+    from .database import open_local
+
+    key = str(path)
+    with _answers_guard:
+        ticks, wall = time.monotonic(), time.time()
+        held = _answers.get(key)
+        if held is not None and not fresh:
+            since, at, found = held
+            if ticks - since < FENCE_SECONDS and abs((wall - at) - (ticks - since)) <= CLOCK_SLACK:
+                return found
+        try:
+            connection = open_local(Path(path), write=False, create=False)
+        except Exception as error:  # noqa: BLE001 -- no answer is unknown, named
+            found = Role("unknown", None, f"the database at {path} did not open: {type(error).__name__}: {error}")
+        else:
+            try:
+                found = role(connection)
+            finally:
+                connection.close()
+        _answers[key] = (ticks, wall, found)
+        return found
+
+
+#: The raw fix for a mistyped `sd.hub_name` on the real hub: the fence stays
+#: strict, so `sd config set` cannot write it (decision on #31345). The newest
+#: `setting` row is the answer (`writes.read_settings`).
+HUB_NAME_FIX = ("UPDATE state SET body = json_object('value', '<this node>') WHERE id = "
+                f"(SELECT max(id) FROM state WHERE kind = 'setting' AND key = '{HUB_NAME}')")
+
+
+def demotion(path: Path, found: Role) -> str:
+    """The `Fenced` text for a local write: the holder, the two demotion steps, `hub.json` first, then the typo fix."""
+    return (f"refused: this machine is not the hub, so it writes nothing to {path}: {found.reason}. "
+            f"Reads still work. Demote it in this order: "
+            f"1. copy ~/{CONFIG_RELATIVE} from any satellite into this home "
+            f"(until step 2, every sd command refuses with HubConflict); "
+            f"2. move {path} aside as {Path(path).name}.demoted-<date>; "
+            f"sd commands then reach the hub, {found.holder}. "
+            f"If this machine is the hub and {HUB_NAME} is mistyped, no sd command can fix it: "
+            f"run sqlite3 {path} \"{HUB_NAME_FIX}\" with this node's tailnet name, "
+            f"or rename this node in Tailscale to {found.holder}")
+
+
+class _WriteFence:
+    """SQLite's authorizer on this machine's own write connection (system sd:5986).
+
+    Write unless fenced (#31093): only `elsewhere` refuses. `holder`, `off`
+    and `unknown` write, so a Tailscale outage does not stop a healthy hub.
+    Each boundary that makes a write persist asks afresh: COMMIT, and the
+    RELEASE of a savepoint opened outside a transaction. A write outside a
+    transaction commits when SQLite ends it, which no authorizer sees, so it
+    is refused at prepare (`unwrapped`); the cursor runs it again inside
+    BEGIN IMMEDIATE ... COMMIT (`_batched`), as it runs `executemany`. A
+    transaction that wrote nothing commits without asking, so reads keep working.
+    Only SQLite's own state ends a transaction here: the write flag and the
+    outer savepoint clear when a statement is prepared outside one, never on
+    a BEGIN, ROLLBACK or RELEASE that may yet fail (review of f716079a9).
+    A write inside a transaction asks the held answer, to stop early; its
+    commit decides. So a transaction open across the console rename rolls back.
+    The connection caches no statement: Python does not authorize a cached one again.
+    It holds its connection weakly, so the pair makes no cycle.
+    """
+
+    def __init__(self, path: Path, connection: sqlite3.Connection) -> None:
+        self.path = path
+        self.connection = weakref.ref(connection)
+        #: The open transaction, or this autocommit statement, prepared a write.
+        self.wrote = False
+        #: The savepoint that opened the current transaction: its RELEASE commits.
+        self.outer: str | None = None
+        #: Why the last statement was denied, for the `Fenced` the connection raises.
+        self.refusal: str | None = None
+        #: The last statement was denied as a write outside a transaction.
+        self.unwrapped = False
+
+    def _open(self) -> bool:
+        """Whether a transaction is open before the statement being prepared."""
+        connection = self.connection()
+        return connection is not None and connection.in_transaction
+
+    def __call__(self, action: int, arg1, arg2, database, trigger) -> int:
+        opened = self._open()
+        if not opened:
+            self.wrote, self.outer = False, None
+        if action == sqlite3.SQLITE_TRANSACTION:
+            ends = arg1 == "COMMIT" and opened and self.wrote
+            return self._ask(fresh=True) if ends else sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_SAVEPOINT:
+            name = (arg2 or "").lower()
+            if arg1 == "BEGIN" and not opened:
+                self.outer = name
+            if arg1 == "RELEASE" and opened and name == self.outer and self.wrote:
+                return self._ask(fresh=True)
+            return sqlite3.SQLITE_OK
+        if action in _WRITES and database != "temp":
+            if not opened:
+                self.unwrapped = True
+                return sqlite3.SQLITE_DENY
+            self.wrote = True
+            return self._ask(fresh=False)
+        return sqlite3.SQLITE_OK
+
+    def _ask(self, *, fresh: bool) -> int:
+        found = write_role(self.path, fresh=fresh)
+        if found.state != "elsewhere":
+            return sqlite3.SQLITE_OK
+        self.refusal = demotion(self.path, found)
+        return sqlite3.SQLITE_DENY
+
+
+class _Unwrapped(Exception):
+    """A write prepared outside a transaction: run it again inside one (`_batched`)."""
+
+
+def _fenced(connection: sqlite3.Connection, run, *args):
+    """`run(*args)`, with a fence denial raised as `Fenced` after its transaction rolls back."""
+    fence: _WriteFence | None = getattr(connection, "fence", None)
+    if fence is not None:
+        fence.refusal, fence.unwrapped = None, False
+    try:
+        return run(*args)
+    except sqlite3.DatabaseError as error:
+        if fence is not None and fence.unwrapped:
+            fence.unwrapped = False
+            raise _Unwrapped() from error
+        if fence is None or fence.refusal is None:
+            raise
+        refusal, fence.refusal = fence.refusal, None
+        if connection.in_transaction:
+            # Nothing a fenced transaction wrote may commit.
+            sqlite3.Connection.execute(connection, "ROLLBACK")
+        raise Fenced(refusal) from error
+
+
+def _batched(connection: sqlite3.Connection, run, *args):
+    """A write in its own transaction outside one, so its COMMIT asks the fence afresh.
+
+    In autocommit SQLite commits a write when it ends, and `executemany`
+    after each parameter set, with no authorizer call between.
+    """
+    if connection.in_transaction:
+        return _fenced(connection, run, *args)
+    sqlite3.Connection.execute(connection, "BEGIN IMMEDIATE")
+    try:
+        cursor = _fenced(connection, run, *args)
+        _fenced(connection, sqlite3.Connection.execute, connection, "COMMIT")
+    except BaseException:
+        if connection.in_transaction:
+            sqlite3.Connection.execute(connection, "ROLLBACK")
+        raise
+    return cursor
+
+
+class _FencedCursor(sqlite3.Cursor):
+    def execute(self, *args):
+        # A read runs as it is; a write outside a transaction is refused at
+        # prepare, before it runs, and runs again inside one.
+        try:
+            return _fenced(self.connection, super().execute, *args)
+        except _Unwrapped:
+            return _batched(self.connection, super().execute, *args)
+
+    def executemany(self, *args):
+        return _batched(self.connection, super().executemany, *args)
+
+    def executescript(self, *args):
+        # sqlite3 commits an open transaction before a script, so none can
+        # hold it, and a script half run cannot run again.
+        try:
+            return _fenced(self.connection, super().executescript, *args)
+        except _Unwrapped:
+            raise SdDbError("refused: a script's write outside a transaction commits unfenced; "
+                            "put BEGIN IMMEDIATE ... COMMIT inside the script (system sd:5986)") from None
+
+
+class FencedConnection(sqlite3.Connection):
+    """This machine's own write connection to its default database (`database.open_local`)."""
+
+    fence: _WriteFence | None = None
+
+    def arm(self, path: Path) -> None:
+        self.fence = _WriteFence(Path(path), self)
+        super().set_authorizer(self.fence)
+
+    def set_authorizer(self, *args, **kwargs):
+        raise SdDbError("the write fence owns this connection's authorizer (system sd:5986)")
+
+    def cursor(self, factory=_FencedCursor):
+        # A plain cursor's `executemany` would commit each set unasked.
+        if not (isinstance(factory, type) and issubclass(factory, _FencedCursor)):
+            raise SdDbError("this connection hands out fenced cursors only (system sd:5986)")
+        return super().cursor(factory)
+
+    # The convenience methods go through `cursor()`: sqlite3's own hand back
+    # a plain cursor, which a caller can reuse past the fence.
+    def execute(self, *args):
+        return self.cursor().execute(*args)
+
+    def executemany(self, *args):
+        return self.cursor().executemany(*args)
+
+    def blobopen(self, *args, readonly: bool = False, name: str = "main"):
+        # A blob write passes no authorizer and commits on each write outside
+        # a transaction, so it is held to one whose COMMIT asks afresh.
+        if not readonly and name != "temp":
+            if not self.in_transaction:
+                raise SdDbError("a writable blob needs a transaction (BEGIN IMMEDIATE ... COMMIT)")
+            if self.fence is not None:
+                self.fence.wrote = True
+        return super().blobopen(*args, readonly=readonly, name=name)
+
+    def executescript(self, *args):
+        return self.cursor().executescript(*args)
+
+    def commit(self):
+        return _fenced(self, super().commit)
+
+    def __exit__(self, *args):
+        return _fenced(self, super().__exit__, *args)

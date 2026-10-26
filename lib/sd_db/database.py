@@ -177,14 +177,17 @@ def connect(
     # The target is compared first, so another database never touches the
     # selector's folder at all, not even a `stat` that could be refused.
     local = local_path(home)
-    if (path is None or _same_file(Path(path), local)) and hub.configured(home):
+    own = path is None or _same_file(Path(path), local)
+    if own and hub.configured(home):
         satellite = hub.read(home)
         if satellite is not None:
             return satellite.open(local, write=write, create=create, busy_timeout=busy_timeout)
     target = Path(path) if path is not None else local
     if _opener is not None:
         return _opener(target, write=write, create=create, busy_timeout=busy_timeout)
-    return open_local(target, write=write, create=create, busy_timeout=busy_timeout)
+    # The write fence (system sd:5986): a write to this machine's own record
+    # asks whether it still holds the hub role. Another file is not the record.
+    return open_local(target, write=write, create=create, busy_timeout=busy_timeout, fence=write and own)
 
 
 #: The test seam `sd_db.testing.surface` and `sd_db.testing.wire` set, in
@@ -197,7 +200,7 @@ _opener = None
 
 def open_local(
     target: Path, *, write: bool, create: bool, busy_timeout: int = BUSY_TIMEOUT,
-    cached_statements: int = 128,
+    cached_statements: int = 128, fence: bool = False,
 ) -> sqlite3.Connection:
     """The local open behind `connect`, for a resolved path.
 
@@ -205,7 +208,13 @@ def open_local(
     connection a local caller gets: same pragmas, same version refusals.
     It passes `cached_statements=0`, so its authorizer sees every statement;
     128 is Python's own default.
+
+    `fence` arms the write fence (`hub.FencedConnection`): every write and
+    its commit ask `hub.write_role`, and `elsewhere` raises `hub.Fenced`.
+    It caches no statement either, for the same reason.
     """
+    from . import hub
+
     if not create and not target.exists():
         raise FileNotFoundError(
             f"no database at {target}; run `bin/sd-db init` from the command pack"
@@ -214,7 +223,9 @@ def open_local(
         target.parent.mkdir(parents=True, exist_ok=True)
     mode = "rwc" if create else "rw" if write else "ro"
     connection = sqlite3.connect(target.resolve().as_uri() + f"?mode={mode}",
-                                 uri=True, isolation_level=None, cached_statements=cached_statements)
+                                 uri=True, isolation_level=None,
+                                 cached_statements=0 if fence else cached_statements,
+                                 factory=hub.FencedConnection if fence else sqlite3.Connection)
     try:
         # First, before the version read and the journal-mode pragma: both
         # take a lock, so a timeout set after them is a timeout that was not
@@ -228,6 +239,8 @@ def open_local(
         if write and found < SCHEMA_VERSION and not create:
             raise SchemaTooOld(found, SCHEMA_VERSION)
         _configure(connection, write=write)
+        if isinstance(connection, hub.FencedConnection):
+            connection.arm(target)
     except BaseException:
         connection.close()
         raise
@@ -249,6 +262,9 @@ def transaction(connection: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     try:
         yield connection
     except BaseException:
+        # A fenced write (`hub.Fenced`) has rolled the whole transaction back already.
+        if not connection.in_transaction:
+            raise
         if savepoint:
             connection.execute(f"ROLLBACK TO {savepoint}")
             connection.execute(f"RELEASE {savepoint}")
