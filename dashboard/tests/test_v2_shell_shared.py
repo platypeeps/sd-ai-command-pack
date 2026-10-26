@@ -847,7 +847,7 @@ class TheTableGrammar(unittest.TestCase):
         self.assertIn("try { localStorage.setItem(TKEY, JSON.stringify(TKEPT)); } catch", js)
         self.assertIn("list.chips(chipped, shown, total, 'tunfilter')", js)
         self.assertIn("tr[data-tout] { display: none !important; }", SHELL_CSS)
-        self.assertIn('td > .tfold[aria-expanded="true"] > .i:first-child { transform: rotate(90deg); }', SHELL_CSS)
+        self.assertIn(':is(td, th) > .tfold[aria-expanded="true"] > .i:first-child { transform: rotate(90deg); }', SHELL_CSS)
 
     def test_a_folded_row_stays_hidden_under_every_page_rule_that_sets_a_row_display(self):
         # A page's mobile `.ledger tbody tr { display: grid }` outranks a plain `tr[data-tout]`, so a shut fold hid nothing at

@@ -44,22 +44,25 @@
   }
 
   // A session id is long; its first block names it, as sd today prints it.
+  // A week can hold a thousand rulings (pack sd:6017): each session is a fold, the newest open; FOLD keeps what the
+  // operator opened or shut across redraws.
+  const FOLD = new Map();
   const session = g => g.session ? `Session ${g.session.split('-')[0]}` : 'No session';
   function reversal(r) {
     if (r.reversed) return html`<span class="why">reversed</span>`;
-    if (!r.answers) return html`<span class="why">answered no question: note the item to change it</span>`;
+    if (!r.answers) return html`<span class="why" title="This ruling answered no question note: note the item to change it">answered no question</span>`;
     return html`<button type="button" class="btn quiet sm" data-reverse="${r.note}"${BUSY.has(-r.note) ? html` disabled` : ''}>Reverse</button>`;
   }
   function drawRulings() {
     const box = $('rulings'); if (!box) return;
     const n = RULINGS.reduce((sum, g) => sum + g.rulings.length, 0);
     put($('rulings-tally'), n ? html`<span>${n} in ${RULINGS.length} ${RULINGS.length === 1 ? 'session' : 'sessions'}</span>` : html``);
-    put(box, !LIST ? html`` : RULINGS.length ? html`${RULINGS.map(g => html`<h3 class="ruling-session">${session(g)} · ${g.rulings.length} ${g.rulings.length === 1 ? 'ruling' : 'rulings'} · <time class="rel" datetime="${g.at}"></time></h3>
+    put(box, !LIST ? html`` : RULINGS.length ? html`${RULINGS.map((g, i) => html`<details class="ruling-group"${(FOLD.has(g.session) ? FOLD.get(g.session) : !i) ? html` open` : ''}><summary class="ruling-session" data-session="${g.session}">${session(g)} · ${g.rulings.length} ${g.rulings.length === 1 ? 'ruling' : 'rulings'} · <time class="rel" datetime="${g.at}"></time></summary>
       <table class="ledger decisions rulings" aria-label="${`Rulings of ${session(g).toLowerCase()}`}"><tbody>${g.rulings.map(r => html`<tr data-item="${r.item}">
         <td class="g ${r.reversed ? 'g-queued' : 'g-ok'}" title="${r.reversed ? 'reversed' : 'ruled'}">${r.reversed ? '○' : '●'}</td>
         <td class="what"><a href="${window.shell.itemHref(r.item)}"><span class="id">#${r.item}</span> ${r.title}</a><span class="repo">${repoName(r.repo)} · ${r.state}</span></td>
         <td class="question">${r.question ? html`${r.question} → ` : ''}<b>${r.ruling}</b><span class="asked-at">note #${r.note} · <time class="rel" datetime="${r.at}"></time></span></td>
-        <td class="act">${reversal(r)}</td></tr>`)}</tbody></table>`)}`
+        <td class="act">${reversal(r)}</td></tr>`)}</tbody></table></details>`)}`
       : html`<p class="filtered">No ruling in the last 7 days.</p>`);
   }
 
@@ -154,6 +157,8 @@
       const b = e.target.closest('button[data-reverse]');
       if (b && !b.disabled) reverse(+b.dataset.reverse);
     });
+    // toggle does not bubble, so the box listens in the capture phase.
+    $('rulings').addEventListener('toggle', e => { const s = e.target.querySelector?.(':scope > summary')?.dataset.session; if (s != null) FOLD.set(s, e.target.open); }, true);
     $('decisions-head').addEventListener('click', e => { if (window.shell.list.sortBy(e, SORT)) window.shell.list.keepFocus(e, draw); });
     put($('decisions-head'), window.shell.list.sortHead(COLS, SORT)); // drawn before the read, so a failed one keeps the columns
     load();

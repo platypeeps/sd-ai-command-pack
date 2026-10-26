@@ -19,6 +19,7 @@ look at 375 px, focus order -- is a manual check recorded on the pull request.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import unittest
 from pathlib import Path
@@ -441,6 +442,13 @@ class TheRulingsScript(TheScript):
         self.assertEqual(rulings.count('data-reverse="'), 1)
         self.assertIn('data-reverse="41"', rulings)
         self.assertIn("answered no question", rulings)
+
+    def test_each_session_is_a_fold_and_only_the_newest_opens(self):
+        # Pack sd:6017: a week held 1071 rulings in 11 sessions; on a phone only the newest session shows its rows.
+        doc = json.dumps({"decisions": [], "rulings": [ruling_group(), ruling_group(session="older", at="2026-10-20T00:00:00Z")]})
+        out = self.run_page("R.rulings = ELS.rulings.html;", f"(path, body) => [200, {doc}]")
+        folds = re.findall(r'<details class="ruling-group"( open)?><summary', out["R"]["rulings"])
+        self.assertEqual(folds, [" open", ""])
 
     def test_reverse_posts_the_ruling_and_reads_again(self):
         doc = json.dumps({"decisions": [], "rulings": [ruling_group()]})
