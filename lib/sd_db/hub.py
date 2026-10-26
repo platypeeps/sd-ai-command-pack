@@ -508,16 +508,24 @@ class FencedConnection(sqlite3.Connection):
 
     def arm(self, path: Path) -> None:
         self.fence = _WriteFence(Path(path), self)
-        self.set_authorizer(self.fence)
+        super().set_authorizer(self.fence)
+
+    def set_authorizer(self, *args, **kwargs):
+        raise SdDbError("the write fence owns this connection's authorizer (system sd:5986)")
 
     def cursor(self, factory=_FencedCursor):
+        # A plain cursor's `executemany` would commit each set unasked.
+        if not (isinstance(factory, type) and issubclass(factory, _FencedCursor)):
+            raise SdDbError("this connection hands out fenced cursors only (system sd:5986)")
         return super().cursor(factory)
 
+    # The convenience methods go through `cursor()`: sqlite3's own hand back
+    # a plain cursor, which a caller can reuse past the fence.
     def execute(self, *args):
-        return _fenced(self, super().execute, *args)
+        return self.cursor().execute(*args)
 
     def executemany(self, *args):
-        return _batched(self, super().executemany, *args)
+        return self.cursor().executemany(*args)
 
     def blobopen(self, *args, readonly: bool = False, name: str = "main"):
         # A blob write passes no authorizer and commits on each write outside
@@ -530,7 +538,7 @@ class FencedConnection(sqlite3.Connection):
         return super().blobopen(*args, readonly=readonly, name=name)
 
     def executescript(self, *args):
-        return _fenced(self, super().executescript, *args)
+        return self.cursor().executescript(*args)
 
     def commit(self):
         return _fenced(self, super().commit)

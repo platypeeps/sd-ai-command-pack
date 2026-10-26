@@ -181,6 +181,7 @@ class TheWriteFence(FenceCase):
             "executemany": lambda: connection.executemany(insert, [("b",)]),
             "executescript": lambda: connection.executescript("CREATE TABLE stale (id INTEGER)"),
             "cursor": lambda: connection.cursor().execute(insert, ("c",)),
+            "execute's cursor": lambda: connection.execute("SELECT 1").execute(insert, ("e",)),
             "inside BEGIN": lambda: (connection.execute("BEGIN IMMEDIATE"), connection.execute(insert, ("d",))),
         }
         for name, write in paths.items():
@@ -188,6 +189,26 @@ class TheWriteFence(FenceCase):
                 write()
             self.assertFalse(connection.in_transaction)
         self.assertEqual(connection.execute("SELECT count(*) FROM state WHERE kind = 'x'").fetchone()[0], 0)
+
+    def test_no_cursor_or_authorizer_leaves_the_fence(self):
+        """Every cursor the connection hands out is fenced; nothing replaces the fence's authorizer."""
+        self.name_hub(HUB_NAME)
+        self.node()
+        connection = self.open()
+        handed = {
+            "cursor": connection.cursor(),
+            "execute": connection.execute("SELECT 1"),
+            "executemany": connection.executemany("DELETE FROM state WHERE id = ?", []),
+            "executescript": connection.executescript("SELECT 1"),
+        }
+        for name, cursor in handed.items():
+            with self.subTest(method=name):
+                self.assertIsInstance(cursor, hub._FencedCursor)
+        with self.assertRaises(SdDbError):
+            connection.cursor(sqlite3.Cursor)
+        for authorizer in (None, lambda *args: sqlite3.SQLITE_OK):
+            with self.subTest(authorizer=authorizer), self.assertRaises(SdDbError):
+                connection.set_authorizer(authorizer)
 
     def test_reads_and_temp_tables_stay_allowed(self):
         """The old hub's dashboard still shows its stale records; a read transaction commits."""
@@ -319,6 +340,11 @@ class TheCommitBoundaries(FenceCase):
         batches = {
             "connection": lambda connection: connection.executemany(insert, sets()),
             "cursor": lambda connection: connection.cursor().executemany(insert, sets()),
+            # Lead review of 731a41b3f: the cursor each convenience method returns, reused.
+            "execute's cursor": lambda connection: connection.execute("SELECT 1").executemany(insert, sets()),
+            "executemany's cursor": lambda connection: connection.executemany(insert, []).executemany(insert, sets()),
+            "executescript's cursor": lambda connection: connection.executescript("SELECT 1").executemany(
+                insert, sets()),
         }
         for name, batch in batches.items():
             with self.subTest(wrapper=name):
