@@ -55,6 +55,10 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
    Do not run a full `make check` or `sd gate check`: the lane's prepare runs the one full gate (system sd:5800).
 6. Merge `origin/main` into your branch (`git fetch -q origin && git merge --no-edit origin/main`), resolve conflicts,
    and rerun the focused tests. A conflict you cannot resolve from the code is a question for the lead.
+   A change to a page a browser shows: capture each page it touches, dark and light, at desktop and phone width (sd:6007).
+   For the pack's dashboard run `dashboard/dashboard.sh shots --out <root>/<repository>/shots-<branch> /<page>...`;
+   for another UI use its repository's capture tool, or say it has none.
+   Name each PNG in the report, not in the pull-request body: the shots hold live data.
 7. Write the pull-request body to the path your brief names. It holds `## Summary`, one bullet group per item
    naming `<repo> sd:N`, and `## Test plan`, with the fail-first tests and focused test lines.
    No tables or checklists, except the failure table that the sd-review skill's class pass asks for.
@@ -107,7 +111,7 @@ Check each class your change touches before you commit.
 ## Report
 
 Return: branch, head SHA, whether the worktree is clean, each item's outcome (built, already fixed, or skipped and why),
-the origin/main commit merged, fail-first lines, focused test lines, the body file path and the primary item, each item as `<repo> sd:N`.
+the origin/main commit merged, fail-first lines, focused test lines, any page shots, the body file path and the primary item, each item as `<repo> sd:N`.
 A partial pass is not a pass; "not verified" is a valid report.
 The `sd-builder-guard` hook blocks a final report that quotes no test runner's result line, such as `Ran 12 tests` and `OK`.
 After a code edit it also wants the fail-first line; `not verified: <reason>` ends the turn without either.

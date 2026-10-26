@@ -38,13 +38,17 @@ def session_of(payload: dict, environ: dict[str, str]) -> str:
     return found if isinstance(found, str) and found else environ.get(SESSION_ENV, "")
 
 
+def first_line(text) -> str:
+    """The first line of a note or title, at most `WIDTH` characters (pack sd:6046)."""
+    first = str(text).strip().partition("\n")[0]
+    return first if len(first) <= WIDTH else first[:WIDTH - 3] + "..."
+
+
 def trail_entry(row, item_ref) -> str:
     ref = item_ref(row["item"], row["repo"])
     if row["kind"] == "status_change":
-        return f"- filed {ref} {row['timestamp'][:10]}: {row['title']}"
-    first = str(row["body"]).strip().partition("\n")[0]
-    if len(first) > WIDTH:
-        first = first[:WIDTH - 3] + "..."
+        return f"- filed {ref} {row['timestamp'][:10]}: {first_line(row['title'])}"
+    first = first_line(row["body"])
     state = ", resolved" if row["kind"] == "question" and row["resolved_at"] else ""
     return f"- {row['kind']} #{row['id']} on {ref} {row['timestamp'][:10]}{state}: {first}"
 

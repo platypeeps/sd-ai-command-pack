@@ -1,5 +1,6 @@
 """Places (sd:5663): a realm with a report family of its own id is a place page, at /places?realm=<id>, with Tasks,
-Briefs and Reports as HOA's and Home's (`places`). The realm and family lines are the operator's, so no realm is named
+Briefs and Reports as HOA's and Home's (`places`), after an Overview of the realm's tiles (`place_tiles`, sd:6162,
+sd:6164), whose buttons post /api/place/tiles. The realm and family lines are the operator's, so no realm is named
 here: place.js reads the id from the address and the label from /ui/sections.js, and the rail lists each realm place
 (`places.realm_places`). Each view reads /api/place/<id>/<view>; an id that is not a realm id is a 404."""
 
@@ -18,10 +19,20 @@ def view(kind: str) -> Api:
         realm = read.path.split("/")[3]
         if realm in places.RESERVED:
             return 404, {"error": f"{realm} is not a realm id"}
+        if kind == "overview":
+            from ... import place_tiles
+
+            return place_tiles.document(realm, now=read.now)
         # A Reports row's Details read the jobs as the Reports page does (sd:5636).
         return getattr(places, kind)(read.connection, realm, now=read.now, **({"jobs": read.jobs} if kind == "reports" else {}))
 
     return Api(read=read, pattern=rf"/api/place/{ID}/{kind}", example=f"/api/place/acme/{kind}")
+
+
+def _run(payload, principal):
+    from ... import place_tiles
+
+    return place_tiles.run(payload)
 
 
 PAGE = Page(
@@ -29,5 +40,5 @@ PAGE = Page(
     routes=("/places",),
     html="place.html",
     item="sd:5663",
-    api=tuple(view(kind) for kind in ("tasks", "briefs", "reports")),
+    api=(*(view(kind) for kind in ("overview", "tasks", "briefs", "reports")), Api("/api/place/tiles", write=_run)),
 )
