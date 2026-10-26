@@ -911,13 +911,13 @@ def one_migration_back(database):
     """
     raw = sqlite3.connect(database, isolation_level=None)
     try:
-        # The reverse of 042_runner_run_build.sql, which its header carries as `--   ` lines: `runner_run`
-        # loses the build columns, and the version goes to 41. The helper is rewritten with every migration:
+        # The reverse of 043_note_harness_session.sql, which its header carries as `--   ` lines: `note`
+        # loses `harness_session`, and the version goes to 42. The helper is rewritten with every migration:
         # a migration that adds a table or a column would be refused if left in place.
-        text = (SCHEMA_DIR / "042_runner_run_build.sql").read_text()
+        text = (SCHEMA_DIR / "043_note_harness_session.sql").read_text()
         script = "\n".join(line[4:] for line in text.splitlines() if line.startswith("--   "))
-        assert "PRAGMA user_version = 41" in script, \
-            "042's reverse is not where this helper expects it"
+        assert "PRAGMA user_version = 42" in script, \
+            "043's reverse is not where this helper expects it"
         raw.executescript(script)
         assert raw.execute("PRAGMA user_version").fetchone()[0] == SCHEMA_VERSION - 1
     finally:
