@@ -25,7 +25,7 @@ import subprocess
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Mapping
+from typing import Any, Mapping
 
 from . import paths
 from .errors import SdDbError
@@ -157,16 +157,43 @@ _STATUS_SINCE = """
 """
 
 
-def _unparked_clause(connection: sqlite3.Connection, *, parked: bool = False) -> str:
-    """A schema-2 store remains readable until its explicit migration; it parks nothing.
+#: The field that moves a learning row to a Documents view (pack sd:6262): `books` or `videos`.
+#: `records.move_documents` sets it and `records.return_documents` takes it off; the row keeps its id and notes.
+DOCUMENT_TYPE = "document-type"
+#: SQL true for a row in no Documents view: `document_view` is None. `CASE` reads the field only from JSON that
+#: parses: one bad row's fields must not fail every list.
+NOT_A_DOCUMENT = (f"(CASE WHEN json_valid(item.fields) THEN json_type(item.fields, '$.\"{DOCUMENT_TYPE}\"') IS NOT 'text'"
+                  f" OR json_extract(item.fields, '$.\"{DOCUMENT_TYPE}\"') = '' ELSE 1 END)")
 
+
+def document_view(fields: Any) -> str | None:
+    """The Documents view a row's fields name, or None: the rule `NOT_A_DOCUMENT` is in SQL."""
+    held = fields.get(DOCUMENT_TYPE) if isinstance(fields, dict) else None
+    return held if isinstance(held, str) and held else None
+
+
+def _has_parked_at(connection: sqlite3.Connection) -> bool:
+    return "parked_at" in {row[1] for row in connection.execute("PRAGMA table_info(item)")}
+
+
+def _unparked_clause(connection: sqlite3.Connection, *, parked: bool = False, documents: bool = False) -> str:
+    """The rows the active lists show: not parked, and in no Documents view.
+
+    A schema-2 store remains readable until its explicit migration; it parks nothing.
     `parked` selects the other side: the items the nightly prune parked, never a
     writing piece, which revives through its own workflow (sd:3012).
+
+    A row moved to a Documents view (`NOT_A_DOCUMENT`, pack sd:6262) shows only
+    there: it leaves Tasks, its Parked view, Today and their counts.
+    `documents=True` keeps it, for a read that is not a list of work, such as
+    the open questions Decide shows.
     """
-    columns = {row[1] for row in connection.execute("PRAGMA table_info(item)")}
-    if "parked_at" not in columns:
-        return "0" if parked else "1"
-    return "(item.parked_at IS NOT NULL AND item.piece IS NULL)" if parked else "item.parked_at IS NULL"
+    shown = "1" if documents else NOT_A_DOCUMENT
+    if not _has_parked_at(connection):
+        return "0" if parked else shown
+    if parked:
+        return f"(item.parked_at IS NOT NULL AND item.piece IS NULL AND {shown})"
+    return f"(item.parked_at IS NULL AND {shown})"
 
 
 def opens_on_clause(connection: sqlite3.Connection) -> str:
@@ -281,6 +308,9 @@ def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200,
                batches: bool = True) -> list[sqlite3.Row]:
     """Unresolved `kind` notes on items that are neither done nor parked, oldest first (sd:3501).
 
+    A row moved to a Documents view keeps its open notes here (pack sd:6262):
+    a question on it still waits on the operator.
+
     `batches=False` leaves out the notes of review batches, in the query, so
     a batch of hundreds does not fill `limit`: the dashboard's Review page
     labels those questions, one click each (sd:5130).
@@ -291,7 +321,7 @@ def open_notes(connection: sqlite3.Connection, kind: str, *, limit: int = 200,
             SELECT note.*, item.title AS item_title, item.repo AS item_repo, item.status AS item_status
               FROM note JOIN item ON item.id = note.item
              WHERE note.kind = ? AND note.resolved_at IS NULL AND item.status != 'done'
-               AND {_unparked_clause(connection)} AND {"1" if batches else "NOT " + REVIEW_BATCH}
+               AND {_unparked_clause(connection, documents=True)} AND {"1" if batches else "NOT " + REVIEW_BATCH}
              ORDER BY note.timestamp ASC, note.id ASC
              LIMIT ?
             """,

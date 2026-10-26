@@ -297,14 +297,18 @@ class TheDocuments(ScreenCase):
         upsert_repo(self.connection, str(root), pieces_source="file")
         piece = writing.import_piece(self.connection, str(root), "2026/a-piece", who="test")["item"]["id"]
         set_item_fields(self.connection, piece, parked_at="2026-09-01T02:00:00Z")
+        # pack sd:6262: a learning row moved to a Documents view shows only there.
+        video = self.item("2016-06-06 - YouTube - Example Channel - A Talk", kind="idea", status="ready", source="vault",
+                          stage="in-progress", fields={"kind": "learning", "document-type": "videos"})
         self.connection.commit()
         rows = {row["id"]: row for row in tasks_screen.document(self.connection, now=NOW)["rows"]}
-        every = [*self.ids.values(), quiet, bare, loud, parked, piece]
+        every = [*self.ids.values(), quiet, bare, loud, parked, piece, video]
         got = {item: tasks_screen.details(self.connection, item, now=NOW) for item in every}
         self.assertEqual({item: got[item]["left_out"] for item in every if got[item]["left_out"]},
                          {self.ids["old"]: "done before the week", quiet: "a report that needs no attention",
                           bare: "a report that needs no attention",
-                          piece: "a parked writing piece, which revives through its own workflow"})
+                          piece: "a parked writing piece, which revives through its own workflow",
+                          video: "a document: it shows under Documents > Videos"})
         self.assertEqual({item for item in every if got[item]["left_out"] is None}, set(rows))
         for item in rows:
             self.assertEqual(got[item]["row"], rows[item], item)

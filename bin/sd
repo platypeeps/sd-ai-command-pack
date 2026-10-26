@@ -2641,7 +2641,8 @@ def gate_check(args: argparse.Namespace) -> int:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="sd", description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(prog="sd", description=__doc__.splitlines()[0],
+                                     epilog="Exit codes: 0 done, 1 refused, 2 usage.")
     groups = parser.add_subparsers(dest="group", required=True)
 
     plugin = groups.add_parser("plugin", help="register and list plugins")

@@ -138,7 +138,11 @@
       v.F.state = v.F.state === c.dataset.v ? '' : c.dataset.v;
       redraw();
     });
-    $(`${id}-empty`).addEventListener('click', e => { if (e.target.closest('[data-fclear]')) { v.F.state = ''; redraw(); } });
+    // The empty state's Clear filters empties the search field too, and tells the Documents list (sd:6285).
+    $(`${id}-empty`).addEventListener('click', e => {
+      if (!e.target.closest('[data-fclear]')) return;
+      v.F.state = ''; v.F.q = ''; $('shift').value = ''; $('shift').dispatchEvent?.(new Event('input')); redraw();
+    });
     $(`${id}-head`).addEventListener('click', e => { if (window.shell.list.sortBy(e, v.L)) window.shell.list.keepFocus(e, () => draw(id)); });
     $(`${id}-pager`).addEventListener('click', e => { if (window.shell.list.paging(e, v.L)) window.shell.list.keepFocus(e, () => draw(id)); });
     $(`${id}-rows`).addEventListener('click', e => {

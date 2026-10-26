@@ -604,9 +604,15 @@ def source_url(repo: Path, src: str) -> str | None:
 
 
 #: A Markdown link or image whose target has no scheme and is no anchor or
-#: absolute path: one a mirror cannot follow.
+#: absolute path: one a mirror cannot follow. A target may hold balanced
+#: parentheses, `report(2026).md`, one level deep, as CommonMark allows.
+#: The `code` branch matches an inline code span first, so a link written
+#: inside one stays as written: its backtick run closes only on a run as
+#: long (sd:6279).
 RELATIVE_LINK = re.compile(
-    r"(?P<bang>!?)\[(?P<label>[^\]\n]*)\]\((?![A-Za-z][A-Za-z0-9+.-]*:|#|/)(?P<path>[^)\s#]+)(?P<anchor>#[^)\s]*)?\)")
+    r"(?P<code>(?<!`)(?P<ticks>`+)(?!`).*?[^`](?P=ticks)(?!`))"
+    r"|(?P<bang>!?)\[(?P<label>[^\]\n]*)\]\((?![A-Za-z][A-Za-z0-9+.-]*:|#|/)"
+    r"(?P<path>(?:[^()\s#]|\([^()\s#]*\))+)(?P<anchor>#(?:[^()\s]|\([^()\s]*\))*)?\)")
 
 
 def repo_links(text: str, repo: Path, src: str) -> str:
@@ -614,21 +620,30 @@ def repo_links(text: str, repo: Path, src: str) -> str:
 
     A mirror has no repository beside it: Notion read `[x](DESIGN.md)` as
     `https://DESIGN.md` (sd:6156). Without a GitHub origin the link keeps
-    its text only. Fenced code is left as written.
+    its text only. Fenced code and code spans are left as written; a fence
+    closes only on a run of its own character at least as long (sd:6279).
     """
     folder = Path(src).parent
 
     def linked(match: re.Match[str]) -> str:
+        if match["code"]:
+            return match["code"]
         url = source_url(repo, (folder / unquote(match["path"])).as_posix())
         if not url:
             return match["label"]
         return "%s[%s](%s%s)" % (match["bang"], match["label"], url, match["anchor"] or "")
 
-    lines, fenced = [], False
+    lines: list[str] = []
+    closer: re.Pattern[str] | None = None
     for line in text.split("\n"):
-        if line.lstrip().startswith(("```", "~~~")):
-            fenced = not fenced
-        lines.append(line if fenced else RELATIVE_LINK.sub(linked, line))
+        if closer:
+            closer = None if closer.match(line) else closer
+        elif fence := FENCE.match(line):
+            mark = fence.group(1)
+            closer = re.compile(r"^\s*%s{%d,}\s*$" % (re.escape(mark[0]), len(mark)))
+        else:
+            line = RELATIVE_LINK.sub(linked, line)
+        lines.append(line)
     return "\n".join(lines)
 
 

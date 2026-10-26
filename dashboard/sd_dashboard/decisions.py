@@ -164,6 +164,9 @@ def reverse(connection, item: int, note: int, *, expected_revision: str, who: st
             raise workflow.WorkflowError(f"note {note} answered no question on sd:{item}; note the item to reverse it")
         if asked["resolved_at"] is None:
             raise workflow.WorkflowError(f"question #{asked['id']} is open already: answer it there")
+        # Decisions lists no question of a done item, so a reopened one would wait where no page shows it (sd:6281).
+        if state["item"]["status"] == "done":
+            raise workflow.WorkflowError(f"sd:{item} is done: reopen the item before you reverse its ruling")
         done = workflow.add_item_note(connection, item, kind="decision", who=who, expected_revision=expected_revision,
                                       body=f"Reversed ruling #{note}: question #{asked['id']} asks again.")
         writes.reopen_note(connection, asked["id"])

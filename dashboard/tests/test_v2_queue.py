@@ -31,13 +31,13 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_dashboard import now_screen, pack_bin, queue_screen, v2
+from sd_dashboard import now_screen, pack_bin, places, queue_screen, v2
 from sd_db import upsert_repo
 
 from support import NOW, ScreenCase
 from test_v2_read import READ_SHELL
 from test_v2_registry import GROUP_BLOCK, Registers
-from test_v2_tasks import SHELL, STAND_IN
+from test_v2_tasks import SHELL, STAND_IN, VIEW_SHELL
 from test_v2_today import OSASCRIPT
 from test_workflow_actions import BrowserSession
 
@@ -147,6 +147,17 @@ class TheRows(Lane, ScreenCase):
 
     def doc(self):
         return queue_screen.document(self.connection, now=NOW)
+
+    def test_each_lane_carries_its_checkouts_realm(self):
+        """pack sd:6016: the realm tab a lane shows under is places.realm_of over its checkout; unread rules give None."""
+        conf = Path(self.tmp.name) / "realms.conf"
+        for text, realm in ((f"realm|work|Work|{self.checkout.parent}/*\n", "work"), ("realm|work|Work|/elsewhere/*\n", "personal"),
+                            (None, None)):
+            conf.unlink(missing_ok=True)
+            if text:
+                conf.write_text(text)
+            with self.subTest(realm=realm), mock.patch.object(places, "REALMS_CONFIG", conf):
+                self.assertEqual([lane["realm"] for lane in queue_screen.document(self.connection, now=NOW)["lanes"]], [realm])
 
     def test_each_of_the_six_states_has_its_row(self):
         rows = self.doc()["lanes"][0]["rows"]
@@ -1034,10 +1045,11 @@ class TheInProcessRead(RealLane):
 class TheScript(Lane, ScreenCase):
     """queue.js against the document `queue_screen` builds from the fixture."""
 
-    def run_page(self, body, move=(200, {"ok": True, "edits": "Edits take effect at the next item boundary."}), search="?show=all"):
-        """`search` is the page's address; most tests read every row, so it defaults to Show: all."""
+    def run_page(self, body, move=(200, {"ok": True, "edits": "Edits take effect at the next item boundary."}), search="?show=all",
+                 shell=""):
+        """`search` is the page's address; most tests read every row, so it defaults to Show: all. `shell` adds to the stand-in."""
         doc = queue_screen.document(self.connection, now=NOW)
-        script = (STAND_IN + f"location.search = {json.dumps(search)};\n" + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL + READ_SHELL
+        script = (STAND_IN + f"location.search = {json.dumps(search)};\n" + MARKUP_JS + "\nconst mk = window.markup.html;\n" + SHELL + READ_SHELL + shell
                   + f"\nvar DOC = {json.dumps(doc)}, MOVE = {json.dumps(list(move))};\n"
                   + "ANSWER = (path, body) => path === '/api/queue' ? [200, DOC] : path === '/api/queue/move' ? MOVE : (window.ELSE || (() => [404, { error: 'no answer' }]))(path, body);\n"
                   + COMMANDS_JS + QUEUE_JS + "\nvar R = {};\n(async () => { try {\n(DOC_LISTENERS.DOMContentLoaded || []).forEach(f => f());\nawait flush();\n"
@@ -1113,6 +1125,28 @@ R.after = ELS.builds.html;""")
             ("cancelled", "queued", "◌", "CANCELLED"), ("landed", "ok", "●", "LANDED")])
         self.assertIn("<b>operator acts</b>", lanes)
         self.assertIn("PR #161", lanes)
+
+    def test_the_realm_tabs_narrow_the_lanes_and_count_each_tabs_active_rows(self):
+        """pack sd:6016: Tasks' realm tabs on Queue. Personal shows no Work lane and says All has it; Work shows it."""
+        conf = Path(self.tmp.name) / "realms.conf"
+        conf.write_text(f"realm|work|Work|{self.checkout.parent}/*\n")
+        with mock.patch.object(places, "REALMS_CONFIG", conf):
+            out = self.run_page("R.views = window.PAGE_VIEWS; R.personal = ELS.lanes.html; R.ptimes = ELS.times.html;"
+                                " window.shell.view.show('work'); R.work = ELS.lanes.html;", search="",
+                                shell="window.SHELL_REALMS = [{ id: 'work', label: 'Work' }];\n" + VIEW_SHELL)
+        self.assertEqual([(v["id"], v["key"]) for v in out["R"]["views"]], [("personal", "p"), ("work", "w"), ("all", "a")])
+        self.assertIn("No lane in this realm. All shows 1 lane.", out["R"]["personal"])
+        self.assertIn("No lane ran an entry", out["R"]["ptimes"])
+        self.assertIn('aria-label="Active lanes"', out["R"]["work"])
+        self.assertNotIn("No lane in this realm", out["R"]["work"])
+        self.assertEqual(out["counts"], {"personal": 0, "work": 7, "all": 7})
+        conf.unlink()
+        with mock.patch.object(places, "REALMS_CONFIG", conf):
+            out = self.run_page("R.personal = ELS.lanes.html;", search="",
+                                shell="window.SHELL_REALMS = [{ id: 'work', label: 'Work' }];\n" + VIEW_SHELL)
+        # No realm list: the lane's realm is unknown, so no tab hides it.
+        self.assertIn('aria-label="Active lanes"', out["R"]["personal"])
+        self.assertEqual(out["counts"], {"personal": 7, "work": 7, "all": 7})
 
     def test_the_times_table_shows_each_lanes_medians_and_slowest_entry(self):
         """Pack sd:6006: one row per lane with entries in 7 days; a median wait past an hour says the question files."""
@@ -1315,8 +1349,9 @@ R.det = ELS.adv.html;""")
 
     def test_queue_has_no_lanes_or_idle_tab(self):
         page = (V2 / "queue.html").read_text(encoding="utf-8")
-        self.assertNotIn("PAGE_VIEWS", QUEUE_JS)
-        self.assertNotIn("view.count", QUEUE_JS)
+        # pack sd:6016: the only tabs are the realm tabs, which narrow the one ledger and have no panel.
+        self.assertNotIn("id: 'lanes'", QUEUE_JS)
+        self.assertNotIn("id: 'idle'", QUEUE_JS)
         self.assertNotIn('id="view-', page)
         self.assertIn('id="details"', page)
 
@@ -1344,9 +1379,9 @@ R.det = ELS.adv.html;""")
         # sd:5921: a quiet lane has no ledger row and no Details; it is one count on the Idle line.
         self.assertNotIn(str(other), out["R"]["ledger"])
         self.assertEqual(out["R"]["idle"], "Idle, quiet: 1 lane.")
-        # The line under the title counts the managed repositories; no tab carries a count.
+        # The line under the title counts the managed repositories; only the realm tabs (pack sd:6016) carry a count.
         self.assertIn("2 managed repositories · read", out["R"]["subhead"])
-        self.assertNotIn("counts", out)
+        self.assertEqual(sorted(out["counts"]), ["all", "personal"])
 
     def test_only_next_rows_carry_controls_and_the_ends_are_off(self):
         lanes = self.run_page("R.lanes = ELS.details.html;")["R"]["lanes"]

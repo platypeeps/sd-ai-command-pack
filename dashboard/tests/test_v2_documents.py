@@ -32,7 +32,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import connect, create_item, writes
+from sd_db import connect, create_item, records, writes
 
 from sd_dashboard import documents, documents_screen, learning_screen, research_screen, server, v2
 
@@ -1115,6 +1115,23 @@ class TheVideos(ScreenCase):
         self.assertEqual(self.connection.execute("SELECT id, kind, status, stage FROM item ORDER BY id").fetchall(), before)
 
 
+class TheMovedRows(ScreenCase):
+    """pack sd:6262: a row `sd-db records documents` moved is in its own view and no other, whatever its content type."""
+
+    def test_a_moved_row_shows_only_in_its_own_view(self):
+        ids = seed_learning(self.connection)
+        bare = learning(self.connection, "A Listed Note", "queued")
+        listed = [bare, ids["video"]]
+        plan = records.plan_documents(self.connection, books=listed)
+        records.move_documents(self.connection, books=listed, plan=plan.digest, who="operator")
+        books = {r["id"] for r in learning_screen.books(self.connection, now=NOW)["rows"]}
+        videos = {r["id"] for r in learning_screen.videos(self.connection, now=NOW)["rows"]}
+        # The note with no content type shows in Books; the listed video moved to Books and leaves Videos.
+        self.assertEqual(books, {ids["book"], ids["article"], ids["bare"], bare, ids["video"]})
+        self.assertEqual(videos, {ids["named"]})
+        self.assertNotIn(ids["course"], books | videos)
+
+
 class TheLearningScript(ScreenCase):
     """sd:6260: learning.js draws the Books view beside the Documents list, in the shared Details pane."""
 
@@ -1182,6 +1199,18 @@ ELS.shift.value = 'writer kind:research'; ELS.shift.listeners.input.forEach(f =>
         self.assertNotIn("Agile Retrospectives", r["queued"])
         self.assertIn("Agile Retrospectives", r["text"])
         self.assertNotIn("On Queues", r["text"])
+
+    def test_clear_filters_in_the_empty_view_clears_the_search_too(self):
+        """sd:6285: the empty state's Clear filters cleared the read state only, so a search that matched nothing stayed."""
+        out = self.run_view("""window.shell.view.show('books'); await flush();
+ELS.shift.value = 'nothing-matches-this'; ELS.shift.listeners.input.forEach(f => f({ target: ELS.shift })); await flush();
+R.before = ELS['books-rows'].html;
+ELS['books-empty'].listeners.click[0]({ target: { closest: s => s === '[data-fclear]' ? {} : null } }); await flush();
+R.after = ELS['books-rows'].html; R.shift = ELS.shift.value;""", self.books())
+        r = out["R"]
+        self.assertNotIn("Agile Retrospectives", r["before"])
+        self.assertIn("Agile Retrospectives", r["after"])
+        self.assertEqual(r["shift"], "", "the search field kept its text")
 
     def test_open_link_and_open_item_run_on_a_book(self):
         out = self.run_view("""window.shell.view.show('books'); await flush();

@@ -123,8 +123,8 @@ class DefaultBranch(Fixture, ScreenCase):
         branch, tree = f"land/sd-{one}", Path(found["worktree"])
         messages = self.log(path, f"{main}..{branch}")
         self.assertEqual([m.strip() for m in messages if m.strip()],
-                         [f"Cleanup (sd:{two})\n\nAuthored-with: claude/anthropic",
-                          f"Land button (sd:{one})\n\nAuthored-with: claude/anthropic"])
+                         [f"chore: Cleanup\n\nRefs: sd:{two}\nAuthored-with: claude/anthropic",
+                          f"chore: Land button\n\nRefs: sd:{one}\nAuthored-with: claude/anthropic"])
         self.assertEqual(git("-C", str(path), "rev-parse", "HEAD"), main)
         self.assertEqual(git("-C", str(path), "status", "--porcelain"), "")
         self.assertEqual((tree / "lib" / "new.txt").read_text(), "new\n")
@@ -134,8 +134,9 @@ class DefaultBranch(Fixture, ScreenCase):
         self.assertEqual(sent[:5], ["-C", str(tree), "lane", "enqueue", "--item"])
         self.assertEqual(sent[sent.index("--expected-head") + 1], tip)
         self.assertEqual([sent[i + 1] for i, a in enumerate(sent) if a == "--item"], [str(one), str(two)])
-        # Lane enqueue refuses a title that is not a Conventional Commits header (pack sd:6059).
-        self.assertEqual(sent[sent.index("--title") + 1], f"chore: Land button and 1 more (sd:{one}, sd:{two})")
+        # Lane enqueue refuses a title that is not a Conventional Commits header; the items go in trailers and the
+        # body, not the title (pack sd:6059).
+        self.assertEqual(sent[sent.index("--title") + 1], "chore: Land button and 1 more")
         self.assertIn("--deliver", sent)
         self.assertEqual(answer["lane"]["status"], "pending")
 
@@ -504,7 +505,8 @@ class FeatureBranch(Fixture, ScreenCase):
         answer = self.land(path, found["spec"], found["revision"], claim="associate-only")
         self.assertTrue(answer["ok"], answer)
         self.assertEqual(git("-C", str(path), "status", "--porcelain"), "")
-        self.assertEqual(git("-C", str(path), "log", "-1", "--format=%s"), f"Land button (sd:{item})")
+        self.assertEqual(git("-C", str(path), "log", "-1", "--format=%s%n%(trailers:key=Refs,valueonly)"),
+                         f"chore: Land button\nsd:{item}")
         self.assertEqual(self.sent()[:2], ["-C", str(path)])
         self.assertIn("--associate-only", self.sent())
 

@@ -243,6 +243,18 @@ class TheRulings(ScreenCase):
         self.assertIn("is open already", str(refused.exception))
         self.assertEqual(tuple(self.connection.iterdump()), before)
 
+    def test_reverse_refuses_a_ruling_of_a_done_item(self):
+        """Pack sd:6281: Decisions lists no question of a done item, so a reopened one would wait unseen."""
+        ruling = self.rule(self.ids["asked"], "A pack store kind", "grill-session")
+        self.connection.execute("UPDATE item SET status = 'done' WHERE id = ?", (self.ids["item"],))
+        self.connection.commit()
+        before = tuple(self.connection.iterdump())
+        revision = workflow.item_state(self.connection, self.ids["item"])["revision"]
+        with self.assertRaises(workflow.WorkflowError) as refused:
+            decisions.reverse(self.connection, self.ids["item"], ruling, expected_revision=revision, who="dashboard")
+        self.assertIn(f"sd:{self.ids['item']} is done", str(refused.exception))
+        self.assertEqual(tuple(self.connection.iterdump()), before)
+
 
 class TheRoutes(BrowserSession):
     def test_reverse_goes_through_the_server_and_a_second_tap_is_stale(self):
