@@ -197,11 +197,41 @@ class TheSections(TodayCase):
         self.assertIn(f"item.source IS '{review.REF_SOURCE}'", reads.REVIEW_BATCH)
         self.assertIn("substr(item.external_id, 1, 7) IS 'review:'", reads.REVIEW_BATCH)
 
+    def grill(self, ref="grill:2026-09-07", repo=APP, questions=2):
+        """A weekly grill as the KISS audit files it: `sd task add --ref grill:<date>`, then question notes."""
+        item = self.item("Weekly grill", repo=repo, source="task-ref", external_id=ref)
+        return item, [add_note(self.connection, item, "question", f"Keep mechanism {n}?\nOption: Keep\nOption: Drop")
+                      for n in range(questions)]
+
+    def test_a_grills_questions_are_one_ready_line_not_decisions(self):
+        """pack sd:6022: the audit's seed questions wait for the operator to say 'grill', not in every walk."""
+        grilled, (first, _) = self.grill()
+        asked = self.item("Asked")
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack\nOption: Rows")
+        # Older state: a ref task under another prefix keeps its questions as Decisions rows.
+        other = self.item("Other ref", source="task-ref", external_id="grilled:1")
+        kept = add_note(self.connection, other, "question", "Keep it?\nOption: Yes\nOption: No")
+        self.assertEqual([row["note"] for row in today.decisions(self.connection)], [decision, kept])
+        self.assertEqual([(row["id"], row["questions"]) for row in today.grill(self.connection)], [(grilled, 2)])
+        found = today.sections(self.connection, now=NOW)
+        self.assertEqual((found["summary"]["grill"], [row["id"] for row in found["grill"]]), (2, [grilled]))
+        self.assertEqual(today.grill(self.connection, repos=[LIB]), [])
+        # A ruling resolves a question, so the count falls; the last one ends the line.
+        workflow.resolve_item_note(self.connection, first, who="tester")
+        self.assertEqual([row["questions"] for row in today.grill(self.connection)], [1])
+        transition(self.connection, grilled, "done", who="operator", reason="test")
+        self.assertEqual(today.grill(self.connection), [])
+
+    def test_a_grill_with_no_open_question_is_not_ready(self):
+        self.grill(questions=0)
+        self.assertEqual(today.grill(self.connection), [])
+        self.assertEqual(today.sections(self.connection, now=NOW)["summary"]["grill"], 0)
+
     def test_sections_come_in_one_order_with_their_counts(self):
         self.item("Soon", due="2026-09-08")
         self.item("Later", due="2026-10-30")
         found = today.sections(self.connection, now=NOW)
-        self.assertEqual(list(found), ["summary", *today.ORDER, "closed_by_hand"])
+        self.assertEqual(list(found), ["summary", *today.ORDER, "closed_by_hand", "grill"])
         self.assertEqual((found["summary"]["planned"], found["summary"]["planned_this_week"]), (2, 1))
 
     def test_the_active_assignment_states_match_the_workflow(self):

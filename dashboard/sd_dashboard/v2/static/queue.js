@@ -216,10 +216,12 @@
       const b = e.target.closest('button[data-show]'); if (!b || b.dataset.show === show) return;
       show = b.dataset.show; window.shell.url(show === 'all' ? { show } : {}); draw();
     });
-    // A write runs from the ledger's primary action or from Details; a lane name or Entries opens the lane in Details.
+    // A write runs from the ledger's primary action or from Details; a lane name, Entries or the rest of its row opens the lane in Details.
     const press = e => {
       const b = e.target.closest('button[data-act]'); if (b) { if (!b.disabled) { open = b.dataset.repo; act(b); } return; }
-      const o = e.target.closest('button[data-open]'); if (o) { open = o.dataset.open; draw(); window.shell.openPane('tab-details'); }
+      const o = e.target.closest('button[data-open]'); if (o) { open = o.dataset.open; draw(); window.shell.openPane('tab-details'); return; }
+      // A click on the rest of a lane row opens it too, unless it hit a button or link (sd:6154).
+      const r = !e.target.closest('button, a') && e.target.closest('tr[data-lane]'); if (r) { open = r.dataset.lane; draw(); window.shell.openPane('tab-details'); }
     };
     $('lanes').addEventListener('click', press); $('details').addEventListener('click', press);
     if (typeof setInterval === 'function') setInterval(() => { if (!document.hidden && !busy) load(); }, 30000);
