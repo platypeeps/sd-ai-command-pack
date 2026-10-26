@@ -87,11 +87,31 @@ class BuildRefused(SdDbError):
     """A press or a claim refused, with nothing written."""
 
 
+def _repo_refusal(row) -> str | None:
+    """Why the item's repository takes no build, or None: the one repository rule `queue` and `claim` read.
+
+    `row` carries the item's `id` and `repo`, and the repository's `repo_path`,
+    `managed`, `remote` and `lane_host` (`_REPO`'s columns).
+    """
+    item = row["id"]
+    if row["repo_path"] is None:
+        return f"item {item} needs a registered repository"
+    if not row["managed"]:
+        return f"item {item}'s repository {row['repo']} is not managed"
+    if not row["remote"]:
+        return f"item {item}'s repository {row['repo']} has no remote"
+    if row["lane_host"] is not None:
+        return f"item {item}'s lane runs on {row['lane_host']}; builds run on the hub only"
+    return None
+
+
+_REPO = ("SELECT item.*, repo.path AS repo_path, repo.remote, repo.managed, repo.lane_host "
+         "FROM item LEFT JOIN repo ON repo.path = item.repo WHERE item.id = ?")
+
+
 def _item(connection, item: int) -> dict:
     """The item a build may take, or the refusal that names why not."""
-    row = connection.execute(
-        "SELECT item.*, repo.path AS repo_path, repo.remote, repo.managed, repo.lane_host "
-        "FROM item LEFT JOIN repo ON repo.path = item.repo WHERE item.id = ?", (item,)).fetchone()
+    row = connection.execute(_REPO, (item,)).fetchone()
     if row is None:
         raise BuildRefused(f"no item {item}")
     if row["kind"] not in RUNNABLE_KINDS:
@@ -99,14 +119,9 @@ def _item(connection, item: int) -> dict:
                            f"{', '.join(RUNNABLE_KINDS[:-1])} and {RUNNABLE_KINDS[-1]} items")
     if row["status"] != "ready":
         raise BuildRefused(f"item {item} is {row['status']}; a build takes a ready item")
-    if row["repo_path"] is None:
-        raise BuildRefused(f"item {item} needs a registered repository")
-    if not row["managed"]:
-        raise BuildRefused(f"item {item}'s repository {row['repo']} is not managed")
-    if not row["remote"]:
-        raise BuildRefused(f"item {item}'s repository {row['repo']} has no remote")
-    if row["lane_host"] is not None:
-        raise BuildRefused(f"item {item}'s lane runs on {row['lane_host']}; builds run on the hub only")
+    refused = _repo_refusal(row)
+    if refused:
+        raise BuildRefused(refused)
     active = connection.execute(
         f"SELECT id, status FROM assignment WHERE item = ? AND status IN {ACTIVE} LIMIT 1", (item,)).fetchone()
     if active:
@@ -287,6 +302,11 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
     whose item moved after the press fails the re-check: the claim's writes
     roll back, that member ends `blocked` with the reason, and nothing else
     changes, so the next claim takes the rest.
+
+    A queued build whose repository `queue` would now refuse (unmanaged, no
+    remote, a satellite lane host: `_repo_refusal`) ends `blocked` with that
+    reason before the bundle is picked, its item left as it is, and the same
+    claim goes on to the next repository (pack sd:6103).
     """
     with transaction(connection):
         if restoration_pending(connection):
@@ -298,6 +318,7 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
             "SELECT assignment.id, assignment.item, item.repo FROM assignment JOIN item ON item.id = assignment.item "
             "WHERE assignment.status = 'queued' AND assignment.scope = ? AND item.repo IS NOT NULL "
             "ORDER BY item.priority IS NULL, item.priority, assignment.queued_at, assignment.id", (SCOPE,)).fetchall()
+        queued = [row for row in queued if not _refused_repo(connection, row)]
         repo = next((row["repo"] for row in queued if room_for(available, row["repo"]) > 0), None)
         if repo is None:
             return None
@@ -326,13 +347,26 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
                 f"SELECT assignment.id, assignment.item, item.status FROM assignment JOIN item ON item.id = assignment.item "
                 f"WHERE assignment.id IN ({marks}) AND NOT ({_RECHECK})", ids).fetchall()
             for row in moved:
-                reason = (_held(connection, row["item"])
-                          or f"item {row['item']} moved to {row['status']} after the press") + "; not built"
-                connection.execute("UPDATE assignment SET status = 'blocked', ended = ?, result = ? "
-                                   "WHERE id = ? AND status = 'queued'", (clock(), reason, row["id"]))
-                add_note(connection, row["item"], "comment", f"Build assignment {row['id']} blocked: {reason}")
+                _refuse(connection, row, _held(connection, row["item"])
+                        or f"item {row['item']} moved to {row['status']} after the press")
             return None
         return run(connection, ident)
+
+
+def _refuse(connection, row, reason: str) -> None:
+    """End one queued build `blocked` with why the claim did not take it; its item stays as it is."""
+    reason += "; not built"
+    connection.execute("UPDATE assignment SET status = 'blocked', ended = ?, result = ? "
+                       "WHERE id = ? AND status = 'queued'", (clock(), reason, row["id"]))
+    add_note(connection, row["item"], "comment", f"Build assignment {row['id']} blocked: {reason}")
+
+
+def _refused_repo(connection, row) -> bool:
+    """End a queued build whose repository turned ineligible after the press (`_repo_refusal`); True if it did."""
+    refused = _repo_refusal(connection.execute(_REPO, (row["item"],)).fetchone())
+    if refused:
+        _refuse(connection, row, f"{refused} after the press")
+    return refused is not None
 
 
 def _open_run(connection, lead: int, *, repo: str, owner: str, step: str, model: str, work: Path, stamp: str,
