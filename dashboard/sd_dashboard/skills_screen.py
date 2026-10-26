@@ -95,7 +95,8 @@ def document(connection, *, now: str) -> dict:
     """The page's one document. A catalog that cannot be read raises `WorkflowError`, `OSError` or `ValueError`."""
     inventory = skills_catalog.catalog(connection, now=now)
     starts = [_monday(_stamp(now)) - timedelta(weeks=WEEKS - 1 - i) for i in range(WEEKS)]
-    week = lambda stamp: next((i for i in range(WEEKS - 1, -1, -1) if _stamp(stamp) >= starts[i]), None)
+    def week(stamp):
+        return next((i for i in range(WEEKS - 1, -1, -1) if _stamp(stamp) >= starts[i]), None)
     names = {skill["name"] for skill in inventory["skills"]}
     per, last, totals, surfaces, other = {}, {}, [0] * WEEKS, {}, {}
     junk = count = 0

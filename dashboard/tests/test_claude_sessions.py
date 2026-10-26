@@ -97,7 +97,8 @@ class Sessions(ScreenCase):
         item = self.item("Sessions screen")
         self.subagent(LEAD, f"b{item}-sessions", MID_TURN, age=120, description="Build sessions")
         self.subagent(LEAD, "old-reader", MID_TURN, age=claude_sessions.STALL + 60, kind="general-purpose")
-        trees = lambda area: {"worktrees": [{"path": "/wt/s", "branch": f"review/sd{item}-s", "live": True}]}
+        def trees(area):
+            return {"worktrees": [{"path": "/wt/s", "branch": f"review/sd{item}-s", "live": True}]}
         row = self.read([agent()], fleet=trees)["sessions"][0]
         self.assertEqual(row["tasks"], [{"item": item, "via": f"builder b{item}-sessions", "title": "Sessions screen",
                                          "status": "planning"}])
@@ -111,7 +112,8 @@ class Sessions(ScreenCase):
         """Review class (sd:5106 round 1): an unknown or stale reading counts as idle, done or safe. Each reading here
         lacks completion evidence, so the session is not safe to exit and its builder holds a Start next slot."""
         item = self.item("Builder under test")
-        trees = lambda area: {"worktrees": [{"path": "/wt/b", "branch": f"sd{item}-b", "live": True}]}
+        def trees(area):
+            return {"worktrees": [{"path": "/wt/b", "branch": f"sd{item}-b", "live": True}]}
 
         def meta_only(session, name):
             folder = self.home / "projects" / "-work-system" / session / "subagents"
@@ -164,7 +166,8 @@ class Sessions(ScreenCase):
         """Review round 2 (sd:5106): Fix tells its builder to work in a worktree, so the session's own item counts."""
         item = self.item("Started by Fix")
         self.transcript(records=[record("user", text=fix_session.prompt("task", item)), record("assistant", stop="end_turn")])
-        trees = lambda area: {"worktrees": [{"path": "/wt/fix", "branch": f"sd{item}-fix", "live": True}]}
+        def trees(area):
+            return {"worktrees": [{"path": "/wt/fix", "branch": f"sd{item}-fix", "live": True}]}
         held = {"/work/system": {"branch": "main", "dirty": 0, "unpushed": 0},
                 "/wt/fix": {"branch": f"sd{item}-fix", "dirty": 0, "unpushed": 2}}
         row = self.read([agent()], fleet=trees, work=held.__getitem__)["sessions"][0]
@@ -235,7 +238,8 @@ class Sessions(ScreenCase):
         self.transcript()
         item = self.item("Fleet controls")
         self.subagent(LEAD, f"b{item}", FINISHED, description=f"Build sd:{item}")
-        trees = lambda area: {"worktrees": [
+        def trees(area):
+            return {"worktrees": [
             {"path": "/wt/mine", "branch": f"review/sd{item}-x", "live": True},
             {"path": "/wt/theirs", "branch": "review/sd424242-x", "live": True}]}
         held = {"/work/system": {"branch": "main", "dirty": 2, "unpushed": 0},
@@ -325,7 +329,7 @@ class Ending(unittest.TestCase):
             with self.subTest(said):
                 sent = []
                 write = claude_sessions.end(payload, agents=agents or (lambda: [agent(LEAD, pid=100), agent(OTHER, pid=200)]),
-                                            processes=processes or (lambda: self.PS), kill=lambda pid, sig: sent.append(pid))
+                                            processes=processes or (lambda: self.PS), kill=lambda pid, sig, *, sent=sent: sent.append(pid))
                 with self.assertRaisesRegex(ValueError, said):
                     write(None)
                 self.assertEqual(sent, [])
@@ -336,7 +340,7 @@ class Ending(unittest.TestCase):
         for agents, processes in ((broken, None), (None, broken)):
             sent = []
             write = claude_sessions.end({"id": LEAD, "pid": 100}, agents=agents or (lambda: [agent(LEAD, pid=100)]),
-                                        processes=processes or (lambda: self.PS), kill=lambda pid, sig: sent.append(pid))
+                                        processes=processes or (lambda: self.PS), kill=lambda pid, sig, *, sent=sent: sent.append(pid))
             with self.assertRaisesRegex(ValueError, "no answer"):
                 write(None)
             self.assertEqual(sent, [])

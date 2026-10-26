@@ -45,7 +45,7 @@ class ReposRead(FleetCase):
         (clone / "README").write_text("more\n")
         self.git(clone, "commit", "-q", "-am", "ahead by one")
         document = self.repos()
-        by_name = dict(zip(self.column(document, "name"), zip(self.column(document, "ahead"), self.column(document, "behind"))))
+        by_name = dict(zip(self.column(document, "name"), zip(self.column(document, "ahead"), self.column(document, "behind"), strict=False), strict=False))
         self.assertEqual(sorted(by_name), ["clone", "remote/origin"])
         self.assertEqual(by_name["clone"], (1, 0))
         self.assertEqual(by_name["remote/origin"], (None, None))
@@ -205,7 +205,7 @@ class ReposRead(FleetCase):
         self.assertIsNone(row["dirty"])
         self.assertIn("git log failed (exit 3)", row["error"])
         document = self.repos()
-        by_name = dict(zip(self.column(document, "name"), self.column(document, "dirty")))
+        by_name = dict(zip(self.column(document, "name"), self.column(document, "dirty"), strict=False))
         self.assertIsNone(by_name["broken"])
 
     def test_a_git_that_cannot_be_started_is_an_unread_row_and_not_a_clean_one(self):

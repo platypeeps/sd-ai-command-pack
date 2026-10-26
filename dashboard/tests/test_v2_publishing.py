@@ -346,7 +346,8 @@ class ObsidianDocument(unittest.TestCase):
         self.kit.trust_conf(self.checkout, self.conf.read_bytes())
 
     def test_a_tick_adds_the_key_and_publish_writes_the_vault_copy(self):
-        runner = lambda argv, **o: subprocess.CompletedProcess(argv, 0, "obsidian: wrote 2 document(s) to x\n", "")
+        def runner(argv, **o):
+            return subprocess.CompletedProcess(argv, 0, "obsidian: wrote 2 document(s) to x\n", "")
         answer = publishing.designate(self.checkout, "idea", "obsidian", runner=runner)
         self.assertEqual((answer["designated"], answer["wrote"], answer["queued"]), ("obsidian", True, False))
         self.assertEqual(publishing.choices_of(self.conf.read_text(encoding="utf-8"))["idea"]["obsidian"], True)

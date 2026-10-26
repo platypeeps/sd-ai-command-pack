@@ -305,7 +305,7 @@ class TheRoutes(BrowserSession):
         status, _, pulled = self.post("/api/review/withdraw", {"item": ids["open"], "ruling": out["ruling"], "revision": out["revision"]})
         self.assertEqual(status, 200, pulled)
         self.assertTrue(review.read(self.connection, ids["open"])["questions"][0]["open"])
-        status, _, exported = self.request("/api/review/%d/export" % ids["open"], headers={"Cookie": self.cookie})[0], None, None
+        status = self.request("/api/review/%d/export" % ids["open"], headers={"Cookie": self.cookie})[0]
         self.assertEqual(status, 200)
 
     def test_a_blind_batch_never_serves_a_recommendation_before_its_ruling(self):

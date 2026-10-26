@@ -202,11 +202,11 @@ class TheDocument(Fixture):
     def test_alarms_today_count_only_real_alarms_on_a_day_the_export_reaches(self):
         alarms = ALARMS + ("2026-09-06 01:00:00,other,A2 VSD Alarm,N,2\n2026-09-06 01:10:00,other,A2 VSD Normal,,0\n"
                            "2026-09-06 02:00:00,generator,Generator Running,N,15\n")
-        hoa = checkout(self.hoa, alarms=alarms)
+        checkout(self.hoa, alarms=alarms)
         self.assertEqual(self.doc()["mission"]["alarms_today"], {"count": 1, "reason": "", "acked": 0})
 
     def test_a_file_that_does_not_parse_is_its_error_and_the_rest_still_answer(self):
-        hoa = checkout(self.hoa, pump="date,a2_starts\n2026-09-01,1\n", alarms=None, assets="{not json")
+        checkout(self.hoa, pump="date,a2_starts\n2026-09-01,1\n", alarms=None, assets="{not json")
         doc = self.doc()
         files = {f["name"]: f["error"] for f in doc["mission"]["files"]}
         self.assertIn("pump-daily.csv has no a2_runtime_hours", files["pump-daily.csv"])
@@ -219,7 +219,7 @@ class TheDocument(Fixture):
         self.assertEqual(doc["mission"]["alarms_today"]["reason"], "alarm-events.csv is not in the export folder")
 
     def test_a_row_with_no_date_is_the_files_error_not_a_silent_skip(self):
-        hoa = checkout(self.hoa, analog=ANALOG + ",96,1,2,3,4,5,6,7,8,9,10,11,12\n")
+        checkout(self.hoa, analog=ANALOG + ",96,1,2,3,4,5,6,7,8,9,10,11,12\n")
         files = {f["name"]: f["error"] for f in self.doc()["mission"]["files"]}
         self.assertEqual(files["analog-daily.csv"], "analog-daily.csv line 50: '' is not a date")
 
@@ -256,7 +256,7 @@ class TheDocument(Fixture):
         doc = self.doc()
         self.assertEqual(doc["lots"], {"error": "", "source": str(self.hoa / "downloads" / "parcels" / "lots.json"), "fetched_at": "2026-09-05T12:00:00+00:00"})
         lots = [f for f in doc["base"]["features"] if f["kind"] == "lot"]
-        self.assertEqual([(l["index"], l["address"], l["owner"], l["parcel"]) for l in lots],
+        self.assertEqual([(lot["index"], lot["address"], lot["owner"], lot["parcel"]) for lot in lots],
                          [(0, "100 Example St", "Test Owner A", "TEST-0001"), (1, "102 Example St", "Test Owner B", "TEST-0002")])
         self.assertNotIn("owner", next(f for f in doc["base"]["features"] if f["kind"] == "tract"))
 
@@ -264,13 +264,13 @@ class TheDocument(Fixture):
         self.lot_data.unlink()
         doc = self.doc()
         self.assertEqual(doc["lots"]["error"], "lot data not fetched: run python3 tools/fetch-lot-parcels.py in the hoa checkout")
-        self.assertEqual([l.get("owner") for l in doc["base"]["features"] if l["kind"] == "lot"], [None, None])
+        self.assertEqual([feature.get("owner") for feature in doc["base"]["features"] if feature["kind"] == "lot"], [None, None])
 
     def test_lot_data_made_from_another_base_file_is_not_joined(self):
         parcels(self.hoa, base_sha="0" * 64)
         doc = self.doc()
         self.assertEqual(doc["lots"]["error"], "lot data is for another base.geojson: run python3 tools/fetch-lot-parcels.py in the hoa checkout")
-        self.assertEqual([l.get("owner") for l in doc["base"]["features"] if l["kind"] == "lot"], [None, None])
+        self.assertEqual([feature.get("owner") for feature in doc["base"]["features"] if feature["kind"] == "lot"], [None, None])
 
     def test_lot_data_that_does_not_parse_is_named(self):
         out = parcels(self.hoa)
@@ -282,7 +282,7 @@ class TheDocument(Fixture):
     def test_assets_and_outlines_carry_their_coordinates(self):
         doc = self.doc()
         self.assertEqual([(a["id"], a["type"], a["lng"], a["lat"]) for a in doc["assets"]["features"]][1], ("WELL-A2", "well", 10.0012, 50.0004))
-        self.assertEqual([l["kind"] for l in doc["base"]["features"]], ["lot", "lot", "tract", "plat"])
+        self.assertEqual([feature["kind"] for feature in doc["base"]["features"]], ["lot", "lot", "tract", "plat"])
         self.assertEqual(len(doc["base"]["features"][2]["rings"][0]), 5)
 
     def test_the_checkout_is_the_registered_repo_whose_folder_is_named_hoa(self):
@@ -653,7 +653,7 @@ shellRun(cmd('item.email'), OBJ.get('{self.late}')); await flush();""", doc)
         self.assertEqual(out["attention"][-1], {"state": "ok", "n": 0, "what": "HOA water system"})
 
     def test_a_broken_file_is_a_partial_read_and_its_cells_are_unknown(self):
-        hoa = checkout(self.hoa, pump="date,a2_starts\n2026-09-01,1\n")
+        checkout(self.hoa, pump="date,a2_starts\n2026-09-01,1\n")
         out = self.run_page("R.lamps = ELS.annunciator.html; R.trends = ELS['trend-list'].html;")
         self.assertEqual(out["states"][-1]["kind"], "partial")
         self.assertIn("Mission export: pump-daily.csv has no", out["states"][-1]["text"])

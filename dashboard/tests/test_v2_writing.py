@@ -250,7 +250,8 @@ VIEW = 'all'; document.dispatchEvent(new CustomEvent('shell:view', { detail: { i
         r = out["R"]
         self.assertEqual(r["views"], [["personal", "p"], ["brand", "r"], ["work", "w"], ["all", "a"]])
         self.assertEqual(out["hidden"], {"brand": False, "work": True})  # Personal never hides (sd:5642)
-        has = lambda board: ["Three Budgets" in board, "Gated Review" in board, "File Owned" in board]
+        def has(board):
+            return ["Three Budgets" in board, "Gated Review" in board, "File Owned" in board]
         self.assertEqual((has(r["personal"]), has(r["brand"]), has(r["all"])),
                          ([True, False, True], [False, True, False], [True, True, True]))
         # Each realm reads again, so the reader's objects are the pieces the view shows.

@@ -231,7 +231,7 @@ class TheWrite(Merged):
                 row = self.row()
                 real = Walk.git
 
-                def stopped(walk, path, *args):
+                def stopped(walk, path, *args, step=step, real=real):
                     return None if args[:2] == step else real(walk, path, *args)
 
                 with patch.object(Walk, "git", stopped):

@@ -16,7 +16,6 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-sdpaths = None  # bound at the end of this module (sd:1439)
 from sd_db import reads, workflow
 
 from . import controls
@@ -25,6 +24,8 @@ from .markup import Markup, join, markdown, tag
 from .pages import command_reference, shell_page
 
 __all__ = ["item"]
+
+sdpaths = None  # bound at the end of this module (sd:1439)
 
 
 def _repo_labels(paths):

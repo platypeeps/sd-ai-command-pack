@@ -1362,7 +1362,8 @@ class Siblings(unittest.TestCase):
         # A control: the orphan sweep already answered 1 for this one, because
         # the withdrawn document leaves its own page behind. It is here so the
         # two paths to the same verdict stay separable.
-        one, two = self.source("one"), self.source("two")
+        self.source("one")
+        two = self.source("two")
         self.assertEqual(design_docs.render(self.root), 0)
         two.unlink()
         self.assertEqual(design_docs.render(self.root, check=True), 1)

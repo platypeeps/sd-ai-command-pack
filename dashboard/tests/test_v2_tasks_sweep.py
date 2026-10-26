@@ -64,7 +64,7 @@ class RunRealmSweep(BrowserSession):
     def finish(self):
         for realm in ("work", "personal"):
             (self.root / f"release-{realm}").touch()
-            wait(self, lambda: not sweep.status(None, realm)["running"], f"the {realm} run to end")
+            wait(self, lambda *, realm=realm: not sweep.status(None, realm)["running"], f"the {realm} run to end")
 
     def runs(self, realm):
         try:

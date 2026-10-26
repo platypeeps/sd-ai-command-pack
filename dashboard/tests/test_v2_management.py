@@ -1222,7 +1222,8 @@ R.got = await cmd('repo.standard').run(C.get('repo:{path}'));""", doc=doc, searc
         out = self.run_page("R.a = ELS['view-repos'].html;" + click % ("'[data-f=\"q\"]'", "{ f: 'q', v: '' }")
                             + " R.b = ELS['view-repos'].html;" + click % ("'[data-fclear]'", "{}")
                             + " R.c = ELS['view-repos'].html; R.box = (OUT.shift ?? null);", search="?view=repos&managed=yes&q=busy")
-        bar = lambda key: re.search(r'<div class="fbar".*?<div class="fsum">.*?</div></div>', out["R"][key], re.S).group(0)
+        def bar(key):
+            return re.search(r'<div class="fbar".*?<div class="fsum">.*?</div></div>', out["R"][key], re.S).group(0)
         self.assertIn('data-f="managed" data-v="yes" aria-pressed="true"', bar("a"))
         self.assertEqual(re.findall(r'class="tok" data-f="(\w+)"', bar("a")), ["q"])
         self.assertTrue(bar("a").endswith('<div class="fsum"><button class="linkbtn" type="button" data-fclear>Clear all</button></div></div>'))

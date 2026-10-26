@@ -555,7 +555,8 @@ class TheDocument(Collectors, ScreenCase):
         self.assertEqual(prot["extra"]["reasons"], ["token does not reach it"])
         self.assertEqual(prot["at"], "2026-09-05T08:00:00Z")
         self.assertEqual(len(prot["extra"]["checks"]), 11)
-        cells = lambda key: {cell[0]: cell[1:] for cell in rows[key]["cells"]}
+        def cells(key):
+            return {cell[0]: cell[1:] for cell in rows[key]["cells"]}
         alpha = cells("prot:/checkouts/alpha")
         self.assertEqual((alpha["Reviews"], alpha["Admins"], alpha["Squash message"], alpha["Required check"], alpha["Rebase merge"]),
                          (["gap", "no approving review is required"], ["ok"], ["ok"],
@@ -1825,7 +1826,8 @@ R.observed = document.body.dataset.observed;""")
         out = self.run_page("R.before = BODY().html;"
                             "PANEL().listeners.click[0]({ target: { closest: s => s === '[data-f]' ? { dataset: { f: 'state', v: 'caution' } } : null } });"
                             "R.after = BODY().html;")
-        tallies = lambda h: re.findall(r'<p class="tally"><span>(\d+ of \d+ rows?)</span>', h)
+        def tallies(h):
+            return re.findall(r'<p class="tally"><span>(\d+ of \d+ rows?)</span>', h)
         self.assertEqual(tallies(out["R"]["before"]), [])
         self.assertEqual(tallies(out["R"]["after"]), ["1 of 2 rows", "1 of 2 rows"], "caution leaves one of each area's two drawn rows")
         bar = re.search(r'<div class="fbar".*?<div class="fsum">.*?</div></div>', out["R"]["after"], re.S).group(0)

@@ -1062,7 +1062,7 @@ class TheToolbarStandard(unittest.TestCase):
 
     def test_the_view_switch_and_the_moved_controls_sit_in_row_one(self):
         for page in self.PAGES:
-            for (tag, cls, id_, _a), up in tree(page):
+            for (_tag, cls, id_, _a), up in tree(page):
                 # A panel's own range (HOA's Trends) belongs to its panel head, not to the page's rows.
                 if id_ == "viewswitch" or (cls & self.MOVED and not any("panel-head" in c for _t, c, _i, _x in up)):
                     with self.subTest(page=page.name, el=id_ or sorted(cls)):
@@ -1073,7 +1073,7 @@ class TheToolbarStandard(unittest.TestCase):
             tags = tree(page)
             with self.subTest(page=page.name):
                 self.assertLessEqual(sum(1 for (_t, _c, i, _a), _u in tags if i == "toolbar"), 1)
-                for (tag, cls, _i, _a), _u in tags:
+                for (_tag, cls, _i, _a), _u in tags:
                     if cls & {"filters", "facets"}:
                         self.assertIn("toolbar-2", cls)
         for name in ("health.js", "management.js"):
@@ -1136,11 +1136,12 @@ class TheToolbarStandard(unittest.TestCase):
     def test_each_view_keeps_the_view_switch_and_row_one_visible(self):
         # Review round 1: HOA's row 1 sat inside view-overview, so picking Tasks hid the tabs. Select each view as
         # shell.viewApply (view-<id>) and places.place ([data-place-view]) do: every other panel turns hidden.
-        panel = lambda a: a.get("data-place-view") or ((a.get("id") or "").startswith("view-") and a["id"])
+        def panel(a):
+            return a.get("data-place-view") or ((a.get("id") or "").startswith("view-") and a["id"])
         for page in self.PAGES:
             tags = tree(page)
             views = [panel(a) for (_t, _c, _i, a), _u in tags if panel(a)]
-            for (tag, cls, id_, _a), up in tags:
+            for (_tag, cls, id_, _a), up in tags:
                 if id_ not in ("toolbar", "viewswitch") and not cls & {"viewswitch", "place-switch"}:
                     continue
                 inside = {panel(a) for _t, _c, _i, a in up if panel(a)}

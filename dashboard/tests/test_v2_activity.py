@@ -613,7 +613,8 @@ R.after = ELS.details.html; R.current = window.PAGE_LIST.current();""")
             self.assertEqual(out["R"]["rows"], base, bad)
 
     def test_the_journal_note_says_what_the_cap_left_unread(self):
-        doc = json.loads(json.dumps(self.doc)); doc["journal_unread"] = 7
+        doc = json.loads(json.dumps(self.doc))
+        doc["journal_unread"] = 7
         out = self.run_page("R.note = ELS['journal-note'].html;", doc=doc)
         self.assertIn(f"The journal reads the latest {self.doc['journal_cap']} exec notes; 7 older are not read.", out["R"]["note"])
 

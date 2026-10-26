@@ -190,7 +190,7 @@ class TheAssets(BrowserSession):
         rules = [(sel.strip(), body) for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", css, flags=re.S))]
         svg_rules = [(sel, body) for sel, body in rules if ".daytrack" in sel and re.search(r"\bsvg\b", sel)]
         self.assertTrue(svg_rules, "the chart svg has no sizing rule")
-        for sel, body in svg_rules:
+        for sel, _body in svg_rules:
             self.assertIn(".track-plot", sel, f"{sel} also matches svg.i in the track table")
         self.assertTrue(any("width: 100%" in body for _, body in svg_rules), "the chart no longer fills its plot")
         self.assertIn('class="track-plot"', (V2 / "today.html").read_text(encoding="utf-8"))

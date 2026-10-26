@@ -125,7 +125,7 @@ class Close(Copy):
 
         self.deliver()
         cli = self.preview()["cli"]
-        for head, writes in (("b" * 40, []), ("a" * 40, ["POST", "PATCH"])):
+        for head, posted in (("b" * 40, []), ("a" * 40, ["POST", "PATCH"])):
             with self.subTest(head=head[:1]), tempfile.TemporaryDirectory() as bin_dir:
                 log = os.path.join(bin_dir, "log")
                 gh = os.path.join(bin_dir, "gh")
@@ -141,7 +141,7 @@ esac
                 REAL_RUN(["sh", "-c", cli], env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
                          capture_output=True, check=False)
                 calls = open(log).read()
-                self.assertEqual([verb for verb in ("POST", "PATCH") if f"--method {verb}" in calls], writes, calls)
+                self.assertEqual([verb for verb in ("POST", "PATCH") if f"--method {verb}" in calls], posted, calls)
 
     def test_close_reads_github_comments_once_then_closes_and_never_merges(self):
         self.deliver()

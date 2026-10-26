@@ -1230,7 +1230,7 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, ports=None
                 kept = _SCANS.last.get(key)
                 if kept:
                     area["stale"], area["at"] = f"{why}; these rows are the read of {kept[0]}", kept[0]
-                    _settle(area, name, lambda: kept[1])
+                    _settle(area, name, lambda *, kept=kept: kept[1])
                 else:
                     area["error"], area["at"] = why, since
             except BaseException:  # noqa: BLE001 - the reader's own error is settled below

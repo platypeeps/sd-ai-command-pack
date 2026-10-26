@@ -105,7 +105,7 @@ class ServerStartup(unittest.TestCase):
                 old.build_check_seconds = 0
                 old.restart_probe = listening.restart_probe
                 ended = []
-                def serve():
+                def serve(old=old, ended=ended):
                     try:
                         old.serve_forever(poll_interval=0.01)
                     except BaseException as error:  # noqa: BLE001 - the test reads what ended it
@@ -143,7 +143,7 @@ class ServerStartup(unittest.TestCase):
                 old.restart_probe = ["sh", "-c", f': > "$0"; sleep 2; exit {code}', str(started)]
                 ended = []
 
-                def serve():
+                def serve(old=old, ended=ended):
                     try:
                         old.serve_forever(poll_interval=0.01)
                     except BaseException as error:  # noqa: BLE001 - the test reads what ended it

@@ -202,7 +202,8 @@ class Item(ScreenCase):
 
     def test_its_stylesheet_names_foundation_tokens(self):
         """sd:3586 PR 1: classic.css has no colour literal and names only declared tokens."""
-        strip = lambda text: re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+        def strip(text):
+            return re.sub(r"/\*.*?\*/", "", text, flags=re.S)
         css = strip((DASHBOARD / "v2/static/classic.css").read_text(encoding="utf-8"))
         self.assertIsNone(re.search(r"#[0-9a-fA-F]{3,8}\b|\b(rgba?|hsla?|oklch|oklab|lab|lch|color)\(", css))
         declared = set(re.findall(r"(--[\w-]+)\s*:", (DASHBOARD / "v2/static/tokens.css").read_text(encoding="utf-8")))

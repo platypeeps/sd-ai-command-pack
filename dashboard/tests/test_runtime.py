@@ -178,7 +178,7 @@ class RuntimeSafety(unittest.TestCase):
                 self.target.write_bytes(self.old)
                 self.loaded = True
                 newer = plistlib.dumps({"Label": runtime.LABEL, "ProgramArguments": ["newer-dashboard"]})
-                def concurrent(arguments, **options):
+                def concurrent(arguments, *, changed_plist=changed_plist, newer=newer, **options):
                     result = self.run_command(arguments, **options)
                     if arguments[:2] == ["launchctl", "bootout"]:
                         self.loaded = True

@@ -234,7 +234,8 @@ def _row_evidence(row):
         return _unknown("the recorded evidence is not a list")
     if not all(isinstance(check, dict) for check in checks):
         return _unknown("a recorded check is not a record")
-    hide = lambda word: LOCAL_PATH.sub(lambda found: "…/" + found[0].rstrip("/").rpartition("/")[2], str(word))
+    def hide(word):
+        return LOCAL_PATH.sub(lambda found: "…/" + found[0].rstrip("/").rpartition("/")[2], str(word))
     return {"state": "read", "verified": bool(row.get("evidence_verified")), "checks": [{
         "command": " ".join(hide(word) for word in check["argv"]) or None if isinstance(check.get("argv"), list) else None,
         "directory": _place(check["cwd"]) if check.get("cwd") else None,
