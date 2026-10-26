@@ -646,7 +646,7 @@ class ThePragmaWrites(FenceCase):
         self.assertGreater(free, 1)
         return free
 
-    def test_an_autocommit_incremental_vacuum_demoted_mid_fetch_frees_nothing(self):
+    def test_autocommit_vacuum_demoted_mid_fetch_frees_nothing(self):
         """Lane review of cae42071c: it frees one page per row fetched, after execute() has returned."""
         self.name_hub(HUB_NAME)
         self.node()
@@ -667,7 +667,7 @@ class ThePragmaWrites(FenceCase):
         self.assertEqual(self.free_pages(), before)
         self.assertIsNotNone(refused, "no commit could ask after the last row")
 
-    def test_an_incremental_vacuum_in_a_transaction_frees_only_after_a_fresh_ask(self):
+    def test_vacuum_in_a_transaction_frees_after_a_fresh_ask(self):
         self.name_hub(HUB_NAME)
         self.node()
         before = self.vacuumable()
