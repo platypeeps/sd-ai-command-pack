@@ -12,7 +12,10 @@
 .daytrack .grid { stroke: var(--color-grid); stroke-width: 1; }
 .daytrack .land { stroke: var(--color-series-1); stroke-width: 2; }
 .daytrack .fail { fill: var(--color-warning); }
-.daytrack .brief { fill: none; stroke: var(--color-muted); stroke-width: 1.2; }
+/* sd:6232: the brief mark is a solid dot; its clear .hit square (24 units, 24px at the 900px track) takes the press. */
+.daytrack .brief { fill: var(--color-ink-2); pointer-events: none; }
+.daytrack .hit { fill: transparent; }
+.daytrack a:hover .brief { fill: var(--color-ink); }
 .daytrack .sess { fill: var(--color-accent); }
 .daytrack .now { stroke: var(--color-accent); stroke-width: 1.5; }
 .daytrack a:focus-visible > * { outline: 2px solid var(--color-focus); }
@@ -28,6 +31,28 @@
   .flowkey { padding: var(--space-xs) 0 0; border-left: 0; border-top: var(--rule-hair) solid var(--color-rule-2); grid-template-columns: auto auto auto auto; }
 }
 @media (pointer: coarse) { .flowkey a, .track-table summary { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
+
+/* The spend line (sd:6031): spent in the last 24 hours and the 7 days, a bar per day; under the track, both columns.
+ * Hallmark · component: spend line · genre: modern-minimal · theme: design.md instrument panel
+ * states: default · hover (the Metrics link) · focus · not read (the reason as text) -- no control of its own. */
+.daytrack .spend { grid-column: 1 / -1; margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs) var(--space-xs);
+  font: 400 var(--text-xs)/1.5 var(--font-data); font-variant-numeric: tabular-nums; color: var(--color-ink-2); }
+.daytrack .spend .lbl { font: 600 var(--text-2xs)/1 var(--font-label); letter-spacing: .09em; text-transform: uppercase; color: var(--color-muted); }
+.daytrack .spend b { color: var(--color-ink); font-weight: 400; }
+.daytrack .spend .spark { width: 42px; height: 16px; }
+.daytrack .spend .spark rect { fill: var(--color-series-1); }
+.daytrack .spend a { color: inherit; text-decoration-color: var(--color-rule); text-underline-offset: 3px; }
+.daytrack .spend a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+@media (pointer: coarse) { .daytrack .spend a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
+
+/* Since yesterday (sd:6002): a few plain lines over the track, the merged items folded under them. */
+.digest { margin-top: var(--space-md); }
+.digest h2 { margin: 0 0 var(--space-2xs); }
+.digest ul { margin: 0; padding-left: var(--space-md); overflow-wrap: anywhere; }
+.digest li + li { margin-top: var(--space-3xs); }
+.digest details { margin-top: var(--space-xs); color: var(--color-muted); }
+.digest summary:focus-visible, .digest a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+@media (pointer: coarse) { .digest summary, .digest .prs a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
 
 /* Section heads */
 .tally { gap: var(--space-md); line-height: 1; }
@@ -117,6 +142,10 @@ section[aria-labelledby="motion-h"] { margin-top: var(--space-xl); }
 .active .via { display: block; color: var(--color-muted); }
 .active .when, .active .num { white-space: nowrap; font: 400 var(--text-xs)/1.35 var(--font-data); font-variant-numeric: tabular-nums; color: var(--color-ink-2); }
 .active .num { text-align: right; }
+/* The builder runs (sd:6003): the session rows' parts above them; the stage leads its cell. No new tokens.
+ * states: default · hover (the item links) · focus · running ● · stalled ▲ · held outcome ■ · not read (one line) */
+.builds { margin-bottom: var(--space-sm); }
+.builds .detail b { font-weight: 500; color: var(--color-ink); }
 @media (max-width: 899px) {
   .active tbody tr { grid-template-columns: 2rem minmax(0, 1fr) auto; grid-template-areas: "g what num" ". detail detail" ". when when"; }
   .active .what { grid-area: what; width: auto; } .active .detail { grid-area: detail; } .active .when { grid-area: when; } .active .num { grid-area: num; }
