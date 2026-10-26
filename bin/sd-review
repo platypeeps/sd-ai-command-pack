@@ -686,16 +686,23 @@ def local_conventions(root: pathlib.Path) -> str:
     )
 
 
-#: The blocker checklist (pack sd:6028) reads the blocking findings in each ship receipt's newest row before the base.
+#: The blocker checklist (pack sd:6028) reads the blocking findings in each ship receipt's newest row before the base,
+#: less each one its adjudication's newest row before the base rebutted (pack sd:6105); a parked risk stays.
 BLOCKER_DAYS, BLOCKER_LINES, BLOCKER_SUMMARY_CHARS = 14, 8, 160
 BLOCKER_HEADER = "Blocker classes that earlier reviews of this repository raised"
 BLOCKER_QUERY = (
     "SELECT json_extract(f.value, '$.family'), json_extract(f.value, '$.path'), substr(json_extract(f.value, '$.summary'),"
-    " 1, 400) FROM state AS s JOIN (SELECT max(id) AS id FROM state WHERE kind = 'checkpoint' AND timestamp < ? AND (key"
+    " 1, 400) FROM state AS s JOIN (SELECT max(id) AS id FROM state WHERE kind = 'checkpoint' AND timestamp < ?1 AND (key"
     " LIKE 'ship:%' OR key LIKE 'ship-review-no-item:%') GROUP BY key) AS latest ON latest.id = s.id, json_each(CASE WHEN"
     " json_valid(s.body) THEN s.body END, '$.passes') AS p, json_each(p.value, '$.report.findings') AS f WHERE s.timestamp"
-    " >= ? AND lower(json_extract(s.body, '$.repository')) = ? AND p.type = 'object' AND f.type = 'object' AND"
-    " json_extract(f.value, '$.disposition') = 'blocking' ORDER BY s.timestamp DESC, s.id DESC, p.key DESC, f.key LIMIT 2000")
+    " >= ?2 AND lower(json_extract(s.body, '$.repository')) = ?3 AND p.type = 'object' AND f.type = 'object' AND"
+    " json_extract(f.value, '$.disposition') = 'blocking' AND NOT EXISTS (SELECT 1 FROM state AS a, json_each(CASE WHEN"
+    " json_valid(a.body) THEN a.body END, '$.proposal.findings') AS d WHERE a.id = (SELECT max(id) FROM state WHERE kind ="
+    " 'checkpoint' AND timestamp < ?1 AND key = CASE WHEN s.key LIKE 'ship:%' THEN 'ship-adjudication:' || substr(s.key, 6)"
+    " ELSE 'ship-adjudication-no-item:' || substr(s.key, 21) END) AND json_extract(d.value, '$.response_disposition') ="
+    " 'rebutted' AND json_extract(d.value, '$.raw_finding.summary') IS json_extract(f.value, '$.summary') AND"
+    " json_extract(d.value, '$.raw_finding.path') IS json_extract(f.value, '$.path'))"
+    " ORDER BY s.timestamp DESC, s.id DESC, p.key DESC, f.key LIMIT 2000")
 
 
 def blocker_checklist(root: pathlib.Path, subject: Subject, database: Any, env: Mapping[str, str]) -> str:
@@ -1517,20 +1524,10 @@ def dispose(findings: Sequence[Mapping[str, Any]], floor: str) -> list[dict[str,
 
 # Pipeline
 
-#: What a failed gate is known to have lacked, read from evidence and not
-#: from its exit code. sd-check reports a program it could not spawn as
-#: `exit_code: None` with `reason: cannot run <program>: <OSError>` (its
-#: `run_one`), and only that proves the gate's own program never started and
-#: no check ran. A child that ran and exited 127 proves nothing about its
-#: first line: a recipe that passed its check and then hit a missing
-#: postprocessor exits 127 too, and the codex review of 23f2f429 caught this
-#: lane naming /bin/sh as a missing interpreter on exactly that shape. So a
-#: 127 is a missing-command diagnostic -- the command the shell could not
-#: find and the line, from the shell's own report -- the gate failure stands,
-#: and nothing is claimed about what ran before it. The make-mediated case
-#: sd:1343 was filed on (`/bin/sh: .venv/bin/python: No such file or
-#: directory`, then `make: *** [lint] Error 127`) reaches sd-check as text,
-#: so it is reported this way, naming the path.
+#: What a failed gate is known to have lacked, read from evidence, not its exit code. Only sd-check's
+#: `exit_code: None` with `reason: cannot run <program>: ...` proves the program never started and no check ran.
+#: A 127 proves nothing about what ran first (23f2f429: a recipe that passed, then lost a postprocessor), so it
+#: is a missing-command report naming what the shell could not find and the line, as for sd:1343's make case.
 TOOLCHAIN_MISSING = "toolchain_missing"
 COMMAND_NOT_FOUND = "command_not_found"
 _CANNOT_RUN = "cannot run "
@@ -1551,10 +1548,8 @@ def _spawn_failed(check: Mapping[str, Any]) -> bool:
 
 
 def _started(check: Mapping[str, Any]) -> bool:
-    """Whether sd-check's record shows the entrypoint's process executing: an
-    exit code, or a failure that is not the spawn (a timeout ran until it
-    was killed). Skipped and absent entrypoints, and one sd-check could not
-    spawn, did not."""
+    """Whether sd-check's record shows the process executing: an exit code, or a failure that is not the spawn
+    (a timeout ran until killed). Skipped and absent entrypoints, and one that could not spawn, did not."""
     return isinstance(check.get("exit_code"), int) or (check.get("status") == "fail" and not _spawn_failed(check))
 
 
@@ -1564,8 +1559,7 @@ def _not_found_report(check: Mapping[str, Any]) -> dict[str, Any] | None:
     recipe = _RECIPE_EXIT_127.search(stderr)
     if check.get("exit_code") != 127 and not recipe:
         return None
-    # The last report is the command that ended the run; an earlier one was
-    # survived, or the shell would have stopped there.
+    # The last report ended the run; the shell survived an earlier one, or it would have stopped there.
     named = next(reversed(list(_NOT_FOUND.finditer(stderr))), None)
     return {
         "reason": COMMAND_NOT_FOUND,
@@ -1579,13 +1573,9 @@ def _not_found_report(check: Mapping[str, Any]) -> dict[str, Any] | None:
 def classify_gate(checks: Any) -> dict[str, Any] | None:
     """What the failed gate lacked, or None when the evidence says nothing.
 
-    The gate is up to three entrypoints (check, test, lint) that sd-check runs
-    as separate processes, so the answer carries `entrypoint`, the record it
-    was read from, and `started`, every entrypoint whose record shows it
-    executing. A sentence about the whole gate is written from `started`,
-    never from one record: the fix-verification review of 30e45b6b ran a
-    `test` that passed and a `lint` that could not spawn, and this lane said
-    no check ran."""
+    The answer carries `entrypoint`, the record it was read from, and `started`, every entrypoint that executed:
+    a sentence about the whole gate is written from `started`, never one record (30e45b6b: a `test` passed, a
+    `lint` could not spawn, and this lane said no check ran)."""
     if not isinstance(checks, list):
         return None
     records = [check for check in checks if isinstance(check, dict)]
@@ -1616,8 +1606,7 @@ def gate_failure(checks: Any, detail: str) -> dict[str, Any]:
 
 
 def gate_failed_line(check: Mapping[str, Any] | None) -> str:
-    """What the failed gate is known to have lacked, and no more: the claim
-    that no check ran is made only when `started` is empty."""
+    """What the failed gate is known to have lacked, and no more: no check ran only when `started` is empty."""
     if check and check.get("reason") == TOOLCHAIN_MISSING:
         started = check.get("started") or []
         if not started:
@@ -1634,6 +1623,16 @@ def gate_failed_line(check: Mapping[str, Any] | None) -> str:
         return (f"sd-review: the gate's {check['entrypoint']} stopped at its bound ({check['evidence']}); the review had cleared before it ran; "
                 "give it longer with --timeout SECONDS (sd-ship prepare: --review-timeout SECONDS)")
     return "sd-review: the repository's own gate failed; the review had cleared before it ran"
+
+
+def gate_failed_checks(check: Mapping[str, Any] | None) -> list[str]:
+    """Each failed check, what sd-check says failed and where it kept the output, else its last line (sd:6075)."""
+    rows = [row for row in (check or {}).get("checks") or [] if isinstance(row, dict) and row.get("status") == "fail"]
+    said = (str((check or {}).get("detail") or "").strip().splitlines() or ["nothing"])[-1]
+    return [f"  failed check: {row.get('name', '?')}: {'; '.join(map(str, row.get('failed_steps') or [row.get('reason')]))}; "
+            + (f"output: {row['output_path']}" if row.get("output_path") else next((part for part in str(row.get("reason"))
+               .split("; ") if part.startswith("output not kept")), "no output kept")) for row in rows] or [
+        f"  failed check: none recorded; sd-check said: {said}"]
 
 
 def phase_seconds(args: argparse.Namespace) -> int:
@@ -2444,6 +2443,7 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
         write(f"\ncheck: {check['status']} (exit {check['exit_code']}){reason}\n")
     if result["status"] == "gate_failed":
         write(gate_failed_line(check) + "\n")
+        write("".join(line + "\n" for line in gate_failed_checks(check)))
         return
 
     write("\noutcomes:\n")

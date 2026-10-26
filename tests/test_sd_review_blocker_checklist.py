@@ -152,6 +152,40 @@ class BlockerChecklistTests(ReviewFixture):
         self.assertNotIn("written after the base", prompts[0])
         self.assertNotIn("long before", prompts[0])
 
+    def adjudication(self, key: str, *rows: tuple[dict[str, Any], str], days: float = 0.5,
+                     prefix: str = "ship-adjudication:") -> None:
+        """The row `sd-ship adjudicate` records for receipt `key`: each finding with its disposition."""
+        stamp = (ANCHOR - timedelta(days=days)).isoformat(timespec="seconds")
+        findings = [{"index": index, "finding_digest": "0" * 64, "raw_finding": raw, "response_disposition": answer,
+                     "reason": "checked"} for index, (raw, answer) in enumerate(rows, 1)]
+        body = {"decision": "accepted", "proposal": {"schema_version": 1, "bindings": {}, "findings": findings},
+                "protocol": 1}
+        with contextlib.closing(self.library.connect(self.database())) as connection:
+            self.library.writes.record_state(connection, "checkpoint", key=f"{prefix}{key}", body=body, timestamp=stamp)
+
+    def test_a_rebutted_blocker_is_left_out(self) -> None:
+        """pack sd:6105: a blocker the lead rebutted was no defect, so it is no class to check.
+        A parked one stays: the risk is real. A rebuttal after the base changes nothing (sd:1397)."""
+        rebutted, parked = finding("a rebutted race"), finding("a parked leak", path="lib/log.py")
+        self.receipt("one", rebutted, parked)
+        self.adjudication("one", (rebutted, "rebutted"), (parked, "parked"))
+        no_item = finding("a rebutted no-item claim", path="bin/other.py")
+        self.receipt("no-item", no_item)
+        with contextlib.closing(self.library.connect(self.database())) as connection:
+            connection.execute("UPDATE state SET key = 'ship-review-no-item:x' WHERE key = 'ship:no-item'")
+            connection.commit()
+        self.adjudication("x", (no_item, "rebutted"), prefix="ship-adjudication-no-item:")
+        late = finding("rebutted only after the base", path="bin/late.py")
+        self.receipt("late", late)
+        self.adjudication("late", (late, "rebutted"), days=-1)
+        prompts, _result, stderr = self.prompts()
+        for prompt in prompts:
+            self.assertIn("a parked leak", prompt)
+            self.assertIn("rebutted only after the base", prompt)
+            self.assertNotIn("a rebutted race", prompt)
+            self.assertNotIn("a rebutted no-item claim", prompt)
+        self.assertEqual(stderr, "")
+
     def test_planning_reviews_read_no_history(self) -> None:
         with unittest.mock.patch.object(self.library, "connect", side_effect=AssertionError("database read")):
             subject = sd_review.Subject("planning", "HEAD", "worktree", ("docs/work/x/design.md",), 1, "plan")
