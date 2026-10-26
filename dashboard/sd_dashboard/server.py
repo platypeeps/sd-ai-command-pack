@@ -205,6 +205,25 @@ def capture_ref(connection, *, ref, who, **values):
         return workflow.item_state(connection, state["item"]["id"])
 
 
+def capture_drafted(connection, capture, *, who):
+    """A task the capture box files, and its draft, in one transaction (pack sd:6361, system sd:6013).
+
+    `capture` files the item (`workflow.capture_task` or `capture_ref`);
+    `draft.queue_if_eligible` then queues its draft when its repository is
+    managed, has a remote and lands on the hub. A failure in either rolls
+    both back, so no captured item misses its draft. A followup, or a task
+    another path files, queues none (ruling #31096).
+    """
+    from sd_db import draft
+
+    with workflow.transaction(connection):
+        state = capture()
+        item = state["item"]["id"]
+        if draft.queue_if_eligible(connection, item, who=who) is None:
+            return state
+        return workflow.item_state(connection, item)
+
+
 def capture_followup(connection, *, followup_of=None, who, **values):
     """A followup item, filed as `sd task add --kind followup` files one (sd:719 step 6a).
 
@@ -545,8 +564,10 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
             if parent is not None:
                 raise ValueError("Only a followup item names the item it follows up.")
             if ref is not None:
-                return lambda connection: capture_ref(connection, ref=ref, who="dashboard", **values)
-            return lambda connection: workflow.capture_task(connection, who="dashboard", **values)
+                return lambda connection: capture_drafted(
+                    connection, lambda: capture_ref(connection, ref=ref, who="dashboard", **values), who="dashboard")
+            return lambda connection: capture_drafted(
+                connection, lambda: workflow.capture_task(connection, who="dashboard", **values), who="dashboard")
         if kind != "followup":
             raise ValueError("Capture files a task or a followup item.")
         if parent is not None and (type(parent) is not int or not 1 <= parent <= 9223372036854775807):
