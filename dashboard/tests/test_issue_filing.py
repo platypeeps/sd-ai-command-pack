@@ -10,6 +10,7 @@ GitHub, Jira or the live database.
 
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import random
@@ -662,6 +663,15 @@ class TheConfirm(FilingCase):
         self.assertEqual([url.rsplit("/rest/", 1)[1] for url, _ in calls], ["api/3/issue", "api/3/search/jql"])
         self.assertRegex(calls[1][1]["jql"], r'^project = "EXAMPLE" AND created >= -[0-9]+m ORDER BY created DESC$')
         self.assertEqual(calls[1][1]["fields"], ["description"])
+
+    def test_a_jira_search_answer_of_the_wrong_shape_is_unknown(self):
+        """Failures (sd:6061): a list, a non-object issue or non-object fields is not a known answer."""
+        target = {"kind": "jira", "project": "EXAMPLE"}
+        env = {"JIRA_BASE_URL": "https://example.atlassian.test", "JIRA_EMAIL": "e", "JIRA_API_TOKEN": "t"}
+        since = datetime.datetime(2026, 10, 1, tzinfo=datetime.UTC)
+        for payload in ([1], {"issues": [1]}, {"issues": [{"key": "EXAMPLE-1", "fields": [1]}]}):
+            with self.subTest(payload=payload), self.assertRaises(issue_filing.Unknown):
+                issue_filing.find_jira(target, "token", since, transport=lambda *a, p=payload: (p, ""), environ=env)
 
     def test_jira_without_its_variables_files_nothing_and_names_them(self):
         target = {"kind": "jira", "project": "EXAMPLE"}

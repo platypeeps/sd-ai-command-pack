@@ -790,9 +790,14 @@ def _today() -> date:
 
 
 def _series_start(row: dict, rule, anchor: str, today: date) -> date:
-    """The date the next occurrence is searched from: the completion day, or the item's `due` for a schedule anchor."""
+    """The date the next occurrence is searched from.
+
+    A schedule anchor starts at the item's `due`. A completion anchor starts at the completion day,
+    or at `due` when that is later: `next_after` is strictly after its start, so an early completion
+    never finds the due date it closes again (pack sd:6230).
+    """
     if anchor == "completion":
-        return today
+        return max(today, date.fromisoformat(row["due"])) if row["due"] is not None else today
     if row["due"] is None:
         raise RecurrenceError(f"recurrence {rule.text()} is schedule-anchored and the item has no due date")
     return date.fromisoformat(row["due"])
@@ -836,8 +841,8 @@ def _next_occurrence(connection: sqlite3.Connection, row: dict, *, who: str) -> 
     takes the first occurrence after it. `completion` restarts the series at
     the completion date and takes the first occurrence after that, so it
     drifts by design: "every three years after the last time we did it". An
-    early completion therefore can produce a row due on the date of the one
-    it closed.
+    early completion restarts at the closed row's `due` instead, so the next
+    row never lands on the date of the one it closed (pack sd:6230).
 
     **The recurrence never blocks the completion.** When there is no next
     occurrence -- none within `HORIZON_YEARS`, a schedule-anchored row with

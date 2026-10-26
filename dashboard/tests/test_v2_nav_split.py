@@ -17,7 +17,7 @@ from pathlib import Path
 from unittest import mock
 
 from sd_db import repos
-from sd_dashboard import now_screen, review_screen, v2
+from sd_dashboard import issues, now_screen, review_screen, v2
 from sd_dashboard.v2.pages import Read
 
 from support import NOW, ScreenCase
@@ -87,7 +87,7 @@ class TheRail(unittest.TestCase):
 
 class TheGitHubRegistration(Registers, unittest.TestCase):
     page, section, route = "github", "GitHub", "/github"
-    api = ("/api/today/github", "/api/github/issues", "/api/today/github/copilot-review", "/api/today/github/merge/preview",
+    api = ("/api/today/github", "/api/github/issues", "/api/github/issues/view", "/api/today/github/copilot-review", "/api/today/github/merge/preview",
            "/api/today/github/merge", "/api/today/github/close/preview", "/api/today/github/close")
 
 
@@ -188,11 +188,15 @@ class TheRoutes(BrowserSession):
         status, _, body = self.request("/github")
         self.assertEqual(status, 200)
         self.assertIn("<title>GitHub · system</title>", body)
+        # Sync now's job (sd:6175) is read from launchd; a fixture reads none.
+        job = {"name": "shadow-sync-nightly", "error": "not installed here"}
         with mock.patch.object(repos, "mine_issues", create=True, return_value={}), \
-                mock.patch.object(repos, "intake_issues", create=True, return_value={}):
+                mock.patch.object(repos, "intake_issues", create=True, return_value={}), \
+                mock.patch.object(issues, "sync_job", return_value=job):
             status, _, out = self.request("/api/github/issues", headers={"Cookie": self.cookie})
         self.assertEqual(status, 200)
-        self.assertEqual(json.loads(out), {"issues": [], "issues_error": "", "github_error": "", "intake": [], "intake_error": ""})
+        self.assertEqual(json.loads(out), {"issues": [], "issues_error": "", "github_error": "", "intake": [], "intake_error": "",
+                                           "store": {"available": True, "reason": ""}, "sync": job})
 
 
 if __name__ == "__main__":

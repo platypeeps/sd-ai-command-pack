@@ -42,7 +42,7 @@ from sd_db import reads
 
 from .documents import _config_dir, pipe_lines
 
-__all__ = ["AREAS", "area_of", "briefs", "parse_realms", "realm_of", "realm_places", "realms", "reports", "series_job",
+__all__ = ["AREAS", "area_of", "briefs", "parse_realms", "realm_issues", "realm_of", "realm_places", "realms", "reports", "series_job",
            "task_rows", "tasks"]
 
 #: The places, by family key, and their labels.
@@ -214,7 +214,28 @@ def tasks(connection, area: str, *, now: str) -> dict:
     with _one_snapshot(connection):
         rows, done = task_rows(connection, owns, now=now)
         lead = _has_lead(connection)
-    return {"read": now, "area": area, "state": "read", "reason": "", "rows": rows, "done": done, "lead": lead}
+        more = {} if area in AREAS else realm_issues(connection, owns, now=now)
+    return {"read": now, "area": area, "state": "read", "reason": "", "rows": rows, "done": done, "lead": lead, **more}
+
+
+def realm_issues(connection, owns, *, now: str) -> dict:
+    """sd:6164: a realm place's issues: the open Your issues rows `/api/github/issues` reads (`issues.with_github`), each
+    with its `tracker`, whose repo the realm owns. A GitHub row outside the issue sources has no `repo_path`, so its
+    registered checkout stands in; an upstream one has neither and stays off. `hidden` is issue Hide's (sd:6175);
+    `issues_reason` names a source that did not read, and `issues_store` whether Hide's store did."""
+    from . import issues, today_github
+    from .documents_screen import views
+
+    github = today_github.document(connection, now=now)
+    found = issues.with_github(issues.document(connection), github)
+    checkout = {f"github:{e['ref']}".lower(): e.get("checkout") for e in (*github["issues"], *github["settled"])}
+    rows = [row for row in found["issues"] if str(row.get("state") or "open").lower() == "open"
+            and owns(row["repo_path"] or checkout.get(str(row["key"]).lower()), "issue")]
+    kept, store = views(connection)
+    for row in rows:
+        row["hidden"] = bool(kept.get(f"issue:{str(row['key']).lower()}", {}).get("hidden"))
+    reason = "; ".join(why for why in (found["issues_error"], found.get("github_error", "")) if why)
+    return {"issues": rows, "issues_reason": reason, "issues_store": {"available": not store, "reason": store}}
 
 
 #: How many briefs are read before the area filter: every one the store holds, in practice; a page shows `ROWS`.

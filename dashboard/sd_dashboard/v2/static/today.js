@@ -309,10 +309,12 @@ window.PAGE_FILTER = { '': 'Needs you' };
   function digest() {
     const D = DOC.digest || { error: 'the document carried no digest' };
     if (D.error) return put($('digest'), html`<p class="why">The digest was not read: ${D.error}. Refresh tries again.</p>`);
-    if (!D.merged.length && !D.failed.length && !D.questions) return put($('digest'), html`<p class="why">Nothing merged, failed or waiting since yesterday.</p>`);
+    // sd:6259: a job or lane read that failed leaves the failures unknown, so the card never reads as a quiet night.
+    if (!D.merged.length && !D.failed.length && !D.questions && !D.unknown) return put($('digest'), html`<p class="why">Nothing merged, failed or waiting since yesterday.</p>`);
     put($('digest'), html`<ul class="lines">${D.merged.map(m => html`<li><b>${m.repo}</b>: ${m.n} merged · ${m.titles.join(', ')}${m.n > m.titles.length ? ', …' : ''}</li>`)}
       ${D.more ? html`<li>and ${plural(D.more, 'more repo')}</li>` : ''}
       ${D.failed.map(f => html`<li class="g-warning"><b>${f.what}</b> · ${f.why} · ${f.fix}</li>`)}
+      ${D.unknown ? html`<li class="g-warning">Failed jobs and blocked lane entries unknown: ${D.unknown}. Refresh tries again.</li>` : ''}
       ${D.questions ? html`<li><a href="/decide">${plural(D.questions, 'question')} ${D.questions === 1 ? 'waits' : 'wait'}</a></li>` : ''}</ul>
       ${D.prs.length ? html`<details><summary>${plural(D.prs.length, 'merged item')}</summary><ul class="prs">${D.prs.map(p => html`<li><a href="${shell.itemHref(p.item)}">#${p.item} ${p.title}</a> · ${p.repo}${p.pr ? ` · PR #${p.pr}` : ''}</li>`)}</ul></details>` : ''}`);
   }

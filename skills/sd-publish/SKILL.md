@@ -27,8 +27,8 @@ short personal-blog version of a published article.
 The output is a destination-specific draft, adaptation ledger, safety review,
 preview, and connector-ready handoff.
 
-Do not use to synthesize unsettled inputs (`sd-digest`), develop an original
-argument (`sd-author`), create a slide narrative (`sd-presentation`), or write a
+Do not use to synthesize unsettled inputs, develop an original
+argument, create a slide narrative (`sd-presentation`), or write a
 normalized record into a knowledge system (`sd-capture`). This skill
 does not send, publish, schedule, or create destination artifacts.
 

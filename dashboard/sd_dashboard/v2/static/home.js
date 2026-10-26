@@ -18,7 +18,7 @@ addEventListener('DOMContentLoaded', () => {
   // ---------- Data (build) ----------
   // E: entity id -> { id, name, domain, group, state, error }. HEAD: the headline entity or null. REASON: why the read gave no
   // state, '' when it did. WRITES: why no command runs, '' when they can. SERVICES: the server's allowlist, domain -> service -> risk.
-  let E = {}, HEAD = null, GROUPS = [], REASON = '', WRITES = '', SERVICES = {}, READ = null, CONFIG = null;
+  let E = {}, HEAD = null, GROUPS = [], WEB = null, REASON = '', WRITES = '', SERVICES = {}, READ = null, CONFIG = null;
   // build (sd:4959): a binary sensor reads by its Home Assistant device_class: [lamp when on, lamp when off, on words, off
   // words, what on means]. On is good for the first group (connectivity off is caution, power off a plain fact), a fault for
   // the second, and a plain fact for the third; a sensor with no class is neutral on/off, never a warning. The words follow Home Assistant's own state names.
@@ -160,6 +160,17 @@ addEventListener('DOMContentLoaded', () => {
       <div class="act">${actionable(t.id) ? C.rowActions(t.id) : ''}</div>
     </div></li>`;
   }
+  // sd:6163: the Home Assistant web UI, first. The link is the dashboard's own /home/assistant, which answers 302 to the
+  // host local-ha-mcp's settings name, so the page never holds the host; with no settings the tile says why.
+  function webHTML() {
+    if (!WEB) return '';
+    const tile = WEB.available
+      ? html`<div class="tile web" data-state="neutral"><a class="open" href="${WEB.path}" target="_blank" rel="noopener" aria-label="Open the Home Assistant web UI in a new tab">
+        ${ICON('house')}<span class="nm">Web UI</span><span class="st">Open ${ICON('arrow-up-right')}</span></a></div>`
+      : html`<div class="tile web" data-state="unknown"><div class="open off">
+        ${ICON('house')}<span class="nm">Web UI</span><span class="st"><span class="g" aria-hidden="true">${GLYPH.unknown}</span>Cannot open</span><span class="why">${WEB.reason}</span></div></div>`;
+    return html`<section class="group" aria-labelledby="g-web"><h2 class="label" id="g-web">Home Assistant</h2><ul class="lamps"><li>${tile}</li></ul></section>`;
+  }
   function subhead() {
     const n = Object.keys(E).length - (HEAD ? 1 : 0);
     put(document.getElementById('subhead'), html`${plural(n, 'tile')} from <code>${CONFIG?.source || 'home-tiles.conf'}</code> · read ${READ ? html`<time class="rel" datetime="${READ}"></time>` : 'not yet'} · ${REASON ? 'no HA state read' : 'HA read'}`);
@@ -173,7 +184,7 @@ addEventListener('DOMContentLoaded', () => {
       put(hb, html`${ICON('bell-ring')}<span class="what"><b>${HEAD.name}</b><span>${hs === 'unknown' ? REASON || hw : hs === 'ok' ? 'nothing reported' : 'problems reported'}</span></span><span class="st"><span aria-hidden="true">${GLYPH[hs]}</span> ${hw}</span>`);
       hb.setAttribute('aria-label', `${HEAD.name}: ${hw}. Details`);
     }
-    put(groupsEl, html`${GROUPS.map(g => html`<section class="group" aria-labelledby="${gid(g.name)}"><h2 class="label" id="${gid(g.name)}">${g.name}</h2><ul class="lamps">${g.tiles.map(tileHTML)}</ul></section>`)}`);
+    put(groupsEl, html`${webHTML()}${GROUPS.map(g => html`<section class="group" aria-labelledby="${gid(g.name)}"><h2 class="label" id="${gid(g.name)}">${g.name}</h2><ul class="lamps">${g.tiles.map(tileHTML)}</ul></section>`)}`);
     subhead();
   }
 
@@ -183,7 +194,7 @@ addEventListener('DOMContentLoaded', () => {
   const SECURITY = 'Changes physical security; runs at once, with no Undo.';
   const ACT = { sensor: 'Read-only: Home Assistant has no service for this domain that the dashboard calls.', lock: SECURITY, alarm_control_panel: SECURITY, cover: SECURITY,
     ...Object.fromEntries(SWITCHES.map(d => [d, 'Runs at once through Home Assistant; Undo for 10 seconds.'])), once: 'Runs once through Home Assistant; no Undo.' };
-  function markSelected() { document.querySelectorAll('.tile').forEach(t => t.setAttribute('aria-current', String(t.dataset.id === selected))); }
+  function markSelected() { document.querySelectorAll('.tile[data-id]').forEach(t => t.setAttribute('aria-current', String(t.dataset.id === selected))); }
   function showDetails(id, open = true) {
     const e = E[id]; if (!e) return;
     selected = id; markSelected();
@@ -221,7 +232,7 @@ addEventListener('DOMContentLoaded', () => {
   document.addEventListener('shell:open', e => { if (E[e.detail]) showDetails(e.detail); });
   // build: j / k are the shell's (PAGE_LIST); the tiles are the list, in reading order.
   window.PAGE_LIST = {
-    rows: () => document.querySelectorAll('.tile'),
+    rows: () => document.querySelectorAll('.tile[data-id]'),
     current: () => selected,
     select: id => showDetails(id, false),
   };
@@ -249,7 +260,7 @@ addEventListener('DOMContentLoaded', () => {
     // body[data-observed] and data-interval (minutes) give the shell's staleness band on Read again its reading time and cadence.
     READ = doc.read; document.body.dataset.observed = doc.read; document.body.dataset.interval = String(EVERY / 60000); CONFIG = doc.config; REASON = doc.reader?.available ? '' : (doc.reader?.reason || 'Home Assistant not read');
     WRITES = doc.writes?.available ? '' : (doc.writes?.reason || 'no Home Assistant writes'); SERVICES = doc.writes?.services || {};
-    HEAD = doc.headline; GROUPS = doc.groups || []; E = {};
+    HEAD = doc.headline; GROUPS = doc.groups || []; WEB = doc.web || null; E = {};
     if (HEAD) E[HEAD.id] = { ...HEAD, group: null };
     GROUPS.forEach(g => g.tiles.forEach(t => { E[t.id] = { ...t, group: g.name }; }));
     document.getElementById('edit-tiles').disabled = !CONFIG?.editor;
@@ -263,7 +274,7 @@ addEventListener('DOMContentLoaded', () => {
       : null;
     return { objects: Object.values(E).map(e => ({ id: e.id, type: kindOf(e.id), label: e.name })), state };
   }
-  function clear(err) { document.getElementById('edit-tiles').disabled = true; E = {}; HEAD = null; GROUPS = []; READ = null; CONFIG = null; REASON = `the tiles were not read: ${err.message}`; WRITES = REASON; SERVICES = {}; delete document.body.dataset.observed; }
+  function clear(err) { document.getElementById('edit-tiles').disabled = true; E = {}; HEAD = null; GROUPS = []; WEB = null; READ = null; CONFIG = null; REASON = `the tiles were not read: ${err.message}`; WRITES = REASON; SERVICES = {}; delete document.body.dataset.observed; }
   function unselect() {
     selected = null; markSelected();
     put(details, html`<p class="why">Select a tile to see its entity and its state.</p>`);

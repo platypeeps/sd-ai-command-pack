@@ -210,6 +210,24 @@ class TheDigest(TodayCase):
             self.assertEqual(self.today()["digest"], {"error": "database is locked"})
 
 
+    def test_a_job_or_lane_read_that_failed_makes_the_failures_unknown(self):
+        """sd:6259: a failed job or lane read listed no failures, and the card said a quiet night."""
+        self.assertEqual(self.today(lanes=queue())["digest"]["unknown"], "")
+
+        def down(connection, now):
+            raise OSError("lane store unreadable")
+
+        with mock.patch.object(now_screen, "_jobs", side_effect=OSError("launchctl did not answer")):
+            digest = self.today(lanes=down)["digest"]
+        self.assertEqual(digest["error"], "")
+        self.assertEqual(digest["unknown"], "jobs: launchctl did not answer; lane: lane store unreadable")
+
+    def test_a_lane_one_repo_could_not_list_is_unknown_too(self):
+        def partial(connection, now):
+            return {**queue()(connection, now), "problems": [{"repo": "/repos/pack", "error": "lane.json unreadable"}]}
+
+        self.assertEqual(self.today(lanes=partial)["digest"]["unknown"], "lane pack: lane.json unreadable")
+
 DIGEST = {"merged": [{"repo": "pack", "n": 2, "titles": ["Fix the link", "Port the page"]}], "more": 1,
           "prs": [{"item": 7, "title": "Fix the link", "repo": "pack", "pr": 13}],
           "failed": [{"what": "backup failed with exit 1", "why": "the disk was full",
@@ -234,3 +252,11 @@ class TheDigestCard(ReaderCase):
         self.doc["digest"] = {"error": "database is locked"}
         failed = self.run_page("R.digest = ELS.digest.html;")["R"]["digest"]
         self.assertIn("The digest was not read: database is locked. Refresh tries again.", failed)
+
+    def test_unknown_failures_are_said_never_a_quiet_night(self):
+        """sd:6259: a job or lane read that failed leaves the failures unknown."""
+        self.doc["digest"] = {"merged": [], "more": 0, "prs": [], "failed": [], "questions": 0, "error": "",
+                              "unknown": "jobs: launchctl did not answer"}
+        card = self.run_page("R.digest = ELS.digest.html;")["R"]["digest"]
+        self.assertNotIn("Nothing merged", card)
+        self.assertIn("Failed jobs and blocked lane entries unknown: jobs: launchctl did not answer", card)

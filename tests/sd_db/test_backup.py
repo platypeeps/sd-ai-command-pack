@@ -656,6 +656,17 @@ class RunnerEvidence(BackupCase):
         self.assertEqual(journal.records(target), [record])
         self.assertFalse((target.parent / "runner-restore-intent.json").exists())
 
+    def test_the_snapshot_leaves_the_run_locks_out(self):
+        # sd:6071: a lock is an empty flock file restore makes again; copied, rsync's open
+        # of one failed the NAS mirror, and listed, offsite-verify failed on the one it missed.
+        _, record = self.run_record()
+        self.assertTrue((self.state / "runner-journal" / f"{record['id']}.lock").exists())
+        snapshot = run(home=self.home)
+        self.assertEqual(sorted(path.name for path in (snapshot.directory / "runner-journal").iterdir()),
+                         [f"{record['id']}.json"])
+        entries = json.loads((snapshot.directory / BACKUP_MANIFEST).read_text())["entries"]
+        self.assertEqual([name for name in entries if name.endswith(".lock")], [])
+
     def test_newer_live_run_record_is_never_rolled_back(self):
         from sd_db import runner_journal as journal
         _, record = self.run_record()
