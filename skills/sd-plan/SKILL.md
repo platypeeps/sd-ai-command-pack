@@ -179,6 +179,21 @@ work item outlives the session that invented it.
 The issue's own text stays in the issue. Cite the link, read the issue for the
 interview, and leave its prose where it will still be current next month.
 
+## The store and plugin contract
+
+`sd plugin add` and `sd store` are the two verbs a plugin author meets, and
+the registry holds one rule about what they accept.
+Write a kind with keys only from `KIND_KEYS` in `bin/sd` (eight), with
+`fields` and `initial-status` required and the other six optional; a ninth key
+is a decision record before it is a commit, and `validate_kind` turns a
+manifest carrying one away by name (R11-D14).
+A store block names `"driver": "db"`: the rows are the source, `sd store`
+reads and changes them. Each base also has one HTML page in the vault. The `vault`
+driver is gone, and a manifest that names it is refused with the fix.
+The rows in `bin/sd_rules.py` state each rule; none is restated here.
+`sd-rules --for <path>` prints the rows in scope for the file being
+written.
+
 ## Never
 
 - **Never accept a repo path.** The repository is the one enclosing cwd
