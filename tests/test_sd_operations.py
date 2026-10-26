@@ -145,7 +145,7 @@ class OperationsCLI(unittest.TestCase):
     def builds(self):
         """`sd_db.build` and `sd_db.build_run` fakes; `dispatch` answers an empty tick."""
         build, run = types.ModuleType("sd_db.build"), types.ModuleType("sd_db.build_run")
-        run.dispatch = Mock(return_value={"reaped": [], "moved": [], "claimed": ["r1"], "spawned": ["r1"], "why": ""})
+        run.dispatch = Mock(return_value={"reaped": [], "moved": [], "claimed": ["r1"], "drafted": [], "spawned": ["r1"], "why": ""})
         run.now = Mock(return_value="2026-10-25T09:00:00+00:00")
         run.paths = types.SimpleNamespace(key=lambda value: value, expand=Path)
         run.Tools = lambda **tools: types.SimpleNamespace(**tools)
@@ -167,7 +167,7 @@ class OperationsCLI(unittest.TestCase):
         kwargs = run.dispatch.call_args.kwargs
         self.assertEqual((kwargs["load"], kwargs["load_cap"], kwargs["interactive"]), (None, None, []))
         self.assertIn("bulk_storage_root is unset", kwargs["why"])
-        self.assertIn("claimed 1, spawned 1", output)
+        self.assertIn("claimed 1, drafted 0, spawned 1", output)
         self.connect.assert_called_with(sd_db, write=True)
         self.connection.close.assert_called_once()
 
@@ -178,7 +178,7 @@ class OperationsCLI(unittest.TestCase):
         sys.modules["sd_db.build"].run = Mock(return_value={"repo": "/repo"})
         run.spawn, run.log_dir = Mock(), lambda root, repo: root
         run.dispatch.side_effect = lambda connection, **kwargs: (kwargs["spawn"]("r1"), {
-            "reaped": [], "moved": [], "claimed": [], "spawned": ["r1"], "why": ""})[1]
+            "reaped": [], "moved": [], "claimed": [], "drafted": [], "spawned": ["r1"], "why": ""})[1]
         with patch.object(cli, "gate_load", return_value=(1.0, 0.0)), \
                 patch.object(cli, "interactive_builders", return_value=[]), \
                 patch.object(cli, "log_root", return_value=Path("/bulk")):
