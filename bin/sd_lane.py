@@ -1080,6 +1080,150 @@ def enqueue_order(connection: Any, repository: str) -> dict[str, int]:
         (len(prefix), prefix)).fetchall()}
 
 
+#: The days the Queue page's wait and gate times read back (pack sd:6006).
+TIMES_DAYS = 7
+#: A median wait past this files the parallel-lanes question (operator ruling, grill Q27).
+WAIT_QUESTION_SECONDS = 3600
+
+
+def _instant(stamp: Any) -> float | None:
+    """A lane stamp (`...Z`) or a state row's time (`...+00:00`), both UTC, as epoch seconds; else None."""
+    try:
+        return float(calendar.timegm(time.strptime(str(stamp)[:19], "%Y-%m-%dT%H:%M:%S")))
+    except ValueError:
+        return None
+
+
+def _speculated(steps: list[Any]) -> float | None:
+    """The seconds the entry's speculative gate ran: 0 when it never ran, None while it runs."""
+    began = next((n for n, row in enumerate(steps) if row["speculation"] == "running"), None)
+    if began is None:
+        return 0.0
+    stopped = next((_instant(row["timestamp"]) for row in steps[began + 1:] if row["speculation"] != "running"), None)
+    opened = _instant(steps[began]["timestamp"])
+    return None if stopped is None or opened is None else stopped - opened
+
+
+def _entry_time(steps: list[Any], start: float) -> dict[str, Any] | None:
+    """One entry's times from its history rows, oldest first; None when it was not claimed since `start`."""
+    claim = next((n for n, row in enumerate(steps) if row["status"] == "running"), None)
+    if claim is None:
+        return None
+    claimed, enqueued = _instant(steps[claim]["started"]), _instant(steps[claim]["enqueued"])
+    if claimed is None or enqueued is None or claimed < start:
+        return None
+    prepared = next((_instant(row["timestamp"]) for row in steps[claim + 1:]
+                     if row["status"] != "running" or row["step"] == "merge"), None)
+    speculated = _speculated(steps)
+    last = steps[-1]
+    ended = _instant(last["finished"]) if last["status"] != "running" else None
+    return {"item": last["item"], "title": last["title"] or "", "status": last["status"], "wait": claimed - enqueued,
+            "gate": None if prepared is None or speculated is None else speculated + prepared - claimed,
+            "total": None if ended is None else ended - enqueued}
+
+
+def entry_times(connection: Any, repository: str, *, now: float, days: int = TIMES_DAYS) -> list[dict[str, Any]]:
+    """Each entry first claimed in the last `days`: its wait and its gate time, from its history rows (pack sd:6006).
+
+    `wait` runs from `enqueued_at` to the first claim. `gate` is the lane's
+    work before the merge: the speculative gate, from the row that set it
+    running to the row that ended it, plus the prepare step, from the first
+    claim to the row that set `step: merge` or ended the claim; a speculative
+    gate runs while the entry waits, so the two overlap. `total` runs from
+    enqueue to the entry's end. A part that has not ended is None, never a
+    guess; an entry never claimed is not listed.
+    """
+    prefix, start = f"{KEY_PREFIX}{repository}:", now - days * 86400
+    rows = connection.execute(
+        "SELECT key, timestamp, json_extract(body, '$.status') AS status, json_extract(body, '$.step') AS step, "
+        "json_extract(body, '$.item') AS item, json_extract(body, '$.title') AS title, "
+        "json_extract(body, '$.enqueued_at') AS enqueued, json_extract(body, '$.started_at') AS started, "
+        "json_extract(body, '$.finished_at') AS finished, json_extract(body, '$.speculation.status') AS speculation "
+        "FROM state WHERE kind = 'checkpoint' AND key IN (SELECT key FROM state WHERE kind = 'checkpoint' "
+        "AND substr(key, 1, ?) = ? AND timestamp >= ?) ORDER BY id",
+        (len(prefix), prefix, time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(start)))).fetchall()
+    history: dict[str, list[Any]] = {}
+    for row in rows:
+        history.setdefault(row["key"], []).append(row)
+    out = []
+    for key, steps in history.items():
+        found = _entry_time(steps, start)
+        if found is not None:
+            out.append({"id": key[len(prefix):], **found})
+    return out
+
+
+def _median(values: list[float]) -> float | None:
+    ordered = sorted(values)
+    if not ordered:
+        return None
+    middle = len(ordered) // 2
+    return ordered[middle] if len(ordered) % 2 else (ordered[middle - 1] + ordered[middle]) / 2
+
+
+def lane_times(connection: Any, repository: str, *, now: float, days: int = TIMES_DAYS) -> dict[str, Any]:
+    """`entry_times` as the Queue page shows it: each median, the slowest entry, and `over` (pack sd:6006).
+
+    The slowest entry has the longest enqueue-to-end time. `entries` counts
+    every entry read; the gate median reads only the entries whose gate
+    ended. `over` is a median wait past `WAIT_QUESTION_SECONDS`.
+    """
+    times = entry_times(connection, repository, now=now, days=days)
+    wait = _median([row["wait"] for row in times])
+    slowest = max((row for row in times if row["total"] is not None), key=lambda row: row["total"], default=None)
+    return {"days": days, "entries": len(times), "wait": wait,
+            "gate": _median([row["gate"] for row in times if row["gate"] is not None]),
+            "slowest": None if slowest is None else {name: slowest[name] for name in ("item", "title", "total")},
+            "over": wait is not None and wait > WAIT_QUESTION_SECONDS}
+
+
+def wait_question(connection: Any, repository: str, path: str, *, now: float) -> int | None:
+    """File the parallel-lanes question once `repository`'s median wait passes an hour (pack sd:6006); its note id.
+
+    The question goes on one item per repository, `task-ref` `lane-wait:<repository>`, opened in `path`'s repo the
+    first time. Nothing is filed while that item is done (the operator settled it), while one of its questions is open,
+    or within `TIMES_DAYS` of its last question, so an answer is not asked again within the week it read. None when
+    nothing was filed.
+    """
+    require_sd_db()
+    from sd_db import writes  # noqa: PLC0415
+
+    times = lane_times(connection, repository, now=now)
+    if not times["over"]:
+        return None
+    found = connection.execute("SELECT id, status FROM item WHERE source = 'task-ref' AND external_id = ?",
+                               (f"lane-wait:{repository}",)).fetchone()
+    if found is not None:
+        if found["status"] == "done":
+            return None
+        recent = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(now - TIMES_DAYS * 86400))
+        if connection.execute("SELECT 1 FROM note WHERE item = ? AND kind = 'question' AND (resolved_at IS NULL "
+                              "OR timestamp >= ?)", (found["id"], recent)).fetchone():
+            return None
+    item = found["id"] if found is not None else writes.create_item(
+        connection, kind="task", title=f"Decide: parallel lanes for {repository}", repo=path, source="task-ref",
+        external_id=f"lane-wait:{repository}")
+    slowest = times["slowest"] or {}
+    return writes.add_note(connection, item, "question", (
+        f"The median lane wait in {repository} was {round(times['wait'] / 60)} min over the last {times['days']} days "
+        f"({times['entries']} entries; median gate {round((times['gate'] or 0) / 60)} min; slowest sd:"
+        f"{slowest.get('item')} at {round((slowest.get('total') or 0) / 60)} min). That is past an hour. "
+        "Run more than one entry of this lane at a time?\nOption: Plan parallel lanes\nOption: Not now"))
+
+
+def ask_wait(checkout: pathlib.Path, path: str, environ: dict[str, str]) -> dict[str, Any] | None:
+    """`wait_question` for a lane this machine hosts, after its run, in one hub transaction (pack sd:6006).
+
+    A failure is named in the run's answer and stops nothing: the next run asks again.
+    """
+    try:
+        queue = queue_for(checkout, environ)
+        note = on_hub(queue, lambda connection: wait_question(connection, queue.repository, path, now=time.time()))
+    except (LaneError, sd_lib.ConfigError, OSError, sqlite3.Error) as error:
+        return {"path": path, "wait_question": None, "error": str(error)}
+    return {"path": path, "wait_question": note} if note else None
+
+
 def newest_entry(connection: Any, repository: str, item: int | None,
                  skip: tuple[str, ...] = ()) -> dict[str, Any] | None:
     """`item`'s newest entry by `enqueue_order` whose status is not in `skip`, or None (sd:3412).
@@ -3186,6 +3330,8 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     default a lane runs here, to its end, before the next starts. While the
     run lasts, a lane whose worker ended and that got new work starts again
     (`new_work`, sd:5809), rather than wait for a later scheduled run.
+    Once the lanes ended, each hosted lane whose median wait passed an hour
+    files the parallel-lanes question (`ask_wait`, pack sd:6006).
     """
     deadline = clock() + RUN_BUDGET_SECONDS
     imported = sd_lib.import_sd_db()
@@ -3232,6 +3378,10 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     order = longest_waiting_first(hosted, environ)
     lanes += run_parallel(order, start or inline, deadline, functools.partial(lane_room, environ),
                           functools.partial(new_work, environ))
+    for path, checkout in hosted:  # after the lanes ran: a slow read never holds a lane back (pack sd:6006)
+        asked = ask_wait(checkout, path, environ)
+        if asked:
+            lanes.append(asked)
     return {"lanes": lanes}
 
 

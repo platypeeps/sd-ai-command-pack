@@ -197,6 +197,8 @@ The page reads each lane in-process with the pack's own `sd_lane`, the read `lan
 The header shows load5 with its 1- and 15-minute neighbours, and the gate slots in use against `sd gate status`'s cap.
 Each item is one row: merging (step, holder host, claim age, lease end; a passed lease lights caution), next (order, gate, head), building, blocked (status, step, the reason's first line, who acts), cancelled (when, head), or landed today (pull request, merge commit).
 Blocked and cancelled entries show for three days; older ones drop off.
+Under the lanes, Last 7 days shows each lane's median wait (enqueue to claim), median gate time (the speculative gate plus prepare) and slowest entry, enqueue to end, read from the entries' history rows (pack sd:6006).
+When a lane's median wait passes an hour, the hosted lane run files the parallel-lanes question on that repository's `Decide: parallel lanes` item, once a week at most.
 Building rows are the builder gate logs, `gate-*.log`, in the lane folder `lane list` names, `<lane root>/<checkout name>/lane`; set `sd.lane_root` where builders write them.
 Up, down, top, hold, release and cancel run `sd-ship lane move|hold|release|cancel` and nothing else.
 Cancel asks first. A cancelled row offers Re-queue (sd:3398): `lane retry <item> --expected-head <head>` queues the cancelled entry again, last, at the head the row showed (pack sd:3389).

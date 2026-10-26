@@ -154,6 +154,11 @@ class TheRows(Lane, ScreenCase):
             ("merging", 3), ("next", 9), ("next", 12), ("building", "queue-notes-1"), ("building", "sd1775-2"),
             ("blocked", 5), ("blocked", 4), ("cancelled", 1), ("landed", 7)])
 
+    def test_a_lane_whose_remote_names_no_github_repository_says_its_times_were_not_read(self):
+        # Pack sd:6006: each lane carries its 7-day times; a lane with no history key is named, never a quiet lane.
+        self.assertEqual(self.doc()["lanes"][0]["times"],
+                         {"error": "its remote names no GitHub repository, so it has no lane history"})
+
     def worktrees(self):
         """The fixture with the worktree `lane enqueue` records on the next and blocked rows (sd:5064)."""
         self.list([{**e, "worktree": f"/work/sd-{e['item']}"} if e["status"] in ("pending", "prepared") else e
@@ -968,6 +973,19 @@ class TheInProcessRead(RealLane):
         self.assertEqual(lane["revision"], queue_screen.revision(self.entries()))
         self.assertEqual(Path(lane["lane"]), Path(self.listed()["queue"]).parent.parent)
 
+    def test_each_lane_carries_its_wait_and_gate_times_from_the_history_rows(self):
+        """Pack sd:6006: the median wait from enqueue to claim, read by the pack's own `sd_lane.lane_times`."""
+        self.store([{**self.seeds()[0], "id": "seed-timed", "item": 7, "status": "running", "step": "prepare",
+                     "position": 7, "enqueued_at": "2026-09-06T10:00:00Z", "started_at": "2026-09-06T11:30:00Z"}])
+        times = queue_screen.document(self.connection, now=NOW)["lanes"][0]["times"]
+        self.assertEqual((times["entries"], times["wait"], times["gate"], times["over"]), (1, 5400, None, True))
+
+    def test_a_failed_times_read_is_named_on_its_lane(self):
+        lane_module = queue_screen.pack_module("sd_lane")
+        with mock.patch.object(lane_module, "lane_times", side_effect=sqlite3.OperationalError("database is locked")):
+            times = queue_screen.document(self.connection, now=NOW)["lanes"][0]["times"]
+        self.assertEqual(times, {"error": "the lane times were not read: OperationalError: database is locked"})
+
     def test_a_lane_hosted_on_a_satellite_reads_the_same_entries(self):
         # Pack sd:3003: the queue sits in the hub database whichever machine runs the lane.
         hub = queue_screen.document(self.connection, now=NOW)["lanes"][0]
@@ -1040,6 +1058,23 @@ class TheScript(Lane, ScreenCase):
             ("cancelled", "queued", "◌", "CANCELLED"), ("landed", "ok", "●", "LANDED")])
         self.assertIn("<b>operator acts</b>", lanes)
         self.assertIn("PR #161", lanes)
+
+    def test_the_times_table_shows_each_lanes_medians_and_slowest_entry(self):
+        """Pack sd:6006: one row per lane with entries in 7 days; a median wait past an hour says the question files."""
+        read = {"days": 7, "entries": 4, "wait": 4500.0, "gate": 610.0, "over": True,
+                "slowest": {"item": 42, "title": "A slow one", "total": 9000.0}}
+        with mock.patch.object(queue_screen, "times", return_value=read):
+            times = self.run_page("R.times = ELS.times.html;")["R"]["times"]
+        self.assertIn('aria-label="Wait and gate time per lane, last 7 days"', times)
+        cells = re.findall(r"<td[^>]*>(.*?)</td>", re.search(r"<tbody>(.*?)</tbody>", times, re.S)[1], re.S)
+        self.assertEqual(cells[:4], ["system", "4", "1h 15m", "10m 10s"])
+        self.assertIn("▲ system: median wait past 1 h. The lane run files the parallel-lanes question.", times)
+        self.assertIn("<code>sd:42</code> A slow one · 2h 30m", times)
+
+    def test_a_lane_whose_times_were_not_read_says_so(self):
+        with mock.patch.object(queue_screen, "times", return_value={"error": "database is locked"}):
+            times = self.run_page("R.times = ELS.times.html;")["R"]["times"]
+        self.assertIn("▨ not read: database is locked", times)
 
     def test_adversarial_review_on_a_lane_row_posts_its_worktree_and_item(self):
         """sd:5064: a lane row with a recorded worktree asks for {kind: change, target, item}; Details follow the run."""
