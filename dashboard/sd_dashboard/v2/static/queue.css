@@ -65,6 +65,7 @@ section.lane > header .src { margin-left: 0; flex-basis: 100%; font: 400 var(--t
 @media (pointer: coarse) {
   .qrow { min-height: var(--row-touch); }
   .qrow .ctl .btn, .lanes .act .btn, .lanes .what .pick { min-height: var(--row-touch); min-width: var(--row-touch); }
+  #builds details.ended summary { display: flex; align-items: center; min-height: var(--row-touch); }
 }
 @media (max-width: 899px) {
   .lanes thead { display: none; }
