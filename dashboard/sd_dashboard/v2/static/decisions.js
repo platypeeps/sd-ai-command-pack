@@ -4,6 +4,9 @@
 // and the item revision the read gave; the server writes the ruling and resolves the question in one transaction.
 // A question with fewer than two Option: lines (sd:5064) gets a text box: its words post as the option, the same ruling
 // `sd task note N "<words>" --kind decision --answers <note>` writes.
+// Rulings by session (pack sd:6015): the last 7 days of decision notes, one group per session, each with its item and
+// that item's state. Reverse posts /api/decisions/reverse: the server notes the reversal and reopens the question, which
+// the next read lists above again.
 // Markup is html`…` from markup.js: every value put in it is escaped, and put() is the only way into the page.
 (() => {
   const { html, put } = window.markup;
@@ -12,7 +15,7 @@
 
   // LIST is the last read; null when it failed. RULED and REFUSED hold what a click did to a row until the next read.
   // REVIEW counts the questions on review batches (sd:3709): Scoring asks them, so Decisions draws one line that opens it.
-  let LIST = [], REVIEW = 0, reads = 0, failed = '';
+  let LIST = [], REVIEW = 0, RULINGS = [], reads = 0, failed = '';
   const RULED = new Map(), REFUSED = new Map(), BUSY = new Set(), DRAFT = new Map();
   // The marker an option carries (sd:5306); the label drops it, the posted text keeps it.
   const REC = /^\s*(?:\(recommended\)|recommended:)\s*|\s*\(recommended\)\s*$/gi, label = o => o.replace(REC, '');
@@ -40,7 +43,31 @@
       ${refused(d)}`;
   }
 
+  // A session id is long; its first block names it, as sd today prints it.
+  // A week can hold a thousand rulings (pack sd:6017): each session is a fold, the newest open; FOLD keeps what the
+  // operator opened or shut across redraws.
+  const FOLD = new Map();
+  const session = g => g.session ? `Session ${g.session.split('-')[0]}` : 'No session';
+  function reversal(r) {
+    if (r.reversed) return html`<span class="why">reversed</span>`;
+    if (!r.answers) return html`<span class="why" title="This ruling answered no question note: note the item to change it">answered no question</span>`;
+    return html`<button type="button" class="btn quiet sm" data-reverse="${r.note}"${BUSY.has(-r.note) ? html` disabled` : ''}>Reverse</button>`;
+  }
+  function drawRulings() {
+    const box = $('rulings'); if (!box) return;
+    const n = RULINGS.reduce((sum, g) => sum + g.rulings.length, 0);
+    put($('rulings-tally'), n ? html`<span>${n} in ${RULINGS.length} ${RULINGS.length === 1 ? 'session' : 'sessions'}</span>` : html``);
+    put(box, !LIST ? html`` : RULINGS.length ? html`${RULINGS.map((g, i) => html`<details class="ruling-group"${(FOLD.has(g.session) ? FOLD.get(g.session) : !i) ? html` open` : ''}><summary class="ruling-session" data-session="${g.session}">${session(g)} · ${g.rulings.length} ${g.rulings.length === 1 ? 'ruling' : 'rulings'} · <time class="rel" datetime="${g.at}"></time></summary>
+      <table class="ledger decisions rulings" aria-label="${`Rulings of ${session(g).toLowerCase()}`}"><tbody>${g.rulings.map(r => html`<tr data-item="${r.item}">
+        <td class="g ${r.reversed ? 'g-queued' : 'g-ok'}" title="${r.reversed ? 'reversed' : 'ruled'}">${r.reversed ? '○' : '●'}</td>
+        <td class="what"><a href="${window.shell.itemHref(r.item)}"><span class="id">#${r.item}</span> ${r.title}</a><span class="repo">${repoName(r.repo)} · ${r.state}</span></td>
+        <td class="question">${r.question ? html`${r.question} → ` : ''}<b>${r.ruling}</b><span class="asked-at">note #${r.note} · <time class="rel" datetime="${r.at}"></time></span></td>
+        <td class="act">${reversal(r)}</td></tr>`)}</tbody></table></details>`)}`
+      : html`<p class="filtered">No ruling in the last 7 days.</p>`);
+  }
+
   function draw() {
+    drawRulings();
     const tb = $('decisions'), line = $('decisions-review'), n = LIST ? REVIEW : 0;
     put($('decisions-head'), window.shell.list.sortHead(COLS, SORT));
     if (line) {
@@ -69,7 +96,7 @@
     try {
       const doc = await window.shell.getJSON('/api/decisions');
       if (n !== reads) return;
-      LIST = doc.decisions; REVIEW = doc.review || 0; RULED.clear(); REFUSED.clear(); BUSY.clear();
+      LIST = doc.decisions; REVIEW = doc.review || 0; RULINGS = doc.rulings || []; RULED.clear(); REFUSED.clear(); BUSY.clear();
     } catch (e) {
       if (n !== reads) return;
       LIST = null; failed = e.message;
@@ -99,6 +126,20 @@
     }
   }
 
+  // A ruling's busy mark is its negated note id, so it never meets a question's.
+  async function reverse(note) {
+    const r = RULINGS.flatMap(g => g.rulings).find(x => x.note === note);
+    if (!r || !r.answers || r.reversed || BUSY.has(-note)) return;
+    BUSY.add(-note); say(''); draw();
+    try {
+      await window.shell.post('/api/decisions/reverse', { item: r.item, note, revision: r.revision });
+      say(`Reversed note #${note}: its question asks again above.`);
+    } catch (e) {
+      say(`Not reversed: ${e.message}.${e.stale ? ' The list was read again.' : ''}`);
+    }
+    return load();
+  }
+
   // Read again (decide.js) reads the list again.
   window.decisions = { load: () => { say(''); return load(); } };
 
@@ -112,6 +153,12 @@
       e.preventDefault(); choose(+f.dataset.note, null, f.elements.answer.value);
     });
     $('decisions').addEventListener('input', e => { const f = e.target.closest('form.answer'); if (f) DRAFT.set(+f.dataset.note, e.target.value); });
+    $('rulings').addEventListener('click', e => {
+      const b = e.target.closest('button[data-reverse]');
+      if (b && !b.disabled) reverse(+b.dataset.reverse);
+    });
+    // toggle does not bubble, so the box listens in the capture phase.
+    $('rulings').addEventListener('toggle', e => { const s = e.target.querySelector?.(':scope > summary')?.dataset.session; if (s != null) FOLD.set(s, e.target.open); }, true);
     $('decisions-head').addEventListener('click', e => { if (window.shell.list.sortBy(e, SORT)) window.shell.list.keepFocus(e, draw); });
     put($('decisions-head'), window.shell.list.sortHead(COLS, SORT)); // drawn before the read, so a failed one keeps the columns
     load();

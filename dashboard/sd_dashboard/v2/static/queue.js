@@ -103,12 +103,27 @@
     return [landed.length ? `Idle, landed today: ${named}${landed.length > IDLE_NAMED ? ` · ${landed.length - IDLE_NAMED} more` : ''}.` : '',
       quiet ? `Idle, quiet: ${plural(quiet, 'lane')}.` : ''].filter(Boolean).join(' ');
   }
+  // Times (pack sd:6006): each lane's last 7 days from its history rows, median wait (enqueue to claim) and gate time
+  // (speculative gate plus prepare), and its slowest entry, enqueue to end. A lane with no entry folds into one line; a
+  // read that failed is its own row. A median wait past an hour says the lane run files the parallel-lanes question.
+  const mins = s => s == null ? 'none ended' : dur(Math.round(s));
+  function timesTable() {
+    const read = DOC.lanes.filter(l => l.times && (l.times.error || l.times.entries)), quiet = DOC.lanes.length - read.length;
+    const days = (read.find(l => l.times.days) || { times: { days: 7 } }).times.days;
+    if (!read.length) return html`<p class="idle">No lane ran an entry in the last ${String(days)} days.</p>`;
+    const cells = l => l.times.error ? html`<td colspan="4" class="why">▨ not read: ${l.times.error}</td>`
+      : html`<td class="num">${String(l.times.entries)}</td><td class="num"${l.times.over ? html` data-over=""` : ''}>${mins(l.times.wait)}</td><td class="num">${mins(l.times.gate)}</td><td class="why">${l.times.slowest ? html`<code>sd:${String(l.times.slowest.item)}</code> ${l.times.slowest.title} · ${mins(l.times.slowest.total)}` : 'none ended'}</td>`;
+    const over = read.filter(l => l.times.over);
+    return html`<h2 class="times-h">Last ${String(days)} days</h2><table class="ledger times" aria-label="Wait and gate time per lane, last ${String(days)} days"><thead><tr><th scope="col">Lane</th><th scope="col" class="num">Entries</th><th scope="col" class="num">Median wait</th><th scope="col" class="num">Median gate</th><th scope="col">Slowest entry</th></tr></thead>
+      <tbody>${read.map(l => html`<tr><td class="what">${l.repo}</td>${cells(l)}</tr>`)}</tbody></table>
+      ${over.map(l => html`<p class="over">▲ ${l.repo}: median wait past 1 h. The lane run files the parallel-lanes question.</p>`)}${quiet ? html`<p class="idle">No entry in ${String(days)} days: ${plural(quiet, 'lane')}.</p>` : ''}`;
+  }
   function details() {
     const l = DOC && DOC.lanes.find(x => x.path === open);
     put($('details'), l ? lane(l) : html`<p class="why">${DOC ? 'No lane is open: no lane has a row to show.' : 'No lane is open: the lanes were not read.'}</p>`);
   }
   function draw() {
-    if (!DOC) { put($('readings'), html``); put($('show'), html``); put($('lanes'), html``); put($('idle'), html``); details(); return; }
+    if (!DOC) { put($('readings'), html``); put($('show'), html``); put($('lanes'), html``); put($('idle'), html``); put($('times'), html``); details(); return; }
     putEntries();
     const L = DOC.load, gates = DOC.gates;
     put($('readings'), html`<div><dt>load5</dt><dd>${L.load5.toFixed(1)}<small>1m ${L.load1.toFixed(1)} · 15m ${L.load15.toFixed(1)} · ${TREND[L.trend]}</small></dd></div>
@@ -127,6 +142,7 @@
       : !DOC.lanes.length ? html`<p class="done">No managed repository's lane was read. sd-db repo managed PATH yes adds one.</p>`
       : html`<p class="done">No lane has a row to show.</p>`}`);
     put($('idle'), html`${idleLine(idle)}`);
+    put($('times'), timesTable());
     details();
   }
 

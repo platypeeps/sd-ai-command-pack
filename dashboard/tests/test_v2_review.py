@@ -72,8 +72,8 @@ def questions_of(connection, item):
 
 class TheRegistration(Registers, unittest.TestCase):
     page, section, route = "decide", "Decide", "/decide"
-    api = ("/api/decisions", "/api/decisions/answer", "/api/review", "/api/review/7/export", "/api/review/rule",
-           "/api/review/withdraw")
+    api = ("/api/decisions", "/api/decisions/answer", "/api/decisions/reverse", "/api/review", "/api/review/7/export",
+           "/api/review/rule", "/api/review/withdraw")
 
     def test_decide_follows_today_in_now_with_reviews_chord_and_icon(self):
         now = re.search(r"\['Now',\s*\[(.*?)\]\],", GROUP_BLOCK).group(1)
