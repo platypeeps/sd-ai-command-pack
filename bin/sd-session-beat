@@ -10,18 +10,54 @@ PostToolUse, so a hold starts before a long test run does. SessionEnd
 deletes the row, freeing the worktrees.
 
 The id is the payload's `session_id`, else the environment's. With neither,
-no `sd_db`, or an unreachable database, it writes nothing. It prints nothing
-and exits 0 whatever happens: a hook never breaks a session, and a missing
-row is no hold, which cleanup's own checks still cover.
+no `sd_db`, or an unreachable database, it writes nothing. It exits 0
+whatever happens: a hook never breaks a session, and a missing row is no
+hold, which cleanup's own checks still cover.
+
+A teammate shares its lead's session id, and no Bash variable tells the two
+apart; only the hook payload's `agent_id` does (pack sd:6046). So a
+teammate's Bash call that runs `sd` or an `sd-*` command gets
+`export SD_AGENT_SESSION=<session>:<agent>; ` in front, through
+`updatedInput`, and `sd` records that mark as the note's session. It is the
+one thing this hook prints, and it sets no permission decision: the call is
+checked as any other.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
+import shlex
 import sys
 
 SESSION_ENV = "CLAUDE_CODE_SESSION_ID"
+
+#: The variable `bin/sd_work.py` reads a teammate's mark from (pack sd:6046).
+AGENT_ENV = "SD_AGENT_SESSION"
+
+#: `sd` or an `sd-*` command, by name or path, as a word of the command line.
+#: A folder named `sd-...` is followed by `/` and does not match.
+SD_COMMAND = re.compile(r"(?:^|[\s;&|(/])sd(?:-[\w-]+)?(?=$|[\s;&|)])", re.ASCII)
+
+#: A session or agent id the mark takes; anything else is left out.
+ID = re.compile(r"[\w.@-]{1,128}", re.ASCII)
+
+
+def agent_mark(payload: dict) -> dict | None:
+    """The PreToolUse answer that hands a teammate's mark to the `sd` its Bash call runs, else None."""
+    session, agent, tool_input = payload.get("session_id"), payload.get("agent_id"), payload.get("tool_input")
+    if (payload.get("hook_event_name") != "PreToolUse" or payload.get("tool_name") != "Bash"
+            or not isinstance(tool_input, dict) or not isinstance(tool_input.get("command"), str)):
+        return None
+    if not all(isinstance(value, str) and ID.fullmatch(value) for value in (session, agent)):
+        return None
+    command = tool_input["command"]
+    if not SD_COMMAND.search(command):
+        return None
+    mark = shlex.quote(f"{session}:{agent}")
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                   "updatedInput": {**tool_input, "command": f"export {AGENT_ENV}={mark}; {command}"}}}
 
 
 def beat_session(payload: dict, environ: dict[str, str]) -> None:
@@ -51,7 +87,17 @@ def beat_session(payload: dict, environ: dict[str, str]) -> None:
 def beat_main() -> int:
     try:
         payload = json.loads(sys.stdin.read() or "{}")
-        beat_session(payload if isinstance(payload, dict) else {}, dict(os.environ))
+        payload = payload if isinstance(payload, dict) else {}
+    except BaseException:  # noqa: BLE001 - a hook never breaks a session
+        return 0
+    try:
+        beat_session(payload, dict(os.environ))
+    except BaseException:  # noqa: BLE001 - a failed beat still marks the call
+        pass
+    try:
+        mark = agent_mark(payload)
+        if mark is not None:
+            print(json.dumps(mark))
     except BaseException:  # noqa: BLE001 - a hook never breaks a session
         return 0
     return 0
