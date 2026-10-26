@@ -808,7 +808,8 @@ class TheRealLaneBound(unittest.TestCase):
             return Answer()
         session = case("run")
         session.base = "http://192.0.2.1"
-        with mock.patch("urllib.request.urlopen", urlopen):
+        # A quiet machine, so the budget read is the case's own: `patience` scales it by the load (sd:6158).
+        with mock.patch("urllib.request.urlopen", urlopen), mock.patch("os.getloadavg", return_value=(0.0, 0.0, 0.0)):
             session.request("/api/queue")
         return seen[0]
 

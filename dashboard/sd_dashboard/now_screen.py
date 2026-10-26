@@ -699,6 +699,123 @@ def track(connection: sqlite3.Connection, now: str, *, rows: list[dict], briefs:
                     "blocked": blocked}}
 
 
+#: The spend line's trend (sd:6031): this many 24-hour windows, the last one ending at the read.
+SPEND_DAYS = 7
+
+
+def _at(stamp) -> datetime | None:
+    found = _utc(stamp)
+    return datetime.fromisoformat(found.replace("Z", "+00:00")) if found else None
+
+
+def spend(connection: sqlite3.Connection, now: str) -> dict:
+    """Today's spend line (sd:6031): what the cost table says was spent in each of the last `SPEND_DAYS` 24-hour
+    windows, oldest first, the last ending at the read, as the day track's 24 hours do; `day` is the last, `week` all.
+
+    Visibility only, no cap (grill Q59). A read that failed is `error`, so the page says spend was not read, never $0.
+    """
+    end = _at(now)
+    since = end - timedelta(days=SPEND_DAYS)
+    try:
+        rows = reads.spent_since(connection, since=_utc(since.timestamp()))
+    except (SdDbError, sqlite3.Error) as failure:
+        return {"error": str(failure) or "the cost table could not be read"}
+    days = [0.0] * SPEND_DAYS
+    for row in rows:
+        at = _at(row["timestamp"])
+        if at is not None and since < at <= end:
+            days[SPEND_DAYS - 1 - int((end - at) / timedelta(days=1))] += float(row["usd"])
+    return {"day": round(days[-1], 2), "week": round(sum(days), 2), "days": [round(day, 2) for day in days], "error": ""}
+
+
+#: The digest's merged lines (sd:6002): at most this many repos, the rest counted in `more`.
+DIGEST_LINES = 5
+
+
+def digest(connection: sqlite3.Connection, now: str, *, rows: list[dict], lanes: list[dict]) -> dict:
+    """Since yesterday (sd:6002), the overnight card (grill Q32): what changed in the day track's 24 hours.
+
+    `merged` is one line per repo, most merges first, each with its count and newest titles, at most `DIGEST_LINES`;
+    `more` counts the repos left out, and `prs` is every merged item with its PR, folded under the lines. `failed` is
+    each failed job and blocked lane entry with its why and one fix; `questions` counts the decisions waiting on Decide.
+    A read that failed is `error`, so the card says the digest was not read, never a quiet night.
+    """
+    from sd_db import today
+
+    try:
+        landed = today.delivered(connection, now=now, hours=TRACK_HOURS)
+        questions = len(today.decisions(connection)) + today.review_questions(connection)
+    except (SdDbError, sqlite3.Error, KeyError, TypeError) as failure:
+        return {"error": str(failure) or "the merged items and questions could not be read"}
+    def repo(row):
+        return Path(row["repo"]).name if row.get("repo") else "no repo"
+
+    by_repo: dict[str, list[dict]] = {}
+    for row in landed:
+        by_repo.setdefault(repo(row), []).append(row)
+    ranked = sorted(by_repo.items(), key=lambda pair: -len(pair[1]))
+    failed = [{"what": row["what"], "why": (row.get("triage") or {}).get("why") or row["detail"], "fix": f"retry: {row['retry']}"}
+              for row in rows if row["kind"] == "job" and row.get("state") == "failed"]
+    failed += [{"what": row["what"], "why": row["detail"], "fix": "Retry it in Needs you or on Queue"} for row in lane_rows(lanes)]
+    return {"merged": [{"repo": name, "n": len(found), "titles": [row.get("title") or "" for row in found[:3]]}
+                       for name, found in ranked[:DIGEST_LINES]],
+            "more": max(0, len(ranked) - DIGEST_LINES),
+            "prs": [{"item": row["id"], "title": row.get("title") or "", "repo": repo(row), "pr": row.get("pr")}
+                    for row in landed],
+            "failed": failed, "questions": questions, "error": ""}
+
+
+#: Each build step as the stage Today names (sd:6003): the builder works, the review reads, the lane holds the branch.
+STAGE = {"claimed": "building", "worktree": "building", "building": "building", "fixing": "building",
+         "reviewing": "review", "enqueuing": "lane", "enqueued": "lane", "checking": "lane", "cleaning": "lane"}
+#: Past runs a builder's ETA needs before Today names one.
+ETA_RUNS = 3
+
+
+def builders(connection: sqlite3.Connection, now: str) -> dict:
+    """In motion's builder runs (sd:6003): each open headless build run (`sd_db.build`), oldest first, with its items,
+    its stage, when it started, its ETA from past runs and what it spent so far.
+
+    The ETA is the start plus the median claim-to-release time of the last `done` runs, once there are `ETA_RUNS`;
+    before that `eta` is None and `eta_why` says so. `state` comes from the run row, never from a quiet stream: an
+    outcome the run ended with and still holds (`blocked`, `abandoned`), else `stalled` when its supervisor's beat is
+    past `build.STALE_SECONDS` (the reap's own test; `enqueued` has no supervisor), else `running`. A read that failed
+    is `error`, so the page says builders were not read, never that none run.
+    """
+    from statistics import median
+
+    from sd_db import build
+
+    clock = _at(now)
+    try:
+        runs = build.open_runs(connection)
+        past = build.finished_seconds(connection) if runs else []
+        usual = median(past) if len(past) >= ETA_RUNS else None
+        rows = []
+        for run in runs:
+            started = _at(run["created_at"])
+            if started is None:
+                raise ValueError(f"build run {run['id']} has no start time")
+            items = []
+            for member in build.run(connection, run["id"])["members"]:
+                item = reads.item_by_id(connection, member["item"])
+                items.append({"item": member["item"], "title": item["title"] if item else ""})
+            beat = _at(run["heartbeat_at"] or run["created_at"])
+            quiet = (clock - beat).total_seconds() if beat else None
+            stalled = run["step"] != "enqueued" and (quiet is None or quiet >= build.STALE_SECONDS)
+            rows.append({"run": run["id"], "repo": Path(run["repo"]).name, "items": items, "step": run["step"] or "claimed",
+                         "stage": STAGE.get(run["step"] or "claimed", run["step"]), "model": run["model"] or "",
+                         "started": _utc(started.timestamp()), "elapsed": active_sessions.elapsed(int((clock - started).total_seconds())),
+                         "eta": _utc((started + timedelta(seconds=usual)).timestamp()) if usual is not None else None,
+                         "eta_why": f"median of the last {len(past)} done runs" if usual is not None
+                         else f"{len(past)} done {plural(len(past), 'run', 'runs')} so far; an ETA needs {ETA_RUNS}",
+                         "state": run["outcome"] or ("stalled" if stalled else "running"),
+                         "quiet": int(quiet) if quiet is not None else None, "usd": round(build.run_spent(connection, run["id"]), 2)})
+    except (SdDbError, sqlite3.Error, ValueError, TypeError, KeyError) as failure:
+        return {"rows": [], "error": str(failure) or "the build runs could not be read"}
+    return {"rows": rows, "error": ""}
+
+
 def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None, jev=None, herdr=None,
              lanes=None) -> dict:
     """The merged, ranked, banded rows, and what each source said if it said nothing.
@@ -727,6 +844,9 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
     work and briefs as group rows, ranked in one list; the badge counts its rows and nothing else. `lane` is what the
     Lane and Gate lamps read (`lane_summary`); `lanes` is the seam for Queue's document, `queue_screen.document` by
     default, and a lane read that failed is a dark `lane` row, as a dark collector is.
+    `spend` is the spend line (sd:6031, `spend`): the last 24 hours and the 7-day trend from the cost table.
+    `builders` is In motion's builder runs (sd:6003, `builders`): each open build run's items, stage, start and ETA.
+    `digest` is Since yesterday (sd:6002, `digest`): merged per repo, failed with why and fix, questions waiting.
     """
     collect_area, kept = fleet or fleet_module.collect, {}
 
@@ -787,7 +907,8 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
             "snoozed": held, "snooze_error": snooze_error,
             "work": work, "work_error": work_error, "needs": listed, "lane": summary,
             "track": track(connection, now, rows=rows, briefs=reported["briefs"], active=active, lane=summary),
-            "attention": _attention(listed), **mail, **reported}
+            "digest": digest(connection, now, rows=rows, lanes=queue.get("lanes") or []),
+            "spend": spend(connection, now), "builders": builders(connection, now), "attention": _attention(listed), **mail, **reported}
 
 
 def _attention(rows: list[dict]) -> dict:

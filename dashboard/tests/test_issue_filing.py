@@ -20,7 +20,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sd_db import repos, workflow, writes
-from sd_db.testing import FixtureRemote, GitHubDouble, gh_environment, install_gh
+from sd_db.testing import FixtureRemote, GitHubDouble, gh_environment, install_gh, patience
 from sd_dashboard import issue_filing, management_screen, tasks_screen
 from sd_dashboard.issue_filing import REMOVED, findings, sanitize, scan
 
@@ -100,14 +100,15 @@ class FilingCase(BrowserSession):
         return status, json.loads(body)
 
     def settled(self, run_id):
-        deadline = time.monotonic() + SETTLE
+        budget = patience(SETTLE)
+        deadline = time.monotonic() + budget
         while time.monotonic() < deadline:
             status, document = self.read(run_id)
             self.assertEqual(status, 200, document)
             if document["state"] not in ("queued", "drafting"):
                 return document
             time.sleep(0.05)
-        self.fail(f"run {run_id} did not settle in {SETTLE} s: {document}")
+        self.fail(f"run {run_id} did not settle in {budget:.0f} s: {document}")
 
     def drafted(self, item, target="github"):
         status, _, run = self.start(item, target)
@@ -325,6 +326,25 @@ class TheDraft(FilingCase):
         self.assertEqual(run["state"], "failed")
         self.assertIn("claude -p exited 3", run["reason"])
         self.assertEqual(self.asked("POST"), 0)
+
+    def test_a_runner_that_ends_between_the_read_and_the_probe_reads_as_its_outcome(self):
+        """sd:6158: the runner writes its outcome, then exits. Under gate load a read before that write and a probe after
+        the exit saw a drafting run with no runner, and a model failure read "stopped without a draft"."""
+        self.enable()
+        (self.double / "exit").write_text("3")
+        run = self.drafted(self.task())
+        record = self.runs / f"{run['id']}.json"
+        outcome = record.read_text(encoding="utf-8")
+        record.write_text(json.dumps({**json.loads(outcome), "state": "drafting"}), encoding="utf-8")
+
+        def ends(pid):
+            record.write_text(outcome, encoding="utf-8")
+            return False
+
+        with patch.object(issue_filing, "_alive", ends):
+            status, document = issue_filing.status(run["id"])
+        self.assertEqual((status, document["state"]), (200, "failed"))
+        self.assertIn("claude -p exited 3", document["reason"])
 
     def test_a_second_start_while_one_drafts_is_refused(self):
         self.enable()
