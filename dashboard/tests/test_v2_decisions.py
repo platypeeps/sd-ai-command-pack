@@ -112,6 +112,17 @@ class TheDocument(ScreenCase):
         self.assertEqual(row["revision"], workflow.item_state(self.connection, ids["item"])["revision"])
         self.assertTrue(row["asked"])
 
+    def test_a_done_items_question_lists_past_the_open_cap(self):
+        """Pack sd:6338: `open_notes` caps at 200 oldest first; older open-item questions hid a done item's."""
+        item = self.item("Asks a lot")
+        for number in range(201):
+            self.note(item, f"Question {number}?\nOption: Yes\nOption: No", kind="question")
+        closed = self.item("Closed work", status="done")
+        late = self.note(closed, "Ship it?\nOption: Yes\nOption: No", kind="question")
+        listed = [row["note"] for row in decisions.document(self.connection)["decisions"]]
+        self.assertEqual(len(listed), 202)
+        self.assertIn(late, listed)
+
     def test_a_scheduled_occurrence_asks_nothing_until_it_opens(self):
         """sd:5670: Decisions lists questions on the items Tasks lists, so a scheduled occurrence (pack sd:5648) waits
         until it opens. A pack before sd:5648 lists its questions as before."""

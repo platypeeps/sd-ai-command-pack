@@ -25,6 +25,7 @@ from tests.test_sd_review import FakeRunner, ReviewFixture, namespace, sd_review
 sd_jev = sd_review.sd_jev
 #: Importable once `tests.test_sd_review` has put `bin/` on `sys.path`.
 import sd_jev_shadow  # noqa: E402
+import sd_review_slots  # noqa: E402
 import sd_work  # noqa: E402
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -110,6 +111,8 @@ class TriageTests(ReviewFixture):
         with contextlib.redirect_stderr(noise):
             result = sd_review.review(root, namespace(), runner, self.environment(JEV_SD_REVIEW="0"),
                                       self.codex_home)
+        # A slot wait is load, not Jev: it differs between two runs on a busy machine (sd:6344).
+        result["review_slot"].pop("waited_seconds", None)
         return json.dumps(result, sort_keys=True), noise.getvalue()
 
     def test_a_review_with_findings_records_a_triage_and_changes_nothing(self):
@@ -131,6 +134,16 @@ class TriageTests(ReviewFixture):
         self.assertEqual(stubs.gh(), [])
         # No opt-in: the local Kev only, for the probe and the question alike.
         self.assertTrue(all(call["argv"][-1] == "--local-only" for call in stubs.jev()), stubs.jev())
+
+    def test_a_slow_slot_wait_is_not_a_difference_jev_made(self):
+        """sd:6344. Two reviews that waited for a review slot unequally compare equal."""
+        root = self.repo()
+        ticks = iter(range(0, 1000, 2))
+        with unittest.mock.patch.object(sd_review_slots, "clock", lambda: next(ticks)):
+            slow, _ = self.review(root, [FINDING])
+        with unittest.mock.patch.object(sd_review_slots, "clock", lambda: 0):
+            quick, _ = self.review(root, [FINDING])
+        self.assertEqual(slow, quick)
 
     def test_a_triage_run_is_one_jev_run(self):
         """sd:2954. The probe and every question of one review share one `JEV_RUN`."""
