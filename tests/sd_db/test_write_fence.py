@@ -393,6 +393,45 @@ class TheCommitBoundaries(FenceCase):
         self.addCleanup(reader.close)
         self.assertEqual(reader.execute("SELECT body FROM state WHERE id = ?", (row,)).fetchone()[0], "abcd")
 
+    def test_a_failed_nested_begin_keeps_the_commit_asking(self):
+        """Lead review of f716079a9: a BEGIN that SQLite refuses inside a transaction ends nothing."""
+        endings = {
+            "COMMIT": ("BEGIN IMMEDIATE", "COMMIT"),
+            "outer RELEASE": ("SAVEPOINT outer", "RELEASE outer"),
+        }
+        for name, (opening, end) in endings.items():
+            with self.subTest(end=name):
+                hub._answers.clear()
+                connection = self.begun(opening)
+                with self.assertRaises(sqlite3.OperationalError):
+                    connection.execute("BEGIN")
+                self.assertTrue(connection.in_transaction)
+                with self.assertRaises(hub.Fenced):
+                    connection.execute(end)
+                self.assertFalse(connection.in_transaction)
+                self.assertEqual(self.rows(), 0)
+
+    def test_a_read_only_transaction_on_a_fenced_node_commits_with_no_probe(self):
+        """Lead ruling on f716079a9: reads on an old hub keep working, and cost no probe."""
+        self.node()
+        self.name_hub(HUB_NAME)
+        self.node(OLD_HUB)
+        connection = self.open()
+        before = len(self.asked())
+        reads = {
+            "COMMIT": ("BEGIN", "COMMIT"),
+            "outer RELEASE": ("SAVEPOINT outer", "RELEASE outer"),
+        }
+        for name, (opening, end) in reads.items():
+            with self.subTest(end=name):
+                connection.execute(opening)
+                self.assertEqual(connection.execute("SELECT count(*) FROM item").fetchone()[0], 0)
+                connection.execute(end)
+                self.assertFalse(connection.in_transaction)
+        with database.transaction(connection):
+            connection.execute("SELECT count(*) FROM state").fetchone()
+        self.assertEqual(len(self.asked()), before)
+
     def test_an_inner_release_does_not_probe(self):
         """A nested savepoint's RELEASE commits nothing, so it costs no probe."""
         self.name_hub(HUB_NAME)

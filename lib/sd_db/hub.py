@@ -401,7 +401,11 @@ class _WriteFence:
     and `unknown` write, so a Tailscale outage does not stop a healthy hub.
     Each boundary that makes a write persist asks afresh: COMMIT, the RELEASE
     of a savepoint opened outside a transaction, and a write outside one,
-    which commits when it ends (`executescript` runs each statement so).
+    which commits when it ends (`executescript` runs each statement so). A
+    transaction that wrote nothing commits without asking, so reads keep working.
+    Only SQLite's own state ends a transaction here: the write flag and the
+    outer savepoint clear when a statement is prepared outside one, never on
+    a BEGIN, ROLLBACK or RELEASE that may yet fail (review of f716079a9).
     A write inside a transaction asks the held answer, to stop early; its
     commit decides. So a transaction open across the console rename rolls back.
     The connection caches no statement: Python does not authorize a cached one again.
@@ -411,9 +415,9 @@ class _WriteFence:
     def __init__(self, path: Path, connection: sqlite3.Connection) -> None:
         self.path = path
         self.connection = weakref.ref(connection)
-        #: This transaction, or an autocommit write since the last BEGIN, prepared a write.
+        #: The open transaction, or this autocommit statement, prepared a write.
         self.wrote = False
-        #: The savepoint opened outside a transaction: its RELEASE commits.
+        #: The savepoint that opened the current transaction: its RELEASE commits.
         self.outer: str | None = None
         #: Why the last statement was denied, for the `Fenced` the connection raises.
         self.refusal: str | None = None
@@ -424,21 +428,22 @@ class _WriteFence:
         return connection is not None and connection.in_transaction
 
     def __call__(self, action: int, arg1, arg2, database, trigger) -> int:
-        if action == sqlite3.SQLITE_TRANSACTION:
-            if arg1 == "COMMIT":
-                return self._ask(fresh=True) if self.wrote else sqlite3.SQLITE_OK
+        opened = self._open()
+        if not opened:
             self.wrote, self.outer = False, None
-            return sqlite3.SQLITE_OK
+        if action == sqlite3.SQLITE_TRANSACTION:
+            ends = arg1 == "COMMIT" and opened and self.wrote
+            return self._ask(fresh=True) if ends else sqlite3.SQLITE_OK
         if action == sqlite3.SQLITE_SAVEPOINT:
             name = (arg2 or "").lower()
-            if arg1 == "BEGIN" and not self._open():
-                self.wrote, self.outer = False, name
-            if arg1 == "RELEASE" and name == self.outer and self.wrote:
+            if arg1 == "BEGIN" and not opened:
+                self.outer = name
+            if arg1 == "RELEASE" and opened and name == self.outer and self.wrote:
                 return self._ask(fresh=True)
             return sqlite3.SQLITE_OK
         if action in _WRITES and database != "temp":
             self.wrote = True
-            return self._ask(fresh=not self._open())
+            return self._ask(fresh=not opened)
         return sqlite3.SQLITE_OK
 
     def _ask(self, *, fresh: bool) -> int:
