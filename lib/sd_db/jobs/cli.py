@@ -303,7 +303,7 @@ def command_documents(argv: list[str]) -> int:
         if undo:
             connection = _open_for_write()
             try:
-                returned = records.return_documents(connection, undo)
+                returned = records.return_documents(connection, undo, who=getpass.getuser())
             finally:
                 connection.close()
             print(f"sd-db: records documents: moved {len(returned)} row(s) back to Tasks: "
@@ -312,7 +312,7 @@ def command_documents(argv: list[str]) -> int:
         connection = _open_for_read() if plan is None else _open_for_write()
         try:
             found = (records.plan_documents(connection, books=books) if plan is None
-                     else records.move_documents(connection, books=books, plan=plan))
+                     else records.move_documents(connection, books=books, plan=plan, who=getpass.getuser()))
         finally:
             connection.close()
     except records.RecordRefused as error:

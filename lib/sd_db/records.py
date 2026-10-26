@@ -425,8 +425,6 @@ def _refuse_duplicate(connection: sqlite3.Connection, rules: Rules, values: dict
 DOCUMENT_VIEWS = {"books": "Books", "videos": "Videos"}
 #: A video note's title: its date, YouTube, the channel and the video's own title. The Videos view reads it too.
 VIDEO_TITLE = re.compile(r"^(\d{4}-\d{2}-\d{2}) - YouTube - (.+?) - (.+)$")
-#: Who a move or an undo names when no person does.
-DOCUMENTS_WHO = "sd-db records documents"
 
 
 @dataclass(frozen=True)
@@ -488,7 +486,7 @@ def plan_documents(connection: sqlite3.Connection, *, books: Iterable[int]) -> D
 
 
 def move_documents(connection: sqlite3.Connection, *, books: Iterable[int], plan: str,
-                   who: str = DOCUMENTS_WHO) -> DocumentPlan:
+                   who: str) -> DocumentPlan:
     """Move the rows `plan_documents` lists to their views, when its digest is still `plan`.
 
     One transaction: the plan is read again inside it, so a row filed or a list changed since the dry run refuses
@@ -509,7 +507,7 @@ def move_documents(connection: sqlite3.Connection, *, books: Iterable[int], plan
     return found
 
 
-def return_documents(connection: sqlite3.Connection, items: Iterable[int], *, who: str = DOCUMENTS_WHO) -> list[int]:
+def return_documents(connection: sqlite3.Connection, items: Iterable[int], *, who: str) -> list[int]:
     """Take `items` out of their Documents views, back to Tasks; refuse them all if one is in no view."""
     wanted = list(dict.fromkeys(int(item) for item in items))
     with transaction(connection):
