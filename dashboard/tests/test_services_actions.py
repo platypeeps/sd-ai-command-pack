@@ -1,18 +1,26 @@
 """Real HTTP service controls with disposable plists and a fake launchctl."""
 
+import json
 import os
 import plistlib
 import subprocess
 from pathlib import Path
-
-import json
 from unittest.mock import patch
 
-from sd_db import services
 from sd_dashboard import health_collectors, health_screen, runtime
 from sd_dashboard.runtime import LABEL as DASHBOARD_LABEL
+from sd_db import services
 
-from .test_v2_health import BRANCHES, CHECKOUT, CLEAN_DOCTOR, DISK, TREES, fleet_of, ports_snapshot, scan_of
+from .test_v2_health import (
+    BRANCHES,
+    CHECKOUT,
+    CLEAN_DOCTOR,
+    DISK,
+    TREES,
+    fleet_of,
+    ports_snapshot,
+    scan_of,
+)
 from .test_workflow_actions import BrowserSession
 
 

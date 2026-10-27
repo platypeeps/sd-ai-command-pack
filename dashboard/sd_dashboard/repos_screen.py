@@ -7,7 +7,6 @@ classic Operations > Repos area that rendered them was retired in sd:3402 (sd:71
 import shlex
 from datetime import datetime, timedelta, timezone
 
-
 #: A fetch older than this cannot vouch for "not behind" (sd:1676). The fleet
 #: never fetches, so a count of zero is only as good as the last fetch.
 STALE_FETCH = timedelta(hours=24)

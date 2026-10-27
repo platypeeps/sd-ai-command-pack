@@ -207,6 +207,16 @@ class LineLengthTests(unittest.TestCase):
                       "(limit 72); commit 111111111111 line 4 is 90 characters (limit 72)", message)
         self.assertNotIn("222222222222", message)
 
+    def test_a_long_default_merge_subject_is_told_the_short_form(self) -> None:
+        """sd:6342: git's own merge subject runs past 72 on a long branch name."""
+        subject = "Merge remote-tracking branch 'origin/main' into " + "b" * 30
+        for commits, named in (([("1" * 40, subject + "\n")], True), ([("1" * 40, "s" * 80 + "\n")], False)):
+            with self.subTest(named=named):
+                with self.assertRaises(ship.Refusal) as caught:
+                    sd_ship_body.refuse_long_lines("t", "", commits)
+                action = caught.exception.workflow["next_action"]
+                self.assertEqual('git merge --no-ff -m "chore: merge origin/main"' in action, named)
+
     def test_only_a_fenced_line_or_one_bare_url_is_exempt(self) -> None:
         url = "https://example.test/" + "p" * 80
         long = "x" * 73

@@ -4,18 +4,17 @@ Identity headers and Serve observations are synthetic. These tests establish
 the server's policy, not physical iPad access or actual Tailscale forwarding.
 """
 
-from copy import deepcopy
-from dataclasses import replace
 import http.client
 import json
-from pathlib import Path
 import re
 import threading
+from copy import deepcopy
+from dataclasses import replace
+from pathlib import Path
 from unittest.mock import Mock, patch
 
-from sd_db import workflow
 from sd_dashboard import auth, runtime, server
-
+from sd_db import workflow
 from support import ScreenCase
 
 

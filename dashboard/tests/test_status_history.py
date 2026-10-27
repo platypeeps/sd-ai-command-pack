@@ -19,7 +19,6 @@ import unittest
 from pathlib import Path
 
 from sd_db import reads, transition
-
 from support import ScreenCase
 
 #: The repository root, the command pack: this file is `<root>/dashboard/tests/` (sd:5987).

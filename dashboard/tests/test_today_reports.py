@@ -10,10 +10,8 @@ import sqlite3
 from pathlib import Path
 from unittest import mock
 
-from sd_db import reporting, routine_briefs, writes
-
 from sd_dashboard import now_screen, server, today_reports, v2
-
+from sd_db import reporting, routine_briefs, writes
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document
 

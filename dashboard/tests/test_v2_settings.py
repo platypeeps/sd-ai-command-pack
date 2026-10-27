@@ -21,11 +21,19 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from sd_dashboard import (
+    adversarial,
+    health_collectors,
+    hoa_screen,
+    pack_library,
+    places,
+    realm_sweep,
+    reports_screen,
+    setting_rows,
+    settings_screen,
+    v2,
+)
 from sd_db import writes
-
-from sd_dashboard import (adversarial, health_collectors, hoa_screen, pack_library, places, realm_sweep, reports_screen,
-                          setting_rows, settings_screen, v2)
-
 from test_v2_registry import GROUPS, Registers
 from test_v2_tasks import FETCH_JS, STAND_IN
 from test_v2_today import OSASCRIPT

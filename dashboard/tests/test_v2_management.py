@@ -26,17 +26,16 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_dashboard import management_screen, server, upload_link, v2
 from sd_db import repos, upsert_repo, upsert_shadow, workflow, writes
 from sd_db.errors import SdDbError
-from sd_dashboard import management_screen, server, upload_link, v2
-
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document, tree
+from test_v2_read import READ_SHELL
+from test_v2_registry import Registers
 from test_v2_tasks import SHELL, STAND_IN
 from test_v2_today import OSASCRIPT, Refused
 from test_workflow_actions import BrowserSession
-from test_v2_registry import Registers
-from test_v2_read import READ_SHELL
 
 V2 = Path(v2.__file__).resolve().parent
 PAGE_JS = (V2 / "static" / "management.js").read_text(encoding="utf-8")
@@ -1214,7 +1213,8 @@ R.got = await cmd('repo.standard').run(C.get('repo:{path}'));""", doc=doc, searc
         out = self.run_page("R.a = ELS['view-repos'].html;" + click % ("'[data-f=\"q\"]'", "{ f: 'q', v: '' }")
                             + " R.b = ELS['view-repos'].html;" + click % ("'[data-fclear]'", "{}")
                             + " R.c = ELS['view-repos'].html; R.box = (OUT.shift ?? null);", search="?view=repos&managed=yes&q=busy")
-        bar = lambda key: re.search(r'<div class="fbar".*?<div class="fsum">.*?</div></div>', out["R"][key], re.S).group(0)
+        def bar(key):
+            return re.search(r'<div class="fbar".*?<div class="fsum">.*?</div></div>', out["R"][key], re.S).group(0)
         self.assertIn('data-f="managed" data-v="yes" aria-pressed="true"', bar("a"))
         self.assertEqual(re.findall(r'class="tok" data-f="(\w+)"', bar("a")), ["q"])
         self.assertTrue(bar("a").endswith('<div class="fsum"><button class="linkbtn" type="button" data-fclear>Clear all</button></div></div>'))

@@ -60,7 +60,7 @@ def state_dir() -> Path:
 def parse(text: str) -> tuple[list[dict], list[str]]:
     """The tiles a text names, each with its actions, and the lines it could not read, each with its number."""
     tiles, problems = {}, []
-    for number, line, fields in pipe_lines(text):
+    for number, _line, fields in pipe_lines(text):
         kind = fields[0]
         if kind == "tile" and len(fields) == 6 and ID.fullmatch(fields[1]) and ID.fullmatch(fields[2]) and fields[3] and fields[4]:
             _, realm, tile, label, folder, url = fields
@@ -160,7 +160,7 @@ def document(realm: str, *, now: str, config: Path | None = None) -> dict:
     with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
         probes = list(pool.map(lambda t: _probe(t["url"]) if t["url"] else None, tiles))
     rows = []
-    for tile, probe in zip(tiles, probes):
+    for tile, probe in zip(tiles, probes, strict=True):
         here = Path(tile["folder"]).is_dir()
         rows.append({"id": tile["id"], "label": tile["label"], "url": tile["url"], "probe": probe, "here": here,
                      "why": "" if here else f"{tile['folder']} is not on this machine, so its actions run elsewhere",

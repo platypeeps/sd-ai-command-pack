@@ -40,9 +40,7 @@ from __future__ import annotations
 import datetime
 import importlib
 import re
-import sys
 import urllib.parse
-from pathlib import Path
 
 from . import publishing
 

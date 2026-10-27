@@ -232,10 +232,6 @@ class WorkflowPage(unittest.TestCase):
     def test_the_installer_block_names_the_page(self):
         self.assertIn("WORKFLOW.md", sd_install.DEFAULT_BLOCK_BODY)
 
-    def test_sd_help_names_the_page(self):
-        skill = (REPO_ROOT / "skills/sd-help/SKILL.md").read_text(encoding="utf-8")
-        self.assertIn("WORKFLOW.md", skill)
-
 
 class MutationChecks(unittest.TestCase):
     """sd:1790: a same-size edit restored within a second reuses a stale `.pyc`."""

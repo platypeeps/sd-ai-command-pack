@@ -21,9 +21,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import create_item
-
 from sd_dashboard import fix_session, run_actions, v2, watches_screen
+from sd_db import create_item
 from support import NOW, ScreenCase
 from test_run_actions import Run
 from test_v2_hoa import HoaJobs

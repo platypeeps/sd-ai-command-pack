@@ -7,8 +7,8 @@ disable-model-invocation: true
 # sd-plan
 
 `sd-plan <slug>` turns an intention into one tracked work item: an sd row,
-plus `docs/work/<YYYY-MM-DD>-<slug>/design.md` **only when the shape needs
-agreement** (sd:3000). New items get no `prd.md` or `implement.md`. Invocation is explicit approval to write
+plus `docs/work/<YYYY-MM-DD>-<slug>/design.md` **only for a change that
+moves state in steps** (sd:3000, sd:6358). New items get no `prd.md` or `implement.md`. Invocation is explicit approval to write
 inside the selected work root, create the item's branch, and record that
 item's progress and decisions through `sd_db`. The work root defaults to
 `docs/work`; `--work-dir` selects another root within this repository. This
@@ -41,8 +41,8 @@ write a design just to record routine progress or work already merged.
    item and continue under `WORKFLOW.md`'s stop conditions.
 2. **Track the item as a row.** Use the row the work already has, or
    `sd task add`. Status, progress and decisions live on the row.
-3. **Write `design.md` from the template**, only when the shape needs
-   agreement. The templates are in `skills/sd-plan/templates/` (`design.md`,
+3. **Write `design.md` from the template**, only for a change that
+   moves state in steps. The templates are in `skills/sd-plan/templates/` (`design.md`,
    `decision.md`, `work-README.md`). Name the row in its frontmatter as
    `item: sd:<id>`, and add no `status:` field. Before writing it, run
    `sd-rules --for <work>/<item>/design.md` (or `--for docs/decisions/<record>.md`
@@ -179,6 +179,21 @@ work item outlives the session that invented it.
 The issue's own text stays in the issue. Cite the link, read the issue for the
 interview, and leave its prose where it will still be current next month.
 
+## The store and plugin contract
+
+`sd plugin add` and `sd store` are the two verbs a plugin author meets, and
+the registry holds one rule about what they accept.
+Write a kind with keys only from `KIND_KEYS` in `bin/sd` (eight), with
+`fields` and `initial-status` required and the other six optional; a ninth key
+is a decision record before it is a commit, and `validate_kind` turns a
+manifest carrying one away by name (R11-D14).
+A store block names `"driver": "db"`: the rows are the source, `sd store`
+reads and changes them. Each base also has one HTML page in the vault. The `vault`
+driver is gone, and a manifest that names it is refused with the fix.
+The rows in `bin/sd_rules.py` state each rule; none is restated here.
+`sd-rules --for <path>` prints the rows in scope for the file being
+written.
+
 ## Never
 
 - **Never accept a repo path.** The repository is the one enclosing cwd
@@ -200,7 +215,7 @@ interview, and leave its prose where it will still be current next month.
   upstream tree. The refusal fires after the files are written, not before —
   move them to the fork's integration branch and re-run.
 - **Never write a design to look thorough.** One page at most, and none
-  when the shape needs no agreement.
+  when no state moves in steps.
 
 ## Reattaching
 

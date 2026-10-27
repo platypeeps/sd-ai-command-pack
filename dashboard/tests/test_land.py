@@ -19,10 +19,8 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import workflow
-
 from sd_dashboard import land
-
+from sd_db import workflow
 from support import ScreenCase
 from test_health_cleanup import FIXTURE_GIT, Isolated, git
 from test_workflow_actions import BrowserSession

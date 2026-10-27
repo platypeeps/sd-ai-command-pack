@@ -14,7 +14,8 @@ class PaletteActions(BrowserSession):
     def setUp(self):
         super().setUp()
         root = Path(self.tmp.name).resolve()
-        self.checkout = root / "checkout"; self.checkout.mkdir()
+        self.checkout = root / "checkout"
+        self.checkout.mkdir()
         upsert_repo(self.connection, str(self.checkout), remote="https://example.invalid/repo.git")
         self.identity = self.item("Command fixture", kind="task", repo=str(self.checkout), branch="task/fixture", status="ready")
         program = root / "fixture-command"
@@ -24,7 +25,8 @@ class PaletteActions(BrowserSession):
         self.file.write_text("version: 1\ncommands:\n  inspect: " + json.dumps({"argv": [str(program)], "screens": ["item"], "mutates": False, "scope": "worktree"}) + "\n")
         original = runner_exec.catalog
         replacement = patch.object(runner_exec, "catalog", side_effect=lambda **options: original(**{**options, "path": options.get("path") or self.file}))
-        replacement.start(); self.addCleanup(replacement.stop)
+        replacement.start()
+        self.addCleanup(replacement.stop)
 
     def payload(self):
         return {"item": self.identity, "command": "inspect", "values": {}, "screen": "item",
@@ -62,10 +64,12 @@ class PaletteActions(BrowserSession):
         self.assertNotIn("<script>fixture output</script>", self.get("/api/activity")[2])
 
     def test_catalog_and_history_are_read_only_and_stale_revision_refuses(self):
-        payload = self.payload(); before = self.snapshot()
+        payload = self.payload()
+        before = self.snapshot()
         with patch("subprocess.Popen", side_effect=AssertionError("read started a process")):
             status, _, body = self.get(f"/api/palette?screen=item&item={self.identity}")
-            self.assertEqual(status, 200); self.assertEqual(json.loads(body)["entries"][0]["name"], "inspect")
+            self.assertEqual(status, 200)
+            self.assertEqual(json.loads(body)["entries"][0]["name"], "inspect")
         # Activity, which holds the history now (sd:3402), reads launchd's jobs, so it is read outside the patch.
         self.assertEqual(self.get("/api/activity")[0], 200)
         self.assertEqual(before, self.snapshot())
@@ -79,7 +83,8 @@ class PaletteActions(BrowserSession):
         result = self.post("/api/palette/prepare", self.payload())[2]
         note = result["execution"]["note"]
         status, _, result = self.post(f"/api/palette/{note}/reconcile", {})
-        self.assertEqual(status, 200); self.assertEqual(result["exit_code"], 125)
+        self.assertEqual(status, 200)
+        self.assertEqual(result["exit_code"], 125)
         self.assertEqual(self.post(f"/api/palette/{note}/execute", {})[0], 400)
 
     def test_item_notes_show_command_outcome_without_raw_descriptor(self):

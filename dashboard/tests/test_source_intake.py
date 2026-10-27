@@ -20,9 +20,8 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import workflow, writes
 from sd_dashboard import research_screen
-
+from sd_db import workflow, writes
 from test_workflow_actions import BrowserSession
 
 LEDGER = """# Source Registry
@@ -142,7 +141,7 @@ class SourceIntake(BrowserSession):
         day = self.day(answer)
         self.assertIn(f"| U | [The Spec - v2](https://example.test/spec) | — | added {day}, not yet read |", lines)
         # The row is the table's: after its last row, before the next section.
-        self.assertEqual(lines.index("## Corrections on record") - 2, lines.index(next(l for l in lines if "The Spec" in l)))
+        self.assertEqual(lines.index("## Corrections on record") - 2, lines.index(next(line for line in lines if "The Spec" in line)))
         self.assertTrue(work.is_relative_to(self.home / "worktrees"), work)
         self.assertEqual(git(work, "branch", "--show-current"), answer["branch"])
         self.assertEqual(git(work, "rev-parse", "HEAD^"), self.before[0])

@@ -6,11 +6,10 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import build, ship, upsert_repo
-from sd_db.writes import now as clock
-from sd_db.workflow import item_state
 from sd_dashboard import builds
-
+from sd_db import build, ship, upsert_repo
+from sd_db.workflow import item_state
+from sd_db.writes import now as clock
 from support import NOW
 from test_workflow_actions import BrowserSession
 

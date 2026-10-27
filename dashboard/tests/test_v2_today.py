@@ -23,10 +23,9 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from sd_dashboard import now_screen, server, v2
-
 from test_now_screen import JobsBackend, fleet_document, repo
-from test_workflow_actions import BrowserSession
 from test_v2_registry import Registers
+from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent
 TODAY_JS = (V2 / "static" / "today.js").read_text(encoding="utf-8")
@@ -191,7 +190,7 @@ class TheAssets(BrowserSession):
         rules = [(sel.strip(), body) for sel, body in re.findall(r"([^{}]+)\{([^{}]*)\}", re.sub(r"/\*.*?\*/", "", css, flags=re.S))]
         svg_rules = [(sel, body) for sel, body in rules if ".daytrack" in sel and re.search(r"\bsvg\b", sel)]
         self.assertTrue(svg_rules, "the chart svg has no sizing rule")
-        for sel, body in svg_rules:
+        for sel, _body in svg_rules:
             self.assertIn(".track-plot", sel, f"{sel} also matches svg.i in the track table")
         self.assertTrue(any("width: 100%" in body for _, body in svg_rules), "the chart no longer fills its plot")
         self.assertIn('class="track-plot"', (V2 / "today.html").read_text(encoding="utf-8"))

@@ -10,10 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_dashboard import operations_screen
 from sd_db import connect, provider_controls, reads, usage
 from sd_db.migrate import initialise
-from sd_dashboard import operations_screen
-
 from support import NOW, ScreenCase, record_cost
 from test_workflow_actions import BrowserSession
 
