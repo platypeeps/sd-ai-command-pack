@@ -256,5 +256,71 @@ class Criterion7(unittest.TestCase):
         self.cancelled_row_frees_the_item(cancel)
 
 
+class DraftGuard(unittest.TestCase):
+    """Mark ready on a drafted item (pack sd:6361): 7.19 holds while the draft runs, and an open draft question refuses.
+
+    The design's failure table names these, system
+    `docs/work/2026-10-25-lead-drafts-specs/design.md`; ruling #31097: a
+    ready item is always buildable, so `change_status` names each open
+    question a draft run asked. Questions from other sources keep the old rule.
+    """
+
+    def setUp(self):
+        from sd_db import draft
+        self.draft = draft
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "sd.db"
+        initialise(self.path)
+        self.db = connect(self.path)
+        self.addCleanup(self.db.close)
+        upsert_repo(self.db, "/repos/system", remote="git@example.invalid:system.git", managed=1)
+        self.item = create_item(self.db, kind="task", title="Captured", repo="/repos/system", status="planning")
+        self.assignment = draft.queue_if_eligible(self.db, self.item, who="dashboard")
+        assert self.assignment is not None
+
+    def run_draft(self, *questions):
+        room = {"machine": 1, "used": {}, "held": [], "why": ""}
+        run = self.draft.claim(self.db, owner="fixture", available=room)
+        self.assertTrue(self.draft.write(self.db, run["id"], "Problem: x", list(questions)))
+        return [note for note in item_state(self.db, self.item)["notes"] if note["kind"] == "question"]
+
+    def test_mark_ready_refuses_during_a_draft(self):
+        """Failure table, Mark ready: queued, then running, the draft's assignment refuses the move."""
+        with self.assertRaisesRegex(TransitionRefused, f"cancel queued assignment {self.assignment} first"):
+            change_status(self.db, self.item, "ready", who="dashboard")
+        self.draft.claim(self.db, owner="fixture", available={"machine": 1, "used": {}, "held": [], "why": ""})
+        with self.assertRaisesRegex(TransitionRefused, rf"running assignment {self.assignment}; its draft is running"):
+            change_status(self.db, self.item, "ready", who="dashboard")
+        self.assertEqual(self.db.execute("SELECT status FROM item WHERE id = ?", (self.item,)).fetchone()[0], "planning")
+
+    def test_mark_ready_names_open_draft_questions(self):
+        """Failure table, Mark ready: each open draft question is named, and nothing moves."""
+        asked = self.run_draft("Which store?\nOption: Rows (Recommended)\nOption: Files",
+                               "Who taps?\nOption: Operator\nOption: Lead")
+        with self.assertRaises(TransitionRefused) as caught:
+            change_status(self.db, self.item, "ready", who="dashboard")
+        self.assertIn("2 open draft questions", str(caught.exception))
+        for note, first in zip(asked, ("Which store?", "Who taps?"), strict=True):
+            self.assertIn(f"#{note['id']}: {first}", str(caught.exception))
+        self.assertEqual(self.db.execute("SELECT status FROM item WHERE id = ?", (self.item,)).fetchone()[0], "planning")
+
+    def test_mark_ready_after_the_last_answer(self):
+        """Failure table, Mark ready: an answer resolves its question; after the last, the move lands."""
+        from sd_db import workflow
+
+        asked = self.run_draft("Which store?\nOption: Rows\nOption: Files", "Who taps?\nOption: Operator\nOption: Lead")
+        workflow.add_item_note(self.db, self.item, kind="question", who="operator", body="An operator's own question")
+        for note in asked:
+            with self.assertRaises(TransitionRefused):
+                change_status(self.db, self.item, "ready", who="dashboard")
+            workflow.add_item_note(self.db, self.item, kind="decision", who="operator",
+                                   body=f"Ruling on note #{note['id']}: Rows")
+            workflow.resolve_item_note(self.db, note["id"], who="operator")
+        moved = change_status(self.db, self.item, "ready", who="dashboard")
+        self.assertEqual(moved["item"]["status"], "ready", "a question from another source keeps the old rule")
+        self.assertIn("planning -> ready by dashboard", [note["body"] for note in status_changes(self.db, self.item)][-1])
+
+
 if __name__ == "__main__":  # pragma: no cover
     unittest.main()

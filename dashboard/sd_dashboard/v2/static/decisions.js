@@ -7,6 +7,9 @@
 // Rulings by session (pack sd:6015): the last 7 days of decision notes, one group per session, each with its item and
 // that item's state. Reverse posts /api/decisions/reverse: the server notes the reversal and reopens the question, which
 // the next read lists above again.
+// Drafts (pack sd:6361): each planning item a headless lead drafted, with its spec. Mark ready posts
+// /api/items/<id>/status with status ready and the item revision; it is off while a draft question is open, as the
+// server refuses that move. A 409 reads the list again.
 // Markup is html`…` from markup.js: every value put in it is escaped, and put() is the only way into the page.
 (() => {
   const { html, put } = window.markup;
@@ -15,7 +18,9 @@
 
   // LIST is the last read; null when it failed. RULED and REFUSED hold what a click did to a row until the next read.
   // REVIEW counts the questions on review batches (sd:3709): Scoring asks them, so Decisions draws one line that opens it.
-  let LIST = [], REVIEW = 0, RULINGS = [], reads = 0, failed = '';
+  let LIST = [], REVIEW = 0, RULINGS = [], DRAFTS = [], reads = 0, failed = '';
+  // READY holds the drafted items a tap moved to ready, MARKING those in flight, UNREADY a refusal's words.
+  const READY = new Set(), MARKING = new Set(), UNREADY = new Map();
   const RULED = new Map(), REFUSED = new Map(), BUSY = new Set(), DRAFT = new Map();
   // The marker an option carries (sd:5306); the label drops it, the posted text keeps it.
   const REC = /^\s*(?:\(recommended\)|recommended:)\s*|\s*\(recommended\)\s*$/gi, label = o => o.replace(REC, '');
@@ -66,8 +71,44 @@
       : html`<p class="filtered">No ruling in the last 7 days.</p>`);
   }
 
+  function readiness(d) {
+    if (READY.has(d.item)) return html`<p class="ruled"><span class="g-ok" aria-hidden="true">●</span> Ready</p>`;
+    const n = d.questions, off = n || MARKING.has(d.item) ? html` disabled` : '';
+    return html`<button type="button" class="btn sm" data-ready="${d.item}"${off}>Mark ready</button>${n ? html`<span class="why">${n} open ${n === 1 ? 'question' : 'questions'}: answer below</span>` : ''}${UNREADY.has(d.item) ? html`<p class="refused" role="alert">Not marked: ${UNREADY.get(d.item)}</p>` : ''}`;
+  }
+  function drawDrafts() {
+    const box = $('drafts'); if (!box) return;
+    const list = LIST ? DRAFTS : [];
+    $('drafts-sec').hidden = !list.length;
+    const open = list.filter(d => d.questions && !READY.has(d.item)).length;
+    put($('drafts-tally'), list.length ? html`<span>${list.length} drafted</span>${open ? html`<span class="g-caution">▲ ${open} with questions</span>` : ''}` : html``);
+    put(box, html`${list.map(d => { const ready = READY.has(d.item); return html`<tr data-item="${d.item}"${MARKING.has(d.item) ? html` aria-busy="true"` : ''}>
+      <td class="g ${ready ? 'g-ok' : d.questions ? 'g-caution' : 'g-queued'}" title="${ready ? 'ready' : d.questions ? 'questions open' : 'drafted'}">${ready ? '●' : d.questions ? '▲' : '◌'}</td>
+      <td class="what"><a href="${window.shell.itemHref(d.item)}"><span class="id">#${d.item}</span> ${d.title}</a><span class="repo">${repoName(d.repo)}</span></td>
+      <td class="question"><details class="spec"><summary>Spec</summary><div class="spec-text">${d.spec}</div></details><span class="asked-at">drafted <time class="rel" datetime="${d.drafted}"></time></span></td>
+      <td class="act">${readiness(d)}</td></tr>`; })}`);
+  }
+
+  async function markReady(item) {
+    const d = DRAFTS.find(x => x.item === item);
+    if (!d || d.questions || READY.has(item) || MARKING.has(item)) return;
+    MARKING.add(item); UNREADY.delete(item); draw();
+    try {
+      const out = await window.shell.post(`/api/items/${item}/status`, { status: 'ready', revision: d.revision });
+      MARKING.delete(item); READY.add(item);
+      // The move changed the item: its questions' rows carry the revision it returned.
+      [...(LIST || []), ...DRAFTS].forEach(x => { if (x.item === item && out.revision) x.revision = out.revision; });
+      draw();
+    } catch (e) {
+      MARKING.delete(item);
+      if (e.stale) { say(`Not marked ready: ${e.message}. The list was read again.`); return load(); }
+      UNREADY.set(item, e.message); draw();
+    }
+  }
+
   function draw() {
     drawRulings();
+    drawDrafts();
     const tb = $('decisions'), line = $('decisions-review'), n = LIST ? REVIEW : 0;
     put($('decisions-head'), window.shell.list.sortHead(COLS, SORT));
     if (line) {
@@ -97,6 +138,7 @@
       const doc = await window.shell.getJSON('/api/decisions');
       if (n !== reads) return;
       LIST = doc.decisions; REVIEW = doc.review || 0; RULINGS = doc.rulings || []; RULED.clear(); REFUSED.clear(); BUSY.clear();
+      DRAFTS = doc.drafts || []; READY.clear(); MARKING.clear(); UNREADY.clear();
     } catch (e) {
       if (n !== reads) return;
       LIST = null; failed = e.message;
@@ -153,6 +195,10 @@
       e.preventDefault(); choose(+f.dataset.note, null, f.elements.answer.value);
     });
     $('decisions').addEventListener('input', e => { const f = e.target.closest('form.answer'); if (f) DRAFT.set(+f.dataset.note, e.target.value); });
+    $('drafts').addEventListener('click', e => {
+      const b = e.target.closest('button[data-ready]');
+      if (b && !b.disabled) markReady(+b.dataset.ready);
+    });
     $('rulings').addEventListener('click', e => {
       const b = e.target.closest('button[data-reverse]');
       if (b && !b.disabled) reverse(+b.dataset.reverse);

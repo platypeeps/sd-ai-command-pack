@@ -236,3 +236,58 @@ class FollowupItemCapture(BrowserSession):
             with self.subTest(payload=payload):
                 self.assertEqual(self.post("/api/items", payload)[0], expected)
         self.assertEqual(self.snapshot(), before)
+
+
+class CaptureDrafts(BrowserSession):
+    """A task the capture box files in a managed hub repository queues its draft (pack sd:6361, ruling #31096)."""
+
+    def drafts(self, item=None):
+        rows = self.connection.execute("SELECT item, status, scope FROM assignment WHERE scope = 'draft'").fetchall()
+        return [tuple(row) for row in rows if item is None or row["item"] == item]
+
+    def test_a_capture_in_a_managed_repo_queues_its_draft(self):
+        upsert_repo(self.connection, "/repos/one", remote="git@example.test:one.git", managed=1)
+        for payload in ({"title": "Plain", "repo": "/repos/one"},
+                        {"title": "Issue", "repo": "/repos/one", "ref": "github:example/project#7"}):
+            with self.subTest(payload=payload):
+                status, _, result = self.post("/api/items", payload)
+                self.assertEqual(status, 201)
+                item = result["item"]["id"]
+                self.assertEqual(self.drafts(item), [(item, "queued", "draft")])
+                self.assertEqual(result["revision"], workflow.item_state(self.connection, item)["revision"],
+                                 "the answer's revision covers the draft's note")
+
+    def test_capture_without_a_managed_repo_queues_no_draft(self):
+        """Failure table, Capture: no managed repository with a remote on the hub's lane, no draft; the item files."""
+        upsert_repo(self.connection, "/repos/off", remote="git@example.test:off.git", managed=0)
+        upsert_repo(self.connection, "/repos/bare", managed=1)
+        upsert_repo(self.connection, "/repos/sat", remote="git@example.test:sat.git", managed=1)
+        self.connection.execute("UPDATE repo SET lane_host = 'work' WHERE path = '/repos/sat'")
+        for payload in ({"title": "No repo"}, {"title": "Unmanaged", "repo": "/repos/off"},
+                        {"title": "No remote", "repo": "/repos/bare"}, {"title": "Satellite", "repo": "/repos/sat"}):
+            with self.subTest(payload=payload):
+                status, _, result = self.post("/api/items", payload)
+                self.assertEqual((status, result["item"]["status"]), (201, "planning"))
+        self.assertEqual(self.drafts(), [])
+
+    def test_a_followup_capture_queues_no_draft(self):
+        upsert_repo(self.connection, "/repos/one", remote="git@example.test:one.git", managed=1)
+        status, _, result = self.post("/api/items", {"title": "Later", "kind": "followup", "repo": "/repos/one"})
+        self.assertEqual((status, result["item"]["kind"]), (201, "followup"))
+        self.assertEqual(self.drafts(), [])
+
+    def test_capture_and_draft_queue_in_one_transaction(self):
+        """Failure table, Capture: a failure after the item is written rolls back both; no item lacks its draft."""
+        from sd_dashboard import server
+        from sd_db import draft
+
+        upsert_repo(self.connection, "/repos/one", remote="git@example.test:one.git", managed=1)
+        before = self.snapshot()
+        with patch.object(draft, "add_note", side_effect=RuntimeError("killed in the transaction")), \
+                self.assertRaisesRegex(RuntimeError, "killed"):
+            server.capture_drafted(self.connection, lambda: workflow.capture_task(
+                self.connection, title="Half", repo="/repos/one", who="dashboard"), who="dashboard")
+        self.assertEqual(self.snapshot(), before)
+        state = server.capture_drafted(self.connection, lambda: workflow.capture_task(
+            self.connection, title="Whole", repo="/repos/one", who="dashboard"), who="dashboard")
+        self.assertEqual(self.drafts(state["item"]["id"]), [(state["item"]["id"], "queued", "draft")])

@@ -53,7 +53,7 @@
 .digest li + li { margin-top: var(--space-3xs); }
 .digest details { margin-top: var(--space-xs); color: var(--color-muted); }
 .digest summary:focus-visible, .digest a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
-@media (pointer: coarse) { .digest summary, .digest .prs a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
+@media (pointer: coarse) { .digest summary, .digest .lines a, .digest .prs a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
 
 /* Section heads */
 .tally { gap: var(--space-md); line-height: 1; }
@@ -118,6 +118,7 @@
 .foot a { color: var(--color-ink-2); }
 .foot a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 #active-tally a { color: var(--color-ink-2); }
+@media (pointer: coarse) { #active-tally a { display: inline-flex; align-items: center; min-height: var(--row-touch); } .active .what a { display: flex; align-items: center; min-height: var(--row-touch); } }
 @media (pointer: coarse) { .needs .what .disc { width: var(--row-touch); height: var(--row-touch); } .needs tr.more .linkbtn, .foot a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
 @media (prefers-reduced-motion: reduce) { .needs .what .disc .i { transition: none; } }
 @media (max-width: 899px) {
@@ -150,6 +151,12 @@ section[aria-labelledby="motion-h"] { margin-top: var(--space-xl); }
 @media (max-width: 899px) {
   .active tbody tr { grid-template-columns: 2rem minmax(0, 1fr) auto; grid-template-areas: "g what num" ". detail detail" ". when when"; }
   .active .what { grid-area: what; width: auto; } .active .detail { grid-area: detail; } .active .when { grid-area: when; } .active .num { grid-area: num; }
+  /* A builder run's .num is a sentence (its ETA reason), not a count: under the title it wraps, rather than taking the
+   * row's width and leaving the title one word per line (pack sd:6017). */
+  .builds tbody tr { grid-template-areas: "g what what" ". detail detail" ". when when" ". num num"; }
+  .builds .num { white-space: normal; text-align: left; }
+  /* The no-sessions row is one cell: in the grid it fell into the 2rem first column, a word a line. */
+  .active tbody tr.empty { display: block; }
 }
 
 /* Status's parts and rows (sd:5099), kept for GitHub's Pull requests, which links this sheet; the Status view itself went

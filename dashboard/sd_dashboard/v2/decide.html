@@ -45,6 +45,16 @@
   <!-- The toolbar standard (sd:5281): row 1, the views then the shell's Shapeshift bar (sd:5539). -->
   <div class="toolbar" id="toolbar" data-shift></div>
   <div id="view-decisions" aria-label="Decisions">
+    <section aria-labelledby="drafts-h" id="drafts-sec" hidden>
+      <div class="sec-head">
+        <h2 id="drafts-h">Drafts <button class="help" type="button" aria-label="Help: Drafts" data-help="&lt;b&gt;Specs a headless lead drafted for new captures.&lt;/b&gt; Read the spec, answer its questions under Decisions, then Mark ready. Mark ready stays off while a draft question is open.">
+          <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+        <p class="tally" id="drafts-tally"></p>
+      </div>
+      <table class="ledger decisions drafts" aria-labelledby="drafts-h">
+        <tbody id="drafts"></tbody>
+      </table>
+    </section>
     <section aria-labelledby="decisions-h">
       <div class="sec-head">
         <h2 id="decisions-h">Decisions <button class="help" type="button" aria-label="Help: Decisions" data-help="&lt;b&gt;Questions that wait on you.&lt;/b&gt; Each is a &lt;code&gt;question&lt;/code&gt; note with one &lt;code&gt;Option:&lt;/code&gt; line per choice. A button records that choice as a &lt;code&gt;decision&lt;/code&gt; note and resolves the question; &lt;code&gt;sd task show&lt;/code&gt; prints both. Prose &quot;Decision needed&quot; notes stay on their item. A review batch&#39;s questions are on Scoring.">
