@@ -369,6 +369,19 @@ class Supervise(Case):
         self.assertIn("delivers no item", ended["blocked"])
         self.assertEqual([call for call in self.calls("sd-ship") if "enqueue" in call["argv"]], [])
 
+    def test_a_group_of_zombies_reads_gone(self):
+        """sd:6406: under load a git grandchild's zombie waits for launchd to reap it, and macOS answers
+        EPERM to `killpg` on a group that holds only zombies; that group runs nothing, so it is gone."""
+        self.press()
+        leader = subprocess.Popen([sys.executable, "-c", "import os\nif os.fork() == 0: os._exit(0)\nos._exit(0)"],
+                                  start_new_session=True)
+        self.addCleanup(leader.wait)
+        while subprocess.run(["ps", "-o", "stat=", "-p", str(leader.pid)], capture_output=True,
+                             text=True).stdout.strip()[:1] != "Z":
+            time.sleep(0.05)
+        self.assertIs(build.Probe.group(leader.pid), False)
+        self.assertTrue(self.supervisor().end_group(leader.pid))
+
     def test_judge_last_line_not_exit(self):
         """Failure table, Judge: exit 0 (here 3) with a permission denial blocks with a question; the exit code is no verdict."""
         self.press()
