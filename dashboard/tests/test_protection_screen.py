@@ -5,11 +5,10 @@ import json
 import re
 from pathlib import Path
 
-from sd_db import upsert_repo
-from support import ScreenCase
-
 from sd_dashboard import v2
 from sd_dashboard.protection_screen import APPLICABLE, FLAGS, GAPS
+from sd_db import upsert_repo
+from support import ScreenCase
 
 AT = "2026-09-11T02:45:00Z"
 UNPROTECTED_GAPS = [

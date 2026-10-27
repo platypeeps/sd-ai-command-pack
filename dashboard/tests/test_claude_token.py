@@ -9,7 +9,6 @@ so the operator's own env.sh is never sourced.
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import sys

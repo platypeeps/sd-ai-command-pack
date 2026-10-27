@@ -16,7 +16,6 @@ a horizontal scroll to read it (`prd.md:722`).
 
 from __future__ import annotations
 
-
 from .markup import Markup, join, tag
 
 __all__ = ["burn_svg", "gauge_svg"]

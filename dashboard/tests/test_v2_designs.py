@@ -20,16 +20,14 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import writes
-
 from sd_dashboard import designs, server, v2
-
+from sd_db import writes
 from test_designs import tree
 from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
+from test_v2_shell_shared import cell_grammar
 from test_v2_tasks import SHELL, STAND_IN
 from test_v2_today import OSASCRIPT, Refused
-from test_v2_shell_shared import cell_grammar
 from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent

@@ -24,9 +24,8 @@ import subprocess
 import unittest
 from pathlib import Path
 
-from sd_db import workflow
 from sd_dashboard import decisions, v2
-
+from sd_db import workflow
 from support import NOW, ScreenCase, before_5648
 from test_v2_tasks import MARKUP_JS, SHELL, STAND_IN
 from test_v2_today import OSASCRIPT

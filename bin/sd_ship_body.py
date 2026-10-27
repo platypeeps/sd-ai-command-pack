@@ -456,10 +456,14 @@ def refuse_long_lines(title: str, body: str, commits) -> None:
     found += [f"commit {sha[:12]} line {number} is {length} characters (limit {LINE_LIMIT})"
               for sha, message in commits for number, length in long_lines(message)]
     if found:
+        merge = any(message.startswith("Merge ") and long_lines(message.split("\n", 1)[0]) for _, message in commits)
         raise Refusal("lines too long: " + "; ".join(found),
                       code="line_too_long", boundary="input", state="operator_decision",
                       next_action=f"Keep the title at {TITLE_LIMIT} characters or less, wrap the named "
-                                  f"body and commit lines at {LINE_LIMIT}, then enqueue again.")
+                                  f"body and commit lines at {LINE_LIMIT}, then enqueue again."
+                                  + (' A merge subject names the branch: redo that merge with `git merge --no-ff -m '
+                                     '"chore: merge origin/main" origin/main`, or, when it is the head, '
+                                     '`git commit --amend -m "chore: merge origin/main"`.' if merge else ""))
 
 
 def refuse_unconventional_title(title: str) -> None:

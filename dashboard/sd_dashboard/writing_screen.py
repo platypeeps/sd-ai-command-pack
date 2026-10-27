@@ -14,7 +14,6 @@ from sd_db.workflow import WorkflowError
 from .markup import href
 from .places import realm_of, realms
 
-
 #: Draft paragraphs the editor shows; the rest stay in the file.
 PARAGRAPHS = 6
 

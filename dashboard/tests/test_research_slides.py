@@ -18,7 +18,6 @@ from pathlib import Path
 from unittest import mock
 
 from sd_dashboard import realm_sweep, research_screen, research_slides
-
 from test_research_deck import brief
 from test_v2_notes import FakeWorkspace
 from test_workflow_actions import BrowserSession

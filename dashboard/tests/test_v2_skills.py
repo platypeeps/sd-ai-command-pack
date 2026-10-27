@@ -24,21 +24,18 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import skills_catalog
-from sd_db.writes import record_skill_use
-
 from sd_dashboard import metrics_screen, server, skill_intake, skills_screen, v2
 from sd_dashboard.v2.pages import Read
-
+from sd_db import skills_catalog
+from sd_db.writes import record_skill_use
 from support import ScreenCase
-from test_v2_read import READ_SHELL
-from test_v2_registry import Registers
-from test_v2_tasks import SHELL, STAND_IN
 from test_v2_metrics import METRICS_JS
 from test_v2_nav_split import moved
+from test_v2_read import READ_SHELL
+from test_v2_registry import Registers
+from test_v2_shell_shared import cell_grammar
+from test_v2_tasks import SHELL, STAND_IN
 from test_v2_today import OSASCRIPT, Refused, run_js
-from test_v2_shell_shared import cell_grammar
-from test_v2_shell_shared import cell_grammar
 from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent

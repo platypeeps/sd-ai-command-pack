@@ -11,7 +11,6 @@ import re
 from sd_db import upsert_shadow
 from sd_db.shadow_sync import write_watermark
 from sd_db.writes import record_state
-
 from support import ScreenCase
 
 PULL = "https://github.com/acme/widgets/pull/4321"

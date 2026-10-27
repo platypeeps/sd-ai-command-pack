@@ -16,10 +16,9 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from sd_dashboard import shots
 from sd_db import connect, create_item
 from sd_db.migrate import initialise
-
-from sd_dashboard import shots
 
 PNG = b"\x89PNG\r\n\x1a\nfake"
 

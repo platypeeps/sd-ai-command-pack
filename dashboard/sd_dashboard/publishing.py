@@ -273,7 +273,7 @@ def _items(entry) -> dict[str, ast.AST] | None:
     if isinstance(entry, ast.Dict):
         if any(not (isinstance(k, ast.Constant) and isinstance(k.value, str)) for k in entry.keys):
             return None
-        return {k.value: v for k, v in zip(entry.keys, entry.values)}
+        return {k.value: v for k, v in zip(entry.keys, entry.values, strict=True)}
     return None
 
 
@@ -392,7 +392,7 @@ def _check(tree: ast.Module, result: str, out: str, channel: str) -> None:
     if isinstance(entry, ast.Call):
         entry.keywords = [k for k in entry.keywords if k.arg != channel]
     else:
-        kept = [(k, v) for k, v in zip(entry.keys, entry.values) if k.value != channel]
+        kept = [(k, v) for k, v in zip(entry.keys, entry.values, strict=True) if k.value != channel]
         entry.keys, entry.values = [k for k, _ in kept], [v for _, v in kept]
     if ast.dump(after) != ast.dump(tree):
         raise Refused("the edit changed more than the one key; add the key by hand")
@@ -420,7 +420,7 @@ def remove_key(source: str, out: str, channel: str) -> str:
     if isinstance(entry, ast.Call):
         pairs = [(k, k.value) for k in entry.keywords]
     else:
-        pairs = list(zip(entry.keys, entry.values))
+        pairs = list(zip(entry.keys, entry.values, strict=True))
     at = next(i for i, (key, _) in enumerate(pairs) if (key.arg if isinstance(entry, ast.Call) else key.value) == channel)
     start = _span(source, pairs[at][0])[0]
     end = _span(source, pairs[at][1])[1]
@@ -436,7 +436,7 @@ def remove_key(source: str, out: str, channel: str) -> str:
     if isinstance(entry, ast.Call):
         entry.keywords = [k for k in entry.keywords if k.arg != channel]
     else:
-        kept = [(k, v) for k, v in zip(entry.keys, entry.values) if k.value != channel]
+        kept = [(k, v) for k, v in zip(entry.keys, entry.values, strict=True) if k.value != channel]
         entry.keys, entry.values = [k for k, _ in kept], [v for _, v in kept]
     if ast.dump(after) != ast.dump(tree):
         raise Refused("the edit changed more than the one key; remove the key by hand")

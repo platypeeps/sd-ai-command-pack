@@ -18,12 +18,10 @@ import os
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import sessions, workflow
-from sd_db.ship import this_host
-
 from sd_dashboard import health_collectors, health_screen
 from sd_dashboard.health_collectors import Walk
-
+from sd_db import sessions, workflow
+from sd_db.ship import this_host
 from support import ScreenCase
 from test_health_cleanup import Isolated, git
 
@@ -233,7 +231,7 @@ class TheWrite(Merged):
                 row = self.row()
                 real = Walk.git
 
-                def stopped(walk, path, *args):
+                def stopped(walk, path, *args, step=step, real=real):
                     return None if args[:2] == step else real(walk, path, *args)
 
                 with patch.object(Walk, "git", stopped):

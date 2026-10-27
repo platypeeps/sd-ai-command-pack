@@ -34,7 +34,6 @@ import urllib.request
 from pathlib import Path
 
 from sd_dashboard import server
-
 from support import ScreenCase
 
 HERE = Path(__file__).resolve().parents[1]
@@ -264,8 +263,8 @@ class OnTheWire(ScreenCase):
         """
         from unittest.mock import patch
 
-        from sd_db import services
         from sd_dashboard import reports_screen, sessions_screen
+        from sd_db import services
 
         empty = Path(self.tmp.name) / "launchd"
         empty.mkdir()
