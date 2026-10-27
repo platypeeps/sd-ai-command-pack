@@ -310,6 +310,31 @@ def _block(connection, assignment, reason: str, stamp: str, *, note: bool) -> No
                  f"{BLOCKED} {reason}. Read the log, then write the spec by hand or capture the item again.")
 
 
+def drafted(connection) -> list[dict]:
+    """Planning items whose newest draft assignment is done, oldest draft first, each with its spec and open questions.
+
+    Decide's Drafts group reads it (`sd_dashboard.decisions.document`); the spec drops its `Draft spec:` line.
+    """
+    rows = connection.execute(
+        "SELECT item.id, item.title, item.repo, assignment.ended FROM item JOIN assignment ON assignment.id = "
+        "(SELECT MAX(id) FROM assignment WHERE assignment.item = item.id AND assignment.scope = ?) "
+        "WHERE item.status = 'planning' AND assignment.status = 'done' ORDER BY assignment.ended, item.id",
+        (SCOPE,)).fetchall()
+    found = []
+    for row in rows:
+        spec = connection.execute(
+            "SELECT body FROM note WHERE item = ? AND kind = 'comment' AND session LIKE ? AND body LIKE ? "
+            "ORDER BY timestamp DESC, id DESC LIMIT 1",
+            (row["id"], f"{SESSION}%", f"{SPEC}%")).fetchone()
+        open_questions = connection.execute(
+            "SELECT COUNT(*) FROM note WHERE item = ? AND kind = 'question' AND resolved_at IS NULL "
+            "AND session LIKE ?", (row["id"], f"{SESSION}%")).fetchone()[0]
+        found.append({"item": row["id"], "title": row["title"], "repo": row["repo"], "drafted": row["ended"],
+                      "spec": spec["body"].removeprefix(SPEC).strip() if spec else "",
+                      "questions": open_questions})
+    return found
+
+
 def item_text(connection, item: int) -> tuple[str, str]:
     """The item's title and body text, as the draft prompt gives them: a JSON body's `text`, else the raw body."""
     row = connection.execute("SELECT title, body FROM item WHERE id = ?", (item,)).fetchone()

@@ -28,10 +28,10 @@ place of buttons. An old prose "Decision needed" comment stays a comment: it lis
   a free-text question takes any words. A stale revision writes nothing (`StaleItem`, a 409).
   `sd task show <item>` prints the ruling and the resolved question.
 
-- `drafts` is the document's `drafts` (pack sd:6361): each item in planning whose newest draft assignment is done,
-  with its `Draft spec:` comment and the count of its draft questions still open. Decide draws one card each with
-  Mark ready, which posts the item's status under its revision; `workflow.change_status` refuses ready while a
-  draft question is open, so the button only saves a round trip.
+- `drafts` is the document's `drafts` (pack sd:6361), read by `sd_db.draft.drafted`: each item in planning whose
+  newest draft assignment is done, with its `Draft spec:` comment and the count of its draft questions still open.
+  Decide draws one row each with Mark ready, which posts the item's status under its revision;
+  `workflow.change_status` refuses ready while a draft question is open, so the button only saves a round trip.
 
 - `rulings` is the document's `rulings` (pack sd:6015): the `decision` notes of the last `RULINGS_DAYS`, one group per
   note session, newest group first, each ruling with its item, the item's state and the question it answered. A grill
@@ -52,7 +52,7 @@ from sd_db import draft, reads, workflow
 
 from .tasks_screen import is_scheduled
 
-__all__ = ["answer", "document", "drafts", "parse", "recommended", "request", "reverse", "reverse_request", "rulings"]
+__all__ = ["answer", "document", "parse", "recommended", "request", "reverse", "reverse_request", "rulings"]
 
 OPTION = re.compile(r"^[ \t]*Option:[ \t]*(.*?)[ \t]*$")
 MARKED = re.compile(r"\(recommended\)$|^(?:\(recommended\)|recommended:)", re.IGNORECASE)
@@ -118,7 +118,7 @@ def document(connection, *, now: str | None = None) -> dict:
                       "priority": item["priority"], "asked": row["timestamp"], "question": question,
                       "options": options, "recommended": recommended(row["body"], options)})
     ruled = rulings(connection, now=now)
-    drafted = drafts(connection)
+    drafted = draft.drafted(connection)
     # One batched revision read for every item asking, drafted or ruled on, not an `item_state` per item (sd:3531).
     rows = [*found, *drafted, *(ruling for group in ruled for ruling in group["rulings"])]
     revisions = reads.revisions(connection, sorted({row["item"] for row in rows}))
@@ -126,28 +126,6 @@ def document(connection, *, now: str | None = None) -> dict:
         row["revision"] = revisions[row["item"]]
     found.sort(key=lambda d: (d["priority"] is None, d["priority"] or 0, d["asked"], d["note"]))
     return {"decisions": found, "drafts": drafted, "review": batched, "rulings": ruled}
-
-
-def drafts(connection) -> list[dict]:
-    """Planning items whose newest draft assignment is done, oldest draft first, each with its spec and open questions."""
-    rows = connection.execute(
-        "SELECT item.id, item.title, item.repo, assignment.ended FROM item JOIN assignment ON assignment.id = "
-        "(SELECT MAX(id) FROM assignment WHERE assignment.item = item.id AND assignment.scope = ?) "
-        "WHERE item.status = 'planning' AND assignment.status = 'done' ORDER BY assignment.ended, item.id",
-        (draft.SCOPE,)).fetchall()
-    found = []
-    for row in rows:
-        spec = connection.execute(
-            "SELECT body FROM note WHERE item = ? AND kind = 'comment' AND session LIKE ? AND body LIKE ? "
-            "ORDER BY timestamp DESC, id DESC LIMIT 1",
-            (row["id"], f"{draft.SESSION}%", f"{draft.SPEC}%")).fetchone()
-        open_questions = connection.execute(
-            "SELECT COUNT(*) FROM note WHERE item = ? AND kind = 'question' AND resolved_at IS NULL "
-            "AND session LIKE ?", (row["id"], f"{draft.SESSION}%")).fetchone()[0]
-        found.append({"item": row["id"], "title": row["title"], "repo": row["repo"], "drafted": row["ended"],
-                      "spec": spec["body"].removeprefix(draft.SPEC).strip() if spec else "",
-                      "questions": open_questions})
-    return found
 
 
 def rulings(connection, *, now: str | None = None) -> list[dict]:
