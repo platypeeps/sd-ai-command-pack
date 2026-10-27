@@ -49,9 +49,9 @@ from tests.test_sd_gate_queue import (  # noqa: E402
 
 #: A check that says it started, then runs until the test writes `release`, at most 120 s.
 HOLDING = """
-import pathlib, sys, time
+import os, pathlib, sys, time
 started, release, mark = (pathlib.Path(part) for part in sys.argv[1:4])
-started.write_text("")
+started.write_text(str(os.getpid()))
 end = time.monotonic() + 120
 while not release.exists() and time.monotonic() < end:
     time.sleep(0.05)
@@ -68,6 +68,14 @@ ticket = sd_gate_slots.Queue(pathlib.Path(sys.argv[1])).enter("together", "/")
 print(ticket.seq, flush=True)
 sys.stdin.read()
 """
+
+
+def alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 def previous_order(entries: list[dict]) -> list[int]:
@@ -117,6 +125,10 @@ class LaneFixture(QueueFixture):
 
     def started(self, name: str) -> bool:
         return (self.tmp / f"{name}.started").exists()
+
+    def check_pid(self, name: str) -> int:
+        """The pid of `name`'s check, which `sd-check` runs in its own session."""
+        return int((self.tmp / f"{name}.started").read_text())
 
     def builder(self, slots: str, *, name: str = "builder", max_wait: str = "60", hold: bool = False) -> subprocess.Popen:
         """`sd gate run` as a builder runs it: its command writes `name` to the order file."""
@@ -242,9 +254,16 @@ class ArrivalOrder(LaneFixture):
         lane = self.lane_gate("lane-a", "1", hold=True)
         self.assertTrue(wait_for(lambda: self.started("lane-a")))
         self.assertEqual([entry["label"] for entry in self.status("1")["lane_gates"]], ["sd-check lane-a"])
+        check = self.check_pid("lane-a")
         lane.send_signal(signal.SIGKILL)
         lane.wait()
         self.assertTrue(wait_for(lambda: slot_free(self.slots / "slot.1.lock")))
+        self.assertFalse(wait_for(lambda: not alive(check), timeout=2),
+                         "a killed sd-check leaves its check running")
+        # The orphan woke on cleanup's release and wrote into the temp
+        # directory while it was being removed (sd:6401): end it first.
+        os.killpg(check, signal.SIGKILL)
+        self.assertTrue(wait_for(lambda: not alive(check)), "the check outlived the test")
         self.assertTrue(slot_free(self.slots / "slot.1.lane"), "the kernel drops the lane marker with the gate")
         self.assertEqual(self.status("1")["lane_gates"], [])
         self.finish_all(self.builder("1"))
