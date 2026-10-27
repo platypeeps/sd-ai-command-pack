@@ -26,3 +26,8 @@ for _name, _relative in (("HOME", "home"), ("XDG_CONFIG_HOME", "home/.config"),
                          ("XDG_DATA_HOME", "home/.local/share"), ("XDG_STATE_HOME", "home/.local/state")):
     os.environ[_name] = os.path.join(_home, _relative)
     os.makedirs(os.environ[_name], exist_ok=True)
+
+# The system config too, with a synthetic privacy-pattern file (sd:6432): no test reads the operator's patterns.
+os.environ["SYSTEM_TOOLS_CONFIG"] = os.path.join(os.environ["XDG_CONFIG_HOME"], "system")
+os.makedirs(os.environ["SYSTEM_TOOLS_CONFIG"], exist_ok=True)
+Path(os.environ["SYSTEM_TOOLS_CONFIG"], "privacy-patterns").write_text("secret-host\\.example\\.test\n", encoding="utf-8")
