@@ -2650,12 +2650,13 @@ R.work = five('{port}'); R.done = five('{ask}');""")
 
     def test_the_narrow_board_is_a_carousel_with_or_without_the_other_lane(self):
         # `.board[data-other]` outranks `.board`, so the narrow-screen rule names both, or a board with an Other lane keeps
-        # its six columns on a phone (review, PR #46).
+        # its six columns on a phone (review, PR #46). The [data-nodone] forms outrank both: they need naming too, or the
+        # container rule's three columns beat the carousel and the lanes were 2 px wide (pack sd:6017).
         css = (V2 / "static" / "tasks.css").read_text(encoding="utf-8")
         narrow = re.search(r"^@media \(max-width: 719px\) \{\n(.*?)^\}", css, re.S | re.M).group(1)
         rule = re.search(r"^  ([^{]*)\{[^}]*grid-template-columns: none;", narrow, re.M)
         self.assertIsNotNone(rule, "the narrow block sets no carousel")
-        self.assertEqual({sel.strip() for sel in rule.group(1).split(",")}, {".board", ".board[data-other]"})
+        self.assertEqual({sel.strip() for sel in rule.group(1).split(",")}, {".board", ".board[data-other]", ".board[data-nodone]", ".board[data-nodone][data-other]"})
 
     def test_the_list_scrolls_inside_its_wrap_and_holds_its_hidden_labels(self):
         # The Actions header's `.sr` label is absolutely placed. With no positioned ancestor its box sat at the table's

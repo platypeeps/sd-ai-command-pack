@@ -9,6 +9,9 @@ removes it once that pid is gone, never while the run lives.
 `SD_LANE_ROOT` points into that folder too: a review a fixture finishes in-process is held in the lane folder until
 its save (sd:3340), and the operator's real lane root is no place for a fixture's files. A test of how the lane root
 resolves passes its own environment.
+
+Git reads no global or system config here either (sd:6386): a satellite's global `fetch.prune=true` failed a fixture's
+fetch on every run. A test that needs a config of its own, such as a hostile one, patches the variables itself.
 """
 
 import atexit
@@ -17,10 +20,14 @@ import shutil
 import sys
 import tempfile
 
+from tests.clean_env import GIT_ISOLATION
+
 os.environ["TMPDIR"] = tempfile.mkdtemp(prefix=f"sd-tests-{os.getpid()}-")
 tempfile.tempdir = None
 os.environ["SD_LANE_ROOT"] = os.path.join(os.environ["TMPDIR"], "lanes")
 atexit.register(shutil.rmtree, os.environ["TMPDIR"], ignore_errors=True)
+
+os.environ.update(GIT_ISOLATION)
 
 # `sd_db` is this checkout's `lib/` and nothing is installed (sd:3280). On the path here and in
 # `PYTHONPATH`, so a module that imports it at the top, and a child's `sitecustomize` shim, read the

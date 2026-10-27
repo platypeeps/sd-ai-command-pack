@@ -22,7 +22,7 @@ def view(kind: str) -> Api:
         if kind == "overview":
             from ... import place_tiles
 
-            return place_tiles.document(realm, now=read.now)
+            return place_tiles.document(realm, now=read.now, connection=read.connection)
         # A Reports row's Details read the jobs as the Reports page does (sd:5636).
         return getattr(places, kind)(read.connection, realm, now=read.now, **({"jobs": read.jobs} if kind == "reports" else {}))
 

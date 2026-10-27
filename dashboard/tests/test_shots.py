@@ -23,7 +23,7 @@ from sd_db.migrate import initialise
 PNG = b"\x89PNG\r\n\x1a\nfake"
 
 FAKE = textwrap.dedent('''\
-    import base64, json, os, select, sys
+    import base64, json, os, select, sys, time
     log = open(os.environ["FAKE_LOG"], "a")
     mode = os.environ.get("FAKE_MODE", "ok")
     outbox = os.fdopen(4, "wb")
@@ -45,6 +45,7 @@ FAKE = textwrap.dedent('''\
         log.write(json.dumps(message) + "\\n")
         log.flush()
         if method == "Target.createTarget":
+            time.sleep(float(os.environ.get("FAKE_TARGET_DELAY", "0")))
             reply = {"targetId": "T"}
         elif method == "Target.attachToTarget":
             reply = {"sessionId": "S"}
@@ -114,7 +115,9 @@ class Capture(FakeChrome):
         self.assertNotIn({"early": True}, self.sent())
 
     def test_a_page_that_never_settles_fails_naming_it_and_writes_nothing(self) -> None:
-        with mock.patch.dict(os.environ, {"FAKE_MODE": "never"}), mock.patch.object(shots, "SETTLE_SECONDS", 1):
+        # A loaded machine answers setup calls late; the 1 s bound is the settle wait's alone (sd:6388).
+        slow = {"FAKE_MODE": "never", "FAKE_TARGET_DELAY": "1.5"}
+        with mock.patch.dict(os.environ, slow), mock.patch.object(shots, "SETTLE_SECONDS", 1):
             with self.assertRaisesRegex(shots.ShotFailed, "/tasks dark 1440: no network idle within 1 s"):
                 shots.capture(str(self.chrome), "http://127.0.0.1:9", ["/tasks"], self.out)
         self.assertEqual(list(self.out.glob("*.png")), [])
