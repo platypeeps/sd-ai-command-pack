@@ -5,6 +5,10 @@ whether its folder is on this machine and whether its link answers, and each act
 files its start left: running while the lock is held, done with the exit code, unknown when a run left no exit record.
 A button runs only a command the file names, in the tile's folder; one that names no line, or a folder not here, runs
 nothing (400), and a second start of a running action is a 409.
+
+sd:6387: a tile line that names another machine's host runs nothing here. Its button writes a request row that the
+host's follow job answers (system `local-repo-sync/satellite_tiles.py`), and each action reads pending until that
+host's result row answers the request, then mirrors it.
 """
 
 from __future__ import annotations
@@ -212,6 +216,96 @@ class TheRun(Case):
         self.assertFalse((place_tiles.state_dir() / "acme").exists(), "a refused start wrote state")
 
 
+class TheHostedTile(Case):
+    """sd:6387: a tile on another machine's host asks it through a request row, and reads its answer back."""
+
+    def setUp(self):
+        super().setUp()
+        from sd_db import connect
+        from sd_db.migrate import initialise
+
+        initialise(self.dir / "sd.db")
+        self.connection = connect(self.dir / "sd.db")
+        self.addCleanup(self.connection.close)
+        self.config.write_text(f"tile|work|sim|World simulator|{self.app}|-|far-host\n"
+                               "act|sim|Start|./example-simulator.sh studio\n"
+                               f"tile|work|mine|Mine|{self.app}|-|{place_tiles.this_host()}\n"
+                               "act|mine|Say hi|printf hi\n", encoding="utf-8")
+        self.tile = {"host": "far-host", "realm": "work", "id": "sim"}
+
+    def rows(self, connection="default"):
+        doc = place_tiles.document("work", now=NOW, config=self.config,
+                                   connection=self.connection if connection == "default" else connection)
+        return {r["id"]: r for r in doc["rows"]}
+
+    def last(self, **kwargs):
+        return self.rows(**kwargs)["sim"]["actions"][0]["last"]
+
+    def ask(self):
+        return place_tiles.run({"realm": "work", "tile": "sim", "action": "Start"}, config=self.config)(self.connection)
+
+    def answer(self, request, **fields):
+        from sd_db import writes
+
+        row = {"host": "far-host", "realm": "work", "tile": "sim", "action": "Start", "request": request, "attempt": 1,
+               "written": NOW, **fields}
+        writes.set_setting(self.connection, place_tiles.key(place_tiles.RESULT, self.tile, "Start"), json.dumps(row))
+
+    def test_a_line_reads_its_host_and_a_host_that_is_no_id_is_a_problem(self):
+        tiles, problems = place_tiles.parse("tile|work|a|A|/x|-|far-host\ntile|work|b|B|/x|-|Far_Host\ntile|work|c|C|/x|-\n")
+        self.assertEqual([(t["id"], t["host"]) for t in tiles], [("a", "far-host"), ("c", "")])
+        self.assertEqual([p.split(":")[0] for p in problems], ["line 2"])
+
+    def test_a_hosted_start_writes_a_request_row_and_runs_nothing_here(self):
+        from sd_db import writes
+
+        with mock.patch("sd_dashboard.sweep.spawn") as spawn:
+            status, body = self.ask()
+        self.assertEqual((status, body["host"], body["command"]), (202, "far-host", "./example-simulator.sh studio"))
+        spawn.assert_not_called()
+        self.assertFalse(place_tiles.state_dir().exists(), "a hosted start wrote state here")
+        key = place_tiles.key(place_tiles.REQUEST, self.tile, "Start")
+        self.assertEqual(key, "place_tiles.request.far_host.work.sim.start")
+        row = json.loads(writes.read_settings(self.connection, [key])[key])
+        self.assertEqual(row, {"id": body["requested"], "at": body["at"], "host": "far-host", "realm": "work",
+                               "tile": "sim", "action": "Start"}, "the row names a command, or misses a name")
+
+    def test_the_tile_shows_its_host_and_reads_pending_until_its_host_answers_the_request(self):
+        row = self.rows()["sim"]
+        self.assertEqual((row["host"], row["here"], row["why"]), ("far-host", False, ""))
+        self.assertEqual(self.last(), {"state": "none", "host": "far-host"})
+        asked = self.ask()[1]
+        first = asked["requested"]
+        self.assertEqual((self.last()["state"], self.last()["requested"]), ("pending", asked["at"]))
+        self.answer(first, state="running", started="2026-09-06T12:01:00+00:00", output="up\n", cut=False)
+        self.assertEqual(self.last()["state"], "running")
+        second = self.ask()[1]["requested"]
+        self.assertEqual(self.last()["state"], "pending", "an answer to the older request read as this one's")
+        self.answer(second, state="done", started=NOW, ended=NOW, exit=0, output="ok\n", cut=False)
+        last = self.last()
+        self.assertEqual((last["state"], last["exit"], last["output"], last["host"]), ("done", 0, "ok\n", "far-host"))
+        self.answer(second, state="refused", reason="example-simulator.sh studio is already running")
+        self.assertEqual(self.last()["state"], "refused")
+
+    def test_a_row_for_another_action_or_no_database_is_unknown_not_none(self):
+        from sd_db import writes
+
+        writes.set_setting(self.connection, place_tiles.key(place_tiles.RESULT, self.tile, "Start"),
+                           json.dumps({"host": "far-host", "realm": "work", "tile": "x-sim", "action": "Start", "state": "done"}))
+        last = self.last()
+        self.assertEqual(last["state"], "unknown")
+        self.assertIn("another action's row", last["reason"])
+        last = self.last(connection=None)
+        self.assertEqual(last["state"], "unknown")
+        self.assertIn("no database answered", last["reason"])
+
+    def test_a_line_that_names_this_machine_runs_here(self):
+        row = self.rows()["mine"]
+        self.assertEqual((row["host"], row["here"]), ("", True))
+        status, body = place_tiles.run({"realm": "work", "tile": "mine", "action": "Say hi"}, config=self.config)(None)
+        self.assertEqual((status, body["repo"]), (202, str(self.app)))
+
+
 class TheRoutes(BrowserSession):
     def test_the_overview_read_needs_a_session_and_the_run_refuses_a_name_no_line_holds(self):
         with tempfile.TemporaryDirectory() as folder, mock.patch.object(place_tiles, "CONFIG", Path(folder) / "place-tiles.conf"):
@@ -222,6 +316,19 @@ class TheRoutes(BrowserSession):
             status, _, out = self.post("/api/place/tiles", {"realm": "acme", "tile": "app", "action": "Start"})
         self.assertEqual(status, 400)
         self.assertIn("Nothing ran", out["error"])
+
+    def test_a_hosted_tiles_button_writes_its_request_and_the_overview_reads_it_pending(self):
+        # sd:6387: the route hands the write its connection, and the read its own.
+        with tempfile.TemporaryDirectory() as folder, mock.patch("sd_dashboard.sweep.spawn") as spawn:
+            config = Path(folder) / "place-tiles.conf"
+            config.write_text(f"tile|acme|sim|Simulator|{folder}|-|far-host\nact|sim|Start|./run.sh\n", encoding="utf-8")
+            with mock.patch.object(place_tiles, "CONFIG", config):
+                status, _, out = self.post("/api/place/tiles", {"realm": "acme", "tile": "sim", "action": "Start"})
+                self.assertEqual((status, out["host"]), (202, "far-host"), out)
+                _, _, body = self.request("/api/place/acme/overview", headers={"Cookie": self.cookie})
+        spawn.assert_not_called()
+        last = json.loads(body)["rows"][0]["actions"][0]["last"]
+        self.assertEqual((last["state"], last["host"]), ("pending", "far-host"))
 
 
 if __name__ == "__main__":

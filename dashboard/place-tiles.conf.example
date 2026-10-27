@@ -6,7 +6,7 @@
 # below are examples. Folders, hosts and commands are this machine's, so
 # they live here, never in the checkout or in a setting the page writes.
 #
-#   tile|<realm>|<tile>|<label>|<folder>|<url or ->
+#   tile|<realm>|<tile>|<label>|<folder>|<url or ->[|<host>]
 #   act|<tile>|<label>|<command>
 #
 # <realm> is an id in dashboard.realms; <tile> is a lower-case id of your
@@ -18,8 +18,16 @@
 # Wrap a command that needs a shell or a login PATH: /bin/zsh -lc "...".
 # A folder that is not on this machine shows the tile, its link and the
 # reason, and runs nothing.
+#
+# <host> runs the tile's actions on that machine (its `hostname -s`,
+# lower-cased) instead (sd:6387): a button writes a request row in the
+# hub's database, and that machine's `repo-sync.sh follow`, every five
+# minutes, runs the act line of ITS OWN place-tiles.conf and writes the
+# result back. So that machine names the same tile and actions, with its
+# own folder; its line may name itself as <host>. Give such a tile a URL
+# this machine can reach: 127.0.0.1 is this machine's, not the host's.
 
-tile|work|simulator|World simulator|~/repos/example-org/example-simulator|http://127.0.0.1:8740/studio
+tile|work|simulator|World simulator|~/repos/example-org/example-simulator|http://work-mac.example.test:8740/studio|work-mac
 act|simulator|Start|./example-simulator.sh studio
 act|simulator|Stop|./example-simulator.sh studio-stop
 act|simulator|Update|git pull --ff-only

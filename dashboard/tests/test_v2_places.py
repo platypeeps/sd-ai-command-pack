@@ -949,6 +949,41 @@ class TheOverviewScript(Fixture):
         self.assertEqual(out["toasts"][-1]["msg"], "Staging site · Deploy started. Read again shows how it ended.")
         self.assertEqual(out["gets"], ["/api/place/acme/overview"] * 2)
 
+    @staticmethod
+    def hosted(*lasts):
+        """sd:6387: an Overview with one tile on another machine's host, one Start per last run given."""
+        return {"state": "read", "area": "acme", "read": NOW, "reason": "", "problems": [], "rows": [
+            {"id": "sim", "label": "Simulator", "url": "", "here": False, "host": "far-host", "why": "", "probe": None,
+             "actions": [{"label": f"Start{i or ''}", "command": "./run.sh studio", "last": {**last, "host": "far-host"}}
+                         for i, last in enumerate(lasts)]}]}
+
+    def test_a_hosted_tiles_button_posts_its_names_and_the_tile_reads_pending_on_its_host(self):
+        docs = {"/api/place/acme/overview": [200, self.hosted({"state": "none"})],
+                "/api/place/tiles": [202, {"requested": "ab12", "at": NOW, "host": "far-host", "command": "./run.sh studio"}]}
+        pending = self.hosted({"state": "pending", "requested": NOW})
+        out = self.run_page(self.CLICK + f"""R.before = ELS['overview-rows'].html;
+DOCS['/api/place/acme/overview'] = [200, {json.dumps(pending)}];
+clickAct('sim', 'Start'); await flush(); R.after = ELS['overview-rows'].html;""", docs, place="acme")
+        before, after = out["R"]["before"], out["R"]["after"]
+        self.assertIn("Runs on far-host: its follow job answers a button within about five minutes.", before)
+        self.assertNotIn("aria-disabled", before, "a hosted tile's button is off")
+        self.assertIn("Not run on far-host from here yet.", before)
+        self.assertEqual(out["posts"], [["/api/place/tiles", {"realm": "acme", "tile": "sim", "action": "Start"}, 64]])
+        self.assertEqual(out["toasts"][-1]["msg"], "Simulator · Start asked of far-host; its follow job runs it within about five minutes.")
+        self.assertIn("Asked far-host <time", after)
+        self.assertIn("waiting for its follow job, every five minutes.", after)
+
+    def test_a_hosted_actions_answer_reads_with_its_host(self):
+        doc = self.hosted({"state": "starting", "started": NOW}, {"state": "running", "started": NOW, "output": "", "cut": False},
+                          {"state": "done", "exit": 0, "started": NOW, "ended": NOW, "output": "up\n", "cut": False},
+                          {"state": "refused", "reason": "example-simulator.sh studio is already running"},
+                          {"state": "unknown", "reason": "its result reads state 'odd'"})
+        out = self.run_page("R.rows = ELS['overview-rows'].html;", {"/api/place/acme/overview": [200, doc]}, place="acme")
+        for words in ("Starting on far-host since", "Running on far-host since", "Done on far-host, exit 0",
+                      "Not run on far-host: example-simulator.sh studio is already running.",
+                      "Not known on far-host: its result reads state &#39;odd&#39;."):
+            self.assertIn(words, out["R"]["rows"])
+
     ISSUES = {"state": "read", "area": "acme", "read": NOW, "reason": "", "rows": [], "done": [], "lead": False, "issues_reason": "",
               "issues_store": {"available": True, "reason": ""}, "issues": [
                   {"tracker": "Jira", "ref": "ACME-8", "key": "jira:ACME-8", "title": "Fix the kit", "repo": "acme-site", "reason": "filed",
