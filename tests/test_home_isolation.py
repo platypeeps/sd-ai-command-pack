@@ -24,6 +24,9 @@ REVIEW = "tests.test_sd_review.TheWorkstationLaneIsNotPrintedWhereItCannotBeReac
 PROBE = ("import importlib, json, os, sys; importlib.import_module(sys.argv[1]); "
          "sys.path.insert(0, sys.argv[2]); from sd_db import database, hub; "
          "print(json.dumps([os.environ['HOME'], str(database.local_path()), hub.configured()]))")
+#: Imports the package, then runs the body's privacy check in the environment it leaves.
+LINT = ("import importlib, subprocess, sys; importlib.import_module(sys.argv[1]); "
+        "sys.exit(subprocess.run([sys.executable, sys.argv[2], '--body-only', '--pr-body', sys.argv[3]]).returncode)")
 
 
 class HomeIsolation(unittest.TestCase):
@@ -54,6 +57,28 @@ class HomeIsolation(unittest.TestCase):
                 self.assertFalse(pathlib.Path(database).resolve().is_relative_to(self.home),
                                  f"{package} resolves the database to {database}")
                 self.assertFalse(satellite, f"{package} still reads the live hub.json")
+
+    def test_each_test_package_checks_bodies_against_synthetic_privacy_patterns(self) -> None:
+        """sd:6432. The temp `HOME` hid `<config>/privacy-patterns` where `SYSTEM_TOOLS_CONFIG` is unset, and five
+        tests failed on the satellite; where it is set, tests read the operator's real patterns. Each package holds a
+        synthetic file of its own in both cases: the live one here matches the body, so reading it fails."""
+        live = self.home / ".config/system"
+        live.mkdir(parents=True)
+        (live / "privacy-patterns").write_text("live-only-secret\n", encoding="utf-8")
+        body = self.home / "body.md"
+        body.write_text("## Summary\n\nNames live-only-secret.\n", encoding="utf-8")
+        # Empty reads as unset, in `sd-docs-lint` and in `dashboard.sh` alike.
+        for config in ("", str(live)):
+            for package in ("tests", "tests.sd_db", "dashboard.tests"):
+                with self.subTest(package=package, set=bool(config)):
+                    done = subprocess.run([sys.executable, "-c", LINT, package, str(REPO_ROOT / "bin/sd-docs-lint"),
+                                           str(body)], cwd=REPO_ROOT, capture_output=True, text=True,
+                                          env=clean_environment(HOME=str(self.home),
+                                                                XDG_CONFIG_HOME=str(self.home / ".config"),
+                                                                SYSTEM_TOOLS_CONFIG=config),
+                                          timeout=120, check=False)
+                    self.assertEqual(done.returncode, 0, done.stdout[-2000:] + done.stderr[-2000:])
+                    self.assertIn("PR privacy: 1 pattern(s) from", done.stdout)
 
 
 if __name__ == "__main__":
