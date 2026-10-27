@@ -1927,6 +1927,39 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
         rows = json.loads(self.call("today", "--json").stdout)
         self.assertEqual([row["title"] for row in rows], ["Busy"])
 
+    def test_today_repo_keeps_one_repositorys_rows(self):
+        """pack sd:6488: `--repo NAME` filters every section and the counts; `fleet` is no repository."""
+        app, lib = "~/repos/example.test/app", "~/repos/example.test/lib"
+        with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
+            for repo in (app, lib):
+                sd_db.upsert_repo(connection, repo)
+            made = {}
+            for repo in (app, lib, None):
+                made[repo] = item = sd_db.create_item(connection, kind="task", title=f"Open {repo}", repo=repo)
+                sd_db.create_item(connection, kind="task", title=f"Busy {repo}", repo=repo, status="in_progress")
+                sd_db.writes.add_note(connection, item, "followup", f"Chase {repo}")
+            connection.commit()
+        env = {**self.environment, "COLUMNS": "120"}
+
+        def heads(*flags):
+            lines = self.call("today", *flags, env=env).stdout.splitlines()
+            return lines[0], [line for line in lines if line.endswith(")") and line.split(" (")[0] in HEADINGS.values()]
+
+        summary, found = heads("--repo", "app")
+        self.assertIn("1 unscheduled · 1 followups · 1 work", summary)
+        self.assertIn("Followups (1)", found)
+        text = self.call("today", "--repo", "app", env=env).stdout
+        self.assertRegex(text, rf"#{made[app]} +app ")
+        self.assertNotRegex(text, rf"(?m)^#({made[lib]}|{made[None]}) ")
+        summary, found = heads("--repo", "app", "--repo", "fleet")
+        self.assertIn("2 unscheduled · 2 followups · 2 work", summary)
+        self.assertRegex(self.call("today", "--repo", "fleet", env=env).stdout, rf"#{made[None]} +fleet ")
+        rows = json.loads(self.call("today", "--repo", "lib", "--json").stdout)
+        self.assertEqual([(row["title"], row["repo"]) for row in rows], [(f"Busy {lib}", lib)])
+        refused = self.call("today", "--repo", "nope", code=2)
+        self.assertIn("unknown repository 'nope'; known: app, lib, fleet", refused.stderr)
+        self.assertEqual(refused.stdout, "")
+
 
 if __name__ == "__main__":
     unittest.main()
