@@ -784,7 +784,7 @@ class Supervisor:
             except ProcessLookupError:
                 return True
             except OSError:
-                return False
+                pass  # EPERM may be a group of zombies only (sd:6406): `gone` decides
             stop = time.monotonic() + wait
             while time.monotonic() < stop:
                 if gone():

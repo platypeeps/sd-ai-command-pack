@@ -51,7 +51,9 @@ and the complete preflight report under
 `~/Library/LaunchAgents/<prefix>.sd-dashboard.plist` (prefix from
 `SYSTEM_TOOLS_LABEL_PREFIX`, default `local.system-tools`). The new service must return
 `/health` with the expected schema, library path, and build digests, and its
-process ID must match the newly loaded LaunchAgent. Health reports the build
+parent process ID must match the newly loaded LaunchAgent: the plist starts
+`dashboard.sh serve` under `/bin/bash -c`, so TCC charges disk access to
+Apple's bash, not to the Homebrew python (sd:6444). Health reports the build
 captured when the server started and becomes unhealthy if its files change;
 an older process cannot claim the new bytes just installed.
 It also reports `commit`, the checkout HEAD it started on; `dashboard.sh health`
