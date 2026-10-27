@@ -1928,7 +1928,7 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
         self.assertEqual([row["title"] for row in rows], ["Busy"])
 
     def test_today_repo_keeps_one_repositorys_rows(self):
-        """pack sd:6488: `--repo NAME` filters every section and the counts; `fleet` is no repository."""
+        """pack sd:6488: `--only NAME` filters every section and the counts; `fleet` is no repository."""
         app, lib = "~/repos/example.test/app", "~/repos/example.test/lib"
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             for repo in (app, lib):
@@ -1945,18 +1945,18 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
             lines = self.call("today", *flags, env=env).stdout.splitlines()
             return lines[0], [line for line in lines if line.endswith(")") and line.split(" (")[0] in HEADINGS.values()]
 
-        summary, found = heads("--repo", "app")
+        summary, found = heads("--only", "app")
         self.assertIn("1 unscheduled · 1 followups · 1 work", summary)
         self.assertIn("Followups (1)", found)
-        text = self.call("today", "--repo", "app", env=env).stdout
+        text = self.call("today", "--only", "app", env=env).stdout
         self.assertRegex(text, rf"#{made[app]} +app ")
         self.assertNotRegex(text, rf"(?m)^#({made[lib]}|{made[None]}) ")
-        summary, found = heads("--repo", "app", "--repo", "fleet")
+        summary, found = heads("--only", "app", "--only", "fleet")
         self.assertIn("2 unscheduled · 2 followups · 2 work", summary)
-        self.assertRegex(self.call("today", "--repo", "fleet", env=env).stdout, rf"#{made[None]} +fleet ")
-        rows = json.loads(self.call("today", "--repo", "lib", "--json").stdout)
+        self.assertRegex(self.call("today", "--only", "fleet", env=env).stdout, rf"#{made[None]} +fleet ")
+        rows = json.loads(self.call("today", "--only", "lib", "--json").stdout)
         self.assertEqual([(row["title"], row["repo"]) for row in rows], [(f"Busy {lib}", lib)])
-        refused = self.call("today", "--repo", "nope", code=2)
+        refused = self.call("today", "--only", "nope", code=2)
         self.assertIn("unknown repository 'nope'; known: app, lib, fleet", refused.stderr)
         self.assertEqual(refused.stdout, "")
 

@@ -1303,7 +1303,7 @@ def _rule_batch(review: Any, workflow: Any, connection: Any, args: argparse.Name
 
 
 def _today_repos(connection: Any, names: list[str] | None) -> tuple[list[str | None] | None, str]:
-    """The `item.repo` keys `--repo` names by short name, None for `fleet`, or the names it does not know (pack sd:6488)."""
+    """The `item.repo` keys `--only` names by short name, None for `fleet`, or the names it does not know (pack sd:6488)."""
     if not names:
         return None, ""
     from sd_db import repos
@@ -1324,7 +1324,7 @@ def run_today(args: argparse.Namespace) -> int:
     sd_db, _ = _library()
     connection = sd_handoff_rows.connect(sd_db, write=False)
     try:
-        keep, unknown = _today_repos(connection, args.repo)
+        keep, unknown = _today_repos(connection, args.only)
         if unknown:
             print(f"sd: {unknown}", file=sys.stderr)
             return 2
@@ -1671,7 +1671,7 @@ def register(groups: Any, store: Any) -> None:
     today = groups.add_parser(
         "today", help="reports needing attention, decisions, open followups, then due and active work")
     _output(today, "today")
-    today.add_argument("--repo", action="append", metavar="NAME",
+    today.add_argument("--only", action="append", metavar="NAME",
                        help="keep only this repository's rows, by short name (system), or fleet for items in "
                             "none; repeat for more; every section and count follows")
     today.set_defaults(handler=run_today)

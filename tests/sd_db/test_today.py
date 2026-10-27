@@ -330,7 +330,7 @@ class TheRepositoryFilter(TodayCase):
         self.assertEqual([row["repo"] for row in today.attention(self.connection, repos=[LIB])], [LIB])
 
     def test_none_keeps_the_rows_of_no_repository(self):
-        """pack sd:6488: `sd today --repo fleet` passes None, the key of an item in no repository."""
+        """pack sd:6488: `sd today --only fleet` passes None, the key of an item in no repository."""
         for repo in (APP, None):
             item = self.item(f"Open {repo}", repo=repo)
             add_note(self.connection, item, "followup", f"Chase {item}")
