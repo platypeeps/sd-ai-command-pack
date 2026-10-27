@@ -18,6 +18,11 @@ import tempfile
 DROPPED = {"SD_SKIP_HOOKS", "SD_COVERAGE_PROCESS_START", "PYTHONPATH", "CI", "GITHUB_ACTIONS",
            "TEST_CHANGED_FILES", "CHANGED", "MAKEFLAGS", "MFLAGS", "MAKELEVEL", "SD_AGENT_SESSION"}
 
+#: Git reads no global or system config under test (sd:6386): a satellite's global `fetch.prune=true` failed a
+#: fixture's fetch. `tests/__init__.py` sets these for the whole test process, so a test that commits gives git
+#: its identity by env or in the fixture's local config.
+GIT_ISOLATION = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
+
 
 @functools.cache
 def home() -> str:
@@ -31,6 +36,6 @@ def clean_environment(**extra: str) -> dict[str, str]:
 
     environment = {key: value for key, value in os.environ.items()
                    if not key.startswith(("GIT_", "COVERAGE_", "SD_COVERAGE_")) and key not in DROPPED}
-    environment.update({"GIT_CONFIG_GLOBAL": os.devnull, "HOME": home(), "XDG_CONFIG_HOME": home(),
+    environment.update({**GIT_ISOLATION, "HOME": home(), "XDG_CONFIG_HOME": home(),
                         "TEST_WORKERS": "4", "PYTHONDONTWRITEBYTECODE": "1", **extra})
     return environment
