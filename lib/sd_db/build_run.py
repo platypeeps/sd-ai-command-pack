@@ -21,6 +21,10 @@ A write that changes no row stops the supervisor before its next child.
 The builder is judged by its last stream line, never its exit code (probe
 #28947). Nothing before `enqueuing` pushes: `sd-ship lane enqueue` publishes
 the head, behind the enqueuing compare-and-set that a requested cancel fails.
+
+The same tick reaps and claims draft runs (`sd_db.draft`, pack sd:6361), one
+at a time, and `DraftSupervisor` walks one: a read-only `claude -p` in the
+repository's checkout, its reply parsed and written by `draft.write`.
 """
 
 from __future__ import annotations
@@ -36,7 +40,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import build, paths, sessions
+from . import build, draft, paths, sessions
 from .build import Probe
 from .ship import this_host
 from .writes import add_note, now, record_cost, record_state
@@ -91,6 +95,36 @@ FIX = """The review of branch {branch} found these blockers. Fix each one fail-f
 {worktree}, then update the body at {body}. Never push. Your final message is your report.
 
 {blockers}
+"""
+
+DRAFT = """You are the headless lead, run by the build dispatcher (pack sd:6361). Draft the spec for one
+captured item. You hold the read tools only: read the repository in the current directory, its CLAUDE.md
+and AGENTS.md, and the code the item touches. You write nothing; the dispatcher writes your reply.
+
+The item is sd:{item}, in {repo}:
+Title: {title}
+{body}
+
+Use the existing context: the item, the repository and its rules. Ask only what would change the work and
+the repository cannot answer. State the problem as an outsider would recognise it, and keep requirements
+apart from assumptions. Each acceptance criterion names a check and its result ("`make test` passes with 0
+failures"), never an intention. When the shape needs a design page before code, say so in the approach.
+
+Your final message is the reply, in exactly this form and nothing else:
+
+## Spec
+
+Problem: <what is wrong today>
+Approach: <the shape of the change, and the alternative you rejected with the reason>
+Acceptance criteria:
+- <a check and its result>
+Risks: <what could make this wrong>
+
+## Questions
+
+<At most {questions}, only those whose answer changes the work. Each is its text, then two or more lines
+that start "Option:", the recommended one first, ending " (Recommended)". Leave the section out when there
+is none.>
 """
 
 RESUME = """Your run was interrupted. Continue the brief in {worktree}: finish the items, commit, write the
@@ -245,7 +279,7 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
     a reason the caller found (such as an unwritable log folder).
     """
     record_state(connection, "heartbeat", key=HEARTBEAT, body={"pid": os.getpid(), "owner": owner})
-    reaped = build.reap(connection, probe=probe, kill=kill)
+    reaped = build.reap(connection, probe=probe, kill=kill) + draft.reap(connection, probe=probe, kill=kill)
     moved = watch(connection, lane=lane, probe=probe)
     claimed: list[str] = []
     while not why and len(claimed) < build.MACHINE_CAP:
@@ -258,12 +292,18 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
         if taken is None:
             break
         claimed.append(taken["id"])
+    drafted: list[str] = []
+    if not why:
+        # After the builds: a draft takes what machine room they leave, and no repository slot.
+        available = build.room(connection, load=load, load_cap=load_cap, interactive=interactive)
+        taken = draft.claim(connection, owner=owner, available=available)
+        drafted += [taken["id"]] if taken else []
     spawned = []
-    for row in build.open_runs(connection):
+    for row in [*build.open_runs(connection), *draft.open_runs(connection)]:
         if row["outcome"] is None and row["supervisor_pid"] is None and row["step"] != "enqueued":
             spawn(row["id"])
             spawned.append(row["id"])
-    return {"reaped": reaped, "moved": moved, "claimed": claimed, "spawned": spawned, "why": why}
+    return {"reaped": reaped, "moved": moved, "claimed": claimed, "drafted": drafted, "spawned": spawned, "why": why}
 
 
 def spawn(argv: list[str], *, log: Path) -> int:
@@ -278,6 +318,14 @@ def spawn(argv: list[str], *, log: Path) -> int:
 def log_dir(log_root: Path, repo: str) -> Path:
     """`<bulk root>/<repository>/build/`, the design's log folder."""
     return log_root / paths.expand(repo).name / "build"
+
+
+def _environ(environ: dict | None) -> dict:
+    env = dict(os.environ if environ is None else environ)
+    # The token reaches the child's environment only: no row or log holds it.
+    if env.get("CUSTOM_CLAUDE_CODE_OAUTH_TOKEN"):
+        env["CLAUDE_CODE_OAUTH_TOKEN"] = env["CUSTOM_CLAUDE_CODE_OAUTH_TOKEN"]
+    return env
 
 
 class Supervisor:
@@ -303,11 +351,7 @@ class Supervisor:
         self.reviewed: str | None = None
         self.blockers: list[dict] = []
         self.last_beat = 0.0
-        env = dict(os.environ if environ is None else environ)
-        # The token reaches the child's environment only: no row or log holds it.
-        if env.get("CUSTOM_CLAUDE_CODE_OAUTH_TOKEN"):
-            env["CLAUDE_CODE_OAUTH_TOKEN"] = env["CUSTOM_CLAUDE_CODE_OAUTH_TOKEN"]
-        self.env = env
+        self.env = _environ(environ)
 
     # ----------------------------------------------------------- the walk
 
@@ -737,3 +781,85 @@ class Supervisor:
                     return True
                 time.sleep(0.05)
         return gone()
+
+
+class DraftSupervisor(Supervisor):
+    """One draft run's supervisor (pack sd:6361): `drafting`, then `draft.write` or `draft.end`.
+
+    It shares the build supervisor's child, beat and group handling: the
+    child's group is recorded before it runs, a lost run ends it, and the
+    `timeout` (`draft.BUDGET_MINUTES`) ends a hung one, which the reap
+    retries once. The child holds `draft.TOOLS` only, in `dontAsk` mode and
+    with no MCP server, so its one way to the database is its reply.
+    """
+
+    def __init__(self, connection, ident: str, *, tools: Tools, log_root: Path, environ: dict | None = None,
+                 beat_seconds: float = BEAT_SECONDS, timeout: float = draft.BUDGET_MINUTES * 60,
+                 grace: float = GRACE_SECONDS, probe=Probe):
+        self.db, self.ident, self.tools, self.probe = connection, ident, tools, probe
+        self.beat_seconds, self.timeout, self.grace = beat_seconds, timeout, grace
+        self.row = build.run(connection, ident)
+        self.logs = log_dir(log_root, self.row["repo"])
+        self.repo = self.work = paths.expand(self.row["repo"])
+        self.log = self.logs / f"{ident}.jsonl"
+        self.item = connection.execute("SELECT item FROM assignment WHERE id = ?",
+                                       (self.row["assignment"],)).fetchone()["item"]
+        self.last_beat = 0.0
+        self.env = _environ(environ)
+
+    def run(self) -> dict:
+        pid = os.getpid()
+        if not build.register(self.db, self.ident, pid=pid, pgid=os.getpgrp(), start=self.probe.started(pid)):
+            return {"run": self.ident, "outcome": None, "why": "another supervisor holds the run, or it ended"}
+        self.logs.mkdir(parents=True, exist_ok=True)
+        self.last_beat = time.monotonic()
+        try:
+            return self.drafting()
+        except (Lost, Cancelled):
+            return {"run": self.ident, "outcome": None, "why": "the run ended or moved under this supervisor"}
+        except TimedOut:
+            return self.finish("timed_out", f"the draft ran past {self.timeout:g} s; its group was ended")
+        except Survivor as survivor:
+            return self.finish("blocked", str(survivor))
+
+    def finish(self, outcome: str, detail: str, *, question: str | None = None) -> dict:
+        ended = draft.end(self.db, self.ident, outcome, detail)
+        return ended or {"run": self.ident, "outcome": None, "why": "the run ended or moved before its last write"}
+
+    def argv(self) -> list[str]:
+        title, body = draft.item_text(self.db, self.item)
+        prompt = DRAFT.format(item=self.item, repo=self.row["repo"], title=title, body=body.strip() or "(no body)",
+                              questions=draft.QUESTIONS_MAX)
+        return [*self.tools.claude, "-p", prompt, "--output-format", "stream-json", "--verbose",
+                "--tools", *draft.TOOLS, "--permission-mode", "dontAsk", "--strict-mcp-config",
+                "--max-turns", str(draft.MAX_TURNS), "--model", self.row["model"] or build.OPUS]
+
+    def drafting(self) -> dict:
+        if not build.write(self.db, self.ident, step="drafting", heartbeat_at=now(),
+                           log_path=str(self.log)):
+            raise Lost
+        self.last_beat = time.monotonic()
+        offset = self.log.stat().st_size if self.log.exists() else 0
+        self.child(self.argv(), cwd=self.repo, name="claude", out=self.log, session=True)
+        with open(self.log, "rb") as handle:
+            handle.seek(offset)
+            lines = handle.read().decode("utf-8", "replace").splitlines()
+        verdict = judge(lines, session=self.fresh()["session_id"])
+        final = verdict.get("final")
+        if final is not None:
+            fields: dict[str, Any] = {"final": json.dumps(final, sort_keys=True)[:65536]}
+            if verdict.get("session_id"):
+                fields["session_id"] = verdict["session_id"]
+            if not build.write(self.db, self.ident, **fields):
+                raise Lost
+            self.cost(final)
+        if verdict["state"] != "pass":
+            # A turn limit is no loss here: a fresh run has no session to resume, so it blocks as any other end.
+            return self.finish("blocked", f"{verdict['why']}; nothing was written; log {self.log}")
+        parsed = draft.parse(final.get("result") if isinstance(final, dict) else None)
+        if parsed is None:
+            return self.finish("blocked", f"the reply has no `## Spec`, or a question short of two Option: "
+                                          f"lines; nothing was written; log {self.log}")
+        if not draft.write(self.db, self.ident, *parsed):
+            raise Lost
+        return {"run": self.ident, "outcome": "done", "questions": len(parsed[1])}

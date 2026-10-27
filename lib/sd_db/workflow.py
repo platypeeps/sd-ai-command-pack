@@ -734,6 +734,8 @@ def change_status(
                 way_out = f"cancel queued assignment {active['id']} first"
             elif active["scope"] == "build":
                 way_out = f"cancel running build assignment {active['id']} first"
+            elif active["scope"] == "draft":
+                way_out = "its draft is running; it ends within its 15-minute bound"
             else:
                 way_out = "it is running, and no verb cancels a running assignment now that the runner is gone"
             raise TransitionRefused(f"item {item} has queued or running assignment {active['id']}; {way_out}")
@@ -742,6 +744,16 @@ def change_status(
         refuse_base_status(row)
         if row["status"] == target:
             return state
+        if target == "ready":
+            # A ready item is always buildable: an open question a draft run
+            # asked is answered first (pack sd:6361, ruling #31097). Questions
+            # from other sources keep the old rule.
+            asked = [note for note in state["notes"] if note["kind"] == "question" and not note["resolved_at"]
+                     and (note["session"] or "").startswith("draft:")]
+            if asked:
+                named = "; ".join(f"#{note['id']}: {(note['body'].strip().splitlines() or [''])[0]}" for note in asked)
+                raise TransitionRefused(f"item {item} has {len(asked)} open draft "
+                                        f"question{'s' if len(asked) > 1 else ''}; answer each first: {named}")
         if row["kind"] == "work":
             if row["status"] == "done":
                 raise TransitionRefused("completed work is terminal; its delivery or cancellation history cannot be reopened here")
