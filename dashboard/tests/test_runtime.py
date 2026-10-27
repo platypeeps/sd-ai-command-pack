@@ -560,12 +560,30 @@ class RuntimeSafety(unittest.TestCase):
         # subcommand added tomorrow is covered without anyone editing this
         # test. `grants` was the entrypoint that shipped without -I, so a
         # caller's PYTHONPATH decided what its Full Disk Access probe ran.
+        # `serve` runs it as a child rather than by exec (sd:6435).
         script = (runtime.HERE / "dashboard.sh").read_text(encoding="utf-8")
         execs = [line.strip() for line in script.splitlines()
-                 if line.strip().startswith('exec "$runtime_python"')]
-        self.assertTrue(execs, "no $runtime_python exec found in dashboard.sh")
+                 if line.strip().removeprefix("exec ").startswith('"$runtime_python"')]
+        self.assertTrue(execs, "no $runtime_python run found in dashboard.sh")
         for line in execs:
             self.assertIn(' -I ', line, line)
+
+    def test_serve_keeps_the_shell_as_the_servers_parent(self):
+        # sd:6435. launchd starts `dashboard.sh serve`; had the shell exec'd
+        # python, macOS would charge the server's TCC checks to python's
+        # identity, which a brew upgrade drops. The stub prints its parent.
+        with tempfile.TemporaryDirectory() as directory:
+            stub = Path(directory) / "python"
+            stub.write_text('#!/bin/sh\nprintf "%s" "$PPID"\n')
+            stub.chmod(0o755)
+            env = {"PATH": os.environ["PATH"], "HOME": directory,
+                   "SYSTEM_TOOLS_CONFIG": directory, "SD_DASHBOARD_PYTHON": str(stub)}
+            launched = subprocess.Popen([str(runtime.HERE / "dashboard.sh"), "serve"], env=env,
+                                        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        stdin=subprocess.DEVNULL, text=True)
+            out, err = launched.communicate(timeout=30)
+        self.assertEqual(launched.returncode, 0, err)
+        self.assertEqual(out, str(launched.pid), "python is not a child of dashboard.sh")
 
 
 class BuildIdentity(unittest.TestCase):

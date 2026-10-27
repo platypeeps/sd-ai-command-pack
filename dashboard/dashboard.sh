@@ -181,7 +181,11 @@ cmd_serve() {
     echo "dashboard: missing installed runtime $runtime_python; run the pack's setup or set SD_DASHBOARD_PYTHON to its provisioned interpreter" >&2
     exit 1
   fi
-  exec "$runtime_python" -I "$DIR/sd_dashboard/bootstrap.py" server "$@"
+  # A child, not exec (sd:6435): launchd starts this script, and macOS
+  # charges the server's TCC checks (git, du) to the responsible process.
+  # Kept as /bin/sh, that identity survives a brew upgrade; exec'd python's
+  # does not. launchd stops the whole process group, so no signal relay.
+  "$runtime_python" -I "$DIR/sd_dashboard/bootstrap.py" server "$@"
 }
 
 cmd_runtime() {
