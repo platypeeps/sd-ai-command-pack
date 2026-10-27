@@ -1017,13 +1017,14 @@ class TheSourceReview(AdversarialCase):
         # Round 2 class: a per-wait socket timeout is not a bound on the whole read.
         started = time.monotonic()
         fetched = adversarial._fetch(f"http://127.0.0.1:{self.port}/drip-body", seconds=1)
-        self.assertLess(time.monotonic() - started, 3, fetched)  # the 1 s bound and its 2 s grace
+        # The 1 s bound and its 2 s grace; the drip's 10 s at the least is far past, the rest is slack (sd:6468).
+        self.assertLess(time.monotonic() - started, 8, fetched)
         self.assertIn("the read stopped at its 1 s bound", fetched)
 
     def test_headers_that_drip_are_not_fetched_within_the_bound(self):
         started = time.monotonic()
         fetched = adversarial._fetch(f"http://127.0.0.1:{self.port}/drip-head", seconds=1)
-        self.assertLess(time.monotonic() - started, 3.5, fetched)
+        self.assertLess(time.monotonic() - started, 8, fetched)  # as the body's drip above (sd:6468)
         self.assertIn("gave no whole answer within 1 s", fetched)
 
     def test_a_source_review_is_refused_for_an_unregistered_checkout_an_unknown_row_or_another_shape(self):

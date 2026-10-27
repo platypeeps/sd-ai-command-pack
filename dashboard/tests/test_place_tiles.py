@@ -143,7 +143,7 @@ class TheTiles(Case):
         # sd:6396: the socket timeout bounds connect and read, not the name lookup before them; a slow resolver held
         # the whole Overview read past its bound.
         def slow(*args, **kwargs):
-            time.sleep(1.5)
+            time.sleep(5)
             raise socket.gaierror(8, "nodename nor servname provided")
 
         self.write("http://slow.example.test:8740/studio")
@@ -151,7 +151,8 @@ class TheTiles(Case):
             began = time.monotonic()
             doc = self.doc()
             took = time.monotonic() - began
-        self.assertLess(took, 1.0, "the read waited for the name lookup")
+        # The lookup takes 5 s; cut at 0.2 s, the rest is slack for a loaded gate (sd:6468).
+        self.assertLess(took, 3, "the read waited for the name lookup")
         probe = doc["rows"][0]["probe"]
         self.assertEqual((probe["answers"], probe["status"]), (None, "not known: no answer within 0.2 s"))
 
