@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from sd_db import build, build_run, operations, runner, sessions
+from sd_db import build, build_run, draft, operations, runner, sessions
 from sd_db.database import connect
 from sd_db.migrate import initialise
 from sd_db.ship import this_host
@@ -31,6 +31,7 @@ from sd_db.workflow import item_state
 from sd_db.writes import add_note, create_item, upsert_repo
 
 from . import support
+from .test_build import Probe as GoneProbe
 
 BIN = Path(__file__).resolve().parents[2] / "bin"
 with mock.patch("sys.path", [str(BIN), *sys.path]):
@@ -82,6 +83,17 @@ FAKE = textwrap.dedent('''
         line({"type": "system", "subtype": "init", "session_id": session})
         if mode == "hang":
             time.sleep(120)
+        if mode.startswith("draft"):
+            # A draft run's reply (pack sd:6361): no file, no commit; `draft-bad` has no `## Spec`.
+            reply = ("## Spec\\n\\nProblem: x\\n\\n## Questions\\n\\nWhich?\\nOption: A (Recommended)\\nOption: B\\n"
+                     if mode != "draft-bad" else "Here is the spec you asked for.")
+            final = {"type": "result", "subtype": "success", "is_error": False, "permission_denials": [],
+                     "session_id": session, "result": reply, "total_cost_usd": 0.31,
+                     "usage": {"input_tokens": 5, "output_tokens": 7}}
+            if mode == "draft-deny":
+                final["permission_denials"] = [{"tool_name": "Write", "tool_input": {"file_path": "x"}}]
+            line(final)
+            sys.exit(0)
         if mode == "slow":
             time.sleep(3)
         if mode == "silent":
@@ -743,6 +755,131 @@ class Tick(Case):
         self.tick()
         row = build.run(self.db, run["id"])
         self.assertEqual((row["step"], row["outcome"], row["released_at"]), ("enqueued", None, None))
+
+
+class Drafts(Case):
+    """The draft supervisor and the tick's draft claim (pack sd:6361), with the fake `claude`."""
+
+    def queue(self):
+        self.items = [create_item(self.db, kind="task", title="Draft me", body={"text": "The capture's one line."},
+                                  repo=str(self.repo), status="planning")]
+        self.assignment = draft.queue_if_eligible(self.db, self.items[0], who="dashboard")
+        assert self.assignment is not None
+
+    def claimed(self):
+        self.queue()
+        run = draft.claim(self.db, owner="fixture", available=build.room(self.db, load=1.0, load_cap=40.0,
+                                                                         interactive=[]))
+        assert run is not None
+        return run
+
+    def drafter(self, ident, **options):
+        options = {"beat_seconds": 0.2, "timeout": 30, "grace": 0.5, **options}
+        return build_run.DraftSupervisor(self.db, ident, tools=self.tools, log_root=self.logs, environ=self.env,
+                                         **options)
+
+    def notes(self):
+        return [dict(row) for row in self.db.execute("SELECT * FROM note WHERE item = ? ORDER BY id", self.items)]
+
+    def assignment_status(self):
+        return self.db.execute("SELECT status FROM assignment WHERE id = ?", (self.assignment,)).fetchone()[0]
+
+    def test_a_draft_run_writes_its_spec_and_questions(self):
+        run = self.claimed()
+        self.plan(claude=["draft"])
+        ended = self.drafter(run["id"]).run()
+        self.assertEqual(ended, {"run": run["id"], "outcome": "done", "questions": 1})
+        notes = [note for note in self.notes() if note["session"] == f"draft:{run['id']}"]
+        self.assertEqual([note["kind"] for note in notes], ["comment", "question"])
+        self.assertTrue(notes[0]["body"].startswith("Draft spec:"))
+        self.assertEqual(notes[1]["body"], "Which?\nOption: A (Recommended)\nOption: B")
+        self.assertEqual((self.assignment_status(), self.statuses()), ("done", ["planning"]))
+        row = build.run(self.db, run["id"])
+        self.assertEqual((row["outcome"], row["step"], row["session_id"]), ("done", "drafting", "session-fixture"))
+        cost = self.db.execute("SELECT * FROM cost WHERE pass = ?", (run["id"],)).fetchone()
+        self.assertEqual((cost["usd"], cost["assignment"]), (0.31, self.assignment))
+        prompt = self.calls("claude")[0]["argv"][1]
+        self.assertIn(f"sd:{self.items[0]}", prompt)
+        self.assertIn("The capture's one line.", prompt)
+
+    def test_a_draft_run_denies_write_tools(self):
+        """Failure table, Drafting: the run holds the read tools only, and a denial writes nothing."""
+        run = self.claimed()
+        self.plan(claude=["draft-deny"])
+        before = self.notes()
+        ended = self.drafter(run["id"]).run()
+        call = self.calls("claude")[0]
+        argv = call["argv"]
+        self.assertEqual(argv[argv.index("--tools"):argv.index("--tools") + 4], ["--tools", "Read", "Grep", "Glob"])
+        self.assertEqual(argv[argv.index("--permission-mode") + 1], "dontAsk")
+        self.assertNotIn("auto", argv)
+        self.assertIn("--strict-mcp-config", argv)
+        self.assertEqual((argv[argv.index("--max-turns") + 1], argv[argv.index("--model") + 1]), ("60", "opus"))
+        self.assertEqual(Path(call["cwd"]).resolve(), self.repo.resolve(), "it reads the repository's checkout")
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("permission denied: Write", build.run(self.db, run["id"])["detail"])
+        self.assertEqual((self.notes(), self.assignment_status(), self.statuses()), (before, "blocked", ["planning"]))
+
+    def test_an_unparsed_reply_writes_no_note(self):
+        """Failure table, Write: a reply with no `## Spec` is no draft; the run ends blocked with its log."""
+        run = self.claimed()
+        self.plan(claude=["draft-bad"])
+        before = self.notes()
+        ended = self.drafter(run["id"]).run()
+        self.assertEqual(ended["outcome"], "blocked")
+        row = build.run(self.db, run["id"])
+        self.assertIn(str(build_run.log_dir(self.logs, run["repo"]) / f"{run['id']}.jsonl"), row["detail"])
+        self.assertEqual((self.notes(), self.assignment_status(), self.statuses()), (before, "blocked", ["planning"]))
+        self.assertIsNone(row["released_at"], "held until the reap reads the supervisor gone")
+        self.assertEqual(draft.reap(self.db, probe=GoneProbe(alive=False, group=False)), [])
+        self.assertIsNotNone(build.run(self.db, run["id"])["released_at"])
+
+    def test_a_hung_draft_is_killed_and_retried_once(self):
+        """Failure table, Drafting: the bound kills the group; a fresh run retries once, then a followup blocks it."""
+        run = self.claimed()
+        self.plan(claude=["hang", "hang"])
+        ended = self.drafter(run["id"], timeout=1.5).run()
+        self.assertEqual(ended["outcome"], "timed_out")
+        self.assertTrue(group_gone(build.run(self.db, run["id"])["builder_pgid"]))
+        retry = build.run(self.db, ended["retry"])
+        self.assertEqual((retry["step"], retry["run"], retry["session_id"]), ("claimed", 2, None))
+        again = self.drafter(retry["id"], timeout=1.5).run()
+        self.assertEqual((again["outcome"], again["retry"]), ("timed_out", None))
+        self.assertEqual((self.assignment_status(), self.statuses()), ("blocked", ["planning"]))
+        followups = [note["body"] for note in self.notes() if note["kind"] == "followup"]
+        self.assertEqual(len(followups), 1)
+        self.assertIn("Draft blocked:", followups[0])
+        self.assertEqual(draft.open_runs(self.db), [])
+
+    def test_a_tick_claims_and_spawns_one_draft(self):
+        self.queue()
+        spawned: list[str] = []
+        tick: dict[str, Any] = {"owner": "fixture", "spawn": spawned.append, "lane": lambda *_: None, "root": self.root / "worktrees",
+                "load": 1.0, "load_cap": 40.0, "interactive": []}
+        result = build_run.dispatch(self.db, **tick)
+        self.assertEqual((result["claimed"], len(result["drafted"]), spawned), ([], 1, result["drafted"]))
+        self.assertEqual(build_run.dispatch(self.db, **tick)["drafted"], [], "one draft at a time")
+        self.assertEqual(build_run.dispatch(self.db, **{**tick, "load": None})["drafted"], [])
+
+    def test_supervise_routes_a_draft_run_to_the_draft_supervisor(self):
+        run = self.claimed()
+        seen = []
+
+        class Fake:
+            def __init__(self, connection, ident, **options):
+                seen.append((type(self).__name__, ident, sorted(options)))
+
+            def run(self):
+                return {"run": seen[-1][1]}
+
+        args = mock.Mock(run=run["id"])
+        with mock.patch("sys.path", [str(BIN), *sys.path]), \
+                mock.patch.object(ADAPTER, "log_root", return_value=self.logs), \
+                mock.patch.object(ADAPTER.sd_handoff_rows, "connect", return_value=connect(self.database)), \
+                mock.patch.object(build_run, "DraftSupervisor", Fake), \
+                mock.patch("builtins.print"):
+            ADAPTER.supervise_build(args)
+        self.assertEqual(seen, [("Fake", run["id"], ["log_root", "tools"])])
 
 
 class Spawn(unittest.TestCase):

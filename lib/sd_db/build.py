@@ -52,6 +52,8 @@ from .writes import now as clock
 
 #: The assignment scope a Build press writes.
 SCOPE = "build"
+#: The scope of a draft run (`sd_db.draft`): it counts against the machine cap only, as it holds no branch.
+DRAFT = "draft"
 #: Code-writing builders per machine and per repository: the operator's standing rule.
 MACHINE_CAP = 6
 REPO_CAP = 3
@@ -66,6 +68,8 @@ RETRIES = 1
 PARKED = "Parked: build run {run} ended blocked; Retry on the Builds panel unparks it"
 #: The steps a run walks, each written before it starts.
 STEPS = ("claimed", "worktree", "building", "reviewing", "fixing", "enqueuing", "enqueued", "checking", "cleaning")
+#: A draft run's steps (`sd_db.draft`): it claims, then drafts.
+DRAFT_STEPS = ("claimed", "drafting")
 #: A note that sends the operator's finding to a bundle's next builder: Send to builder (pack sd:6020).
 FINDING = "Send to builder: "
 #: The model a bundle runs on (Q60): Sonnet only when every member's `fields.work_kind` is `mechanical`.
@@ -226,7 +230,10 @@ def room(connection, *, load: float | None, load_cap: float | None, interactive:
         "FROM runner_lease lease JOIN runner_run run ON run.id = lease.run "
         "LEFT JOIN assignment ON assignment.id = run.assignment WHERE lease.released_at IS NULL").fetchall()
     builds = [row for row in leases if row["scope"] == SCOPE]
-    headless = {row["session_id"] for row in builds if row["session_id"]}
+    drafts = connection.execute(
+        "SELECT runner_run.session_id FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
+        "WHERE runner_run.released_at IS NULL AND assignment.scope = ?", (DRAFT,)).fetchall()
+    headless = {row["session_id"] for row in [*builds, *drafts] if row["session_id"]}
     used: dict[str, int] = {}
     for row in builds:
         used[row["repo"]] = used.get(row["repo"], 0) + 1
@@ -236,7 +243,7 @@ def room(connection, *, load: float | None, load_cap: float | None, interactive:
         if repo:
             used[repo] = used.get(repo, 0) + 1
     held = sorted({row["repo"] for row in leases if row["scope"] != SCOPE and (row["exclusive"] or row["quarantine"])})
-    machine = MACHINE_CAP - len(builds) - len(others)
+    machine = MACHINE_CAP - len(builds) - len(drafts) - len(others)
     if not why and isinstance(load, (int, float)) and isinstance(load_cap, (int, float)):
         why = over_load(load, load_cap)
     if not why and machine <= 0:
@@ -512,7 +519,7 @@ def write(connection, ident: str, **fields) -> bool:
     """One supervisor write on its own run; False, with nothing written, once the run ended or was released."""
     if not fields or set(fields) - RUN_FIELDS:
         raise BuildRefused(f"unsupported build run write: {sorted(set(fields) - RUN_FIELDS)}")
-    if "step" in fields and fields["step"] not in STEPS:
+    if "step" in fields and fields["step"] not in (*STEPS, *DRAFT_STEPS):
         raise BuildRefused(f"no build step {fields['step']!r}")
     columns = ", ".join(f"{name} = ?" for name in fields)
     with transaction(connection):
@@ -807,11 +814,16 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
     every run the restore found, and a run it did not find is not this
     store's to judge.
     """
+    return _reap(connection, open_runs, _settle, now=now, probe=probe, kill=kill)
+
+
+def _reap(connection, runs, settle, *, now: str | None, probe, kill) -> list[dict]:
+    """`reap` over `runs(connection)`, each ended run passed to `settle`: a draft run's reap is this one too."""
     now = now or clock()
     settled: list[dict] = []
     if restoration_pending(connection):
         return settled
-    for row in open_runs(connection):
+    for row in runs(connection):
         if row["outcome"] in HELD:
             _release(connection, row, probe=probe)
             continue
@@ -840,7 +852,7 @@ def reap(connection, *, now: str | None = None, probe=Probe, kill=kill_group) ->
             survivors = [group for group in groups if not kill(group)]
             if survivors:
                 block = f"process group {', '.join(map(str, survivors))} still had a process after SIGKILL"
-        result = _settle(connection, row, block=block)
+        result = settle(connection, row, block=block)
         if result is not None:
             settled.append(result)
     return settled
@@ -1001,7 +1013,7 @@ def unpark(connection, item: int) -> None:
 
 
 def abandon(connection, reason: str) -> list[str]:
-    """End every unreleased build run `abandoned`, never retried; the ids.
+    """End every unreleased build or draft run `abandoned`, never retried; the ids.
 
     A restore and a promotion call it in the transaction that blocks the
     assignments: the rows came from a store, or a machine, that is no longer
@@ -1011,7 +1023,10 @@ def abandon(connection, reason: str) -> list[str]:
     """
     with transaction(connection):
         stamp = clock()
-        runs = [row["id"] for row in open_runs(connection) if row["outcome"] not in HELD]
+        runs = [row["id"] for row in connection.execute(
+            "SELECT runner_run.id, runner_run.outcome FROM runner_run JOIN assignment "
+            "ON assignment.id = runner_run.assignment WHERE runner_run.released_at IS NULL AND assignment.scope IN (?, ?) "
+            "ORDER BY runner_run.created_at, runner_run.id", (SCOPE, DRAFT)) if row["outcome"] not in HELD]
         for ident in runs:
             connection.execute("UPDATE runner_run SET outcome = 'abandoned', detail = COALESCE(detail, ?), "
                                "updated_at = ? WHERE id = ?", (reason, stamp, ident))

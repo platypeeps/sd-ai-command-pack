@@ -260,12 +260,14 @@ def dispatch_builds(args: argparse.Namespace) -> int:
         connection.close()
     print(json.dumps(result, ensure_ascii=False) if args.json else
           f"reaped {len(result['reaped'])}, moved {len(result['moved'])}, claimed {len(result['claimed'])}, "
-          f"spawned {len(result['spawned'])}" + (f"; no claim: {result['why']}" if result["why"] else ""))
+          f"drafted {len(result['drafted'])}, spawned {len(result['spawned'])}" + (f"; no claim: {result['why']}" if result["why"] else ""))
     return 0
 
 
 def supervise_build(args: argparse.Namespace) -> int:
-    """`sd assignments dispatch --supervise RUN`: walk one build run to the lane; the tick starts it in its own session."""
+    """`sd assignments dispatch --supervise RUN`: walk one build run to the lane, or one draft run to its spec
+    (pack sd:6361). The tick starts it in its own session; the run's assignment scope picks the supervisor.
+    """
     import sd_lib
     sd_db, _, build_run = build_modules()
     try:
@@ -276,7 +278,14 @@ def supervise_build(args: argparse.Namespace) -> int:
         raise WorkRefusal("sd.bulk_storage_root is unset, so a build run has no log folder")
     connection = sd_handoff_rows.connect(sd_db, write=True)
     try:
-        result = build_run.Supervisor(connection, args.run, tools=tools(build_run), log_root=root, cited=cited).run()
+        scope = connection.execute("SELECT assignment.scope FROM runner_run JOIN assignment "
+                                   "ON assignment.id = runner_run.assignment WHERE runner_run.id = ?",
+                                   (args.run,)).fetchone()
+        if scope is not None and scope[0] == build_run.draft.SCOPE:
+            result = build_run.DraftSupervisor(connection, args.run, tools=tools(build_run), log_root=root).run()
+        else:
+            result = build_run.Supervisor(connection, args.run, tools=tools(build_run), log_root=root,
+                                          cited=cited).run()
     except (sd_db.SdDbError, ValueError) as error:
         raise WorkRefusal(str(error)) from error
     finally:
@@ -321,7 +330,7 @@ def register(groups: Any) -> None:
             parser.set_defaults(handler=build_dispatcher)
             mode = parser.add_mutually_exclusive_group()
             mode.add_argument("--supervise", metavar="RUN", dest="run",
-                              help="supervise one build run to the lane; the tick starts it")
+                              help="supervise one build or draft run; the tick starts it")
             mode.add_argument("--sessions", action="store_true",
                               help="list the live Claude sessions and the worktrees each holds")
             parser.add_argument("--json", action="store_true")
