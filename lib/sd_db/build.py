@@ -669,6 +669,9 @@ class Probe:
             os.killpg(pgid, 0)
         except ProcessLookupError:
             return False
+        except PermissionError:
+            # macOS answers EPERM for a group of zombies only (sd:6406): one runs nothing, so it is gone.
+            return False if _zombies_only(pgid) else None
         except OSError:
             return None
         return True
@@ -683,6 +686,19 @@ class Probe:
         if done.returncode != 0:
             return None
         return " ".join(done.stdout.split()) or None
+
+
+def _zombies_only(pgid: int) -> bool:
+    """Whether `ps` reads every member of the group as a zombie (none left counts); False when unread."""
+    try:
+        done = subprocess.run(["ps", "-A", "-o", "pgid=,stat="], capture_output=True, text=True,
+                              timeout=10, check=False, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if done.returncode != 0:
+        return False
+    rows = [line.split() for line in done.stdout.splitlines()]
+    return all(row[1].startswith("Z") for row in rows if len(row) == 2 and row[0] == str(pgid))
 
 
 def _age(stamp: str, now: str) -> float:
@@ -779,14 +795,10 @@ def kill_group(pgid: int) -> bool:
     except ProcessLookupError:
         return True
     except OSError:
-        return False
+        pass  # EPERM may be a group of zombies only: the probe decides
     for _ in range(20):
-        try:
-            os.killpg(pgid, 0)
-        except ProcessLookupError:
+        if Probe.group(pgid) is False:
             return True
-        except OSError:
-            return False
         time.sleep(0.1)
     return False
 
