@@ -26,7 +26,6 @@
       "summary": "plan to build to ship",
       "skills": [
         "sd-check",
-        "sd-help",
         "sd-next",
         "sd-plan",
         "sd-receive-review",
@@ -39,7 +38,6 @@
     "act": {
       "summary": "brief to draft to send",
       "skills": [
-        "sd-diagram",
         "sd-humanizer",
         "sd-presentation",
         "sd-publish"

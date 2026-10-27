@@ -32,16 +32,21 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from sd_dashboard import (
+    documents,
+    documents_screen,
+    learning_screen,
+    research_screen,
+    server,
+    v2,
+)
 from sd_db import connect, create_item, records, writes
-
-from sd_dashboard import documents, documents_screen, learning_screen, research_screen, server, v2
-
 from support import NOW, ScreenCase
 from test_v2_read import READ_SHELL
-from test_v2_today import OSASCRIPT, Refused
-from test_v2_tasks import SHELL, STAND_IN, VIEW_SHELL
-from test_workflow_actions import BrowserSession
 from test_v2_registry import Registers
+from test_v2_tasks import SHELL, STAND_IN, VIEW_SHELL
+from test_v2_today import OSASCRIPT, Refused
+from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent
 DOCUMENTS_JS = (V2 / "static" / "documents.js").read_text(encoding="utf-8")
@@ -311,7 +316,8 @@ class TheViewState(ScreenCase):
                                          config_path=self.conf, repo_root=self.base)
 
     def test_a_write_names_a_served_file_and_a_field(self):
-        ask = lambda payload: documents_screen.request(payload, config_path=self.conf, repo_root=self.base)
+        def ask(payload):
+            return documents_screen.request(payload, config_path=self.conf, repo_root=self.base)
         for payload in ({}, {"root": "lab", "file": "plan.html"}, {"root": "lab", "file": "plan.html", "pinned": True, "seen": 1},
                         {"root": "lab", "pinned": True}, {"root": 1, "file": "plan.html", "pinned": True},
                         {"root": "lab", "file": "gone.html", "pinned": True}, {"root": "lab", "file": "../x.html", "hidden": True},
@@ -364,7 +370,8 @@ class TheRootViews(ScreenCase):
         self.assertIn("civic/brief.html", rows)
 
     def test_a_root_write_names_a_listed_root_and_a_label_or_hidden(self):
-        ask = lambda payload: documents_screen.request(payload, config_path=self.conf, repo_root=self.base)
+        def ask(payload):
+            return documents_screen.request(payload, config_path=self.conf, repo_root=self.base)
         for payload in ({"root": "lab"}, {"root": "lab", "pinned": True}, {"root": "lab", "tags": []},
                         {"root": "gone", "hidden": True}, {"root": "twin", "label": "Twin"},
                         {"root": "lab", "file": "plan.html", "label": "x"}, {"root": "lab", "label": 5}):
@@ -586,7 +593,8 @@ R.det = ELS.details.html; F.hidden = true; render(); R.empty = ELS.empty.html;""
 for (const [id, o] of [['document.pin', plan], ['document.hide', plan], ['document.unpin', over], ['document.unhide', over]]) {
   shellRun(cmd(id), o); await flush(); lastToast().undo(); await flush(); }
 R.when = [cmd('document.pin').when(over), cmd('document.hide').when(over)];""", answer=self.VIEW % json.dumps(self.doc))
-        at = lambda file, **change: {"root": "lab", "file": file, **change}
+        def at(file, **change):
+            return {"root": "lab", "file": file, **change}
         self.assertEqual(self.view_posts(out), [
             at("plan.html", pinned=True), at("plan.html", pinned=False), at("plan.html", hidden=True), at("plan.html", hidden=False),
             at("overview.html", pinned=False), at("overview.html", pinned=True), at("overview.html", hidden=False),
@@ -669,7 +677,8 @@ shellRun(cmd('document.untag'), C.get('tag:b')); await flush(); lastToast().undo
         self.assertIn('id="tag-in"', out["R"]["det"])
         self.assertIn('data-cmd="document.untag"', out["R"]["det"])
         self.assertIs(out["R"]["when"], True)
-        tags = lambda *t: {"root": "lab", "file": "plan.html", "tags": list(t)}
+        def tags(*t):
+            return {"root": "lab", "file": "plan.html", "tags": list(t)}
         self.assertEqual(self.view_posts(out), [tags("board", "q4-plan"), tags("board"), tags(), tags("board")])
         self.assertEqual([t[0] for t in out["toasts"]], ["The plan not changed: already tagged board", "Tagged q4-plan · The plan",
                                                         "Tag undone · The plan", "Removed tag board", "Untag undone · board on The plan"])
@@ -693,7 +702,8 @@ FIELD_VALUES.tag = 'Board Q1'; shellRun(tag, other); await flush();""", answer=s
         click = "ELS.facets.listeners.click[0]({ target: { closest: () => ({ id: 'f-hidden', dataset: {}, getAttribute: () => null }) } });"
         out = self.run_page(f"""R.rows = ELS.rows.html; R.facets = ELS.facets.html; {click}
 R.hidden = ELS.rows.html; R.url = {self.URL}; {click} R.back = ELS.rows.html;""")
-        ids = lambda rows: re.findall(r'data-id="([^"]+)"', rows)
+        def ids(rows):
+            return re.findall(r'data-id="([^"]+)"', rows)
         # Pinned first; the hidden one is out of the list until the filter shows it.
         self.assertEqual(ids(out["R"]["rows"]), ["lab/plan.html", "lab/orphan.html", "lab/overview.html"])
         self.assertRegex(out["R"]["facets"], r'id="f-hidden"[^>]*>.*Hidden <span class="n">1</span>')
@@ -854,7 +864,8 @@ box('lab', true); await flush(); R.two = ELS.rows.html; R.after = ELS.facets.htm
         before = out["R"]["before"]
         self.assertEqual(re.findall(r'<input type="checkbox" data-pick="repo" value="([^"]+)"', before), ["civic", "lab", "quiet"])
         self.assertNotIn('data-f="repo"', before)
-        ids = lambda rows: re.findall(r'data-id="([^"]+)"', rows)
+        def ids(rows):
+            return re.findall(r'data-id="([^"]+)"', rows)
         self.assertEqual(ids(out["R"]["one"]), ["civic/brief.html"])
         self.assertEqual(sorted(ids(out["R"]["two"])), ["civic/brief.html", "lab/orphan.html", "lab/overview.html", "lab/plan.html"])
         self.assertRegex(out["R"]["after"], r'<details class="fpick" data-pick="repo" open><summary[^>]*><span id="f-repo-v">2 picked</span>')
@@ -885,7 +896,8 @@ box('lab', true); await flush(); R.two = ELS.rows.html; R.after = ELS.facets.htm
         for row in self.doc["documents"]:
             row["pub"] = {"lab/plan.html": {"choice": {"notion": True, "drive": False}, "copies": []},
                           "lab/overview.html": {"choice": {}, "copies": [{"channel": "drive", "title": "Drive", "state": "has"}]}}.get(f"{row['key']}/{row['file']}")
-        ids = lambda out: re.findall(r'data-id="([^"]+)"', out["R"]["rows"])
+        def ids(out):
+            return re.findall(r'data-id="([^"]+)"', out["R"]["rows"])
         out = self.run_page("R.rows = ELS.rows.html; R.facets = ELS.facets.html;", search="?dest=notion")
         self.assertEqual(ids(out), ["lab/plan.html"])
         self.assertIn('data-f="dest" data-v="none"', out["R"]["facets"])

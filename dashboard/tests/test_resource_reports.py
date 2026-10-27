@@ -14,17 +14,21 @@ from sd_dashboard import reports_screen
 
 HERE = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("fixture_collectors", HERE / "collectors.py")
-collectors = importlib.util.module_from_spec(spec); spec.loader.exec_module(collectors)
+collectors = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(collectors)
 
 class Resources(unittest.TestCase):
     def test_research_config_is_data_without_execution(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory); config = root / "research.conf.py"; marker = root / "executed"
+            root = Path(directory)
+            config = root / "research.conf.py"
+            marker = root / "executed"
             config.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('bad')\nA=dict(src='index.md', title='Title')\nDOCS=[dict(**A, out='read' + 'ing')]\n")
             self.assertEqual(collectors.read_research_config(config)["DOCS"], [{"src": "index.md", "title": "Title", "out": "reading"}])
             self.assertFalse(marker.exists())
             config.write_text(f"DOCS=__import__('pathlib').Path({str(marker)!r}).write_text('bad')\n")
-            with self.assertRaises(ValueError): collectors.read_research_config(config)
+            with self.assertRaises(ValueError):
+                collectors.read_research_config(config)
             self.assertFalse(marker.exists())
 
     def test_research_document_fields_are_validated_before_collection(self):
@@ -40,8 +44,12 @@ class Resources(unittest.TestCase):
 
     def test_computed_research_config_warns_without_hiding_valid_neighbor(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory); computed = root / "computed"; literal = root / "literal"
-            computed.mkdir(); literal.mkdir(); marker = root / "executed"
+            root = Path(directory)
+            computed = root / "computed"
+            literal = root / "literal"
+            computed.mkdir()
+            literal.mkdir()
+            marker = root / "executed"
             (computed / "research.conf.py").write_text(
                 f"from pathlib import Path\nPath({str(marker)!r}).write_text('bad')\n"
                 "A=dict(src='index.md', title='Computed')\n"
@@ -67,8 +75,10 @@ class Resources(unittest.TestCase):
 
     def tile(self, source):
         """A stand-in for `sd_tile.py`: a real child, read the way the real one is."""
-        directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
-        script = Path(directory.name) / "tile.py"; script.write_text(source)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        script = Path(directory.name) / "tile.py"
+        script.write_text(source)
         return patch.object(reports_screen, "TILE", script), Path(directory.name)
 
     def test_resource_observations_are_visible_and_escaped_in_every_view(self):
@@ -110,7 +120,8 @@ class Resources(unittest.TestCase):
             self.assertEqual(len(call), 2, call)
             self.assertTrue(before <= float(call[1]) <= after, call)
         spec = importlib.util.spec_from_file_location("since_sd_tile", HERE / "sd_tile.py")
-        sd_tile = importlib.util.module_from_spec(spec); spec.loader.exec_module(sd_tile)
+        sd_tile = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(sd_tile)
         deadlines = []
 
         class Collectors:
@@ -190,7 +201,8 @@ class Resources(unittest.TestCase):
 
     def stub_sd(self, listed):
         """A stub `sd` first on PATH: `store list KIND --json` prints `listed[KIND]`; a kind not listed exits 1."""
-        directory = tempfile.TemporaryDirectory(); self.addCleanup(directory.cleanup)
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
         root = Path(directory.name)
         for kind, rows in listed.items():
             (root / f"{kind}.json").write_text(json.dumps(rows))
@@ -207,7 +219,8 @@ cat {str(root)!r}/"$3.json"
     def queues(self, listed):
         stub = self.stub_sd(listed)
         # A vault folder with a waiting note in it: the view must not read it.
-        vault = stub / "vault" / "System" / "Databases" / "Blog Ideas"; vault.mkdir(parents=True)
+        vault = stub / "vault" / "System" / "Databases" / "Blog Ideas"
+        vault.mkdir(parents=True)
         (vault / "Vault note.md").write_text("---\nstatus: inbox\ndateCreated: 2026-01-01\n---\n")
         with patch.dict(os.environ, {"PATH": f"{stub}:{os.environ['PATH']}", "OBSIDIAN_VAULT": str(stub / "vault")}):
             html = str(reports_screen.resources({"resource": ["queues"]}))
@@ -239,8 +252,10 @@ cat {str(root)!r}/"$3.json"
         parser = reports_screen.SafeFragment()
         parser.feed('<p onclick="bad()">Text<script>alert(1)</script><a href="javascript:bad()">Link</a><img src=x onerror=bad()></p>')
         result = "".join(parser.output)
-        self.assertNotIn("onclick", result); self.assertNotIn("<script", result)
-        self.assertNotIn("javascript:", result); self.assertNotIn("<img", result)
+        self.assertNotIn("onclick", result)
+        self.assertNotIn("<script", result)
+        self.assertNotIn("javascript:", result)
+        self.assertNotIn("<img", result)
         self.assertIn("Text", result)
 
 class CronJobFiles(unittest.TestCase):
@@ -249,9 +264,12 @@ class CronJobFiles(unittest.TestCase):
     def test_the_config_jobs_dir_is_read_and_an_extra_dir_overrides(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            jobs = root / "config/cron-jobs/jobs"; jobs.mkdir(parents=True)
-            extra = root / "extra"; extra.mkdir()
-            (jobs / "one.job").write_text("A\n"); (jobs / "two.job").write_text("B\n")
+            jobs = root / "config/cron-jobs/jobs"
+            jobs.mkdir(parents=True)
+            extra = root / "extra"
+            extra.mkdir()
+            (jobs / "one.job").write_text("A\n")
+            (jobs / "two.job").write_text("B\n")
             (extra / "two.job").write_text("C\n")
             env = {"SYSTEM_TOOLS_CONFIG": str(root / "config"), "CRON_JOBS_EXTRA_DIRS": str(extra),
                    "CRON_JOBS_HOST": "mini"}
@@ -262,10 +280,13 @@ class CronJobFiles(unittest.TestCase):
     def test_this_hosts_folder_overrides_and_other_hosts_are_ignored(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            jobs = root / "config/cron-jobs/jobs"; (jobs / "mini").mkdir(parents=True)
+            jobs = root / "config/cron-jobs/jobs"
+            (jobs / "mini").mkdir(parents=True)
             (jobs / "studio").mkdir()
-            (jobs / "one.job").write_text("A\n"); (jobs / "mini/one.job").write_text("B\n")
-            (jobs / "mini/mine.job").write_text("C\n"); (jobs / "studio/theirs.job").write_text("D\n")
+            (jobs / "one.job").write_text("A\n")
+            (jobs / "mini/one.job").write_text("B\n")
+            (jobs / "mini/mine.job").write_text("C\n")
+            (jobs / "studio/theirs.job").write_text("D\n")
             env = {"SYSTEM_TOOLS_CONFIG": str(root / "config"), "CRON_JOBS_HOST": "Mini"}
             with patch.dict(os.environ, env):
                 os.environ.pop("CRON_JOBS_EXTRA_DIRS", None)
@@ -275,7 +296,8 @@ class CronJobFiles(unittest.TestCase):
     def test_no_host_folder_reads_the_shared_jobs(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            jobs = root / "config/cron-jobs/jobs"; jobs.mkdir(parents=True)
+            jobs = root / "config/cron-jobs/jobs"
+            jobs.mkdir(parents=True)
             (jobs / "one.job").write_text("A\n")
             env = {"SYSTEM_TOOLS_CONFIG": str(root / "config"), "CRON_JOBS_HOST": "mini"}
             with patch.dict(os.environ, env):

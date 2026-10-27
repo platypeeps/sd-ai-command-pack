@@ -11,9 +11,8 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 
-from sd_dashboard import fleet, repos_screen
-
 from fleet_support import FleetCase
+from sd_dashboard import fleet, repos_screen
 
 
 class DefaultBranch(FleetCase):

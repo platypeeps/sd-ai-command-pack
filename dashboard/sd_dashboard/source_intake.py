@@ -276,7 +276,7 @@ def add(connection, *, target: str, urls: list, files: list, who: str) -> dict:
             elif key in urls_seen:
                 refused.append(f"{url} (the same source as {urls_seen[key]})")
             urls_seen.setdefault(key, url)
-        for one, name in zip(files, named):
+        for one, name in zip(files, named, strict=False):
             sha, folded = one["sha256"], name.casefold()
             if sha in hashes:
                 refused.append(f"{name} (the same file as {hashes[sha]})")
@@ -300,7 +300,7 @@ def add(connection, *, target: str, urls: list, files: list, who: str) -> dict:
             new.append(_cells(heads, sid=f"S{next_id}", title=title, link=url, day=day))
             added.append({"kind": "url", "title": title, "key": research_screen.source_key(url), "id": f"S{next_id}"})
             next_id += 1
-        for one, name in zip(files, named):
+        for one, name in zip(files, named, strict=False):
             source = staged / one["sha256"]
             if source.stat().st_size > FILE_BYTES:
                 shelf.mkdir(parents=True, exist_ok=True)

@@ -1068,16 +1068,14 @@ class PipelineTests(ReviewFixture):
 
     def test_a_gate_that_timed_out_names_the_timeout_flag(self) -> None:
         """sd:1560: a gate stopped at its bound says so and names the flag that
-        gives it longer, whether sd-check killed one entrypoint, no gate slot
-        came free, or the runner killed sd-check itself and left no record."""
+        gives it longer, whether sd-check killed one entrypoint or the runner
+        killed sd-check itself and left no record."""
         root = self.make_repo()
         self.prepare(root)
         killed = [{"name": "check", "command": ["make", "check"], "status": "fail", "exit_code": None,
                    "reason": "timed out after 3600s", "stderr": ""}]
-        no_slot = [dict(killed[0], reason="no gate slot came free within 3600s")]
         for label, answer, evidence in (
                 ("record", sd_review.Completed(1, json.dumps({"checks": killed}), ""), "timed out after 3600s"),
-                ("slot", sd_review.Completed(1, json.dumps({"checks": no_slot}), ""), "no gate slot came free within 3600s"),
                 ("runner", sd_review.Completed(124, "", "python3: timed out after 3600s", False), "timed out after 3600s")):
             with self.subTest(label=label):
                 result = self.run_review(root, FakeRunner({"sd-check": answer}))
@@ -1091,6 +1089,31 @@ class PipelineTests(ReviewFixture):
         spawn = [killed[0], {"name": "lint", "command": ["/no/python"], "status": "fail", "exit_code": None,
                              "reason": "cannot run /no/python: [Errno 2] No such file or directory"}]
         self.assertEqual(sd_review.classify_gate(spawn)["reason"], "toolchain_missing")
+
+    def test_a_gate_that_waited_for_a_slot_reads_as_not_run_not_fail(self) -> None:
+        """sd:6343: no gate slot came free is a busy gate, not a failed check.
+
+        The head is still not gated, so the status and exit code stay
+        `gate_failed`; the text says the check did not run and what to do.
+        """
+        root = self.make_repo()
+        self.prepare(root)
+        no_slot = [{"name": "check", "command": ["make", "check"], "status": "fail", "exit_code": None,
+                    "reason": "no gate slot came free within 3600s", "stderr": "",
+                    "failed_steps": ["check: no gate slot came free within 3600s"]}]
+        result = self.run_review(root, FakeRunner({"sd-check": sd_review.Completed(1, json.dumps({"checks": no_slot}), "")}))
+        self.assertEqual(result["status"], "gate_failed")
+        self.assertEqual((result["check"]["reason"], result["check"]["evidence"]),
+                         ("gate_busy", "no gate slot came free within 3600s"))
+        stream = io.StringIO()
+        sd_review.render(result, stream)
+        text = stream.getvalue()
+        self.assertIn("check: not run -- gate busy: no gate slot came free within 3600s", text)
+        self.assertNotIn("check: fail", text)
+        self.assertNotIn("failed check:", text)
+        self.assertNotIn("--timeout SECONDS", text)
+        self.assertIn("the lane runs the full gate", text)
+        self.assertIn("sd gate status", text)
 
     def test_the_code_prompt_names_the_six_operator_listed_defect_classes(self) -> None:
         """sd:1635: the classes a retired manual checklist held, named in the lane's own prompt."""

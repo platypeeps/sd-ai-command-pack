@@ -5,7 +5,6 @@ from html.parser import HTMLParser
 from pathlib import Path
 
 from sd_dashboard import controls
-
 from support import ScreenCase
 
 

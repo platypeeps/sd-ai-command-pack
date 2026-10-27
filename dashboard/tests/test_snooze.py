@@ -5,10 +5,8 @@ from __future__ import annotations
 import unittest
 from datetime import UTC, datetime, timedelta
 
-from sd_db import writes
-
 from sd_dashboard import health_screen, now_screen, snooze
-
+from sd_db import writes
 from test_workflow_actions import BrowserSession
 
 NOW = "2026-09-06T12:00:00Z"

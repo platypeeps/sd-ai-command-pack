@@ -120,7 +120,8 @@ def _set(key: str, value: str):
 
 def _scalars() -> dict:
     """Every single-value row the page edits, by key: `(description, pattern or None)`."""
-    from .adversarial import DEEP, PATTERNS, SETTINGS as REVIEW
+    from .adversarial import DEEP, PATTERNS
+    from .adversarial import SETTINGS as REVIEW
     from .realm_sweep import SETTINGS as SWEEP
 
     return {**{key: (text, None) for key, text in SWEEP.items()}, **{key: (text, PATTERNS[key]) for key, text in REVIEW.items()},
@@ -144,7 +145,8 @@ def rows(connection) -> dict:
     from sd_db.errors import SdDbError
 
     from . import setting_rows
-    from .adversarial import DEEP, SETTINGS as REVIEW
+    from .adversarial import DEEP
+    from .adversarial import SETTINGS as REVIEW
     from .realm_sweep import SETTINGS as SWEEP
 
     def scalar(key, text, held, pattern=None):

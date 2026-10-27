@@ -20,10 +20,8 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import services
-
 from sd_dashboard import server, v2
-
+from sd_db import services
 from test_now_screen import JobsBackend, fleet_document, repo
 from test_workflow_actions import BrowserSession
 

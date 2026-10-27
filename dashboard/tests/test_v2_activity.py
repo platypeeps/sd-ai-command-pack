@@ -28,17 +28,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db.ship import note_merge
 from sd_dashboard import activity_screen, server, v2
-
+from sd_db.ship import note_merge
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend
 from test_v2_read import READ_SHELL
+from test_v2_registry import Registers
+from test_v2_shell_shared import cell_grammar
 from test_v2_tasks import SHELL, STAND_IN
 from test_v2_today import OSASCRIPT, Refused
 from test_workflow_actions import BrowserSession
-from test_v2_registry import Registers
-from test_v2_shell_shared import cell_grammar
 
 V2 = Path(v2.__file__).resolve().parent
 ACTIVITY_JS = (V2 / "static" / "activity.js").read_text(encoding="utf-8")
@@ -614,7 +613,8 @@ R.after = ELS.details.html; R.current = window.PAGE_LIST.current();""")
             self.assertEqual(out["R"]["rows"], base, bad)
 
     def test_the_journal_note_says_what_the_cap_left_unread(self):
-        doc = json.loads(json.dumps(self.doc)); doc["journal_unread"] = 7
+        doc = json.loads(json.dumps(self.doc))
+        doc["journal_unread"] = 7
         out = self.run_page("R.note = ELS['journal-note'].html;", doc=doc)
         self.assertIn(f"The journal reads the latest {self.doc['journal_cap']} exec notes; 7 older are not read.", out["R"]["note"])
 

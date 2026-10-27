@@ -412,7 +412,7 @@ def document(connection, *, now: str = "") -> dict:
         gates, probe = pool.submit(_gates), pool.submit(retry_help)
         answers = {path: in_process(connection, path, managed[path]["remote"]) for path in here}
         left = [path for path, answer in answers.items() if answer is None]
-        answers.update(zip(left, pool.map(lane_list, left)))
+        answers.update(zip(left, pool.map(lane_list, left), strict=True))
         gates, probe = gates.result(), probe.result()
     lanes, root = [], None
     for path, answer in answers.items():

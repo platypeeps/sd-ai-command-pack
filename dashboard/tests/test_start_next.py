@@ -11,9 +11,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import build, upsert_repo, workflow
 from sd_dashboard import builds, fix_session, start_next
-
+from sd_db import build, upsert_repo, workflow
 from support import NOW, ScreenCase, before_5648
 
 
@@ -193,6 +192,7 @@ class StartNext(ScreenCase):
         whose logs hold no record, leaves no room, and the stalled builder's item is not offered again."""
         import json
         import os
+
         from sd_dashboard import claude_sessions
         held, other = self.ready("Held by a stalled builder"), self.ready("Next")
         home = Path(self.tmp.name) / "claude"

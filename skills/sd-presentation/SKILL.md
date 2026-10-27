@@ -27,7 +27,7 @@ specification, evidence and citation ledger, accessibility review, and
 production handoff.
 
 Do not use to develop the source argument, model
-a complex structure as the primary artifact (`sd-diagram`), adapt an accepted
+a complex structure as the primary artifact, adapt an accepted
 artifact for another publishing channel (`sd-publish`), or create a slide file.
 Use presentation tooling only after this specification is accepted.
 

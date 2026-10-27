@@ -252,6 +252,17 @@ class SliceBuilderDiskRules(unittest.TestCase):
                 self.assertIn(needle, body)
 
 
+class SliceBuilderMergeSubject(unittest.TestCase):
+    """sd:6342. Git's default merge subject names the branch and ran 77
+    characters; enqueue refused it after review. The brief gives the short
+    subject up front."""
+
+    def test_the_slice_builder_merges_main_with_a_short_subject(self) -> None:
+        _, body = (AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8").split("\n---\n", 1)
+        self.assertIn('git merge --no-ff -m "chore: merge origin/main" origin/main', body)
+        self.assertNotIn("git merge --no-edit", body)
+
+
 class SliceBuilderDecisionNote(unittest.TestCase):
     """sd:3112. A builder that skips an item for an operator decision writes a
     `question` note with `Option:` lines, which the dashboard shows as buttons;

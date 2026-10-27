@@ -13,9 +13,8 @@ import json
 import sys
 from unittest.mock import patch
 
-from sd_db import projection, workflow
 from sd_dashboard import tasks_screen
-
+from sd_db import projection, workflow
 from support import NOW, ScreenCase
 from test_workflow_actions import BrowserSession
 

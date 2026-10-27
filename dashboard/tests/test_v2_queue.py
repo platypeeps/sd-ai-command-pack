@@ -33,7 +33,6 @@ from unittest import mock
 
 from sd_dashboard import now_screen, pack_bin, places, queue_screen, v2
 from sd_db import upsert_repo
-
 from support import NOW, ScreenCase
 from test_v2_read import READ_SHELL
 from test_v2_registry import GROUP_BLOCK, Registers
@@ -1202,7 +1201,8 @@ R.det = ELS.adv.html;""")
     def test_show_defaults_to_the_active_rows_and_all_adds_the_ended_ones(self):
         out = self.run_page("window.shell.url = q => OUT.urls.push(q); OUT.urls = []; R.lanes = ELS.details.html; R.show = ELS.show.html;"
                             f" {self.SHOW_ALL} R.all = ELS.details.html; R.show2 = ELS.show.html;", search="")
-        states = lambda lanes: re.findall(r'<li class="qrow" data-state="(\w+)"', lanes)
+        def states(lanes):
+            return re.findall(r'<li class="qrow" data-state="(\w+)"', lanes)
         self.assertEqual(states(out["R"]["lanes"]), ["merging", "next", "next", "building", "building", "blocked", "blocked"])
         self.assertEqual(states(out["R"]["all"]), ["merging", "next", "next", "building", "building", "blocked", "blocked", "cancelled", "landed"])
         chips = r'data-show="(\w+)" aria-pressed="(\w+)">\w+ <span class="n">(\d+)</span>'
@@ -1330,7 +1330,8 @@ R.det = ELS.adv.html;""")
         out = self.run_page("window.shell.openPane = t => { OUT.pane = t; }; R.before = ELS.lanes.html; R.beforeDetails = ELS.details.html;"
                             " ELS.lanes.listeners.click[0]({ target: { closest: s => s === 'tr[data-lane]'"
                             f" ? {{ dataset: {{ lane: {other} }} }} : null }} }}); R.after = ELS.lanes.html; R.details = ELS.details.html;", search="")
-        selected = lambda html: re.findall(r'<tr data-lane="([^"]+)" aria-selected="true"', html)
+        def selected(html):
+            return re.findall(r'<tr data-lane="([^"]+)" aria-selected="true"', html)
         self.assertEqual(selected(out["R"]["before"]), [str(self.checkout)])
         self.assertEqual(selected(out["R"]["after"]), [json.loads(other)])
         self.assertIn("sd:40", out["R"]["details"])

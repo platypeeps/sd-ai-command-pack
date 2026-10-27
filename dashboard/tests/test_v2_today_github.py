@@ -36,12 +36,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import progress, reads, repos, upsert_repo
-from sd_db.writes import set_item_fields
-
 from sd_dashboard import today_github, v2
 from sd_dashboard.v2 import pages
-
+from sd_db import progress, reads, repos, upsert_repo
+from sd_db.writes import set_item_fields
 from support import NOW, ScreenCase, upsert_shadow
 from test_v2_tasks import MARKUP_JS, SHELL, SHELL_JS, STAND_IN
 from test_v2_today import OSASCRIPT
@@ -425,7 +423,8 @@ class TheRepoColumnAndFilter(unittest.TestCase):
                             " box('example/anvil', true); box('example/forge', true); R.sections = ELS['github-sections'].html;"
                             " R.after = ELS['github-filters'].html; R.tally = ELS['github-tally'].html; R.search = location.search;",
                             f"(path, body) => [200, {json.dumps(found)}]")
-        keys = lambda html: [n for n in (1, 2, 3, 4) if f"pull/{n}\"" in html]
+        def keys(html):
+            return [n for n in (1, 2, 3, 4) if f"pull/{n}\"" in html]
         self.assertIn('data-pick="repo" value="example/press"', out["R"]["bar"])
         self.assertIn("2 picked", out["R"]["after"])
         self.assertEqual(keys(out["R"]["sections"]), [1, 2, 3])
@@ -439,7 +438,8 @@ class TheRepoColumnAndFilter(unittest.TestCase):
                             " box('example/press', true); R.one = ELS['github-sections'].html; R.s1 = location.search;"
                             " box('example/press', false); R.back = ELS['github-sections'].html; R.s2 = location.search;",
                             f"(path, body) => [200, {json.dumps(repos_doc())}]")
-        count = lambda html: html.count("<tr data-key=")
+        def count(html):
+            return html.count("<tr data-key=")
         self.assertEqual((count(out["R"]["all"]), count(out["R"]["one"]), count(out["R"]["back"])), (4, 1, 4))
         self.assertIn("repo=example%2Fpress", out["R"]["s1"])
         self.assertEqual(out["R"]["s2"], "")
