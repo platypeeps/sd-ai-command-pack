@@ -139,6 +139,22 @@ class TheTiles(Case):
                 probe = self.doc()["rows"][0]["probe"]
             self.assertIsNone(probe["answers"], f"a timeout is not a down app: {timeout!r}")
 
+    def test_a_name_that_resolves_slowly_is_unknown_within_the_bound(self):
+        # sd:6396: the socket timeout bounds connect and read, not the name lookup before them; a slow resolver held
+        # the whole Overview read past its bound.
+        def slow(*args, **kwargs):
+            time.sleep(1.5)
+            raise socket.gaierror(8, "nodename nor servname provided")
+
+        self.write("http://slow.example.test:8740/studio")
+        with mock.patch.object(place_tiles, "PROBE_SECONDS", 0.2), mock.patch("socket.getaddrinfo", slow):
+            began = time.monotonic()
+            doc = self.doc()
+            took = time.monotonic() - began
+        self.assertLess(took, 1.0, "the read waited for the name lookup")
+        probe = doc["rows"][0]["probe"]
+        self.assertEqual((probe["answers"], probe["status"]), (None, "not known: no answer within 0.2 s"))
+
     def test_a_url_http_refuses_to_send_is_that_tiles_unknown_not_the_overviews_failure(self):
         for url in ("http://127.0.0.1:1/a b", "http://127.0.0.1:nope/"):
             self.write(url)

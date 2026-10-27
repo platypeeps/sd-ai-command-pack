@@ -9,8 +9,9 @@ the config folder, never in a request or a setting row the page writes: `<config
 
 `document` answers `GET /api/place/<realm>/overview`. Each tile says whether its folder is on this machine (`here`,
 else `why`: an app that runs on another machine shows the tile and the reason, never a button that seems to work),
-and probes its URL once, bounded by `PROBE_SECONDS`: any HTTP answer is `answers: true` with its status, a refused
-connection `false`, anything else `null`, unknown. Each action carries its last run (`last`).
+and probes its URL once, bounded by `PROBE_SECONDS`, the name lookup too (sd:6396): any HTTP answer is
+`answers: true` with its status, a refused connection `false`, anything else `null`, unknown. Each action carries its
+last run (`last`).
 
 `run` answers `POST /api/place/tiles {realm, tile, action}`. It reads the file again and runs only a command a line
 names, split by `shlex` with no shell, in the tile's folder, through `sweep.spawn`: one lock per action
@@ -129,6 +130,22 @@ def _probe(url: str) -> dict:
         return {"answers": None, "status": f"not known: {error.__class__.__name__}"}
 
 
+def _probes(urls: list[str]) -> list[dict | None]:
+    """Each URL's probe, None for no URL, all within `PROBE_SECONDS` (sd:6396).
+
+    The socket timeout bounds connect and read, not the name lookup before them, so one slow resolver held the whole
+    read. A probe still out at the bound is unknown; its thread is left to end on its own, never waited for.
+    """
+    pool = concurrent.futures.ThreadPoolExecutor(max_workers=8)
+    try:
+        futures = [pool.submit(_probe, url) if url else None for url in urls]
+        concurrent.futures.wait([f for f in futures if f is not None], timeout=PROBE_SECONDS)
+        return [None if f is None else f.result() if f.done()
+                else {"answers": None, "status": f"not known: no answer within {PROBE_SECONDS:g} s"} for f in futures]
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
 def _slug(label: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-") or "action"
 
@@ -231,8 +248,7 @@ def document(realm: str, *, now: str, config: Path | None = None, connection=Non
     except (OSError, UnicodeDecodeError) as error:
         return {**base, "state": "unknown", "reason": f"{source} was not read: {error.__class__.__name__}"}
     tiles = [tile for tile in tiles if tile["realm"] == realm]
-    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
-        probes = list(pool.map(lambda t: _probe(t["url"]) if t["url"] else None, tiles))
+    probes = _probes([tile["url"] for tile in tiles])
     held, unread = _held_rows(connection, [(t, a["label"]) for t in tiles if _hosted(t) for a in t["actions"]])
     rows = []
     for tile, probe in zip(tiles, probes, strict=True):
