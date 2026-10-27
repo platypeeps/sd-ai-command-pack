@@ -4693,6 +4693,23 @@ class HostedOrder(Lane):
             sd_lane.run_hosted(self.environ, self.ship)
         self.assertEqual(order, [later, self.repo])
 
+    def test_a_build_mismatch_skips_the_tick_and_exits_0(self) -> None:
+        """sd:6425. Between a hub refresh and the satellite's follow, the repo-table read met a
+        build mismatch, exited 3, and the health check read the job as failed. The tick skips."""
+        import sd_db.database
+        from sd_db import remote
+
+        def refused(*args: Any, **kwargs: Any) -> Any:
+            raise remote.BuildMismatch("build", "0000aaaa", "1111bbbb")
+        args = mock.Mock(lane_command="run", hosted=True)
+        with mock.patch.object(sd_db.database, "connect", refused), \
+                mock.patch("sys.stdout", new_callable=io.StringIO) as out:
+            code = sd_lane.lane_main(args)
+        self.assertEqual(code, 0, out.getvalue())
+        answer = json.loads(out.getvalue())
+        self.assertEqual(answer["lanes"], [])
+        self.assertIn("build mismatch", answer["skipped"])
+
 
 def thread_lane(run: Any) -> sd_lane.StartedLane:
     """A lane run on a thread, so a suite's stub ships reach it; `run_hosted` runs a `child_lane` from the CLI."""
