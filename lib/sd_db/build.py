@@ -993,6 +993,13 @@ def _park(connection, ident: str, lead: int, stamp: str) -> None:
             add_note(connection, member["item"], "comment", PARKED.format(run=ident))
 
 
+def unpark(connection, item: int) -> None:
+    """Clear an item's park, as Retry runs it again: a parked item would stay hidden while it builds (pack sd:6132)."""
+    row = connection.execute("SELECT parked_at FROM item WHERE id = ?", (item,)).fetchone()
+    if row is not None and row["parked_at"] is not None:
+        set_item_fields(connection, item, parked_at=None)
+
+
 def abandon(connection, reason: str) -> list[str]:
     """End every unreleased build run `abandoned`, never retried; the ids.
 
