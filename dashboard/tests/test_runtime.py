@@ -45,7 +45,9 @@ class RuntimeSafety(unittest.TestCase):
         self.pending_removal = None
         self.info = {"python": sys.executable, "library": "/fixture/.venv/lib/python3.13/site-packages/sd_db/__init__.py", "schema": 3,
                      "library_digest": "a" * 64, "dashboard_digest": "b" * 64}
-        self.health = {"ok": True, "service": "sd-dashboard", "pid": 4242, **self.info}
+        # launchd's job is dashboard.sh (pid 4242); the server answering
+        # /health is its python child (sd:6435).
+        self.health = {"ok": True, "service": "sd-dashboard", "pid": 4243, **self.info}
         self.addCleanup(patch.stopall)
         patch.object(runtime, "installed_library", return_value=self.info).start()
         patch.object(runtime, "_run", side_effect=self.run_command).start()
@@ -71,6 +73,8 @@ class RuntimeSafety(unittest.TestCase):
             output = (arguments[2] + " = {\n\tpid = 4242\n\tpath = " + str(self.target) +
                       "\n\tprogram = " + argv[0] + "\n\targuments = {\n" +
                       "\n".join("\t\t" + argument for argument in argv) + "\n\t}\n}")
+        elif arguments[:3] == ["ps", "-o", "ppid="]:
+            output = "4242\n" if arguments[-1] == "4243" else "1\n"
         elif arguments[:2] == ["launchctl", "bootout"]:
             self.loaded = False
         elif arguments[:2] == ["launchctl", "bootstrap"]:

@@ -499,8 +499,15 @@ def _verify_loaded_process(domain, health):
             if (match := re.fullmatch(r"\tpid = ([1-9][0-9]*)", line))]
     if (result.returncode or not lines or lines[0] != service + " = {" or
             lines[-1] != "}" or len(pids) != 1 or type(health.get("pid")) is not int or
-            pids[0] != health["pid"]):
+            pids[0] not in (health["pid"], _parent_pid(health["pid"]))):
         raise RuntimeRefused("health response is not from the newly loaded dashboard process")
+
+
+def _parent_pid(pid):
+    """launchd's job is dashboard.sh, and the server its python child (sd:6435)."""
+    result = _run(["ps", "-o", "ppid=", "-p", str(pid)], check=False)
+    text = result.stdout.strip()
+    return int(text) if not result.returncode and text.isdigit() else None
 
 
 def _replace(path, data):
