@@ -85,6 +85,7 @@ Rules:
   `sd-ship lane enqueue` refuses a longer one.
 - Write the pull-request title, a Conventional Commit of {title_max} characters or less, alone to {title}.
 - Write the pull-request body, with `## Summary` and `## Test plan`, to {body}; quote each fail-first line.
+  The body is public, so it names no local path (the worktree, a home directory): use repo-relative paths.
 - Leave the worktree clean, with your commits on the branch.
 - An item that needs the operator: record it with `sd task note N '<question>' --kind question` and skip it.
 
@@ -496,8 +497,17 @@ class Supervisor:
             title = ""
         if not title or len(title) > TITLE_MAX or "\n" in title:
             return self.finish("blocked", f"the title at {self.title} is missing or over {TITLE_MAX} characters")
+        errors = self.out("lint.err")
+        errors.write_bytes(b"")
         if self.child([*self.tools.lint, "--pr-body", str(self.body)], cwd=self.work, name="lint") != 0:
-            return self.finish("blocked", f"sd-docs-lint refused the body at {self.body}; see {self.out('lint')}")
+            # The lint prints its failures on stderr; its stdout holds only notes (pack sd:6402).
+            try:
+                failures = [line[5:] for line in errors.read_text(encoding="utf-8").splitlines()
+                            if line.startswith("FAIL ")]
+            except OSError:
+                failures = []
+            return self.finish("blocked", f"sd-docs-lint refused the body at {self.body}: "
+                                          f"{'; '.join(failures[:3]) or 'no FAIL line'}; see {errors}")
         out = self.out("enqueue")
         out.write_bytes(b"")
         items = [arg for item in delivered for arg in ("--item", str(item))]

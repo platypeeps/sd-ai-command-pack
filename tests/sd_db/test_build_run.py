@@ -167,7 +167,13 @@ FAKE = textwrap.dedent('''
     if role == "sd-docs-lint":
         _, args = real("sd-docs-lint")
         assert args.pr_body is not None and args.pr_body.is_file(), args
-        sys.exit(1 if mode == "refuse" else 0)
+        if mode == "refuse":  # the real tool's failure lines, on stderr, its stdout only notes
+            print("PR privacy: 1 pattern(s) from /x/privacy-patterns, no match")
+            print("FAIL pull request body: line 3 matches a privacy pattern in /x/privacy-patterns",
+                  file=sys.stderr)
+            print("sd-docs-lint: 1 failure(s)", file=sys.stderr)
+            sys.exit(1)
+        sys.exit(0)
 ''')
 
 
@@ -549,6 +555,18 @@ class Supervise(Case):
         self.assertEqual(ended["outcome"], "blocked")
         self.assertIn("limit 72", ended["blocked"])
         self.assertIn("72 characters or less outside a code fence", build_run.BRIEF)
+
+    def test_a_body_the_lint_refuses_blocks_naming_the_line(self):
+        """Pack sd:6402: the lint's failures go to stderr; the block names them, and the brief warns."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"], sd_docs_lint=["refuse"])
+        ended = self.supervisor().run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("line 3 matches a privacy pattern", ended["blocked"])
+        self.assertIn(".lint.err.out", ended["blocked"])
+        self.assertEqual([call for call in self.calls("sd-ship") if "enqueue" in call["argv"]], [])
+        self.assertIn("names no local path", build_run.BRIEF)
 
     def test_a_requeued_bundle_briefs_the_findings_sent_to_its_branch(self):
         """Pack sd:6020: Send to builder writes a finding note and queues the bundle again; the fresh builder's brief
