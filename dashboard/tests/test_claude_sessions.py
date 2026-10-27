@@ -110,7 +110,9 @@ class Sessions(ScreenCase):
 
     def test_stalled_or_unread_counts_as_active_until_a_final_answer(self):
         """Review class (sd:5106 round 1): an unknown or stale reading counts as idle, done or safe. Each reading here
-        lacks completion evidence, so the session is not safe to exit and its builder holds a Start next slot."""
+        lacks completion evidence, so the session is not safe to exit. An unread builder holds a Start next slot; a
+        stalled one does not (operator, pack sd:6400): the load cap guards the machine, and a day's finished builders
+        left 51 stalled slots against a cap of 6, so Build claimed nothing."""
         item = self.item("Builder under test")
         def trees(area):
             return {"worktrees": [{"path": "/wt/b", "branch": f"sd{item}-b", "live": True}]}
@@ -138,7 +140,7 @@ class Sessions(ScreenCase):
                 doc = self.read([agent(session)], fleet=trees)
                 row = doc["sessions"][0]
                 self.assertEqual(row["safe"], {"state": state, "why": [why]})
-                self.assertEqual(counted(doc["builders"]), {"running": 1, "why": ""})
+                self.assertEqual(counted(doc["builders"]), {"running": 0 if case == "stalled" else 1, "why": ""})
                 self.assertEqual([t["item"] for t in row["tasks"]], [item])
         # A final answer is the evidence that frees it.
         self.transcript(OTHER)

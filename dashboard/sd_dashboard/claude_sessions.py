@@ -23,7 +23,7 @@ runs under it, and no checkout above holds unpushed work; a fact that could not 
 the reason, never `yes`. Sessions on other machines are not listed: `claude agents` lists this Mac's.
 
 `builders` counts the builders running on this Mac, for Tasks' Start next (sd:5107): every builder subagent that is
-not idle (running, stalled or unknown) and every Fix session that `claude agents` does not call idle. A source that
+running or unknown (not idle or stalled, pack sd:6400) and every Fix session that `claude agents` does not call idle. A source that
 could not be read makes it None with the reason.
 
 `end` is Management's End session (sd:5126): it reads `claude agents --json` and `ps` again and sends SIGTERM only
@@ -390,13 +390,14 @@ def builders(sessions: list[dict] | None, why: str) -> dict:
              if any(reason.startswith(("no transcript", "its transcript")) for reason in row["safe"]["why"])]
     if blind:
         return {"running": None, "why": f"the transcripts of {', '.join(blind)} were not read", "holders": []}
-    # Stalled and unknown hold their slot: only a finished answer or an idle session frees it. `holders` names each
-    # slot, stalled first, so a full cap says which sessions to end (operator ruling on sd:5106 round 1).
+    # Unknown holds its slot: only a finished answer or an idle session frees it (sd:5106 round 1). A stalled agent
+    # does not (operator, pack sd:6400): the load cap guards the machine, and finished builders that never wrote a
+    # final answer filled the cap. `holders` names each slot, unknown first.
     holders = []
     for row in sessions:
         where = {"session": row["name"] or row["id"][:8], "repo": Path(row["cwd"]).name if row["cwd"] else row["name"]}
         holders += [where | {"agent": agent["name"], "state": agent["state"], "age": agent["age"]}
-                    for agent in row["agents"] if agent["builder"] and agent["state"] != "idle"]
+                    for agent in row["agents"] if agent["builder"] and agent["state"] not in ("idle", "stalled")]
         if row["builder"] and row["status"] != "idle":
             holders.append(where | {"agent": "", "state": "running" if row["status"] == "busy" else row["status"], "age": row["age"]})
     order = {"stalled": 0, "unknown": 1, "waiting": 2, "running": 3}
