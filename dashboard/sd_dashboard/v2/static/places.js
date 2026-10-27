@@ -39,34 +39,44 @@
   // command with that command's last run. A tile whose folder is not on this machine shows why, and its buttons run nothing.
   const t = s => s ? html`<time class="rel" datetime="${s}"></time>` : 'at a time not known';
   const ANSWER = { true: ['ok', p => `answers, ${p.status}`], false: ['queued', p => `not answering: ${p.status}`], null: ['unknown', p => p.status] };
+  // sd:6387: a hosted tile's action carries its host, and three more states from the rows its host answers: pending
+  // (asked, not yet answered), starting, and refused (nothing ran there, and why).
   function lastHTML(l) {
     const out = l.output ? html` <details class="pt-out"><summary>Output${l.cut ? ', the end' : ''}</summary><pre>${l.output}</pre></details>` : '';
-    if (l.state === 'none') return html`<span class="pt-last">Not run from here yet.</span>`;
-    if (l.state === 'running') return html`<span class="pt-last g queued"><span aria-hidden="true">${GLYPH.queued}</span> Running since ${t(l.started)}.</span>${out}`;
-    if (l.state === 'done') return html`<span class="pt-last g ${l.exit ? 'warning' : 'ok'}"><span aria-hidden="true">${GLYPH[l.exit ? 'warning' : 'ok']}</span> ${l.exit ? 'Failed' : 'Done'}, exit ${String(l.exit)}, ${t(l.ended)}.</span>${out}`;
-    return html`<span class="pt-last g unknown"><span aria-hidden="true">${GLYPH.unknown}</span> Not known: ${l.reason}.</span>${out}`;
+    const on = l.host ? ` on ${l.host}` : '';
+    if (l.state === 'none') return html`<span class="pt-last">Not run${on} from here yet.</span>`;
+    if (l.state === 'pending') return html`<span class="pt-last g queued"><span aria-hidden="true">${GLYPH.queued}</span> Asked ${l.host} ${t(l.requested)}; waiting for its follow job, every five minutes.</span>`;
+    if (l.state === 'starting') return html`<span class="pt-last g queued"><span aria-hidden="true">${GLYPH.queued}</span> Starting${on} since ${t(l.started)}.</span>`;
+    if (l.state === 'running') return html`<span class="pt-last g queued"><span aria-hidden="true">${GLYPH.queued}</span> Running${on} since ${t(l.started)}.</span>${out}`;
+    if (l.state === 'done') return html`<span class="pt-last g ${l.exit ? 'warning' : 'ok'}"><span aria-hidden="true">${GLYPH[l.exit ? 'warning' : 'ok']}</span> ${l.exit ? 'Failed' : 'Done'}${on}, exit ${String(l.exit)}, ${t(l.ended)}.</span>${out}`;
+    if (l.state === 'refused') return html`<span class="pt-last g warning"><span aria-hidden="true">${GLYPH.warning}</span> Not run${on}: ${l.reason}.</span>`;
+    return html`<span class="pt-last g unknown"><span aria-hidden="true">${GLYPH.unknown}</span> Not known${on}: ${l.reason}.</span>${out}`;
   }
   function tileHTML(r) {
     const [st, words] = r.probe ? ANSWER[String(r.probe.answers)] : ['', () => 'no link'];
-    const off = r.here ? '' : r.why;
+    const off = r.here || r.host ? '' : r.why;
+    const tip = a => r.host ? `Asks ${r.host} to run ${a.command} in the tile's folder there.` : `Runs ${a.command} in the tile's folder.`;
     return html`<li class="place-tile" data-tile="${r.id}" data-label="${r.label}">
       <div class="pt-head"><h3>${r.label}</h3><span class="pt-st g ${st}">${st ? html`<span aria-hidden="true">${GLYPH[st]}</span> ` : ''}${words(r.probe)}</span></div>
       ${r.url ? html`<p><a class="btn quiet sm" href="${r.url}" target="_blank" rel="noopener">${window.shell.ICON('arrow-up-right')} Visit</a></p>` : ''}
       ${off ? html`<p class="why">${off}.</p>` : ''}
+      ${r.host ? html`<p class="why">Runs on ${r.host}: its follow job answers a button within about five minutes.</p>` : ''}
       <ul class="pt-acts">${r.actions.map(a => html`<li>${off
         ? html`<button class="btn sm" type="button" data-tile-act="${a.label}" aria-disabled="true" data-tip="${off}">${a.label}</button>`
-        : html`<button class="btn sm" type="button" data-tile-act="${a.label}" data-tip="Runs ${a.command} in the tile's folder.">${a.label}</button>`} ${lastHTML(a.last)}</li>`)}</ul>
+        : html`<button class="btn sm" type="button" data-tile-act="${a.label}" data-tip="${tip(a)}">${a.label}</button>`} ${lastHTML(a.last)}</li>`)}</ul>
     </li>`;
   }
   // A button posts the tile's names; the server runs only the command its file names (POST /api/place/tiles). A start
-  // answers at once, so the toast says it started and the view reads again: Read again shows how it ended.
+  // answers at once, so the toast says it started and the view reads again: Read again shows how it ended. A hosted
+  // tile's answer is the request it wrote (`requested`), which its host's follow job runs.
   async function runTile(b) {
     const li = b.closest('[data-tile]'), tile = li.dataset.tile, label = li.dataset.label, action = b.dataset.tileAct;
     if (b.getAttribute('aria-disabled') === 'true') { window.shell.toast(`${label} · ${action} not run: ${b.dataset.tip}.`); return; }
     b.setAttribute('aria-busy', 'true');
     try {
-      await window.shell.post('/api/place/tiles', { realm: document.body.dataset.place, tile, action });
-      window.shell.toast(`${label} · ${action} started. Read again shows how it ended.`);
+      const out = await window.shell.post('/api/place/tiles', { realm: document.body.dataset.place, tile, action });
+      window.shell.toast(out.requested ? `${label} · ${action} asked of ${out.host}; its follow job runs it within about five minutes.`
+        : `${label} · ${action} started. Read again shows how it ended.`);
     } catch (err) {
       window.shell.toast(err.status ? `${label} · ${action} not run: ${err.message}` : `${label} · ${action}: no answer, so whether it started is not known: ${err.message}`);
     }
