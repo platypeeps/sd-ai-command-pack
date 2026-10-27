@@ -44,6 +44,8 @@ THEME = "localStorage.setItem('theme', '%s')"
 TALLEST = 4000
 #: How long a page has to reach network idle once its navigation starts.
 SETTLE_SECONDS = 30
+#: How long Chrome has to answer one DevTools call; apart from the settle wait, so a test can bound that alone.
+ANSWER_SECONDS = 30
 
 
 class ShotFailed(Exception):
@@ -94,12 +96,12 @@ class Browser:
             message["sessionId"] = session
         self.writer.write(json.dumps(message).encode() + b"\0")
         self.writer.flush()
-        deadline = time.monotonic() + SETTLE_SECONDS
+        deadline = time.monotonic() + ANSWER_SECONDS
         while True:
             try:
                 answer = self.read(deadline)
             except TimeoutError:
-                raise ShotFailed("%s: no answer within %s s" % (method, SETTLE_SECONDS)) from None
+                raise ShotFailed("%s: no answer within %s s" % (method, ANSWER_SECONDS)) from None
             if answer.get("id") != self.last:
                 self.events.append(answer)
                 continue
