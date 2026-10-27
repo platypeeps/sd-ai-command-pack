@@ -96,9 +96,24 @@ class TheBuildControls(unittest.TestCase):
         self.assertEqual(len(row), 1)
         self.assertIn('". num num"', row[0])
         self.assertIn('"g what what"', row[0])
-        num = [body for sels, body in rules(phone) if ".builds .num" in sels]
+        num = [body for sels, body in rules(phone) if ".ledger.builds .num" in sels]
         self.assertEqual(len(num), 1)
         self.assertIn("white-space: normal", num[0])
+
+    def test_the_eta_sentence_wrap_wins_the_cascade_on_a_phone(self):
+        # `.ledger.active .num` (three classes) kept it nowrap over the phone's
+        # two-class `.builds .num`, so the sentence still overran (pack sd:6398).
+        # The cell: `td.num` in `table.ledger.active.builds`, at phone width.
+        table = {"ledger", "active", "builds"}
+        found = []
+        for order, (sels, body) in enumerate(rules(TODAY_CSS)):
+            value = re.search(r"(?:^|;|\s)white-space:\s*([a-z-]+)", body)
+            for sel in sels:
+                parts = re.fullmatch(r"((?:\.[\w-]+)+) \.num", sel)
+                if value and parts and set(parts[1].split(".")[1:]) <= table:
+                    found.append((parts[1].count("."), order, sel, value[1]))
+        self.assertTrue(found)
+        self.assertEqual(max(found)[3], "normal", max(found)[2])
 
     def test_the_no_sessions_row_is_one_block_on_a_phone(self):
         # Its single cell fell into the 2rem first grid column, so the sentence ran one word a line.

@@ -154,7 +154,7 @@ section[aria-labelledby="motion-h"] { margin-top: var(--space-xl); }
   /* A builder run's .num is a sentence (its ETA reason), not a count: under the title it wraps, rather than taking the
    * row's width and leaving the title one word per line (pack sd:6017). */
   .builds tbody tr { grid-template-areas: "g what what" ". detail detail" ". when when" ". num num"; }
-  .builds .num { white-space: normal; text-align: left; }
+  .ledger.builds .num { white-space: normal; text-align: left; }
   /* The no-sessions row is one cell: in the grid it fell into the 2rem first column, a word a line. */
   .active tbody tr.empty { display: block; }
 }
