@@ -29,6 +29,14 @@ atexit.register(shutil.rmtree, os.environ["TMPDIR"], ignore_errors=True)
 
 os.environ.update(GIT_ISOLATION)
 
+# `HOME` and the XDG roots point into that folder too (sd:6403): the database, `hub.json` and the registry resolve
+# under `$HOME`, so a test that opened the default database read the operator's live one, and on a satellite the
+# hub's over the tailnet, where a hub refresh mid-run failed 356 tests with a build mismatch.
+for _name, _relative in (("HOME", "home"), ("XDG_CONFIG_HOME", "home/.config"),
+                         ("XDG_DATA_HOME", "home/.local/share"), ("XDG_STATE_HOME", "home/.local/state")):
+    os.environ[_name] = os.path.join(os.environ["TMPDIR"], _relative)
+    os.makedirs(os.environ[_name], exist_ok=True)
+
 # `sd_db` is this checkout's `lib/` and nothing is installed (sd:3280). On the path here and in
 # `PYTHONPATH`, so a module that imports it at the top, and a child's `sitecustomize` shim, read the
 # commit under test; `bin/` entrypoints put `lib/` first themselves.
