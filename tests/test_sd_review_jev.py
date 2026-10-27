@@ -93,7 +93,9 @@ class JevTierTests(ReviewFixture):
 
     def commit(self, root: pathlib.Path) -> None:
         subprocess.run(["git", "add", "-A"], cwd=str(root), check=True, capture_output=True)
-        subprocess.run(["git", "commit", "--quiet", "-m", "fixture"], cwd=str(root),
+        # The policy commit adds no file. It found one only while the operator's global excludes
+        # hid `CLAUDE.local.md` from the seed commit, which no test process reads now (sd:6386).
+        subprocess.run(["git", "commit", "--quiet", "--allow-empty", "-m", "fixture"], cwd=str(root),
                        check=True, capture_output=True)
 
     def install_stub(self, *, gate: int = 0, answer: str = "deep", code: int = 0,
