@@ -206,10 +206,14 @@ class QueueOutlivesTheProcess(Lane):
     def setUp(self) -> None:
         super().setUp()
         self.register_items(7)
-        # The child's docs lint reads the privacy patterns (sd:5989): this fixture's, never the operator's.
+        # The docs lint reads the privacy patterns (sd:5989): this fixture's, never the operator's. The child
+        # gets them in `sd_ship`; `enqueue_entry` lints in this process, so `os.environ` names them too (sd:6445).
         self.config = self.tmp / "config"
         self.config.mkdir()
         (self.config / "privacy-patterns").write_text("secret-host\\.example\\.test\n", encoding="utf-8")
+        patcher = mock.patch.dict(os.environ, {"SYSTEM_TOOLS_CONFIG": str(self.config)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def sd_ship(self, cwd: pathlib.Path, *args: str, chdir: str | None = None) -> subprocess.CompletedProcess:
         env = {**os.environ, **self.environ, "XDG_CONFIG_HOME": str(self.tmp / "xdg"),
