@@ -40,7 +40,14 @@ from . import paths, reads
 from .database import transaction
 from .errors import SdDbError
 from .runner import RUNNABLE_KINDS, queue_state, restoration_pending
-from .writes import add_note, create_assignment, create_item, set_setting, transition
+from .writes import (
+    add_note,
+    create_assignment,
+    create_item,
+    set_item_fields,
+    set_setting,
+    transition,
+)
 from .writes import now as clock
 
 #: The assignment scope a Build press writes.
@@ -55,6 +62,8 @@ BUDGET_MINUTES = 60
 STALE_SECONDS = 180
 #: Lost runs one bundle may retry before it blocks.
 RETRIES = 1
+# The note on an item a blocked run parked (pack sd:6132).
+PARKED = "Parked: build run {run} ended blocked; Retry on the Builds panel unparks it"
 #: The steps a run walks, each written before it starts.
 STEPS = ("claimed", "worktree", "building", "reviewing", "fixing", "enqueuing", "enqueued", "checking", "cleaning")
 #: A note that sends the operator's finding to a bundle's next builder: Send to builder (pack sd:6020).
@@ -853,6 +862,8 @@ def _release(connection, read: dict, *, probe=Probe) -> bool:
             return False
         connection.execute("UPDATE runner_lease SET released_at = ? WHERE run = ? AND released_at IS NULL",
                            (stamp, read["id"]))
+        if read["outcome"] == "blocked":
+            _park(connection, read["id"], read["assignment"], stamp)
         return True
 
 
@@ -939,6 +950,7 @@ def _settle(connection, read: dict, *, block: str | None = None) -> dict | None:
                 reason = (f"build run {ident} lost at step {row['step']} a second time; "
                           f"log {row['log_path'] or 'none'}, worktree {row['work_path']}")
                 _block(connection, members, reason, stamp)
+                _park(connection, ident, lead, stamp)
         return {"run": ident, "outcome": row["outcome"], "retry": retry, "blocked": block}
 
 
@@ -969,6 +981,23 @@ def _block(connection, members: list[dict], reason: str, stamp: str) -> None:
         _move(connection, member["item"], "blocked", reason)
         add_note(connection, member["item"], "followup",
                  f"Build blocked: {reason}. Look at the log and the worktree, then requeue or cancel.")
+
+
+def _park(connection, ident: str, lead: int, stamp: str) -> None:
+    """Park each item of a blocked run, once the run and its lease are released, as the nightly prune parks an idle
+    one (pack sd:6132, sd:6008): an item the operator moved on, or one parked already, stays as it is."""
+    for member in _members(connection, lead, "blocked"):
+        row = connection.execute("SELECT status, parked_at FROM item WHERE id = ?", (member["item"],)).fetchone()
+        if row is not None and row["status"] == "blocked" and row["parked_at"] is None:
+            set_item_fields(connection, member["item"], parked_at=stamp)
+            add_note(connection, member["item"], "comment", PARKED.format(run=ident))
+
+
+def unpark(connection, item: int) -> None:
+    """Clear an item's park, as Retry runs it again: a parked item would stay hidden while it builds (pack sd:6132)."""
+    row = connection.execute("SELECT parked_at FROM item WHERE id = ?", (item,)).fetchone()
+    if row is not None and row["parked_at"] is not None:
+        set_item_fields(connection, item, parked_at=None)
 
 
 def abandon(connection, reason: str) -> list[str]:

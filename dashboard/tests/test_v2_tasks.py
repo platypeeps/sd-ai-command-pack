@@ -2002,8 +2002,8 @@ R.shown = D.html; R.before = OUT.posts.length; D.returnValue = 'start'; D.onclos
         return self.run_page(self.START.replace("COUNT", json.dumps(count)), answer)
 
     def test_start_next_shows_the_plan_first_then_posts_the_first_n_with_the_revisions_it_read(self):
-        """sd:5107. Nothing posts until Start; Start sends the first N of the plan, each with its revision."""
-        run = "[200, { started: [{ id: 11, session: 'builder', pane: 'w1:p1', checkout: '/r' }], failed: null, not_started: [] }]"
+        """sd:5107. Nothing posts until Build; Build sends the first N of the plan, each with its revision."""
+        run = "[200, { queued: [{ id: 7, item: 11, status: 'queued' }], kickstart: { ok: true, service: 'x', why: '' } }]"
         out = self.start_next(self.START_PLAN, run)
         shown = out["R"]["shown"]
         self.assertIn("2 of 6 builders run · five-minute load 4.5 of 40", shown)
@@ -2014,10 +2014,25 @@ R.shown = D.html; R.before = OUT.posts.length; D.returnValue = 'start'; D.onclos
         self.assertIn('value="start"', shown)
         self.assertEqual(out["R"]["before"], 0)
         self.assertEqual(out["posts"], [["/api/tasks/start-next/run", {"items": [{"id": 11, "revision": "a" * 64}]}, 64]])
-        self.assertEqual(out["toasts"][-1], ["Started #11 · builder sessions in herdr", False])
         self.assertEqual(out["gets"][-2:], ["/api/tasks/start-next", "/api/tasks"])
 
-    def test_start_next_refused_offers_no_start_and_a_partial_run_names_each_item(self):
+    def test_start_next_queues_a_build_and_says_so_not_a_herdr_session(self):
+        """Build step 5 (pack sd:6096): the dialog offers Build, and its toast names the queued builds and the
+        dispatcher's kickstart; a kickstart that failed says the next slot claims them."""
+        run = "[200, { queued: [{ id: 7, item: 11, status: 'queued' }], kickstart: { ok: true, service: 'x', why: '' } }]"
+        out = self.start_next(self.START_PLAN, run)
+        self.assertIn('<button class="btn" value="start" type="submit">Build</button>', out["R"]["shown"])
+        self.assertIn("Tasks to build (1–2)", out["R"]["shown"])
+        self.assertIn("Each queues a headless build; the dispatcher bundles them by repository.", out["R"]["shown"])
+        self.assertNotIn("herdr", out["R"]["shown"])
+        self.assertEqual(out["toasts"][-1], ["Queued #11 for build · the dispatcher was started", False])
+        late = ("[200, { queued: [{ id: 7, item: 11, status: 'queued' }, { id: 8, item: 12, status: 'queued' }],"
+                " kickstart: { ok: false, service: 'x', why: 'launchctl kickstart exit 113' } }]")
+        out = self.start_next(self.START_PLAN, late, count="2")
+        self.assertEqual(out["toasts"][-1][0], "Queued #11, #12 for build · the dispatcher starts at its next slot "
+                                               "(launchctl kickstart exit 113)")
+
+    def test_start_next_refused_offers_no_build_and_a_refused_post_says_why(self):
         refused = dict(self.START_PLAN, running=None, room=0, start=[], refusal="the running builders were not counted: ps failed")
         out = self.start_next(refused, "[500, { error: 'not called' }]")
         self.assertIn("▨ of 6 builders run", out["R"]["shown"])
@@ -2032,16 +2047,15 @@ R.shown = D.html; R.before = OUT.posts.length; D.returnValue = 'start'; D.onclos
         self.assertIn("Stalled: research b4211 (3h 0m).", out["R"]["shown"])
         self.assertIn('<a class="btn quiet" href="/management?view=sessions">Open Management › Sessions</a>', out["R"]["shown"])
         self.assertEqual(out["posts"], [])
-        partial = ("[200, { started: [{ id: 11 }], failed: { id: 12, status: 504, error: 'herdr.sh launch gave no answer in 90 s' },"
-                   " not_started: [13] }]")
-        out = self.start_next(dict(self.START_PLAN, room=3), partial, count="3")
+        queued = "[200, { queued: [{ id: 7, item: 11 }, { id: 8, item: 12 }], kickstart: { ok: true } }]"
+        out = self.start_next(dict(self.START_PLAN, room=3), queued, count="3")
         self.assertEqual(len(out["posts"][0][1]["items"]), 2)  # the plan listed two; a count past them sends no more
-        self.assertEqual(out["toasts"][-1][0], "Started #11 · builder sessions in herdr · #12 did not start: herdr.sh launch "
-                                               "gave no answer in 90 s · not tried: #13")
-        out = self.start_next(self.START_PLAN, "[400, { error: 'Nothing started: #12 is not ready; read the plan again.' }]")
-        self.assertEqual(out["toasts"][-1][0], "Nothing started: #12 is not ready; read the plan again.")
+        out = self.start_next(self.START_PLAN, "[409, { error: 'Nothing queued: item 12 changed; refresh the selection.' }]")
+        self.assertEqual(out["toasts"][-1][0], "Nothing queued: item 12 changed; refresh the selection.")
+        out = self.start_next(self.START_PLAN, "[400, { error: 'Nothing queued: #12 is not ready; read the plan again.' }]")
+        self.assertEqual(out["toasts"][-1][0], "Nothing queued: #12 is not ready; read the plan again.")
         out = self.start_next(self.START_PLAN, "Promise.reject(new Error('Load failed'))")
-        self.assertIn("got no answer, so what started is not known", out["toasts"][-1][0])
+        self.assertIn("got no answer, so what queued is not known", out["toasts"][-1][0])
 
     # Build (pack sd:6095): the plan builds.plan answers for one ready item, read before anything is written.
     def build_plan(self, item, refused=()):
