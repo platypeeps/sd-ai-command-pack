@@ -15,7 +15,6 @@ from pathlib import Path
 from unittest.mock import patch
 
 from sd_dashboard import documents
-
 from test_workflow_actions import BrowserSession
 
 

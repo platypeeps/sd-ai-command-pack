@@ -13,9 +13,8 @@ import http.client
 import unittest
 from urllib.parse import parse_qs, urlsplit
 
-from sd_db import upsert_repo
 from sd_dashboard import tasks_screen, v2
-
+from sd_db import upsert_repo
 from support import NOW, ScreenCase
 from test_workflow_actions import BrowserSession
 

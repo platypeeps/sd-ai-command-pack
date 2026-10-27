@@ -12,9 +12,8 @@ import subprocess
 from pathlib import Path
 from unittest import mock
 
-from sd_db import upsert_repo
 from sd_dashboard import why_search
-
+from sd_db import upsert_repo
 from support import ScreenCase
 from test_workflow_actions import BrowserSession
 

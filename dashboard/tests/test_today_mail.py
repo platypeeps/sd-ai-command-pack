@@ -14,11 +14,9 @@ import sqlite3
 from pathlib import Path
 from unittest import mock
 
+from sd_dashboard import now_screen, today_mail, v2
 from sd_db import repos
 from sd_db.channels import ChannelRefusal
-
-from sd_dashboard import now_screen, today_mail, v2
-
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document
 

@@ -20,9 +20,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from sd_db import review, workflow
 from sd_dashboard import decisions, review_screen, v2
-
+from sd_db import review, workflow
 from support import ScreenCase, before_5648
 from test_v2_registry import GROUP_BLOCK, Registers
 from test_v2_tasks import MARKUP_JS, SHELL, STAND_IN
@@ -306,7 +305,7 @@ class TheRoutes(BrowserSession):
         status, _, pulled = self.post("/api/review/withdraw", {"item": ids["open"], "ruling": out["ruling"], "revision": out["revision"]})
         self.assertEqual(status, 200, pulled)
         self.assertTrue(review.read(self.connection, ids["open"])["questions"][0]["open"])
-        status, _, exported = self.request("/api/review/%d/export" % ids["open"], headers={"Cookie": self.cookie})[0], None, None
+        status = self.request("/api/review/%d/export" % ids["open"], headers={"Cookie": self.cookie})[0]
         self.assertEqual(status, 200)
 
     def test_a_blind_batch_never_serves_a_recommendation_before_its_ruling(self):
@@ -360,7 +359,7 @@ class TodaysDecisions(ScreenCase):
 
     def test_the_batch_ref_today_names_is_the_one_review_files_under(self):
         self.assertEqual(decisions.BATCH_SOURCE, review.REF_SOURCE)
-        self.assertTrue(f"review:labels:C1".startswith(decisions.BATCH_PREFIX))
+        self.assertTrue("review:labels:C1".startswith(decisions.BATCH_PREFIX))
 
 
 class ThePage(unittest.TestCase):

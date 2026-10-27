@@ -24,11 +24,9 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_dashboard import adversarial
 from sd_db import review, routine_briefs, upsert_shadow, workflow, writes
 from sd_db.testing import patience
-
-from sd_dashboard import adversarial
-
 from test_workflow_actions import BrowserSession
 
 #: The longest a run against the double may take before the case fails naming it.

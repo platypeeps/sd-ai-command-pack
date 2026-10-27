@@ -16,11 +16,9 @@ from pathlib import Path
 from unittest.mock import patch
 
 import sd_db
+from sd_dashboard import shadow_run
 from sd_db import shadow_sync
 from sd_db.shadow_sync import SyncBusy, Synced, sync_lock
-
-from sd_dashboard import shadow_run
-
 from support import ScreenCase
 from test_workflow_actions import BrowserSession
 

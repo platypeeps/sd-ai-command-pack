@@ -31,10 +31,9 @@ DASHBOARD = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(DASHBOARD))
 
 import sd_db  # noqa: E402
+from sd_dashboard import realm_sweep  # noqa: E402
 from sd_db import connect, initialise, writes  # noqa: E402
 from sd_db.database import local_path  # noqa: E402
-
-from sd_dashboard import realm_sweep  # noqa: E402
 
 #: The sd_db this process imported, for the run's own PYTHONPATH: the copy the gate pins, not the live pack.
 PACK_LIB = Path(sd_db.__file__).resolve().parent.parent

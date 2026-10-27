@@ -38,15 +38,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from sd_db import writes
 from sd_dashboard import home_screen, server, v2
-
+from sd_db import writes
 from support import NOW, ScreenCase
-from test_v2_today import OSASCRIPT, Refused
-from test_v2_tasks import SHELL, STAND_IN
-from test_workflow_actions import BrowserSession
-from test_v2_registry import Registers
 from test_v2_read import READ_SHELL
+from test_v2_registry import Registers
+from test_v2_tasks import SHELL, STAND_IN
+from test_v2_today import OSASCRIPT, Refused
+from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent
 HOME_JS = (V2 / "static" / "home.js").read_text(encoding="utf-8")
@@ -944,7 +943,8 @@ open('binary_sensor.wan_degraded'); R.det = ELS.details.html; R.groups = ELS.gro
     def binary(self):
         doc = self.live()
         base = doc["groups"][0]["tiles"][0]
-        tile = lambda entity_id, value, device_class: dict(base, id=entity_id, name=entity_id.split(".")[1].replace("_", " ").capitalize(), type=None, error="",
+        def tile(entity_id, value, device_class):
+            return dict(base, id=entity_id, name=entity_id.split(".")[1].replace("_", " ").capitalize(), type=None, error="",
                                                            state={"value": value, "changed": "2026-09-06T11:00:00+00:00", "device_class": device_class, "unit": None})
         doc["groups"].append({"name": "Binary", "tiles": [
             tile("binary_sensor.house_powerwall_grid_status", "on", "power"), tile("binary_sensor.pump_fault", "on", "problem"),
@@ -976,7 +976,8 @@ open('binary_sensor.wan_degraded'); R.det = ELS.details.html; R.groups = ELS.gro
         doc = self.live()
         base = doc["groups"][0]["tiles"][0]
         ran = "2026-10-22T04:39:00+00:00"
-        tile = lambda entity_id, value, last: dict(base, id=entity_id, name=entity_id.split(".")[1], type=None, error="", state={
+        def tile(entity_id, value, last):
+            return dict(base, id=entity_id, name=entity_id.split(".")[1], type=None, error="", state={
             "value": value, "changed": "2026-10-22T04:39:30+00:00", "device_class": None, "unit": None, "ran": last})
         doc["groups"].append({"name": "Routines", "tiles": [tile("script.good_night", "off", ran), tile("automation.good_night", "on", ran),
                                                              tile("script.never_ran", "off", None)]})

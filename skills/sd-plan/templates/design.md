@@ -6,7 +6,7 @@ item: sd:<id>
 
 # Design — <slug>
 
-Write this page only when the shape needs agreement before the code.
+Write this page only for a change that moves state in steps.
 The item's row holds status, progress and decisions; this page holds the shape.
 
 ## Problem

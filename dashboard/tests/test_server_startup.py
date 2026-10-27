@@ -3,7 +3,6 @@
 import http.client
 import io
 import json
-from pathlib import Path
 import socket
 import subprocess
 import sys
@@ -11,10 +10,11 @@ import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from unittest.mock import ANY, Mock, patch
 
-from sd_db.testing import patience
 from sd_dashboard import runtime, server
+from sd_db.testing import patience
 
 
 class ServerStartup(unittest.TestCase):
@@ -105,7 +105,7 @@ class ServerStartup(unittest.TestCase):
                 old.build_check_seconds = 0
                 old.restart_probe = listening.restart_probe
                 ended = []
-                def serve():
+                def serve(old=old, ended=ended):
                     try:
                         old.serve_forever(poll_interval=0.01)
                     except BaseException as error:  # noqa: BLE001 - the test reads what ended it
@@ -143,7 +143,7 @@ class ServerStartup(unittest.TestCase):
                 old.restart_probe = ["sh", "-c", f': > "$0"; sleep 2; exit {code}', str(started)]
                 ended = []
 
-                def serve():
+                def serve(old=old, ended=ended):
                     try:
                         old.serve_forever(poll_interval=0.01)
                     except BaseException as error:  # noqa: BLE001 - the test reads what ended it

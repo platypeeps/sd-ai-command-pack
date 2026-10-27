@@ -15,9 +15,8 @@ import time
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db.testing import patience
 from sd_dashboard import chat, email_draft
-
+from sd_db.testing import patience
 from support import bound_from
 from test_email_draft import DOUBLE
 from test_workflow_actions import BrowserSession

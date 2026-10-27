@@ -792,6 +792,29 @@ class ThePragmaWrites(FenceCase):
         connection.execute("VACUUM")
         self.assertEqual(len(self.asked()), before + 1, "one fresh ask")
 
+    def test_page_size_and_auto_vacuum_are_refused_not_dropped(self):
+        """pack sd:6378: BEGIN IMMEDIATE creates the file's header, so the wrapper drops both settings."""
+        for suffix in ("", "-wal", "-shm"):
+            Path(f"{self.path}{suffix}").unlink(missing_ok=True)
+        self.node()
+        connection = database.connect(create=True)
+        self.addCleanup(connection.close)
+        self.assertIsInstance(connection, hub.FencedConnection)
+        for statement in ("PRAGMA page_size = 8192", "PRAGMA auto_vacuum = FULL", "PRAGMA main.page_size = 8192"):
+            for opening in (None, "BEGIN", "BEGIN IMMEDIATE"):
+                with self.subTest(statement=statement, opening=opening):
+                    if opening is not None:
+                        connection.execute(opening)
+                    try:
+                        with self.assertRaisesRegex(SdDbError, "before the database exists"):
+                            connection.execute(statement)
+                    finally:
+                        if connection.in_transaction:
+                            connection.execute("ROLLBACK")
+        self.assertEqual((connection.execute("PRAGMA page_size").fetchone()[0],
+                          connection.execute("PRAGMA auto_vacuum").fetchone()[0]), (4096, 0))
+        self.assertEqual(connection.execute("PRAGMA temp.page_size = 8192").fetchall(), [])
+
 class TheRestore(FenceCase):
     def test_restore_writes_before_the_name_is_taken(self):
         """Promote step 5 restores the old hub's record on a machine that does not hold its name yet."""

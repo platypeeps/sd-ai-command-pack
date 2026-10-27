@@ -40,7 +40,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Mapping, Sequence
 from urllib.parse import urlencode
 
-from .markup import Markup, escape, join, tag
+from .markup import Markup, join, tag
 
 __all__ = ["BulkAction", "Column", "Listing", "PAGE_SIZE", "SHOW_TOTAL_ABOVE"]
 

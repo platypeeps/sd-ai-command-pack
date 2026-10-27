@@ -39,15 +39,15 @@ import threading
 import time
 import traceback
 from datetime import datetime, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import CookieError, SimpleCookie
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 import sd_db
 from sd_db import workflow
-from sd_db.errors import SdDbError
 from sd_db.database import schema_version
+from sd_db.errors import SdDbError
 from sd_db.schema import SCHEMA_VERSION
 
 from . import auth, caching, runtime, screens
@@ -1063,8 +1063,6 @@ class Dashboard(BaseHTTPRequestHandler):
 
         The read answers a document (200) or `(status, document)`. A route refuses a query unless it says it takes one.
         """
-        from . import v2
-
         if not self._session(context):
             return self._json(403, {"error": f"Reload the page to read {page.section}: {SESSION_ENDED}"})
         if split.query and not entry.query:
@@ -1169,6 +1167,7 @@ class Dashboard(BaseHTTPRequestHandler):
             connection = sd_db.connect(self.database)
             try:
                 from sd_db import reporting, writes
+
                 from . import command_journal
 
                 # A command that runs something gets its execution journal record once it answered (sd:5541). Its

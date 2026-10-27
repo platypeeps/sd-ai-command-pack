@@ -12,19 +12,32 @@ from __future__ import annotations
 
 import json
 import re
+import sqlite3
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
-import sqlite3
-
-from sd_db import repos, reporting, routine_briefs, upsert_repo, upsert_shadow, workflow, writes
-
-from sd_dashboard import hoa_screen, places, reports_screen, snooze, tasks_screen, today_reports, v2
-
 import test_v2_tasks
+from sd_dashboard import (
+    hoa_screen,
+    places,
+    reports_screen,
+    snooze,
+    tasks_screen,
+    today_reports,
+    v2,
+)
+from sd_db import (
+    reporting,
+    repos,
+    routine_briefs,
+    upsert_repo,
+    upsert_shadow,
+    workflow,
+    writes,
+)
 from support import NOW, ScreenCase, before_5648
 from test_now_screen import JobsBackend
 from test_v2_tasks import SHELL, STAND_IN
@@ -243,7 +256,8 @@ class Briefs(Fixture):
     def test_a_brief_seen_on_today_reads_seen_here_until_its_text_grows(self):
         # sd:5752: Seen is Today's snooze, under Today's row id and fingerprint, so a mark made in either place holds in both.
         stem = "2026-09-05 - Board Notes"
-        mine = lambda: next(r for r in places.briefs(self.connection, "hoa", now=NOW, config=self.config)["rows"] if r["id"] == stem)
+        def mine():
+            return next(r for r in places.briefs(self.connection, "hoa", now=NOW, config=self.config)["rows"] if r["id"] == stem)
         today = next(r for r in today_reports.document(self.connection, now=NOW, snoozes={})["briefs"] if r["stem"] == stem)
         row = mine()
         self.assertEqual((row["mark"], row["seen"], row["marked"]), (today["id"], today["seen"], False))
@@ -495,7 +509,8 @@ class TheRoutes(BrowserSession):
             with mock.patch.object(places, "REALMS_CONFIG", conf):
                 signed = self.request("/ui/sections.js", headers={"Cookie": self.cookie})[2]
                 bare = self.request("/ui/sections.js")[2]
-        realms = lambda body: json.loads(re.search(r"^window\.SHELL_REALMS = (.*);$", body, re.M).group(1))
+        def realms(body):
+            return json.loads(re.search(r"^window\.SHELL_REALMS = (.*);$", body, re.M).group(1))
         self.assertEqual(realms(signed), [{"id": "work", "label": "Work", "place": None}])
         self.assertEqual(realms(bare), [])
         self.assertNotIn("example-work", signed, "a glob is a path; the page needs only the id and label")
@@ -757,7 +772,8 @@ seg('tasks', 'open'); await flush(); R.back = ELS['tasks-rows'].html;
 await go('#view=reports'); R.reports = ELS['reports-rows'].html; seg('reports', 'all'); await flush(); R.reportsAll = ELS['reports-rows'].html;""",
                             docs, place="home")
         r = out["R"]
-        row = lambda n: f'<tr data-id="{n}" '
+        def row(n):
+            return f'<tr data-id="{n}" '
         self.assertEqual([row(self.home_item) in r["open"], row(self.swept) in r["open"]], [True, False])
         self.assertIn('data-f="tasks" data-v="open" aria-pressed="true"', r["open"])
         self.assertIn('Open <span class="n">1</span>', r["open"])
@@ -787,7 +803,7 @@ await go('#view=reports'); R.reports = ELS['reports-rows'].html; seg('reports', 
         out = self.run_page(self.ACTS + """await go('#view=tasks'); R.tasks = ELS['tasks-rows'].html;
 await go('#view=reports'); R.reports = ELS['reports-rows'].html;""", docs, place="home")
         r = out["R"]
-        self.assertIn(f'<td class="what"><button type="button">Clean the gutters</button></td>', r["tasks"])
+        self.assertIn('<td class="what"><button type="button">Clean the gutters</button></td>', r["tasks"])
         self.assertRegex(r["tasks"], rf'(?s)<tr data-id="{self.home_item}" .*?<i data-act="item.status.done"></i></td></tr>')
         self.assertRegex(r["reports"], rf'(?s)<tr data-id="r{self.open_report}" .*?<i data-act="report.ack"></i></td></tr>')
         self.assertIn('<th scope="col" class=""><span class="sr">Actions</span></th>', r["tasks"])

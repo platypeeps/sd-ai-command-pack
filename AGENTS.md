@@ -49,7 +49,7 @@ Shared contributors do not revoke merge permission; ownership gates still apply.
 - Read each `docs/spec/**` notice before using that page.
   Some pages describe the retired pre-3e model.
 - Work items are rows (`sd task add`). [docs/work](docs/work/README.md) holds one directory per
-  item whose shape needs agreement, with a single `design.md`.
+  item that moves state in steps, with a single `design.md`.
 
 ## Calling Convention
 

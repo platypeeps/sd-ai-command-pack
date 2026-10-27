@@ -21,7 +21,6 @@ import unittest
 from pathlib import Path
 
 from sd_dashboard import now_screen, v2
-
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document, repo
 from test_today_needs import blocked, lane, work

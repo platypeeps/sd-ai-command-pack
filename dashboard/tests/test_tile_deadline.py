@@ -337,7 +337,7 @@ class Calls(unittest.TestCase):
         # cost, never more: the stop is fixed before `Popen` and measured
         # after it. `assertEqual` here would have to trust that `Popen` takes
         # no time, which on a loaded host it does not.
-        for waited, asked in zip(self.timeouts, (25, 10, 15)):
+        for waited, asked in zip(self.timeouts, (25, 10, 15), strict=False):
             self.assertTrue(asked - 1.0 < waited <= asked, (waited, asked))
         self.assertTrue(4.0 < self.module.Budget(5.0).stop - time.monotonic() <= 5.0)
 

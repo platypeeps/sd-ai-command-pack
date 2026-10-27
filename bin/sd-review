@@ -1539,7 +1539,7 @@ _NOT_FOUND = re.compile(
 _RECIPE_EXIT_127 = re.compile(r"\bError 127\b")
 #: sd-check's reason for a check it killed at `--timeout` or no gate slot admitted, and the runner's line
 #: for sd-check itself (sd:1560). Weaker than a missing program, so it is read last.
-GATE_TIMED_OUT = "timed_out"
+GATE_TIMED_OUT, GATE_BUSY = "timed_out", "gate_busy"  # busy: the wait for a slot ran out, no check ran (sd:6343)
 _TIMED_OUT = re.compile(r"\b(?:timed out after|no gate slot came free within) \d+s")
 
 
@@ -1593,8 +1593,8 @@ def classify_gate(checks: Any) -> dict[str, Any] | None:
         if found is not None:
             return {**found, "entrypoint": str(check.get("name", "?")), "started": started}
     timed = next(((check, hit) for check in records if (hit := _TIMED_OUT.search(str(check.get("reason") or "")))), None)
-    return {"reason": GATE_TIMED_OUT, "evidence": timed[1].group(0), "entrypoint": str(timed[0].get("name", "?")),
-            "started": started} if timed else None
+    return {"reason": GATE_BUSY if timed[1].group(0).startswith("no gate") else GATE_TIMED_OUT, "evidence": timed[1].group(0),
+            "entrypoint": str(timed[0].get("name", "?")), "started": started} if timed else None
 
 
 def gate_failure(checks: Any, detail: str) -> dict[str, Any]:
@@ -1619,6 +1619,9 @@ def gate_failed_line(check: Mapping[str, Any] | None) -> str:
         where = f" at line {check['missing_line']}" if check.get("missing_line") else ""
         return (f"sd-review: the gate's {check['entrypoint']} failed: {what}{where} ({check['evidence']}); "
                 "it ran up to that point, so a check may have run; the review had cleared before it ran")
+    if check and check.get("reason") == GATE_BUSY:
+        return (f"sd-review: the gate did not run ({check['evidence']}); the review had cleared; the lane runs the "
+                "full gate again: enqueue, or run again when `sd gate status --json` shows a free slot")
     if check and check.get("reason") == GATE_TIMED_OUT:
         return (f"sd-review: the gate's {check['entrypoint']} stopped at its bound ({check['evidence']}); the review had cleared before it ran; "
                 "give it longer with --timeout SECONDS (sd-ship prepare: --review-timeout SECONDS)")
@@ -1628,6 +1631,8 @@ def gate_failed_line(check: Mapping[str, Any] | None) -> str:
 def gate_failed_checks(check: Mapping[str, Any] | None) -> list[str]:
     """Each failed check, what sd-check says failed and where it kept the output, else its last line (sd:6075)."""
     rows = [row for row in (check or {}).get("checks") or [] if isinstance(row, dict) and row.get("status") == "fail"]
+    if (check or {}).get("reason") == GATE_BUSY:
+        return []  # no check ran: none failed
     said = (str((check or {}).get("detail") or "").strip().splitlines() or ["nothing"])[-1]
     return [f"  failed check: {row.get('name', '?')}: {'; '.join(map(str, row.get('failed_steps') or [row.get('reason')]))}; "
             + (f"output: {row['output_path']}" if row.get("output_path") else next((part for part in str(row.get("reason"))
@@ -2440,7 +2445,8 @@ def render(result: Mapping[str, Any], stream: TextIO) -> None:
         write(f"\ncheck: not run -- {check['reason']}\n")
     elif check:
         reason = f" reason={check['reason']}" if check.get("reason") else ""
-        write(f"\ncheck: {check['status']} (exit {check['exit_code']}){reason}\n")
+        write(f"\ncheck: {check['status']} (exit {check['exit_code']}){reason}\n" if check.get("reason") != GATE_BUSY
+              else f"\ncheck: not run -- gate busy: {check['evidence']}\n")
     if result["status"] == "gate_failed":
         write(gate_failed_line(check) + "\n")
         write("".join(line + "\n" for line in gate_failed_checks(check)))

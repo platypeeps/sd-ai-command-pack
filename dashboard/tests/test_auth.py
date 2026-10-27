@@ -1,10 +1,15 @@
 """Pure boundary checks; remote request handling is not enabled by these tests."""
 
+import unittest
 from copy import deepcopy
 from email.message import Message
-import unittest
 
-from sd_dashboard.auth import access_context, direct_context, parse_direct_origin, validate_frontdoor
+from sd_dashboard.auth import (
+    access_context,
+    direct_context,
+    parse_direct_origin,
+    validate_frontdoor,
+)
 
 
 class AuthenticationPolicy(unittest.TestCase):

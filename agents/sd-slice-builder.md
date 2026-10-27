@@ -54,7 +54,7 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
    `sd gate run --max-wait 240 --label '<branch> tests' -- <test command>`. It waits in arrival order while every gate slot is held.
    It exits 75, the tests not run, when no slot came free in 240 s: run it again later.
    Do not run a full `make check` or `sd gate check`: the lane's prepare runs the one full gate (system sd:5800).
-6. Merge `origin/main` into your branch (`git fetch -q origin && git merge --no-edit origin/main`), resolve conflicts,
+6. Merge `origin/main` into your branch (`git fetch -q origin && git merge --no-ff -m "chore: merge origin/main" origin/main`), resolve conflicts,
    and rerun the focused tests. A conflict you cannot resolve from the code is a question for the lead.
    A change to a page a browser shows: capture each page it touches, dark and light, at desktop and phone width (sd:6007).
    For the pack's dashboard run `dashboard/dashboard.sh shots --out <root>/<repository>/shots-<branch> /<page>...`;

@@ -21,10 +21,8 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import upsert_repo, upsert_shadow, workflow, writes
-
 from sd_dashboard import command_journal, pr_merge
-
+from sd_db import upsert_repo, upsert_shadow, workflow, writes
 from support import ScreenCase
 from test_health_cleanup import FIXTURE_GIT, git
 from test_land import Fixture

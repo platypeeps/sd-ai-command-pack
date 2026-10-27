@@ -6,11 +6,10 @@
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_db import build, ship, upsert_repo
-from sd_db.writes import now as clock
-from sd_db.workflow import item_state
 from sd_dashboard import builds
-
+from sd_db import build, ship, upsert_repo
+from sd_db.workflow import item_state
+from sd_db.writes import now as clock
 from support import NOW
 from test_workflow_actions import BrowserSession
 
@@ -183,6 +182,10 @@ class BuildsPanel(Fixture):
         items = [self.ready(), self.ready()]
         run = self.blocked(items)
         self.assertEqual([item_state(self.connection, i)["item"]["status"] for i in items], ["blocked", "blocked"])
+
+        def parked():
+            return [item_state(self.connection, i)["item"]["parked_at"] is not None for i in items]
+        self.assertEqual(parked(), [True, True], "pack sd:6132: a blocked run parks its items")
         recent = self.panel(clock())["recent"]
         self.assertEqual((recent[0]["outcome"], recent[0]["retry"]["allowed"]), ("interrupted", True))
         status, _, body = self.post("/api/queue/builds/retry", {"assignment": run["assignment"],
@@ -190,6 +193,7 @@ class BuildsPanel(Fixture):
         self.assertEqual(status, 200, body)
         self.assertEqual(sorted(row["item"] for row in body["queued"]), items)
         self.assertEqual([item_state(self.connection, i)["item"]["status"] for i in items], ["ready", "ready"])
+        self.assertEqual(parked(), [False, False], "Retry unparks what the block parked")
         queued = self.connection.execute("SELECT COUNT(*) FROM assignment WHERE scope = 'build' AND status = 'queued'")
         self.assertEqual(queued.fetchone()[0], 2)
         self.assertEqual(len(self.kicks), 1)
