@@ -303,6 +303,7 @@ def retry(connection, assignment: int, *, expected_revision: str, who: str, find
             item = items.get(member["item"])
             if item is not None and item["status"] == "blocked":
                 transition(connection, member["item"], "ready", who=who, reason=f"Retry of build run {run['id']}")
+            build.unpark(connection, member["item"])
             try:
                 build._item(connection, member["item"])
             except build.BuildRefused as refusal:

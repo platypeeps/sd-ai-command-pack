@@ -327,11 +327,10 @@ RULES: tuple[Rule, ...] = (
         scope="code",
         teaches="skills/sd-check/SKILL.md#Code health",
     ),
-    #: The store and plugin contract, three rows taught from one section of
-    #: `skills/sd-help/SKILL.md` -- the one skill that names `sd plugin`, and
-    #: the host team-lead chose on 2026-09-17 for the reason Dec-2 declined a
-    #: new skill for the code rules. `R11-D14` closed the kind vocabulary at
-    #: the eight keys `KIND_KEYS` holds and made a ninth a decision record;
+    #: The store and plugin contract, taught from one section of
+    #: `skills/sd-plan/SKILL.md`, the skill that uses `sd store`; it moved
+    #: there when `sd-help` retired (sd:6357). `R11-D14` closed the kind
+    #: vocabulary at the eight keys `KIND_KEYS` holds and made a ninth a decision record;
     #: what enforces it is `validate_kind`, once, by name, and the subject
     #: names the constant and the count rather than the keys, because the
     #: test that pins them already holds a copy and a third would drift
@@ -348,7 +347,7 @@ RULES: tuple[Rule, ...] = (
               "carrying a ninth key registers; `test_a_ninth_key_refuses` in "
               "`tests/test_sd_plugin.py` goes red",
         scope="code",
-        teaches="skills/sd-help/SKILL.md#The store and plugin contract",
+        teaches="skills/sd-plan/SKILL.md#The store and plugin contract",
     ),
     #: The code rules, registered against sd:430's checkers and nothing new
     #: (owner decision 2026-09-14, Dec-1 and Dec-2): a new round for rules the

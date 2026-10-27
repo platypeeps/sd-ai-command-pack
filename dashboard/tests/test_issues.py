@@ -17,11 +17,9 @@ import subprocess
 from pathlib import Path
 from unittest import mock
 
-from sd_db import progress, repos, upsert_shadow, workflow, writes
-
 from sd_dashboard import issues, now_screen, tasks_screen, v2
 from sd_dashboard.v2.pages import Read
-
+from sd_db import progress, repos, upsert_shadow, workflow, writes
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document
 from test_v2_tasks import MARKUP_JS, SHELL, STAND_IN
@@ -617,7 +615,8 @@ class TheViewRoute(BrowserSession):
     def test_hide_writes_the_view_state_the_read_carries_back_and_unhide_clears_it(self):
         job = {"name": "shadow-sync-nightly", "error": "not installed here"}
         with stub(return_value=FOUND), stub_intake(return_value=INTAKE), mock.patch.object(issues, "sync_job", return_value=job):
-            read = lambda: json.loads(self.request("/api/github/issues", headers={"Cookie": self.cookie})[2])
+            def read():
+                return json.loads(self.request("/api/github/issues", headers={"Cookie": self.cookie})[2])
             self.assertFalse(read()["issues"][0]["hidden"])
             before = self.snapshot()
             for payload in ({"key": "jira:EXAMPLE-8"}, {"key": "jira:EXAMPLE-8", "hidden": "yes"}, {"key": 3, "hidden": True},

@@ -26,10 +26,9 @@ import time
 from pathlib import Path
 from unittest import mock
 
+from sd_dashboard import realm_sweep, sweep
+from sd_dashboard import research_experiments as rx
 from sd_db import connect, repos, writes
-
-from sd_dashboard import realm_sweep, research_experiments as rx, sweep
-
 from support import ScreenCase
 from test_workflow_actions import BrowserSession
 

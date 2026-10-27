@@ -9,7 +9,7 @@
 
 One repository, one prefix, one machine-scope install. The pack renders its
 `sd-*` surfaces into the AI tools installed on a machine and gets out of the
-way. `sd --help` and `sd-help` enumerate the installed commands and skills. It
+way. `sd --help` and `sd skill list` enumerate the installed commands and skills. It
 does not install anything into the repositories you work in.
 
 That last sentence is the design, not a summary of it. The previous version of
@@ -158,7 +158,7 @@ Two skills add paths of their own, both tracked. Invoking either is the approval
 to write, and neither writes anywhere else:
 
 - `sd-plan` — a work item is a row (`sd task add`); it writes
-  `docs/work/<YYYY-MM-DD>-<slug>/design.md` only when the shape needs agreement.
+  `docs/work/<YYYY-MM-DD>-<slug>/design.md` only for a change that moves state in steps.
   `--work-dir` selects a root other than `docs/work`; `--decision`
   writes `docs/decisions/<YYYY-MM-DD>-<slug>.md` instead of a work item.
 - `sd-spec` — `docs/spec/**`, rewritten in place on the branch so the
@@ -502,8 +502,7 @@ rest safe:
 
 ## Commands
 
-There are twelve named surfaces: eleven commands plus `sd-help`.
-The taxonomy makes `sd-help` a skill because a catalog authorizes nothing.
+There are eleven named surfaces, all commands.
 All platforms preserve Markdown bodies.
 Codex invocation metadata uses the [adapter](#codex-invocation-metadata).
 Each surface has one `SKILL.md` file under `skills/` or `contrib/`.
@@ -511,21 +510,20 @@ That file is both the installed artifact and its documentation.
 
 `skills/` and `contrib/` also hold the skills these commands draw on —
 knowledge and procedure with no standing side-effect authority, loaded when
-relevant rather than invoked. They are not listed here: `sd-help` reads the
-installed tree at runtime, and `sd skill list` reads both roots, which are the
-only two inventories that cannot go stale.
+relevant rather than invoked. They are not listed here: `sd skill list`
+reads both roots, which are the only two inventories that cannot go stale.
 
 `sd-skill-adopt`, `sd-tips`, `sd-draft-review` and `sd-publish-drive` are the named surfaces in `contrib/`.
 They install with `sd skill try` instead of the default installer.
 They remain commands because they authorize side effects.
 Each of the eleven commands sets `disable-model-invocation`.
-Every other surface, including `sd-help`, omits that marker.
+Every other surface omits that marker.
 
 **Runs as** identifies the execution form.
 `bin/` means the pack ships an executable entry point.
 **prose** means an agent follows the skill without a runner.
 For prose surfaces, the skill is the implementation.
-Six of the twelve are prose.
+Five of the eleven are prose.
 Each prose skill has a "State of the tooling" section.
 `tests/test_skill_frontmatter.py` checks each claim against the filesystem.
 
@@ -537,7 +535,6 @@ Each prose skill has a "State of the tooling" section.
 | `sd-ship` | `bin/` | Review committed work, prepare its PR, verify merge authority, and reconcile delivery |
 | `sd-spec` | prose | Update `docs/spec/**` on the PR branch |
 | `sd-status` | `bin/` | Read-only: derived status, open PRs, branch-protection gaps and the states this repo accepts (its `status` declaration) |
-| `sd-help` | prose | Runtime catalog of installed `sd-*` surfaces |
 | `sd-skill-adopt` | `bin/` | Safety pre-screen, lint, and canonical transform for an incoming skill |
 | `sd-handoff` | `bin/` | Write the local session packet for this directory; `/clear` restores it |
 | `sd-tips` | prose | File scored tips into a writing content repository's vault inbox |

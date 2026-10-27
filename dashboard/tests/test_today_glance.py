@@ -7,13 +7,11 @@ read failed is its reason, never a zero or an empty list.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from unittest import mock
 
-from sd_db import reads
-
 from sd_dashboard import now_screen
-
+from sd_db import reads
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document
 from test_today_needs import blocked, lane, queue

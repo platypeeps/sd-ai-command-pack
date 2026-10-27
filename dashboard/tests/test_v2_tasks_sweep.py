@@ -21,7 +21,6 @@ from pathlib import Path
 from unittest import mock
 
 from sd_dashboard import sweep
-
 from test_workflow_actions import BrowserSession
 
 STUB = r'''import json, os, pathlib, sys, time
@@ -65,7 +64,7 @@ class RunRealmSweep(BrowserSession):
     def finish(self):
         for realm in ("work", "personal"):
             (self.root / f"release-{realm}").touch()
-            wait(self, lambda: not sweep.status(None, realm)["running"], f"the {realm} run to end")
+            wait(self, lambda *, realm=realm: not sweep.status(None, realm)["running"], f"the {realm} run to end")
 
     def runs(self, realm):
         try:

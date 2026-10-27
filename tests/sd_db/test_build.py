@@ -842,6 +842,59 @@ class Reap(Case):
             workflow.change_status(self.db, self.items[0], "blocked", who="operator")
 
 
+class Park(Case):
+    """pack sd:6132 (operator ruling #32107): a build run that ends blocked parks its items once its lease is
+    released, as the nightly prune parks an idle item (sd:6008); a run that ends done or retried parks nothing."""
+
+    def setUp(self):
+        super().setUp()
+        self.items = [self.item(), self.item()]
+        build.queue(self.db, self.items, who="operator")
+        self.bundle = self.claim()
+
+    def parked(self):
+        return [item_state(self.db, item)["item"]["parked_at"] is not None for item in self.items]
+
+    def lose(self, row):
+        return build.reap(self.db, now=later(row["created_at"], build.STALE_SECONDS + 1))[0]
+
+    def test_a_second_loss_parks_the_blocked_items_and_a_retry_parks_none(self):
+        build.write(self.db, self.bundle["id"], step="building")
+        retry = self.lose(self.bundle)["retry"]
+        self.assertEqual(self.parked(), [False, False], "a retried run parks nothing")
+        self.assertIsNone(self.lose(build.run(self.db, retry))["retry"])
+        self.assertEqual((self.statuses(self.items), self.parked()), (["blocked", "blocked"], [True, True]))
+        note = self.db.execute("SELECT body FROM note WHERE item = ? AND kind = 'comment' ORDER BY id DESC",
+                               (self.items[0],)).fetchone()
+        self.assertEqual(note["body"], build.PARKED.format(run=retry))
+
+    def test_a_held_blocked_run_parks_its_items_only_when_its_lease_is_released(self):
+        """A supervisor that ends blocked holds the lease until its groups read gone; the park waits for that, and an
+        item the operator moved on in the meantime stays unparked."""
+        build.write(self.db, self.bundle["id"], supervisor_pid=4242, supervisor_pgid=4242, supervisor_start=START,
+                    builder_pgid=777, builder_start=START)
+        build.end(self.db, self.bundle["id"], "blocked", "a permission denial")
+        self.assertEqual((self.statuses(self.items), self.parked()), (["blocked", "blocked"], [False, False]))
+        workflow.change_status(self.db, self.items[1], "ready", who="operator")
+        build.reap(self.db, probe=Probe(alive=False, group=False), kill=Kill(self.db))
+        self.assertIsNotNone(build.run(self.db, self.bundle["id"])["released_at"])
+        self.assertEqual(self.parked(), [True, False])
+
+    def test_a_run_that_ends_done_parks_nothing(self):
+        build.end(self.db, self.bundle["id"], "done", "the lane merged it")
+        self.assertEqual(self.parked(), [False, False])
+
+    def test_a_park_never_unparks_or_restamps_an_item(self):
+        """An item parked already keeps its first stamp and gets no second note."""
+        build.write(self.db, self.bundle["id"], step="building")
+        retry = self.lose(self.bundle)["retry"]
+        workflow.edit_item(self.db, self.items[0], {"parked_at": "2026-10-01T00:00:00+00:00"}, who="operator")
+        self.lose(build.run(self.db, retry))
+        self.assertEqual(item_state(self.db, self.items[0])["item"]["parked_at"], "2026-10-01T00:00:00+00:00")
+        self.assertEqual(self.count("SELECT COUNT(*) FROM note WHERE item = ? AND body LIKE 'Parked: build run%'",
+                                    self.items[0]), 0)
+
+
 class Race(Case):
     """Race table: a writer runs between the reap's read and its compare-and-set; the reap must do nothing then."""
 

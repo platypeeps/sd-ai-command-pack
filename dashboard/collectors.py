@@ -749,7 +749,8 @@ def db_rows(key):
         raise RuntimeError(f"`sd store list {d['kind']} --json` gave no rows to read")
     rows = []
     for entry in listed:
-        text = lambda name: "" if entry.get(name) is None else str(entry[name])
+        def text(name, *, entry=entry):
+            return "" if entry.get(name) is None else str(entry[name])
         row = {"stem": text("title"), "status": text("status"), "created": text("dateCreated")[:10]}
         row["age"] = age_days(row["created"])
         for c in d["columns"]:
@@ -768,7 +769,7 @@ def git_facts(path):
     if not (path / ".git").exists():
         return None
     branch = run(["git", "-C", p, "rev-parse", "--abbrev-ref", "HEAD"]) or "?"
-    dirty = len([l for l in run(["git", "-C", p, "status", "--porcelain"]).split("\n") if l.strip()])
+    dirty = len([line for line in run(["git", "-C", p, "status", "--porcelain"]).split("\n") if line.strip()])
     last = run(["git", "-C", p, "log", "-1", "--format=%cI%x1f%s%x1f%an"])
     when, subject, author = (last.split("\x1f") + ["", "", ""])[:3]
     ahead = behind = None
@@ -807,14 +808,15 @@ def read_research_config(path):
     def value(node, depth=0):
         if depth > 30:
             raise ValueError("research data is too deeply nested")
-        child = lambda part: value(part, depth + 1)
+        def child(part):
+            return value(part, depth + 1)
         if isinstance(node, ast.Constant) and isinstance(node.value, (str, int, float, bool, type(None))):
             return node.value
         if isinstance(node, (ast.List, ast.Tuple)):
             return [child(part) for part in node.elts]
         if isinstance(node, ast.Dict):
             result = {}
-            for key, part in zip(node.keys, node.values):
+            for key, part in zip(node.keys, node.values, strict=True):
                 if key is None:
                     result.update(child(part))
                 else:
@@ -967,7 +969,7 @@ def collect_research():
             items.append({
                 "name": repo.name, "path": str(repo),
                 "project": ns.get("PROJECT", repo.name), "docs": docs,
-                "links": [list(l) for l in dict.fromkeys(tuple(l) for l in links)],
+                "links": [list(line) for line in dict.fromkeys(tuple(line) for line in links)],
                 "notion": [list(n) for n in notion[:6]],
                 "git": git_facts(repo), "error": "", "manifest": manifest,
             })
@@ -1110,8 +1112,8 @@ def read_drift(log):
                 "drift_unknown": (f"the run that began {when} has not reported drift yet"
                                   if phase == "starting" else
                                   f"the {when or 'last'} run ended before it reported drift")}
-    items = [l.strip() for l in block
-             if re.match(r"^\s+(missing|extra|differs|DIFFERS|MISSING|EXTRA|STALE|BUSY|CLASH)", l)]
+    items = [line.strip() for line in block
+             if re.match(r"^\s+(missing|extra|differs|DIFFERS|MISSING|EXTRA|STALE|BUSY|CLASH)", line)]
     return {
         "drift": int(count.group(1)),
         "drift_at": when,
@@ -1147,8 +1149,8 @@ def collect_toolbox():
     for jf in cron_job_files():
         text = jf.read_text(errors="replace")
         sched = (re.search(r'JOB_SCHEDULE="([^"]*)"', text) or [None, ""])[1]
-        desc = " ".join(l.lstrip("# ").strip() for l in text.split("\n")
-                        if l.startswith("#"))[:220]
+        desc = " ".join(line.lstrip("# ").strip() for line in text.split("\n")
+                        if line.startswith("#"))[:220]
         name = jf.stem
         label = f"{LABEL_PREFIX}.cron.{name}"
         pid, rc = loaded.get(label, (None, None))
@@ -1171,7 +1173,7 @@ def collect_toolbox():
     fails = []
     flog = logs_dir / "failures.log"
     if flog.exists():
-        fails = [l for l in flog.read_text(errors="replace").strip().split("\n") if l][-10:]
+        fails = [line for line in flog.read_text(errors="replace").strip().split("\n") if line][-10:]
 
     agents = []
     for label, (pid, rc) in sorted(loaded.items()):

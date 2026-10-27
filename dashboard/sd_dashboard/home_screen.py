@@ -68,9 +68,9 @@ import os
 import re
 import socket
 import sqlite3
-import uuid
 import urllib.error
 import urllib.request
+import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -211,7 +211,7 @@ def _settings(environ) -> tuple[str, str]:
                       "local-ha-mcp/.env.example to <config>/ha-mcp/.env and fill it in")
     try:
         url = urlsplit(values["HA_MCP_URL"])
-        url.port  # a port that is not a number raises here
+        _ = url.port  # a port that is not a number raises here
     except ValueError:
         url = None
     if url is None or url.scheme not in ("http", "https") or not url.hostname:

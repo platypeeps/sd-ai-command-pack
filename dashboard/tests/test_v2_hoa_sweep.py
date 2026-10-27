@@ -19,7 +19,6 @@ from pathlib import Path
 from unittest import mock
 
 from sd_dashboard import sweep
-
 from test_workflow_actions import BrowserSession
 
 #: The stub: `run` counts itself and waits for `release` (or dies at once when `die` exists); `status --json` prints

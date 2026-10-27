@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_dashboard import controls
 from sd_db import (
     connect,
     create_assignment,
@@ -16,7 +17,6 @@ from sd_db import (
     workflow,
 )
 from sd_db.writes import add_note, upsert_repo
-from sd_dashboard import controls
 
 from .test_capture_screen import Fields
 from .test_workflow_actions import BrowserSession
@@ -38,16 +38,20 @@ class WorkflowControls(BrowserSession):
     def setUp(self):
         super().setUp()
         root = Path(self.tmp.name).resolve()
-        provider_file = root / "providers.yaml"; provider_file.write_text(REGISTRY)
+        provider_file = root / "providers.yaml"
+        provider_file.write_text(REGISTRY)
         original = registry.read
         replacement = patch.object(registry, "read", side_effect=lambda path=None, **kw: original(path or provider_file, **kw))
-        replacement.start(); self.addCleanup(replacement.stop)
-        self.pack = root / "pack"; (self.pack / "skills").mkdir(parents=True)
+        replacement.start()
+        self.addCleanup(replacement.stop)
+        self.pack = root / "pack"
+        (self.pack / "skills").mkdir(parents=True)
         (self.pack / "skills/paths.json").write_text(json.dumps({"paths": {"build": {"skills": []}}}))
         (self.pack / "contrib/sd-fixture").mkdir(parents=True)
         (self.pack / "contrib/sd-fixture/SKILL.md").write_text("---\nname: sd-fixture\ndescription: A fixture skill.\n---\nUse for testing.\n")
         replacement = patch.object(skills_catalog, "location", return_value=(self.pack, {}))
-        replacement.start(); self.addCleanup(replacement.stop)
+        replacement.start()
+        self.addCleanup(replacement.stop)
 
     def test_every_new_route_refuses_bad_session_before_work(self):
         before = self.snapshot()
@@ -58,7 +62,8 @@ class WorkflowControls(BrowserSession):
 
     def test_provider_atomic_valid_alternate_and_stale_refusal(self):
         state = provider_controls.snapshot(self.connection)
-        enabled = {entry["name"]: entry["enabled"] for entry in state["providers"]}; enabled["codex"] = False
+        enabled = {entry["name"]: entry["enabled"] for entry in state["providers"]}
+        enabled["codex"] = False
         payload = {"revision": state["revision"], "enabled": enabled, "orders": state["orders"]}
         before = self.snapshot()
         self.assertEqual(self.post("/api/providers/configure", payload)[0], 400)

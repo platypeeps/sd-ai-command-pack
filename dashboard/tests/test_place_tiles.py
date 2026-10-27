@@ -27,7 +27,6 @@ from pathlib import Path
 from unittest import mock
 
 from sd_dashboard import place_tiles
-
 from support import NOW
 from test_workflow_actions import BrowserSession
 

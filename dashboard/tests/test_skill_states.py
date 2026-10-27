@@ -9,9 +9,9 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_dashboard import server, skills_screen
 from sd_db import registry, runner, skills_catalog
 from sd_db.writes import upsert_repo
-from sd_dashboard import server, skills_screen
 
 from .test_controls_actions import REGISTRY
 from .test_workflow_actions import BrowserSession
@@ -29,20 +29,26 @@ class SkillStates(BrowserSession):
     def setUp(self):
         super().setUp()
         root = Path(self.tmp.name).resolve()
-        provider_file = root / "providers.yaml"; provider_file.write_text(REGISTRY)
+        provider_file = root / "providers.yaml"
+        provider_file.write_text(REGISTRY)
         original = registry.read
         replacement = patch.object(registry, "read", side_effect=lambda path=None, **kw: original(path or provider_file, **kw))
-        replacement.start(); self.addCleanup(replacement.stop)
+        replacement.start()
+        self.addCleanup(replacement.stop)
         self.pack = root / "pack"
         for name, source in (("sd-onpath", "skills"), ("sd-trial", "contrib"), ("sd-contrib", "contrib")):
             (self.pack / source / name).mkdir(parents=True)
             (self.pack / source / name / "SKILL.md").write_text(self.SKILL.format(name=name))
         (self.pack / "skills/paths.json").write_text(json.dumps({"paths": {"build": {"skills": ["sd-onpath"]}}}))
-        self.git("init", "-b", "main"); self.git("config", "user.name", "Fixture"); self.git("config", "user.email", "fixture@example.invalid")
-        self.git("add", "."); self.git("commit", "-m", "Fixture\n\nAuthored-with: codex/openai")
+        self.git("init", "-b", "main")
+        self.git("config", "user.name", "Fixture")
+        self.git("config", "user.email", "fixture@example.invalid")
+        self.git("add", ".")
+        self.git("commit", "-m", "Fixture\n\nAuthored-with: codex/openai")
         upsert_repo(self.connection, str(self.pack), remote="git@example.invalid:pack.git")
         replacement = patch.object(skills_catalog, "location", return_value=(self.pack, {}))
-        replacement.start(); self.addCleanup(replacement.stop)
+        replacement.start()
+        self.addCleanup(replacement.stop)
         self.assertEqual(self.post("/api/skills/sd-trial/try", {"revision": self.skill("sd-trial")["revision"]})[0], 200)
         self.assertEqual({name: self.skill(name)["status"] for name in ("sd-onpath", "sd-trial", "sd-contrib")},
                          {"sd-onpath": "path", "sd-trial": "trial", "sd-contrib": "contrib"})
@@ -103,7 +109,8 @@ class SkillStates(BrowserSession):
 
     def test_applying_both_proposals_queues_one_apply_assignment_carrying_exactly_them(self):
         item, assignment, proposals, state = self.reviewed("sd-contrib")
-        self.connection.execute("UPDATE assignment SET status='done' WHERE id=?", (assignment,)); self.connection.commit()
+        self.connection.execute("UPDATE assignment SET status='done' WHERE id=?", (assignment,))
+        self.connection.commit()
         notes = [note["id"] for note in state["notes"] if note["kind"] == "proposal"]
         status, _, result = self.post(f"/api/skill-reviews/{item}/apply", {"revision": state["revision"], "notes": notes})
         self.assertEqual(status, 200, result)
@@ -112,7 +119,7 @@ class SkillStates(BrowserSession):
         self.assertEqual(result["item"]["kind"], "task")
         text = json.loads(result["item"]["body"])["text"]
         self.assertEqual(json.loads(text.split("\n\n", 1)[1]),
-                         [{"note": note, "assignment": assignment, "provider": "claude", **proposal} for note, proposal in zip(notes, proposals)])
+                         [{"note": note, "assignment": assignment, "provider": "claude", **proposal} for note, proposal in zip(notes, proposals, strict=False)])
 
     def test_promote_and_demote_refuse_the_wrong_state_and_file_a_task_for_the_right_one(self):
         before = self.snapshot()

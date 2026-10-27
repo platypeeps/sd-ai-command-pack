@@ -17,10 +17,9 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_dashboard import email_draft
 from sd_db import workflow
 from sd_db.testing import patience
-from sd_dashboard import email_draft
-
 from support import bound_from
 from test_v2_notes import FakeWorkspace
 from test_workflow_actions import BrowserSession

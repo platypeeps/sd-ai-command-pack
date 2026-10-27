@@ -18,7 +18,6 @@ import urllib.request
 from pathlib import Path
 
 from sd_dashboard import v2
-
 from test_workflow_actions import BrowserSession
 
 IMMUTABLE = "private, max-age=31536000, immutable"

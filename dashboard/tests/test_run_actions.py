@@ -16,10 +16,9 @@ import stat
 from pathlib import Path
 from unittest.mock import patch
 
+from sd_dashboard import fix_session, health_collectors, home_screen, run_actions
 from sd_db import contributions, repos, upsert_repo
 from sd_db.workflow import WorkflowError
-
-from sd_dashboard import fix_session, health_collectors, home_screen, run_actions
 from test_workflow_actions import BrowserSession
 
 STUB = """#!/bin/sh

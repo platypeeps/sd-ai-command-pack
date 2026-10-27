@@ -11,7 +11,6 @@ import sqlite3
 from unittest import mock
 
 from sd_dashboard import now_screen, queue_screen
-
 from support import NOW
 from test_now_screen import JobsBackend, fleet_document
 from test_today_reports import ReportsCase
@@ -291,9 +290,8 @@ class TheUnread(ReportsCase):
         """sd:5954: the dark rows a part read raised skipped the snooze, so they carried no `seen` and /api/snooze refused
         their Snooze. Each is split as Now's rows are: it carries a `seen`, a snooze holds it, and a snoozed one still
         names its lamp, so the lamp reads unknown (sd:5939)."""
-        from sd_db import writes
         from sd_dashboard import active_sessions, today_mail, today_reports
-
+        from sd_db import writes
         from test_now_screen import repo
 
         def lane_down(connection, now):
@@ -303,7 +301,8 @@ class TheUnread(ReportsCase):
                    "briefs": [], "briefs_more": 0, "briefs_error": "", "briefs_skipped": 0}
         mail = {"mail": [], "mail_more": 0, "mail_unread": [{"repo": "hoa", "reason": "no alias"}], "mail_error": ""}
         live = {"rows": [], "sources": {"herdr": "herdr did not answer"}, "error": ""}
-        fleet = lambda area: fleet_document(area, repos=[repo("gone", error="git did not answer")])
+        def fleet(area):
+            return fleet_document(area, repos=[repo("gone", error="git did not answer")])
         cases = (("dark:lane", {"lanes": lane_down}), ("dark:gate", {"lanes": queue(gates={"error": "no answer"})}),
                  ("dark:repos", {"fleet": fleet}))
         with mock.patch.object(today_reports, "document", return_value=reports), \
@@ -323,7 +322,7 @@ class TheUnread(ReportsCase):
         # Review of sd:5939: unread_rows read the kept fleet rows before it checked that _repos accepted them.
         for repos in ("not a list", [{"error": "git did not answer"}], [{"name": "x", "error": {"not": "text"}}]):
             with self.subTest(repos=repos):
-                doc = self.today(fleet=lambda area: {"repos": repos} if area == "repos" else fleet_document(area))
+                doc = self.today(fleet=lambda area, *, repos=repos: {"repos": repos} if area == "repos" else fleet_document(area))
                 self.assertEqual(self.dark(doc), {"dark:repos": ("broken", "repos", "repos could not be read",
                                                                  "fleet collector returned an incomplete repos document")})
 

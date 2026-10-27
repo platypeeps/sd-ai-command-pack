@@ -17,7 +17,6 @@ from unittest.mock import patch
 from sd_dashboard import v2
 from sd_dashboard.v2 import pages as registry
 from sd_dashboard.v2.pages import Api, Page, Read, attention
-
 from test_workflow_actions import BrowserSession
 
 WHAT = {"warning": "rows broken", "caution": "rows to watch"}

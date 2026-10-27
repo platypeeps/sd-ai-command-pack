@@ -80,7 +80,7 @@ def this_host() -> str:
 def parse(text: str) -> tuple[list[dict], list[str]]:
     """The tiles a text names, each with its actions, and the lines it could not read, each with its number."""
     tiles, problems = {}, []
-    for number, line, fields in pipe_lines(text):
+    for number, _line, fields in pipe_lines(text):
         kind = fields[0]
         if (kind == "tile" and len(fields) in (6, 7) and ID.fullmatch(fields[1]) and ID.fullmatch(fields[2]) and fields[3]
                 and fields[4] and (len(fields) == 6 or ID.fullmatch(fields[6]))):
@@ -235,7 +235,7 @@ def document(realm: str, *, now: str, config: Path | None = None, connection=Non
         probes = list(pool.map(lambda t: _probe(t["url"]) if t["url"] else None, tiles))
     held, unread = _held_rows(connection, [(t, a["label"]) for t in tiles if _hosted(t) for a in t["actions"]])
     rows = []
-    for tile, probe in zip(tiles, probes):
+    for tile, probe in zip(tiles, probes, strict=True):
         hosted = _hosted(tile)
         here = not hosted and Path(tile["folder"]).is_dir()
         lasts = [({"state": "unknown", "host": tile["host"], "reason": unread} if unread else _remote_last(tile, a["label"], held))
@@ -244,7 +244,7 @@ def document(realm: str, *, now: str, config: Path | None = None, connection=Non
                      "host": tile["host"] if hosted else "",
                      "why": "" if here or hosted else f"{tile['folder']} is not on this machine, so its actions run elsewhere",
                      "actions": [{"label": a["label"], "command": a["command"], "last": last}
-                                 for a, last in zip(tile["actions"], lasts)]})
+                                 for a, last in zip(tile["actions"], lasts, strict=True)]})
     reason = "; ".join(problems) if problems else "" if rows else f"{source} names no tile for {realm}."
     return {**base, "state": "read", "rows": rows, "problems": problems, "reason": reason}
 

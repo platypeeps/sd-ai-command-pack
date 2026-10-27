@@ -60,7 +60,8 @@ class OneDeclaration(unittest.TestCase):
         modules = {"brief-details.js": ["briefs.html", "hoa.html", "home.html", "place.html"], "report-details.js": ["hoa.html", "home.html", "reports.html"],
                    "task-details.js": ["hoa.html", "home.html", "place.html", "tasks.html"],
                    "today-github.js": ["github.html"]}
-        scripts = lambda page: re.findall(r'<script src="/ui/([^"]+)"', page.read_text(encoding="utf-8"))
+        def scripts(page):
+            return re.findall(r'<script src="/ui/([^"]+)"', page.read_text(encoding="utf-8"))
         for name in users:
             with self.subTest(script=name):
                 pages = [page for page in V2.glob("*.html") if f'src="/ui/{name}"' in page.read_text(encoding="utf-8")]
@@ -164,7 +165,7 @@ class EveryCommandSaysWhatItDoes(unittest.TestCase):
                 self.assertIn(known, found)
 
     def test_a_does_text_is_short(self):
-        for name, text in SCRIPTS.items():
+        for _name, text in SCRIPTS.items():
             for found, body in declarations(text):
                 m = DOES.search(body)
                 if not m:

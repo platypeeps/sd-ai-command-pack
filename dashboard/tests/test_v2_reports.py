@@ -28,17 +28,16 @@ from datetime import timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
-from sd_db import reporting, workflow
 from sd_dashboard import reports_screen, server, v2
-
+from sd_db import reporting, workflow
 from support import ScreenCase
 from test_now_screen import JobsBackend
 from test_v2_read import READ_SHELL
-from test_v2_today import OSASCRIPT, Refused
-from test_v2_tasks import SHELL, STAND_IN
-from test_workflow_actions import BrowserSession
 from test_v2_registry import Registers
 from test_v2_shell_shared import cell_grammar
+from test_v2_tasks import SHELL, STAND_IN
+from test_v2_today import OSASCRIPT, Refused
+from test_workflow_actions import BrowserSession
 
 V2 = Path(v2.__file__).resolve().parent
 REPORTS_JS = (V2 / "static" / "reports.js").read_text(encoding="utf-8")
@@ -700,7 +699,7 @@ R.type = C.get('r{n}').type; R.rows = ELS.rows.html; R.cad = ELS['cad-body'].htm
         for case, runs in cases.items():
             with self.subTest(case):
                 sync["runs"][DAYS[4]] = runs
-                out = self.run_page(f"R.marks = [3, 4, 5].map(i => mark('nightly-sync', DAYS[i]));", doc=doc)
+                out = self.run_page("R.marks = [3, 4, 5].map(i => mark('nightly-sync', DAYS[i]));", doc=doc)
                 self.assertEqual(out["R"]["marks"][0], ["unknown", "▨", "not read"])
                 self.assertEqual(out["R"]["marks"][1], ["unknown", "▨", "not read"])
                 self.assertEqual(out["R"]["marks"][2], ["caution", "▲", "no run logged"])
@@ -717,7 +716,7 @@ R.type = C.get('r{n}').type; R.rows = ELS.rows.html; R.cad = ELS['cad-body'].htm
 TB.querySelectorAll = () => [...(TB.html || '').matchAll(/<tr data-id="([^"]+)"/g)].map(m => ({ dataset: { id: m[1] }, setAttribute() {}, toggleAttribute() {} }));
 TB.querySelector = () => TB.querySelectorAll()[0] || null;"""
         failed, clean = self.ids["failed"], self.ids["clean"]
-        for search, want in ((f"?job=weekly-scan", f"r{clean}"), (f"?job=weekly-scan&row=r{failed}", f"r{clean}"),
+        for search, want in (("?job=weekly-scan", f"r{clean}"), (f"?job=weekly-scan&row=r{failed}", f"r{clean}"),
                              (f"?row=r{clean}", f"r{clean}"), ("", f"r{failed}")):
             with self.subTest(search):
                 out = self.run_page("R.sel = sel; R.drawn = TB.querySelectorAll().map(t => t.dataset.id);",

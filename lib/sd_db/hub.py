@@ -357,10 +357,19 @@ _PRAGMA_WRITES = frozenset({"incremental_vacuum", "wal_checkpoint"})
 #: a transaction", "database table is locked"). Each writes all it writes
 #: before its one row. VACUUM is the same, authorized as SQLITE_ATTACH.
 _PRAGMA_UNDONE_BY_NOTHING = frozenset({"journal_mode", "wal_checkpoint"})
-#: Why `incremental_vacuum` never runs on the record: no fence check holds it.
-_INCREMENTAL_VACUUM = ("refused: PRAGMA incremental_vacuum frees pages as its rows are fetched, after any "
-                       "fence check and past a ROLLBACK, so it never runs on this machine's own database; "
-                       "run it with sqlite3 on the hub (pack sd:6328)")
+#: Write pragmas that never run on the record, and why. No fence check holds
+#: `incremental_vacuum`. BEGIN IMMEDIATE writes the header of an empty file,
+#: so the wrapper would drop `page_size` and `auto_vacuum` without a word;
+#: no caller sets them after `arm` (pack sd:6378).
+_FORBIDDEN_PRAGMAS = {
+    "incremental_vacuum": "refused: PRAGMA incremental_vacuum frees pages as its rows are fetched, after any "
+                          "fence check and past a ROLLBACK, so it never runs on this machine's own database; "
+                          "run it with sqlite3 on the hub (pack sd:6328)",
+    **{name: f"refused: PRAGMA {name} takes effect only before the database exists, and this connection's "
+             f"write fence would wrap it in BEGIN IMMEDIATE, which creates the file with the default; "
+             f"set it with sqlite3 before the database exists (pack sd:6378)"
+       for name in ("page_size", "auto_vacuum")},
+}
 
 _answers: dict[str, tuple[float, float, Role]] = {}
 _answers_guard = threading.Lock()
@@ -442,7 +451,7 @@ class _WriteFence:
     `incremental_vacuum` frees a page per row fetched, after execute().
     Those no ROLLBACK undoes (`_PRAGMA_UNDONE_BY_NOTHING`, VACUUM) ask
     afresh before they run, in a transaction or not; `incremental_vacuum`
-    never runs (`_INCREMENTAL_VACUUM`).
+    never runs, nor `page_size` or `auto_vacuum` (`_FORBIDDEN_PRAGMAS`).
     Only SQLite's own state ends a transaction here: the write flag and the
     outer savepoint clear when a statement is prepared outside one, never on
     a BEGIN, ROLLBACK or RELEASE that may yet fail (review of f716079a9).
@@ -492,8 +501,8 @@ class _WriteFence:
         writes = action in _WRITES or pragma is not None and (
             pragma in _PRAGMA_WRITES or arg2 is not None and pragma not in _PRAGMA_READ_OR_CONNECTION)
         if writes and database != "temp":
-            if pragma == "incremental_vacuum":
-                self.forbidden = _INCREMENTAL_VACUUM
+            if pragma in _FORBIDDEN_PRAGMAS:
+                self.forbidden = _FORBIDDEN_PRAGMAS[pragma]
                 return sqlite3.SQLITE_DENY
             if pragma in _PRAGMA_UNDONE_BY_NOTHING:
                 return self._ask(fresh=True)
