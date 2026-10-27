@@ -189,7 +189,8 @@ class StartNext(ScreenCase):
 
     def test_a_stalled_or_unread_builder_holds_its_slot_and_its_item(self):
         """Review class (sd:5106 round 1): the real sessions document, with one builder stalled past `STALL` and five
-        whose logs hold no record, leaves no room, and the stalled builder's item is not offered again."""
+        whose logs hold no record: the five unread hold their slots, the stalled one does not (pack sd:6400), and the
+        stalled builder's item is still not offered again."""
         import json
         import os
 
@@ -214,14 +215,8 @@ class StartNext(ScreenCase):
                                             work=lambda path: None, fleet=lambda area: {"worktrees": []})
 
         out = self.plan(sessions=document)
-        # Operator ruling (sd:5106 round 1): a full cap names the sessions holding it, stalled first, and where to end them.
-        self.assertEqual((out["running"], out["room"]), (6, 0))
-        self.assertEqual(out["refusal"], "6 builders run already; the cap is 6. Stalled: checkout builder-a (3h 0m). Unknown: "
-                                         "checkout builder-f (3h 5m), checkout builder-e (3h 4m), checkout builder-d (3h 3m), "
-                                         "checkout builder-c (3h 2m), checkout builder-b (3h 1m). End a session in Management > "
-                                         "Sessions to free its slots")
-        self.assertEqual(out["holders"][0], {"session": "lead", "repo": "checkout", "agent": "builder-a", "state": "stalled",
-                                             "age": 10800})
+        # pack sd:6400 (operator): the stalled builder frees its slot; the five unread ones still hold theirs.
+        self.assertEqual((out["running"], out["room"]), (5, 1))
         self.assertEqual({row["id"]: row["why"] for row in out["skipped"]}[held], "a live Claude session works on it")
         self.assertEqual([row["id"] for row in out["eligible"]], [other])
 

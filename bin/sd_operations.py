@@ -190,7 +190,7 @@ def interactive_builders(connection: Any, now: str, key: Any) -> list[dict] | No
         repos = [row["path"] for row in connection.execute("SELECT path FROM repo")]
         found = []
         for session in document["sessions"] or []:
-            count = sum(1 for agent in session["agents"] if agent["builder"] and agent["state"] != "idle")
+            count = sum(1 for agent in session["agents"] if agent["builder"] and agent["state"] not in ("idle", "stalled"))
             count += 1 if session["builder"] and session["status"] != "idle" else 0
             cwd = key(str(sd_lib.main_worktree_root(Path(session["cwd"]).resolve()))) if session.get("cwd") else ""
             repo = next((path for path in repos if cwd and (cwd == path or cwd.startswith(path.rstrip("/") + "/"))),

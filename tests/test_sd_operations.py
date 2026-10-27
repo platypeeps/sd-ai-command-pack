@@ -209,7 +209,8 @@ class OperationsCLI(unittest.TestCase):
         with patch.object(sessions_module, "document", return_value=document):
             found = cli.interactive_builders(connection, "2026-10-25T09:00:00+00:00", lambda path: path)
         self.assertEqual(len(found), document["builders"]["running"])
-        self.assertEqual([row["repo"] for row in found if row["session_id"] == "s1"], ["/repos/a"] * 3)
+        # pack sd:6400: s1's stalled builder holds no slot.
+        self.assertEqual([row["repo"] for row in found if row["session_id"] == "s1"], ["/repos/a"] * 2)
 
     def test_a_builder_in_a_linked_worktree_counts_against_its_repository(self):
         """pack sd:6112: a cwd in a worktree outside the checkout is its registered repository, by git's common dir."""
