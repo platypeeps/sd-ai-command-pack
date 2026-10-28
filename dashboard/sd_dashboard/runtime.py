@@ -31,6 +31,16 @@ LABEL_PREFIX = os.environ.get("SYSTEM_TOOLS_LABEL_PREFIX", "local.system-tools")
 LABEL = f"{LABEL_PREFIX}.sd-dashboard"
 LAUNCH_PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 HERE = Path(__file__).resolve().parents[1]
+#: `/bin/bash -c` runs `dashboard.sh serve` and stays its parent: TCC charges
+#: disk access to Apple's signed bash, not to a Python whose ad-hoc grant a
+#: brew upgrade drops (sd:6444). The trailing `exit` stops bash from exec'ing
+#: its last command; launchd stops the whole process group.
+LAUNCH_SCRIPT = '"$0" "$@"; exit $?'
+#: Apple's bash passes its grant only to Apple programs, so Homebrew Python
+#: under it is still charged to itself (system sd:6466). Where the system
+#: tools built their launcher, it starts `dashboard.sh` instead: it forks,
+#: waits and stays the parent, and its one grant survives every upgrade.
+JOB_LAUNCH = ".local/libexec/system-tools/job-launch"
 
 
 class RuntimeRefused(Exception):
@@ -369,8 +379,12 @@ def _rollback_route(config, before, owned_route):
 
 
 def _plist(config_path, config, home):
-    arguments = [str(HERE / "dashboard.sh"), "serve", "--config", str(config_path),
-                 "--port", str(config["port"])]
+    launcher = home / JOB_LAUNCH
+    if os.access(launcher, os.X_OK):
+        arguments = [str(launcher), str(HERE / "dashboard.sh")]
+    else:
+        arguments = ["/bin/bash", "-c", LAUNCH_SCRIPT, str(HERE / "dashboard.sh")]
+    arguments += ["serve", "--config", str(config_path), "--port", str(config["port"])]
     if config.get("database"):
         arguments += ["--database", str(Path(config["database"]).expanduser().resolve())]
     # Standard, not Background: this is an interactive HTTP server. Background
@@ -491,15 +505,18 @@ def health_check(port, *, wait=30.0):
 
 
 def _verify_loaded_process(domain, health):
-    """A healthy older listener cannot stand in for the process just loaded."""
+    """A healthy older listener cannot stand in for the process just loaded.
+
+    launchd's pid is the launcher (job-launch or `/bin/bash`); the server is its child, so its
+    parent pid must be the one launchd names (sd:6444)."""
     service = f"{domain}/{LABEL}"
     result = _run(["launchctl", "print", service], check=False)
     lines = result.stdout.splitlines()
     pids = [int(match[1]) for line in lines
             if (match := re.fullmatch(r"\tpid = ([1-9][0-9]*)", line))]
     if (result.returncode or not lines or lines[0] != service + " = {" or
-            lines[-1] != "}" or len(pids) != 1 or type(health.get("pid")) is not int or
-            pids[0] != health["pid"]):
+            lines[-1] != "}" or len(pids) != 1 or type(health.get("ppid")) is not int or
+            pids[0] != health["ppid"]):
         raise RuntimeRefused("health response is not from the newly loaded dashboard process")
 
 

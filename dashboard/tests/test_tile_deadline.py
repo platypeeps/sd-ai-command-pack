@@ -476,9 +476,10 @@ class Deadlines(unittest.TestCase):
         grandchild = int(recorded[1])
         self.assertTrue(running(grandchild), "the grandchild did not hold the pipe past the kill")
         self.assertEqual(out, "")
-        # Not a tight bound: under load the only claim is that the wait stopped
-        # a second or more short of its uncapped five past the command's three.
-        self.assertLess(elapsed, 3 + 5 - 1, "the wait after the kill ignored the tile's deadline")
+        # Not a tight bound: uncapped the wait cannot end before five past the
+        # command's three, and capped it ends near four; all between is slack
+        # for a loaded gate (sd:6468).
+        self.assertLess(elapsed, 3 + 5, "the wait after the kill ignored the tile's deadline")
 
     def test_the_wait_after_a_timeout_is_five_seconds_unless_the_deadline_is_nearer(self):
         timeouts = []

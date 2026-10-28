@@ -4008,12 +4008,12 @@ roles:
 
     def test_without_wait_a_held_lock_refuses_at_once(self):
         self.hold_ship_lock(self.operation().repository)
-        started = time.monotonic()
-        with patch.object(ship.Ship, "merge", side_effect=AssertionError("ran under a held lock")):
+        # sd:6489: at once means no poll, not a wall-clock bound that flakes under load.
+        with patch.object(ship.Ship, "merge", side_effect=AssertionError("ran under a held lock")), \
+                patch("time.sleep", side_effect=AssertionError("the lock polled")):
             with self.assertRaisesRegex(Exception, "another ship operation owns this repository"):
                 ship.dispatch(self.root, self.connection, self.database,
                               self.args("merge", "--manual", "--expected-head", "0" * 40), receipts, False)
-        self.assertLess(time.monotonic() - started, 1)
 
     def test_wait_takes_finite_non_negative_seconds_on_prepare_and_merge(self):
         for command in ("prepare", "merge"):
@@ -5995,11 +5995,13 @@ class ReviewWatchdogTests(unittest.TestCase):
                 time.sleep(.005)
             return original_communicate(process, *args, **kwargs)
         started = time.monotonic()
-        with patch.object(subprocess.Popen, "communicate", after_ready), patch.object(ship, "REVIEW_CLEANUP_SECONDS", .05):
+        # The close comes after 1 s and the drain's bound at 10 s; the rest is slack for a loaded gate (sd:6468).
+        with patch.object(subprocess.Popen, "communicate", after_ready), patch.object(ship, "REVIEW_CLEANUP_SECONDS", .05), \
+                patch.object(ship, "REVIEW_DRAIN_SECONDS", 10):
             with self.assertRaises(ship.ReviewTimeout) as raised:
                 ship.review_process(self.root, [sys.executable, "-c", script], timeout=.05)
         self.assertEqual(raised.exception.diagnostic["cleanup"], {"term": "sent", "kill": "sent", "drained": True, "leader_reaped": True})
-        self.assertLess(time.monotonic() - started, 4, "the drain ends at the close, not at its bound")
+        self.assertLess(time.monotonic() - started, 8, "the drain ends at the close, not at its bound")
 
     def test_exited_leader_cannot_leave_inherited_pipes_and_a_live_grandchild(self):
         diagnostic = self.expired_group(leader_exits=True)

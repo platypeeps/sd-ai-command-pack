@@ -206,10 +206,14 @@ class QueueOutlivesTheProcess(Lane):
     def setUp(self) -> None:
         super().setUp()
         self.register_items(7)
-        # The child's docs lint reads the privacy patterns (sd:5989): this fixture's, never the operator's.
+        # The docs lint reads the privacy patterns (sd:5989): this fixture's, never the operator's. The child
+        # gets them in `sd_ship`; `enqueue_entry` lints in this process, so `os.environ` names them too (sd:6445).
         self.config = self.tmp / "config"
         self.config.mkdir()
         (self.config / "privacy-patterns").write_text("secret-host\\.example\\.test\n", encoding="utf-8")
+        patcher = mock.patch.dict(os.environ, {"SYSTEM_TOOLS_CONFIG": str(self.config)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def sd_ship(self, cwd: pathlib.Path, *args: str, chdir: str | None = None) -> subprocess.CompletedProcess:
         env = {**os.environ, **self.environ, "XDG_CONFIG_HOME": str(self.tmp / "xdg"),
@@ -302,6 +306,23 @@ class Enqueue(Lane):
         sd_lane.enqueue_entry(self.feature, 3, "fix: t", self.body, self.environ, claim="deliver")
         with self.assertRaisesRegex(sd_lane.LaneError, "already queued"):
             sd_lane.enqueue_entry(self.feature, 3, "fix: t", self.body, self.environ, claim="deliver")
+
+    def test_a_branch_stacked_on_another_open_entry_is_refused_and_names_it(self) -> None:
+        """sd:6493. A squash merge of the base leaves the stacked branch carrying its pre-squash commits."""
+        git(self.feature, "commit", "-q", "--allow-empty", "-m", "fix: base")
+        sd_lane.enqueue_entry(self.feature, 1, "fix: base", self.body, self.environ, claim="deliver")
+        stacked = self.tmp / "stacked"
+        git(self.repo, "worktree", "add", "-q", "-b", "stacked", str(stacked), "feature")
+        git(stacked, "commit", "-q", "--allow-empty", "-m", "fix: on top")
+        with self.assertRaises(sd_lane.LaneError) as caught:
+            sd_lane.enqueue_entry(stacked, 2, "fix: on top", self.body, self.environ, claim="deliver")
+        self.assertEqual(caught.exception.code, sd_lane.STACKED)
+        self.assertIn("sd:1", str(caught.exception))
+        self.assertIn("feature", str(caught.exception))
+        self.assertEqual([row["item"] for row in self.entries()], [1])
+        self.assertNotIn("refs/heads/stacked", git(self.origin, "for-each-ref", "--format=%(refname)"))
+        sd_lane.cancel(self.repo, 1, self.environ)  # no longer open: the stacked branch queues
+        sd_lane.enqueue_entry(stacked, 2, "fix: on top", self.body, self.environ, claim="deliver")
 
     def test_a_cancelled_entry_is_not_run(self) -> None:
         sd_lane.enqueue_entry(self.feature, 3, "fix: t", self.body, self.environ, claim="deliver")

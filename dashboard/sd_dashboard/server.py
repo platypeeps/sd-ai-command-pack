@@ -1016,7 +1016,7 @@ class Dashboard(BaseHTTPRequestHandler):
         healthy = version == SCHEMA_VERSION and not changed and direct_ok
         result = {
             "service": "sd-dashboard", "ok": healthy, "code_changed": changed,
-            "pid": os.getpid(), "commit": self.served_commit,
+            "pid": os.getpid(), "ppid": os.getppid(), "commit": self.served_commit,
             "schema": version, "expected_schema": SCHEMA_VERSION,
             "library": str(Path(sd_db.__file__).resolve()),
             **self.loaded_build,

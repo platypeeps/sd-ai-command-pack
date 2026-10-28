@@ -1251,9 +1251,10 @@ class TheDoctor(Collectors, ScreenCase):
             return CLEAN_DOCTOR
         first = self.area(self.doc(doctor=second_blocks))
         started = time.monotonic()
-        with patch.object(health_screen, "DOCTOR_WAIT_SECONDS", 5.0):
+        # Waited on, the run holds the page 9 s; shown at once, the rest is slack for a loaded gate (sd:6468).
+        with patch.object(health_screen, "DOCTOR_WAIT_SECONDS", 9.0):
             later = self.area(self.doc(doctor=second_blocks, now="2026-09-06T12:11:00Z"))
-        self.assertLess(time.monotonic() - started, 2.0, "the page waited on a doctor run it had an answer for")
+        self.assertLess(time.monotonic() - started, 5, "the page waited on a doctor run it had an answer for")
         self.assertEqual((len(runs), later["rows"], later["at"]), (2, first["rows"], NOW))
         self.assertIn("is still running", later["stale"])
         self.assertIn(f"these rows are the read of {NOW}", later["stale"])
@@ -1401,7 +1402,7 @@ class TheViews(Collectors, ScreenCase):
         started = time.monotonic()
         with patch.object(health_screen, "document", side_effect=AssertionError("the summary built the document")):
             found = health_screen.summary(self.connection, now=NOW, **self.seams(fleet=blocked))
-        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertLess(time.monotonic() - started, 5)  # a walker waited on holds it 10 s (sd:6468)
         lamps = {lamp["id"]: lamp for lamp in found["lamps"]}
         self.assertEqual(list(lamps), [key for key, *_ in health_screen.AREAS])
         # The database-only areas are read now; a walker no read has answered is unknown and says why.

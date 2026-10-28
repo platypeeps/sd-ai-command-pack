@@ -45,7 +45,8 @@ class RuntimeSafety(unittest.TestCase):
         self.pending_removal = None
         self.info = {"python": sys.executable, "library": "/fixture/.venv/lib/python3.13/site-packages/sd_db/__init__.py", "schema": 3,
                      "library_digest": "a" * 64, "dashboard_digest": "b" * 64}
-        self.health = {"ok": True, "service": "sd-dashboard", "pid": 4242, **self.info}
+        # launchd's pid is the /bin/bash parent; the server is its child (sd:6444).
+        self.health = {"ok": True, "service": "sd-dashboard", "pid": 4243, "ppid": 4242, **self.info}
         self.addCleanup(patch.stopall)
         patch.object(runtime, "installed_library", return_value=self.info).start()
         patch.object(runtime, "_run", side_effect=self.run_command).start()
@@ -107,7 +108,7 @@ class RuntimeSafety(unittest.TestCase):
         before = {p.relative_to(self.home): p.read_bytes() for p in self.home.rglob("*") if p.is_file()}
         plan = self.plan()
         self.assertFalse(plan["serve_route_present"])
-        self.assertEqual(plan["program"][0], str(runtime.HERE / "dashboard.sh"))
+        self.assertEqual(plan["program"][:4], ["/bin/bash", "-c", runtime.LAUNCH_SCRIPT, str(runtime.HERE / "dashboard.sh")])
         self.assertEqual(before, {p.relative_to(self.home): p.read_bytes() for p in self.home.rglob("*") if p.is_file()})
         self.assertEqual(self.status, PUBLIC)
         self.assertTrue(all(call[1] in ("serve", "status", "print") for call in self.calls))
@@ -126,6 +127,39 @@ class RuntimeSafety(unittest.TestCase):
         self.assertEqual(plist["ProcessType"], "Standard")
         self.assertTrue(self.loaded)
         self.assertFalse(any("funnel" in call or "reset" in call or "set-config" in call for call in self.calls))
+
+    def test_install_starts_dashboard_under_apples_bash(self):
+        """sd:6444: /bin/bash stays the TCC responsible process, so a Python upgrade keeps disk access."""
+        written = runtime._plist(self.config.resolve(), runtime.read_config(self.config), self.home)
+        argv = plistlib.loads(written)["ProgramArguments"]
+        self.assertEqual(argv[:2], ["/bin/bash", "-c"])
+        # A trailing command stops bash -c from exec'ing its last one.
+        self.assertTrue(argv[2].endswith("; exit $?"), argv[2])
+        self.assertEqual(argv[3:5], [str(runtime.HERE / "dashboard.sh"), "serve"])
+        self.assertTrue(self.install(self.plan())["ok"])
+        self.assertEqual(self.target.read_bytes(), written)
+
+    def test_install_starts_dashboard_under_job_launch_where_it_is_built(self):
+        """system sd:6466: Apple's bash passes its grant only to Apple programs."""
+        launcher = self.home / runtime.JOB_LAUNCH
+        launcher.parent.mkdir(parents=True)
+        launcher.write_text("#!/bin/sh\nexec \"$@\"\n")
+        launcher.chmod(0o755)
+        written = runtime._plist(self.config.resolve(), runtime.read_config(self.config), self.home)
+        argv = plistlib.loads(written)["ProgramArguments"]
+        self.assertEqual(argv[:3], [str(launcher), str(runtime.HERE / "dashboard.sh"), "serve"])
+        self.assertTrue(self.install(self.plan())["ok"])
+        self.assertEqual(self.target.read_bytes(), written)
+
+    def test_bash_launcher_stays_the_parent_and_passes_the_exit_code(self):
+        script = self.home / "child.sh"
+        script.write_text('#!/bin/sh\necho "$PPID $1"\nexit 7\n')
+        script.chmod(0o755)
+        child = subprocess.Popen(["/bin/bash", "-c", runtime.LAUNCH_SCRIPT, str(script), "a b"],
+                                 stdout=subprocess.PIPE, text=True)
+        output, _ = child.communicate(timeout=10)
+        self.assertEqual(child.returncode, 7)
+        self.assertEqual(output, f"{child.pid} a b\n")
 
     def test_install_waits_for_delayed_launchd_removal_before_replacement(self):
         with patch.object(runtime, "_run", side_effect=self.delayed_removal), \
@@ -372,12 +406,19 @@ class RuntimeSafety(unittest.TestCase):
         self.assertFalse((self.home / ".local/share/sd/runtime-backups").exists())
 
     def test_healthy_unrelated_listener_cannot_satisfy_installation(self):
-        self.health["pid"] = 31337
+        self.health.update(pid=31337, ppid=31336)
         with self.assertRaisesRegex(runtime.RuntimeRefused, "newly loaded dashboard process"):
             self.install(self.plan())
         self.assertEqual(self.target.read_bytes(), self.old)
         self.assertEqual(self.status, PUBLIC)
         self.assertTrue(self.loaded)
+
+    def test_listener_without_its_parent_pid_cannot_satisfy_installation(self):
+        """An older build's /health names no ppid; the new bash child must."""
+        del self.health["ppid"]
+        with self.assertRaisesRegex(runtime.RuntimeRefused, "newly loaded dashboard process"):
+            self.install(self.plan())
+        self.assertEqual(self.target.read_bytes(), self.old)
 
     def test_unknown_or_duplicate_launchctl_pid_is_refused(self):
         service = f"gui/{os.getuid()}/{runtime.LABEL}"
@@ -712,6 +753,7 @@ class BuildIdentity(unittest.TestCase):
             status, body = health()
             self.assertEqual(status, 200)
             self.assertFalse(body["code_changed"])
+            self.assertEqual((body["pid"], body["ppid"]), (os.getpid(), os.getppid()))
         changed = dict(original, library_digest="0" * 64)
         with patch.object(runtime, "build_digests", return_value=changed):
             status, body = health()

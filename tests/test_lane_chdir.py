@@ -11,11 +11,13 @@ repository, so `-C` is the only thing that can point them at one.
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[1]
 BIN = REPO_ROOT / "bin"
@@ -44,6 +46,14 @@ class LaneChdirTests(unittest.TestCase):
         self.empty = pathlib.Path(self.scratch.name) / "empty"
         self.empty.mkdir()
         self.missing = pathlib.Path(self.scratch.name) / "missing"
+        # `body` lints its body against the privacy patterns, which fail closed when absent (sd:6445).
+        # A synthetic file under the scratch folder: never the operator's real patterns.
+        config = pathlib.Path(self.scratch.name) / "config"
+        config.mkdir()
+        (config / "privacy-patterns").write_text("secret-host\\.example\\.test\n", encoding="utf-8")
+        patcher = mock.patch.dict(os.environ, {"SYSTEM_TOOLS_CONFIG": str(config)})
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_an_empty_directory_is_not_a_repository_and_is_named(self) -> None:
         for command, arguments in LANE_COMMANDS.items():

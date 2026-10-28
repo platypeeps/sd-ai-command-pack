@@ -8,6 +8,8 @@ import importlib
 import json
 import math
 import os
+import signal
+import sqlite3
 import subprocess
 import sys
 from pathlib import Path
@@ -137,6 +139,8 @@ def list_sessions(args: argparse.Namespace) -> int:
 
 BIN = Path(__file__).resolve().parent
 GATE_SECONDS = 15
+#: The tick's own bound, under the build-dispatch job's 90 s JOB_TIMEOUT: past it the tick skips (pack sd:6494).
+TICK_SECONDS = 75
 
 
 def build_modules() -> tuple[Any, Any, Any]:
@@ -225,6 +229,10 @@ def tools(build_run: Any) -> Any:
                            lint=[str(BIN / "sd-docs-lint")])
 
 
+class Overdue(BaseException):
+    """The tick ran past `TICK_SECONDS`: a BaseException, so no broad `except Exception` in the tick holds it."""
+
+
 def dispatch_builds(args: argparse.Namespace) -> int:
     """`sd assignments dispatch`: one build-dispatch tick (pack sd:6094)."""
     import sd_lib
@@ -238,6 +246,38 @@ def dispatch_builds(args: argparse.Namespace) -> int:
         why = "sd.bulk_storage_root is unset, so a build run has no log folder"
     elif root is not None and not (root.is_dir() and os.access(root, os.W_OK)):
         why = f"the log folder {root} is not writable"
+
+    def overdue(*_: Any) -> None:
+        raise Overdue
+    # One bound for the whole tick, the waits on a lock and the lane list too; a skip exits 0 (pack sd:6494).
+    signal.signal(signal.SIGALRM, overdue)
+    signal.setitimer(signal.ITIMER_REAL, TICK_SECONDS)
+    unstarted: dict[str, str] = {}
+    try:
+        result = tick(sd_db, build, build_run, root, why, unstarted)
+    except Overdue:
+        result = None
+        print(f"skipped: the tick ran past {TICK_SECONDS:g} s")
+    except sqlite3.OperationalError as error:
+        if "locked" not in str(error) and "busy" not in str(error):
+            raise WorkRefusal(str(error)) from error
+        result = None
+        print(f"skipped: {error}")
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+    if result is None:
+        return 0
+    if unstarted:  # an unwritable run log skips that run's supervisor, not the tick
+        result["spawned"] = [ident for ident in result["spawned"] if ident not in unstarted]
+        result["why"] = "; ".join(filter(None, [result["why"], *unstarted.values()]))
+    print(json.dumps(result, ensure_ascii=False) if args.json else
+          f"reaped {len(result['reaped'])}, moved {len(result['moved'])}, claimed {len(result['claimed'])}, "
+          f"drafted {len(result['drafted'])}, spawned {len(result['spawned'])}" + (f"; no claim: {result['why']}" if result["why"] else ""))
+    return 0
+
+
+def tick(sd_db: Any, build: Any, build_run: Any, root: Path | None, why: str, unstarted: dict[str, str]) -> dict:
+    """`dispatch_builds`' tick in the database; each run whose supervisor could not start goes in `unstarted`."""
     load, load_cap = gate_load()
     connection = sd_handoff_rows.connect(sd_db, write=True)
     try:
@@ -245,8 +285,11 @@ def dispatch_builds(args: argparse.Namespace) -> int:
             if root is None:
                 return
             repo = build.run(connection, ident)["repo"]
-            build_run.spawn([sys.executable, str(BIN / "sd"), "assignments", "dispatch", "--supervise", ident],
-                            log=build_run.log_dir(root, repo) / f"{ident}.supervisor.log")
+            try:
+                build_run.spawn([sys.executable, str(BIN / "sd"), "assignments", "dispatch", "--supervise", ident],
+                                log=build_run.log_dir(root, repo) / f"{ident}.supervisor.log")
+            except OSError as error:
+                unstarted[ident] = f"cannot start {ident}'s supervisor: {error}"
 
         def lane(row: dict, items: list[int]) -> dict | None:
             return build_run.lane_entry(tools(build_run).ship, build_run.paths.expand(row["repo"]), items)
@@ -258,10 +301,7 @@ def dispatch_builds(args: argparse.Namespace) -> int:
         raise WorkRefusal(str(error)) from error
     finally:
         connection.close()
-    print(json.dumps(result, ensure_ascii=False) if args.json else
-          f"reaped {len(result['reaped'])}, moved {len(result['moved'])}, claimed {len(result['claimed'])}, "
-          f"drafted {len(result['drafted'])}, spawned {len(result['spawned'])}" + (f"; no claim: {result['why']}" if result["why"] else ""))
-    return 0
+    return result
 
 
 def supervise_build(args: argparse.Namespace) -> int:

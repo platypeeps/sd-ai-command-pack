@@ -37,6 +37,13 @@ for _name, _relative in (("HOME", "home"), ("XDG_CONFIG_HOME", "home/.config"),
     os.environ[_name] = os.path.join(os.environ["TMPDIR"], _relative)
     os.makedirs(os.environ[_name], exist_ok=True)
 
+# The system config is that folder's too, with a synthetic privacy-pattern file (sd:6432): unset, the temp `HOME` hid
+# the operator's file and five body checks failed; set, tests read the real patterns. No suite needs the real ones.
+os.environ["SYSTEM_TOOLS_CONFIG"] = os.path.join(os.environ["XDG_CONFIG_HOME"], "system")
+os.makedirs(os.environ["SYSTEM_TOOLS_CONFIG"], exist_ok=True)
+with open(os.path.join(os.environ["SYSTEM_TOOLS_CONFIG"], "privacy-patterns"), "w", encoding="utf-8") as _patterns:
+    _patterns.write("secret-host\\.example\\.test\n")
+
 # `sd_db` is this checkout's `lib/` and nothing is installed (sd:3280). On the path here and in
 # `PYTHONPATH`, so a module that imports it at the top, and a child's `sitecustomize` shim, read the
 # commit under test; `bin/` entrypoints put `lib/` first themselves.

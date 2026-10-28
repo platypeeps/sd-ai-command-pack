@@ -318,10 +318,11 @@ class TheLiveRead(ScreenCase):
         self.assertNotIn(str(port), json.dumps(doc))
 
     def test_a_slow_answer_is_cut_at_the_timeout(self):
-        stub = self.stub(lambda path: (time.sleep(2), (200, STATES, {}))[1])
+        # The answer comes after 6 s; cut at 0.3 s, the rest is slack for a loaded gate (sd:6468).
+        stub = self.stub(lambda path: (time.sleep(6), (200, STATES, {}))[1])
         started = time.monotonic()
         doc = self.doc(self.env(stub.url), timeout=0.3)
-        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertLess(time.monotonic() - started, 4)
         self.assertFalse(doc["reader"]["available"])
         self.assertIn("0.3 s", doc["reader"]["reason"])
         self.assertEqual(self.tile(doc, "lock.front_door")["error"], "HA timed out")

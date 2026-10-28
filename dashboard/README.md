@@ -741,6 +741,13 @@ first two learned the hard way on 2026-08-28 when the page sat on
   that reaches `/bin/ls` and not the vault — anything wider silences the
   probes too, and a silent probe is a refusal and exit 1 — and the line
   prints the wait it passed on, so the exit is never the only thing said.
+- **The LaunchAgent starts the server under `/bin/bash`** (sd:6444). Its
+  `ProgramArguments` are `/bin/bash -c '"$0" "$@"; exit $?' dashboard.sh serve …`;
+  the trailing `exit` keeps bash from exec'ing python, so Apple's signed bash
+  stays the responsible process for disk access, and a `brew upgrade python`
+  that drops the python grant does not drop the server's. Check it with a TCC
+  `AUTHREQ_ATTRIBUTION` log line for a server child: it names
+  `responsible=com.apple.bash`.
 - **The vault read is probed in a child first** (`vault_blocked()`, 15 s).
   Nothing spawned by an agent can click a TCC prompt, so an ungranted read does
   not fail — it waits forever. The probe turns that into an error on the tab and
