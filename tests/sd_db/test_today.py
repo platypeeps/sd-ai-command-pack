@@ -288,11 +288,13 @@ class TheOperations(TodayCase):
                                          "error": None, "slots": 2, "load": [1.5, 1.0, 0.5], "load_max": 40.0})
         self.assertEqual(today.operations(self.connection, host="beta", gate="slots unreadable")["gate"],
                          {"holders": [], "waiters": [], "error": "slots unreadable"})
-        # A machine belongs to no repository: the repository filter leaves the section whole.
+        # pack sd:6488: the filter keeps the findings of its repositories' reports; the gate stays whole.
         with mock.patch.object(today, "this_host", return_value="alpha"):
             mine = today.sections(self.connection, repos=[LIB], now=NOW, gate=snapshot)
-        self.assertEqual(mine["operations"], {**found, "host": "alpha"})
-        self.assertEqual(mine["summary"]["operations"], 5)
+            loose = today.sections(self.connection, repos=[None], now=NOW, gate=snapshot)
+        self.assertEqual([row["id"] for row in mine["operations"]["findings"]], [store])
+        self.assertEqual((mine["operations"]["gate"], mine["summary"]["operations"]), (found["gate"], 1))
+        self.assertEqual(sorted(row["id"] for row in loose["operations"]["findings"]), sorted([exited, folded, unread]))
 
 
 class TheRepositoryFilter(TodayCase):
@@ -326,6 +328,27 @@ class TheRepositoryFilter(TodayCase):
             self.item(f"Report {repo}", repo=repo, kind="report", fields={"attention": "look"})
         self.assertEqual([row["repo"] for row in today.delivered(self.connection, repos=[LIB])], [LIB])
         self.assertEqual([row["repo"] for row in today.attention(self.connection, repos=[LIB])], [LIB])
+
+    def test_none_keeps_the_rows_of_no_repository(self):
+        """pack sd:6488: `sd today --only fleet` passes None, the key of an item in no repository."""
+        for repo in (APP, None):
+            item = self.item(f"Open {repo}", repo=repo)
+            add_note(self.connection, item, "followup", f"Chase {item}")
+            add_note(self.connection, item, "question", f"Pick {item}\nOption: A\nOption: B")
+            self.item(f"Report {repo}", repo=repo, kind="report", fields={"attention": "look"})
+            self.item(f"Due {repo}", repo=repo, due="2026-09-09")
+            self.item(f"Stuck {repo}", repo=repo, status="blocked")
+            # A lane entry of a repository no row registers has no key: it is no fleet row.
+            self.lane("example-owner/unregistered", f"e{item}", item=item, status="pending", position=item)
+        found = today.sections(self.connection, repos=[None], now=NOW)
+        for key in ("attention", "decisions", "followups", "planned", "blocked", "unscheduled"):
+            with self.subTest(section=key):
+                self.assertTrue(found[key])
+                self.assertEqual({row["repo"] for row in found[key]}, {None})
+        self.assertEqual(found["landing"]["entries"], [])
+        both = today.sections(self.connection, repos=[APP, None], now=NOW)
+        self.assertEqual({row["repo"] for row in both["followups"]}, {APP, None})
+        self.assertEqual(both["summary"]["followups"], 2)
 
 
 if __name__ == "__main__":
