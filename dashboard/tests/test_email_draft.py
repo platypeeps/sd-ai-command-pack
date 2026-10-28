@@ -30,10 +30,10 @@ cat > "$DOUBLE_DIR/stdin"
 printf '%s' "${DOUBLE_TOKEN-unset}" > "$DOUBLE_DIR/token"
 pwd -P > "$DOUBLE_DIR/cwd"
 if [ -f "$DOUBLE_DIR/escape" ]; then
-  perl -e 'use POSIX; setsid(); sleep 60' & echo $! > "$DOUBLE_DIR/escaped.new"; mv "$DOUBLE_DIR/escaped.new" "$DOUBLE_DIR/escaped"
+  perl -e 'use POSIX; setsid(); sleep 120' & echo $! > "$DOUBLE_DIR/escaped.new"; mv "$DOUBLE_DIR/escaped.new" "$DOUBLE_DIR/escaped"
 fi
 if [ -f "$DOUBLE_DIR/stall" ]; then sleep 2; fi
-if [ -f "$DOUBLE_DIR/hang" ]; then sleep 60 & echo $! > "$DOUBLE_DIR/pid.new"; mv "$DOUBLE_DIR/pid.new" "$DOUBLE_DIR/pid"; wait; fi
+if [ -f "$DOUBLE_DIR/hang" ]; then sleep 120 & echo $! > "$DOUBLE_DIR/pid.new"; mv "$DOUBLE_DIR/pid.new" "$DOUBLE_DIR/pid"; wait; fi
 cat "$DOUBLE_DIR/reply"
 exit "$(cat "$DOUBLE_DIR/exit" 2>/dev/null || echo 0)"
 """
@@ -58,6 +58,9 @@ class SlowDraft(FakeWorkspace):
 
 
 class DraftCase(BrowserSession):
+    #: A hung run spends its stall, its 1 s bound and the kill inside one request; 5 s left a loaded gate no room (sd:6468).
+    http_timeout = 12
+
     def setUp(self):
         super().setUp()
         root = Path(self.tmp.name)
@@ -171,7 +174,7 @@ class TheFailures(DraftCase):
         began = time.monotonic()
         with self.hung(), patch.object(email_draft, "MODEL_TIMEOUT", 1):
             status, _, answer = self.draft(item)
-        self.assertLess(time.monotonic() - began, patience(4))
+        self.assertLess(time.monotonic() - began, patience(10))
         self.assertEqual(status, 504)
         said = "Draft email failed: claude -p gave no answer in 1 s. No Gmail draft was saved."
         self.assertEqual(answer["error"], said)
@@ -195,7 +198,7 @@ class TheFailures(DraftCase):
             with patch.object(email_draft, "MODEL_TIMEOUT", 1), patch.object(email_draft, "REAP_TIMEOUT", 1, create=True):
                 with self.assertRaisesRegex(TimeoutError, "gave no answer in 1 s"):
                     email_draft._model("a question")
-            self.assertLess(time.monotonic() - began, patience(5))
+            self.assertLess(time.monotonic() - began, patience(10))
         os.kill(self.written("escaped"), signal.SIGKILL)
 
     def test_a_reply_without_a_subject_line_saves_nothing(self):

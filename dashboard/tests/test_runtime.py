@@ -139,6 +139,18 @@ class RuntimeSafety(unittest.TestCase):
         self.assertTrue(self.install(self.plan())["ok"])
         self.assertEqual(self.target.read_bytes(), written)
 
+    def test_install_starts_dashboard_under_job_launch_where_it_is_built(self):
+        """system sd:6466: Apple's bash passes its grant only to Apple programs."""
+        launcher = self.home / runtime.JOB_LAUNCH
+        launcher.parent.mkdir(parents=True)
+        launcher.write_text("#!/bin/sh\nexec \"$@\"\n")
+        launcher.chmod(0o755)
+        written = runtime._plist(self.config.resolve(), runtime.read_config(self.config), self.home)
+        argv = plistlib.loads(written)["ProgramArguments"]
+        self.assertEqual(argv[:3], [str(launcher), str(runtime.HERE / "dashboard.sh"), "serve"])
+        self.assertTrue(self.install(self.plan())["ok"])
+        self.assertEqual(self.target.read_bytes(), written)
+
     def test_bash_launcher_stays_the_parent_and_passes_the_exit_code(self):
         script = self.home / "child.sh"
         script.write_text('#!/bin/sh\necho "$PPID $1"\nexit 7\n')
