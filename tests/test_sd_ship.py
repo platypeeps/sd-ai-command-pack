@@ -4008,12 +4008,12 @@ roles:
 
     def test_without_wait_a_held_lock_refuses_at_once(self):
         self.hold_ship_lock(self.operation().repository)
-        started = time.monotonic()
-        with patch.object(ship.Ship, "merge", side_effect=AssertionError("ran under a held lock")):
+        # sd:6489: at once means no poll, not a wall-clock bound that flakes under load.
+        with patch.object(ship.Ship, "merge", side_effect=AssertionError("ran under a held lock")), \
+                patch("time.sleep", side_effect=AssertionError("the lock polled")):
             with self.assertRaisesRegex(Exception, "another ship operation owns this repository"):
                 ship.dispatch(self.root, self.connection, self.database,
                               self.args("merge", "--manual", "--expected-head", "0" * 40), receipts, False)
-        self.assertLess(time.monotonic() - started, 1)
 
     def test_wait_takes_finite_non_negative_seconds_on_prepare_and_merge(self):
         for command in ("prepare", "merge"):
