@@ -15,12 +15,17 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from sd_db import initialise, ship
 from sd_db.testing.wire import hub_only
 from sd_db.workflow import WorkflowError
 
 REPOSITORY = "fixture/repo"
+
+#: "At once" means the lock never polled: a wall-clock bound flaked under
+#: gate load (sd:6489), and the poll's `time.sleep` is the only wait.
+NO_POLL = patch("time.sleep", side_effect=AssertionError("the lock polled"))
 
 #: Hold the lock, say so on stdout, and release after argv[3] seconds. The
 #: last line is the monotonic time it let go, so a waiter's latency is measured
@@ -101,10 +106,8 @@ class ShipLockHolder(unittest.TestCase):
         (entry,) = ship.lock_files(self.database)
         self.assertEqual(entry["state"], "stale")
         self.assertEqual(ship.held_locks(self.database), [])
-        started = time.monotonic()
-        with ship.repository_lock(self.database, REPOSITORY, holder={"item": 8}):
+        with NO_POLL, ship.repository_lock(self.database, REPOSITORY, holder={"item": 8}):
             self.assertEqual(json.loads(self.lock_path().read_text())["item"], 8)
-        self.assertLess(time.monotonic() - started, 1.0)
 
     @hub_only
     def test_status_lists_a_held_lock_and_not_an_idle_file(self):
@@ -124,11 +127,9 @@ class ShipLockHolder(unittest.TestCase):
     @hub_only
     def test_without_wait_the_refusal_is_immediate(self):
         self.hold()
-        started = time.monotonic()
-        with self.assertRaises(WorkflowError):
+        with NO_POLL, self.assertRaises(WorkflowError):
             with ship.repository_lock(self.database, REPOSITORY):
                 self.fail("second owner")
-        self.assertLess(time.monotonic() - started, 0.5)
 
     @hub_only
     def test_wait_refuses_at_the_deadline_and_names_the_holder(self):

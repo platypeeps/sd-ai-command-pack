@@ -36,6 +36,11 @@ HERE = Path(__file__).resolve().parents[1]
 #: brew upgrade drops (sd:6444). The trailing `exit` stops bash from exec'ing
 #: its last command; launchd stops the whole process group.
 LAUNCH_SCRIPT = '"$0" "$@"; exit $?'
+#: Apple's bash passes its grant only to Apple programs, so Homebrew Python
+#: under it is still charged to itself (system sd:6466). Where the system
+#: tools built their launcher, it starts `dashboard.sh` instead: it forks,
+#: waits and stays the parent, and its one grant survives every upgrade.
+JOB_LAUNCH = ".local/libexec/system-tools/job-launch"
 
 
 class RuntimeRefused(Exception):
@@ -374,8 +379,12 @@ def _rollback_route(config, before, owned_route):
 
 
 def _plist(config_path, config, home):
-    arguments = ["/bin/bash", "-c", LAUNCH_SCRIPT, str(HERE / "dashboard.sh"), "serve",
-                 "--config", str(config_path), "--port", str(config["port"])]
+    launcher = home / JOB_LAUNCH
+    if os.access(launcher, os.X_OK):
+        arguments = [str(launcher), str(HERE / "dashboard.sh")]
+    else:
+        arguments = ["/bin/bash", "-c", LAUNCH_SCRIPT, str(HERE / "dashboard.sh")]
+    arguments += ["serve", "--config", str(config_path), "--port", str(config["port"])]
     if config.get("database"):
         arguments += ["--database", str(Path(config["database"]).expanduser().resolve())]
     # Standard, not Background: this is an interactive HTTP server. Background
@@ -498,7 +507,7 @@ def health_check(port, *, wait=30.0):
 def _verify_loaded_process(domain, health):
     """A healthy older listener cannot stand in for the process just loaded.
 
-    launchd's pid is the `/bin/bash` launcher; the server is its child, so its
+    launchd's pid is the launcher (job-launch or `/bin/bash`); the server is its child, so its
     parent pid must be the one launchd names (sd:6444)."""
     service = f"{domain}/{LABEL}"
     result = _run(["launchctl", "print", service], check=False)
