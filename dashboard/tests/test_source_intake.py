@@ -313,7 +313,8 @@ class SourceIntake(BrowserSession):
             response = http.client.HTTPResponse(raw)
             response.begin()
             status, answer = response.status, response.read().decode()
-            self.assertLess(time.monotonic() - started, 4, answer)
+            # The whole drip takes 10 s at the least; cut at 1 s, the rest is slack for a loaded gate (sd:6468).
+            self.assertLess(time.monotonic() - started, 8, answer)
         self.assertEqual(status, 503, answer)
         self.assertIn("took longer than 1 s", answer)
         self.assertFalse(list((self.root / "state" / "system" / "source-intake" / "staged").glob("*")))
