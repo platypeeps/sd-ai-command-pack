@@ -492,6 +492,12 @@ class Supervisor:
         if not delivered and asked:
             return self.finish("blocked", f"every cited item has an open question since the run started: "
                                           f"{', '.join(f'sd:{item}' for item in asked)}")
+        if asked:
+            # The lane closes every open item a branch trailer cites; a `Refs:` line keeps these open.
+            refs = f"Refs: {' '.join(f'sd:{item}' for item in asked)}"
+            if refs not in body.splitlines():
+                body = body.rstrip("\n") + f"\n\n{refs}\n"
+                self.body.write_text(body, encoding="utf-8")
         if not delivered:
             return self.finish("blocked", "the branch delivers no item: no commit has a `Closes: sd:N` trailer "
                                           "for one of the run's items")

@@ -362,6 +362,14 @@ class Supervise(Case):
         enqueue = next(call["argv"] for call in self.calls("sd-ship") if "enqueue" in call["argv"])
         self.assertEqual([enqueue[n + 1] for n, arg in enumerate(enqueue) if arg == "--item"], [str(self.items[0])])
         self.assertEqual(self.statuses(), ["in_progress", "blocked"])
+        # The lane adds each open item a branch commit's trailer cites to the closing set, unless a `Refs:`
+        # line keeps it open: the questioned member's old trailer must not close it.
+        work = Path(build.run(self.db, self.bundle["id"])["work_path"])
+        head = enqueue[enqueue.index("--expected-head") + 1]
+        body = Path(enqueue[enqueue.index("--body-file") + 1]).read_text(encoding="utf-8")
+        self.db.execute("UPDATE item SET status = 'in_progress' WHERE id = ?", (self.items[1],))
+        cited, _ = LANE.cited_closes(self.db, self.items[0], body, LANE.branch_commits(work, "main", head), ())
+        self.assertEqual([row["item"] for row in cited], [])
 
     def test_the_lane_entry_is_found_by_any_delivered_member(self):
         """The entry's item is the first member delivered, so the lookups (resume, watch) read every member."""
