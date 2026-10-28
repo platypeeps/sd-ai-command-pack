@@ -485,6 +485,13 @@ class Supervisor:
             raise Unread(f"the commits {head[:12]} adds were not read")
         # Delivery as the lane reads it: a member no `Closes:` trailer cites was skipped, and stays open.
         delivered = [item for item in [self.lead, *self.others] if item in cited]
+        # A retry's branch keeps the lost run's trailers: a member this run's builder skipped with a question
+        # waits on it (pack sd:6571).
+        asked = [item for item in delivered if build.open_question(self.db, [item], self.row["created_at"])]
+        delivered = [item for item in delivered if item not in asked]
+        if not delivered and asked:
+            return self.finish("blocked", f"every cited item has an open question since the run started: "
+                                          f"{', '.join(f'sd:{item}' for item in asked)}")
         if not delivered:
             return self.finish("blocked", "the branch delivers no item: no commit has a `Closes: sd:N` trailer "
                                           "for one of the run's items")
