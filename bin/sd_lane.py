@@ -2448,7 +2448,7 @@ def hub_fault_of(error: BaseException | None) -> BaseException | None:
     """`error`, or the hub fault it wraps (`sd_db.ship.LaneUnknown` keeps it as its cause); None for any other."""
     seen: set[int] = set()
     while error is not None and id(error) not in seen:
-        if sd_ship_workflow.is_hub_fault(error):  # type: ignore[arg-type]
+        if sd_ship_workflow.is_hub_fault(error):
             return error
         seen.add(id(error))
         error = error.__cause__ or error.__context__
