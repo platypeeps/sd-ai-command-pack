@@ -315,6 +315,8 @@ DEFAULT_BRANCH = "default_branch"
 #: The skips of an entry with no checkout here (sd:3283): `origin/<branch>` is past the queued head and its
 #: catch-up merge, or a local branch of that name is at another commit; `HEAD_GONE` when `origin` has no branch.
 HEAD_MOVED, BRANCH_BUSY = "head_moved", "branch_busy"
+#: The refusal code of an enqueue whose branch holds another open entry's head (sd:6493).
+STACKED = "stacked_branch"
 #: The code of a lane verb off its lane host, and of an `sd-ship merge` that met a lane move (sd:3003).
 LANE_ELSEWHERE = "lane_elsewhere"
 #: Each entry is the latest `state` row, kind `checkpoint`, of its key `lane:v1:<owner/repo>:<id>` (sd:3282).
@@ -720,7 +722,8 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
                         "queue the worktree's head.", code=HEAD_MOVED)
     queue = queue_for(worktree, environ)
     # Read first: a hub that does not answer, or an item already queued, refuses before anything is pushed.
-    if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in read_queue(queue)):
+    queued = read_queue(queue)
+    if any(row.get("item") == item and row.get("status") in ("pending", "running") for row in queued):
         raise LaneError(f"sd:{item} is already queued in this lane")
     body = body_file.read_text(encoding="utf-8")
     closes = tuple(dict.fromkeys(number for number in closes if number != item))
@@ -731,6 +734,7 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
              "authority": "manual" if manual else None, "claim": claim, "enqueued_on": this_host(),
              "worktree": str(worktree), "status": "pending", "enqueued_at": stamp_now()}
     def refuse_before_push(base: str) -> None:
+        refuse_stacked(worktree, branch, base, head, queued)
         check_lines(worktree, title, body, base, head)
         check_docs(worktree, body, base)
         if claim == "deliver":  # an associate-only claim closes nothing (sd:3365)
@@ -746,6 +750,24 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     require_published(worktree, branch, head, f"{head} names no commit in {worktree}", refuse_before_push,
                       lambda tip: tip_past(worktree, branch, tip, head))
     return add_entry(queue, entry)
+
+
+def refuse_stacked(worktree: pathlib.Path, branch: str, base: str, head: str, entries: list[dict[str, Any]]) -> None:
+    """Refuse `STACKED` for a head whose `origin/<base>..head` holds another branch's open entry head (sd:6493);
+    the same head on two branches is one commit, not a stack.
+
+    A squash merge of that base leaves this branch carrying its pre-squash
+    commits: the branch conflicts, or falls behind once a later merge holds
+    it. Rebase on `origin/<base>` after the base lands. A failed read raises
+    `PUBLISH_UNKNOWN`.
+    """
+    commits = set(branch_parents(worktree, base, head))
+    for row in entries:
+        if (row.get("status") in ("pending", "running") and row.get("branch") != branch
+                and row.get("expected_head") != head and row.get("expected_head") in commits):
+            raise LaneError(f"{branch} is stacked on {row.get('branch')}, the open entry of sd:{row.get('item')}: "
+                            f"it holds {row.get('expected_head')}. Nothing was queued or pushed. Let that entry "
+                            f"land, then rebase {branch} on origin/{base} and enqueue again.", code=STACKED)
 
 
 def check_lines(worktree: pathlib.Path, title: str, body: str, base: str, head: str) -> None:
