@@ -1306,6 +1306,7 @@ def _today_repos(connection: Any, names: list[str] | None) -> tuple[list[str | N
     """The `item.repo` keys `--only` names by short name, None for `fleet`, or the names it does not know (pack sd:6488)."""
     if not names:
         return None, ""
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
     from sd_db import repos
 
     known: dict[str, list[str | None]] = {}
