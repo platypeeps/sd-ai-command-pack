@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import time
@@ -60,6 +61,10 @@ HEARTBEAT = "build-dispatch"
 #: The lane entry states that end an `enqueued` run without a merge: the lane's `BLOCKED` ends, which
 #: `lane retry` queues again (`prepared` is a merge the lane refused), and a cancel.
 LANE_ENDED = ("failed", "skipped", "prepared", "cancelled")
+
+#: The waits, in seconds, before a supervisor statement a locked database refused is sent again (pack sd:6588).
+#: With each try's own `busy_timeout` they total about a minute, well under `build.STALE_SECONDS`.
+LOCK_WAITS = (1, 2, 4, 8, 16)
 
 #: The child waits for one byte on its pipe, written once its group is recorded, then execs the command.
 GATE = ("import os, sys\n"
@@ -329,6 +334,31 @@ def _environ(environ: dict | None) -> dict:
     return env
 
 
+class Patient:
+    """A supervisor's connection: a statement a locked database refused outside a transaction is sent again.
+
+    A statement refused outside a transaction (a `BEGIN`, a read, one
+    autocommit write) wrote nothing, so a retry cannot write twice; one
+    inside a transaction fails as it did. Each try waits its `busy_timeout`.
+    """
+
+    def __init__(self, connection):
+        self.connection = connection
+
+    def __getattr__(self, name: str):
+        return getattr(self.connection, name)
+
+    def execute(self, sql: str, parameters=()):
+        for wait in (*LOCK_WAITS, None):
+            try:
+                return self.connection.execute(sql, parameters)
+            except sqlite3.OperationalError as error:
+                if wait is None or self.connection.in_transaction or not (
+                        "locked" in str(error) or "busy" in str(error)):
+                    raise
+            time.sleep(wait)
+
+
 class Supervisor:
     """One run's supervisor: `run()` walks its steps and returns how it ended."""
 
@@ -338,13 +368,14 @@ class Supervisor:
                  probe=Probe):
         """`cited(worktree, base, head, body)` is the items the lane reads the branch as delivering, None when unread:
         the lane's own reader, which lives beside it in `bin/`."""
-        self.db, self.ident, self.tools, self.probe, self.cited = connection, ident, tools, probe, cited
+        self.db: Any = Patient(connection)  # duck-types the connection the writes are annotated with
+        self.ident, self.tools, self.probe, self.cited = ident, tools, probe, cited
         self.beat_seconds, self.timeout, self.grace = beat_seconds, timeout, grace
-        self.row = build.run(connection, ident)
+        self.row = build.run(self.db, ident)
         self.logs = log_dir(log_root, self.row["repo"])
         self.work = Path(self.row["work_path"])
         self.repo = paths.expand(self.row["repo"])
-        self.lead, self.others = _lead_item(connection, ident)
+        self.lead, self.others = _lead_item(self.db, ident)
         lead_id = self.row["assignment"]
         self.title = self.logs / f"sd-{lead_id}.title"
         self.body = self.logs / f"sd-{lead_id}.body.md"
@@ -819,13 +850,13 @@ class DraftSupervisor(Supervisor):
     def __init__(self, connection, ident: str, *, tools: Tools, log_root: Path, environ: dict | None = None,
                  beat_seconds: float = BEAT_SECONDS, timeout: float = draft.BUDGET_MINUTES * 60,
                  grace: float = GRACE_SECONDS, probe=Probe):
-        self.db, self.ident, self.tools, self.probe = connection, ident, tools, probe
+        self.db, self.ident, self.tools, self.probe = Patient(connection), ident, tools, probe
         self.beat_seconds, self.timeout, self.grace = beat_seconds, timeout, grace
-        self.row = build.run(connection, ident)
+        self.row = build.run(self.db, ident)
         self.logs = log_dir(log_root, self.row["repo"])
         self.repo = self.work = paths.expand(self.row["repo"])
         self.log = self.logs / f"{ident}.jsonl"
-        self.item = connection.execute("SELECT item FROM assignment WHERE id = ?",
+        self.item = self.db.execute("SELECT item FROM assignment WHERE id = ?",
                                        (self.row["assignment"],)).fetchone()["item"]
         self.last_beat = 0.0
         self.env = _environ(environ)

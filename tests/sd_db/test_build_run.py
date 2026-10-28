@@ -12,6 +12,7 @@ import importlib
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -572,6 +573,39 @@ class Supervise(Case):
             with self.assertRaises(build_run.Lost):
                 supervisor.child([*self.tools.claude, "-p", "x"], cwd=self.root, name="gated")
         self.assertEqual(self.calls("claude"), [], "the fake never started")
+
+    def test_a_locked_database_once_keeps_the_run_at_its_step(self):
+        """pack sd:6588: the supervisor's group write meets one `database is locked`, retries, and the child runs."""
+        self.press()
+        build.write(self.db, self.bundle["id"], step="reviewing")
+
+        class Locked:
+            """The fixture connection whose next `BEGIN IMMEDIATE` fails once, as a held write lock does."""
+            def __init__(self, connection):
+                self.connection, self.armed = connection, False
+
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+
+            def execute(self, sql, parameters=()):
+                if self.armed and sql == "BEGIN IMMEDIATE":
+                    self.armed = False
+                    raise sqlite3.OperationalError("database is locked")
+                return self.connection.execute(sql, parameters)
+
+        locked = Locked(self.db)
+        supervisor = build_run.Supervisor(locked, self.bundle["id"], tools=self.tools, log_root=self.logs,
+                                          environ=self.env, cited=ADAPTER.cited, beat_seconds=0.2, timeout=30,
+                                          grace=0.5)
+        supervisor.logs.mkdir(parents=True, exist_ok=True)
+        locked.armed = True
+        with mock.patch.object(build_run, "LOCK_WAITS", (0.01,)):
+            code = supervisor.child([*self.tools.claude, "-p", "x"], cwd=self.root, name="locked")
+        self.assertFalse(locked.armed, "the lock was met")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(self.calls("claude")), 1)
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["step"], row["outcome"]), ("reviewing", None))
 
     def test_a_second_supervisor_registers_nothing(self):
         self.press()
