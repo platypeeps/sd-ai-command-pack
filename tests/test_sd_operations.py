@@ -8,6 +8,7 @@ import os
 import sqlite3
 import sys
 import tempfile
+import time
 import types
 import unittest
 from contextlib import redirect_stderr, redirect_stdout
@@ -188,6 +189,44 @@ class OperationsCLI(unittest.TestCase):
         arguments = self.parser.parse_args(argv[2:])
         self.assertEqual((arguments.handler, arguments.run, arguments.sessions), (cli.build_dispatcher, "r1", False))
         self.assertEqual(run.spawn.call_args.kwargs["log"], Path("/bulk/r1.supervisor.log"))
+
+    def tick(self, run):
+        with patch.object(cli, "gate_load", return_value=(1.0, 40.0)), \
+                patch.object(cli, "interactive_builders", return_value=[]), \
+                patch.object(cli, "log_root", return_value=Path("/bulk")):
+            return self.call("assignments", "dispatch")
+
+    def test_a_locked_database_skips_the_tick_with_exit_0(self):
+        """pack sd:6494: `database is locked` in the heartbeat's BEGIN IMMEDIATE printed a traceback, rc=1."""
+        run = self.builds()
+        run.dispatch.side_effect = sqlite3.OperationalError("database is locked")
+        code, output = self.tick(run)
+        self.assertEqual((code, output), (0, "skipped: database is locked\n"))
+        self.connection.close.assert_called_once()
+
+    def test_a_tick_past_its_deadline_skips_with_exit_0(self):
+        """pack sd:6494: three slots ran to the job's 90 s JOB_TIMEOUT, printing nothing."""
+        run = self.builds()
+        run.dispatch.side_effect = lambda connection, **kwargs: time.sleep(5)
+        started = time.monotonic()
+        with patch.object(cli, "TICK_SECONDS", 0.2, create=True):
+            code, output = self.tick(run)
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual((code, output), (0, "skipped: the tick ran past 0.2 s\n"))
+        self.connection.close.assert_called_once()
+
+    def test_an_unwritable_run_log_skips_its_spawn_with_exit_0(self):
+        """pack sd:6494: EPERM opening a run's supervisor log failed every tick with rc=1."""
+        run = self.builds()
+        sys.modules["sd_db.build"].run = Mock(return_value={"repo": "/repo"})
+        run.log_dir = lambda root, repo: root
+        run.spawn = Mock(side_effect=PermissionError(1, "Operation not permitted"))
+        run.dispatch.side_effect = lambda connection, **kwargs: (kwargs["spawn"]("r1"), {
+            "reaped": [], "moved": [], "claimed": [], "drafted": [], "spawned": ["r1"], "why": ""})[1]
+        code, output = self.tick(run)
+        self.assertEqual(code, 0)
+        self.assertIn("spawned 0; no claim: cannot start r1's supervisor", output)
+        self.assertIn("Operation not permitted", output)
 
     def test_interactive_builders_count_as_the_dashboard_counts_them(self):
         """Review round 1: one entry per slot the dashboard's own `claude_sessions.builders` counts."""
