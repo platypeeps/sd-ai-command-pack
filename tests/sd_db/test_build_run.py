@@ -12,6 +12,7 @@ import importlib
 import json
 import os
 import signal
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -342,6 +343,35 @@ class Supervise(Case):
         note = self.db.execute("SELECT body FROM note WHERE item = ? AND body LIKE '%Closes: sd:%'", (self.items[1],))
         self.assertIsNotNone(note.fetchone(), "the skipped item says why it stays open")
 
+    def test_a_member_with_an_open_question_is_not_enqueued(self):
+        """sd:6571: an earlier run's commit cites the member, but this run's builder skipped it with a question."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        add_note(self.db, self.items[0], "question", "Which option?")
+        ended = self.supervisor().run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertIn("open question", ended["blocked"])
+        self.assertEqual([call for call in self.calls("sd-ship") if "enqueue" in call["argv"]], [])
+
+    def test_only_the_member_with_an_open_question_stays_out(self):
+        self.press(2)
+        self.write_pr()
+        self.plan(claude=["pass"], sd_review=["clean"])
+        add_note(self.db, self.items[1], "question", "Which option?")
+        self.assertEqual(self.supervisor().run()["step"], "enqueued")
+        enqueue = next(call["argv"] for call in self.calls("sd-ship") if "enqueue" in call["argv"])
+        self.assertEqual([enqueue[n + 1] for n, arg in enumerate(enqueue) if arg == "--item"], [str(self.items[0])])
+        self.assertEqual(self.statuses(), ["in_progress", "blocked"])
+        # The lane adds each open item a branch commit's trailer cites to the closing set, unless a `Refs:`
+        # line keeps it open: the questioned member's old trailer must not close it.
+        work = Path(build.run(self.db, self.bundle["id"])["work_path"])
+        head = enqueue[enqueue.index("--expected-head") + 1]
+        body = Path(enqueue[enqueue.index("--body-file") + 1]).read_text(encoding="utf-8")
+        self.db.execute("UPDATE item SET status = 'in_progress' WHERE id = ?", (self.items[1],))
+        cited, _ = LANE.cited_closes(self.db, self.items[0], body, LANE.branch_commits(work, "main", head), ())
+        self.assertEqual([row["item"] for row in cited], [])
+
     def test_the_lane_entry_is_found_by_any_delivered_member(self):
         """The entry's item is the first member delivered, so the lookups (resume, watch) read every member."""
         (self.plans / "lane.json").write_text(json.dumps([{"id": "e1", "item": 7, "status": "merged",
@@ -543,6 +573,39 @@ class Supervise(Case):
             with self.assertRaises(build_run.Lost):
                 supervisor.child([*self.tools.claude, "-p", "x"], cwd=self.root, name="gated")
         self.assertEqual(self.calls("claude"), [], "the fake never started")
+
+    def test_a_locked_database_once_keeps_the_run_at_its_step(self):
+        """pack sd:6588: the supervisor's group write meets one `database is locked`, retries, and the child runs."""
+        self.press()
+        build.write(self.db, self.bundle["id"], step="reviewing")
+
+        class Locked:
+            """The fixture connection whose next `BEGIN IMMEDIATE` fails once, as a held write lock does."""
+            def __init__(self, connection):
+                self.connection, self.armed = connection, False
+
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+
+            def execute(self, sql, parameters=()):
+                if self.armed and sql == "BEGIN IMMEDIATE":
+                    self.armed = False
+                    raise sqlite3.OperationalError("database is locked")
+                return self.connection.execute(sql, parameters)
+
+        locked = Locked(self.db)
+        supervisor = build_run.Supervisor(locked, self.bundle["id"], tools=self.tools, log_root=self.logs,
+                                          environ=self.env, cited=ADAPTER.cited, beat_seconds=0.2, timeout=30,
+                                          grace=0.5)
+        supervisor.logs.mkdir(parents=True, exist_ok=True)
+        locked.armed = True
+        with mock.patch.object(build_run, "LOCK_WAITS", (0.01,)):
+            code = supervisor.child([*self.tools.claude, "-p", "x"], cwd=self.root, name="locked")
+        self.assertFalse(locked.armed, "the lock was met")
+        self.assertEqual(code, 0)
+        self.assertEqual(len(self.calls("claude")), 1)
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["step"], row["outcome"]), ("reviewing", None))
 
     def test_a_second_supervisor_registers_nothing(self):
         self.press()
