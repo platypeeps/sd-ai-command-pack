@@ -29,7 +29,7 @@ HUB_UNAVAILABLE = "hub_unavailable"
 LANE_ELSEWHERE = "lane_elsewhere"
 
 
-def is_hub_fault(error: Exception, faults: frozenset[str] = HUB_FAULTS) -> bool:
+def is_hub_fault(error: BaseException, faults: frozenset[str] = HUB_FAULTS) -> bool:
     """Whether `error` is one of `faults`, by default `HUB_FAULTS`, read without importing `sd_db`."""
     return any(kind.__module__.startswith("sd_db.") and kind.__name__ in faults for kind in type(error).__mro__)
 

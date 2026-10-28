@@ -2448,7 +2448,7 @@ def hub_fault_of(error: BaseException | None) -> BaseException | None:
     """`error`, or the hub fault it wraps (`sd_db.ship.LaneUnknown` keeps it as its cause); None for any other."""
     seen: set[int] = set()
     while error is not None and id(error) not in seen:
-        if sd_ship_workflow.is_hub_fault(error):  # type: ignore[arg-type]
+        if sd_ship_workflow.is_hub_fault(error):
             return error
         seen.add(id(error))
         error = error.__cause__ or error.__context__
@@ -3373,6 +3373,8 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     (`new_work`, sd:5809), rather than wait for a later scheduled run.
     Once the lanes ended, each hosted lane whose median wait passed an hour
     files the parallel-lanes question (`ask_wait`, pack sd:6006).
+    A build refusal on the repo-table read (`BUILD_FAULTS`) skips the run
+    with exit 0: the satellite's follow fixes it, not a retry (sd:6425).
     """
     deadline = clock() + RUN_BUDGET_SECONDS
     imported = sd_lib.import_sd_db()
@@ -3387,6 +3389,10 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
         connection = connect(database, write=False)
         rows = sd_lib.managed_rows(registered(connection))
     except Exception as error:  # noqa: BLE001 -- no list of lanes is no lane to run
+        fault = hub_fault_of(error)
+        if fault is not None and sd_ship_workflow.is_hub_fault(fault, sd_ship_workflow.BUILD_FAULTS):
+            # a satellite between a hub refresh and its follow: a skipped tick, not a failed job (sd:6425)
+            return {"lanes": [], "skipped": f"{error}. Nothing ran; the run after the follow runs the lanes."}
         raise LaneError(f"Cannot read the repositories this machine hosts: {error}. Nothing ran; "
                         "the next run retries.", code="lane_unknown") from None
     lanes: list[dict[str, Any]] = []
