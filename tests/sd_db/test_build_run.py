@@ -426,17 +426,44 @@ class Supervise(Case):
         self.assertIs(build.Probe.group(leader.pid), False)
         self.assertTrue(self.supervisor().end_group(leader.pid))
 
+    def questions(self):
+        return [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ? AND kind = 'question'",
+                                                       (self.items[0],))]
+
     def test_judge_last_line_not_exit(self):
-        """Failure table, Judge: exit 0 (here 3) with a permission denial blocks with a question; the exit code is no verdict."""
+        """Failure table, Judge: exit 0 (here 3) with a permission denial is a denial; the exit code is no verdict.
+
+        pack sd:6723: the first denial requeues the run once at its step, with no question, and the retry's
+        brief carries the denied call; the second blocks with the question."""
         self.press()
         self.plan(claude=["deny"])
         ended = self.supervisor().run()
-        self.assertEqual(ended["outcome"], "blocked")
-        self.assertEqual(self.statuses(), ["blocked"])
-        question = self.db.execute("SELECT body FROM note WHERE item = ? AND kind = 'question'",
-                                   (self.items[0],)).fetchone()
-        self.assertIn("denied Bash", question["body"])
+        self.assertEqual(ended["outcome"], "denied")
+        self.assertEqual((self.statuses(), self.questions()), (["in_progress"], []))
         self.assertEqual(self.calls("sd-review"), [], "no review after a denial")
+        retry = build.run(self.db, ended["retry"])
+        self.assertEqual((retry["step"], retry["session_id"], retry["run"]), ("building", "session-fixture", 2))
+        self.plan(claude=["deny"])
+        again = self.supervisor(retry["id"]).run()
+        prompt = self.calls("claude")[-1]["argv"]
+        prompt = prompt[prompt.index("-p") + 1]
+        self.assertIn("permission denied: Bash `git push`", prompt)
+        self.assertIn("never amend", prompt)
+        self.assertEqual(again["outcome"], "blocked")
+        self.assertEqual(self.statuses(), ["blocked"])
+        self.assertEqual(len(self.questions()), 1)
+        self.assertIn("denied Bash", self.questions()[0])
+
+    def test_the_brief_keeps_the_builder_in_its_worktree(self):
+        """pack sd:6723: the brief holds the three lines, and the builder may commit with -m or -F."""
+        self.press()
+        self.plan(claude=["pass"])
+        self.supervisor().run()
+        argv = self.calls("claude")[0]["argv"]
+        prompt = argv[argv.index("-p") + 1]
+        self.assertIn("Write no file outside the worktree", prompt)
+        self.assertIn("never amend", prompt)
+        self.assertIn("Bash(git commit -F:*)", argv[argv.index("--allowedTools"):argv.index("--permission-mode")])
 
     def test_a_success_line_passes_whatever_the_exit_code(self):
         self.press()
