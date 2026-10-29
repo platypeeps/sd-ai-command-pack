@@ -72,10 +72,7 @@ function renderAnnunciator() {
   const n = k => ROWS.filter(r => shown(r) && FILTERS[k].test(r)).length;
   const cell = (k, state, val) => ({ button: true, state, pressed: F.f === k, attrs: html` data-filter="${k}"`, label: FILTERS[k].lbl, tip: FILTERS[k].tip,
     mark: state === 'caution' ? html`<span class="g-caution" aria-hidden="true">▲</span>` : I(FILTERS[k].icon), val });
-  const [hh, day] = [D.read.slice(11, 16), `${+D.read.slice(8, 10)} ${'Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec'.split(' ')[+D.read.slice(5, 7) - 1]}`];
-  // build: Observed rereads /api/designs instead of reloading the page.
-  put(document.getElementById('annunciator'), cells([...Object.keys(FILTERS).map(k => { const c = n(k); return cell(k, FILTERS[k].warn && c ? 'caution' : 'ok', html`<b>${c}</b> ${markup.plural.word(c, k === 'brief' ? 'product' : 'page')}`); }),
-    { button: true, attrs: html` id="refresh"`, label: 'Observed', mark: I('rotate-ccw'), val: html`<span class="ph"><b>${hh}</b> UTC</span> · <span class="ph">${day} · ${D.head || 'no commit'}</span>` }]));
+  put(document.getElementById('annunciator'), cells(Object.keys(FILTERS).map(k => { const c = n(k); return cell(k, FILTERS[k].warn && c ? 'caution' : 'ok', html`<b>${c}</b> ${markup.plural.word(c, k === 'brief' ? 'product' : 'page')}`); })));
 }
 function renderRows() {
   const rows = ranked();
@@ -195,7 +192,6 @@ let reading = null;
 document.addEventListener('click', e => {
   const open = e.target.closest?.('tbody [data-open]'); if (open) { if (ROWS.some(r => r.id === open.dataset.open)) select(open.dataset.open, true); return; }
   const cell = e.target.closest?.('.annunciator .cell'); if (cell) {
-    if (cell.id === 'refresh') return reading?.load();
     const k = cell.dataset.filter; F.f = F.f === k ? '' : k; writeFilter(); update(); return;
   }
   const tr = e.target.closest?.('tr[data-id]'); if (tr && !e.target.closest('button, a, time')) select(tr.dataset.id, false);
@@ -272,6 +268,6 @@ document.addEventListener('DOMContentLoaded', () => {
     unselect: clearSelection,
   });
   reading.load();
-  // Read again (sd:5638): the shell's head button reads the designs again, as the Observed lamp does.
+  // Read again (sd:5638): the shell's head button reads the designs again; sd:6697 dropped the Observed lamp.
   window.PAGE_AGAIN = { title: 'Read the designs again', run: () => reading.load() };
 });

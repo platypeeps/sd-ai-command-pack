@@ -61,7 +61,7 @@ addEventListener('DOMContentLoaded', () => {
     unselect: () => unselect(),
   });
   const load = () => activity.load(), reread = () => activity.reread();
-  // Read again (sd:5638): the shell's head button reads the events again, as the Observed lamp does.
+  // Read again (sd:5638): the shell's head button reads the events again.
   window.PAGE_AGAIN = { title: 'Read the events again', run: load };
 
   // ---------- State (mirrored in the URL) ----------
@@ -122,14 +122,11 @@ addEventListener('DOMContentLoaded', () => {
       // build: the design's "want changes · approve" has no source; a delivery records clean or adjudicated (sd:2211).
       review: html`<span class="ph"><b>${n('review', 'caution')}</b> adjudicated</span> · <span class="ph">${n('review', 'ok')} clean</span>${DOC?.review_unrecorded ? html` · <span class="ph">${plural(DOC.review_unrecorded, 'merge')} unrecorded</span>` : ''}`,
     };
-    const d = new Date(OBSERVED);
-    put($('annunciator'), cells([...KINDS.map(k => cell(k, VAL[k.id] || '')),
-      { button: true, attrs: html` id="refresh"`, label: 'Observed', mark: ICON('rotate-ccw'),
-        val: html`<span class="ph"><b>${d.toISOString().slice(11, 16)}</b> UTC</span> · <span class="ph">${d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', timeZone: 'UTC' })}</span>` }]));
+    // sd:6697: no Observed cell; the shell's Read again is the page's one re-read.
+    put($('annunciator'), cells(KINDS.map(k => cell(k, VAL[k.id] || ''))));
   }
   $('annunciator').addEventListener('click', e => {
     const c = e.target.closest('button.cell'); if (!c) return;
-    if (c.id === 'refresh') return load(); // build: reads the document again instead of reloading the page
     const k = c.dataset.kind;
     F.kind.has(k) ? F.kind.delete(k) : F.kind.add(k); page = 1; update(); window.shell.view.show('timeline'); // adds to the kind filter, as the lane does
   });

@@ -585,7 +585,7 @@ fire('click', act('reject')); await flush(); await flush();""", hold_a=False, ho
         self.assertNotRegex(ann + out["R"]["lanes"], r'data-state="(caution|warning)"|class="fail"')
         self.assertRegex(ann, r'title="' + re.escape(briefs_screen.WATCHDOG_REASON) + '" data-state="unknown"')
         self.assertIn("<b>4</b> in 7 days", ann)
-        self.assertEqual(cell_grammar(self, ann), [("div", "ok"), ("div", "unknown"), ("div", "ok"), ("button", None)])
+        self.assertEqual(cell_grammar(self, ann), [("div", "ok"), ("div", "unknown"), ("div", "ok")])
         self.assertIn("Vault copies", ann)
         self.assertEqual(len(re.findall(r'class="lane-btn"', out["R"]["lanes"])), 3)
         self.assertEqual(out["R"]["sub"], "All read")
@@ -683,12 +683,12 @@ R.day = ELS.rows.html;""")
         self.assertEqual(re.findall(r'<tr data-id="([^"]+)"', out["R"]["rows"]), ["2026-09-06 - Intel Brief", "2026-09-04 - Intel Brief"])
 
     def refresh(self, body, later):
-        """Load, then click Observed with each answer of `later` held; `body` releases them and reads the page."""
+        """Load, then press Read again with each answer of `later` held; `body` releases them and reads the page."""
         return self.run_page(f"""const A = ANSWER, LATER = {json.dumps(later)}, HELD = [];
 C.select = id => (OUT.selects = OUT.selects || []).push(id);
 ANSWER = (path, body) => {{ if (path !== '/api/briefs') return A(path, body); const doc = LATER.shift();
   return new Promise(r => HELD.push(() => r(Array.isArray(doc) ? doc : [200, doc]))); }};
-const click = () => ELS.annunciator.listeners.click[0]({{ target: {{ closest: s => s === '#refresh' ? {{}} : null }} }});
+const click = () => window.PAGE_AGAIN.run();
 {body}""")
 
     def subset(self, keep):
@@ -702,7 +702,7 @@ const click = () => ELS.annunciator.listeners.click[0]({{ target: {{ closest: s 
         return self.doc(reader=refuse)
 
     def test_an_older_refresh_that_answers_last_does_not_win(self):
-        # Review ede2f75d05ab: two Observed clicks overlap; the newer read stands whatever order they answer in.
+        # Review ede2f75d05ab: two Read again presses overlap; the newer read stands whatever order they answer in.
         older = self.subset({"2026-09-06 - Intel Brief"})
         out = self.refresh("""click(); click(); await flush();
 HELD[1](); await flush(); HELD[0](); await flush();

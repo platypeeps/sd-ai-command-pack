@@ -96,11 +96,9 @@ let polling = 0;
     mission: 'Age of the newest row in the Mission export. Source: the hoa checkout\'s tools/source-ages.py. CLI: python3 tools/source-ages.py',
   };
   function lamps() {
-    const clock = { button: true, cls: 'clock', attrs: html` id="refresh"`, label: html`<span><span class="live" aria-hidden="true"></span> Observed</span>`, mark: html`<kbd>r</kbd>`,
-      val: html`<span class="ph"><b>${DOC ? DOC.read.slice(11, 16) : '—'}</b>${DOC ? ' UTC' : ''}</span>`, small: 'refresh',
-      tip: 'When this page read /api/hoa. Press it, or r, to read again.' };
+    // sd:6697: no Observed clock; the shell's Read again (or r) is the page's one re-read.
     put($('annunciator'), cells([...CELLS.map(c => ({ button: true, state: c.state, attrs: html` data-cell="${c.id}"${c.open ? html` data-open="${c.open}"` : ''}`,
-      label: c.label, mark: html`<span class="${c.state === 'ok' ? 'g' : ''}" aria-hidden="true">${GLYPH[c.state]}</span>`, val: html`<span class="ph">${c.val}</span>`, small: c.small, tip: TIPS[c.id] })), clock]));
+      label: c.label, mark: html`<span class="${c.state === 'ok' ? 'g' : ''}" aria-hidden="true">${GLYPH[c.state]}</span>`, val: html`<span class="ph">${c.val}</span>`, small: c.small, tip: TIPS[c.id] }))]));
   }
   // The badge is the read's own (sd:3446, hoa_screen._attention), the cells above that can light.
   function attention() {
@@ -543,7 +541,6 @@ let polling = 0;
 
     $('annunciator').addEventListener('click', e => {
       const c = e.target.closest('button.cell'); if (!c) return;
-      if (c.id === 'refresh') { load(); return; }
       const k = c.dataset.open; if (!k) return;
       if (k.startsWith('day:')) $('trends').scrollIntoView({ behavior: reduce() ? 'auto' : 'smooth' });
       select(k, true);

@@ -9,7 +9,7 @@
 // A skill the intake installed in ~/.claude/skills (sd:3997) is a "user skill": the Adopt panel lists it with Re-import, which
 // runs the intake with the user scope. It is no catalog row, so Try, Review, Promote and Demote are not on it.
 // The Intake view (system sd:5478) lists the repositories `sd skill intake --tracked` names, from /api/skills/intake/repos.
-// Track, Refresh and Remove post /api/skills/intake/tracking; Remove keeps the installed skills and its Undo tracks the
+// Track, Refresh skills and Remove post /api/skills/intake/tracking; Remove keeps the installed skills and its Undo tracks the
 // repository again. A refresh lists each skill's intake report and installs nothing: Approve under a report is the intake's.
 // Rollback (system sd:5779) posts the same route with rollback: true and shows the swap back to the copy the last install
 // replaced, with the pack skills the import informed; Approve rollback asks first and posts the revision that report printed.
@@ -94,9 +94,6 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
       // build: read, not drawn: the reference's "not read" lamp holds only while skill_use has no row from another surface.
       { href: '?row=surfaces', attrs: html` data-open="surfaces"`, state: other ? 'ok' : 'unknown', label: 'Codex · opencode use', mark: lampGlyph(other ? 'ok' : 'unknown'),
         val: html`<span class="ph"><b>${other || '—'}</b> ${other ? 'rows' : 'not read'}</span>`, small: other ? 'from surfaces other than claude' : html`no rows · <code>sd skill scan</code> not run` },
-      // build: refresh rereads /api/skills instead of reloading the page.
-      { button: true, attrs: html` id="refresh"`, label: 'Observed', mark: I('rotate-ccw'), val: html`<span class="ph"><b>${String(DOC.read).slice(11, 16)}</b> UTC</span>`,
-        small: `${String(DOC.read).slice(0, 10)} · refresh` },
     ]));
   }
 
@@ -463,7 +460,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
     const url = repoOf(id), tracked = id.startsWith('repo:');
     const r = REPOS && (tracked ? REPOS.repos : REPOS.untracked).find(x => x.url === url); if (!r) return false;
     selected = id; markRepos(); C.select(id);
-    const [g, st, why] = tracked ? repoGlyph(r) : ['▨', 'unknown', 'Not tracked: Refresh does not read it'];
+    const [g, st, why] = tracked ? repoGlyph(r) : ['▨', 'unknown', 'Not tracked: Refresh skills does not read it'];
     put(details, html`<p class="kind"><span class="g-${st}" aria-hidden="true">${g}</span> ${tracked ? `Tracked repository · ${r.scope}` : 'Adopted from, not tracked'}</p>
       <h2>${url}</h2><p class="desc">${why}.</p>
       <dl><dt>Adopted</dt><dd>${r.skills.length ? r.skills.map(x => `${x.name} (${x.scope})`).join(' · ') : 'no installed skill'}</dd>
@@ -515,7 +512,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
   function showTrack() {
     selected = 'track'; C.select(null); markRepos();
     put(details, html`<p class="kind">${I('plus')} Track a repository</p><h2>Track a repository</h2>
-      <p class="desc">Refresh reads a tracked repository's default branch and lists its new and changed skills, each with its intake report. Nothing installs until you approve a report.</p>
+      <p class="desc">Refresh skills reads a tracked repository's default branch and lists its new and changed skills, each with its intake report. Nothing installs until you approve a report.</p>
       <form class="form" id="track-form" novalidate><label>Repository<input id="tr-url" placeholder="https://github.com/owner/repo" autocomplete="off" aria-describedby="tr-err"></label>
         <div class="row"><label class="target">New skills install to<select id="tr-scope"><option value="pack">pack · contrib/</option><option value="user">user · ~/.claude/skills</option></select></label>
           <button class="btn" type="submit">Track</button></div>
@@ -536,7 +533,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
   }
   document.getElementById('track-btn').addEventListener('click', () => showTrack());
   const REPO_COMMANDS = [
-    { id: 'skill.intake.refresh', on: 'tracked repo', label: 'Refresh', does: 'Fetches the repository and lists its new and changed skills; installs nothing.', key: 'e', risk: 'safe', icon: 'rotate-ccw', primary: () => true,
+    { id: 'skill.intake.refresh', on: 'tracked repo', label: 'Refresh skills', does: 'Fetches the repository and lists its new and changed skills; installs nothing.', key: 'e', risk: 'safe', icon: 'rotate-ccw', primary: () => true,
       when: o => REFRESH[o.url]?.wait ? 'refreshing now' : true,
       cli: o => `sd skill intake --refresh ${shq(o.url)}`, run: o => { select(`repo:${o.url}`, true); return refresh(o); } },
     { id: 'skill.intake.untrack', on: 'tracked repo', label: 'Remove', does: 'Stops tracking this repository; its installed skills stay. Undo tracks it again.', key: 'm', risk: 'undo',
@@ -545,7 +542,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
         return { text: `Stopped tracking ${o.url}; its installed skills stay`, removed: out.removed }; }, unknown(o, 'Removal')),
       // Undo tracks the repository again with the scope it had; its last refresh time and result are not restored.
       undo: (o, v) => trackPost(o.url, v?.removed?.scope || o.scope).then(() => { repoReader.reread(); }, e => { repoReader.load(); throw e; }) },
-    { id: 'skill.intake.track', on: 'untracked repo', label: 'Track', does: 'Adds this repository to the tracked list, so Refresh reads it.', key: 't', risk: 'safe', icon: 'plus', primary: () => true,
+    { id: 'skill.intake.track', on: 'untracked repo', label: 'Track', does: 'Adds this repository to the tracked list, so Refresh skills reads it.', key: 't', risk: 'safe', icon: 'plus', primary: () => true,
       cli: o => `sd skill intake --track ${shq(o.url)}`, run: o => trackPost(o.url).then(() => { repoReader.reread(); return `Tracking ${o.url}`; }, unknown(o, 'Tracking')) },
   ];
   repoRows.addEventListener('click', e => {
@@ -577,7 +574,6 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
     // design.md § Lamps: a button lamp toggles a filter; a lamp that opens a reading is a link to it (here, Details).
     // A modified or non-primary click is the browser's: a new tab at the link's ?row= (PR #31 review).
     const a = e.target.closest('a.cell[data-open]'); if (a) { if (e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return; e.preventDefault(); select(a.dataset.open, true); return; }
-    if (e.target.closest('#refresh')) load();
   });
 
   // ---------- Shapeshift bar: filter · run skill · adopt source ----------
@@ -703,7 +699,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
     unselect: nothing,
   });
   const load = () => reading.load(), reread = () => reading.reread();
-  // Read again (sd:5638): the shell's head button reads the skills again, as the Observed lamp does, and Usage once shown (sd:5964).
+  // Read again (sd:5638): the shell's head button reads the skills again, and Usage once shown (sd:5964).
   window.PAGE_AGAIN = { title: 'Read the skills and the tracked repositories again', run: () => Promise.all([load(), window.skillsUsage?.again()]) };
   registerCommands();
   if (window.shell.view?.current()) onView(window.shell.view.current());

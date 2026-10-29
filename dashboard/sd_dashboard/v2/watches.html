@@ -6,9 +6,9 @@
   Data: /api/watches (watches_screen.document: every sdw.market row with its status, its last refresh date read from its
   profile and what that date is worth, fresh, stale, never or idle; and the market-watch job's launchd state, last run and
   the last line it printed), read when the page opens. Nothing here is sample data.
-  Writes: Refresh all is Run now on the job, POST /api/jobs/market-watch/retry with the job's revision, as Management and
-  HOA run a job. Refresh (one watch) and Add watch post /api/actions/run, watch.refresh and watch.add (run_actions.py):
-  Refresh starts claude in herdr on the routine's per-entity step for that one row; Add watch files a candidate row
+  Writes: Refresh watches is Run now on the job, POST /api/jobs/market-watch/retry with the job's revision, as Management and
+  HOA run a job. Refresh watch (one watch) and Add watch post /api/actions/run, watch.refresh and watch.add (run_actions.py):
+  Refresh watch starts claude in herdr on the routine's per-entity step for that one row; Add watch files a candidate row
   through sd store add. Details shows each answer. The status moves in Tasks (Open item): candidate to active is the
   operator's call.
 -->
@@ -38,9 +38,9 @@
     <div id="state" hidden></div>
     <section aria-labelledby="job-h">
       <div class="sec-head">
-        <h2 id="job-h">Refresh</h2>
+        <h2 id="job-h">Market watch</h2>
         <div class="tools">
-          <button class="btn" type="button" data-cmd="jobs.retry" data-obj="job:market-watch">Refresh all</button>
+          <button class="btn" type="button" data-cmd="jobs.retry" data-obj="job:market-watch">Refresh watches</button>
           <button class="btn quiet" type="button" data-cmd="watch.add" data-obj="watches">Add watch…</button>
         </div>
       </div>

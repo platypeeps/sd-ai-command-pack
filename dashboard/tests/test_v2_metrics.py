@@ -35,7 +35,6 @@ from sd_db import provider_controls, reads, transition, usage, workflow
 from support import NOW, ScreenCase, before_5648, record_cost
 from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
-from test_v2_shell_shared import cell_grammar
 from test_v2_tasks import SHELL, STAND_IN
 from test_v2_today import OSASCRIPT, Refused
 from test_workflow_actions import BrowserSession
@@ -412,7 +411,6 @@ class TheScript(Controlled):
         self.assertRegex(lamps, r'data-cell="spend" data-ev="spend" data-view="spend" data-state="ok".*?<b>\$80.00</b>')
         self.assertRegex(lamps, r'data-cell="w-claude" data-ev="win:claude:10080" data-view="spend" data-state="caution".*?<b>80%</b> used')
         self.assertRegex(lamps, r'data-cell="ci" data-ev="ci" data-view="ci" data-state="unknown".*?no gate run')
-        self.assertEqual(cell_grammar(self, lamps)[-1], ("button", None))
         self.assertEqual(out["attention"][-1], {"state": "caution", "n": 1, "what": "readings past a threshold"})
         self.assertIsNone(out["states"][-1])
 
@@ -523,14 +521,13 @@ C.run(cmd('bill.cap'), OBJ.get('bill:capped')); await flush();""")
         lamps = out["R"]["lamps"]
         states = dict(re.findall(r'data-cell="([\w-]+)"[^>]*data-state="(\w+)"', lamps))
         self.assertEqual({k: v for k, v in states.items() if k != "ci"}, {"spend": "unknown", "w-claude": "unknown", "bound": "unknown"})
-        self.assertIn("<b>11:31</b> UTC", lamps)
         self.assertEqual(out["states"][-1]["kind"], "partial")
         self.assertIn("usage: stale since 11:31 UTC: database is locked", out["states"][-1]["text"])
 
     def test_a_document_that_does_not_arrive_leaves_no_reading_and_says_so(self):
         out = self.run_page("""R.before = ELS.annunciator.html;
 DOC = { error: 'Open a dashboard page before reading Metrics.' }; STATUS = 403;
-DOC_LISTENERS.click.forEach(f => f({ target: { closest: s => s === '#refresh' ? {} : null } })); await flush();
+window.PAGE_AGAIN.run(); await flush();
 R.lamps = ELS.annunciator.html; R.bills = ELS.bills.html;""")
         self.assertEqual(out["gets"], ["/api/metrics", "/api/metrics"])
         self.assertIn("data-cell=", out["R"]["before"])

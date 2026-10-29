@@ -104,10 +104,9 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
   const oldest = d => [d.read, d.usage.observed, d.numbers.observed].filter(Boolean).sort()[0];
   const hhmm = iso => `${iso.slice(11, 16)} UTC`;
   function lamps() {
-    const clock = { button: true, attrs: html` id="refresh"`, label: 'Observed', mark: html`<kbd>r</kbd>`,
-      val: html`<span class="ph"><b>${DOC ? oldest(DOC).slice(11, 16) : '—'}</b>${DOC ? ' UTC' : ''}</span>`, small: DOC ? `${oldest(DOC).slice(0, 10)} · refresh` : 'refresh' };
+    // sd:6697: no Observed clock; the shell's Read again (or r) is the page's one re-read.
     put($('annunciator'), cells([...CELLS.map(c => ({ button: true, state: c.state, attrs: html` data-cell="${c.id}" data-ev="${c.ev || ''}" data-view="${c.view}"`,
-      label: c.label, mark: html`<span class="${c.state === 'ok' ? 'g' : ''}" aria-hidden="true">${G[c.state]}</span>`, val: html`<span class="ph">${c.val}</span>`, small: c.small })), clock]));
+      label: c.label, mark: html`<span class="${c.state === 'ok' ? 'g' : ''}" aria-hidden="true">${G[c.state]}</span>`, val: html`<span class="ph">${c.val}</span>`, small: c.small }))]));
   }
   // The badge is the read's own (sd:3446, metrics_screen._attention), the cells above that can light.
   function attention() {
@@ -255,7 +254,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
   // ---------- Reader (read.js) ----------
   let reader = null;
   const load = () => reader.load();
-  // Read again (sd:5638): the shell's head button reads the Metrics readings again, as the Observed lamp does.
+  // Read again (sd:5638): the shell's head button reads the Metrics readings again.
   window.PAGE_AGAIN = { title: 'Read the Metrics readings again', run: load };
   const spec = {
     source: '/api/metrics', what: 'the Metrics readings',
@@ -309,7 +308,6 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     );
     document.addEventListener('click', e => {
       if (e.target.closest?.('.rowact')) return;
-      if (e.target.closest?.('#refresh')) { load(); return; }
       const el = e.target.closest?.('[data-ev]'); if (!el) return;
       if (el.dataset.view) S.view.show(el.dataset.view);
       if (el.dataset.ev) show(el.dataset.ev, true);

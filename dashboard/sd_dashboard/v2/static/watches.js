@@ -1,7 +1,7 @@
 // Watches (sd:6264): the store's market rows and the market-watch job that refreshes them (watches_screen.py). The page
 // reads /api/watches through the shell's reader and draws the Documents list grammar: a filter bar, a sorted and paged
-// ledger, and the one Details pane. Refresh all is Run now on the job (commands.retry, /api/jobs/market-watch/retry);
-// Refresh and Add watch run watch.refresh and watch.add through /api/actions/run (commands.runAction), and Details shows
+// ledger, and the one Details pane. Refresh watches (sd:6697) is Run now on the job (commands.retry, /api/jobs/market-watch/retry);
+// Refresh watch and Add watch run watch.refresh and watch.add through /api/actions/run (commands.runAction), and Details shows
 // the answer. A refresh date is the profile's own: an active watch past the bound reads stale, never fresh.
 (() => {
   const { html, put, plural } = window.markup;
@@ -87,7 +87,7 @@
         ${facts.map(([k, x]) => html`<dt>${k}</dt><dd>${x}</dd>`)}
         <dt>URL</dt><dd>${link(r.url) ? html`<a class="ext" href="${r.url}" target="_blank" rel="noopener noreferrer">${r.url}</a>` : r.url_text ? html`${r.url_text} <span class="why">(not a link that parses)</span>` : '— none in its Sources'}</dd>
         <dt>Item</dt><dd><a href="${window.shell.itemHref(r.item)}">#${r.item}</a></dd></dl>
-      <p class="why">The date is the newest one market-watch wrote into the profile. Refresh starts claude on this one watch; the date moves when its run writes the profile. The status moves in Tasks.</p>`);
+      <p class="why">The date is the newest one market-watch wrote into the profile. Refresh watch starts claude on this one watch; the date moves when its run writes the profile. The status moves in Tasks.</p>`);
     window.shell.commands.select(r.id);
   }
   function unselect() {
@@ -125,15 +125,15 @@
     if (e.target.closest('.rowact, a')) return;
     const tr = e.target.closest('tr[data-id]'); if (tr) { show(tr.dataset.id); window.shell.openPane('tab-details'); }
   });
-  // Refresh all: Run now on the job, with the revision the page read; the job's line comes back with the next read.
+  // Refresh watches: Run now on the job, with the revision the page read; the job's line comes back with the next read.
   const job = o => ({ name: 'market-watch', service: o.service, failed: o.state === 'failed', exit: o.last_exit,
     capability: o.error ? { allowed: false, reason: o.error } : o.state === 'running' ? { allowed: false, reason: 'market-watch is running now' } : o.capabilities?.retry });
   const kick = o => window.shell.post('/api/jobs/market-watch/retry', { revision: o.revision })
-    .then(out => reader.reread().then(() => window.commands.answered(out, 'market-watch', 'started', 'Refresh all started · market-watch refreshes the next three active watches')));
+    .then(out => reader.reread().then(() => window.commands.answered(out, 'market-watch', 'started', 'Refresh watches started · market-watch refreshes the next three active watches')));
   const register = () => window.shell.commands.register(
-    { ...window.commands.retry({ job, run: kick }), label: 'Refresh all', primary: () => true,
-      does: 'Runs the market-watch job now: it refreshes the next three active watches in its queue.' },
-    { id: 'watch.refresh', on: 'watch', label: 'Refresh', does: 'Starts claude in herdr on this one watch\'s market-watch refresh.', key: 'r', icon: 'rotate-ccw', risk: 'confirm', executes: true,
+    { ...window.commands.retry({ job, run: kick }), label: 'Refresh watches', primary: () => true,
+      does: 'Runs the market-watch job now: it refreshes the next three active watches in its queue and writes their profiles.' },
+    { id: 'watch.refresh', on: 'watch', label: 'Refresh watch', does: 'Starts claude in herdr to refresh this one watch; it writes the watch\'s profile.', key: 'r', icon: 'rotate-ccw', risk: 'confirm', executes: true,
       primary: o => o.fresh === 'stale' || o.fresh === 'never', when: o => o.stage === 'active' || `${o.stage}: market-watch refreshes active watches only`,
       consequence: o => `This opens herdr workspace watch-${o.item} in the vault and starts claude on the market-watch routine's per-entity refresh for ${o.title} only. It writes the profile's sections; the session is yours to steer or close.`,
       cli: o => `claude ${shq(`Run the market-watch routine's per-entity refresh for ${o.title} only.`)}`, sends: o => `POST /api/actions/run {action: watch.refresh, item: ${o.item}}`,

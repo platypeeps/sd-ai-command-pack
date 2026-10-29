@@ -1745,7 +1745,8 @@
     if (e.key === 'n') { e.preventDefault(); openCapture(); return; }
     if (e.key === 'u' && tUndo) { e.preventDefault(); t.querySelector('button')?.click(); return; }
     if (e.key === 'c') { e.preventDefault(); openChat(); }
-    if (e.key === 'r') { e.preventDefault(); location.reload(); }
+    // sd:6697: r presses the page's one Read again; a page without one reloads.
+    if (e.key === 'r') { e.preventDefault(); const a = document.getElementById('read-again'); a ? a.click() : location.reload(); }
     if (e.key === '[' && matchMedia('(min-width: 900px)').matches) { e.preventDefault(); setRail(!body.dataset.rail); }
     if (e.key === ']') { e.preventDefault(); wide() ? setPane(!body.dataset.pane) : pane.hasAttribute('data-open') ? closePane() : openPane(); }
     if (e.key === '?') { e.preventDefault(); modal(keys, keys.querySelector('#keys-close')); }
@@ -1793,11 +1794,11 @@
 
   // ---------- Staleness (design.md, Microinteractions) ----------
   // body[data-observed] is the reading time and body[data-interval] the collector's interval in minutes. Past twice the interval
-  // the Observed cell (#refresh) turns caution and says "stale since …"; past five times it is unknown. A page with no Observed
-  // cell marks its Read again button (Home, sd:5750). It is checked against real now each minute and after a re-render. A page
+  // the Read again button (sd:5750; sd:6697 dropped the Observed cells) turns caution and says "stale since …"; past five
+  // times it is unknown. It is checked against real now each minute and after a re-render. A page
   // without data-interval gets no state: the shell does not guess a cadence.
   function staleness() {
-    const cell = document.getElementById('refresh') || document.getElementById('read-again'), obs = Date.parse(body.dataset.observed || ''), iv = +body.dataset.interval * 60000;
+    const cell = document.getElementById('read-again'), obs = Date.parse(body.dataset.observed || ''), iv = +body.dataset.interval * 60000;
     if (!cell || !isFinite(obs) || !(iv > 0)) return;
     const age = Date.now() - obs, state = age > 5 * iv ? 'unknown' : age > 2 * iv ? 'caution' : '';
     const d = new Date(obs + 2 * iv).toISOString(), text = state ? `${state === 'unknown' ? 'unknown · ' : ''}stale since ${d.slice(5, 10)} ${d.slice(11, 16)} UTC` : '';

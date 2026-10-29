@@ -215,7 +215,7 @@ class TheScript(unittest.TestCase):
         self.assertIn("brief only · a brief and no page yet", rows)
         self.assertEqual(re.findall(r'data-filter="(\w+)" data-state="(\w+)"', lamps),
                          [("recent", "ok"), ("stale", "caution"), ("noshot", "caution"), ("dirty", "caution"), ("brief", "ok")])
-        self.assertEqual(cell_grammar(self, lamps), [("button", s) for s in ("ok", "caution", "caution", "caution", "ok", None)])
+        self.assertEqual(cell_grammar(self, lamps), [("button", s) for s in ("ok", "caution", "caution", "caution", "ok")])
         self.assertEqual(re.findall(r'data-filter="(\w+)"[^>]*>.*?<b>(\d+)</b>', lamps, re.S),
                          [("recent", "2"), ("stale", "1"), ("noshot", "1"), ("dirty", "1"), ("brief", "1")])
         self.assertEqual(out["text"]["sub"], "4 pages in 2 products")

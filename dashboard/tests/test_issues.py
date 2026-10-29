@@ -245,7 +245,7 @@ window.shell = { aside: (() => { const { html } = window.markup;
 
     def test_a_failure_is_a_row_naming_it_and_none_is_said(self):
         failed = self.drawn({"issues": [], "error": "database is locked"})
-        self.assertIn("Issues could not be read: database is locked. Refresh tries again.", failed["issues"])
+        self.assertIn("Issues could not be read: database is locked. Read again tries again.", failed["issues"])
         self.assertNotIn("open", failed["issues-tally"])
         empty = self.drawn({"issues": [], "error": ""})
         self.assertIn("No open issue is assigned to you or filed by you", empty["issues"])
@@ -411,7 +411,7 @@ window.shell = { aside: window.shell.aside, post: (path, body) => { posted.push(
 
     def test_a_failure_is_a_row_naming_it_and_none_is_said(self):
         failed = dict(self.drawn({"intake": [], "error": "database is locked"})["sunk"])
-        self.assertIn("Issue intake could not be read: database is locked. Refresh tries again.", failed["intake"])
+        self.assertIn("Issue intake could not be read: database is locked. Read again tries again.", failed["intake"])
         empty = dict(self.drawn({"intake": [], "error": ""})["sunk"])
         self.assertIn("No third-party issue waits for an item", empty["intake"])
 

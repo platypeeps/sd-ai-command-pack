@@ -35,7 +35,7 @@
     // Every count below is of the rows in view: the unhidden ones, the hidden ones under Hidden, or both under All.
     const pool = ISSUES.filter(inView), open = pool.filter(isOpen), rows = closedToo() ? pool : open, L = window.shell?.list;
     const hiddenN = ISSUES.filter(r => r.hidden && (closedToo() || isOpen(r))).length, openN = ISSUES.filter(r => !r.hidden && (closedToo() || isOpen(r))).length;
-    put($('issues'), error ? html`<tr class="empty"><td colspan="4">Issues could not be read: ${error}. Refresh tries again.</td></tr>`
+    put($('issues'), error ? html`<tr class="empty"><td colspan="4">Issues could not be read: ${error}. Read again tries again.</td></tr>`
       : html`${rows.length ? rows.map(r => html`<tr${selected(r)}>
         <td class="ref">${r.url ? html`<a href="${r.url}">${r.tracker} ${r.ref}</a>` : html`${r.tracker} ${r.ref}`}</td>
         <td class="what">${title(r)}</td>
@@ -43,7 +43,7 @@
         <td class="why">${isOpen(r) ? r.reason : `${r.state} · ${r.reason}`}</td></tr>`)
       : html`<tr class="empty"><td colspan="4">${showHidden() ? `No ${closedToo() ? '' : 'open '}issue is hidden.`
         : `No ${closedToo() ? '' : 'open '}issue is assigned to you or filed by you.`}</td></tr>`}${
-        github ? html`<tr class="empty"><td colspan="4">Your GitHub issues outside the repos' issue sources were not read: ${github}. Refresh tries again.</td></tr>` : ''}`);
+        github ? html`<tr class="empty"><td colspan="4">Your GitHub issues outside the repos' issue sources were not read: ${github}. Read again tries again.</td></tr>` : ''}`);
     put($('issues-tally'), pool.length && !error ? html`<span>${open.length} ${showHidden() ? 'hidden' : 'open'}</span>${closedToo() ? html`<span>${pool.length - open.length} closed in 7 d</span>` : ''}` : html``);
     if (L) put($('issues-filters'), error ? html`` : L.fbar(html`${hiddenSeg(openN, hiddenN)}${L.fseg('iss', 'State', [['open', open.length], ['closed', pool.length]].map(([v, n]) =>
       ({ v, pressed: closedToo() === (v === 'closed'), label: html`${v === 'open' ? 'open' : 'with closed'} <span class="n">${String(n)}</span>` })))}`));
@@ -87,7 +87,7 @@
       ${REFUSED.has(r.key) ? html`<p class="refused" role="alert">Not filed: ${REFUSED.get(r.key)}</p>` : ''}`;
   }
   function drawIntake() {
-    put($('intake'), FAILED ? html`<tr class="empty"><td colspan="5">Issue intake could not be read: ${FAILED}. Refresh tries again.</td></tr>`
+    put($('intake'), FAILED ? html`<tr class="empty"><td colspan="5">Issue intake could not be read: ${FAILED}. Read again tries again.</td></tr>`
       : INTAKE.filter(inView).length ? html`${INTAKE.filter(inView).map(r => html`<tr${selected(r)}${BUSY.has(r.key) ? html` aria-busy="true"` : ''}>
         <td class="ref">${r.url ? html`<a href="${r.url}">GitHub ${r.ref}</a>` : html`GitHub ${r.ref}`}</td>
         <td class="what">${title(r)}</td>

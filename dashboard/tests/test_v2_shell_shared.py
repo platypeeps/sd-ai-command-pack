@@ -656,7 +656,7 @@ class TheCells(unittest.TestCase):
     def test_todays_server_drawn_lamps_follow_the_same_grammar(self):
         today = (V2 / "today.html").read_text(encoding="utf-8")
         lamps = re.search(r'<ul class="annunciator" id="annunciator">(.*?)</ul>', today, re.S).group(1)
-        self.assertEqual(cell_grammar(self, re.sub(r">\s+<li>", "><li>", lamps)), [("button", "unknown")] * 6 + [("a", "unknown")] * 2 + [("button", None)])
+        self.assertEqual(cell_grammar(self, re.sub(r">\s+<li>", "><li>", lamps)), [("button", "unknown")] * 6 + [("a", "unknown")] * 2)
         self.assertNotIn('class="cell', PAGE_JS["today.js"])
 
     def test_a_spec_becomes_a_button_a_link_or_a_div(self):
@@ -665,7 +665,7 @@ class TheCells(unittest.TestCase):
     val: html`<b>2</b> gone`, sr: 'state caution' }]).text;
   R.link = cells([{ href: '?row=a&b', state: 'ok', label: 'Use', mark: html`<span class="g" aria-hidden="true">●</span>`, val: '1 row', small: 'from claude' }]).text;
   R.div = cells([null, { state: 'unknown', cls: 'clock', label: '<x>', val: 'not read' }, false]).text;
-  R.plain = cells([{ button: true, attrs: html` id="refresh"`, label: 'Observed', val: 'now' }]).text;
+  R.plain = cells([{ button: true, attrs: html` id="plain"`, label: 'Plain', val: 'now' }]).text;
   try { cells([{ attrs: ' onclick="x()"', label: 'a', val: 'b' }]); R.refused = false; } catch (e) { R.refused = e instanceof TypeError; }""")
         self.assertEqual(out["button"], '<li><button class="cell" type="button" data-area="wt" data-state="caution" aria-pressed="true">'
                          '<span class="lbl">Worktrees<svg class="i" aria-hidden="true"><use href="#i-folder"/></svg></span>'
@@ -673,7 +673,7 @@ class TheCells(unittest.TestCase):
         self.assertEqual(out["link"], '<li><a class="cell" href="?row=a&amp;b" data-state="ok"><span class="lbl">Use<span class="g" aria-hidden="true">●</span></span>'
                          '<span class="val">1 row<small>from claude</small></span></a></li>')
         self.assertEqual(out["div"], '<li><div class="cell clock" data-state="unknown"><span class="lbl">&lt;x&gt;</span><span class="val">not read</span></div></li>')
-        self.assertEqual(out["plain"], '<li><button class="cell" type="button" id="refresh"><span class="lbl">Observed</span><span class="val">now</span></button></li>')
+        self.assertEqual(out["plain"], '<li><button class="cell" type="button" id="plain"><span class="lbl">Plain</span><span class="val">now</span></button></li>')
         self.assertTrue(out["refused"])
         self.assertEqual(cell_grammar(self, out["button"] + out["link"] + out["div"] + out["plain"]),
                          [("button", "caution"), ("a", "ok"), ("div", "unknown"), ("button", None)])
@@ -1277,6 +1277,36 @@ class EverySetAsideIsOneSegmentGroup(unittest.TestCase):
             with self.subTest(page=name):
                 self.assertRegex(PAGE_JS[name], r"shell\.aside\.(seg|buttons)\('" + re.escape(key) + "'")
                 self.assertRegex(PAGE_JS[name], rf"shell\.aside\.mode\('{key}'[,)]")
+
+
+class EveryPageHasOneReadAgain(unittest.TestCase):
+    """sd:6697 (operator, 2026-10-29): one Read again and Refresh model, as Research has it. The shell's head button
+    (window.PAGE_AGAIN) is the one re-read control on a page: no Observed cell re-reads and no page draws its own Read
+    again. Every source refresh is a Refresh <what> command, so its label names what it refreshes."""
+
+    PAGES = {**PAGE_JS, **{p.name: p.read_text(encoding="utf-8") for p in V2.glob("*.html")}}
+
+    def test_no_page_draws_a_second_read_again_control(self):
+        for name, text in self.PAGES.items():
+            with self.subTest(page=name):
+                self.assertNotIn('id="refresh"', text, "an Observed cell that reads the page again")
+                self.assertNotRegex(text, r">\s*Read again\s*<", "a page's own Read again button")
+
+    def test_the_r_key_presses_read_again(self):
+        line = SHELL_JS.split("if (e.key === 'r')")[1].split("\n")[0]
+        self.assertIn("document.getElementById('read-again')", line)
+        self.assertIn("a.click()", line)
+
+    def test_every_refresh_label_names_what_it_refreshes(self):
+        bare = re.compile(r"""label: '(Refresh(?: all)?)'|>\s*(Refresh(?: all)?)\s*</(?:button|span|h2)""")
+        for name, text in self.PAGES.items():
+            with self.subTest(page=name):
+                self.assertEqual([m.group(0) for m in bare.finditer(text)], [], "a Refresh that names no object")
+
+    def test_watches_refresh_says_it_runs_the_market_watch_job(self):
+        js = PAGE_JS["watches.js"]
+        self.assertIn("label: 'Refresh watches'", js)
+        self.assertRegex(js, r"label: 'Refresh watches'[^}]*does: '[^']*market-watch job")
 
 
 class EveryDisclosureHasOneArrow(unittest.TestCase):
