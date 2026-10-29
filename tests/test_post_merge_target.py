@@ -7,6 +7,7 @@ The dry run reads what `make` would do and changes nothing.
 from __future__ import annotations
 
 import pathlib
+import re
 import shutil
 import subprocess
 import tempfile
@@ -30,7 +31,17 @@ class ThePostMergeTarget(unittest.TestCase):
         self.assertEqual(len(lines), 3, done.stdout)
         self.assertIn("git symbolic-ref", lines[0])
         self.assertIn(f'/example/system/local-repo-sync/repo-sync.sh" refresh "{REPO_ROOT}"', lines[1])
-        self.assertIn('/example/system/local-project-dashboard/dashboard.sh" health', lines[2])
+        self.assertIn(f'"{REPO_ROOT}/dashboard/dashboard.sh" health', lines[2])
+
+    def test_every_script_it_runs_from_this_checkout_exists(self) -> None:
+        # REGRESSION sd:6631: the health step named the system checkout's retired dashboard.sh,
+        # so every pack merge's post-merge exited 127 after a good refresh.
+        done = dry_run("SYSTEM_REPO=/example/system")
+        scripts = re.findall(r'^sh "([^"]+)"', done.stdout, re.MULTILINE)
+        local = [path for path in scripts if not path.startswith("/example/system/")]
+        self.assertTrue(local, done.stdout)
+        for path in local:
+            self.assertTrue(pathlib.Path(path).is_file(), path)
 
     def test_the_system_checkout_defaults_to_the_home_folder(self) -> None:
         done = dry_run()
@@ -45,11 +56,10 @@ class ThePostMergeTargetRuns(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.tmp, True)
         system = self.tmp / "system"
-        for tool in ("local-repo-sync/repo-sync.sh", "local-project-dashboard/dashboard.sh"):
-            (system / tool).parent.mkdir(parents=True)
-            (system / tool).write_text(f'echo "{tool.split("/")[1]} $*" >> "{self.tmp}/calls"\n', encoding="utf-8")
         self.checkout = self.tmp / "pack"
-        self.checkout.mkdir()
+        for tool in (system / "local-repo-sync/repo-sync.sh", self.checkout / "dashboard/dashboard.sh"):
+            tool.parent.mkdir(parents=True)
+            tool.write_text(f'echo "{tool.name} $*" >> "{self.tmp}/calls"\n', encoding="utf-8")
         shutil.copy(REPO_ROOT / "Makefile", self.checkout / "Makefile")
         self.git("init", "-q", "-b", "main")
         self.git("-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-q", "--allow-empty", "-m", "x")

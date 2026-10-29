@@ -556,11 +556,11 @@ gate-env:
 # it leaves a branch checkout alone. Setup here, outside that protection, would
 # race live services and lanes, so a branch checkout is refused with the step
 # that pins it.
-# The tools live in the `system` checkout; SYSTEM_REPO names it when it is not
-# ~/repos/system.
+# repo-sync lives in the `system` checkout; SYSTEM_REPO names it when it is not
+# ~/repos/system. The dashboard moved to this checkout (pack sd:5987).
 SYSTEM_REPO ?= $(HOME)/repos/system
 
 post-merge:
 	@if git symbolic-ref -q HEAD >/dev/null 2>&1; then echo "post-merge: $(CURDIR) is on a branch, so refresh will not install it; pin it: git -C $(CURDIR) switch --detach && make post-merge" >&2; exit 1; fi
 	sh "$(SYSTEM_REPO)/local-repo-sync/repo-sync.sh" refresh "$(CURDIR)"
-	sh "$(SYSTEM_REPO)/local-project-dashboard/dashboard.sh" health
+	sh "$(CURDIR)/dashboard/dashboard.sh" health
