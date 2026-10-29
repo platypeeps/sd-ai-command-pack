@@ -780,17 +780,19 @@ class TileUnderTheLoader(unittest.TestCase):
                 killed = True
             late = float(reached.read_text()) - started if reached.exists() else None
             when = "never" if late is None else f"{late:.2f}s after the loader started"
+            # Under gate load the tile's budget can run out before the scan's shell writes its pids: nothing was
+            # measured, so that attempt is tried again too (sd:6648).
+            pids = [int(line) for line in self.pids.read_text().split()] if self.pids.exists() else []
             try:
                 self.assertFalse(killed, f"the loader's kill arrived before the tile's refusal; the tile reached main {when}")
                 self.assertEqual((process.returncode, out), (1, b""))
                 self.assertIn(b"ran past its budget", err)
+                self.assertEqual(len(pids), 2, f"the scan did not start; the tile reached main {when}")
                 break
             except self.failureException as failure:
-                if not tried_again(attempt, late):
+                if not (tried_again(attempt, late) or (attempt < 3 and len(pids) < 2)):
                     raise
                 say_retry(sys.stderr, self.id(), "ports", attempt, failure, when, err)
-        pids = [int(line) for line in self.pids.read_text().split()]
-        self.assertEqual(len(pids), 2)
         deadline = time.monotonic() + 3
         while pids and time.monotonic() < deadline:
             pids = [pid for pid in pids if CollectionBudget.running(pid)]
