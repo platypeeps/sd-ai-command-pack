@@ -450,7 +450,7 @@ class Reap(Case):
         return later(self.bundle["created_at"], build.STALE_SECONDS + 1)
 
     def test_reap_unstarted_run(self):
-        """Failure table, Spawn: no beat for 180 s after the claim: reaped, a fresh row at `worktree`."""
+        """Failure table, Spawn: no beat for `STALE_SECONDS` after the claim: reaped, a fresh row at `worktree`."""
         self.assertEqual(build.reap(self.db, now=later(self.bundle["created_at"], 60)), [])
         settled = build.reap(self.db, now=self.stale())
         self.assertEqual([(row["run"], row["outcome"]) for row in settled], [(self.bundle["id"], "interrupted")])
