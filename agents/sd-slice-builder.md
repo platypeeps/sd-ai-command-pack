@@ -63,7 +63,8 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
 7. Write the pull-request body to the path your brief names. It holds `## Summary`, one bullet group per item
    naming `<repo> sd:N`, and `## Test plan`, with the fail-first tests and focused test lines.
    No tables or checklists, except the failure table that the sd-review skill's class pass asks for.
-   No line starts with `Item:` or `Delivers:`; name the primary item in the report instead.
+   No line starts with `Closes:`, `Item:` or `Delivers:`: enqueue takes items by `--item` and refuses
+   a body trailer (sd:3704); name the primary item in the report instead.
    A `Work:` line is allowed: `sd-ship prepare` strips one that matches what it writes.
    Check it with `sd-docs-lint --pr-body <file>`.
 8. Note each item before you report, one per item: `sd task note N '<head> <fail-first line>; <result lines>'`.

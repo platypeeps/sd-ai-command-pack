@@ -644,6 +644,10 @@ class Supervise(Case):
         self.assertEqual([call for call in self.calls("sd-ship") if "enqueue" in call["argv"]], [])
         self.assertIn("names no local path", build_run.BRIEF)
 
+    def test_the_brief_keeps_closes_lines_out_of_the_body(self):
+        """Pack sd:6626: run 137 copied its commit's Closes: trailer into the body; enqueue refuses it."""
+        self.assertIn("The body carries no `Closes:` line", build_run.BRIEF)
+
     def test_a_requeued_bundle_briefs_the_findings_sent_to_its_branch(self):
         """Pack sd:6020: Send to builder writes a finding note and queues the bundle again; the fresh builder's brief
         names the finding and the branch it resumes, and leaves out a note from before the bundle's first run."""

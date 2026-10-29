@@ -91,6 +91,7 @@ Rules:
 - Write the pull-request title, a Conventional Commit of {title_max} characters or less, alone to {title}.
 - Write the pull-request body, with `## Summary` and `## Test plan`, to {body}; quote each fail-first line.
   The body is public, so it names no local path (the worktree, a home directory): use repo-relative paths.
+  The body carries no `Closes:` line: enqueue takes items by `--item` and refuses one (sd:3704).
 - Leave the worktree clean, with your commits on the branch.
 - An item that needs the operator: record it with `sd task note N '<question>' --kind question` and skip it.
 
