@@ -684,15 +684,21 @@ class NoDefaultWorkRootTests(LintFixture):
         self.assertIn("sd-docs-lint: clean", printed)
         self.assertNotIn("does not exist", said)
 
-    def test_red_rule_7_still_runs_without_the_default_root(self) -> None:
-        """A dangling `docs/work` reference in a page fails with no work root (sd:3134)."""
+    def test_red_rule_7_skips_without_the_default_root(self) -> None:
+        """No work root, so a `docs/work` path names another repository's (sd:6673).
+
+        The vault's notes cite other repositories' `docs/work` pages; rule 7
+        failed it 71 times on main and its build could not enqueue.
+        """
         (self.repo / "README.md").write_text(
-            "# readme\n\nSee `docs/work/2026-01-01-gone/design.md`.\n", encoding="utf-8"
+            "# readme\n\nSee `docs/work/x/prd.md`.\n", encoding="utf-8"
         )
         self.git("add", "-A")
         code, printed, said = self.cli()
-        self.assertEqual(code, 1, printed)
-        self.assertIn("docs/work/2026-01-01-gone/design.md names nothing in the checkout", said)
+        self.assertEqual(code, 0, said)
+        self.assertIn(
+            "rule 7 work references: no docs/work in this checkout, nothing to check", said)
+        self.assertNotIn("names nothing in the checkout", said)
 
     def test_the_other_rules_still_run_without_the_default_root(self) -> None:
         body = self.repo / "body.md"
