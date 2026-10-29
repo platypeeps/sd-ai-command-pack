@@ -47,12 +47,7 @@
   <annunciator-strip><ul class="annunciator" id="annunciator"></ul></annunciator-strip>
   <!-- The toolbar standard (sd:5281): row 1, the views then the shell's Shapeshift bar (sd:5539); the count sits on the view's tab. -->
   <div class="toolbar" id="toolbar" data-shift>
-    <fieldset class="seg repo-scope" id="scope">
-      <legend class="sr">Repositories</legend>
-      <label><input type="radio" name="scope" value="all" checked><span>All <b></b></span></label>
-      <label><input type="radio" name="scope" value="internal"><span>Internal <b></b></span></label>
-      <label><input type="radio" name="scope" value="external"><span>External <b></b></span></label>
-    </fieldset>
+    <div class="vseg" id="scope" role="group" aria-label="Repositories"></div>
   </div>
   <p class="source" id="source"></p>
 

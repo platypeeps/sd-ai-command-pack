@@ -1174,11 +1174,6 @@ class TheToolbarBoxesAlign(unittest.TestCase):
         self.assertIsNotNone(body, "no row-1 rule zeroes the margin of the switch, the box around it and a chip group")
         self.assertIn("margin: 0;", body)
 
-    def test_a_chip_group_in_row_one_has_no_margin(self):
-        # sd:5639: queue.css gives .fgroup a bottom margin, so Queue's Show chips sat above the centre of the Lanes switch.
-        self.assertIn("margin: 0 0 var(--space-md)", self.rule((STATIC / "queue.css").read_text(encoding="utf-8"), ".fgroup"))
-        self.assertIn(".toolbar > .fgroup", SHELL_CSS)
-
     def test_the_switch_and_the_shapeshift_box_take_one_height_token(self):
         row = self.rule(SHELL_CSS, ".toolbar")
         self.assertIsNotNone(row, "the row-1 height token is declared on .toolbar")
@@ -1194,6 +1189,58 @@ class TheToolbarBoxesAlign(unittest.TestCase):
         body = self.rule(SHELL_CSS, ".toolbar .viewswitch [role=\"tab\"], .toolbar .vseg > button")
         self.assertIsNotNone(body)
         self.assertIn("min-height: 0;", body)
+
+
+class EveryToolbarHasOneOrder(unittest.TestCase):
+    """sd:6693 (operator, 2026-10-29): "the filter should be to the left" of the page's actions, and every segment group the
+    size of Tasks'. Every row-1 toolbar on every page holds, in order, its segments (the shell's view switch, a place switch
+    or a .vseg), then the filter (the Shapeshift bar, then the column filter), then the page's actions in one .tools at the
+    right. HOA's Alarms row put the column filter after Acknowledge all; Queue's Show chips, Contributions' scope radios,
+    Metrics' range chips and HOA's Tasks segments each drew a segment group of another size."""
+
+    PAGES = sorted(V2.glob("*.html"))
+    SEGMENTS = {"viewswitch", "place-switch", "vseg"}
+
+    @staticmethod
+    def rows(page):
+        """Each toolbar on `page` as its direct children's (classes, id), in order."""
+        tags, out = tree(page), {}
+        for (_t, cls, id_, _a), up in tags:
+            if up and "toolbar" in up[-1][1]:
+                out.setdefault(id(up[-1][3]), []).append((cls, id_))
+        return list(out.values())
+
+    def kind(self, cls, id_):
+        if cls & self.SEGMENTS or id_ == "viewswitch":
+            return 0
+        if cls & {"shift", "tgrid", "chips"}:
+            return 1
+        return 2 if "tools" in cls else None
+
+    def test_segments_then_the_filter_then_the_actions_in_every_toolbar(self):
+        for page in self.PAGES:
+            for row in self.rows(page):
+                # A help button explains the control before it, wherever that sits.
+                kinds = [self.kind(c, i) for c, i in row if "help" not in c]
+                with self.subTest(page=page.name, row=[sorted(c) or i for c, i in row]):
+                    self.assertNotIn(None, kinds, "a toolbar child that is no segment group, filter or .tools")
+                    self.assertEqual(kinds, sorted(kinds), "out of order: segments, filter, then actions")
+
+    def test_the_shell_puts_its_filters_after_the_segments_and_before_the_actions(self):
+        js = (STATIC / "shell.js").read_text(encoding="utf-8")
+        self.assertIn("const segs = shiftRow.querySelectorAll(':scope > :is(.viewswitch, #viewswitch, .place-switch, .vseg)');", js)
+        self.assertIn("segEnd ? (segHelp || segEnd).after(el) : shiftRow.prepend(el);", js)
+        self.assertIn("tools = row?.querySelector(':scope > .tools');", js)
+        self.assertIn("tools ? tools.before(bar) : row ? row.append(bar) : twrap(t).before(bar);", js)
+        self.assertIn(".toolbar > .tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs); margin-left: auto; }", SHELL_CSS)
+
+    def test_one_segment_size_from_one_rule(self):
+        # The view switch's tab and a .vseg button share one rule, so a state group is the size of Tasks' realm tabs.
+        self.assertIn('.viewswitch [role="tab"], .vseg > button { display: inline-flex;', SHELL_CSS)
+        self.assertNotRegex(SHELL_CSS, r"(?m)^\.vseg > button \{ display")
+        for name, css in PAGE_CSS.items():
+            with self.subTest(css=name):
+                self.assertNotRegex(wide(css), r"\.(vseg|viewswitch|repo-scope)\b[^{]*\{", "a page sizes a segment group")
 
 
 class EveryDisclosureHasOneArrow(unittest.TestCase):

@@ -385,8 +385,10 @@
         <div class="chips" role="group" aria-label="Interpret as">${SHIFT_MODES.map(m => html`<button class="chip" type="button" data-as="${m}" aria-pressed="${String(m === 'filter')}">${{ filter: 'filter', task: 'new task', ask: 'ask chat' }[m]}</button>`)}</div>
         <p class="hint" id="shift-hint">→ changes the reading · Enter runs · Esc clears</p>
       </div>`);
-    const after = shiftRow.querySelector(':scope > .viewswitch, :scope > #viewswitch, :scope > .place-switch');
-    after ? after.after(el) : shiftRow.prepend(el);
+    // sd:6693: the bar follows the row's segment groups (the view switch, a .vseg) and comes before its actions.
+    const segs = shiftRow.querySelectorAll(':scope > :is(.viewswitch, #viewswitch, .place-switch, .vseg)');
+    const segEnd = segs[segs.length - 1], segHelp = segEnd?.nextElementSibling?.matches('.help') && segEnd.nextElementSibling;
+    segEnd ? (segHelp || segEnd).after(el) : shiftRow.prepend(el);
     shiftIn = el.querySelector('#shift'); shiftPrev = el.querySelector('#shift-preview');
     // A ?q= link opens with its text as the filter; a page that keeps ?q= reads it too, and a server list its own key.
     const u = new URLSearchParams(location.search), listQ = [...LISTS, 'q'].map(k => u.get(k)).find(Boolean) || '';
@@ -1597,8 +1599,9 @@
       bar._name = t.getAttribute('aria-labelledby') ? tlabel(document.getElementById(t.getAttribute('aria-labelledby')) || t) : '';
       bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', `Table controls${bar._name ? ': ' + bar._name : ''}`);
       put(bar, html`<label class="tfacet"><span class="sr">Filter by a column value</span><select></select></label><span class="tfolds"><button class="linkbtn" type="button" data-tfold-all="open">Expand all</button><button class="linkbtn" type="button" data-tfold-all="shut">Collapse all</button></span><div class="tchips"></div>`);
-      const row = t.dataset.toolbar && document.getElementById(t.dataset.toolbar);
-      row ? row.append(bar) : twrap(t).before(bar);
+      // sd:6693: the column filter joins the filters, left of the row's actions (.tools), never after them.
+      const row = t.dataset.toolbar && document.getElementById(t.dataset.toolbar), tools = row?.querySelector(':scope > .tools');
+      tools ? tools.before(bar) : row ? row.append(bar) : twrap(t).before(bar);
     }
     bar.hidden = false;
     const sel = bar.querySelector('select');

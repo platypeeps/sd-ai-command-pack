@@ -3,7 +3,6 @@
  * External context block, which reuses the page's dl rules and adds none. */
 /* Tasks page. Tokens only. Structure: head + filter strip + one of three views (list, board, matrix) + details pane.
  * Statuses and move rules mirror sd_db.workflow (TASK_STATUSES, allowed_statuses); urgency mirrors sd_db.reads.is_urgent. */
-.views { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs); }
 
 /* Filters */
 .fgroup .chips { margin: 0; }
@@ -173,7 +172,7 @@
 }
 @media (max-width: 899px) {
   .head { align-items: stretch; }
-  .views { width: 100%; justify-content: space-between; }
+  .toolbar > .tools { width: 100%; justify-content: space-between; }
 }
 /* The carousel names the same four selectors as the container rule above: its [data-nodone] forms outrank a bare .board
  * and kept three 2px columns here (pack sd:6017). */

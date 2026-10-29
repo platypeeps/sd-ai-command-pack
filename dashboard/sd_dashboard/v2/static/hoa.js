@@ -411,8 +411,9 @@ let polling = 0;
     const C = window.shell.commands, f = DOC?.items, shown = obShow === 'all' ? TASKS() : OB, n = k => shown.filter(o => o.kind === k).length;
     const kinds = [...new Set([...KINDS, ...shown.map(o => o.kind)])].filter(n);
     if (!kinds.includes(kind)) kind = 'all';
-    const seg = (v, word, count) => ({ v, pressed: obShow === v, title: `${word}: ${count}`, label: html`${word} <span class="n">${String(count)}</span>` });
-    put($('ob-show'), DOC && !f.error ? window.shell.list.fseg('tasks', 'Tasks shown', [seg('open', 'Open', OB.length), seg('all', 'All', TASKS().length)]) : html``);
+    // sd:6693: Open | All is the shell's .vseg, the size of every other segment group.
+    const seg = (v, word, count) => html`<button type="button" data-f="tasks" data-v="${v}" aria-pressed="${String(obShow === v)}">${word} <span class="n">${String(count)}</span></button>`;
+    put($('ob-show'), DOC && !f.error ? html`${seg('open', 'Open', OB.length)}${seg('all', 'All', TASKS().length)}` : html``);
     put($('ob-kinds'), html`${['all', ...kinds].map(k => html`<button class="chip" type="button" data-kind="${k}" aria-pressed="${String(k === kind)}">${k === 'all' ? 'All' : k} <b>${k === 'all' ? shown.length : n(k)}</b></button>`)}`);
     put($('ob-head'), window.shell.list.sortHead(OB_COLS, OB_ST));
     const rows = obRows();

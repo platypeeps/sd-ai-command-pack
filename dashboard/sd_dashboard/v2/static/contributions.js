@@ -38,6 +38,8 @@ addEventListener('DOMContentLoaded', () => {
   const FRESH = { fresh: 'ok', stale: 'caution', degraded: 'warning', never: 'unknown', unknown: 'unknown' };
   const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
   const n = x => Number(x || 0).toLocaleString('en-US');
+  // The scope group (sd:6693): the shell's .vseg, All | Internal | External, each with its open count.
+  const scopeSeg = count => put(document.getElementById('scope'), html`${SCOPES.map(v => html`<button type="button" data-scope="${v}" aria-pressed="${String(v === scope)}">${v[0].toUpperCase() + v.slice(1)} <span class="n">${count(v)}</span></button>`)}`);
   // build: a POSIX single-quoted word, so a title with $ or a quote copies as itself.
   const shq = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
     // build: only an https github.com URL becomes a link, as v1's _link allows.
@@ -207,7 +209,7 @@ addEventListener('DOMContentLoaded', () => {
   function renderHead() {
     const c = DOC.collector || {}, st = FRESH[c.state] || 'unknown';
     put(document.getElementById('sub'), html`Pull requests and issues you opened or owe · <span id="open-n">${n(openN(scope))}</span> open · read <time class="rel" datetime="${DOC.read}"></time>`);
-    document.querySelectorAll('#scope input').forEach(i => { i.checked = i.value === scope; const b = i.nextElementSibling?.querySelector('b'); if (b) b.textContent = n(openN(i.value)); });
+    scopeSeg(v => n(openN(v)));
     const cnt = g => tot(g);
     const LANES = [
       ['newly_unblocked', 'Newly unblocked', 'git-merge', 'caution', 'ready'],
@@ -481,7 +483,7 @@ addEventListener('DOMContentLoaded', () => {
   // A lane lamp filters the Open rows it counts, so it shows the Open view and turns Show hidden off.
   document.getElementById('annunciator').addEventListener('click', e => { const c = e.target.closest('button.cell'); if (c) { HIDDEN = false; setLane(c.dataset.cell); window.shell.view.show('open'); } });
   document.getElementById('open-filters').addEventListener('click', e => { if (DOC && e.target.closest('[data-f="hidden"]')) { HIDDEN = !HIDDEN; applyFilter(); } });
-  document.getElementById('scope').addEventListener('change', e => setScope(e.target.value));
+  document.getElementById('scope').addEventListener('click', e => { const b = e.target.closest('button[data-scope]'); if (b) setScope(b.dataset.scope); });
   document.getElementById('rows-head').addEventListener('click', e => { if (DOC && window.shell.list.sortBy(e, L)) window.shell.list.keepFocus(e, applyFilter); });
   put(document.getElementById('rows-head'), window.shell.list.sortHead(COLS, L)); // drawn before the read, so a failed one keeps the columns
   document.addEventListener('contributions:scope', e => setScope(e.detail));
@@ -514,7 +516,7 @@ addEventListener('DOMContentLoaded', () => {
   // Not read: every box says so, and the state slot above says why.
   function blank() {
     put(document.getElementById('sub'), html`Pull requests and issues you opened or owe · not read`);
-    document.querySelectorAll('#scope b').forEach(b => { b.textContent = ''; });
+    scopeSeg(() => '');
     put(document.getElementById('annunciator'), html``);
     put(document.getElementById('source'), html``);
     put(tbody, html`<tr class="lane"><td colspan="4"><span class="label">Not read: ${FAILED}</span></td></tr>`);

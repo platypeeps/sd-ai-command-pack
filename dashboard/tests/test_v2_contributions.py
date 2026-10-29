@@ -1242,12 +1242,13 @@ ELS.annunciator.listeners.click[0]({ target: lamp }); R.on = where(); R.html = E
         self.assertLess(page.index('id="view-settled"'), page.index('<section class="filed" id="view-filed"'))
         self.assertLess(page.index('<section id="view-open"'), page.index('<section class="settled" id="view-settled"'))
 
-    def test_the_scope_buttons_keep_name_and_count_on_one_line(self):
-        """sd:5750: .seg span is a grid, so All and its <b> count stacked as two rows, and the group shrank in the toolbar."""
-        css = (V2 / "static" / "contributions.css").read_text(encoding="utf-8")
-        rules = dict(re.findall(r"(?m)^(\.repo-scope(?: span)?) \{ ([^}]*) \}$", css))
-        self.assertIn("grid-auto-flow: column", rules.get(".repo-scope span", ""), "a scope button's count sits under its name")
-        self.assertIn("flex: none", rules.get(".repo-scope", ""), "the toolbar may shrink the scope group and wrap its buttons")
+    def test_the_scope_is_the_shells_segment_group(self):
+        """sd:6693: the scope radios (.seg) were shorter than Tasks' realm tabs; the scope is the shell's .vseg now."""
+        page = (V2 / "contributions.html").read_text(encoding="utf-8")
+        self.assertIn('<div class="vseg" id="scope" role="group" aria-label="Repositories"></div>', page)
+        self.assertNotIn("repo-scope", (V2 / "static" / "contributions.css").read_text(encoding="utf-8"))
+        out = self.run_page("R.scope = ELS.scope.html;")
+        self.assertRegex(out["R"]["scope"], r'^<button type="button" data-scope="all" aria-pressed="true">All <span class="n">\d+</span></button>')
 
     def test_trackers_is_a_link_beside_the_views_not_a_second_open(self):
         # sd:5064: the Open | Settled tabs are the page's views; the old Open | Trackers switch repeated Open.

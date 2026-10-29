@@ -318,7 +318,7 @@ window.PAGE_VIEWS = [{ id: 'spend', label: 'Spend' }, { id: 'providers', label: 
     $('trends').addEventListener('keydown', e => {
       const el = e.target.closest?.('svg [data-ev]'); if (el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); e.stopPropagation(); show(el.dataset.ev, true); }
     });
-    $('range').addEventListener('click', e => { const c = e.target.closest('.chip[aria-disabled="true"]'); if (c) S.toast(c.title); });
+    $('range').addEventListener('click', e => { const c = e.target.closest('button[aria-disabled="true"]'); if (c) S.toast(c.title); });
     document.addEventListener('shell:open', e => { if (EV[e.detail]) show(e.detail, true); });
     load();
   });
