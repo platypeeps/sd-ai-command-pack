@@ -55,17 +55,22 @@ One cutover on the hub inside a stop window, then two reference PRs through the 
 | --- | --- | --- | --- | --- |
 | 1. Preflight | none | pack lane not empty, a builder or worktree holds the checkout, a gate slot held | stop; rerun when `sd gate status --json` shows no holders and the lane is empty | `sd-ship lane` list and `git worktree list` read before step 2 |
 | 2. Stop | `sd-serve`, dashboard, runner, cron jobs paused | a job starts mid-window | `launchctl bootout` each label; check `launchctl list` before step 3 | label list empty for `sd-*` and paused jobs |
-| 3. Backup | backup copy | backup exits non-zero | stop; fix the cause; nothing else moved yet | backup exit 0 |
+| 3. Backup | backup copy; `sd.db` and `runner-journal/` copied aside as one pair | backup exits non-zero, or the copy fails | stop; fix the cause; nothing else moved yet | backup exit 0; `cmp` of each copied journal file with its source |
 | 4. GitHub rename | remote repository name | rename refused or name taken | nothing local moved; retry or stop | `get_file_contents` on `platypeeps/sd-workflow` |
 | 5. Move checkout | directory moved, symlink at old path | `mv` fails half-way (same volume: atomic) | `mv` back, remove the symlink | `test -L old && test -d new/.git` |
 | 6. Repair | worktree links, `origin` URL, `.venv` rebuilt | `make setup` fails | old `.venv` is unusable after the move; rerun `make setup`; services stay stopped until it passes | `.venv/bin/python -c 'import sd_db'` |
-| 7. Re-key DB | keyed rows rewritten in one transaction | a column missed, transaction aborted | aborted transaction moves nothing; restore from step 3's backup if a commit was partial | `SELECT count(*)` of old key in every `repo` column returns 0 |
-| 8. Re-key journal | 2 journal files rewritten with fresh sha256 | a digest wrong | rewrite from the backup copy | `bin/sd-db backup` exit 0 ("rows and journal agree") |
+| 7. Re-key DB | keyed rows rewritten in one transaction | a column missed, transaction aborted | aborted transaction moves nothing; after a commit, roll back with step 3's pair (below) | `SELECT count(*)` of old key in every `repo` column returns 0 |
+| 8. Re-key journal | 2 journal files rewritten with fresh sha256 | a digest wrong, or a record half-written | roll back with step 3's pair (below), then redo steps 7-8 | `bin/sd-db backup` exit 0 ("rows and journal agree") |
 | 9. Config | plist templates, `repos.*.conf`, cron jobs, settings permissions, symlinks | a template still names the old path | old path still resolves via the symlink; fix and rerun `machine-setup.sh status` | `machine-setup.sh status` shows no drift |
 | 10. Start | services and jobs back | a service on the old build or path | `dashboard.sh health`; kickstart any stale service | health exits 0; `sd today` reads |
 | 11. Reference PRs | tracked lines in pack, then system | the lane gate fails on a missed reference | fix in the PR; the symlink keeps the old path working | `git grep 'platypeeps/sd-ai-command-pack'` returns only the kept config and data names |
 | 12. Satellites | each satellite's checkout, symlink, setup | a satellite session holds the checkout | ask its session to stop; the hub keeps working meanwhile | satellite `machine-setup.sh status` clean, `sd today` reads |
 | 13. Remove symlinks | old-path symlinks gone | a caller still uses the old path | recreate the symlink; fix that caller | an item (below) closes only after a week with no old-path use |
+
+Rollback after step 7 commits: with every service still stopped, copy step 3's `sd.db` and `runner-journal/` back together, then run `bin/sd-db backup`.
+Do not use `sd-db restore` for this. It merges the saved journal with the live one, and `backup._compatible_runner_records` refuses a record whose `repo` changed.
+Advancing `journal_version` during the rewrite would not change that: the check compares `repo` at any version.
+So the rename keeps `journal_version` as `docs/sd-db.md` does, and the pair copy is the one way back.
 
 ## Slices
 
