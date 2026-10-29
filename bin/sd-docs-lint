@@ -22,6 +22,7 @@ PR privacy        -- a pull request body is public, so no line of it matches
                     carries no required or refused line.
 Rules 1 to 4 and 7 read the tree; the privacy rule needs `--pr-body`.
 A `mode: minimal` repository keeps `docs/work` local, so rules 1, 2 and 7 skip.
+A checkout with no `docs/work` skips rules 1, 2 and 7 too.
 `--body-only` runs the privacy rule alone, for a repository with no work
 root. `--no-history` reads no commit history: rule 2 asks no item whether it
 was delivered, so nothing fetches or runs `git log`, and the run says so.
@@ -651,9 +652,9 @@ def run(
         check_decisions(repo / decisions_dir, report)
         check_spec_index(repo / spec_dir, report)
         check_pr_privacy(pr_body, report)
-        # Rule 7 reads every tracked page, so a reference to a root that is
-        # not there is a dangling one (sd:3134).
-        check_work_references(repo, work_dir, report)
+        # With no work root, a `docs/work` path a page names is another
+        # repository's, as the vault's notes cite them (sd:6673).
+        report.warn(f"rule 7 work references: no {work_dir} in this checkout, nothing to check")
         return report
 
     with sd_lib.git_read_memo():  # one fetch per remote and ref, not one per item (sd:2873)
