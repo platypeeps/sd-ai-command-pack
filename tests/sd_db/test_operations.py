@@ -122,6 +122,25 @@ class Operations(unittest.TestCase):
         self.assertNotIn("hide-me", json.dumps(data))
         self.assertEqual(self.actions(), [])
 
+    def test_job_launch_wrapped_plist_lists_and_reads(self):
+        # sd:6679. system #538 starts every cron plist through job-launch;
+        # the bare runner argv alone listed no job at all.
+        self.argv = [str(Path.home() / ".local/libexec/system-tools/job-launch")] + self.argv
+        self.config["ProgramArguments"] = self.argv
+        self.write_config()
+        original = self.run_launchctl
+        def wrapped(argv):
+            result = original(argv)
+            result.stdout = result.stdout.replace("\tprogram = /bin/bash", "\tprogram = " + self.argv[0])
+            return result
+        self.backend.runner = wrapped
+        self.assertEqual(self.backend.names(), [self.job])
+        job = inventory(self.db, backend=self.backend)["jobs"][0]
+        self.assertEqual((job["name"], job["state"]), (self.job, "failed"))
+        self.config["ProgramArguments"] = ["/tmp/job-launch"] + self.argv[1:]
+        self.write_config()
+        self.assertEqual(self.backend.names(), [])
+
     def test_foreign_program_missing_job_symlink_and_unsafe_names_never_dispatch(self):
         self.config["ProgramArguments"] = ["/bin/bash", "-c", "SECRET"]
         self.write_config()
