@@ -39,6 +39,10 @@ class OneDeclaration(unittest.TestCase):
         twice = {found: names for found, names in where.items() if len(names) > 1}
         self.assertEqual(twice, {}, "declare a shared command once, in commands.js")
 
+    def test_only_the_shared_module_declares_fix(self):
+        # sd:6709: one Fix, one icon, on every page: a page takes commands.fix's label, key and icon, not its own.
+        self.assertEqual([name for name, body in SCRIPTS.items() if re.search(r"label: 'Fix'", body)], [SHARED])
+
     def test_jobs_retry_reads_run_now_for_an_idle_job_and_a_failed_one(self):
         # The run-now pack (sd:4982) allows a run of an idle job too, so the label cannot say Retry.
         line = SCRIPTS[SHARED].split("id: 'jobs.retry'", 1)[1].split("\n", 1)[0]
