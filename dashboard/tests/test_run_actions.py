@@ -41,6 +41,10 @@ class Jobs:
 
 
 class Run(BrowserSession):
+    #: Past the default step's own bound: a request that waited less gave up on a stubbed `sd` that the server still
+    #: ran, and timed out at gate load 9-11 (sd:6648).
+    http_timeout = run_actions.SECONDS + 10
+
     def setUp(self):
         self.backend = Jobs()
         super().setUp()
@@ -177,6 +181,10 @@ class TheReads(Run):
 
 
 class TheBounds(Run):
+    def test_a_request_outwaits_the_default_steps_bound(self):
+        """sd:6648: a 5 s request gave up while the server still held a 30 s step, so the test, not the step, ended."""
+        self.assertGreater(self.http_timeout, run_actions.SECONDS)
+
     def test_a_step_past_its_bound_is_504_and_its_outcome_unknown(self):
         self.stub("slow", "sleep 5")
         status, body = run_actions.run("job.log", run_actions.Step(line="slow", argv=("slow",), seconds=1))

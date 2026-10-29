@@ -47,6 +47,10 @@ class StagingWorkspace(FakeWorkspace):
 
 
 class SlidesCase(BrowserSession):
+    #: Past the status probe's own bound: a 5 s request gave up on a refused press that the server still ran, at gate
+    #: load 9-11 (sd:6648).
+    http_timeout = research_slides.PROBE_TIMEOUT + 25
+
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory())).resolve()
         self.workspace = ThreadingHTTPServer(("127.0.0.1", 0), StagingWorkspace)
@@ -143,6 +147,10 @@ class TheImport(SlidesCase):
 
 
 class TheRefusals(SlidesCase):
+    def test_a_request_outwaits_the_status_probes_bound(self):
+        """sd:6648: a request that waits no longer than the probe it reads gives up first under load."""
+        self.assertGreater(self.http_timeout, research_slides.PROBE_TIMEOUT)
+
     def test_no_built_deck_or_no_checkout_imports_nothing(self):
         self.deck.unlink()
         for key in ("research/alpha", "research/gone", "../research/alpha"):
