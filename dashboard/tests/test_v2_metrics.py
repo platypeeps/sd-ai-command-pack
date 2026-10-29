@@ -134,6 +134,12 @@ class TheDocument(Fixture):
         with before_5648():
             self.assertEqual(count(), 3)
 
+    def test_age_counts_no_idea(self):
+        """pack sd:6743: the histogram's bars open Tasks, which lists no idea kind, so age counts none."""
+        for kind in ("idea", "work-idea", "personal-idea"):
+            self.item(f"A {kind}", kind=kind, **({} if kind != "idea" else {"repo": self.repo()}))
+        self.assertEqual(sum(b["ready_to_send"] + b["other"] for b in self.doc()["age"]["buckets"]), 2)
+
     def test_a_part_that_fails_is_its_error_and_the_rest_still_answer(self):
         with mock.patch.object(reads, "scorecard", side_effect=sqlite3.OperationalError("database is locked")):
             doc = self.doc()
