@@ -206,9 +206,14 @@ class LaunchdBackend:
             raw = self._file(plist, self.launch_agents)
             config = plistlib.loads(raw)
             argv = ["/bin/bash", str(script), "exec", name]
+            # system #538 starts each plist through job-launch; an older
+            # install runs the bare argv. Accept exactly these two shapes.
+            launch = str(Path.home() / ".local/libexec/system-tools/job-launch")
+            if isinstance(config, dict) and config.get("ProgramArguments") == [launch] + argv:
+                argv = [launch] + argv
             if not isinstance(config, dict) or config.get("Label") != label or config.get("ProgramArguments") != argv:
                 raise WorkflowError("job is not supported: installed command does not match the trusted job runner")
-            if config.get("Program", "/bin/bash") != "/bin/bash":
+            if config.get("Program", argv[0]) != argv[0]:
                 raise WorkflowError("job is not supported: alternate executable")
             hashes = [hashlib.sha256(value).hexdigest() for value in
                       (raw, self._file(script, self.cron_root), self._file(job, jobs_dir))]
@@ -295,7 +300,7 @@ class LaunchdBackend:
                         coalition = found[1]
                 else:
                     return {}
-        if (fields.get("path") != installed["_plist"] or fields.get("program") != "/bin/bash" or
+        if (fields.get("path") != installed["_plist"] or fields.get("program") != installed["_argv"][0] or
                 arguments != installed["_argv"] or fields.get("state") not in {"running", "not running", "waiting"}):
             return {}
         try:
