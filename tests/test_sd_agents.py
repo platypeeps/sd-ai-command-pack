@@ -263,6 +263,16 @@ class SliceBuilderMergeSubject(unittest.TestCase):
         self.assertNotIn("git merge --no-edit", body)
 
 
+class SliceBuilderBodyTrailer(unittest.TestCase):
+    """sd:6626. Build run 137 copied its commit's `Closes:` trailer into the
+    PR body; enqueue refuses a body trailer (sd:3704) and takes items by
+    `--item`, so the brief says the body carries none."""
+
+    def test_the_slice_builder_keeps_closes_lines_out_of_the_body(self) -> None:
+        _, body = (AGENTS / "sd-slice-builder.md").read_text(encoding="utf-8").split("\n---\n", 1)
+        self.assertIn("No line starts with `Closes:`, `Item:` or `Delivers:`", body)
+
+
 class SliceBuilderDecisionNote(unittest.TestCase):
     """sd:3112. A builder that skips an item for an operator decision writes a
     `question` note with `Option:` lines, which the dashboard shows as buttons;
