@@ -84,14 +84,15 @@
   }
 
   // sd:6164: a realm place's Tasks also lists the realm's open GitHub and Jira issues (places.realm_issues), each marked by
-  // its source and linked to its tracker in a new tab. An issue Hide hid (sd:6175) stays off until Show hidden.
-  let hiddenShown = false;
+  // its source and linked to its tracker in a new tab. An issue Hide hid (sd:6175) shows under Hidden or All in the list's
+  // Open | Hidden | All (sd:6701), kept as ?issues-hidden=.
+  let issuesHid = null;  // read from the URL at the first draw: shell.js loads after this script
   function issuesHTML(doc) {
     if (!doc.issues) return '';
-    const hidden = doc.issues.filter(r => r.hidden).length, rows = hiddenShown ? doc.issues : doc.issues.filter(r => !r.hidden);
-    const toggle = hidden ? html` <button class="btn quiet sm" type="button" data-issues-hidden>${hiddenShown ? 'Hide hidden' : `Show hidden (${hidden})`}</button>` : '';
+    issuesHid ??= window.shell.aside.mode('issues-hidden');
+    const hidden = doc.issues.filter(r => r.hidden).length, rows = doc.issues.filter(r => window.shell.aside.shows(issuesHid, r.hidden));
     const notes = [doc.issues_reason && `Not every issue was read: ${doc.issues_reason}.`, doc.issues_store?.reason && `Hide is off: ${doc.issues_store.reason}.`].filter(Boolean);
-    return html`<div class="place-issues-head"><h3>Issues</h3><p class="note">The realm's open GitHub and Jira issues assigned to you or filed by you, as GitHub's Your issues lists them.${toggle}</p></div>
+    return html`<div class="place-issues-head"><h3>Issues</h3>${window.shell.aside.seg('issues-hidden', 'Hidden', issuesHid, { open: doc.issues.length - hidden, aside: hidden })}<p class="note">The realm's open GitHub and Jira issues assigned to you or filed by you, as GitHub's Your issues lists them.</p></div>
       ${notes.map(n => html`<p class="note">${n}</p>`)}
       <table class="ledger place-issues"><thead><tr><th scope="col">Source</th><th scope="col">Issue</th><th scope="col">Title</th><th scope="col" class="hide-sm">Repo</th><th scope="col" class="hide-sm">Why</th></tr></thead>
       <tbody>${rows.length ? rows.map(r => html`<tr${r.hidden ? html` class="hidden-row"` : ''}><td class="src">${r.tracker}</td>
@@ -133,7 +134,14 @@
   document.addEventListener('click', e => {
     const run = e.target.closest('[data-tile-act]');
     if (run) { runTile(run); return; }
-    if (e.target.closest('[data-issues-hidden]')) { hiddenShown = !hiddenShown; if (RAW.tasks?.state === 'read') draw('tasks'); return; }
+    const hb = e.target.closest('button[data-aside="issues-hidden"]');
+    if (hb) {
+      issuesHid = hb.dataset.v;
+      const q = new URLSearchParams(location.search), v = window.shell.aside.param(issuesHid);
+      if (v) q.set('issues-hidden', v); else q.delete('issues-hidden');
+      window.shell.url(q.toString());
+      if (RAW.tasks?.state === 'read') draw('tasks'); return;
+    }
     // A view that reads its own document (data-api) has its Open | All here; HOA's Tasks is hoa.js's.
     const f = e.target.closest('.place-view[data-api] [data-f]');
     if (OPEN[f?.dataset?.f]) { show(f.dataset.f, f.dataset.v); return; }

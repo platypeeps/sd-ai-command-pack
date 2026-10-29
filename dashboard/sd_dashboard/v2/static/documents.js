@@ -38,13 +38,13 @@ const confNote = r => r.conf ? `research.conf.py was not read: ${r.conf}`
   : r.manifest === 'older' ? `docs/dashboard/research.json is from an older research.conf.py: run sd-research-kit render in ${checkoutOf(r)} to refresh it` : '';
 
 // ---------- State ----------
-const F = { repo: new Set(), kind: new Set(), fresh: new Set(), dest: new Set(), text: '', pinned: false, hidden: false };
+const F = { repo: new Set(), kind: new Set(), fresh: new Set(), dest: new Set(), text: '', pinned: false, hidden: 'open' };
 // The list's sort, page and size (shell.list, sd:2682): newest first, 50 a page.
 const LIST = { sort: 'mod', dir: -1, size: 50 }, L = { ...LIST, page: 1 };
 let selected = null, picked = [];
 
 function matches(d) {
-  if (d.hidden !== F.hidden) return false;
+  if (!window.shell.aside.shows(F.hidden, d.hidden)) return false;
   if (F.pinned && !d.pinned) return false;
   if (F.repo.size && !F.repo.has(d.key)) return false;
   if (F.kind.size && !F.kind.has(d.kind)) return false;
@@ -93,9 +93,15 @@ function renderFacets() {
     <div class="facet"><span class="label">Freshness</span><div class="chips">${Object.entries(FRESH).map(([k, l]) => chip('fresh', k, l, k === 'stale' ? html`<span class="g-caution" aria-hidden="true">▲</span>` : ''))}</div></div>
     <div class="facet"><span class="label">Destination</span><div class="chips">${Object.entries(DEST).map(([k, [l, i]]) => chip('dest', k, l, i ? I(i) : ''))}</div></div>
     <div class="facet"><span class="label">Show</span><div class="chips">
-      <button class="chip" type="button" id="f-pinned" aria-pressed="${String(F.pinned)}">${I('pin')}Pinned only <span class="n">${DOCS.filter(d => d.pinned && !d.hidden).length}</span></button>
-      <button class="chip" type="button" id="f-hidden" aria-pressed="${String(F.hidden)}">${I('eye-off')}Hidden <span class="n">${DOCS.filter(d => d.hidden).length}</span></button></div></div>`);
+      <button class="chip" type="button" id="f-pinned" aria-pressed="${String(F.pinned)}">${I('pin')}Pinned only <span class="n">${DOCS.filter(d => d.pinned && !d.hidden).length}</span></button></div></div>`);
+  // sd:6701: Open | Hidden | All, the shell's one set-aside group, at the toolbar's left.
+  const hid = DOCS.filter(d => d.hidden).length;
+  put(document.getElementById('hidden-seg'), window.shell.aside.buttons('hidden', 'Hidden', F.hidden, { open: DOCS.length - hid, aside: hid }));
 }
+document.getElementById('hidden-seg').addEventListener('click', e => {
+  const b = e.target.closest('button[data-aside="hidden"]'); if (!b) return;
+  F.hidden = b.dataset.v; L.page = 1; render();
+});
 // The fold of hidden roots, each with Unhide root; it stays open across a reread while the operator has it open.
 function hiddenRoots() {
   const hid = ROOTS.filter(r => r.hidden); if (!hid.length) return '';
@@ -109,7 +115,6 @@ facets.addEventListener('click', e => {
   if (!c && e.target.closest('.rootfold summary')) { FOLD = !FOLD; return; }
   if (!c || c.getAttribute('aria-disabled') === 'true') return;
   if (c.id === 'f-pinned') F.pinned = !F.pinned;
-  else if (c.id === 'f-hidden') F.hidden = !F.hidden;
   else { const s = F[c.dataset.f]; s.has(c.dataset.v) ? s.delete(c.dataset.v) : s.add(c.dataset.v); }
   L.page = 1; render();
 });
@@ -123,7 +128,7 @@ function activeFilters() {
   F.repo.forEach(v => act.push({ key: `repo:${v}`, label: `repo:${v}` })); F.kind.forEach(v => act.push({ key: `kind:${v}`, label: `kind:${v}` }));
   F.dest.forEach(v => act.push({ key: `dest:${v}`, label: `dest:${v}` }));
   F.fresh.forEach(v => act.push({ key: `fresh:${v}`, label: v === 'stale' ? 'is:stale' : `age:${v}` }));
-  if (F.pinned) act.push({ key: 'pinned', label: 'is:pinned' }); if (F.hidden) act.push({ key: 'hidden', label: 'is:hidden' });
+  if (F.pinned) act.push({ key: 'pinned', label: 'is:pinned' });
   if (F.text) act.push({ key: 'q', label: `“${F.text}”` });
   return act;
 }
@@ -160,8 +165,8 @@ function render() {
   const empty = document.getElementById('empty');
   empty.hidden = list.length > 0;
   // build: an unread store hides nothing, and the empty Hidden view says why.
-  put(empty, html`${F.hidden ? html`Nothing is hidden. ${STORE ? `${STORE}.` : 'Hide a document from its row or from Details.'}` : html`No document matches these filters. <button class="linkish" type="button" data-clear>Clear filters</button>`}`);
-  put(document.getElementById('chips'), L_.chips(activeFilters(), list.length, DOCS.filter(d => d.hidden === F.hidden).length));
+  put(empty, html`${F.hidden === 'aside' ? html`Nothing is hidden. ${STORE ? `${STORE}.` : 'Hide a document from its row or from Details.'}` : html`No document matches these filters. <button class="linkish" type="button" data-clear>Clear filters</button>`}`);
+  put(document.getElementById('chips'), L_.chips(activeFilters(), list.length, DOCS.filter(d => window.shell.aside.shows(F.hidden, d.hidden)).length));
   put(document.getElementById('pager'), L_.pager(list.length, L, 'documents'));
   put(document.getElementById('list-help'), L_.help('', legend()));
   window.shell?.view.count('documents', list.length);
@@ -182,10 +187,10 @@ document.getElementById('chips').addEventListener('click', e => {
   if (e.target.closest('[data-unfilter-all]')) return clearAll();
   const b = e.target.closest('[data-unfilter]'); if (!b) return;
   const [f, v] = b.dataset.unfilter.split(/:(.*)/);
-  if (f === 'pinned' || f === 'hidden') F[f] = false; else if (f === 'q') { F.text = ''; input.value = ''; } else F[f].delete(v);
+  if (f === 'pinned') F.pinned = false; else if (f === 'q') { F.text = ''; input.value = ''; } else F[f].delete(v);
   L.page = 1; render();
 });
-function clearAll() { F.repo.clear(); F.kind.clear(); F.fresh.clear(); F.dest.clear(); F.text = ''; F.pinned = false; F.hidden = false; input.value = ''; L.page = 1; renderShift(); render(); }
+function clearAll() { F.repo.clear(); F.kind.clear(); F.fresh.clear(); F.dest.clear(); F.text = ''; F.pinned = false; F.hidden = 'open'; input.value = ''; L.page = 1; renderShift(); render(); }
 document.getElementById('main').addEventListener('click', e => {
   if (e.target.closest('[data-clear]')) return clearAll();
 });
@@ -358,7 +363,7 @@ function readURL() {
   F.kind = new Set(list('kind').filter(v => KINDS.includes(v)));
   F.fresh = new Set(list('fresh').filter(v => v in FRESH));
   F.dest = new Set(list('dest').filter(v => v in DEST));
-  F.text = (q.get('q') || '').trim().toLowerCase(); F.pinned = q.get('pinned') === '1'; F.hidden = q.get('hidden') === '1';
+  F.text = (q.get('q') || '').trim().toLowerCase(); F.pinned = q.get('pinned') === '1'; F.hidden = window.shell.aside.mode('hidden', q);
   // A page is decimal digits: ?page=1.5 sliced mid-page and pressed no pager button, and Number('0x2') is 2 (sd:2427).
   window.shell.list.listParams(q, L, { sorts: SORTS, size: LIST.size });
   const [col, dir] = (q.get('sort') || '').split('.'); if (dir && SORTS.includes(col)) { L.sort = col; L.dir = dir === 'asc' ? 1 : -1; } // an older link's ?sort=col.dir
@@ -367,7 +372,7 @@ function readURL() {
 function writeURL() {
   const q = new URLSearchParams();
   ['repo', 'kind', 'fresh', 'dest'].forEach(k => { if (F[k].size) q.set(k, [...F[k]].join(',')); });
-  if (F.text) q.set('q', F.text); if (F.pinned) q.set('pinned', '1'); if (F.hidden) q.set('hidden', '1');
+  if (F.text) q.set('q', F.text); if (F.pinned) q.set('pinned', '1'); const hp = window.shell.aside.param(F.hidden); if (hp) q.set('hidden', hp);
   window.shell.list.listQuery(q, L, LIST);
   // Only once the first read has restored the filters: a draw before it would keep an empty query over the kept one.
   if (linked) { const k = new URLSearchParams(q.toString()); k.delete('page'); try { localStorage.setItem(KEEP, k.toString()); } catch { /* blocked */ } }
@@ -428,7 +433,7 @@ function renderShift() {
     put(chipsEl, html`${[...p.repo.map(r => `repo:${r}`), ...p.kind.map(k => `kind:${k}`), ...p.fresh.map(f => f === 'stale' ? 'is:stale' : `age:${f}`), p.pinned ? 'is:pinned' : '', p.hidden ? 'is:hidden' : ''].filter(Boolean).map(c => html`<span class="chip" aria-pressed="true">${c}</span>`)}`);
     reqEl.hidden = true;
     F.text = p.words.join(' ').toLowerCase();
-    F.repo = new Set(p.repo); F.kind = new Set(p.kind); F.fresh = new Set(p.fresh); F.pinned = p.pinned; F.hidden = p.hidden;
+    F.repo = new Set(p.repo); F.kind = new Set(p.kind); F.fresh = new Set(p.fresh); F.pinned = p.pinned; if (p.hidden) F.hidden = 'aside';
     L.page = 1; render();
   } else {
     const title = p.words.filter((w, i) => !(i === 0 && /^(request|need|write|generate|make)$/i.test(w))).join(' ').replace(/^(a|an)\s+/i, '');
@@ -492,7 +497,7 @@ window.PAGE_LIST = { rows: () => tbody.querySelectorAll('tr[data-id]'), current:
 window.PAGE_COMMANDS = [
   { label: 'Request a document', icon: 'plus', run: () => { reqScope = scopeNow(); input.value = 'request '; mode = 'request'; renderShift(); input.focus(); } },
   { label: 'Show render-stale documents', icon: 'clock', run: () => { clearAll(); F.fresh.add('stale'); render(); } },
-  { label: 'Show hidden documents', icon: 'eye-off', run: () => { F.hidden = true; render(); } },
+  { label: 'List hidden documents', icon: 'eye-off', run: () => { F.hidden = 'aside'; L.page = 1; render(); } },
 ];
 
 // ---------- Start (build: read /api/documents through shell.read, then draw) ----------

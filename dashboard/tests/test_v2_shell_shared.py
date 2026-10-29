@@ -1243,6 +1243,42 @@ class EveryToolbarHasOneOrder(unittest.TestCase):
                 self.assertNotRegex(wide(css), r"\.(vseg|viewswitch|repo-scope)\b[^{]*\{", "a page sizes a segment group")
 
 
+class EverySetAsideIsOneSegmentGroup(unittest.TestCase):
+    """sd:6701 (operator, 2026-10-29): "I want one consistent way everywhere". Writing's Parked chip, the Show hidden toggles
+    (Contributions, Designs, GitHub's issues, a place's issues), Documents' Hidden chip and Tasks' Parked only in Scope each
+    set rows aside their own way. Every one is now shell.aside: a .vseg of Open | Parked or Hidden | All with its counts."""
+
+    PAGES = {"writing.js": "parked", "contributions.js": "hidden", "designs.js": "hidden", "issues.js": "hidden",
+             "places.js": "issues-hidden", "documents.js": "hidden", "tasks.js": "parked"}
+
+    def test_the_shell_reads_the_choice_from_the_url_and_counts_each_segment(self):
+        found = re.search(r"\n  // aside:start\n(.*?)\n  // aside:end\n", SHELL_JS, re.S)
+        self.assertIsNotNone(found, "shell.js has no aside block")
+        out = run_js(found.group(1) + """
+  R.modes = ['', '?hidden=1', '?hidden=all', '?hidden=x'].map(s => { location.search = s; return aside.mode('hidden'); });
+  R.shows = [['open', true], ['open', false], ['aside', true], ['aside', false], ['all', true]].map(([m, a]) => aside.shows(m, a));
+  R.params = ['open', 'aside', 'all'].map(aside.param);
+  R.seg = aside.seg('parked', 'Parked', 'aside', { open: 4, aside: 2 }).text;""")
+        self.assertEqual(out["modes"], ["open", "aside", "all", "open"])
+        self.assertEqual(out["shows"], [False, True, True, False, True])
+        self.assertEqual(out["params"], [None, "1", "all"])
+        self.assertEqual(re.findall(r'data-v="(\w+)" aria-pressed="(\w+)">(\w+) <span class="n">(\d+)</span>', out["seg"]),
+                         [("open", "false", "Open", "4"), ("aside", "true", "Parked", "2"), ("all", "false", "All", "6")])
+        self.assertTrue(out["seg"].startswith('<div class="vseg" role="group" aria-label="Parked rows">'))
+
+    def test_no_page_keeps_a_set_aside_toggle_of_its_own(self):
+        pages = [p.read_text(encoding="utf-8") for p in V2.glob("*.html")] + list(PAGE_JS.values())
+        for text in pages:
+            for toggle in ("Show hidden", "show-parked", "f-hidden", "Parked only", "Hide hidden"):
+                self.assertNotIn(toggle, text)
+
+    def test_every_page_that_sets_rows_aside_draws_the_shells_group(self):
+        for name, key in self.PAGES.items():
+            with self.subTest(page=name):
+                self.assertRegex(PAGE_JS[name], r"shell\.aside\.(seg|buttons)\('" + re.escape(key) + "'")
+                self.assertRegex(PAGE_JS[name], rf"shell\.aside\.mode\('{key}'[,)]")
+
+
 class EveryDisclosureHasOneArrow(unittest.TestCase):
     """sd:5637: every <details> summary but a filter pick wears one ▸/▾ arrow from shell.css. Cause: Briefs' and Activity's
     "as a table" summaries were inline-flex, which drops the native marker, while Notes drew its own arrow."""

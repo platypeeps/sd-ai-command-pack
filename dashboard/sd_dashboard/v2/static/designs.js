@@ -2,8 +2,8 @@
 // Designs (sd:2126). Built from the design source's products/system/designs/pages/designs.js at 2729265.
 // build: the ledger comes from /api/designs through shell.read, not from data/designs-data.js; links open /designs/<path>.
 // build (sd:3447): Hide and Unhide post /api/designs/view, the workflow database's view state that Documents' Hide writes.
-// A hidden row leaves the ledger, its lamps and the badge. Show hidden, a toggle in the filter bar (sd:5753), lists the
-// hidden rows instead, kept as ?hidden=1. An older ?show=hidden, ?f=hidden or #view=hidden link (Hidden was a view, sd:5064)
+// A hidden row leaves the ledger, its lamps and the badge. Open | Hidden | All in the filter bar (sd:5753, sd:6701) lists
+// the hidden rows alone, kept as ?hidden=1, or every row, as ?hidden=all. An older ?show=hidden, ?f=hidden or #view=hidden link (Hidden was a view, sd:5064)
 // lands on it. The lamps count the rows the ledger draws, and a lamp narrows them further. An unread store hides nothing and
 // turns both commands off with its reason. One view, so the tab carries the ledger's count (sd:5524), as on Documents.
 window.PAGE_VIEWS = [{ id: 'pages', label: 'Pages' }];
@@ -45,13 +45,13 @@ const FILTERS = {
   dirty:   { lbl: 'Uncommitted', icon: 'pen-line', test: r => r.dirty, warn: true, tip: 'Pages with a change not yet committed. Source: git status of the ui-design checkout.' },
   brief:   { lbl: 'Brief only', icon: 'file-text', test: r => r.type === 'brief', tip: 'Products with a design brief and no drawn page. Source: the ui-design checkout\'s products folder.' },
 };
-const shown = r => F.hidden === r.hidden;
+const shown = r => window.shell.aside.shows(F.hidden, r.hidden);
 const tbody = document.getElementById('rows'), details = document.getElementById('details');
-let selected = null, F = { f: '', q: '', state: '', product: '', hidden: false };
+let selected = null, F = { f: '', q: '', state: '', product: '', hidden: 'open' };
 let pickedIds = new Set();
 const match = r => shown(r) && (!F.f || FILTERS[F.f].test(r)) && (!F.state || r.state === F.state) && (!F.product || r.product === F.product)
   && (!F.q || `${r.path || ''} ${r.title || ''} ${r.subject || ''} ${r.kind} ${r.product}`.toLowerCase().includes(F.q));
-const narrowed = () => !!(F.f || F.q || F.state || F.product), active = () => narrowed() || F.hidden;
+const narrowed = () => !!(F.f || F.q || F.state || F.product), active = () => narrowed() || F.hidden !== 'open';
 // Order: product, then the header's column (sd:3455) inside it. Page, the default, is the design's order: the drawn pages
 // before the skeleton and captures, then path; it also breaks a tie in the other columns.
 const KIND = { 'v2 mockup': 0, 'v1 mockup': 1, design: 2, final: 0, reference: 3, skeleton: 4, 'brief only': 5 };
@@ -94,7 +94,7 @@ function renderRows() {
     <td class="act">${shell.commands.rowActions(r.id)}</td></tr>`;
   })}`);
   const empty = document.getElementById('empty');
-  empty.hidden = rows.length > 0; empty.textContent = F.hidden && !narrowed() ? `Nothing is hidden. ${STORE ? `${STORE}.` : 'Hide a row from its actions or Details.'}` : active() ? 'No page matches this filter. Clear it to see all pages.' : `No design pages found in ${D.root}/products.`;
+  empty.hidden = rows.length > 0; empty.textContent = F.hidden === 'aside' && !narrowed() ? `Nothing is hidden. ${STORE ? `${STORE}.` : 'Hide a row from its actions or Details.'}` : active() ? 'No page matches this filter. Clear it to see all pages.' : `No design pages found in ${D.root}/products.`;
   const pages = ROWS.filter(r => r.type === 'page').length;
   // The Pages tab carries the rows the ledger draws (sd:5524).
   shell.view.count('pages', rows.length);
@@ -103,15 +103,15 @@ function renderRows() {
   document.getElementById('src').textContent = `${D.root} at ${D.head || 'no commit'}`;
 }
 // The filter bar (sd:5463), Activity's layout from shell.list: the state as a segment with its counts, the product as a
-// pick, Show hidden as a toggle with the hidden count (sd:5753), a pressed lamp and the query as removable tokens, then Clear
+// pick, Open | Hidden | All with its counts at the left (sd:5753, sd:6701), a pressed lamp and the query as removable tokens, then Clear
 // all. A lamp already filters by kind, so it has no chip.
 const STATES = [['caution', 'needs a look'], ['ok', 'ok'], ['queued', 'brief only']];
 function renderFilters() {
   const n = (k, v) => ROWS.filter(r => shown(r) && r[k] === v).length, list = shell.list;
-  put(document.getElementById('filters'), list.fbar(html`${list.fseg('state', 'State', STATES.map(([s, w]) => ({ v: s, pressed: F.state === s, title: `${w}: ${n('state', s)}`,
+  put(document.getElementById('filters'), list.fbar(html`${window.shell.aside.seg('hidden', 'Hidden', F.hidden, { open: ROWS.filter(r => !r.hidden).length, aside: ROWS.filter(r => r.hidden).length })}
+    ${list.fseg('state', 'State', STATES.map(([s, w]) => ({ v: s, pressed: F.state === s, title: `${w}: ${n('state', s)}`,
     label: html`<span class="g-${s}" aria-hidden="true">${GLYPH[s]}</span><span class="n">${String(n('state', s))}</span><span class="sr"> ${w}</span>` })))}
     ${list.pick('product', 'Product', PRODUCTS.map(p => [p, p, n('product', p)]), F.product, { all: 'All products' })}
-    ${list.fseg('hidden', 'Hidden', [{ v: '1', pressed: F.hidden, label: html`${I('eye-off')}Show hidden <span class="n">${String(ROWS.filter(r => r.hidden).length)}</span>` }])}
     ${F.f ? list.tok('f', F.f, FILTERS[F.f].lbl) : ''}${F.q ? list.tok('q', '', `“${F.q}”`) : ''}`, { clear: active() }));
 }
 function show(id) {
@@ -161,7 +161,7 @@ function reconcile() {
 // The sort joins the filter in the URL when it is not the default, as shell.list.listQuery writes it.
 function writeFilter() {
   const sort = L.sort !== LIST.sort || L.dir !== LIST.dir ? { sort: L.sort, dir: L.dir > 0 ? 'asc' : 'desc' } : {};
-  shell.url({ ...(F.f && { f: F.f }), ...(F.state && { state: F.state }), ...(F.product && { product: F.product }), ...(F.hidden && { hidden: 1 }), ...(qText && { q: qText }), ...sort });
+  shell.url({ ...(F.f && { f: F.f }), ...(F.state && { state: F.state }), ...(F.product && { product: F.product }), ...(F.hidden !== 'open' && { hidden: window.shell.aside.param(F.hidden) }), ...(qText && { q: qText }), ...sort });
 }
 function update() {
   if (!D) return;
@@ -176,7 +176,7 @@ const view = (o, hidden) => shell.post('/api/designs/view', { id: o.id, hidden }
 // One Hide and one Unhide for each row type, a page and a brief-only product; the row shows the one that is on.
 const hiding = on => [
   { id: 'design.hide', on, label: 'Hide', does: 'Hides this row from the list; Undo shows it again.', key: 'h', icon: 'eye-off', risk: 'undo', bulk: true, primary: () => true, when: o => o.hidden ? 'already hidden' : STORE || true,
-    cli: () => NO_CLI, run: o => view(o, true).then(() => `Hidden: ${o.label}. Show hidden lists it.`), undo: o => view(o, false) },
+    cli: () => NO_CLI, run: o => view(o, true).then(() => `Hidden: ${o.label}. Hidden lists it.`), undo: o => view(o, false) },
   { id: 'design.unhide', on, label: 'Unhide', does: 'Shows this row in the list again; Undo hides it.', key: 'h', icon: 'eye', risk: 'undo', bulk: true, primary: () => true, when: o => !o.hidden ? 'not hidden' : STORE || true,
     cli: () => NO_CLI, run: o => view(o, false).then(() => `Unhidden: ${o.label}`), undo: o => view(o, true) },
 ];
@@ -205,9 +205,9 @@ const bar = document.getElementById('filters');
 let qText = '';
 bar.addEventListener('change', e => shell.list.pickChange(e, F, () => { writeFilter(); update(); }));
 bar.addEventListener('click', e => {
-  const b = e.target.closest('[data-fclear], [data-f]'); if (!b) return;
-  if (b.dataset.fclear != null) Object.assign(F, { f: '', q: '', state: '', product: '', hidden: false });
-  else if (b.dataset.f === 'hidden') F.hidden = !F.hidden;
+  const b = e.target.closest('[data-fclear], [data-f], [data-aside]'); if (!b) return;
+  if (b.dataset.fclear != null) Object.assign(F, { f: '', q: '', state: '', product: '', hidden: 'open' });
+  else if (b.dataset.aside === 'hidden') F.hidden = b.dataset.v;
   else if (b.dataset.f === 'state') F.state = F.state === b.dataset.v ? '' : b.dataset.v;
   else F[b.dataset.f] = '';
   if (!F.q && qText) { qText = ''; shell.filter(''); }
@@ -259,7 +259,7 @@ document.addEventListener('DOMContentLoaded', () => {
   F.f = FILTERS[p.get('f')] ? p.get('f') : '';
   F.state = STATES.some(([s]) => s === p.get('state')) ? p.get('state') : '';
   F.product = p.get('product') || ''; // a product the read does not name stays a pick option, so it can be lifted
-  F.hidden = p.get('hidden') === '1';
+  F.hidden = window.shell.aside.mode('hidden');
   if (p.get('q')) { qText = p.get('q').trim(); F.q = qText.toLowerCase(); }
   shell.list.listParams(p, L, { sorts: Object.keys(BY), size: LIST.size });
   put(document.getElementById('rows-head'), shell.list.sortHead(COLS, L)); // drawn before the read, so a failed one keeps the columns

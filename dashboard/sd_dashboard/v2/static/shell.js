@@ -1666,6 +1666,26 @@
     try { history.replaceState(history.state, '', `${s ? '?' + s : location.pathname.split('/').pop()}${location.hash}`); } catch (_) {}
   }
   const rowParam = () => new URLSearchParams(location.search).get('row');
+  // aside:start
+  // sd:6701: one set-aside pattern on every page that sets rows aside (Writing's parked pieces, the hidden contributions,
+  // designs, issues and documents, Tasks' parked tasks): a .vseg of Open | <Parked or Hidden> | All, each with its count.
+  // The URL keeps the choice in the page's key: <key>=1 is the set-aside rows alone, as the older Show hidden toggle kept it,
+  // so an older link still lands there; <key>=all is every row; Open keeps no key.
+  //   shell.aside.mode(key)                the choice the URL names: 'open', 'aside' or 'all'
+  //   shell.aside.seg(key, word, mode, n)  the group; n = { open, aside }; a button carries data-aside="<key>" data-v
+  //   shell.aside.buttons(…)               the same buttons, for a .vseg the page's markup holds
+  //   shell.aside.shows(mode, setAside)    whether a row, set aside or not, shows under the choice
+  //   shell.aside.param(mode)              the URL value for the choice, or null for Open
+  const ASIDE_V = { 1: 'aside', all: 'all' };
+  const aside = {
+    mode: (key, q = new URLSearchParams(location.search)) => ASIDE_V[q.get(key)] || 'open',
+    shows: (mode, setAside) => mode === 'all' || (mode === 'aside') === !!setAside,
+    param: mode => ({ aside: '1', all: 'all' })[mode] || null,
+    buttons: (key, word, mode, n) => html`${[['open', 'Open', n.open], ['aside', word, n.aside], ['all', 'All', n.open + n.aside]].map(([v, label, c]) =>
+      html`<button type="button" data-aside="${key}" data-v="${v}" aria-pressed="${String(v === mode)}">${label} <span class="n">${String(c)}</span></button>`)}`,
+  };
+  aside.seg = (key, word, mode, n) => html`<div class="vseg" role="group" aria-label="${word} rows">${aside.buttons(key, word, mode, n)}</div>`;
+  // aside:end
   // walk:start
   // A row is shown when it has a box and no hidden ancestor: a view panel the switch hid (view-<id>) holds no row j / k may
   // reach, whatever the page's stylesheet gives it (sd:5113).
@@ -1916,7 +1936,7 @@
   const read = window.SHELL_READ && window.SHELL_READ({ fetch: (...a) => fetch(...a), commands, state, row: rowParam, listen: (t, f) => document.addEventListener(t, f) });
   // read:end
   // build: (sd:2418) `read` joins the shell's API; (view switch) so does `view`.
-  window.shell = { ready, ICON, closeX: CLOSE_X, plural, state, read, post, getJSON, shown: stillShown, list, viewPick, tables, chording: () => !!chord && Date.now() - chord < 1500, openPane, closePane, showTab, openChat, setContext, suggest, send, toast, confirm: a => confirmAction(a).then(r => r.yes), ask: a => confirmAction(a).then(({ yes, values }) => ({ yes, values })), commands, capture: openCapture, fileCapture, filter, repos: readRepos, shq, itemHref, itemPage, openItem, time, attention, view, reconcile, url, row: (...a) => a.length ? writeRow(a[0]) : rowParam(), pages: PAGES, groups: GROUPS,
+  window.shell = { ready, ICON, aside, closeX: CLOSE_X, plural, state, read, post, getJSON, shown: stillShown, list, viewPick, tables, chording: () => !!chord && Date.now() - chord < 1500, openPane, closePane, showTab, openChat, setContext, suggest, send, toast, confirm: a => confirmAction(a).then(r => r.yes), ask: a => confirmAction(a).then(({ yes, values }) => ({ yes, values })), commands, capture: openCapture, fileCapture, filter, repos: readRepos, shq, itemHref, itemPage, openItem, time, attention, view, reconcile, url, row: (...a) => a.length ? writeRow(a[0]) : rowParam(), pages: PAGES, groups: GROUPS,
     // sd:3445: the rail's width in px, or null at the default; railWidth(px) sets and keeps it, railWidth(null) resets it.
     railWidth: (...a) => a.length ? setWidth(a[0]) : railWidth(store('sd.rail.width')) };
   if (location.hash === '#chat') openChat(); // screenshot hook
