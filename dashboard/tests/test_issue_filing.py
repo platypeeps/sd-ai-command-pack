@@ -22,7 +22,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_dashboard import command_journal, issue_filing, management_screen, tasks_screen
+from sd_dashboard import (
+    command_journal,
+    email_draft,
+    issue_filing,
+    management_screen,
+    tasks_screen,
+)
 from sd_dashboard.issue_filing import REMOVED, findings, sanitize, scan
 from sd_db import repos, workflow, writes
 from sd_db.testing import (
@@ -337,11 +343,19 @@ class TheDraft(FilingCase):
 
     def test_a_runner_that_ends_between_the_read_and_the_probe_reads_as_its_outcome(self):
         """sd:6158: the runner writes its outcome, then exits. Under gate load a read before that write and a probe after
-        the exit saw a drafting run with no runner, and a model failure read "stopped without a draft"."""
-        self.enable()
+        the exit saw a drafting run with no runner, and a model failure read "stopped without a draft".
+
+        The runner runs here, in-process, so its outcome is written before the test goes on: a detached runner under
+        gate load could miss `STARTUP` and settle as "never started" (sd:6609)."""
         (self.double / "exit").write_text("3")
-        run = self.drafted(self.task())
-        record = self.runs / f"{run['id']}.json"
+        self.runs.mkdir(parents=True)
+        run_id = f"github-{self.task()}-20261018T000000Z"
+        record, written = self.runs / f"{run_id}.json", self.runs / f"{run_id}.input.md"
+        written.write_text("Title: t\n", encoding="utf-8")
+        record.write_text(json.dumps({
+            "id": run_id, "kind": "github", "target": {"kind": "github", "repo": "example/tool"}, "state": "queued",
+            "started": "2026-10-18T00:00:00Z", "input": str(written), "claude": email_draft.CLAUDE}))
+        self.assertEqual(issue_filing.run(record), 1)
         outcome = record.read_text(encoding="utf-8")
         record.write_text(json.dumps({**json.loads(outcome), "state": "drafting"}), encoding="utf-8")
 
@@ -350,7 +364,7 @@ class TheDraft(FilingCase):
             return False
 
         with patch.object(issue_filing, "_alive", ends):
-            status, document = issue_filing.status(run["id"])
+            status, document = issue_filing.status(run_id)
         self.assertEqual((status, document["state"]), (200, "failed"))
         self.assertIn("claude -p exited 3", document["reason"])
 
