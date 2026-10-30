@@ -110,7 +110,8 @@ let polling = 0;
   // build: the design's glyphs, drawn into one SVG. Coordinates project equirectangular around the HOA's middle latitude: at
   // this size the error is far below a glyph. Glyphs keep their screen size at every zoom.
   const TYPES = {
-    tank:    { label: 'Tank',    size: 26, svg: html`<path class="halo" d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><ellipse class="halo" cx="12" cy="6" rx="8" ry="3"/><path class="body" d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6c0 1.7-3.6 3-8 3S4 7.7 4 6z"/><ellipse class="body" cx="12" cy="6" rx="8" ry="3" fill-opacity=".55"/>` },
+    // sd:6691: the one tank is the buried cistern, so the type reads Cistern: a tank under a ground line, its riser through it.
+    tank:    { label: 'Cistern', size: 26, svg: html`<path class="halo" d="M2 8h20M5 12v7c0 1.3 3.1 2.4 7 2.4s7-1.1 7-2.4v-7"/><ellipse class="halo" cx="12" cy="12" rx="7" ry="2.4"/><path class="body" d="M5 12v7c0 1.3 3.1 2.4 7 2.4s7-1.1 7-2.4v-7c0 1.3-3.1 2.4-7 2.4S5 13.3 5 12z"/><ellipse class="body" cx="12" cy="12" rx="7" ry="2.4" fill-opacity=".55"/><path class="line ground" d="M2 8h20M12 8v1.6"/>` },
     well:    { label: 'Well',    size: 22, svg: html`<circle class="halo" cx="12" cy="12" r="8"/><circle class="body" cx="12" cy="12" r="8" fill-opacity=".2"/><circle class="body" cx="12" cy="12" r="3.2"/>` },
     hydrant: { label: 'Hydrant', size: 18, svg: html`<path class="halo" d="M8 8a4 4 0 0 1 8 0v11H8z"/><path class="body" d="M8 8a4 4 0 0 1 8 0v11H8z"/><path class="body" d="M5 11h3v4H5zM16 11h3v4h-3zM6 19h12v2.5H6z"/>` },
     valve:   { label: 'Valve',   size: 16, svg: html`<path class="halo" d="M3 6l9 6-9 6zM21 6l-9 6 9 6z"/><path class="body" d="M3 6l9 6-9 6zM21 6l-9 6 9 6z"/><path class="line" d="M12 12V4M9 4h6"/>` },
