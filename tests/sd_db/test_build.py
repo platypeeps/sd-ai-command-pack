@@ -172,6 +172,15 @@ class Claim(Case):
         self.assertEqual(self.statuses(items), ["in_progress", "in_progress"])
         self.assertIsNone(self.claim(), "nothing is left queued")
 
+    def test_a_claim_records_the_build_branch_on_every_member_row(self):
+        """pack sd:6756: an empty `item.branch` failed sd-docs-lint on a design-only build."""
+        items = [self.item(), self.item()]
+        self.db.execute("UPDATE item SET branch = 'docs/old' WHERE id = ?", (items[1],))
+        lead = build.queue(self.db, items, who="operator")[0]["id"]
+        self.claim()
+        self.assertEqual([item_state(self.db, item)["item"]["branch"] for item in items],
+                         [f"build/sd-{lead}"] * 2)
+
     def test_a_bundle_of_mechanical_items_runs_sonnet(self):
         build.queue(self.db, [self.item(fields={"work_kind": "mechanical"})], who="operator")
         self.assertEqual(self.claim()["model"], "sonnet")
