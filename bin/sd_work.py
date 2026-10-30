@@ -1081,6 +1081,7 @@ def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
     and cancelled rows too; `sd task edit` is the verb that changes a row.
     """
     _ref_checked(args)
+    _priority_checked(args)
     with workflow.transaction(connection):
         if args.ref is not None:
             filed = sd_db.writes.item_by_external(connection, REF_SOURCE, args.ref)
@@ -1110,6 +1111,17 @@ def _capture(sd_db: Any, workflow: Any, args: argparse.Namespace,
 #: external_id)` holds one row per reference, and a reference whose own source
 #: part is `docs/work` or `cron-report` can never reach a row those sources own.
 REF_SOURCE = "task-ref"
+
+
+#: The kinds `sd task add` files without a priority: ideas are not ranked (sd:6726).
+UNRANKED_KINDS = ("work-idea", "personal-idea")
+
+
+def _priority_checked(args: argparse.Namespace) -> None:
+    """Refuse a work item with no `--priority` (sd:6726): an unranked item closes after 30 days."""
+    if args.priority is None and args.kind not in UNRANKED_KINDS:
+        raise WorkRefusal(f"sd task add needs --priority 1-4 for a {args.kind} (1 most urgent, 3 the usual); "
+                          "the nightly sweep closes an unranked item 30 days after filing")
 
 
 def _ref_checked(args: argparse.Namespace) -> None:

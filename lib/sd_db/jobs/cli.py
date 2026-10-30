@@ -19,6 +19,7 @@ import os
 import shlex
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import channels, credentials, judgment, records, removal, review, usage
@@ -486,8 +487,25 @@ REVIEW_USAGE = ("sd-db review: takes `file <batch.json>`, `file --kev <file.json
                 "`export <item> [--key <file>] --out <path> [--format review|reviews]` or `apply <queue>`")
 
 
+def _review_priorities() -> int:
+    """`review priorities`: the nightly priority sweep (`sd_db.priority_sweep`, sd:6726)."""
+    from .. import priority_sweep
+
+    connection = _open_for_write()
+    try:
+        done = priority_sweep.sweep(connection, who=getpass.getuser(), now=datetime.now(timezone.utc))
+    finally:
+        connection.close()
+    print(f"sd-db: priority sweep ranked {len(done['ranked'])}, closed {len(done['closed'])} unranked after "
+          f"{priority_sweep.CLOSE_DAYS} days, asked {done['asked']}"
+          + (f" in sd:{done['batch']}" if done["batch"] else ""))
+    for item in done["closed"]:
+        print(f"sd-db: closed sd:{item}: no priority after {priority_sweep.CLOSE_DAYS} days")
+    return 0
+
+
 def command_review(argv: list[str]) -> int:
-    """`review file|export|apply`: the review queue's plumbing (`sd_db.review`, sd:3635).
+    """`review file|export|apply|priorities`: the review queue's plumbing (`sd_db.review`, sd:3635).
 
     `file` files a batch file and prints what it dropped; `export` writes the
     batch's labels as JSONL through a `.part` file, and with `--key` closes a
@@ -512,6 +530,8 @@ def command_review(argv: list[str]) -> int:
                 and options.get("format", "review") in ("review", "reviews")):
             return _review_export(int(item), options.get("key"), Path(options["out"]),
                                   as_reviews=options.get("format") == "reviews")
+    if action == "priorities" and not rest:
+        return _review_priorities()
     if action == "apply" and len(rest) == 1:
         connection = _open_for_write()
         try:

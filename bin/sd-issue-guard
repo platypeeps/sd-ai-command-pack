@@ -65,7 +65,7 @@ ASK = (
 
 REASON = (
     "This repository tracks work in sd, not GitHub issues. Record the work "
-    "with `sd task add \"<title>\" --body \"<detail>\"` from this checkout;"
+    "with `sd task add \"<title>\" --priority 3 --body \"<detail>\"` from this checkout;"
     " `sd task note <n> --body \"<text>\"` adds to an existing item."
 )
 
