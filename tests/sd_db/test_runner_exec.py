@@ -482,7 +482,11 @@ class Palette(PaletteFixture):
                     killpg(pid, sig)
                     if isinstance(error, PermissionError):
                         # Exited, not reaped: the leader is a zombie when EPERM answers.
-                        os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)
+                        # The command is a second member of the group; SIGKILL lands
+                        # on it asynchronously, so wait for it too or a loaded gate
+                        # sees it alive and reports a refused kill.
+                        for member in (pid, processes[-1].pid):
+                            os.waitid(os.P_PID, member, os.WEXITED | os.WNOWAIT)
                     else:
                         processes[-1].wait()
                     raise error
