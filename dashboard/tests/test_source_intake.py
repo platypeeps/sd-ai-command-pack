@@ -20,8 +20,9 @@ import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_dashboard import research_screen
+from sd_dashboard import research_screen, source_intake
 from sd_db import workflow, writes
+from sd_db.testing import patience
 from test_workflow_actions import BrowserSession
 
 LEDGER = """# Source Registry
@@ -59,6 +60,10 @@ def git(directory, *args):
 
 
 class SourceIntake(BrowserSession):
+    #: An intake runs git steps of up to GIT_SECONDS each: a 5 s request timed out in recv_into at gate load 40
+    #: while the server still worked (pack sd:6739).
+    http_timeout = source_intake.GIT_SECONDS + 10
+
     def setUp(self):
         super().setUp()
         root = Path(self.tmp.name).resolve()
@@ -120,7 +125,7 @@ class SourceIntake(BrowserSession):
             "Content-Type": "application/octet-stream", "Origin": self.base, "Cookie": self.cookie,
             "X-SD-CSRF": self.csrf, "Sec-Fetch-Site": "same-origin", "X-SD-File-Name": urllib.parse.quote(name)})
         try:
-            answer = urllib.request.urlopen(request, timeout=10)
+            answer = urllib.request.urlopen(request, timeout=patience(self.http_timeout))
         except urllib.error.HTTPError as error:
             answer = error
         with answer:
@@ -231,6 +236,10 @@ class SourceIntake(BrowserSession):
         self.assertCheckoutUntouched()
         # The staged file stays, so the same drop can be added again.
         self.assertTrue((self.root / "state" / "system" / "source-intake" / "staged" / staged["sha256"]).is_file())
+
+    def test_a_request_outwaits_the_git_bound(self):
+        """pack sd:6739: a request that waits less than the git step it runs gives up first under load."""
+        self.assertGreater(self.http_timeout, source_intake.GIT_SECONDS)
 
     def test_a_duplicate_url_or_file_is_refused_by_name_and_nothing_is_written(self):
         self.publish(LEDGER, ("10-sources/files/kept.md", b"# kept\n"))

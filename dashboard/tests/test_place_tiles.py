@@ -320,6 +320,12 @@ class TheHostedTile(Case):
         self.assertEqual((row["host"], row["here"]), ("", True))
         status, body = place_tiles.run({"realm": "work", "tile": "mine", "action": "Say hi"}, config=self.config)(None)
         self.assertEqual((status, body["repo"]), (202, str(self.app)))
+        # The detached child holds the action's lock until it exits; wait for it, or the temporary folder's
+        # cleanup races its exit-file write (gate 2026-10-30 02:09 MDT: "Directory not empty").
+        lock = next(self.dir.rglob("say-hi/lock"))
+        with open(lock, "a+", encoding="utf-8") as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+        self.assertTrue((lock.parent / "exit").is_file(), "the child wrote its exit line before it let go")
 
 
 class TheRoutes(BrowserSession):

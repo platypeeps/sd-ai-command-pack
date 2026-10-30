@@ -481,8 +481,10 @@ class Palette(PaletteFixture):
                 def exited_first(pid, sig, error=error):
                     killpg(pid, sig)
                     if isinstance(error, PermissionError):
-                        # Exited, not reaped: the leader is a zombie when EPERM answers.
+                        # Exited, not reaped: the leader is a zombie when EPERM answers. Wait on the
+                        # command too: run_process polls it, and it can outlive the leader (sd:6739).
                         os.waitid(os.P_PID, pid, os.WEXITED | os.WNOWAIT)
+                        os.waitid(os.P_PID, processes[-1].pid, os.WEXITED | os.WNOWAIT)
                     else:
                         processes[-1].wait()
                     raise error
