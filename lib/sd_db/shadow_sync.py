@@ -153,6 +153,7 @@ query($q: String!, $n: Int!, $after: String) {
       }
       ... on PullRequest {
         number title url state createdAt updatedAt closedAt mergedAt headRefName
+        reviewDecision mergeable commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
         closingIssuesReferences(first: 10) { nodes { url } }
         author { login }
         assignees(first: 10) { nodes { login } }
@@ -520,6 +521,24 @@ def _validate_limits(max_requests, max_seconds):
         raise ValueError("max_seconds must be a positive finite number")
 
 
+def merge_state(node: dict) -> dict:
+    """A pull request's `review_decision`, `checks` and `mergeable` (pack sd:6711), lower-cased; None is not read.
+
+    GitHub's null review decision or rollup is read: `none`, no review asked or no check on the head.
+    """
+    def word(value, none=None):
+        return none if value is None else value.lower() if isinstance(value, str) and value else None
+
+    commits = node.get("commits")
+    nodes = commits.get("nodes") if isinstance(commits, dict) else None
+    commit = nodes[-1].get("commit") if isinstance(nodes, list) and nodes and isinstance(nodes[-1], dict) else None
+    rollup = commit.get("statusCheckRollup") if isinstance(commit, dict) else None
+    return {"review_decision": word(node.get("reviewDecision"), "none") if "reviewDecision" in node else None,
+            "checks": None if not isinstance(commit, dict) else "none" if rollup is None
+            else word(rollup.get("state") if isinstance(rollup, dict) else None),
+            "mergeable": word(node.get("mergeable"))}
+
+
 def normalize(node: dict, why: str) -> dict | None:
     """One search result as a `shadow` row, or None when it is unusable.
 
@@ -546,6 +565,7 @@ def normalize(node: dict, why: str) -> dict | None:
         "updated_at": node.get("updatedAt") or "",
         "created_at": settled_at(node.get("createdAt")),
         "assignee": assignees(node),
+        **(merge_state(node) if node.get("__typename") == "PullRequest" else {}),
         "why": [why],
     }
 
@@ -674,7 +694,8 @@ def store(connection: sqlite3.Connection, issues: list[dict]) -> int:
     `collect` derives from `why` (migration 34). `updated_at` (migration 39)
     is written as `iso` spells it, or None when it does not read, which keeps
     the stored one. `created_at`, `filed`, `status` and `assignee` (migration
-    40) follow the same rule. The one it does not write, `why`, is not an oversight;
+    40) follow the same rule, as do a pull request's `review_decision`, `checks`
+    and `mergeable` (migration 44). The one it does not write, `why`, is not an oversight;
     the `shadow` table has no column for it, and the comment above that table
     says why and where it goes instead. It goes there *before* this runs:
     `sync` passes the same `result.issues` to `contribution_sync.refresh`
@@ -701,6 +722,9 @@ def store(connection: sqlite3.Connection, issues: list[dict]) -> int:
             filed=issue.get("filed"),
             status=issue.get("status") or None,
             assignee=issue.get("assignee"),
+            review_decision=issue.get("review_decision"),
+            checks=issue.get("checks"),
+            mergeable=issue.get("mergeable"),
         )
     return len(issues)
 
