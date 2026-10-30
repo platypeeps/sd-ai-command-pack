@@ -501,6 +501,8 @@ def _review_priorities() -> int:
           + (f" in sd:{done['batch']}" if done["batch"] else ""))
     for item in done["closed"]:
         print(f"sd-db: closed sd:{item}: no priority after {priority_sweep.CLOSE_DAYS} days")
+    for item, reason in done["held"]:
+        print(f"sd-db: kept sd:{item} open: {reason}")
     return 0
 
 

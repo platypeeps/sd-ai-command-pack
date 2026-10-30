@@ -8,7 +8,8 @@ three steps, one run each night (`sd-db review priorities`):
    item's priority, when the item still has none; a batch with no open
    question closes.
 2. **close**: an item still unranked `CLOSE_DAYS` after it was filed is
-   closed, with a note that names the sweep and how to reopen it.
+   closed, with a note that names the sweep and how to reopen it; one a
+   queued or running build holds is left open and reported as `held`.
 3. **ask**: every other unranked item not already asked gets one question
    in tonight's batch, P1 to P4, with a proposed rank and its reason, for
    the Review page.
@@ -24,6 +25,7 @@ import sqlite3
 from datetime import datetime, timedelta
 
 from . import review, workflow
+from .errors import SdDbError
 
 QUEUE = "priority"
 KINDS = ("task", "followup", "personal")
@@ -86,10 +88,18 @@ def sweep(connection: sqlite3.Connection, *, who: str, now: datetime) -> dict:
     waiting: list[dict] = []
     for item in unranked(connection):
         (stale if (item["created_at"] or "")[:10] < cutoff else waiting).append(item)
+    closed: list[int] = []
+    held: list[tuple[int, str]] = []
     for item in stale:
-        workflow.change_status(connection, item["id"], "done", who=who,
-                               reason=f"priority sweep (sd:6726): no priority {CLOSE_DAYS} days after filing; reopen with "
-                                      f"`sd task status {item['id']} planning` and `sd task edit {item['id']} --priority N`")
+        try:
+            workflow.change_status(connection, item["id"], "done", who=who,
+                                   reason=f"priority sweep (sd:6726): no priority {CLOSE_DAYS} days after filing; reopen "
+                                          f"with `sd task status {item['id']} planning` and "
+                                          f"`sd task edit {item['id']} --priority N`")
+        except SdDbError as refused:  # a queued or running build owns the item; the next night tries again
+            held.append((item["id"], str(refused)))
+        else:
+            closed.append(item["id"])
     asked = _asked(connection)
     questions = [{"subject": f"sd:{item['id']}", "text": f"Priority for sd:{item['id']}: {item['title']}",
                   "evidence": [f"Kind: {item['kind']}", f"Filed: {(item['created_at'] or '?')[:10]}",
@@ -105,5 +115,5 @@ def sweep(connection: sqlite3.Connection, *, who: str, now: datetime) -> dict:
             "context": {"purpose": f"Rank each open work item filed without a priority; one still unranked "
                                    f"{CLOSE_DAYS} days after filing closes."},
             "questions": questions[:review.LIMIT]}, who=who, now=now.isoformat(), suppress=False)
-    return {"ranked": ranked, "batches_closed": batches, "closed": [item["id"] for item in stale],
+    return {"ranked": ranked, "batches_closed": batches, "closed": closed, "held": held,
             "asked": filed and filed["filed"] or 0, "batch": filed and filed["item"]}

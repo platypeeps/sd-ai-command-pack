@@ -61,6 +61,18 @@ class Sweep(unittest.TestCase):
         self.assertEqual((ruled["ranked"], ruled["batches_closed"]), ([young], [first["batch"]]))
         self.assertEqual(self.row(young)["priority"], 1)
 
+    def test_an_item_a_build_holds_stays_open_and_the_rest_still_sweep(self):
+        """Review blocker: a queued or running assignment refuses the close; the sweep goes on."""
+        held = self.item("Held", filed="2026-09-01T09:00:00+00:00")
+        old = self.item("Old", filed="2026-09-02T09:00:00+00:00")
+        young = self.item("Young", filed="2026-10-20T09:00:00+00:00")
+        self.db.execute("INSERT INTO assignment (item, role, status) VALUES (?, 'author', 'running')", (held,))
+        done = priority_sweep.sweep(self.db, who="sweep", now=NOW)
+        self.assertEqual((done["closed"], [item for item, _ in done["held"]], done["asked"]), ([old], [held], 1))
+        self.assertIn("assignment", done["held"][0][1])
+        self.assertEqual((self.row(held)["status"], self.row(old)["status"]), ("planning", "done"))
+        self.assertEqual(review.read(self.db, done["batch"])["questions"][0]["subject"], f"sd:{young}")
+
     def test_a_near_due_date_proposes_p2(self):
         self.assertEqual(priority_sweep.propose({"kind": "task", "due": "2026-11-05"}, NOW)["option"], "P2")
         self.assertEqual(priority_sweep.propose({"kind": "task", "due": "2026-12-31"}, NOW)["option"], "P3")
