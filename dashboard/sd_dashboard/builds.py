@@ -8,8 +8,8 @@ why. `press` is the Build press: `build.queue` with the revisions the dialog rea
 refusal is a 409 and writes nothing. After the queue lands it kickstarts the `build-dispatch` job, so a claim
 takes seconds, not a slot; a kickstart that fails only says so, and the next tick claims the rows.
 
-`panel` is Queue's Builds panel: one row per open build run, and the build runs released in the last 24 hours with
-their outcome. `retry` is Retry on a blocked or cancelled run: each such member's item goes back to `ready` and
+`panel` is Queue's Builds panel: one row per open build run; under Show All, the ended build runs too, however old,
+with their outcome (pack sd:6834: a parked item's note points here for Retry). `retry` is Retry on a blocked or cancelled run: each such member's item goes back to `ready` and
 its assignment is queued again (`runner.requeue`), in one transaction. With a `finding` it is Send to builder (pack
 sd:6020): the finding is a `build.FINDING` note on each item first, and the claim keeps the bundle under its lead, so
 the next builder resumes the same worktree and its brief names the finding. Cancel on a running build is the route that
@@ -21,7 +21,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import subprocess
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from sd_db import build, operations, reads, runner, workflow
@@ -31,14 +31,15 @@ from sd_db.database import transaction
 from sd_db.errors import SdDbError
 from sd_db.writes import add_note, transition
 
-__all__ = ["JOB", "QUIET_SECONDS", "RECENT_HOURS", "kickstart", "panel", "plan", "press", "retry"]
+__all__ = ["ENDED_MAX", "JOB", "QUIET_SECONDS", "kickstart", "panel", "plan", "press", "retry"]
 
 #: The local-cron-jobs job that runs `sd assignments dispatch` (system, build-dispatch.job).
 JOB = "build-dispatch"
 #: A builder whose log has not grown this long is stalled: shown, never acted on (design, Dashboard).
 QUIET_SECONDS = 15 * 60
-#: How far back the panel lists ended runs.
-RECENT_HOURS = 24
+#: The most ended runs Show All lists, newest first.
+# ponytail: a flat cap; page it if the parked runs ever outnumber it.
+ENDED_MAX = 500
 KICKSTART_SECONDS = 5
 #: The bundle statuses Retry and Send to builder take: each keeps its worktree.
 AGAIN = ("blocked", "cancelled")
@@ -254,27 +255,29 @@ def _retry_state(connection, run: dict) -> dict:
             "bundle": current["status"]}
 
 
-def panel(connection, *, now: str) -> dict:
-    """Queue's Builds panel: `runs`, each open build run; `recent`, the runs released in the last `RECENT_HOURS`.
+def panel(connection, *, now: str, show: str = "active") -> dict:
+    """Queue's Builds panel: `runs`, each open build run; `recent`, under `show` "all" only, the ended runs, newest
+    first, up to `ENDED_MAX` (pack sd:6834).
 
     A read that failed is `error`, so the page says the builds were not read, never that none run.
     """
     try:
         rows = [_open_row(connection, run, now) for run in build.open_runs(connection)]
-        since = (_at(now) - timedelta(hours=RECENT_HOURS)).isoformat().replace("+00:00", "Z")
         recent = []
-        for row in build.ended_runs(connection, since):
+        for row in build.ended_runs(connection, limit=ENDED_MAX) if show == "all" else []:
             members = _members(connection, row)
-            recent.append({"run": row["id"], "repo": row["repo"], "name": Path(row["repo"]).name, "items": members,
+            recent.append({"run": row["id"], "assignment": row["assignment"], "repo": row["repo"],
+                           "name": Path(row["repo"]).name, "items": members,
                            "pull": build.pull_url(connection, row["repo"], row["branch"], [m["item"] for m in members]),
                            "outcome": row["outcome"], "detail": row["detail"] or "",
                            "ended": row["released_at"], "step": row["step"] or "claimed", "model": row["model"] or "",
                            "usd": round(build.run_spent(connection, row["id"]), 2), "log": row["log_path"] or "",
                            "worktree": row["work_path"] or "", "retry": _retry_state(connection, row)})
     except (SdDbError, sqlite3.Error, ValueError, TypeError, KeyError) as failure:
-        return {"runs": [], "recent": [], "error": str(failure) or "the build runs could not be read", "read": now}
+        return {"runs": [], "recent": [], "error": str(failure) or "the build runs could not be read", "read": now,
+                "show": show}
     return {"runs": rows, "recent": recent, "error": "", "read": now, "quiet_seconds": QUIET_SECONDS,
-            "stale_seconds": build.STALE_SECONDS, "hours": RECENT_HOURS}
+            "stale_seconds": build.STALE_SECONDS, "show": show}
 
 
 def retry(connection, assignment: int, *, expected_revision: str, who: str, finding: str = "") -> dict:

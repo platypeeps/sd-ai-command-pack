@@ -3,6 +3,7 @@
 `builds.kickstart` is replaced, so nothing reaches launchctl; the room's gate and sessions are seams of `plan`.
 """
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -113,8 +114,8 @@ class BuildsPanel(Fixture):
         build.reap(self.connection, now="2099-01-02T00:00:00Z")
         return build.run(self.connection, retry)
 
-    def panel(self, now="2099-01-02T01:00:00Z"):
-        return builds.panel(self.connection, now=now)
+    def panel(self, now="2099-01-02T01:00:00Z", show="all"):
+        return builds.panel(self.connection, now=now, show=show)
 
     def test_an_open_run_is_a_row_with_its_items_step_state_and_cancel(self):
         items = [self.ready(), self.ready()]
@@ -200,6 +201,22 @@ class BuildsPanel(Fixture):
         status, _, body = self.post("/api/queue/builds/retry", {"assignment": run["assignment"],
                                                                "revision": recent[0]["retry"]["revision"]})
         self.assertEqual(status, 409, body)
+
+    def test_a_parked_run_ended_days_ago_shows_under_all_with_retry_not_under_active(self):
+        """Pack sd:6834: the parked note points to Retry on the Builds panel, so All lists every ended run, however
+        old, with its Retry and assignment; Active lists the open runs only."""
+        run = self.blocked([self.ready()])
+        later = "2099-01-09T00:00:00Z"
+        everything = self.panel(later)
+        newest = everything["recent"][0]
+        self.assertEqual((newest["run"], newest["assignment"], newest["retry"]["allowed"]),
+                         (run["id"], run["assignment"], True))
+        self.assertEqual(everything["show"], "all")
+        active = self.panel(later, show="active")
+        self.assertEqual((active["recent"], active["show"]), ([], "active"))
+        status, _, body = self.request("/api/queue/builds?show=all", headers={"Cookie": self.cookie})
+        self.assertEqual(status, 200, body)
+        self.assertEqual(json.loads(body)["recent"][0]["run"], run["id"])
 
     def test_retry_refuses_a_run_that_did_not_block(self):
         run = self.claimed([self.ready()])
