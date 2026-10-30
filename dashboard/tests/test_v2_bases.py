@@ -206,7 +206,8 @@ R.board = ELS['view-board'].html; R.url = OUT.urls[OUT.urls.length - 1];""")
         self.assertIn("An idea", out["R"]["board"])
         self.assertNotIn("Plan the review", out["R"]["board"])
         self.assertIn("kind=base%3Ablog-idea", out["R"]["url"])
-        out = self.run_page("R.list = ELS['view-list'].html;", search="?view=list&sort=score")
+        # pack sd:6743: an idea lists only when Kind picks it, here beside the tasks.
+        out = self.run_page("R.list = ELS['view-list'].html;", search="?view=list&sort=score&kind=task,base:blog-idea")
         self.assertRegex(out["R"]["list"], r"An idea</button><span class=\"fold mono\">[^<]*</span></td><td class=\"mono rp\"><span[^>]*>[^<]*</span></td>"
                          r"<td class=\"st\">Planning</td><td>inbox<span class=\"fold mono\">score 7</span></td><td class=\"mono sc\">7</td>")
         self.assertLess(out["R"]["list"].index("An idea"), out["R"]["list"].index("Plan the review"))

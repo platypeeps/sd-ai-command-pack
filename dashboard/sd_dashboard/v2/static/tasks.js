@@ -42,7 +42,7 @@ addEventListener('DOMContentLoaded', () => {
   let tasks = [], READ = null, AGES = [], ATTENTION = null;
   // pack sd:5648: whether the store takes a lead (tasks_screen._has_lead). A store before schema 41 has none, so the page
   // shows no Lead field and no Lead column, and writes no lead.
-  let LEAD = false;
+  let LEAD = false, IDEAS = new Set();
   // sd:5462: a linked item the read does not list, a quiet report or one done before the week, opens in Details all the
   // same. PIN is that item: its key, and its row once its /api/tasks/<id> reading answers (details' `row`), marked with why
   // the list leaves it out. The row is kept beside `tasks`, so no view, count or filter lists it; a read that lists it ends PIN.
@@ -69,7 +69,10 @@ addEventListener('DOMContentLoaded', () => {
     : LINK === t.key && !visible().some(x => x.key === t.key) ? html`<p class="why">The view or filters hide #${t.id}; it stays selected until you pick another.</p>` : '';
   // The rows every view lists: a parked row shows only under Parked or All (sd:3012, sd:6701), and a scheduled occurrence,
   // a repeating task's next row before due minus its lead (reads.opens_on_clause, pack sd:5648), under Scheduled only.
-  const listed = () => tasks.filter(t => !t.parked && !t.scheduled);
+  // pack sd:6743: an idea kind (/api/tasks' `ideas`) shows only when Kind picks its kind or base, as the Vault view.
+  const picked = t => F.kind.has(t.kind) || (!!t.base && F.kind.has(`base:${t.base}`));
+  const work = t => !IDEAS.has(t.kind) || picked(t);
+  const listed = () => tasks.filter(t => !t.parked && !t.scheduled && work(t));
   let PARKED = 'open';
   const scoped = t => t.parked ? window.shell.aside.shows(PARKED, true)
     : window.shell.aside.shows(PARKED, false) && !!t.scheduled === F.active.has('scheduled');
@@ -169,7 +172,7 @@ addEventListener('DOMContentLoaded', () => {
   find.addEventListener('input', () => { Q = find.value.trim().toLowerCase(); L.page = 1; render(); });
   find.addEventListener('keydown', e => { if (e.key === 'Escape' && find.value) { e.stopPropagation(); find.value = ''; Q = ''; L.page = 1; render(); } });
   const words = t => `#${t.id} ${t.title} ${t.repo} ${slabel(t.status)} ${t.kind} ${t.stage || ''}`.toLowerCase();
-  const passes = t => (!F.kind.size || F.kind.has(t.kind) || (!!t.base && F.kind.has(`base:${t.base}`))) && (!F.repo.size || F.repo.has(t.repo)) && (!F.p.size || F.p.has(t.p ? String(t.p) : 'unset')) && (!F.due.size || F.due.has(dueBucket(t)))
+  const passes = t => (!F.kind.size || picked(t)) && work(t) && (!F.repo.size || F.repo.has(t.repo)) && (!F.p.size || F.p.has(t.p ? String(t.p) : 'unset')) && (!F.due.size || F.due.has(dueBucket(t)))
     && (!F.status.size || F.status.has(t.status)) && (!F.age.size || F.age.has(t.age)) && (!F.active.has('1') || t.status !== 'done') && scoped(t) && inPlace(t) && (!Q || words(t).includes(Q));
   const visible = () => tasks.filter(passes);
 
@@ -689,7 +692,7 @@ addEventListener('DOMContentLoaded', () => {
   }
   const reading = shell.read({
     source: '/api/tasks', what: 'the tasks',
-    adopt: doc => { tasks = doc.rows.map(TD.shape); READ = doc.read; LEAD = !!doc.lead; AGES = doc.ages || []; ATTENTION = doc.attention || null; REALMS = doc.realms || null; SWEEPS = doc.sweeps || null;
+    adopt: doc => { tasks = doc.rows.map(TD.shape); READ = doc.read; LEAD = !!doc.lead; IDEAS = new Set(doc.ideas || []); AGES = doc.ages || []; ATTENTION = doc.attention || null; REALMS = doc.realms || null; SWEEPS = doc.sweeps || null;
       // While a sweep runs, Tasks reads again every SWEEP_POLL ms, so its words follow the run to its end.
       if (!sweepTimer && Object.values(SWEEPS || {}).some(w => w.running)) sweepTimer = setTimeout(() => { sweepTimer = 0; reread(); }, SWEEP_POLL);
       // A row read at another revision than its cached Details changed elsewhere: they are read again (review 2026-10-12).
