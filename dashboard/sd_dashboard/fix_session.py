@@ -69,8 +69,9 @@ NOTE = "Fix: started a {session} session (claude) in herdr workspace sd-{item}, 
 GRILL = ("Grill piece sd:{id} for its author. Read `sd task show {id}` for the piece's path, then the `## Draft` of "
          "its index.md. Write 5 to 10 pointed questions, one question note each: `sd task note {id} '<question>' --kind "
          "question`. Ask about the claims the draft makes without support, the audience it is for, the one point it "
-         "makes, and what to cut. Where a question has a few clear answers, put each on its own line as `Option: "
-         "<answer>`. Edit nothing: the author answers on the dashboard's Writing page.")
+         "makes, and what to cut. Put two or more answers under each question, one per line as `Option: <answer>`, and "
+         "mark the one you recommend `(Recommended)`: a question with none is refused (pack sd:6708). Edit nothing: "
+         "the author picks or types an answer on the dashboard's Writing page.")
 ANSWERS = ("Apply the grill answers to piece sd:{id}. Read `sd task show {id}`: each `Ruling on note #N` decision answers "
            "question note #N. Read the `## Draft` of the piece's index.md and edit it so it follows each answer. Leave "
            "the draft edit an uncommitted diff for the operator to read. Commit nothing, stage nothing and publish nothing.")

@@ -279,9 +279,9 @@ class SessionRecord(unittest.TestCase):
         return [dict(row) for row in self.db.execute('SELECT * FROM note WHERE item = ? AND session = ? ORDER BY id', (self.item, self.run))]
 
     def test_session_notes_are_filed_on_the_item_with_the_run_as_session(self):
-        ids = runner.record_session_notes(self.db, self.run, [{'kind': 'followup', 'body': ' a '}, {'kind': 'question', 'body': 'b'}])
+        ids = runner.record_session_notes(self.db, self.run, [{'kind': 'followup', 'body': ' a '}, {'kind': 'question', 'body': 'b\nOption: Yes (Recommended)\nOption: No'}])
         self.assertEqual(len(ids), 2)
-        self.assertEqual([(n['kind'], n['body'], n['resolved_at']) for n in self.notes()], [('followup', 'a', None), ('question', 'b', None)])
+        self.assertEqual([(n['kind'], n['body'], n['resolved_at']) for n in self.notes()], [('followup', 'a', None), ('question', 'b\nOption: Yes (Recommended)\nOption: No', None)])
         self.assertEqual(runner.record_session_notes(self.db, self.run, []), [])
 
     def test_session_notes_of_other_kinds_or_without_body_file_nothing(self):

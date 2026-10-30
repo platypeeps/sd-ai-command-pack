@@ -49,7 +49,7 @@ def fill(connection) -> dict[str, int]:
 
     item("report", "nightly-sweep: needs attention", kind="report", repo=APP, fields={"attention": "two stale rows"})
     asked = item("asked", "Pick a store", repo=APP)
-    add_note(connection, asked, "question", "Which store holds the rows?\nOption: Pack\nOption: Database")
+    add_note(connection, asked, "question", "Which store holds the rows?\nOption: Pack (Recommended)\nOption: Database")
     for number in range(1, 8):
         owed = item(f"owed{number}", f"Owed work number {number}", repo=LIB, priority=number % 3)
         add_note(connection, owed, "followup", f"Chase the vendor about {number}")
@@ -249,7 +249,7 @@ class SdToday(Zone):
         grilled = sd_db.create_item(self.connection, kind="task", title="Weekly grill", source="task-ref",
                                     external_id="grill:2026-09-07")
         for number in range(2):
-            add_note(self.connection, grilled, "question", f"Keep mechanism {number}?\nOption: Keep\nOption: Drop")
+            add_note(self.connection, grilled, "question", f"Keep mechanism {number}?\nOption: Keep (Recommended)\nOption: Drop")
         found = today.sections(self.connection, now=NOW, gate=GATE)
         lines = sd_views.render_sections(found, now=MOMENT, width=100).splitlines()
         at = lines.index("Decisions (1)")

@@ -47,6 +47,55 @@ class TransitionRefused(SdDbError):
     """A status change the kind's table does not allow."""
 
 
+class QuestionRefused(SdDbError):
+    """A question note with no choices, or none it recommends (pack sd:6708)."""
+
+
+#: A question's choice line, and the two ways it recommends one (sd:5306); Decisions reads them here.
+OPTION = re.compile(r"^[ \t]*Option:[ \t]*(.*?)[ \t]*$")
+MARKED = re.compile(r"\(recommended\)$|^(?:\(recommended\)|recommended:)", re.IGNORECASE)
+ADVICE = re.compile(r"^[ \t]*Recommendation:[ \t]*(.*?)[ \t.]*$", re.IGNORECASE)
+#: The shape a question note must have, as the refusal names it.
+QUESTION_SHAPE = ("a question needs two or more `Option:` lines and one recommended, "
+                  "e.g. 'Which store?' then 'Option: Rows (Recommended)' and 'Option: Files', one per line")
+
+
+def parse(body: str) -> tuple[str, list[str]]:
+    """The question text and the choices, in the order written."""
+    question, options = [], []
+    for line in body.splitlines():
+        found = OPTION.match(line)
+        if found is None:
+            question.append(line)
+        elif found[1] and found[1] not in options:
+            options.append(found[1])
+    return "\n".join(question).strip(), options
+
+
+def recommended(body: str, options: list[str]) -> int | None:
+    """The index of the recommended option, or None; the posted text stays the option as written."""
+    if len(options) < 2:
+        return None
+    marked = [i for i, option in enumerate(options) if MARKED.search(option)]
+    if marked:
+        return marked[0] if len(marked) == 1 else None
+    for line in body.splitlines():
+        found = ADVICE.match(line)
+        if found:
+            said = found[1].casefold() + " "
+            # The longest option the line starts with, whole words, so "Rows" does not take "Rows and a cache".
+            named = [i for i, option in enumerate(map(str.casefold, options))
+                     if said.startswith(option) and not said[len(option)].isalnum()]
+            return max(named, key=lambda i: len(options[i])) if named else None
+    return None
+
+
+def check_question(body: str) -> None:
+    """Refuse a question the operator could only answer in words: every question carries a pick (pack sd:6708)."""
+    if recommended(body, parse(body)[1]) is None:
+        raise QuestionRefused(QUESTION_SHAPE)
+
+
 def now() -> str:
     """One clock, in UTC, in one format. Rows are compared as text."""
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -437,17 +486,22 @@ def add_note(
     exit_code: int | None = None,
     output_path: str | None = None,
     harness_session: str | None = None,
+    labelling: bool = False,
 ) -> int:
     """Any note but a status change, which only `transition` writes.
 
     `harness_session` is the harness session that wrote a note whose
     `session` names someone else, as a CLI ruling does (pack sd:6046).
+    A question must pass `check_question`, but for a review batch's
+    `labelling` one: Scoring asks it, and a pick would bias a blind batch.
     """
     if kind == STATUS_CHANGE:
         raise TransitionRefused(
             "a status_change note is written by `transition`, with the status, "
             "in one transaction"
         )
+    if kind == "question" and not labelling:
+        check_question(body)
     with transaction(connection):
         cursor = connection.execute(
             "INSERT INTO note (item, timestamp, kind, body, session, started, "

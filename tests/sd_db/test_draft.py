@@ -190,6 +190,7 @@ class Parse(unittest.TestCase):
                  "an option alone": "## Spec\n\nx\n\n## Questions\n\nOption: x\nOption: y",
                  "a repeated option": "## Spec\n\nx\n\n## Questions\n\nA?\nOption: x\nOption: x",
                  "a blank option": "## Spec\n\nx\n\n## Questions\n\nA?\nOption: x\nOption:",
+                 "no pick (pack sd:6708)": "## Spec\n\nx\n\n## Questions\n\nA?\nOption: x\nOption: y",
                  "no text": "", "not text": None}
         for case, reply in cases.items():
             with self.subTest(case=case):

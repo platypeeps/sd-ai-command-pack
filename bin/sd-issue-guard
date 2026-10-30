@@ -68,7 +68,8 @@ ASK = (
 ASK_OWN = (
     "This repository's policy is issues=ask: the operator approves each issue "
     "write. In an unattended run, draft it on the item instead with "
-    "`sd task note <n> \"<draft>\" --kind question`."
+    "`sd task note <n> $'<draft>\\nOption: File it (Recommended)\\nOption: Drop it' "
+    "--kind question`: a question needs options and a pick (pack sd:6708)."
 )
 
 REASON = (
