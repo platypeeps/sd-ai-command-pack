@@ -277,6 +277,9 @@ def scratch(case):
 class StubSd(Pack, BrowserSession):
     """A pack, a session, and `sd` replaced by STUB_SD."""
 
+    #: Each request runs the stub as a real subprocess: at load 38 the 5 s budget for an in-process server ran out.
+    http_timeout = 15
+
     def setUp(self):
         super().setUp()
         self.make_pack()
