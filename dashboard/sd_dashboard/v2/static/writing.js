@@ -7,7 +7,7 @@ window.PAGE_COMMANDS = [
   { label: 'Capture an idea or find a piece', icon: 'lightbulb', key: '/', run: () => document.getElementById('shift-in').focus() },
   { label: 'Board view', icon: 'kanban', key: 'v b', run: () => window.writingView?.('board') },
   { label: 'Editor view for the selected piece', icon: 'pen-line', key: 'v e', run: () => window.writingView?.('editor') },
-  { label: 'Show or hide parked pieces', icon: 'archive', run: () => document.getElementById('show-parked').click() },
+  { label: 'Show parked pieces', icon: 'archive', run: () => document.querySelector('#parked-seg [data-v="aside"]')?.click() },
 ];
 window.PAGE_ATTENTION = { state: 'unknown', n: 0, what: 'pieces not read' };
 // Realm views (sd:5064): Personal, the dashboard.realms realms (SHELL_REALMS, from /ui/sections.js), then All. A piece's realm is
@@ -105,12 +105,15 @@ addEventListener('DOMContentLoaded', () => {
        <span class="fact"><span class="g-unknown" aria-hidden="true">▨</span>vault ideas not read</span>
        <button class="help" type="button" aria-label="Help: lamps" data-help="<b>D R F A</b>: draft, research, fact-check, adversarial, in that order on every card. <b>●</b> passes against this draft, <b>▲</b> stale or findings open, <b>■</b> verdict not pass, <b>◌</b> not written yet, <b>▨</b> file exists but no gate verdict is recorded. Source: <code>sd_db.writing._problems</code>.">${ICON('circle-help')}</button>
        <span class="src">read ${String(D.read).slice(11, 16)} UTC</span>`);
-    document.getElementById('parked-n').textContent = pieces.filter(p => p.parked).length;
+    const parkedN = pieces.filter(p => p.parked).length;
+    put(document.getElementById('parked-seg'), window.shell.aside.buttons('parked', 'Parked', parked, { open: pieces.length - parkedN, aside: parkedN }));
   }
 
   // ---------- Board ----------
   // selected is the piece the editor and the URL follow.
-  let selected = null, showParked = false, view = 'board';
+  // parked: Open | Parked | All (sd:6701), kept as ?parked=.
+  let selected = null, parked = window.shell.aside.mode('parked'), view = 'board';
+  const keep = () => { const v = window.shell.aside.param(parked); return v ? { parked: v } : {}; };
   function card(p) {
     const L = gates(p), st = worst(L);
     return html`<article class="card${p.parked ? ' parked' : ''}" tabindex="0" role="option" data-id="${p.id}" aria-selected="${String(p.id === selected)}"${st ? html` data-state="${st}"` : ''} aria-label="#${p.id} ${p.title}${p.parked ? ', parked' : ''}">
@@ -121,7 +124,7 @@ addEventListener('DOMContentLoaded', () => {
     </article>`;
   }
   function renderBoard() {
-    const v = pieces.filter(p => showParked || !p.parked);
+    const v = pieces.filter(p => window.shell.aside.shows(parked, p.parked));
     // build: no reader for the vault's blog ideas exists yet (the design read `sd store list sdw.blog-idea --json`), so the
     // column says so and keeps its drop zone, which refuses a piece as the design does.
     const ideaCol = html`<div class="col vault" data-drop="stage:ideas">
@@ -287,7 +290,7 @@ addEventListener('DOMContentLoaded', () => {
     renderDetails();
     const scope = document.getElementById('scope-name'); if (scope && byId(selected)) scope.textContent = byId(selected).piece; // chat scope = the selected piece
     C.select(curId()); // the shell writes ?row=
-    window.shell.url({ view });
+    window.shell.url({ view, ...keep() });
     if (open) openPane('tab-details');
   }
   function unselect() { selected = null; renderDetails(); if (view === 'editor') renderEditor(); }
@@ -296,7 +299,7 @@ addEventListener('DOMContentLoaded', () => {
   document.getElementById('main').addEventListener('focusin', e => { const c = e.target.closest?.('.card[data-id]'); if (c && e.target === c && c.dataset.id !== curId()) select(c.dataset.id, false); });
   document.addEventListener('shell:open', e => { if (byId(e.detail)) select(e.detail, true); });
   document.addEventListener('shell:picked', e => document.querySelectorAll('.card[data-id]').forEach(c => c.toggleAttribute('data-picked', e.detail.includes(c.dataset.id))));
-  document.getElementById('show-parked').addEventListener('click', e => { showParked = !showParked; e.currentTarget.setAttribute('aria-pressed', showParked); render(); });
+  document.getElementById('parked-seg').addEventListener('click', e => { const b = e.target.closest('button[data-aside]'); if (b && b.dataset.v !== parked) { parked = b.dataset.v; window.shell.url({ view, ...keep() }); render(); } });
 
   // ---------- Drag (mouse and pen; touch uses the Details buttons) ----------
   let drag = null, suppress = false;
@@ -359,7 +362,7 @@ addEventListener('DOMContentLoaded', () => {
     ['board', 'editor'].forEach(x => { const el = document.getElementById('view-' + x); el.hidden = x !== v; if (x !== v) el.replaceChildren(); });
     document.getElementById('strip').hidden = v === 'editor';
     subhead();
-    window.shell.url({ view: v }); // the shell keeps ?row=
+    window.shell.url({ view: v, ...keep() }); // the shell keeps ?row=
     render();
   }
   window.writingView = setView;
@@ -416,7 +419,7 @@ addEventListener('DOMContentLoaded', () => {
   // command, and a failed read clears the board, the rail and Details.
   const q = new URLSearchParams(location.search);
   view = q.get('view') === 'editor' ? 'editor' : 'board';
-  const firstShown = () => (pieces.find(p => showParked || !p.parked) || pieces[0])?.id;
+  const firstShown = () => (pieces.find(p => window.shell.aside.shows(parked, p.parked)) || pieces[0])?.id;
   reading = window.shell.read({
     source: '/api/writing', what: 'the pieces',
     adopt: doc => {

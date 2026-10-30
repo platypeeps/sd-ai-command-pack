@@ -385,8 +385,10 @@
         <div class="chips" role="group" aria-label="Interpret as">${SHIFT_MODES.map(m => html`<button class="chip" type="button" data-as="${m}" aria-pressed="${String(m === 'filter')}">${{ filter: 'filter', task: 'new task', ask: 'ask chat' }[m]}</button>`)}</div>
         <p class="hint" id="shift-hint">→ changes the reading · Enter runs · Esc clears</p>
       </div>`);
-    const after = shiftRow.querySelector(':scope > .viewswitch, :scope > #viewswitch, :scope > .place-switch');
-    after ? after.after(el) : shiftRow.prepend(el);
+    // sd:6693: the bar follows the row's segment groups (the view switch, a .vseg) and comes before its actions.
+    const segs = shiftRow.querySelectorAll(':scope > :is(.viewswitch, #viewswitch, .place-switch, .vseg)');
+    const segEnd = segs[segs.length - 1], segHelp = segEnd?.nextElementSibling?.matches('.help') && segEnd.nextElementSibling;
+    segEnd ? (segHelp || segEnd).after(el) : shiftRow.prepend(el);
     shiftIn = el.querySelector('#shift'); shiftPrev = el.querySelector('#shift-preview');
     // A ?q= link opens with its text as the filter; a page that keeps ?q= reads it too, and a server list its own key.
     const u = new URLSearchParams(location.search), listQ = [...LISTS, 'q'].map(k => u.get(k)).find(Boolean) || '';
@@ -1597,8 +1599,9 @@
       bar._name = t.getAttribute('aria-labelledby') ? tlabel(document.getElementById(t.getAttribute('aria-labelledby')) || t) : '';
       bar.setAttribute('role', 'group'); bar.setAttribute('aria-label', `Table controls${bar._name ? ': ' + bar._name : ''}`);
       put(bar, html`<label class="tfacet"><span class="sr">Filter by a column value</span><select></select></label><span class="tfolds"><button class="linkbtn" type="button" data-tfold-all="open">Expand all</button><button class="linkbtn" type="button" data-tfold-all="shut">Collapse all</button></span><div class="tchips"></div>`);
-      const row = t.dataset.toolbar && document.getElementById(t.dataset.toolbar);
-      row ? row.append(bar) : twrap(t).before(bar);
+      // sd:6693: the column filter joins the filters, left of the row's actions (.tools), never after them.
+      const row = t.dataset.toolbar && document.getElementById(t.dataset.toolbar), tools = row?.querySelector(':scope > .tools');
+      tools ? tools.before(bar) : row ? row.append(bar) : twrap(t).before(bar);
     }
     bar.hidden = false;
     const sel = bar.querySelector('select');
@@ -1663,6 +1666,26 @@
     try { history.replaceState(history.state, '', `${s ? '?' + s : location.pathname.split('/').pop()}${location.hash}`); } catch (_) {}
   }
   const rowParam = () => new URLSearchParams(location.search).get('row');
+  // aside:start
+  // sd:6701: one set-aside pattern on every page that sets rows aside (Writing's parked pieces, the hidden contributions,
+  // designs, issues and documents, Tasks' parked tasks): a .vseg of Open | <Parked or Hidden> | All, each with its count.
+  // The URL keeps the choice in the page's key: <key>=1 is the set-aside rows alone, as the older Show hidden toggle kept it,
+  // so an older link still lands there; <key>=all is every row; Open keeps no key.
+  //   shell.aside.mode(key)                the choice the URL names: 'open', 'aside' or 'all'
+  //   shell.aside.seg(key, word, mode, n)  the group; n = { open, aside }; a button carries data-aside="<key>" data-v
+  //   shell.aside.buttons(…)               the same buttons, for a .vseg the page's markup holds
+  //   shell.aside.shows(mode, setAside)    whether a row, set aside or not, shows under the choice
+  //   shell.aside.param(mode)              the URL value for the choice, or null for Open
+  const ASIDE_V = { 1: 'aside', all: 'all' };
+  const aside = {
+    mode: (key, q = new URLSearchParams(location.search)) => ASIDE_V[q.get(key)] || 'open',
+    shows: (mode, setAside) => mode === 'all' || (mode === 'aside') === !!setAside,
+    param: mode => ({ aside: '1', all: 'all' })[mode] || null,
+    buttons: (key, word, mode, n) => html`${[['open', 'Open', n.open], ['aside', word, n.aside], ['all', 'All', n.open + n.aside]].map(([v, label, c]) =>
+      html`<button type="button" data-aside="${key}" data-v="${v}" aria-pressed="${String(v === mode)}">${label} <span class="n">${String(c)}</span></button>`)}`,
+  };
+  aside.seg = (key, word, mode, n) => html`<div class="vseg" role="group" aria-label="${word} rows">${aside.buttons(key, word, mode, n)}</div>`;
+  // aside:end
   // walk:start
   // A row is shown when it has a box and no hidden ancestor: a view panel the switch hid (view-<id>) holds no row j / k may
   // reach, whatever the page's stylesheet gives it (sd:5113).
@@ -1722,7 +1745,8 @@
     if (e.key === 'n') { e.preventDefault(); openCapture(); return; }
     if (e.key === 'u' && tUndo) { e.preventDefault(); t.querySelector('button')?.click(); return; }
     if (e.key === 'c') { e.preventDefault(); openChat(); }
-    if (e.key === 'r') { e.preventDefault(); location.reload(); }
+    // sd:6697: r presses the page's one Read again; a page without one reloads.
+    if (e.key === 'r') { e.preventDefault(); const a = document.getElementById('read-again'); a ? a.click() : location.reload(); }
     if (e.key === '[' && matchMedia('(min-width: 900px)').matches) { e.preventDefault(); setRail(!body.dataset.rail); }
     if (e.key === ']') { e.preventDefault(); wide() ? setPane(!body.dataset.pane) : pane.hasAttribute('data-open') ? closePane() : openPane(); }
     if (e.key === '?') { e.preventDefault(); modal(keys, keys.querySelector('#keys-close')); }
@@ -1770,11 +1794,11 @@
 
   // ---------- Staleness (design.md, Microinteractions) ----------
   // body[data-observed] is the reading time and body[data-interval] the collector's interval in minutes. Past twice the interval
-  // the Observed cell (#refresh) turns caution and says "stale since …"; past five times it is unknown. A page with no Observed
-  // cell marks its Read again button (Home, sd:5750). It is checked against real now each minute and after a re-render. A page
+  // the Read again button (sd:5750; sd:6697 dropped the Observed cells) turns caution and says "stale since …"; past five
+  // times it is unknown. It is checked against real now each minute and after a re-render. A page
   // without data-interval gets no state: the shell does not guess a cadence.
   function staleness() {
-    const cell = document.getElementById('refresh') || document.getElementById('read-again'), obs = Date.parse(body.dataset.observed || ''), iv = +body.dataset.interval * 60000;
+    const cell = document.getElementById('read-again'), obs = Date.parse(body.dataset.observed || ''), iv = +body.dataset.interval * 60000;
     if (!cell || !isFinite(obs) || !(iv > 0)) return;
     const age = Date.now() - obs, state = age > 5 * iv ? 'unknown' : age > 2 * iv ? 'caution' : '';
     const d = new Date(obs + 2 * iv).toISOString(), text = state ? `${state === 'unknown' ? 'unknown · ' : ''}stale since ${d.slice(5, 10)} ${d.slice(11, 16)} UTC` : '';
@@ -1913,7 +1937,7 @@
   const read = window.SHELL_READ && window.SHELL_READ({ fetch: (...a) => fetch(...a), commands, state, row: rowParam, listen: (t, f) => document.addEventListener(t, f) });
   // read:end
   // build: (sd:2418) `read` joins the shell's API; (view switch) so does `view`.
-  window.shell = { ready, ICON, closeX: CLOSE_X, plural, state, read, post, getJSON, shown: stillShown, list, viewPick, tables, chording: () => !!chord && Date.now() - chord < 1500, openPane, closePane, showTab, openChat, setContext, suggest, send, toast, confirm: a => confirmAction(a).then(r => r.yes), ask: a => confirmAction(a).then(({ yes, values }) => ({ yes, values })), commands, capture: openCapture, fileCapture, filter, repos: readRepos, shq, itemHref, itemPage, openItem, time, attention, view, reconcile, url, row: (...a) => a.length ? writeRow(a[0]) : rowParam(), pages: PAGES, groups: GROUPS,
+  window.shell = { ready, ICON, aside, closeX: CLOSE_X, plural, state, read, post, getJSON, shown: stillShown, list, viewPick, tables, chording: () => !!chord && Date.now() - chord < 1500, openPane, closePane, showTab, openChat, setContext, suggest, send, toast, confirm: a => confirmAction(a).then(r => r.yes), ask: a => confirmAction(a).then(({ yes, values }) => ({ yes, values })), commands, capture: openCapture, fileCapture, filter, repos: readRepos, shq, itemHref, itemPage, openItem, time, attention, view, reconcile, url, row: (...a) => a.length ? writeRow(a[0]) : rowParam(), pages: PAGES, groups: GROUPS,
     // sd:3445: the rail's width in px, or null at the default; railWidth(px) sets and keeps it, railWidth(null) resets it.
     railWidth: (...a) => a.length ? setWidth(a[0]) : railWidth(store('sd.rail.width')) };
   if (location.hash === '#chat') openChat(); // screenshot hook

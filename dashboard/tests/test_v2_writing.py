@@ -374,7 +374,15 @@ R.code = 1; ELS['shift-in'].value = 'Another idea'; enter(); await flush(); R.ke
         self.assertIn("<b>3</b> active", out["html"]["strip"])
         self.assertIn("vault ideas not read", out["html"]["strip"])
         self.assertEqual(out["page_attention"], {"state": "ok", "n": 0, "what": "pieces need a gate"})
-        self.assertEqual(out["text"]["parked-n"], 1)
+        # sd:6701: Open | Parked | All, the shell's set-aside group, with each count.
+        self.assertEqual(re.findall(r'data-v="(\w+)" aria-pressed="(\w+)">\w+ <span class="n">(\d+)</span>', out["html"]["parked-seg"]),
+                         [("open", "true", "3"), ("aside", "false", "1"), ("all", "false", "4")])
+
+    def test_parked_shows_the_parked_pieces_alone_and_all_shows_every_piece(self):
+        def board(search):
+            return re.findall(r'<article class="card[^"]*"[^>]*data-id="(\d+)"', self.run_page("", search=search)["html"]["view-board"])
+        self.assertEqual(board("?parked=1"), ["13"])
+        self.assertEqual(sorted(board("?parked=all")), ["11", "12", "13", "14"])
 
     def test_the_badge_rule_lights_what_the_cards_lamps_light(self):
         # sd:3446: the rail's rule is writing_screen's; each card's lamps stay the page's. They must agree, piece by piece.

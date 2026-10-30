@@ -34,7 +34,6 @@ from support import NOW, ScreenCase
 from test_now_screen import JobsBackend
 from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
-from test_v2_shell_shared import cell_grammar
 from test_v2_tasks import SHELL, STAND_IN
 from test_v2_today import OSASCRIPT, Refused
 from test_workflow_actions import BrowserSession
@@ -428,7 +427,7 @@ shellRun(cmd('jobs.log'), C.get('job:nightly-sync')); await flush(); R.details =
         out = self.run_page("R.lanes = ELS.lanes.html; R.ann = ELS.annunciator.html; R.rows = ELS.rows.html;")
         self.assertRegex(out["R"]["lanes"], r'data-kind="review"[^>]*><svg[^>]*></svg><span>Reviews</span><span class="n">1</span>')
         self.assertIn('<button class="cell" type="button" data-kind="review" data-state="ok"', out["R"]["ann"])
-        self.assertEqual(cell_grammar(self, out["R"]["ann"])[-1], ("button", None))  # the lamps, then Observed
+        self.assertNotIn("Observed", out["R"]["ann"])  # sd:6697: the lamps alone; Read again re-reads
         self.assertIn("<b>0</b> adjudicated</span> · <span class=\"ph\">1 clean</span>", out["R"]["ann"])
         self.assertNotIn("unrecorded", out["R"]["ann"])
         self.assertIn("codex reviewed system#41", out["R"]["rows"])
@@ -544,8 +543,7 @@ R.table = ELS['chart-table'].html; R.lanes = ELS.lanes.html;""")
         self.assertIn(f"<b>{failed_jobs}</b> jobs failed", out["R"]["ann"])
         self.assertIn(f"{blocked_runs} of {assignments} runs blocked", out["R"]["ann"])
 
-    REFRESH = ("const refresh = () => ELS.annunciator.listeners.click[0]({ target: { closest: s => s === 'button.cell' "
-               "? { id: 'refresh', dataset: {} } : null } });\n")
+    REFRESH = "const refresh = () => window.PAGE_AGAIN.run();\n"  # sd:6697: Read again is the one re-read
 
     def test_an_older_read_that_answers_last_does_not_replace_a_newer_one(self):
         newer = json.loads(json.dumps(self.doc))

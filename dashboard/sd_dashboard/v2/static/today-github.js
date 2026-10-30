@@ -95,7 +95,7 @@
 
   function draw() {
     if (!DOC || DOC.error) {
-      const why = DOC ? `GitHub could not be read: ${DOC.error}. Refresh tries again.` : started ? `GitHub could not be read: ${failed}. Refresh tries again.` : 'Reading GitHub…';
+      const why = DOC ? `GitHub could not be read: ${DOC.error}. Read again tries again.` : started ? `GitHub could not be read: ${failed}. Read again tries again.` : 'Reading GitHub…';
       put($('github-tally'), html``); put($('github-filters'), html``);
       put($('github-sections'), html`<p class="st-line">${why}</p>`);
       return;

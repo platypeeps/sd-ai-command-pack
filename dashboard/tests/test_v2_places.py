@@ -457,7 +457,7 @@ class RealmPlaces(RealmFixture):
 class RealmIssues(RealmFixture):
     """sd:6164: a realm place's Tasks also lists the operator's open GitHub and Jira issues that /api/github/issues reads
     (issue sources and the shadow sync), only those of the realm's repos, each with its source; issue Hide (sd:6175)
-    marks a row hidden, which the page leaves out until Show hidden."""
+    marks a row hidden, which the page leaves out until Hidden or All."""
 
     MINE = {"/repos/acme-site": [
         {"tracker": "jira", "url": "https://example.test/browse/ACME-8", "number": None, "title": "Fix the kit",
@@ -1007,11 +1007,11 @@ clickAct('sim', 'Start'); await flush(); R.after = ELS['overview-rows'].html;"""
                   {"tracker": "GitHub", "ref": "#12", "key": "github:example/acme-site#12", "title": "Crash <b>on</b> start", "repo": "acme-site",
                    "reason": "assigned", "url": "https://github.com/example/acme-site/issues/12", "hidden": False}]}
 
-    def test_tasks_lists_the_realms_issues_with_their_source_and_hidden_ones_on_show_hidden(self):
+    def test_tasks_lists_the_realms_issues_with_their_source_and_hidden_ones_under_all(self):
         docs = {"/api/place/acme/overview": [200, self.TILES], "/api/place/acme/tasks": [200, self.ISSUES]}
         out = self.run_page("""await go('#view=tasks'); R.rows = ELS['tasks-rows'].html;
-const b = { dataset: { issuesHidden: '' } };
-(DOC_LISTENERS['click'] || []).forEach(f => f({ button: 0, target: { closest: sel => sel === '[data-issues-hidden]' ? b : null } }));
+const b = { dataset: { v: 'all' } };
+(DOC_LISTENERS['click'] || []).forEach(f => f({ button: 0, target: { closest: sel => sel === 'button[data-aside="issues-hidden"]' ? b : null } }));
 await flush(); R.all = ELS['tasks-rows'].html;""", docs, place="acme")
         rows, every = out["R"]["rows"], out["R"]["all"]
         self.assertIn("<h3>Issues</h3>", rows)
@@ -1019,10 +1019,10 @@ await flush(); R.all = ELS['tasks-rows'].html;""", docs, place="acme")
         self.assertIn('<a href="https://github.com/example/acme-site/issues/12" target="_blank" rel="noopener">#12</a>', rows)
         self.assertIn("Crash &lt;b&gt;on&lt;/b&gt; start", rows)
         self.assertNotIn("ACME-8", rows, "a hidden issue showed by default")
-        self.assertIn("Show hidden (1)", rows)
+        self.assertIn('data-aside="issues-hidden" data-v="aside" aria-pressed="false">Hidden <span class="n">1</span>', rows)
         self.assertIn('<td class="src">Jira</td>', every)
         self.assertIn("ACME-8", every)
-        self.assertIn("Hide hidden", every)
+        self.assertIn('data-v="all" aria-pressed="true"', every)
 
     def test_a_refused_or_unanswered_start_says_why_and_an_off_button_posts_nothing(self):
         out = self.run_overview("clickAct('app', 'Deploy'); await flush();", answer=(409, {"error": "Staging site Deploy is already running"}))

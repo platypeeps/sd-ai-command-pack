@@ -381,10 +381,10 @@ class TheScript(unittest.TestCase):
     def test_a_failed_read_says_why_and_draws_no_count(self):
         out = self.run_page("show(); await flush(); R.sections = ELS['github-sections'].html; R.tally = ELS['github-tally'].html;",
                             "(path, body) => [500, { error: 'database is locked' }]")
-        self.assertIn("GitHub could not be read: database is locked. Refresh tries again.", out["R"]["sections"])
+        self.assertIn("GitHub could not be read: database is locked. Read again tries again.", out["R"]["sections"])
         self.assertEqual(out["R"]["tally"], "")
         refused = self.draw(doc(error="no such column: filed"))
-        self.assertIn("GitHub could not be read: no such column: filed. Refresh tries again.", refused["R"]["sections"])
+        self.assertIn("GitHub could not be read: no such column: filed. Read again tries again.", refused["R"]["sections"])
 
 
 

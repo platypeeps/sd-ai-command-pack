@@ -1743,7 +1743,7 @@ R.said = ['dependabot alerts.review', 'secret scanning.review'].map(id => cmd(id
     def test_a_document_that_does_not_arrive_leaves_no_row_and_says_so(self):
         out = self.run_page("""R.before = BODY().html;
 DOC = { error: 'Open a dashboard page before reading Health.' }; STATUS = 403;
-ELS.annunciator.listeners.click[0]({ target: { closest: s => s === 'button.cell' ? { id: 'refresh', dataset: {} } : null } }); await flush();
+window.PAGE_AGAIN.run(); await flush();
 R.areas = BODY().html; R.lamps = ELS.annunciator.html;""")
         self.assertEqual(out["gets"], ["/api/health/summary", "/api/health/checkouts", "/api/health/summary",
                                        "/api/health/checkouts", "/api/health/summary"])
@@ -1752,7 +1752,7 @@ R.areas = BODY().html; R.lamps = ELS.annunciator.html;""")
         self.assertIn("Open a dashboard page before reading Health.", out["states"][-1]["text"])
         self.assertEqual(out["attention"][-1], {"state": "unknown", "n": 0, "what": "rows"})
         self.assertNotIn("data-id=", out["R"]["areas"], "rows from the last read stayed on screen")
-        self.assertIn("not read", out["R"]["lamps"])
+        self.assertNotIn('data-state="ok"', out["R"]["lamps"], "a lamp from the last read stayed lit")
 
     def test_the_filter_finds_a_row_by_a_path_in_its_facts_or_its_list(self):
         # The shell's Shapeshift bar sends its text as shell:filter (sd:5539): a registered worktree's path is in `list`, the
@@ -1767,7 +1767,7 @@ R.list = filter('/work/wt-b'); R.facts = filter('/checkouts/group/alpha'); R.non
         # The shell keeps every object put and every pick; the bulk bar must not offer a prune built from a row that is gone.
         out = self.run_page("""var PICKED = new Set();
 C.pick = id => { PICKED.has(id) ? PICKED.delete(id) : PICKED.add(id); document.dispatchEvent(new CustomEvent('shell:picked', { detail: [...PICKED] })); };
-const refresh = () => ELS.annunciator.listeners.click[0]({ target: { closest: s => s === 'button.cell' ? { id: 'refresh', dataset: {} } : null } });
+const refresh = () => window.PAGE_AGAIN.run();
 const live = id => !!OBJ.get(id) && REG.some(c => c.on === OBJ.get(id).type);
 C.pick('gone:group/alpha'); C.pick('unread:beta');
 DOC = { ...DOC, areas: DOC.areas.map(a => ({ ...a, rows: a.rows.filter(r => r.id !== 'gone:group/alpha') })) };
@@ -1785,7 +1785,7 @@ R.failed = [live('unread:beta'), PICKED.has('unread:beta'), PICKED.size];""")
         # as an older reading.
         out = self.run_page("""var pending = [];
 ANSWER = path => path === '/api/health/summary' ? [200, SUMMARY_DOC] : new Promise((answer, fail) => pending.push({ answer, fail }));
-const refresh = () => ELS.annunciator.listeners.click[0]({ target: { closest: s => s === 'button.cell' ? { id: 'refresh', dataset: {} } : null } });
+const refresh = () => window.PAGE_AGAIN.run();
 refresh(); refresh(); await flush();
 pending[1].answer([200, DOC]); await flush();
 pending[0].fail(new Error('an older read that failed')); await flush();

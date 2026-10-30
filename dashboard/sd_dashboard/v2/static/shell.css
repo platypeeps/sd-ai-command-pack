@@ -14,6 +14,8 @@
  * 2026-10-21 component: toolbar alignment (sd:5619) row 1 view switch and Shapeshift box share --bar-h, one top and bottom edge
  *   pre-emit critique: P4 H4 E4 S4 R5 V4 · states: unchanged (height and margin only)
  * 2026-10-23 (sd:5902): row 1's selects and buttons take --bar-h too · states: unchanged (height only)
+ * 2026-10-29 component: toolbar order and one segment size (sd:6693) segments · filter · .tools right; .vseg buttons take the
+ *   view tab's rule · pre-emit critique: P4 H4 E4 S4 R5 V4 · states: default · hover · focus · active · pressed · disabled
  */
 
 html, body { overflow-x: clip; }
@@ -528,7 +530,7 @@ select.cap-in { min-height: var(--row-touch); }
 /* build (view switch): a page's sub-sections, one segmented tablist under the lamps (shell.js, view block). It takes .seg's
  * look; a label never wraps, and a long set scrolls inside its own box, not the page. Only the shown panel renders. */
 .viewswitch { display: flex; gap: var(--space-3xs); width: max-content; max-width: 100%; overflow-x: auto; margin: 0 0 var(--space-lg); padding: var(--space-3xs); border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-md); }
-.viewswitch [role="tab"] { display: inline-flex; align-items: center; gap: var(--space-xs); flex: none; min-height: 2.25rem; padding: 0 var(--space-md); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-ink-2); font: 500 var(--text-sm)/1 var(--font-ui); white-space: nowrap; cursor: pointer; }
+.viewswitch [role="tab"], .vseg > button { display: inline-flex; align-items: center; gap: var(--space-xs); flex: none; min-height: 2.25rem; padding: 0 var(--space-md); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-ink-2); font: 500 var(--text-sm)/1 var(--font-ui); white-space: nowrap; cursor: pointer; }
 .viewswitch [role="tab"]:hover { color: var(--color-ink); background: var(--color-well); }
 .viewswitch [role="tab"]:active { box-shadow: inset 0 0 0 var(--rule-hair) var(--color-rule); }
 .viewswitch [role="tab"][aria-selected="true"] { color: var(--color-ink); background: var(--color-accent-bg); box-shadow: inset 0 0 0 var(--rule-hair) var(--color-accent); }
@@ -783,6 +785,9 @@ th[aria-sort] > .sorter .i { opacity: 1; }
  * box sits short beside the Shapeshift box; :is() keeps this above the touch rules for .tgrid select and .viewpick-btn. */
 .toolbar :is(select, .viewpick-btn, .btn) { min-height: var(--bar-h); }
 .toolbar .viewswitch [role="tab"], .toolbar .vseg > button { min-height: 0; }
+/* sd:6693: a page's actions sit in one .tools at the row's right end, after the segments and the filters. */
+.toolbar > .tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs); margin-left: auto; }
+.toolbar > .tools:empty { display: none; }
 .toolbar > .count { margin-left: auto; font: 400 var(--text-xs)/1.2 var(--font-data); color: var(--color-ink-2); white-space: nowrap; }
 .toolbar > .count:empty { display: none; }
 /* A table's title line (sd:5463): its heading and help on the left, its tally (the count and the table's facts) on the right. */
@@ -820,10 +825,12 @@ th[aria-sort] > .sorter .i { opacity: 1; }
   .fsum .linkbtn { display: inline-flex; align-items: center; min-height: var(--row-touch); min-width: var(--row-touch); }
 }
 /* A view group that filters one list (HOA's alarm events: Open | Acknowledged | All): the view switch's segments, pressed
- * buttons rather than tabs, since every choice shows the same table. */
+ * buttons rather than tabs, since every choice shows the same table. Its buttons take the tab's rule, so every segment group
+ * is one size (sd:6693). */
 .vseg { display: flex; gap: var(--space-3xs); width: max-content; max-width: 100%; overflow-x: auto; padding: var(--space-3xs); border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-md); background: var(--color-panel); }
-.vseg > button { display: inline-flex; align-items: center; gap: var(--space-xs); flex: none; min-height: 2rem; padding: 0 var(--space-md); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-ink-2); font: 500 var(--text-sm)/1 var(--font-ui); cursor: pointer; }
 .vseg > button:hover { color: var(--color-ink); background: var(--color-well); }
+.vseg > button[aria-disabled="true"] { color: var(--color-muted); cursor: not-allowed; }
+.vseg > button[aria-disabled="true"]:hover { background: transparent; }
 .vseg > button:active { box-shadow: inset 0 0 0 var(--rule-hair) var(--color-rule); }
 .vseg > button[aria-pressed="true"] { color: var(--color-ink); background: var(--color-accent-bg); box-shadow: inset 0 0 0 var(--rule-hair) var(--color-accent); }
 .vseg > button:focus-visible { outline: 2px solid var(--color-focus); outline-offset: calc(-1 * var(--rule-focus)); }

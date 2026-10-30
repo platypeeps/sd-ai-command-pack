@@ -151,9 +151,6 @@ window.PAGE_FILTER = { '': 'Needs you' };
     gate.title = off || '';
     put(gate.querySelector('.val'), off ? html`<span class="ph">not read</span>`
       : html`<b>${gates.running}/${gates.cap}</b> ${gates.waiting} waiting${load != null ? html`<small>load5 ${load}</small>` : ''}`);
-    // the oldest reading on the page: a kept fleet area can be older than the document.
-    const d = new Date([DOC.now, ...Object.values(DOC.observed || {}).map(o => o.at)].map(t => new Date(t).getTime()).reduce((x, y) => Math.min(x, y)));
-    put($('observed'), html`<b>${d.toISOString().slice(11, 16)}</b> UTC`);
   }
 
   // build (sd:2483): one object per row, for shell.read to put, and to retire once a read stops listing the row.
@@ -217,7 +214,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     // A part of the list that could not be read is said under it, never left out quietly.
     const unread = [['Work', DOC.work_error], ['Briefs', DOC.briefs_error]].filter(([, why]) => why);
     $('unread').hidden = !unread.length;
-    $('unread').textContent = unread.map(([k, why]) => `${k} could not be read: ${why}. Refresh tries again.`).join(' ');
+    $('unread').textContent = unread.map(([k, why]) => `${k} could not be read: ${why}. Read again tries again.`).join(' ');
     motion();
     digest();
     dayTrack();
@@ -235,7 +232,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     const items = [];
     rows.forEach(r => { const last = items[items.length - 1]; if (last && last.item === r.item) last.rows.push(r); else items.push({ item: r.item, title: r.title, rows: [r] }); });
     const shown = motionAll ? items : items.slice(0, SHOWN), more = items.length - shown.length;
-    put($('active'), a.error ? html`<tr class="empty"><td colspan="5">Sessions could not be read: ${a.error}. Refresh tries again.</td></tr>`
+    put($('active'), a.error ? html`<tr class="empty"><td colspan="5">Sessions could not be read: ${a.error}. Read again tries again.</td></tr>`
       : items.length ? html`${shown.map(it => { const sure = it.rows.every(r => r.verified), s = sure ? 'ok' : 'unknown', top = it.rows[0]; return html`<tr data-item="${it.item}">
         <td class="g g-${s}" title="${sure ? 'live' : 'a launch not confirmed: herdr was not read'}">${GLYPH[s]}</td>
         <td class="what"><a href="${window.shell.itemHref(it.item)}">#${it.item} ${it.title}</a></td>
@@ -257,7 +254,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
   function builds() {
     const B = DOC.builders || { rows: [], error: 'the document carried no builder runs' };
     $('builds-table').hidden = !B.rows.length && !B.error;
-    put($('builds'), B.error ? html`<tr class="empty"><td colspan="5">Builder runs could not be read: ${B.error}. Refresh tries again.</td></tr>`
+    put($('builds'), B.error ? html`<tr class="empty"><td colspan="5">Builder runs could not be read: ${B.error}. Read again tries again.</td></tr>`
       : html`${B.rows.map(b => { const s = BSTATE[b.state] || 'warning'; return html`<tr data-run="${b.run}">
         <td class="g g-${s}" title="${b.state === 'stalled' ? `stalled: no beat for ${Math.round(b.quiet / 60)}m` : b.state}">${GLYPH[s]}</td>
         <td class="what"><ul class="sessions">${b.items.map(it => html`<li><a href="${window.shell.itemHref(it.item)}">#${it.item} ${it.title}</a></li>`)}</ul><span class="via">${b.repo} · ${b.model || 'model not recorded'} · ${usd(b.usd)} so far</span></td>
@@ -276,7 +273,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
   function dayTrack() {
     const T = DOC.track || { error: 'the document carried no track' };
     if (T.error) {
-      put($('track-plot'), html`<p class="why">The day track was not read: ${T.error}. Refresh tries again.</p>`);
+      put($('track-plot'), html`<p class="why">The day track was not read: ${T.error}. Read again tries again.</p>`);
       put($('flowkey'), html``); put($('track-rows'), html``); $('track-table').hidden = true; return;
     }
     const t0 = Date.parse(T.since), t1 = Date.parse(T.until), X0 = 64, W = 900, x = at => (X0 + (W - X0 - 8) * (Date.parse(at) - t0) / (t1 - t0)).toFixed(1);
@@ -308,13 +305,13 @@ window.PAGE_FILTER = { '': 'Needs you' };
   // why and one fix each, and the questions waiting on Decide. A read that failed says so, never a quiet night.
   function digest() {
     const D = DOC.digest || { error: 'the document carried no digest' };
-    if (D.error) return put($('digest'), html`<p class="why">The digest was not read: ${D.error}. Refresh tries again.</p>`);
+    if (D.error) return put($('digest'), html`<p class="why">The digest was not read: ${D.error}. Read again tries again.</p>`);
     // sd:6259: a job or lane read that failed leaves the failures unknown, so the card never reads as a quiet night.
     if (!D.merged.length && !D.failed.length && !D.questions && !D.unknown) return put($('digest'), html`<p class="why">Nothing merged, failed or waiting since yesterday.</p>`);
     put($('digest'), html`<ul class="lines">${D.merged.map(m => html`<li><b>${m.repo}</b>: ${m.n} merged · ${m.titles.join(', ')}${m.n > m.titles.length ? ', …' : ''}</li>`)}
       ${D.more ? html`<li>and ${plural(D.more, 'more repo')}</li>` : ''}
       ${D.failed.map(f => html`<li class="g-warning"><b>${f.what}</b> · ${f.why} · ${f.fix}</li>`)}
-      ${D.unknown ? html`<li class="g-warning">Failed jobs and blocked lane entries unknown: ${D.unknown}. Refresh tries again.</li>` : ''}
+      ${D.unknown ? html`<li class="g-warning">Failed jobs and blocked lane entries unknown: ${D.unknown}. Read again tries again.</li>` : ''}
       ${D.questions ? html`<li><a href="/decide">${plural(D.questions, 'question')} ${D.questions === 1 ? 'waits' : 'wait'}</a></li>` : ''}</ul>
       ${D.prs.length ? html`<details><summary>${plural(D.prs.length, 'merged item')}</summary><ul class="prs">${D.prs.map(p => html`<li><a href="${shell.itemHref(p.item)}">#${p.item} ${p.title}</a> · ${p.repo}${p.pr ? ` · PR #${p.pr}` : ''}</li>`)}</ul></details>` : ''}`);
   }
@@ -324,7 +321,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
   const usd = n => `$${Number(n).toFixed(2)}`;
   function spendLine() {
     const S = DOC.spend || { error: 'the document carried no spend' };
-    if (S.error) return put($('spend'), html`Spend not read: ${S.error}. Refresh tries again.`);
+    if (S.error) return put($('spend'), html`Spend not read: ${S.error}. Read again tries again.`);
     const top = Math.max(...S.days, 0.01), H = 16;
     put($('spend'), html`<span class="lbl">Spend</span> 24h <b>${usd(S.day)}</b> · 7 days <b>${usd(S.week)}</b>
       <svg class="spark" viewBox="0 0 ${S.days.length * 6} ${H}" role="img" aria-label="${`Spent per day, oldest first: ${S.days.map(usd).join(', ')}`}">${S.days.map((d, i) => {
@@ -348,7 +345,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
   // ---------- Reading (build, sd:2483): shell.read reads /api/now ----------
   // The reader (read.js, sd:2418) holds the guards: of overlapping reads only the newest draws, a row the read no longer lists
   // runs no command, a selection whose row is gone moves to the first row the filter shows, and a failed read clears the page.
-  let reading = null, failed = '', reads = 0;
+  let reading = null, failed = '';
   function adopt(doc) {
     DOC = doc; NEEDS = doc.needs || []; SNOOZED = doc.snoozed; ACTIVE = doc.active || null;
     ALL = new Map(); NEEDS.forEach(r => { ALL.set(r.id, r); (r.members || []).forEach(m => ALL.set(m.id, m)); });
@@ -360,12 +357,11 @@ window.PAGE_FILTER = { '': 'Needs you' };
   function draw() {
     if (DOC) return render();
     // Nothing from the last read stays on screen: rows, counts, lamps, the observed time, the selection and the badge.
-    $('subhead').textContent = `Today could not be read: ${failed}. Refresh tries again.`;
+    $('subhead').textContent = `Today could not be read: ${failed}. Read again tries again.`;
     document.querySelectorAll('#annunciator .cell:not(.clock)').forEach(cell => { cell.dataset.state = 'unknown'; cell.title = 'Today could not be read'; put(cell.querySelector('.val'), html`<span class="ph">not read</span>`); });
-    put($('observed'), html`<span class="ph">not read</span>`);
     put($('tally'), html``); put($('intents'), html``);
     put($('rows'), html`<tr class="empty"><td colspan="6">Needs you could not be read: ${failed}</td></tr>`);
-    put($('active'), html`<tr class="empty"><td colspan="5">Sessions could not be read: ${failed}. Refresh tries again.</td></tr>`);
+    put($('active'), html`<tr class="empty"><td colspan="5">Sessions could not be read: ${failed}. Read again tries again.</td></tr>`);
     put($('active-tally'), html``); $('builds-table').hidden = true;
     $('active-note').hidden = true; $('unread').hidden = true;
     put($('track-plot'), html`<p class="why">The day track was not read: ${failed}.</p>`); put($('flowkey'), html``); $('track-table').hidden = true;
@@ -375,8 +371,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     attend();
   }
   function load() {
-    $('refresh').setAttribute('aria-busy', 'true'); reads++;
-    return reading.load().finally(() => { if (!--reads) $('refresh').removeAttribute('aria-busy'); });
+    return reading.load();
   }
 
   function clearSource() { srcFilter = null; intent = null; document.querySelectorAll('.cell[data-src]').forEach(x => x.setAttribute('aria-pressed', 'false')); if (DOC) { intents(); applyFilter(); } }
@@ -384,8 +379,8 @@ window.PAGE_FILTER = { '': 'Needs you' };
   // build (sd:3521): capture's repo default is the row's: a repo row names it in its id, a pull request as owner/name.
   window.PAGE_REPO = o => o && o.type === 'repo' ? o.id.split(':')[1] : (o && o.repo) || null;
 
-  // Read again (sd:5638): the shell's head button presses the Observed lamp.
-  window.PAGE_AGAIN = { title: 'Read Today again', run: () => $('refresh').click() };
+  // Read again (sd:5638): the shell's head button reads Today again; sd:6697 dropped the Observed lamp.
+  window.PAGE_AGAIN = { title: 'Read Today again', run: load };
 
   window.PAGE_COMMANDS = [
     { label: 'Clear the filter', icon: 'filter', run: clearSource },
@@ -500,7 +495,6 @@ window.PAGE_FILTER = { '': 'Needs you' };
     document.addEventListener('shell:picked', e => { picked = e.detail; mark(row()); });
     $('annunciator').addEventListener('click', e => {
       const c = e.target.closest('button.cell'); if (!c) return;
-      if (c.id === 'refresh') return load();
       srcFilter = srcFilter === c.dataset.src ? null : c.dataset.src;
       document.querySelectorAll('.cell[data-src]').forEach(x => x.setAttribute('aria-pressed', x.dataset.src === srcFilter));
       if (DOC) applyFilter();

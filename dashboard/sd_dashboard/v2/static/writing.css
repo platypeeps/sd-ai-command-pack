@@ -1,7 +1,6 @@
 /* Hallmark · pre-emit critique: P5 H4 E4 S5 R5 V4
  * Writing v2 (sd:2125): head + capture + pipeline board (vault ideas → accepted … published) with four gate lamps per piece,
  * and a focused editor (draft left, evidence right). Route: custom, locked to foundation/ and the v2 shell.css. From the design source's writing.css at 2729265. */
-.views { display: inline-flex; align-items: center; gap: var(--space-2xs); }
 .seg { display: inline-grid; grid-auto-flow: column; gap: 2px; padding: 2px; border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-md); background: var(--color-panel); }
 .seg button { display: inline-flex; align-items: center; gap: var(--space-2xs); min-height: 2.25rem; padding: 0 var(--space-sm); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--color-muted); font: 500 var(--text-sm)/1 var(--font-ui); cursor: pointer; white-space: nowrap; }
 .seg button:hover { color: var(--color-ink); background: var(--color-well); }
@@ -118,7 +117,7 @@
 }
 @media (max-width: 1239px) { .board { grid-auto-columns: minmax(15rem, 17rem); } }
 @media (max-width: 1023px) { .editor { grid-template-columns: minmax(0, 1fr); } .page { padding: var(--space-md) var(--space-lg); } }
-@media (max-width: 899px) { .head { align-items: stretch; } .views { width: 100%; justify-content: space-between; } }
+@media (max-width: 899px) { .head { align-items: stretch; } .toolbar > .tools { width: 100%; justify-content: space-between; } }
 @media (max-width: 719px) {
   .board { grid-auto-columns: 84%; scroll-snap-type: x mandatory; }
   .col { scroll-snap-align: start; }

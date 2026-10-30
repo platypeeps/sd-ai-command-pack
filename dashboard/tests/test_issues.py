@@ -22,7 +22,7 @@ from sd_dashboard.v2.pages import Read
 from sd_db import progress, repos, upsert_shadow, workflow, writes
 from support import NOW, ScreenCase
 from test_now_screen import JobsBackend, fleet_document
-from test_v2_tasks import MARKUP_JS, SHELL, STAND_IN
+from test_v2_tasks import ASIDE_JS, MARKUP_JS, SHELL, STAND_IN
 from test_v2_today import OSASCRIPT, run_js
 from test_workflow_actions import BrowserSession
 
@@ -206,6 +206,9 @@ function URLSearchParams(q) { var m = new Map(String(q || '').replace(/^[?]/, ''
 var els = {}, listeners = {};
 document.getElementById = id => (els[id] = els[id] || { id, replaceChildren(f) { sunk.push([id, f.parsed]); } });
 document.addEventListener = (t, f) => { listeners[t] = f; };
+window.shell = { aside: (() => { const { html } = window.markup;
+""" + ASIDE_JS + """
+    return aside; })() };
 """
 
     def drawn(self, detail, search=""):
@@ -242,7 +245,7 @@ document.addEventListener = (t, f) => { listeners[t] = f; };
 
     def test_a_failure_is_a_row_naming_it_and_none_is_said(self):
         failed = self.drawn({"issues": [], "error": "database is locked"})
-        self.assertIn("Issues could not be read: database is locked. Refresh tries again.", failed["issues"])
+        self.assertIn("Issues could not be read: database is locked. Read again tries again.", failed["issues"])
         self.assertNotIn("open", failed["issues-tally"])
         empty = self.drawn({"issues": [], "error": ""})
         self.assertIn("No open issue is assigned to you or filed by you", empty["issues"])
@@ -264,7 +267,10 @@ window.open = (u, t) => opened.push([u, t]);
 window.shell = { itemHref: n => `/tasks?item=${n}`, openItem: n => `#${n} opens in Tasks`, shq: v => `'${v}'`, row: () => null,
   openPane: tab => panes.push(tab), post: () => new Promise(() => {}),
   commands: { put: o => { objects[o.id] = o; }, get: id => objects[id], register: (...c) => registered.push(...c),
-    select: id => selected.push(id), bar: id => window.markup.html`<div class="bar">${id}</div>` } };
+    select: id => selected.push(id), bar: id => window.markup.html`<div class="bar">${id}</div>` },
+  aside: (() => { const { html } = window.markup;
+""" + ASIDE_JS + """
+    return aside; })() };
 """
 
     shadow = TheDetails.shadow
@@ -374,7 +380,7 @@ class TheIntakeTable(ScreenCase):
 
     PAGE = TheTable.PAGE + """
 var posted = [];
-window.shell = { post: (path, body) => { posted.push([path, body]); return new Promise(() => {}); } };
+window.shell = { aside: window.shell.aside, post: (path, body) => { posted.push([path, body]); return new Promise(() => {}); } };
 """
 
     def drawn(self, detail, then=""):
@@ -405,7 +411,7 @@ window.shell = { post: (path, body) => { posted.push([path, body]); return new P
 
     def test_a_failure_is_a_row_naming_it_and_none_is_said(self):
         failed = dict(self.drawn({"intake": [], "error": "database is locked"})["sunk"])
-        self.assertIn("Issue intake could not be read: database is locked. Refresh tries again.", failed["intake"])
+        self.assertIn("Issue intake could not be read: database is locked. Read again tries again.", failed["intake"])
         empty = dict(self.drawn({"intake": [], "error": ""})["sunk"])
         self.assertIn("No third-party issue waits for an item", empty["intake"])
 
@@ -476,7 +482,7 @@ JOB = {"name": "shadow-sync-nightly", "service": "gui/501/local.sd.shadow-sync-n
 
 
 class TheGitHubPage(ScreenCase):
-    """github.js and issues.js on the stand-in page with the shared commands: Hide, Show hidden and Sync now (sd:6175).
+    """github.js and issues.js on the stand-in page with the shared commands: Hide, Open | Hidden | All and Sync now (sd:6175, sd:6701).
     The stand-in server keeps the hidden keys a view POST writes and answers each read with them."""
 
     def run_page(self, body, *, issues_rows=None, intake_rows=None, sync=None, states=("idle",), store=None):
@@ -503,8 +509,9 @@ class TheGitHubPage(ScreenCase):
                   + "window.shell.row = () => null; window.shell.url = q => { location.search = q ? '?' + q : ''; };\n"
                   + GITHUB_JS + ISSUES_JS
                   + "\nvar R = {};\nconst show = id => document.dispatchEvent(new CustomEvent('shell:view', { detail: { id } }));\n"
-                  + "const click = f => (DOC_LISTENERS.click || []).forEach(h => h({ target: { closest: s => s.includes(`[data-f=\"${f}\"]`)"
-                    " ? { dataset: { f, v: '1' } } : null } }));\n"
+                  # sd:6701: click('hidden', v) presses Open | Hidden | All's v, Hidden by default.
+                  + "const click = (f, v = 'aside') => (DOC_LISTENERS.click || []).forEach(h => h({ target: { closest: s => s.includes(`[data-f=\"${f}\"]`)"
+                    " ? { dataset: { f, v: '1' } } : f === 'hidden' && s.includes('[data-aside=\"hidden\"]') ? { dataset: { aside: f, v } } : null } }));\n"
                   + "const act = (id, obj) => C.run(cmd(id), C.get(obj));\n"
                   + "(async () => { try {\n(DOC_LISTENERS.DOMContentLoaded || []).forEach(f => f());\nawait flush();\n"
                   + body + "\n} catch (e) { OUT.error = String(e) + ' ' + e.stack; } })();\n"
@@ -526,8 +533,7 @@ class TheGitHubPage(ScreenCase):
         self.assertIn("Crash on start", r["after"])
         self.assertEqual((r["n0"], r["n1"], r["n2"]), (2, 1, 2))
         self.assertIn("<span>1 open</span>", r["tally"])
-        self.assertIn('data-f="hidden"', r["bar"])
-        self.assertIn('Show hidden <span class="n">1</span>', r["bar"])
+        self.assertIn('data-aside="hidden" data-v="aside" aria-pressed="false">Hidden <span class="n">1</span>', r["bar"])
         self.assertIn("Hidden · Jira EXAMPLE-8", r["toast"])
         self.assertIn("Fix the widget", r["back"])
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/github/issues/view", {"key": "jira:EXAMPLE-8", "hidden": True}],
@@ -538,13 +544,17 @@ class TheGitHubPage(ScreenCase):
                             " click('hidden'); await flush(); R.shown = ELS.issues.html; R.search = location.search;"
                             " R.unhide = C.offWhy(cmd('jira issue.unhide'), C.get('iss:jira:EXAMPLE-8'));"
                             " R.hide = C.offWhy(cmd('jira issue.hide'), C.get('iss:jira:EXAMPLE-8'));"
-                            " act('jira issue.unhide', 'iss:jira:EXAMPLE-8'); await flush(); R.after = ELS.issues.html;")
+                            " act('jira issue.unhide', 'iss:jira:EXAMPLE-8'); await flush(); R.after = ELS.issues.html;"
+                            " click('hidden', 'all'); await flush(); R.all = ELS.issues.html; R.allSearch = location.search;")
         r = out["R"]
         self.assertIn("Fix the widget", r["shown"])
         self.assertNotIn("Crash on start", r["shown"])
         self.assertEqual(r["search"], "?hidden=1")
         self.assertEqual((r["unhide"], r["hide"]), ("", "already hidden"))
         self.assertNotIn("Fix the widget", r["after"])
+        self.assertIn("Fix the widget", r["all"])
+        self.assertIn("Crash on start", r["all"])
+        self.assertEqual(r["allSearch"], "?hidden=all")
 
     def test_a_page_opened_with_hidden_1_shows_the_hidden_rows(self):
         rows = [{"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix the widget",
@@ -562,7 +572,7 @@ class TheGitHubPage(ScreenCase):
         r = out["R"]
         self.assertEqual((r["n0"], r["n1"]), (1, 0))
         self.assertNotIn("Docs typo", r["after"])
-        self.assertIn('Show hidden <span class="n">1</span>', r["bar"])
+        self.assertIn('data-aside="hidden" data-v="aside" aria-pressed="false">Hidden <span class="n">1</span>', r["bar"])
         self.assertIn("Docs typo", r["shown"])
 
     def test_an_unread_view_store_turns_hide_off_with_the_reason(self):
