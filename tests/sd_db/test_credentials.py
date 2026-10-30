@@ -114,6 +114,39 @@ class Probes(unittest.TestCase):
         probes, _ = self.check(github=(200, {}))
         self.assertEqual((probes["github_pat"]["valid"], probes["github_pat"]["expires"]), (True, None))
 
+    def test_aws_reads_each_profile_and_region_and_names_a_failed_read(self):
+        """sd:6713: my running AWS resources, one bounded aws call per read; a failure is named, not an empty list."""
+        answers = {"ec2": (0, json.dumps([{"id": "i-1", "name": "box", "since": "2026-10-01T00:00:00Z"}])),
+                   "cloudformation": (255, "")}
+        calls = []
+
+        def run(argv, timeout):
+            if argv[0] != "aws":
+                return Fakes().run(argv, timeout)
+            calls.append(argv)
+            return answers[argv[11]]
+
+        body = credentials.check(self.db, env={"SD_AWS_READ": "me:us-east-1"}, get=Fakes().get, run=run,
+                                 now="2026-10-06T09:10:00Z")
+        self.assertEqual(body["aws"], {
+            "resources": [{"type": "EC2 instance", "profile": "me", "region": "us-east-1", "id": "i-1", "name": "box",
+                           "since": "2026-10-01T00:00:00Z"}],
+            "errors": ["me us-east-1 CloudFormation stack: aws exited 255"]})
+        self.assertEqual([argv[:7] for argv in calls], [["aws", "--profile", "me", "--region", "us-east-1",
+                                                         "--cli-connect-timeout", "10"]] * 2)
+        self.assertNotIn("aws", credentials.check(self.db, env={}, get=Fakes().get, run=run))
+
+    def test_aws_entry_without_a_region_is_an_error_not_an_empty_read(self):
+        """sd:6713 review: `me` or `me:` reads nothing, so it is named, never a green zero."""
+        def run(argv, timeout):
+            self.assertNotEqual(argv[0], "aws")
+            return Fakes().run(argv, timeout)
+
+        for setting in ("me", "me:", ":us-east-1"):
+            body = credentials.check(self.db, env={"SD_AWS_READ": setting}, get=Fakes().get, run=run)
+            self.assertEqual(body["aws"], {"resources": [], "errors": [
+                f"SD_AWS_READ entry {setting!r}: want profile:region,region"]})
+
 
 class Redirects(unittest.TestCase):
     """A token goes only where it was addressed: `_get` follows no redirect (sd:2203 review)."""

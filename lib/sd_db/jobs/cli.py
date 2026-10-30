@@ -227,6 +227,8 @@ def command_credentials(argv: list[str]) -> int:
         connection.close()
     for probe in body["probes"]:
         print(credentials.describe(probe))
+    if "aws" in body:
+        print(f"aws: {len(body['aws']['resources'])} running resources, {len(body['aws']['errors'])} reads failed")
     return 0
 
 
