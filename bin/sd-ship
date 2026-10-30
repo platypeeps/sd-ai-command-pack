@@ -2997,7 +2997,7 @@ def main(argv=None) -> int:
         return 3
     try:
         from sd_db import ship
-        from sd_db.database import connect, default_path
+        from sd_db.database import Patient, connect, default_path
         from sd_db.errors import SdDbError
         from sd_db.workflow import WorkflowError
     except ImportError as error:
@@ -3012,7 +3012,8 @@ def main(argv=None) -> int:
         sd_lib.refuse_unmanaged(root, unmanaged_refusal, args.database)
         database = args.database or default_path()
         readonly = args.command in ("observe", "verify-review") or (args.command == "adjudicate" and args.dispositions_file is None)
-        connection = connect(database, write=not readonly)
+        # A write a locked database refused is sent again, not a failed lane entry (sd:6855).
+        connection = Patient(connect(database, write=not readonly))
         try:
             if args.command in ("review", "verify-review") and not args.no_item:
                 raise Refusal("item-backed review and clearance run inside prepare and merge; --no-item selects the standalone record path")
