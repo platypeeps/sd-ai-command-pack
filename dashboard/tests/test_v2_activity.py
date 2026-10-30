@@ -323,7 +323,7 @@ class TheScript(ScreenCase):
             ["pr.item", "pull request", "safe", "i", None, True, False, False],
             ["review.open", "review", "safe", "o", None, True, False, False],
             ["review.item", "review", "safe", "i", None, True, False, False],
-            ["asg.get", "assignment", "safe", "o", False, True, False, False],  # copy only: Details show it (sd:3524)
+            ["asg.get", "assignment", "safe", "o", True, True, False, False],  # runs sd assignments get (sd:6682)
             ["asg.item", "assignment", "safe", "i", None, True, False, False],
             ["jobs.retry", "job", "safe", "t", None, True, False, True],
             ["jobs.log", "job", "safe", "l", True, True, False, False],
@@ -412,6 +412,18 @@ shellRun(cmd('jobs.log'), C.get('job:nightly-sync')); await flush(); R.details =
         self.assertIn('<section class="ran" data-obj="job:nightly-sync"', out["R"]["details"])
         self.assertIn("Exit 0 · <code>local-cron-jobs/cron-jobs.sh logs nightly-sync</code>", out["R"]["details"])
         self.assertIn("<pre class=\"code\">the log &lt;tail&gt;</pre>", out["R"]["details"])
+
+    def test_show_assignment_runs_sd_assignments_get_and_shows_its_output(self):
+        """sd:6682: Show assignment selected the row a click already shows; it now runs the line and Details shows it."""
+        n = self.ids["blocked"]
+        out = self.run_page(f"""const was = ANSWER; ANSWER = (p, b) => p === '/api/actions/run' ? [200, {{ action: b.action, label: 'Show assignment', line: `sd assignments get ${{b.assignment}}`, exit: 0, output: 'assignment {n} blocked', cut: false }}] : was(p, b);
+R.executes = cmd('asg.get').executes;
+shellRun(cmd('asg.get'), C.get('run:{n}')); await flush(); R.details = ELS.details.html;""")
+        self.assertEqual(out["posts"], [["/api/actions/run", {"action": "assignment.get", "assignment": n}, 64]])
+        self.assertIs(out["R"]["executes"], True)
+        self.assertEqual(out["toasts"], [["Show assignment · exit 0 · the output is in Details", False]])
+        self.assertIn(f"Exit 0 · <code>sd assignments get {n}</code>", out["R"]["details"])
+        self.assertIn(f"assignment {n} blocked", out["R"]["details"])
 
     def test_show_output_reads_the_execution_record_into_details(self):
         note = self.ids["bad_run"]

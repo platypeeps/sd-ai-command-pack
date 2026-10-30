@@ -377,7 +377,7 @@ addEventListener('DOMContentLoaded', () => {
     // build: the design's review.open; its review.lane re-runs a review, which a recorded one cannot ask for, so it is left out.
     window.commands.openPullRequest({ on: 'review', pr: o => ({ repo: `${o.owner}/${o.repo}`, number: o.pr, url: o.url }) }),
     { id: 'review.item', on: 'review', label: 'Open item', does: 'Opens the work item this review names.', key: 'i', risk: 'safe', when: o => !!o.item || 'the delivery names no work item', cli: o => `sd task show ${o.item}`, run: o => openItem(o.item) },
-    window.commands.showAssignment({ run: o => { select(o.id, true); return `Assignment #${o.n} shown in Details`; } }),
+    window.commands.showAssignment(),
     { id: 'asg.item', on: 'assignment', label: 'Open item', does: 'Opens the work item this assignment works on.', key: 'i', risk: 'safe', when: o => !!o.item || 'the assignment names no item', cli: o => `sd task show ${o.item}`, run: o => openItem(o.item) },
     // Retry (commands.js): it posts /api/jobs/<job>/retry with the job's revision, as Operations > Jobs does; launchd starts
     // the run.

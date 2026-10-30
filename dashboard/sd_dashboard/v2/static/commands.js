@@ -92,10 +92,12 @@
       run: o => runAction(o, 'job.print', { job: job(o).name }) };
   }
 
-  // Show assignment: `sd assignments get` prints what the page's Details show, so the line is copy only. run(o) shows it.
-  function showAssignment({ primary = () => true, run }) {
-    return { id: 'asg.get', on: 'assignment', label: 'Show assignment', does: 'Shows the assignment\'s record in Details.', key: 'o', icon: 'clipboard-list', risk: 'safe', primary, executes: false,
-      cli: o => `sd assignments get ${o.n}`, run };
+  // Show assignment (sd:6682): the server runs `sd assignments get` for the row's number and Details shows its output,
+  // which a row click does not. `o.n` is the assignment's number.
+  function showAssignment({ primary = () => true } = {}) {
+    return { id: 'asg.get', on: 'assignment', label: 'Show assignment', does: 'Prints the assignment\'s record in Details.', key: 'o', icon: 'clipboard-list', risk: 'safe', primary, executes: true,
+      cli: o => `sd assignments get ${o.n}`, sends: o => `POST /api/actions/run {action: assignment.get, assignment: ${o.n}}`,
+      run: o => runAction(o, 'assignment.get', { assignment: o.n }) };
   }
 
   // Open a pull request on GitHub, in a new tab, from a pull request row or a review of one (`on`). `pr(o)` names
