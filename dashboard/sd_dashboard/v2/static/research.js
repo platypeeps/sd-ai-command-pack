@@ -693,7 +693,7 @@ function registerCommands() {
   const C = shell.commands;
   C.put(DRAFT); C.put(PAGE);
   C.register(
-    { id: 'research.render', on: 'research project', label: 'Render', does: 'Renders the project in its checkout and queues its Notion mirror; a session writes Notion later.', key: 'r', icon: 'rotate-ccw', risk: 'safe', executes: true, primary: o => o.s === 'caution',
+    { id: 'research.render', on: 'research project', label: 'Render', does: 'Renders in its checkout and queues the Notion mirror; a session writes it later.', key: 'r', icon: 'rotate-ccw', risk: 'safe', executes: true, primary: o => o.s === 'caution',
       cli: o => `cd ${shPath(o.path)} && sd-research-kit render`, sends: o => `POST /api/research/render {"repo": "${o.key}"}`,
       run: o => window.shell.post('/api/research/render', { repo: o.key }).then(run => { followRun(run, o, 'render'); return `Rendering ${o.label} · run ${run.id}`; }, refused) },
     { id: 'research.review', on: 'research project', label: 'Review', does: 'Runs the research kit\'s mechanical pre-publication checks here; Details show the report.', key: 'v', icon: 'shield-check', risk: 'safe', executes: true,

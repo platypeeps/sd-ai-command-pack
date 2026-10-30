@@ -939,7 +939,7 @@ R.lines = ['research.render', 'research.review'].map(id => [cmd(id).executes, cm
                   f" : path === '/api/research/research/beta' ? [200, {json.dumps(self.ledger)}] : [404, {{ error: 'none' }}]")
         out = self.run_page("""R.does = cmd('research.render').does; select('research/beta', false);
 shellRun(cmd('research.render'), C.get('research/beta')); await flush(); await flush(); R.det = ELS.details.html;""", answer=answer)
-        self.assertEqual(out["R"]["does"], "Renders the project in its checkout and queues its Notion mirror; a session writes Notion later.")
+        self.assertEqual(out["R"]["does"], "Renders in its checkout and queues the Notion mirror; a session writes it later.")
         self.assertIn("<h3>Last render</h3>", out["R"]["det"])
         self.assertIn("<li>mirror: queued 10-notes/notes.md -&gt; notion:abc</li>", out["R"]["det"])
 
