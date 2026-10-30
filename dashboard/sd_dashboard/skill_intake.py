@@ -8,7 +8,8 @@ temporary directory; nothing here calls git or gh, and `skills_screen` stays fre
 
 The Intake view's tracked repositories (system sd:5478) are the pack's too: `repos` reads `sd skill intake --tracked --json`
 and `tracking` runs `--track`, `--untrack` or `--refresh` with one https://github.com/<owner>/<repo> URL. The list is one
-workflow database setting row the verb writes; a refresh fetches and judges, and installs nothing.
+workflow database setting row the verb writes; a refresh fetches and judges, and installs nothing unless the page sent
+`apply` (pack sd:6686): then the verb installs the new revision of each installed skill whose verdict is install.
 
 Rollback (system sd:5779) is the same run with `--rollback` and an installed skill's name: its report swaps the installed
 copy with the one its last install replaced, and `--approve` makes the swap, again only for the revision a report printed.
@@ -66,24 +67,30 @@ def repos():
 
 
 def tracking(payload: dict):
-    """Check the page's request, then return the run: `--track URL [--scope]`, `--untrack URL` or `--refresh URL`.
+    """Check the page's request, then return the run: `--track URL [--scope]`, `--untrack URL` or `--refresh URL [--apply]`.
 
-    A refresh reports; it never installs: each skill it lists installs only through `intake` with `approve`."""
+    A refresh reports (Review); with `apply` (Refresh) it also updates the installed skills its report says install."""
     values = dict(payload)
-    action, url, scope = values.get("action"), values.get("url"), values.get("scope")
-    if set(values) - {"action", "url", "scope"} or action not in TRACKING:
+    action, url, scope, apply = values.get("action"), values.get("url"), values.get("scope"), values.get("apply", False)
+    if set(values) - {"action", "url", "scope", "apply"} or action not in TRACKING:
         raise ValueError("Track, untrack or refresh one repository.")
     if not isinstance(url, str) or not REPO.fullmatch(url) or url.rsplit("/", 1)[1] in (".", ".."):
         raise ValueError("Give a repository URL: https://github.com/<owner>/<repo>.")
     if scope is not None and (action != "track" or scope not in ("pack", "user")):
         raise ValueError("A scope goes with Track only: pack or user.")
-    argv = [command("sd"), "skill", "intake", "--json", f"{TRACKING[action]}={url}", *([f"--scope={scope}"] if scope else [])]
+    if apply not in (True, False) or (apply and action != "refresh"):
+        raise ValueError("Apply goes with Refresh only.")
+    argv = [command("sd"), "skill", "intake", "--json", f"{TRACKING[action]}={url}", *([f"--scope={scope}"] if scope else []),
+            *(["--apply"] if apply else [])]
     seconds = INTAKE_SECONDS if action == "refresh" else LIST_SECONDS
 
     def run(_connection):
         try:
             done = _run(argv, seconds)
         except (OSError, subprocess.SubprocessError) as error:
+            if apply:
+                return 502, {"error": f"sd skill intake gave no answer ({error}); whether it updated any skill is not known. "
+                                      "Review shows what is installed now.", "outcome": "unknown"}
             if action == "refresh":
                 return 502, {"error": f"Not refreshed: sd skill intake gave no answer ({error}). Nothing was installed."}
             return 502, {"error": f"sd skill intake gave no answer ({error}); read the list again to see whether it changed.",
@@ -94,6 +101,10 @@ def tracking(payload: dict):
         said = _said(done)
         if done.returncode and "changed since they were read" in said:
             raise workflow.StaleItem(f"Not changed: {said}")
+        # An applying refresh refused before its fetch installed nothing; any other failure may have updated a skill.
+        if apply and "is not tracked" not in said:
+            return 502, {"error": f"sd skill intake exited {done.returncode}: {said or 'no output'}; whether it updated any skill "
+                                  "is not known. Review shows what is installed now.", "outcome": "unknown"}
         if done.returncode and (action == "refresh" or said.endswith("nothing written") or "not a GitHub repository" in said
                                 or "already" in said):
             raise ValueError(f"Not {'refreshed' if action == 'refresh' else 'changed'}: {said}")

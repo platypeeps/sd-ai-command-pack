@@ -1069,6 +1069,14 @@ open({port}); await flush(); R.port = ELS.details.html;""")
         self.assertEqual(sorted(out["R"]["off"]), sorted([f"item.status.{s}" for s in ("planning", "ready", "in_progress", "blocked", "done")]
                                                         + ["item.complete", "item.p1", "item.p2", "item.p3", "item.p4", "item.edit", "item.move"]))
 
+    def test_status_and_priority_leave_the_row_menu_and_keep_their_keys(self):
+        """sd:6687: Tasks, Home, HOA and the place pages share these commands; the ⋯ menu drops Status → and Edit → P,
+        while keys 1-5, bulk and the Details fields still change them."""
+        out = self.run_page("R.off = REG.filter(c => c.menu === false).map(c => c.id); R.keys = REG.filter(c => c.menu === false && c.key).map(c => c.key);")
+        self.assertEqual(sorted(out["R"]["off"]), sorted([f"item.status.{s}" for s in ("planning", "ready", "in_progress", "blocked", "done")]
+                                                        + ["item.p1", "item.p2", "item.p3", "item.p4"]))
+        self.assertEqual(out["R"]["keys"], ["1", "2", "3", "4", "5"])
+
     def test_a_field_change_writes_once_with_its_cli_line_and_undo(self):
         plan = self.ids["plan"]
         row = self.row("plan")

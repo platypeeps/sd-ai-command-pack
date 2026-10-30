@@ -929,6 +929,20 @@ R.lines = ['research.render', 'research.review'].map(id => [cmd(id).executes, cm
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/research/render", {"repo": "research/beta"}],
                                                          ["/api/research/review", {"repo": "research/beta"}]])
 
+    def test_renders_tip_and_details_name_the_queued_notion_mirror(self):
+        """sd:6698: Render queues the Notion mirror and never writes Notion; its tip says so, and Details after a
+        render list the run's mirror lines."""
+        run = {"id": "render-20260906T120000Z", "state": "done", "reason": None, "repo": "research/beta", "finished": NOW,
+               "mirrors": ["mirror: queued 10-notes/notes.md -> notion:abc"]}
+        answer = (f"(path) => path === '/api/research' ? [200, {json.dumps(self.doc)}]"
+                  f" : path === '/api/research/render' ? [202, {json.dumps(run)}]"
+                  f" : path === '/api/research/research/beta' ? [200, {json.dumps(self.ledger)}] : [404, {{ error: 'none' }}]")
+        out = self.run_page("""R.does = cmd('research.render').does; select('research/beta', false);
+shellRun(cmd('research.render'), C.get('research/beta')); await flush(); await flush(); R.det = ELS.details.html;""", answer=answer)
+        self.assertEqual(out["R"]["does"], "Renders in its checkout and queues the Notion mirror; a session writes it later.")
+        self.assertIn("<h3>Last render</h3>", out["R"]["det"])
+        self.assertIn("<li>mirror: queued 10-notes/notes.md -&gt; notion:abc</li>", out["R"]["det"])
+
     def test_make_experiment_drafts_one_for_the_rows_project_and_is_off_when_linked(self):
         # sd:5662: a project row and its Details turn the project into an experiment: a draft create naming the project.
         out = self.run_page("""const beta = C.get('research/beta');

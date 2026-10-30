@@ -952,6 +952,73 @@ class TheRefresh(TrackedCase):
         self.assertIn("one path segment", failed[0]["error"])
         self.assertIn("4 new", report["result"])
 
+    def test_an_applying_refresh_updates_installed_skills_and_leaves_new_and_folded_ones(self) -> None:
+        # sd:6686: Refresh installs the new revision of each installed skill whose verdict is install, through the
+        # approval path; a new skill and an installed one whose verdict is fold or decline stay as they were.
+        self.install("ledger")
+        self.install("planner")
+        self.write(self.upstream / "skills" / "ledger", GOOD + "\nSecond version.\n")
+        self.write(self.upstream / "skills" / "planner", PLANNER + "\nSecond version.\n")
+        commit = self.commit()
+        planner = (self.root / "contrib" / "sd-planner" / "SKILL.md").read_bytes()
+        report = intake.refresh(self.connection, self.REPO, self.root, self.home, TODAY, apply=True)
+        self.assertEqual([(a["skill"], a["scope"], a["commit"]) for a in report["applied"]], [("sd-ledger", "pack", commit)])
+        self.assertIn("Second version.", (self.root / "contrib" / "sd-ledger" / "SKILL.md").read_text(encoding="utf-8"))
+        self.assertEqual(intake.source_of(self.root / "contrib" / "sd-ledger")[1], commit)
+        self.assertEqual((self.root / "contrib" / "sd-planner" / "SKILL.md").read_bytes(), planner)
+        for name in ("installer", "tabulate"):
+            self.assertFalse((self.root / "contrib" / f"sd-{name}").exists(), name)
+        skipped = {each["skill"]: each["why"] for each in report["skipped"]}
+        self.assertTrue(skipped["sd-planner"].startswith("verdict fold"), skipped)
+        self.assertIn("new skill", skipped["sd-tabulate"])
+        self.assertNotIn("sd-ledger", skipped)
+        # The update keeps the copy it replaced, so Rollback undoes it from the same place.
+        self.assertEqual(intake.rollback("sd-ledger", scope="pack", approve=None, root=self.root, home=self.home)["mode"], "rollback")
+
+    def test_an_applying_refresh_leaves_a_locally_edited_skill_for_its_report(self) -> None:
+        # Review of sd:6686: a local edit reads as re-import, and the auto-approved revision bound the edit, so it was
+        # overwritten. A skill changed since the intake wrote it is skipped, upstream moved or not.
+        self.install("ledger")
+        self.install("planner")
+        edited = self.root / "contrib" / "sd-ledger" / "SKILL.md"
+        edited.write_text(edited.read_text(encoding="utf-8").replace("Step 1 of", "Local note. Step 1 of"), encoding="utf-8")
+        for moved in (False, True):
+            with self.subTest(upstream_moved=moved):
+                if moved:
+                    self.write(self.upstream / "skills" / "ledger", GOOD + "\nSecond version.\n")
+                    self.commit()
+                report = intake.refresh(self.connection, self.REPO, self.root, self.home, TODAY, apply=True)
+                self.assertEqual(report["applied"], [])
+                skipped = {each["skill"]: each["why"] for each in report["skipped"]}
+                self.assertIn("local edit", skipped["sd-ledger"])
+                self.assertIn("SKILL.md", skipped["sd-ledger"])
+                self.assertIn("Local note.", edited.read_text(encoding="utf-8"))
+
+    def test_an_install_that_fails_after_its_swap_is_unknown_not_left_as_is(self) -> None:
+        # Review of sd:6686: install() swaps the new copy in before it keeps the old one; an OSError there was reported as
+        # "not installed" while the new copy stood. A failure the intake cannot place before its write is unknown.
+        self.install("ledger")
+        self.write(self.upstream / "skills" / "ledger", GOOD + "\nSecond version.\n")
+        self.commit()
+        with mock.patch.object(intake, "_keep", side_effect=OSError("disk full")):
+            report = intake.refresh(self.connection, self.REPO, self.root, self.home, TODAY, apply=True)
+        self.assertIn("Second version.", (self.root / "contrib" / "sd-ledger" / "SKILL.md").read_text(encoding="utf-8"))
+        self.assertEqual(report["applied"], [])
+        self.assertNotIn("sd-ledger", {each["skill"] for each in report["skipped"]})
+        [unknown] = report["unknown"]
+        self.assertEqual(unknown["skill"], "sd-ledger")
+        self.assertIn("not known", unknown["why"])
+        self.assertIn("disk full", unknown["why"])
+        self.assertIn("1 not known", report["result"])
+
+    def test_a_refresh_without_apply_lists_nothing_applied(self) -> None:
+        self.install("ledger")
+        self.write(self.upstream / "skills" / "ledger", GOOD + "\nSecond version.\n")
+        self.commit()
+        report = self.refresh()
+        self.assertNotIn("applied", report)
+        self.assertNotIn("Second version.", (self.root / "contrib" / "sd-ledger" / "SKILL.md").read_text(encoding="utf-8"))
+
     def test_a_refresh_of_an_untracked_repository_is_refused(self) -> None:
         with self.assertRaisesRegex(intake.IntakeError, "is not tracked"):
             self.refresh()
@@ -1035,6 +1102,17 @@ class TheTrackingVerb(TrackedCase):
         self.assertIn("result: 4 new", output)
         self.assertRegex(output, r"approve: sd skill intake \S+/tree/main/skills/ledger --scope pack --approve [0-9a-f]{16}")
         self.assertNotIn("skills/installer --scope", output, "a refused skill offers no approval")
+
+    def test_refresh_apply_prints_each_update_with_its_rollback(self) -> None:
+        self.install("ledger")
+        self.write(self.upstream / "skills" / "ledger", GOOD + "\nSecond version.\n")
+        self.commit()
+        code, output = self.run_verb("--refresh", self.REPO, "--apply")
+        self.assertEqual(code, 0)
+        self.assertRegex(output, r"updated: sd-ledger \(pack\) to [0-9a-f]{12} · rollback: sd skill intake sd-ledger --rollback --scope pack")
+        self.assertRegex(output, r"skipped: sd-installer: ")
+        with self.assertRaises(sd_skill.SkillRefusal):
+            self.run_verb("--track", self.REPO, "--apply")
 
     def test_one_action_at_a_time(self) -> None:
         for argv in ((), (URL.format("ledger"), "--refresh", self.REPO), ("--refresh", self.REPO, "--approve", "0" * 16),

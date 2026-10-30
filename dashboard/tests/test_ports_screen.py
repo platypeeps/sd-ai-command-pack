@@ -684,9 +684,11 @@ class CollectionBudget(unittest.TestCase):
         self.assertEqual(result.stdout, "Proto (state)\ntcp4 *.2 LISTEN")
 
     def test_netstat_listen_rows_still_spend_the_byte_ceiling(self):
+        # Read through a budget with no own timeout and a long deadline: the
+        # page's 3-second netstat timeout lost to a loaded gate (sd:6739).
         self.busy_netstat(listen=[str(port) for port in range(10000, 11000)], rows=0)
-        html, _ = self.page()
-        self.assertIn("netstat wrote more than its budget of 64 KB", html)
+        with self.assertRaisesRegex(self.module.OverBudget, "netstat wrote more than its budget of 64 KB"):
+            self.module.Budget(60.0).run([str(self.bin / "netstat")], keep=self.module.netstat_kept)
 
     def test_size_ceiling_is_applied_while_reading(self):
         # Review N2. A scan that never stops writing, under a time ceiling far
