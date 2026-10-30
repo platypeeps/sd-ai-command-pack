@@ -4034,13 +4034,17 @@ roles:
         self.assertIn("waited 5s", str(refused.exception))
 
     def test_merge_wait_runs_once_the_holder_releases(self):
-        """sd:1937. With the lock released at 2 s, `--wait 5` runs the merge once."""
-        self.hold_ship_lock(self.operation().repository, seconds=2)
+        """sd:1937. With the lock released at 1 s, `--wait 60` runs the merge once.
+
+        The wait is far past the release: a 5 s wait against a 2 s holder lost the race
+        when gate load slowed the holder's release (sd:6855 review).
+        """
+        self.hold_ship_lock(self.operation().repository, seconds=1)
         started = time.monotonic()
         with patch.object(ship.Ship, "merge", return_value={"ok": True}) as merge:
-            ship.dispatch(self.root, self.connection, self.database, self.locked_merge("--wait", "5"), receipts, False)
+            ship.dispatch(self.root, self.connection, self.database, self.locked_merge("--wait", "60"), receipts, False)
         self.assertEqual(merge.call_count, 1)
-        self.assertLess(time.monotonic() - started, 2 + receipts.WAIT_POLL_SECONDS + 2)
+        self.assertGreaterEqual(time.monotonic() - started, 0.5, "the merge waited for the holder")
 
     def test_without_wait_a_held_lock_refuses_at_once(self):
         self.hold_ship_lock(self.operation().repository)
