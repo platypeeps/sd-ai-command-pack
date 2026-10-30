@@ -1090,6 +1090,7 @@ class StalledRootTests(PluginFixture):
     def test_a_root_silent_past_the_bound_is_skipped_with_a_warning(self) -> None:
         sd = load_sd()
         sd.ROOT_READ_SECONDS = 0.3
+        sd.root_read_seconds = lambda: sd.ROOT_READ_SECONDS  # the message names the bound; load must not move it
         stalled, owner = str(self.stalled()), str(self.owner())
         said, found = io.StringIO(), {}
 
@@ -1110,6 +1111,7 @@ class StalledRootTests(PluginFixture):
 
         sd = load_sd()
         sd.ROOT_READ_SECONDS = 0.3
+        sd.root_read_seconds = lambda: sd.ROOT_READ_SECONDS  # the message names the bound; load must not move it
         stalled, owner = str(self.stalled()), str(self.owner())
         said, shown, done = io.StringIO(), io.StringIO(), []
         args = argparse.Namespace(json=True)
@@ -1128,6 +1130,28 @@ class StalledRootTests(PluginFixture):
         self.assertEqual([(e["root"], e["readable"], e.get("prefix")) for e in json.loads(shown.getvalue())],
                          [(stalled, False, None), (owner, True, "pp")])
         self.assertIn(f"warning: skipped plugin root {stalled}: {silent}", said.getvalue())
+
+    def test_a_loaded_machine_stretches_the_bound_for_a_slow_root(self) -> None:
+        """A gate at load 3 per core read a local manifest past 5 s and skipped it: starved, not hung."""
+
+        sd = load_sd()
+        sd.ROOT_READ_SECONDS = 1.0
+        owner = str(self.owner())
+        read = sd.read_manifest
+
+        def starved_read(path: pathlib.Path) -> dict[str, object]:
+            time.sleep(1.5)
+            return read(path)
+
+        sd.read_manifest = starved_read
+        cores = os.cpu_count() or 1
+        with mock.patch.object(sd.os, "getloadavg", return_value=(3.0 * cores, 0.0, 0.0)), \
+                contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(list(sd.scan([owner])), ["pp"])
+        with mock.patch.object(sd.os, "getloadavg", return_value=(99.0 * cores, 0.0, 0.0)):
+            self.assertEqual(sd.root_read_seconds(), 3.0)
+        with mock.patch.object(sd.os, "getloadavg", return_value=(0.0, 0.0, 0.0)):
+            self.assertEqual(sd.root_read_seconds(), 1.0)
 
     def test_registration_refuses_while_a_root_is_silent(self) -> None:
         """A silent root may own the prefix being registered; a uniqueness check cannot skip it."""
