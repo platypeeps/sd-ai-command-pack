@@ -130,6 +130,16 @@ class Decisions(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIsNone(self.decision(bash(command, timeout=600000)))
 
+    def test_a_kill_by_pattern_is_denied_and_a_kill_by_pid_passes(self) -> None:
+        """Pack sd:6815: `pkill -f "sd-check --json"` ended another job's queued gate."""
+        for command in ('pkill -f "sd-check --json"', "cd /tmp/wt && pkill -f sd-check; grep x y",
+                        "killall python3", "/usr/bin/pkill -TERM -f make", "sudo killall sd-check"):
+            with self.subTest(command=command):
+                self.assertDenied(bash(command, timeout=600000), "another session's gate", "kill <pid>")
+        for command in ("kill 4242", "kill -- -4242", "pgrep -f sd-check", "grep -n pkill notes.txt"):
+            with self.subTest(command=command):
+                self.assertIsNone(self.decision(bash(command, timeout=600000)))
+
     def test_a_mention_is_an_accepted_false_deny_that_names_the_way_past(self) -> None:
         """A builder is not hostile: a false deny costs a rephrase, a miss costs work."""
         for command in ("echo git stash", "git commit -m 'git stash'", "git log --grep stash",

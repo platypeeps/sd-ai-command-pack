@@ -20,6 +20,9 @@ for builders only and the lead's own background watches keep working.
   rounds found shell forms a parser missed. A mention, such as a commit
   message, is a false deny the refusal says how to rephrase; a builder is
   not hostile, and a miss costs lost work.
+- Bash with `pkill` or `killall` in command position: denied (sd:6815). A
+  pattern matches every session's processes: `pkill -f "sd-check --json"`
+  ended another job's queued gate. `kill <pid>` of its own process passes.
 
 It denies rather than rewriting the input with `updatedInput`. Every matching
 PreToolUse hook runs in parallel and the last `updatedInput` to arrive wins, so
@@ -70,6 +73,16 @@ STASH = (
     "git stash list and git stash show still pass. A line that only mentions "
     "stash is refused too: put that text in a file, as git commit -F <file>."
 )
+
+PATTERN_KILL = (
+    "A builder never kills by pattern: pkill and killall match another "
+    "session's gate as well as its own, and one ended a queued sd gate post. "
+    "End only a process you started, by its id: kill <pid>, or kill -- -<pgid> "
+    "for its group."
+)
+
+#: `pkill` or `killall` first on a line or after a separator, past `sudo` or a path.
+PATTERN_KILLS = re.compile(r"(?:^|[;&|(])\s*(?:sudo\s+)?(?:\S*/)?(?:pkill|killall)\b", re.MULTILINE)
 
 SLEEP = re.compile(r"\s*sleep(\s|;|&|\||$)")
 
@@ -148,6 +161,8 @@ def reason(payload: dict) -> str | None:
         return WAIT
     if STASHES.search(tool_input["command"].replace("\\\n", " ")):
         return STASH
+    if PATTERN_KILLS.search(tool_input["command"]):
+        return PATTERN_KILL
     timeout = tool_input.get("timeout")
     if tool_input.get("run_in_background") or not isinstance(timeout, (int, float)) or timeout < TIMEOUT_MS:
         return FOREGROUND
