@@ -32,8 +32,11 @@ registry, a bill's cap or the order policy changed since this read.
 from __future__ import annotations
 
 import json
+import math
 import re
 import sqlite3
+import statistics
+from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 from sd_db import provider_controls, reads, registry, reporting, usage
@@ -42,7 +45,8 @@ from sd_db.errors import SdDbError
 from .operations_screen import BILL_NAME
 from .tasks_screen import is_scheduled
 
-__all__ = ["CI_DAYS", "GATE_CODES", "GATE_FAILED", "SLOW", "TREND_DAYS", "UNREAD", "WINDOW", "document", "slow"]
+__all__ = ["CI_DAYS", "GATE_CODES", "GATE_FAILED", "HEALTH_DAYS", "SLOW", "TREND_DAYS", "UNREAD", "WINDOW", "document",
+           "health", "slow"]
 
 #: The vendor window the trend draws: seven days, in minutes.
 WINDOW = 10080
@@ -207,6 +211,95 @@ def _ci(connection, now):
     return {"error": "", "days": CI_DAYS, "since": since, "unreadable": unreadable,
             "repos": sorted(repos.values(), key=lambda r: (-r["gate"], r["repository"])),
             "flaky": sorted(flaky.values(), key=lambda f: f["passed"], reverse=True)}
+
+
+#: The weekly KISS audit's window, with the window that ended a week ago beside it (pack sd:6744).
+HEALTH_DAYS = 14
+
+#: What names a failed suite in a gate refusal: sd-check's `shard <module>: 46s exit=1`, or a `make target <name>`.
+SUITE = re.compile(r"\bshard ([\w./-]+): \S+ exit=[1-9]|\bmake target ([\w./-]+)")
+
+#: A build run's reap detail opens with its id and step, then says why: `_reason` keeps the step and the why.
+RUN_PREFIX = re.compile(r"^build run \w+ ended at step ")
+
+#: What sets one reap reason apart from another of the same kind: a head or a count.
+VARYING = re.compile(r"\b(?=[0-9a-f]*\d)[0-9a-f]{7,40}\b|\d+")
+
+
+def _reason(detail: str | None, outcome: str) -> str:
+    """A build run's reap reason, grouped: its step and the why's first clause, with heads and counts as N."""
+    if not detail:
+        return outcome
+    step, _, why = RUN_PREFIX.sub("", detail).partition(": ") if RUN_PREFIX.match(detail) else ("", "", detail)
+    why = re.split(r"[;:\n]", why, maxsplit=1)[0]
+    return VARYING.sub("N", f"{step}: {why}" if step else why).strip()[:120]
+
+
+def _health_window(entries: list[tuple[str, dict]], runs: list, since: str, until: str) -> dict:
+    repos: dict[str, dict] = {}
+    suites: Counter = Counter()
+    lead: list[float] = []
+    for at, entry in entries:
+        if not since <= at <= until:
+            continue
+        row = repos.setdefault(entry["repository"], {"repository": entry["repository"], "entries": 0, "review": 0,
+                                                     "gate": 0, "other": 0})
+        row["entries"] += 1
+        if entry["status"] in PASSED:
+            if entry["status"] == "merged" and isinstance(entry.get("enqueued_at"), str):
+                lead.append((_stamp(at) - _stamp(entry["enqueued_at"])).total_seconds() / 60)
+            continue
+        kind = _failure(entry) if entry["status"] == "failed" else "other"
+        row["review" if kind == "review" else "gate" if kind == "gate" else "other"] += 1
+        if kind == "gate":
+            named = {shard or target for shard, target in SUITE.findall(str(entry.get("reason") or ""))}
+            suites.update((entry["repository"], name) for name in named or {"unnamed"})
+    for row in repos.values():
+        row["failed_percent"] = round(100 * (row["review"] + row["gate"] + row["other"]) / row["entries"])
+    ended = [run for run in runs if run["outcome"] and since <= _stamp(run["created_at"]).strftime("%Y-%m-%dT%H:%M:%SZ") <= until]
+    lead.sort()
+    return {
+        "since": since, "until": until,
+        "lane": sorted(repos.values(), key=lambda r: (-r["entries"], r["repository"])),
+        "gate_suites": [{"repository": repo, "suite": name, "failures": count}
+                        for (repo, name), count in suites.most_common(6)],
+        "builds": {"done": sum(run["outcome"] == "done" for run in ended), "total": len(ended),
+                   "reasons": [{"reason": reason, "runs": count} for reason, count in Counter(
+                       _reason(run["detail"], run["outcome"]) for run in ended if run["outcome"] != "done").most_common()]},
+        "lead_minutes": {"merged": len(lead), "median": round(statistics.median(lead)) if lead else None,
+                         "p90": round(lead[math.ceil(0.9 * len(lead)) - 1]) if lead else None},
+    }
+
+
+def health(connection, *, now: str) -> dict:
+    """The weekly KISS audit's four numbers (pack sd:6744), over `HEALTH_DAYS` ending now and ending a week ago.
+
+    - `lane`: each repository's lane entries that ended, and how many failed, by class: `review`, `gate`, and `other`
+      (a conflict, an uncommitted tree, a cancel, a skip or a hand-back), with the failed percent.
+    - `gate_suites`: the six suites, each in its repository, that gate failures named most (`SUITE`); a refusal naming none is `unnamed`.
+    - `builds`: build runs that ended, done over all, and the reap reasons of the rest (`_reason`).
+    - `lead_minutes`: enqueue to merge, the median and p90 over merged entries.
+
+    An entry that ran no lane step (pending, running) is not counted; a body that is not a lane entry is `unreadable`.
+    """
+    entries, unreadable = [], 0
+    for row in reads.lane_entries(connection):
+        try:
+            entry = json.loads(row["body"]) if isinstance(row["body"], str) else None
+            if not isinstance(entry, dict) or not isinstance(entry.get("repository"), str):
+                raise ValueError(row["key"])
+            if entry.get("status") in ("pending", "running", None):
+                continue
+            entries.append((_stamp(entry["finished_at"]).strftime("%Y-%m-%dT%H:%M:%SZ"), entry))
+        except (ValueError, KeyError, TypeError):
+            unreadable += 1
+    runs = reads.build_runs(connection)
+    stamp, day = _stamp(now), timedelta(days=1)
+
+    def window(end):
+        return _health_window(entries, runs, (end - HEALTH_DAYS * day).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                              end.strftime("%Y-%m-%dT%H:%M:%SZ"))
+    return {"days": HEALTH_DAYS, "unreadable": unreadable, "now": window(stamp), "last_week": window(stamp - 7 * day)}
 
 
 def _writes(name, spawned, held):
