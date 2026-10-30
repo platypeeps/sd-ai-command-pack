@@ -643,11 +643,21 @@ def _remove(kind: str):
 
 def _delete(kind: str):
     """Delete: the row, its notes and its assignments go for good, through `sd-db item remove`. Its preview's
-    fingerprint is handed to its apply at once; the verb files its removal record and backs the store up first, and
+    fingerprint is handed to its apply at once, and only when the verb's default store is the database the row was read
+    from. The verb files its removal record and backs the store up first, and
     refuses a row another one still needs (an open question, a running assignment)."""
 
     def check(connection, values, jobs=None) -> Step:
+        from sd_db import database
+
         row = _store_row(connection, values, kind)
+        # `sd-db item remove` opens the default store, and the dashboard may serve another (`--database`): the same id
+        # there is another row, so Delete runs only when both are one file (review of build/sd-206).
+        served = next((r[2] for r in connection.execute("PRAGMA database_list") if r[1] == "main"), "")
+        target = Path(str(database.default_path(Path.home())))
+        if not served or Path(served).resolve() != target.resolve():
+            raise ValueError(f"sd-db item remove opens {target}, another database than the one this dashboard serves "
+                             f"({served or 'no file'}); nothing ran. Delete #{row['id']} with sd-db on its own store.")
         verb = [_command("sd-db"), "item", "remove", str(row["id"]), "--who", "dashboard",
                 "--reason", f"Deleted on the dashboard: sdw.{kind} {row['title']}"]
 

@@ -349,6 +349,9 @@ class TheTopicActions(Run):
             self.assertIn("is retired already", body["error"])
 
     def test_delete_removes_the_topic_row_through_item_remove(self):
+        same = mock.patch("sd_db.database.default_path", return_value=Path(self.path))
+        same.start()
+        self.addCleanup(same.stop)
         self.stub("sd-db", 'case "$*" in *--apply*) echo "sd-db: removed 1 item";; *) echo "sd-db: fingerprint: ff00";; esac')
         status, body = self.run_("topic.delete", item=self.topics["Climate"])
         self.assertEqual((status, body["exit"], body["label"]), (200, 0, "Delete topic"), body)
@@ -356,6 +359,16 @@ class TheTopicActions(Run):
         status, body = self.run_("topic.delete", item=999999)
         self.assertEqual(status, 400)
         self.assertIn("is not a topic row", body["error"])
+
+    def test_delete_refuses_when_sd_db_would_open_another_database(self):
+        """Review of build/sd-206: Delete is bound to the database the dashboard read the row from."""
+        self.stub("sd-db", 'echo "sd-db: fingerprint: ff00"')
+        other = Path(self.tmp.name).resolve() / "other" / "workflow.sqlite3"
+        with mock.patch("sd_db.database.default_path", return_value=other):
+            status, body = self.run_("topic.delete", item=self.topics["Climate"])
+        self.assertEqual(status, 400)
+        self.assertIn("another database", body["error"])
+        self.assertEqual(self.ran(), [])
 
 
 class TheItemPage(BriefCase):

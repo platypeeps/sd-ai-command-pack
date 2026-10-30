@@ -219,8 +219,23 @@ class TheActions(Run):
             self.refused([({"action": "watch.remove", "item": item}, 400, "is declined already"),
                           ({"action": "watch.remove", "item": str(item)}, 400, "by its item number")])
 
+    def same_store(self):
+        """`sd-db` opens `default_path(HOME)`; here it is the database the dashboard serves, so Delete may run."""
+        same = patch("sd_db.database.default_path", return_value=Path(self.path))
+        same.start()
+        self.addCleanup(same.stop)
+
+    def test_delete_refuses_when_sd_db_would_open_another_database(self):
+        """Review of build/sd-206: the dashboard may serve `--database` elsewhere, and `sd-db item remove` opens the
+        default store; the same id there is another row, so Delete refuses and runs nothing."""
+        self.stub("sd-db", 'echo "sd-db: fingerprint: 0a1b2c"')
+        other = Path(self.tmp.name).resolve() / "other" / "workflow.sqlite3"
+        with patch("sd_db.database.default_path", return_value=other):
+            self.refused([({"action": "watch.delete", "item": self.ids["paused"]}, 400, "another database")])
+
     def test_delete_previews_then_applies_the_fingerprint_it_printed(self):
         """sd:6703: Delete runs `sd-db item remove`, whose apply needs the fingerprint its preview printed."""
+        self.same_store()
         self.stub("sd-db", 'case "$*" in *--apply*) echo "sd-db: removed 1 item";; *) echo "sd-db: fingerprint: 0a1b2c";; esac')
         status, body = self.run_("watch.delete", item=self.ids["paused"])
         self.assertEqual((status, body["exit"], body["label"]), (200, 0, "Delete watch"), body)
@@ -230,6 +245,7 @@ class TheActions(Run):
         self.assertIn("sd-db: removed 1 item", body["output"])
 
     def test_a_refused_delete_preview_applies_nothing(self):
+        self.same_store()
         self.stub("sd-db", 'echo "sd-db:   I7 note 9: note 9 is an unresolved question"; echo "sd-db: fingerprint: 0a1b2c"; exit 3')
         status, body = self.run_("watch.delete", item=self.ids["paused"])
         self.assertEqual((status, body["exit"]), (200, 3))
