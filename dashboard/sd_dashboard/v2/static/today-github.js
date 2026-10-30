@@ -19,6 +19,8 @@
 // sd:5757, sd:5899: Show mine, the default, keeps the rows assigned to you or opened by you (the read's `mine`); Show all
 // adds what others opened in a registered repo, a review asked of you among them. ?gh=all keeps All across a reload.
 // State open, the default, lists open pull requests; with closed adds those merged or closed in the window (?prs=closed).
+// pack sd:6711: ready to merge (?prs=ready) keeps the open ones approved, with green or no checks and no conflict, as
+// sd shadow sync stored them (the read's `ready`); one whose state was not read is never ready, and a line counts them.
 // sd:6173: a Repo column; a Repo pick (shell.list.pick, multi) keeps the rows of the repos picked, none picked keeps all, and
 // names them in ?repo= (comma separated); an Actions column of the shell's rowActions: Open on GitHub, then the ⋯ menu.
 (() => {
@@ -42,10 +44,11 @@
   const pullOf = key => pulls().find(r => r.key === key);
   // The selected pull request's key: the page's one selection (pick) names it in ?row= as its object id.
   const param = k => new URLSearchParams(location.search).get(k);
-  const all = () => param('gh') === 'all', closed = () => param('prs') === 'closed';
+  const all = () => param('gh') === 'all', closed = () => param('prs') === 'closed', ready = () => param('prs') === 'ready';
   const mine = r => !!r.mine;
   // The table's rows: open pull requests, and with closed those settled in the window, before Show.
-  const listed = () => [...DOC.pulls, ...(closed() ? DOC.settled.filter(r => r.kind === 'pull') : [])];
+  const listed = () => ready() ? DOC.pulls.filter(r => r.ready === true)
+    : [...DOC.pulls, ...(closed() ? DOC.settled.filter(r => r.kind === 'pull') : [])];
   // The Repo pick's choice (F.repo), read from the address when the first read arrives; none picked means every repo.
   const F = { repo: new Set() };
   let seeded = false;
@@ -74,10 +77,12 @@
       <td class="act">${window.shell.commands.rowActions(oid(r.key))}</td></tr>`;
   };
   // With closed, the window and the settled rows it could not place.
-  const note = () => closed() ? html`<p class="st-line">Merged or closed: the last ${DOC.days} days${DOC.undated ? html` · <span class="g-unknown">▨</span> ${plural(DOC.undated, 'merged or closed row')} with no date recorded, not placed` : ''}</p>` : '';
+  const unknown = () => DOC.pulls.filter(r => r.ready == null && (all() || mine(r)) && inRepo(r)).length;
+  const note = () => ready() ? (unknown() ? html`<p class="st-line"><span class="g-unknown">▨</span> ${plural(unknown(), 'open pull request')} whose review, checks or merge state was not read, so not listed: the next sd shadow sync reads them</p>` : '')
+    : closed() ? html`<p class="st-line">Merged or closed: the last ${DOC.days} days${DOC.undated ? html` · <span class="g-unknown">▨</span> ${plural(DOC.undated, 'merged or closed row')} with no date recorded, not placed` : ''}</p>` : '';
   function table() {
     const L = window.shell.list, rows = shown();
-    if (!rows.length) return html`<p class="st-line st-empty">No ${closed() ? '' : 'open '}pull request ${all() ? 'is listed' : 'is assigned to you or opened by you'}.</p>`;
+    if (!rows.length) return html`<p class="st-line st-empty">No ${closed() ? '' : 'open '}pull request ${ready() ? 'is ready to merge' : all() ? 'is listed' : 'is assigned to you or opened by you'}.</p>`;
     return html`<table class="ledger st" aria-labelledby="github-h">
       <thead><tr><th scope="col"><span class="sr">State</span></th><th scope="col">Pull request</th><th scope="col">Repo</th><th scope="col">Why</th><th scope="col">Activity</th><th scope="col"><span class="sr">Actions</span></th></tr></thead>
       <tbody>${L.pageOf(rows, st()).map(row)}</tbody></table>${L.pager(rows.length, st(), 'pull requests')}`;
@@ -104,10 +109,12 @@
     const L = window.shell.list, n = f => String(listed().filter(r => f(r) && inRepo(r)).length);
     const open = DOC.pulls.filter(r => (all() || mine(r)) && inRepo(r)).length;
     const every = open + DOC.settled.filter(r => r.kind === 'pull' && (all() || mine(r)) && inRepo(r)).length;
+    const merging = DOC.pulls.filter(r => r.ready === true && (all() || mine(r)) && inRepo(r)).length;
+    const prs = closed() ? 'closed' : ready() ? 'ready' : 'open';
     const repos = [...new Set(scoped().map(r => r.repo))].sort();
     put($('github-filters'), L.fbar(html`${L.fseg('gh', 'Show', [['mine', mine], ['all', () => true]].map(([v, f]) =>
-      ({ v, pressed: all() === (v === 'all'), label: html`${v} <span class="n">${n(f)}</span>` })))}${L.fseg('prs', 'State', [['open', open], ['closed', every]].map(([v, c]) =>
-      ({ v, pressed: closed() === (v === 'closed'), label: html`${v === 'open' ? 'open' : 'with closed'} <span class="n">${String(c)}</span>` })))}${
+      ({ v, pressed: all() === (v === 'all'), label: html`${v} <span class="n">${n(f)}</span>` })))}${L.fseg('prs', 'State', [['open', open, 'open'], ['ready', merging, 'ready to merge'], ['closed', every, 'with closed']].map(([v, c, name]) =>
+      ({ v, pressed: prs === v, label: html`${name} <span class="n">${String(c)}</span>` })))}${
       repos.length || F.repo.size ? L.pick('repo', 'Repo', repos.map(x => [x, x, scoped().filter(r => r.repo === x).length]), F.repo, { multi: true }) : ''}`));
     const unread = Object.entries(DOC.unread || {});
     put($('github-sections'), html`${unread.map(([k, why]) => html`<p class="st-line"><span class="g-unknown">▨</span> ${UNREAD[k] || k} not read: ${why}</p>`)}${note()}${table()}`);
@@ -125,6 +132,8 @@
     if (open) window.shell.openPane('tab-details');
   }
   // A time the read carries, or not recorded: a missing stamp is never a time.
+  // pack sd:6711: a merge fact sd shadow sync did not read says so, never a value.
+  const said = v => v ? v.replace(/_/g, ' ') : html`<span class="ph">not read</span>`;
   const stamp = v => v ? html`<time class="rel" data-long datetime="${v}"></time>` : html`<span class="ph">not recorded</span>`;
   function details(key, open = true) {
     const r = pullOf(key); if (!r) return;
@@ -137,6 +146,7 @@
         ${r.assignee ? html`<dt>Assignee</dt><dd>${r.assignee}</dd>` : ''}
         <dt>Opened</dt><dd>${stamp(r.created_at)}</dd><dt>Updated</dt><dd>${stamp(r.updated_at)}</dd>
         ${settled ? html`<dt>${settled[0]}</dt><dd>${stamp(settled[1])}</dd>` : ''}
+        ${r.state === 'open' ? html`<dt>Review</dt><dd>${said(r.review)}</dd><dt>Checks</dt><dd>${said(r.checks)}</dd><dt>Merge</dt><dd>${said(r.mergeable)}${r.ready ? ' · ready to merge' : ''}</dd>` : ''}
         ${(r.attention || []).length ? html`<dt>Waiting on</dt><dd>${r.attention.join(' · ')}</dd>` : ''}
         <dt>Item</dt><dd>${r.item ? html`<a href="${window.shell.itemHref(r.item)}">sd:${r.item}</a>` : html`<span class="ph">none known</span>`}</dd></dl>
       ${r.url ? html`<p><a href="${r.url}" target="_blank" rel="noopener noreferrer">Open ${r.ref} on GitHub</a></p>` : ''}
@@ -270,7 +280,7 @@
     $('github-filters').addEventListener('click', e => {
       const b = e.target.closest('[data-f="gh"], [data-f="prs"]'); if (!b) return;
       st().page = 1;
-      address(b.dataset.f === 'gh' ? { gh: b.dataset.v === 'all' ? 'all' : '' } : { prs: b.dataset.v === 'closed' ? 'closed' : '' });
+      address(b.dataset.f === 'gh' ? { gh: b.dataset.v === 'all' ? 'all' : '' } : { prs: ['closed', 'ready'].includes(b.dataset.v) ? b.dataset.v : '' });
       draw();
       $('github-filters').querySelector(`[data-f="${b.dataset.f}"][data-v="${b.dataset.v}"]`)?.focus();
     });

@@ -9,6 +9,8 @@ design walked each checkout's first-parent history instead; a delivery note
 is the same merge, recorded once, with no git walk. Done and opened come from
 the day's `status_change` notes (`reads.status_change_notes`). The page reads
 no runner runs and no mail (sd:5289): Activity shows runs, and Today shows mail.
+A merge row opens its pull request on GitHub: an icon on the row and a button
+in Details (sd:6695).
 
 Each day also carries its daily note's text (sd:3426), read from the
 Obsidian vault named by `OBSIDIAN_VAULT`, else `<config>/shared.env`, else

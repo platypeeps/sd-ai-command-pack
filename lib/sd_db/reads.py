@@ -157,6 +157,10 @@ _STATUS_SINCE = """
 """
 
 
+#: The idea kinds (pack sd:6743): they show in the Writing and Vault views, never in a work count.
+IDEA_KINDS = ("idea", "work-idea", "personal-idea")
+#: SQL true for a row of a work kind: every kind but `IDEA_KINDS`.
+WORK_KIND = f"item.kind NOT IN ({', '.join(repr(kind) for kind in IDEA_KINDS)})"
 #: The field that moves a learning row to a Documents view (pack sd:6262): `books` or `videos`.
 #: `records.move_documents` sets it and `records.return_documents` takes it off; the row keeps its id and notes.
 DOCUMENT_TYPE = "document-type"

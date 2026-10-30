@@ -1162,6 +1162,26 @@ class TheLinks(SyncCase):
                 self.assertTrue(result.ok, result.reason)
                 self.assertEqual(self.links()["10"], ("fix/one", json.dumps([f"{self.BASE}/issues/1"])))
 
+    def merge(self):
+        return {row["url"].rsplit("/", 1)[1]: (row["review_decision"], row["checks"], row["mergeable"])
+                for row in self.shadow().values()}
+
+    def test_a_pull_requests_review_checks_and_mergeable_are_stored_and_an_unread_one_is_null(self):
+        """pack sd:6711: the Ready to merge filter reads these; GitHub's null review or rollup is `none`, never unread."""
+        rollup = {"nodes": [{"commit": {"statusCheckRollup": {"state": "SUCCESS"}}}]}
+        pulls = [{**self.pull(10, branch="a"), "reviewDecision": "APPROVED", "mergeable": "MERGEABLE", "commits": rollup},
+                 {**self.pull(11, branch="b"), "reviewDecision": None, "mergeable": "CONFLICTING",
+                  "commits": {"nodes": [{"commit": {"statusCheckRollup": None}}]}},
+                 self.pull(12, branch="c")]
+        runner = QueryGh(lambda query: pulls if "mentions:@me" in query else [])
+        result = sync(self.connection, now=self.now, runner=runner)
+        self.assertTrue(result.ok, result.reason)
+        query = next(value for argv in runner.calls for value in argv if value.startswith("query="))
+        self.assertIn("reviewDecision mergeable commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }", query)
+        rows = {key: value for key, value in self.merge().items() if key.isdigit()}
+        self.assertEqual(rows, {"10": ("approved", "success", "mergeable"), "11": ("none", "none", "conflicting"),
+                                "12": (None, None, None)})
+
     def test_an_issue_row_has_no_branch_and_no_links(self):
         sync(self.connection, now=self.now, runner=QueryGh(lambda query: [node(1)] if "mentions:@me" in query else []))
         self.assertEqual(self.links(), {"1": (None, None)})

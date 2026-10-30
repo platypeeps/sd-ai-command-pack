@@ -831,6 +831,9 @@ def upsert_shadow(
     filed: bool | None = None,
     status: str | None = None,
     assignee: str | None = None,
+    review_decision: str | None = None,
+    checks: str | None = None,
+    mergeable: str | None = None,
 ) -> None:
     """A tracker's row, keyed by `(tracker, url)`. Seen once, then kept current.
 
@@ -853,6 +856,10 @@ def upsert_shadow(
     Jira's status name and the assignee; None keeps the stored value, and an
     empty `assignee` says unassigned.
 
+    `review_decision`, `checks` and `mergeable` (migration 44, pack sd:6711)
+    are a pull request's review, check and merge state; None keeps the stored
+    value.
+
     The conflict target is both columns, so this updates only the row this
     tracker already owns. Until sd:603 it was `url` alone and the update set
     `tracker = excluded.tracker`, which meant the last collector to see a url
@@ -865,8 +872,8 @@ def upsert_shadow(
         connection.execute(
             "INSERT INTO shadow (tracker, repo, url, number, kind, title, state, "
             "author, reason, merged_at, closed_at, branch, linked_issues, updated_at, "
-            "created_at, filed, status, assignee, first_seen, last_seen) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+            "created_at, filed, status, assignee, review_decision, checks, mergeable, first_seen, last_seen) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(tracker, url) DO UPDATE SET "
             "repo = excluded.repo, number = excluded.number, kind = excluded.kind, "
             "title = excluded.title, state = excluded.state, "
@@ -882,10 +889,14 @@ def upsert_shadow(
             "filed = COALESCE(excluded.filed, shadow.filed), "
             "status = COALESCE(excluded.status, shadow.status), "
             "assignee = COALESCE(excluded.assignee, shadow.assignee), "
+            "review_decision = COALESCE(excluded.review_decision, shadow.review_decision), "
+            "checks = COALESCE(excluded.checks, shadow.checks), "
+            "mergeable = COALESCE(excluded.mergeable, shadow.mergeable), "
             "last_seen = excluded.last_seen",
             (tracker, repo, url, number, kind, title, state, author, reason, merged_at, closed_at, branch,
              None if linked_issues is None else json.dumps(list(linked_issues)), updated_at,
-             created_at, None if filed is None else int(filed), status, assignee, stamp, stamp),
+             created_at, None if filed is None else int(filed), status, assignee, review_decision, checks, mergeable,
+             stamp, stamp),
         )
 
 

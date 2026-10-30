@@ -912,6 +912,17 @@ pick('p', ''); R.url2 = OUT.urls[OUT.urls.length - 1];""", search="?kind=task,wo
         self.assertIn("A blog idea", out["R"]["board"])
         self.assertNotIn("Port the page", out["R"]["board"])
 
+    def test_ideas_leave_the_rows_and_counts_until_kind_picks_them(self):
+        """pack sd:6743: an idea kind shows in the Writing and Vault views only; Kind picks it, as the Vault view."""
+        self.assertEqual(self.doc["ideas"], ["idea", "work-idea", "personal-idea"])
+        self.doc["rows"] = [*self.doc["rows"], {**self.doc["rows"][0], "id": 902, "title": "A vault idea", "kind": "idea", "base": "blog-idea"}]
+        out = self.run_page("R.board = ELS['view-board'].html; R.filters = ELS.filters.html;")
+        self.assertNotIn("A vault idea", out["R"]["board"])
+        self.assertEqual(out["counts"]["all"], 3)
+        self.assertIn('<option value="idea">idea</option>', out["R"]["filters"])
+        for search in ("?kind=idea", "?base=blog-idea"):
+            self.assertIn("A vault idea", self.run_page("R.board = ELS['view-board'].html;", search=search)["R"]["board"])
+
     def test_repo_is_a_multiselect_dropdown_and_two_repos_show_their_union(self):
         """sd:5158: Repo is a menu of checkboxes; two picks show the tasks of both, and the address names both."""
         box = "const box = (v, on) => ELS.filters.listeners.change[0]({ currentTarget: ELS.filters, target: { dataset: { pick: 'repo' }, type: 'checkbox', value: v, checked: on, getAttribute: () => null } });\n"
