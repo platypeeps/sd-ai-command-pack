@@ -32,6 +32,9 @@ Topics (system sd:5778) is the page's third view: one row per `sdw.topic` row, a
 same document's `topics` (`briefs_screen.topics`, through `records.list_rows`). Each row shows the slug, the stage,
 the newest line of its `## Memory` section with the line count, and how many lines its `## Sources` section holds;
 the hub's brief routines rewrite both, and a topic without one says so. A topic opens on Tasks, where it is edited.
+Add topic (`topic.add`, sd:6703) files a candidate row with `sd store add sdw.topic`; Remove (`topic.remove`) moves
+a topic to retired, which the brief routines skip (they read `--status active`), and keeps its Memory and Sources;
+Delete (`topic.delete`) removes its row through `sd-db item remove`. Restore waits on the plugin's stage graph.
 Last signal and the days in range come from each brief's `signal_topics`, which pack sd:5798 copies into its
 record. Until then no brief records them, and the view says signal is not recorded, never quiet; a range with any
 brief that records none counts no topic as quiet. A failed brief read shows signal as not read, and a failed topic

@@ -19,6 +19,11 @@ active watch, runs `watch.refresh` through `/api/actions/run`: claude starts
 in a herdr workspace in the vault on the routine's per-entity refresh for
 that one row. Add watch takes a URL and an optional name and runs
 `watch.add`: `sd store add sdw.market` files a candidate row with the URL as
-its first source. Details shows each answer, a refusal or a failed step
+its first source. Remove (`watch.remove`, sd:6703) moves a row to declined,
+which market-watch skips; its profile and Sources stay. Delete
+(`watch.delete`) runs `sd-db item remove` on the row, preview then apply,
+which files a removal record and backs the store up first. Both ask first.
+Restore waits on the plugin: its stage graph has no move out of declined.
+Details shows each answer, a refusal or a failed step
 with its output. The status moves in Tasks (Open item). The page reads
 through the shell's reader, `read.js`.

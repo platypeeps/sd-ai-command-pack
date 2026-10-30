@@ -1,7 +1,8 @@
 // Watches (sd:6264): the store's market rows and the market-watch job that refreshes them (watches_screen.py). The page
 // reads /api/watches through the shell's reader and draws the Documents list grammar: a filter bar, a sorted and paged
 // ledger, and the one Details pane. Refresh all is Run now on the job (commands.retry, /api/jobs/market-watch/retry);
-// Refresh and Add watch run watch.refresh and watch.add through /api/actions/run (commands.runAction), and Details shows
+// Refresh, Add watch, Remove and Delete run watch.refresh, watch.add, watch.remove and watch.delete through
+// /api/actions/run (commands.runAction), and Details shows
 // the answer. A refresh date is the profile's own: an active watch past the bound reads stale, never fresh.
 (() => {
   const { html, put, plural } = window.markup;
@@ -149,7 +150,16 @@
       consequence: () => 'This files a candidate market row with sd store add: the URL is its first source. market-watch refreshes it once you make it active.',
       cli: (o, v) => `sd store add sdw.market ${shq(v?.name || 'NAME')} --field content-type=company --section ${shq(`Sources=- ${v?.url || 'URL'}`)}`,
       sends: () => 'POST /api/actions/run {action: watch.add, url, name}',
-      run: (o, v) => window.commands.runAction(o, 'watch.add', { url: v?.url || '', name: v?.name || '' }).then(said => reader.reread().then(() => said)) });
+      run: (o, v) => window.commands.runAction(o, 'watch.add', { url: v?.url || '', name: v?.name || '' }).then(said => reader.reread().then(() => said)) },
+    // sd:6703: Remove retires (stage declined, which market-watch skips); Delete removes the row for good.
+    { id: 'watch.remove', on: 'watch', label: 'Remove', does: 'Declines the watch: market-watch stops refreshing it; its profile stays.', key: 'm', risk: 'confirm', executes: true,
+      when: o => o.stage !== 'declined' || 'declined already', consequence: o => `This moves ${o.title} to declined. market-watch refreshes it no more; its profile and Sources stay, and Delete removes it for good.`,
+      cli: o => `no sd verb: the dashboard moves #${o.item} to declined, as Tasks moves it`, sends: o => `POST /api/actions/run {action: watch.remove, item: ${o.item}}`,
+      run: o => window.commands.runAction(o, 'watch.remove', { item: o.item }).then(said => reader.reread().then(() => said)) },
+    { id: 'watch.delete', on: 'watch', label: 'Delete', does: 'Deletes the watch\'s row for good, with its profile and Sources.', key: 'x', risk: 'confirm', executes: true,
+      consequence: o => `This deletes ${o.title} (#${o.item}) for good: its profile, its Sources and its notes are lost. sd-db item remove files a removal record and backs the store up first. Remove keeps them.`,
+      cli: o => `sd-db item remove ${o.item} --who dashboard --reason ${shq(`Deleted on the dashboard: sdw.market ${o.title}`)}`, sends: o => `POST /api/actions/run {action: watch.delete, item: ${o.item}}`,
+      run: o => window.commands.runAction(o, 'watch.delete', { item: o.item }).then(said => reader.reread().then(() => said)) });
   window.PAGE_LIST = { rows: () => $('rows').querySelectorAll('tr[data-id]'), current: () => SELECTED, select: key => show(key) };
   document.addEventListener('DOMContentLoaded', () => {
     reader = start();

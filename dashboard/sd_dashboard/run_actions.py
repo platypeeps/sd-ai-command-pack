@@ -24,6 +24,11 @@ mounted volume, a port number, a Home Assistant tile, a registered repo row, a c
 | repo.pull          | `pull_refusal`, read again under the lock    | `git pull --ff-only`, under the lane's lock   |
 | watch.refresh      | an active market row, the vault's routine    | claude, one market-watch entity, in herdr     |
 | watch.add          | an http(s) URL, an optional name             | `sd store add sdw.market <name> ...`          |
+| watch.remove       | a market row not declined                    | `records.edit_row`, stage declined            |
+| watch.delete       | a market row                                 | `sd-db item remove <id>`, preview then apply  |
+| topic.add          | a topic title                                | `sd store add sdw.topic <title> ...`          |
+| topic.remove       | a topic row not retired                      | `records.edit_row`, stage retired             |
+| topic.delete       | a topic row                                  | `sd-db item remove <id>`, preview then apply  |
 
 A step is bounded (`Step.seconds`), and its output is kept to its last `OUTPUT_CHARS` characters. The answer is
 `{action, line, exit, output, cut}` for a step that ran, whatever its exit. A refusal before the step ran is a
@@ -36,6 +41,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import urllib.parse
 from dataclasses import dataclass
@@ -571,6 +577,102 @@ def watch_add(connection, values, jobs=None) -> Step:
     return Step(line="sd store add " + " ".join(shlex.quote(a) for a in args), argv=(_command("sd"), "store", "add", *args))
 
 
+def topic_add(connection, values, jobs=None) -> Step:
+    """Add topic: a candidate topic row through `sd store add`, as Add watch files a market row (sd:6703). The brief
+    routines read active topics only, so it waits for the operator to activate it in Tasks."""
+    from datetime import date
+
+    title = _text(_fields(values, {"title"})["title"], "topic")
+    title = re.sub(r"\s+", " ", re.sub(r"[/\\:()~#\[\]|\"]", " ", title)).strip()
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    if not slug or title.startswith("-") or len(title) > 120:
+        raise ValueError("Name the topic: a title starts with a letter or digit and has at most 120 characters; nothing ran.")
+    today = date.today().isoformat()
+    args = ["sdw.topic", title, "--field", f"slug={slug}", "--field", f"dateCreated={today}",
+            "--section", f"Provenance=Added on the dashboard's Briefs page, {today}."]
+    return Step(line="sd store add " + " ".join(shlex.quote(a) for a in args), argv=(_command("sd"), "store", "add", *args))
+
+
+# ---------- Remove and Delete (sd:6703) ----------
+
+#: The stage Remove moves a row to: the one its routine skips. market-watch refreshes active watches and the brief
+#: routines read active topics, so a removed row keeps its body, Memory and Sources and gets no new run.
+RETIRED = {"market": "declined", "topic": "retired"}
+
+
+def _store_row(connection, values, kind: str) -> dict:
+    """The `sdw.<kind>` row the page names by its item number, read from the store here, never taken from the page."""
+    from sd_db import records
+
+    item = _fields(values, {"item"})["item"]
+    if type(item) is not int:
+        raise ValueError(f"Name the {kind} row by its item number; nothing ran.")
+    row = next((r for r in records.list_rows(connection, kind) if r["id"] == item), None)
+    if row is None:
+        raise ValueError(f"#{item} is not a {kind} row; nothing ran.")
+    return row
+
+
+def _remove(kind: str):
+    """Remove: the row's stage moves to `RETIRED[kind]` through `records.edit_row`, as Tasks moves a base row. The
+    dashboard is the operator, so the plugin's `human-only` stage is its to set; `sd store set` refuses it to agents."""
+
+    def check(connection, values, jobs=None) -> Step:
+        from sd_db import records, workflow
+
+        row, stage = _store_row(connection, values, kind), RETIRED[kind]
+        current = row.get("stage") or ""
+        if current == stage:
+            raise ValueError(f"{row['title']} is {stage} already; nothing ran.")
+        rules = records.rules_for(kind, home=Path.home())
+        if rules.transitions is not None and stage not in rules.transitions.get(current, []):
+            raise ValueError(f"{row['title']} is {current}: its plugin allows no move to {stage}; nothing ran.")
+
+        def call():
+            try:
+                revision = workflow.item_state(connection, row["id"])["revision"]
+                records.edit_row(connection, row["id"], rules, revision=revision, who="dashboard", stage=stage)
+            except workflow.WorkflowError as error:
+                return 1, str(error)
+            return 0, f"{row['title']}: stage {current} -> {stage}. Its body stays; Delete removes the row."
+
+        return Step(line=f"stage {current} -> {stage} on #{row['id']} (records.edit_row, as Tasks moves it)", call=call)
+
+    return check
+
+
+def _delete(kind: str):
+    """Delete: the row, its notes and its assignments go for good, through `sd-db item remove`. Its preview's
+    fingerprint is handed to its apply at once; the verb files its removal record and backs the store up first, and
+    refuses a row another one still needs (an open question, a running assignment)."""
+
+    def check(connection, values, jobs=None) -> Step:
+        row = _store_row(connection, values, kind)
+        verb = [_command("sd-db"), "item", "remove", str(row["id"]), "--who", "dashboard",
+                "--reason", f"Deleted on the dashboard: sdw.{kind} {row['title']}"]
+
+        def call():
+            said = []
+            try:
+                preview = subprocess.run(verb, capture_output=True, text=True, timeout=30, check=False)
+                said.append((preview.stdout + preview.stderr).strip())
+                found = re.search(r"^sd-db: fingerprint: ([0-9a-f]+)$", preview.stdout, re.M)
+                if preview.returncode != 0 or not found:
+                    return preview.returncode or 1, "\n".join(said)
+                done = subprocess.run([*verb, "--apply", "--if-fingerprint", found.group(1)], capture_output=True,
+                                      text=True, timeout=80, check=False)
+                said.append((done.stdout + done.stderr).strip())
+                return done.returncode, "\n".join(said)
+            except subprocess.TimeoutExpired:
+                return None, "\n".join([*said, f"sd-db item remove gave no answer, so whether #{row['id']} is gone is not known."])
+            except OSError as error:
+                return 1, f"{verb[0]} did not start: {error}; nothing ran."
+
+        return Step(line=" ".join(shlex.quote(a) for a in ["sd-db", *verb[1:]]), call=call, seconds=120)
+
+    return check
+
+
 #: Every action a page may post, by name: its label for the journal and Details, and its check.
 ACTIONS = {
     "job.log": ("Show log", job_log),
@@ -590,6 +692,11 @@ ACTIONS = {
     "repo.pull": ("Pull", repo_pull),
     "watch.refresh": ("Refresh watch", watch_refresh),
     "watch.add": ("Add watch", watch_add),
+    "watch.remove": ("Remove watch", _remove("market")),
+    "watch.delete": ("Delete watch", _delete("market")),
+    "topic.add": ("Add topic", topic_add),
+    "topic.remove": ("Remove topic", _remove("topic")),
+    "topic.delete": ("Delete topic", _delete("topic")),
 }
 
 
