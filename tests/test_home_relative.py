@@ -99,7 +99,7 @@ class TheLookupUnderASecondHome(unittest.TestCase):
         return result
 
     def test_task_add_here_finds_the_checkout(self):
-        state = json.loads(self.call(self.home, self.root, "task", "add", "Written under B",
+        state = json.loads(self.call(self.home, self.root, "task", "add", "--priority", "3", "Written under B",
                                      "--here", "--json").stdout)
         self.assertEqual(state["item"]["repo"], KEY)
 
