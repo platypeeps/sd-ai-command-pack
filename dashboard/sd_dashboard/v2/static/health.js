@@ -348,6 +348,9 @@
     return `Not known what changed · ${o.facts.Label}: ${e.message}. Health was read again; check the row before you act again.`;
   });
   const can = action => o => revised(o) === true ? (o.can[action].allowed || o.can[action].reason) : revised(o);
+  // Fix on a Dependabot row (sd:6685): commands.js fix() on the item the row's run filed or reused.
+  const depFix = window.commands.fix('dependabot alerts', { item: o => o.filed ?? '<filed>', report: () => false,
+    post: (o, path) => shell.post(path, { revision: o.filedRevision }) });
   window.PAGE_COMMANDS = [
     { label: 'Read Health again', icon: 'rotate-ccw', run: () => load() },
     { label: 'Open Sessions in Operations', icon: 'folder-x', run: () => { location.href = '/operations?area=sessions'; } },
@@ -420,6 +423,18 @@
       // alerts page in a new tab (sd:5628); its gh line, which lists the alert links, stays for copying.
       { id: 'dependabot alerts.review', on: 'dependabot alerts', label: 'Review on GitHub', does: 'Opens the Dependabot alerts on GitHub in a new tab.', key: 'o', icon: 'arrow-up-right', risk: 'safe', primary: () => true,
         executes: false, when: o => !!o.slug || 'no github.com remote: there is no alerts page', cli: o => o.cli, run: o => openAlerts(o, 'dependabot') },
+      // Fix (sd:6685): files the repo's item under dependabot:<slug>, or reuses the open one, then starts claude on it
+      // through commands.js fix(). The brief: land an open Dependabot PR through sd-ship, else bump the dependency in
+      // a worktree; never re-enable Actions. The clean and alerts-off rows are checks, so they have no Fix.
+      { ...depFix, when: o => !!o.slug || 'no github.com remote: there is no alerts page to fix from',
+        does: 'Asks first, files an sd item in this repo, then starts claude in herdr as a builder on it.',
+        sends: o => `POST /api/items {ref: dependabot:${o.slug}}, then POST /api/items/<id>/fix {revision}`,
+        consequence: o => `Files an sd item in ${o.facts.Repository} for ${o.slug}'s ${o.facts.Shown} open Dependabot alerts (reused while one is open), `
+          + 'then opens a herdr workspace there and starts claude as a builder on it: it lands an open Dependabot PR through sd-ship, or bumps the dependency in a worktree.',
+        run: o => shell.post('/api/items', { title: `Dependabot: ${o.facts.Shown} open alerts in ${o.slug}`, repo: o.repo_path, ref: `dependabot:${o.slug}`,
+          body: `${o.facts.Shown} open Dependabot alerts in ${o.slug}, ${o.grave} critical or high. Land an open Dependabot PR through sd-ship if one exists; `
+            + 'else bump the dependency in a worktree. Never re-enable Actions.' })
+          .then(filed => depFix.run({ ...o, filed: filed.item.id, filedRevision: filed.revision })) },
       { id: 'secret scanning.review', on: 'secret scanning', label: 'Review on GitHub', does: 'Opens the secret scanning alerts on GitHub in a new tab.', key: 'o', icon: 'arrow-up-right', risk: 'safe', primary: () => true,
         executes: false, when: o => !!o.slug || 'no github.com remote: there is no alerts page', cli: o => o.cli, run: o => openAlerts(o, 'secret-scanning') },
       { id: 'credential.probe', on: 'credential', label: 'Probe again', does: 'Probes the credentials again and shows the result in Details.', key: 'r', icon: 'rotate-ccw', risk: 'safe', primary: () => true, executes: true,
