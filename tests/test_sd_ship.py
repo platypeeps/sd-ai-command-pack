@@ -3670,14 +3670,49 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "--acceptance-file"):
             self.unanswered("--deliver").prepare()
 
-    def test_empty_search_after_uncertain_create_cannot_duplicate_pr(self):
+    def test_a_create_a_5xx_left_uncertain_is_recovered_by_one_more_create(self):
+        # sd:6858: GitHub answered 5xx and made no pull request; the next
+        # prepare finds none, open or closed, at this head, so it creates
+        # again. GitHub refuses a second open one per head and base.
         self.double.no_create_result = True
         with self.assertRaises(ship.Refusal):
             self.prepare()
         self.double.no_create_result = False
-        with self.assertRaisesRegex(ship.Refusal, "empty search"):
+        self.assertEqual(self.prepare()["pull_request"]["number"], 1)
+        self.assertEqual(len(self.remote.pull_requests), 1)
+        self.assertEqual(len([call for call in self.remote.calls
+                              if call.method == "POST" and call.path.endswith("/pulls")]), 2)
+
+    def test_a_create_whose_pr_was_closed_since_still_refuses(self):
+        # The uncertain create did make one, and someone closed it: that is
+        # an operator's act, so no second pull request is made.
+        self.double.lose_create = True
+        with self.assertRaises(ship.Refusal):
             self.prepare()
-        self.assertEqual(len([call for call in self.remote.calls if call.method == "POST"]), 1)
+        self.remote.pull(1).state = "CLOSED"
+        with self.assertRaisesRegex(ship.Refusal, "closed"):
+            self.prepare()
+        self.assertEqual(len(self.remote.pull_requests), 1)
+
+    def test_a_retried_create_github_refuses_reads_the_one_it_made(self):
+        # The list missed the pull request the lost create made, and GitHub
+        # refuses the second create (422): the re-read binds that one.
+        self.double.lose_create = True
+        with self.assertRaises(ship.Refusal):
+            self.prepare()
+        self.double.lose_create = False
+        original, seen = self.double._route, []
+
+        def lagging(method, path, body):
+            if method == "GET" and urlsplit(path).path.endswith("/pulls") and "base=" in path and not seen:
+                seen.append(path)
+                return 200, []
+            if method == "POST" and urlsplit(path).path.endswith("/pulls"):
+                raise RemoteRefusal(422, "A pull request already exists")
+            return original(method, path, body)
+        with patch.object(self.double, "_route", lagging):
+            self.assertEqual(self.prepare()["pull_request"]["number"], 1)
+        self.assertEqual(len(self.remote.pull_requests), 1)
 
     def test_lost_create_response_finds_one_matching_pr(self):
         self.double.lose_create = True
