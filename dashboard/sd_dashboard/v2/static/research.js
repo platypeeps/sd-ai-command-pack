@@ -493,6 +493,8 @@ function showProject(key, read = true) {
     ${p.experiment ? html`<h3>Deck</h3><p class="links">${deckLine(p)}${slidesLine(p)}</p>` : ''}
     ${REVIEWS[p.key] ? html`<h3>Last review</h3><p class="why">${REVIEWS[p.key].state === 'done' ? 'Every check passed' : REVIEWS[p.key].reason || 'failed'} · <time class="rel" datetime="${REVIEWS[p.key].finished || ''}"></time></p>
       <details class="report"><summary>Report</summary><pre>${REVIEWS[p.key].output || 'It printed nothing.'}</pre></details>` : ''}
+    ${RENDERS[p.key] ? html`<h3>Last render</h3><p class="why">${RENDERS[p.key].state === 'done' ? 'Rendered' : RENDERS[p.key].reason || 'failed'} · <time class="rel" datetime="${RENDERS[p.key].finished || ''}"></time></p>
+      ${(RENDERS[p.key].mirrors || []).length ? html`<ul>${RENDERS[p.key].mirrors.map(line => html`<li>${line}</li>`)}</ul>` : html`<p class="why">It queued no Notion mirror.</p>`}` : ''}
     <p class="why">Render, Review and Build deck run one at a time. The kit runs research.conf.py only after you run sd-research-kit render once by hand in this checkout.</p>
     <section aria-live="polite">${experimentSection(p)}</section>`);
   shell.commands.select(p.key);
@@ -655,10 +657,12 @@ tbody.addEventListener('click', e => { if (e.target.closest('.rowact, a')) retur
 // One poll per run until it settles; a render that is done reads the board again, a failed one says the kit's reason.
 // A review keeps its report, pass or fail, and the project's Details show it under Last review.
 const REVIEWS = {};
+// sd:6698: the last render per project, for its queued Notion mirrors in Details.
+const RENDERS = {};
 const followRun = (run, o, verb) => (['done', 'failed'].includes(run.state)
   ? (verb === 'review' ? (REVIEWS[o.key] = run, shownProject === o.key && showProject(o.key, false),
       shell.toast(run.state === 'done' ? `Reviewed · ${o.label}: every check passed` : `Review · ${o.label}: ${run.reason || 'no reason recorded'}`))
-    : (shell.toast(run.state === 'done' ? `Rendered · ${o.label}` : `Render failed · ${o.label}: ${run.reason || 'no reason recorded'}`), run.state === 'done' && load()))
+    : (RENDERS[o.key] = run, shownProject === o.key && showProject(o.key, false), shell.toast(run.state === 'done' ? `Rendered · ${o.label}` : `Render failed · ${o.label}: ${run.reason || 'no reason recorded'}`), run.state === 'done' && load()))
   : setTimeout(() => window.shell.getJSON(`/api/research/deck/${encodeURIComponent(run.id)}`).then(next => followRun(next, o, verb),
     e => shell.toast(`${verb === 'review' ? 'Review' : 'Render'} ${run.id}: not read (${e.message}); whether it ended is not known`)), DECK_POLL));
 // Draft experiment is a page action (the Experiments tab's header, sd:5631): it names its project, the one shown first. The server refuses a linked one (409).
@@ -689,7 +693,7 @@ function registerCommands() {
   const C = shell.commands;
   C.put(DRAFT); C.put(PAGE);
   C.register(
-    { id: 'research.render', on: 'research project', label: 'Render', does: 'Renders this research project again in its checkout.', key: 'r', icon: 'rotate-ccw', risk: 'safe', executes: true, primary: o => o.s === 'caution',
+    { id: 'research.render', on: 'research project', label: 'Render', does: 'Renders the project in its checkout and queues its Notion mirror; a session writes Notion later.', key: 'r', icon: 'rotate-ccw', risk: 'safe', executes: true, primary: o => o.s === 'caution',
       cli: o => `cd ${shPath(o.path)} && sd-research-kit render`, sends: o => `POST /api/research/render {"repo": "${o.key}"}`,
       run: o => window.shell.post('/api/research/render', { repo: o.key }).then(run => { followRun(run, o, 'render'); return `Rendering ${o.label} · run ${run.id}`; }, refused) },
     { id: 'research.review', on: 'research project', label: 'Review', does: 'Runs the research kit\'s mechanical pre-publication checks here; Details show the report.', key: 'v', icon: 'shield-check', risk: 'safe', executes: true,
