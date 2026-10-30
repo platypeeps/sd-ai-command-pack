@@ -444,8 +444,8 @@ class TheHideState(ScreenCase):
 
 
 class TheSyncJob(ScreenCase):
-    """sd:6175: the issue read carries Sync now's job, shadow-sync-nightly, as the jobs inventory reads it: the revision
-    the retry route checks and the retry capability that turns Sync now off."""
+    """sd:6175: the issue read carries Refresh from GitHub's job, shadow-sync-nightly, as the jobs inventory reads it: the revision
+    the retry route checks and the retry capability that turns Refresh from GitHub off."""
 
     def test_the_read_carries_the_jobs_state_revision_and_retry_capability(self):
         backend = JobsBackend(self.tmp.name, jobs=[("shadow-sync-nightly", "idle", 0, None)])
@@ -482,10 +482,11 @@ JOB = {"name": "shadow-sync-nightly", "service": "gui/501/local.sd.shadow-sync-n
 
 
 class TheGitHubPage(ScreenCase):
-    """github.js and issues.js on the stand-in page with the shared commands: Hide, Open | Hidden | All and Sync now (sd:6175, sd:6701).
+    """github.js and issues.js on the stand-in page with the shared commands: Hide, Open | Hidden | All and Refresh from
+    GitHub (sd:6175, sd:6701, pack sd:6702).
     The stand-in server keeps the hidden keys a view POST writes and answers each read with them."""
 
-    def run_page(self, body, *, issues_rows=None, intake_rows=None, sync=None, states=("idle",), store=None):
+    def run_page(self, body, *, issues_rows=None, intake_rows=None, sync=None, states=("idle",), store=None, synced=None):
         doc = {"issues": issues_rows if issues_rows is not None else [
                    {"repo": "anvil", "tracker": "Jira", "ref": "EXAMPLE-8", "key": "jira:EXAMPLE-8", "title": "Fix the widget",
                     "reason": "filed", "url": None, "state": None, "hidden": False},
@@ -495,7 +496,7 @@ class TheGitHubPage(ScreenCase):
                "intake": intake_rows if intake_rows is not None else [
                    {"repo": "anvil", "repo_path": "/home/example/repos/acme/anvil", "ref": "#21", "key": "github:example/project#21",
                     "title": "Docs typo", "author": "octocat", "url": None, "hidden": False}],
-               "intake_error": "", "store": store or {"available": True, "reason": ""}, "sync": sync or JOB}
+               "intake_error": "", "store": store or {"available": True, "reason": ""}, "sync": sync or JOB, "synced": synced}
         answer = """(() => { const HID = new Set(), DOC = %s, STATES = %s; let reads = 0;
   return (path, body) => {
     if (path === '/api/github/issues/view') { if (body.hidden) HID.add(body.key); else HID.delete(body.key); return [200, { key: body.key, hidden: body.hidden }]; }
@@ -588,14 +589,14 @@ class TheGitHubPage(ScreenCase):
                             states=("idle", "running", "idle"))
         r = out["R"]
         self.assertIn('data-cmd="jobs.retry" data-obj="job:shadow-sync-nightly"', r["line"])
-        self.assertIn(">Sync now<", r["line"])
+        self.assertIn("<span>Refresh from GitHub</span>", r["line"])
         self.assertIn("runs in the background", r["line"])
-        self.assertIn(">Sync now<", r["intake"])
-        self.assertEqual((r["label"], r["cli"]), ("Sync now", "sd jobs retry shadow-sync-nightly"))
+        self.assertEqual(r["intake"], r["line"])
+        self.assertEqual((r["label"], r["cli"]), ("Refresh from GitHub", "sd jobs retry shadow-sync-nightly"))
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/jobs/shadow-sync-nightly/retry", {"revision": "r1"}]])
         # The first read, then one while the run is going, then the one after it ends; then no more.
         self.assertEqual(out["gets"], ["/api/github/issues"] * 3)
-        self.assertIn("Sync started in the background", r["toast"])
+        self.assertIn("Refresh from GitHub started in the background", r["toast"])
 
     def test_sync_now_is_off_with_the_reason_while_the_job_runs_or_is_not_installed(self):
         # The stand-in's timers run at once; a run that never ends would read forever, so this one holds its poll.
@@ -610,11 +611,26 @@ class TheGitHubPage(ScreenCase):
         out = self.run_page("show('issues'); await flush(); R.line = ELS['issues-sync'].html;"
                             " R.off = C.offWhy(cmd('jobs.retry'), C.get('job:shadow-sync-nightly'));", sync=missing)
         self.assertEqual(out["R"]["off"], missing["error"])
-        self.assertIn("Sync now is off: shadow-sync-nightly is not an installed job", out["R"]["line"])
+        self.assertIn("Refresh from GitHub is off: shadow-sync-nightly is not an installed job", out["R"]["line"])
+
+    def test_pull_requests_has_refresh_from_github_and_reads_again_when_the_run_ends(self):
+        """pack sd:6702: Pull requests shows the same Refresh from GitHub with when GitHub was last read, and the read
+        after the run ends reads Pull requests again too."""
+        out = self.run_page("OUT.again = 0; window.githubPulls = { again: () => { OUT.again++; } };"
+                            " show('pulls'); await flush(); R.line = ELS['pulls-sync'].html; R.issues = ELS['issues-sync'].html;"
+                            " act('jobs.retry', 'job:shadow-sync-nightly'); await flush();",
+                            states=("idle", "running", "idle"), synced={"last_success_at": "2026-10-19T15:30:00Z"})
+        r = out["R"]
+        self.assertIn('data-cmd="jobs.retry" data-obj="job:shadow-sync-nightly"', r["line"])
+        self.assertIn("<span>Refresh from GitHub</span>", r["line"])
+        self.assertIn('GitHub read <time class="rel" datetime="2026-10-19T15:30:00Z">', r["line"])
+        self.assertEqual(r["issues"], r["line"])
+        self.assertEqual([p[0] for p in out["posts"]], ["/api/jobs/shadow-sync-nightly/retry"])
+        self.assertEqual(out["again"], 1)
 
     def test_github_draws_the_sync_lines_and_the_intake_filter_bar(self):
         html = (V2 / "github.html").read_text(encoding="utf-8")
-        for found in ('id="issues-sync"', 'id="intake-sync"', 'id="intake-filters"'):
+        for found in ('id="pulls-sync"', 'id="issues-sync"', 'id="intake-sync"', 'id="intake-filters"'):
             self.assertIn(found, html)
 
 
