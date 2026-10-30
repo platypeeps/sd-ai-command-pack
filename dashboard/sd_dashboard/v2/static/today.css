@@ -127,13 +127,12 @@
   .needs .age { grid-area: age; } .needs .src { align-self: center; }
 }
 
-/* Working now (sd:3466): one row per open item, its live sessions listed in the Session cell. Rows are not selectable,
- * so no row hover.
+/* Working now (sd:3466): one row per open item, its live sessions listed in the Session cell. A row click shows the item
+ * in Details (sd:6714), as a Needs you row's does, so the row takes the ledger's hover and selection.
  * Hallmark · component: session row · genre: modern-minimal · theme: design.md instrument panel
- * states: default · hover (the title link) · focus · active -- no row control; unconfirmed is ▨ with a title, not colour alone. */
+ * states: default · hover · focus (the title link) · selected; unconfirmed is ▨ with a title, not colour alone. */
 section[aria-labelledby="motion-h"] { margin-top: var(--space-xl); }
-.active tbody tr { cursor: default; }
-.active tbody tr:hover td { background: transparent; }
+.active tbody tr[data-id] { cursor: pointer; }
 .active td { vertical-align: top; height: auto; padding-block: var(--space-xs); }
 .active .what { width: 36%; min-width: 0; overflow-wrap: anywhere; }
 .active .what a { color: var(--color-ink); text-decoration: none; }
