@@ -32,6 +32,8 @@ html[data-kiosk] .tiles-edit { display: none; }
   border: var(--rule-hair) solid var(--color-rule); border-radius: var(--radius-md);
   background: var(--color-panel); color: var(--color-ink); font: inherit;
 }
+/* `.headline` sets display, which beats the hidden attribute home.js sets with no headline line (sd:6688). */
+.headline[hidden] { display: none; }
 .headline .i { width: var(--icon-md); height: var(--icon-md); }
 .headline .what { display: grid; gap: var(--space-3xs); min-width: 0; }
 .headline .what b { font: 600 var(--text-lg)/1.2 var(--font-ui); }
