@@ -17,7 +17,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 
 from .reads import (
+    IDEA_KINDS,
     REVIEW_BATCH,
+    WORK_KIND,
     _now,
     _parse,
     _unparked_clause,
@@ -39,7 +41,7 @@ ORDER = ("attention", "operations", "decisions", "landing", "delivered", "planne
 #: A choice line of a decision, as the dashboard's Decisions reads one (sd:3012).
 OPTION_LINE = re.compile(r"^[ \t]*Option:[ \t]*\S", re.MULTILINE)
 #: Kinds that are not work to schedule: ideas wait for promotion, reports for acknowledgement.
-_UNSCHEDULED_SKIPS = ("idea", "work-idea", "personal-idea", "report")
+_UNSCHEDULED_SKIPS = (*IDEA_KINDS, "report")
 _DELIVERED_AT = re.compile(r"\bdelivered at ([0-9a-f]{40,64})\b")
 _CODE_DELIVERY = re.compile(r"Code delivery (\S+) at ([0-9a-f]{40,64})\b")
 _PULL = re.compile(r"/pull/([0-9]+)\b")
@@ -334,7 +336,7 @@ def landing(connection: sqlite3.Connection, *, repos: Iterable[str | None] | Non
 
 def planned(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None,
             now: str | None = None) -> list[dict]:
-    """Open unparked items due after today, soonest first: `status`, `due`, `priority`.
+    """Open unparked work items (`reads.WORK_KIND`) due after today, soonest first: `status`, `due`, `priority`.
 
     Today's and overdue ones are `work`. A scheduled occurrence of a recurring
     series (`reads.opens_on_clause`) is in neither until its lead brings it
@@ -345,7 +347,7 @@ def planned(connection: sqlite3.Connection, *, repos: Iterable[str | None] | Non
              "due": row["due"], "priority": row["priority"]} for row in connection.execute(
         f"""
         SELECT item.* FROM item
-         WHERE item.status != 'done' AND item.due > ? AND {_unparked_clause(connection)}
+         WHERE item.status != 'done' AND item.due > ? AND {WORK_KIND} AND {_unparked_clause(connection)}
            AND NOT {scheduled_clause(connection, "?")} AND {where}
          ORDER BY item.due ASC, item.priority IS NULL, item.priority ASC, item.id ASC
         """,
@@ -379,7 +381,7 @@ def unscheduled(connection: sqlite3.Connection, *, repos: Iterable[str | None] |
 
 
 def blocked(connection: sqlite3.Connection, *, repos: Iterable[str | None] | None = None) -> list[dict]:
-    """Open items that are blocked or whose newest comment says they wait on someone:
+    """Open work items (`reads.WORK_KIND`) that are blocked or whose newest comment says they wait on someone:
     `status`, `why` (the reason on the newest move to blocked, else that comment), `since`."""
     where, values = _in("item.repo", _keep(repos))
     rows = connection.execute(
@@ -393,7 +395,7 @@ def blocked(connection: sqlite3.Connection, *, repos: Iterable[str | None] | Non
                  ORDER BY note.id DESC LIMIT 1) AS comment,
                item.updated_at
           FROM item
-         WHERE item.status != 'done' AND {_unparked_clause(connection)} AND {where}
+         WHERE item.status != 'done' AND {WORK_KIND} AND {_unparked_clause(connection)} AND {where}
          ORDER BY item.id ASC
         """,
         values,

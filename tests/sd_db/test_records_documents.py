@@ -99,7 +99,8 @@ class TheMove(DocumentsCase):
         self.db.execute("UPDATE item SET status='blocked' WHERE id=?", (self.named,))
         sections = today.sections(self.db, now=NOW)
         ids = {row["id"] for key in ("planned", "blocked", "work") for row in sections[key]}
-        self.assertTrue({self.video, self.named, self.book} <= ids)
+        # pack sd:6743: an idea leaves Planned and Blocked; the overdue one stays in Work.
+        self.assertIn(self.video, ids)
         before = len(self.db.execute("SELECT id FROM note WHERE item=?", (self.video,)).fetchall())
         plan = plan_documents(self.db, books=[self.book])
         moved = move_documents(self.db, books=[self.book], plan=plan.digest, who="operator")
