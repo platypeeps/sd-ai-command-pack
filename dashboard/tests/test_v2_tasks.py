@@ -52,6 +52,8 @@ FETCH_JS = re.search(r"^  // fetch:start\n(.*?)^  // fetch:end$", SHELL_JS, re.S
 ITEM_JS = re.search(r"^  // item:start\n(.*?)^  // item:end$", SHELL_JS, re.S | re.M).group(1)
 # The list grammar, as shell.js has it (sd:2527, sd:2528, sd:2529): sort header, pager and filter chips.
 LIST_JS = re.search(r"^  // list:start\n(.*?)^  // list:end$", SHELL_JS, re.S | re.M).group(1)
+# sd:6701: the set-aside group every page draws through shell.aside, cut from shell.js as the list block is.
+ASIDE_JS = re.search(r"^  // aside:start\n(.*?)^  // aside:end$", SHELL_JS, re.S | re.M).group(1)
 # The layout picker, as shell.js has it (sd:5641): Tasks and Writing wire their view menu through shell.viewPick.
 VIEWPICK = re.search(r"^  // viewpick:start\n(.*?)^  // viewpick:end$", SHELL_JS, re.S | re.M)
 VIEWPICK_JS = VIEWPICK.group(1) if VIEWPICK else "function viewPick() { throw new Error('shell.js has no viewpick block'); }\n"
@@ -494,7 +496,10 @@ window.shell = { commands: C, post, getJSON, shown: stillShown, itemHref, itemPa
     return viewPick; })(),
   list: (() => { const { html, plural } = window.markup, ICON = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 """ + LIST_JS + r"""
-    return list; })() };
+    return list; })(),
+  aside: (() => { const { html } = window.markup;
+""" + ASIDE_JS + r"""
+    return aside; })() };
 const cmd = id => REG.find(c => c.id === id);
 const flush = async () => { for (let i = 0; i < 400; i++) await null; };
 const open = key => document.dispatchEvent(new CustomEvent('shell:open', { detail: String(key) }));
@@ -1704,31 +1709,40 @@ R.after = ELS.details.html; R.views2 = views(); R.obj = C.get(String(ITEM)) && C
         self.doc = tasks_screen.document(self.connection, now=NOW)
         return parked
 
-    # sd:3012: triage's Parked view. A parked row stays off every other view, the badge and the count; the Parked chip
-    # shows only the parked rows, and Unpark runs on each picked one through the item edit route.
-    def test_a_parked_row_shows_only_under_the_parked_chip(self):
+    # sd:3012: triage's Parked view. A parked row stays off every other view, the badge and the count; the toolbar's
+    # Open | Parked | All (sd:6701) shows the parked rows alone or with the rest, and Unpark runs on each picked one.
+    PARK_SEG = ("ELS['parked-seg'].listeners.click[0]({ target: { closest: s => s === 'button[data-aside=\"parked\"]'"
+                " ? { dataset: { v: '%s' } } : null } });")
+
+    def test_a_parked_row_shows_only_under_parked_or_all(self):
         self.park()
-        out = self.run_page("""R.sub = ELS.subhead.html; R.board = ELS['view-board'].html; R.filters = ELS.filters.html;
-ELS.filters.listeners.change[0]({ target: { dataset: { pick: 'active' }, value: 'parked' } });
-R.parked = ELS['view-board'].html; R.url = OUT.urls[OUT.urls.length - 1];""")
+        out = self.run_page(f"""R.sub = ELS.subhead.html; R.board = ELS['view-board'].html; R.filters = ELS.filters.html;
+R.seg = ELS['parked-seg'].html; {self.PARK_SEG % 'aside'}
+R.parked = ELS['view-board'].html; R.url = OUT.urls[OUT.urls.length - 1];
+{self.PARK_SEG % 'all'} R.all = ELS['view-board'].html; R.urlAll = OUT.urls[OUT.urls.length - 1];""")
         self.assertIn("1 parked · read", out["R"]["sub"])
         self.assertEqual(out["counts"]["all"], 3)
         self.assertNotIn("Parked by the prune", out["R"]["board"])
         self.assertIn("Plan the review", out["R"]["board"])
-        # sd:5643: Scope and Parked are one dropdown, each option starting with a capital; sd:5649 adds Scheduled only.
+        # sd:5643's Scope keeps Open only and Scheduled only (sd:5649); Parked is the toolbar's segment now.
         self.assertIn('<select id="f-active" class="fsel" data-pick="active"><option value="" selected>Open and done</option><option value="1">Open only</option>'
-                      '<option value="parked">Parked only</option><option value="scheduled">Scheduled only</option></select>', out["R"]["filters"])
-        self.assertNotIn('f-parked', out["R"]["filters"])
+                      '<option value="scheduled">Scheduled only</option></select>', out["R"]["filters"])
+        self.assertNotIn('Parked only', out["R"]["filters"])
+        self.assertIn('data-v="aside" aria-pressed="false">Parked <span class="n">1</span>', out["R"]["seg"])
         self.assertIn("Parked by the prune", out["R"]["parked"])
         self.assertNotIn("Plan the review", out["R"]["parked"])
-        self.assertIn("active=parked", out["R"]["url"])
+        self.assertIn("parked=1", out["R"]["url"])
+        self.assertIn("Parked by the prune", out["R"]["all"])
+        self.assertIn("Plan the review", out["R"]["all"])
+        self.assertIn("parked=all", out["R"]["urlAll"])
         self.assertEqual(out["attention"][-1], self.doc["attention"])
 
-    def test_the_parked_chip_is_read_from_the_address(self):
+    def test_parked_is_read_from_the_address_old_and_new(self):
         self.park()
-        out = self.run_page("R.board = ELS['view-board'].html;", search="?parked=1")
-        self.assertIn("Parked by the prune", out["R"]["board"])
-        self.assertNotIn("Plan the review", out["R"]["board"])
+        for search in ("?parked=1", "?active=parked"):
+            out = self.run_page("R.board = ELS['view-board'].html;", search=search)
+            self.assertIn("Parked by the prune", out["R"]["board"], search)
+            self.assertNotIn("Plan the review", out["R"]["board"], search)
 
     def test_unpark_runs_on_every_picked_parked_row_and_is_off_for_a_listed_one(self):
         parked = self.park()

@@ -345,13 +345,12 @@ class TheLamps(ReaderCase):
 document.querySelectorAll = sel => sel === '.cell[data-src]' ? CELLS : [];
 DOC0.observed = { repos: { at: '2026-09-06T11:31:00Z', stale: 'git did not answer' }, sessions: { at: '2026-09-06T11:58:00Z', stale: null } };
 refresh(); await flush();
-R.cells = CELLS.map(c => [c.dataset.src, c.dataset.state, c.title || null]); R.observed = ELS.observed.html;"""
+R.cells = CELLS.map(c => [c.dataset.src, c.dataset.state, c.title || null]);"""
 
     def test_a_kept_fleet_area_shows_its_read_time_and_a_stale_one_is_unknown(self):
         out = self.run_page(self.CELLS)
         self.assertEqual(out["R"]["cells"], [["repos", "unknown", "observed 11:31 UTC · stale: git did not answer"],
                                             ["sessions", "ok", "observed 11:58 UTC"]])
-        self.assertIn("<b>11:31</b> UTC", out["R"]["observed"])
 
 
 class TheUnreadLamps(ReaderCase):
@@ -498,8 +497,8 @@ refresh(); await flush(); R.again = ELS.details.html; R.now = selected(); R.row2
     def test_a_part_that_failed_is_said_under_the_list_never_an_empty_one(self):
         self.doc["work_error"], self.doc["briefs_error"] = "database is locked", "no routine_briefs"
         out = self.run_page("R.unread = [ELS.unread.hidden, ELS.unread.textContent];")
-        self.assertEqual(out["R"]["unread"], [False, "Work could not be read: database is locked. Refresh tries again."
-                                                     " Briefs could not be read: no routine_briefs. Refresh tries again."])
+        self.assertEqual(out["R"]["unread"], [False, "Work could not be read: database is locked. Read again tries again."
+                                                     " Briefs could not be read: no routine_briefs. Read again tries again."])
 
     def test_nothing_to_do_says_so(self):
         self.doc["needs"] = []

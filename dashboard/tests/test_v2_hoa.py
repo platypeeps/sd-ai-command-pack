@@ -34,7 +34,6 @@ from sd_db.migrate import initialise
 from support import NOW, ScreenCase, before_5648
 from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
-from test_v2_shell_shared import cell_grammar
 from test_v2_tasks import SHELL, STAND_IN
 from test_v2_today import OSASCRIPT, Refused
 from test_workflow_actions import BrowserSession
@@ -414,7 +413,7 @@ window.shell.view.current = () => 'tasks'; read(); await flush(); R.tasks = ELS.
         self.assertEqual(sorted(tips), ["alarms", "aquifer", "mission", "pumps", "tank", "tasks", "water"])
         self.assertIn("Source: alarm-events.csv", tips["alarms"])
         self.assertIn("CLI: python3 tools/source-ages.py", tips["mission"])
-        self.assertRegex(out["R"]["lamps"], r'id="refresh"[^>]*data-tip="When this page read /api/hoa')
+        self.assertNotIn('id="refresh"', out["R"]["lamps"], "sd:6697: Read again is the one re-read")
 
     def test_each_cell_is_a_reading_or_unknown_with_its_reason(self):
         out = self.run_page("R.lamps = ELS.annunciator.html; R.sub = ELS.subhead.html;")
@@ -426,7 +425,6 @@ window.shell.view.current = () => 'tasks'; read(); await flush(); R.tasks = ELS.
         self.assertRegex(lamps, r'data-cell="alarms"[^>]*data-state="unknown".*?the export ends 2026-09-05.*?2 alarms in 30 d · 1 generator test')
         self.assertRegex(lamps, rf'data-cell="tasks" data-open="{self.late}" data-state="warning".*?Tasks.*?<b>1</b> overdue.*?5 open · 1 due within a week')
         self.assertRegex(lamps, r'data-cell="mission" data-open="source:mission" data-state="ok".*?<b>1 d</b> old')
-        self.assertEqual(cell_grammar(self, lamps)[-1], ("button", None))
         self.assertIn("3 mapped assets, 4 lot and tract outlines; Mission export through 2026-09-05", out["R"]["sub"])
         self.assertEqual(out["attention"][-1], {"state": "warning", "n": 1, "what": "HOA annunciator cells"})
         self.assertIsNone(out["states"][-1])
@@ -664,7 +662,7 @@ shellRun(cmd('item.email'), OBJ.get('{self.late}')); await flush();""", doc)
     def test_a_document_that_does_not_arrive_leaves_no_row_and_says_so(self):
         out = self.run_page("""R.before = ELS['ob-body'].html;
 DOC = { error: 'Open a dashboard page before reading HOA.' }; STATUS = 403;
-ELS.annunciator.listeners.click[0]({ target: { closest: s => s === 'button.cell' ? { id: 'refresh', dataset: {} } : null } }); await flush();
+window.places = { again: () => {} }; window.PAGE_AGAIN.run(); await flush();
 R.ob = ELS['ob-body'].html; R.lamps = ELS.annunciator.html;""")
         self.assertEqual(hoa_reads(out), ["/api/hoa", "/api/hoa"])
         self.assertIn("data-id=", out["R"]["before"])

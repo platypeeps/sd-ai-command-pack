@@ -89,9 +89,7 @@
     const L = SUMMARY ? SUMMARY.lamps : [];
     put($('annunciator'), cells([...L.filter(l => !NO_LAMP.has(l.id)).map(l => ({ button: true, state: l.state, pressed: F.area.has(l.id),
       attrs: html` data-area="${l.id}"`, label: l.name, mark: I(LOOK[l.id]?.[0] || 'circle-help'), val: lampValue(l),
-      sr: `state ${l.state} · ${l.view === VIEW ? `shows only ${l.name} rows` : `opens ${PAGE_VIEWS.find(v => v.id === l.view)?.label}`}` })),
-      { button: true, attrs: html` id="refresh"`, label: 'Observed', mark: I('rotate-ccw'),
-        val: html`<span class="ph">${SUMMARY ? html`<b>${new Date(SUMMARY.read).toISOString().slice(11, 16)}</b> UTC` : 'not read'}</span> · <span class="ph">refresh</span>` }]));
+      sr: `state ${l.state} · ${l.view === VIEW ? `shows only ${l.name} rows` : `opens ${PAGE_VIEWS.find(v => v.id === l.view)?.label}`}` }))]));
   }
 
   // ---------- Views ----------
@@ -257,8 +255,8 @@
   // longer lists runs no command and loses its pick, and a failed read leaves no row, lamp or command from the last one.
   // Each puts and retires only its own view's rows; one for a view not open keeps its reading and draws nothing.
   const load = () => Promise.resolve(readers[VIEW] && readers[VIEW].load()).then(() => readSummary());
-  // Read again (sd:5638): the shell's head button reads the shown view and the lamps again, as
-  // the Observed lamp does. Re-run collector, on the protection collector, runs the sync first.
+  // Read again (sd:5638): the shell's head button reads the shown view and the lamps again; sd:6697
+  // dropped the Observed lamp. Re-run collector, on the protection collector, runs the sync first.
   window.PAGE_AGAIN = { title: 'Read the shown view and the lamps again', run: load };
   const spec = view => ({
     source: `/api/health/${view}`, what: `the ${PAGE_VIEWS.find(v => v.id === view).label} rows`,
@@ -458,7 +456,6 @@
     // A lamp is the Area pick's value for its area: pressing it adds the area to the filter, pressing it again takes it out.
     $('annunciator').addEventListener('click', e => {
       const c = e.target.closest('button.cell'); if (!c) return;
-      if (c.id === 'refresh') return load();
       const id = c.dataset.area, lamp = SUMMARY?.lamps.find(l => l.id === id);
       if (lamp && lamp.view !== VIEW) { F.area.clear(); F.area.add(id); shell.view.show(lamp.view); return; }
       F.area.has(id) ? F.area.delete(id) : F.area.add(id);

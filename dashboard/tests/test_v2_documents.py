@@ -571,7 +571,7 @@ C.put({ id: 'tag:x', type: 'document tag', doc: d, tag: 'x', label: 'x' }); docu
 const ids = ['document.pin', 'document.unpin', 'document.hide', 'document.unhide', 'document.tag', 'document.untag'];
 R.when = ids.map(id => cmd(id).when(cmd(id).on === 'document tag' ? C.get('tag:x') : d));
 ids.forEach(id => shellRun(cmd(id), cmd(id).on === 'document tag' ? C.get('tag:x') : d)); await flush();
-R.det = ELS.details.html; F.hidden = true; render(); R.empty = ELS.empty.html;""", row="'lab/plan.html'")
+R.det = ELS.details.html; F.hidden = 'aside'; render(); R.empty = ELS.empty.html;""", row="'lab/plan.html'")
         # Unpin and Unhide say first that the row is not pinned or hidden; the unread store is why none is.
         self.assertEqual(out["R"]["when"], [reason, "not pinned", reason, "not hidden", reason, reason])
         self.assertEqual(out["posts"], [])
@@ -697,19 +697,25 @@ FIELD_VALUES.tag = 'Board Q1'; shellRun(tag, other); await flush();""", answer=s
         self.assertEqual(out["confirms"], ["document.tag", "document.tag"], "Tag ran on another row without showing its tag")
         self.assertEqual([t[0] for t in out["toasts"]], ["Tagged q4 · The plan", "Tagged q4 · Overview", "Tagged board-q1 · Overview"])
 
-    def test_the_hidden_filter_shows_the_hidden_documents_and_only_them(self):
+    def test_hidden_shows_the_hidden_documents_alone_and_all_shows_every_one(self):
         self.rows_of(**{"civic/brief.html": {"hidden": True}, "lab/plan.html": {"pinned": True}})
-        click = "ELS.facets.listeners.click[0]({ target: { closest: () => ({ id: 'f-hidden', dataset: {}, getAttribute: () => null }) } });"
-        out = self.run_page(f"""R.rows = ELS.rows.html; R.facets = ELS.facets.html; {click}
-R.hidden = ELS.rows.html; R.url = {self.URL}; {click} R.back = ELS.rows.html;""")
+        def click(v):
+            return ("ELS['hidden-seg'].listeners.click[0]({ target: { closest: s => s === 'button[data-aside=\"hidden\"]'"
+                    f" ? {{ dataset: {{ v: '{v}' }} }} : null }} }});")
+        out = self.run_page(f"""R.rows = ELS.rows.html; R.seg = ELS['hidden-seg'].html; {click('aside')}
+R.hidden = ELS.rows.html; R.url = {self.URL}; {click('all')} R.all = ELS.rows.html; R.urlAll = {self.URL};
+{click('open')} R.back = ELS.rows.html;""")
         def ids(rows):
             return re.findall(r'data-id="([^"]+)"', rows)
         # Pinned first; the hidden one is out of the list until the filter shows it.
         self.assertEqual(ids(out["R"]["rows"]), ["lab/plan.html", "lab/orphan.html", "lab/overview.html"])
-        self.assertRegex(out["R"]["facets"], r'id="f-hidden"[^>]*>.*Hidden <span class="n">1</span>')
+        self.assertIn('data-v="aside" aria-pressed="false">Hidden <span class="n">1</span>', out["R"]["seg"])
+        self.assertIn('data-v="all" aria-pressed="false">All <span class="n">4</span>', out["R"]["seg"])
         self.assertEqual(ids(out["R"]["hidden"]), ["civic/brief.html"])
         self.assertIn('class="hid"', out["R"]["hidden"])
         self.assertEqual(out["R"]["url"], "hidden=1")
+        self.assertEqual(sorted(ids(out["R"]["all"])), sorted(ids(out["R"]["rows"]) + ["civic/brief.html"]))
+        self.assertEqual(out["R"]["urlAll"], "hidden=all")
         self.assertEqual(ids(out["R"]["back"]), ids(out["R"]["rows"]))
         # A link to the hidden view opens it.
         out = self.run_page("R.rows = ELS.rows.html;", search="?hidden=1")

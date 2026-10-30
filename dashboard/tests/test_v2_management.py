@@ -1055,6 +1055,7 @@ class TheScript(PageScript):
             ["svc.restart", "service", "confirm", "t", None, False],
             ["svc.stop", "service", "confirm", "s", None, False],
             ["svc.start", "service", "safe", "a", None, False],
+            ["repos.refresh", "git state", "safe", None, True, False],
             ["sats.refresh", "satellite refresh", "confirm", None, True, False],
             ["upload.regenerate", "upload link", "confirm", None, True, False],
             ["jobs.retry", "job", "safe", "t", None, False],
@@ -1166,12 +1167,17 @@ R.got = await cmd('repo.standard').run(C.get('repo:{path}'));""", doc=doc, searc
         self.assertIn("nightly-sync", out["R"]["sched"])
         self.assertEqual(out["attention"][-1], {"state": "warning", "n": 1, "what": "scheduled jobs failed"})
 
-    def test_the_repos_table_has_a_refresh_button_and_no_hint_line(self):
-        """sd:5614: Refresh posts /api/repos/refresh, which makes the next read wait for a fresh git reading."""
+    def test_the_repos_table_has_a_refresh_git_state_command_and_no_hint_line(self):
+        """sd:5614: Refresh posts /api/repos/refresh, which makes the next read wait for a fresh git reading. sd:6697: it is
+        Refresh git state, a registered command whose tip says it writes nothing."""
         answer = """(p, b) => p === '/api/repos/refresh' ? [200, { refreshed: true }] : [404, { error: 'no' }]"""
-        click = "ELS['view-repos'].listeners.click.forEach(f => f({ target: { closest: s => s === '[data-refresh-repos]' ? {} : null } }));"
-        out = self.run_page(f"R.html = ELS['view-repos'].html; {click} await flush(); await flush();", answer=answer)
-        self.assertIn('data-refresh-repos', out["R"]["html"])
+        out = self.run_page("""R.html = ELS['view-repos'].html; const c = cmd('repos.refresh');
+R.label = c.label; R.does = c.does; R.got = await c.run(C.get('repos:git')); await flush();""", answer=answer)
+        self.assertIn('data-cmd="repos.refresh" data-obj="repos:git"', out["R"]["html"])
+        self.assertIn("<span>Refresh git state</span>", out["R"]["html"])
+        self.assertEqual(out["R"]["label"], "Refresh git state")
+        self.assertIn("writes nothing", out["R"]["does"])
+        self.assertEqual(out["R"]["got"], "Git state refreshed")
         self.assertNotIn("nothing here fetches", out["R"]["html"])
         self.assertNotIn("opens a registered repo's settings", out["R"]["html"])
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/repos/refresh", {}]])
@@ -2128,7 +2134,7 @@ await flush(); R.shown = OUT.shown.slice(); R.view = view; R.after = ELS.annunci
         self.assertEqual(re.findall(r'data-view="(\w+)" data-state="(\w+)" aria-pressed="(\w+)"', out["R"]["before"]),
                          [("repos", "ok", "true"), ("lane", "ok", "false"), ("sessions", "caution", "false"),
                           ("deploys", "unknown", "false"), ("schedules", "warning", "false")])
-        self.assertIn('id="refresh"', out["R"]["before"])
+        self.assertNotIn('id="refresh"', out["R"]["before"])
         self.assertEqual((out["R"]["shown"], out["R"]["view"]), (["schedules"], "schedules"))
         self.assertIn('data-view="schedules" data-state="warning" aria-pressed="true"', out["R"]["after"])
 

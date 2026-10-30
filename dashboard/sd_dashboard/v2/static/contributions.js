@@ -5,7 +5,7 @@
 // Dismiss run through dashboard routes and ask first: none has a verb that reverses it. Open on GitHub opens a tab (sd:5628);
 // Re-run collector asks the server to run sd shadow sync (sd:2207). The reference's Trackers view is not ported: its switch opens the classic Operations > Trackers.
 // build (sd:5486): Hide and Unhide post /api/contributions/view, the view state Designs' Hide writes, each with Undo. A hidden
-// row leaves the Open rows, the lamps, the tallies and the badge; Show hidden, in the Open table's filter bar, lists it with Unhide.
+// row leaves the Open rows, the lamps, the tallies and the badge; Hidden, in the Open table's Open | Hidden | All, lists it with Unhide.
 // Hide persists until Unhide, where Dismiss ends on new activity. An unread store hides nothing and turns both commands off.
 // build (sd:5488): the Filed view lists the Jira tickets and GitHub issues you filed this year, as sd shadow sync stored them
 // (pack sd:5496), with Details and Edit, which opens one in Jira or on GitHub in a new tab; the dashboard writes nothing there.
@@ -14,7 +14,7 @@ const { html, put, plural, cells } = window.markup;
 // Palette "This page" group. shell.js reads it at start, so it is set before the shell runs.
 // The shell's view switch (shell.js, view block, sd:5064): Open, the rows acted on, first; Settled, the record, second;
 // Filed (sd:5488), what you filed in Jira and on GitHub this year, on its own table. The rows the operator hid (sd:5486) are a
-// filter on Open, Show hidden, kept as ?hidden=1 (sd:5753); an older #view=hidden link, from when they were a view, lands on it.
+// filter on Open, Hidden in Open | Hidden | All, kept as ?hidden=1 (sd:5753, sd:6701); an older #view=hidden link, from when they were a view, lands on it.
 window.PAGE_VIEWS = [{ id: 'open', label: 'Open' }, { id: 'settled', label: 'Settled' }, { id: 'filed', label: 'Filed' }];
 if (location.hash === '#view=hidden') {
   const p = new URLSearchParams(location.search); p.set('hidden', '1');
@@ -38,6 +38,8 @@ addEventListener('DOMContentLoaded', () => {
   const FRESH = { fresh: 'ok', stale: 'caution', degraded: 'warning', never: 'unknown', unknown: 'unknown' };
   const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
   const n = x => Number(x || 0).toLocaleString('en-US');
+  // The scope group (sd:6693): the shell's .vseg, All | Internal | External, each with its open count.
+  const scopeSeg = count => put(document.getElementById('scope'), html`${SCOPES.map(v => html`<button type="button" data-scope="${v}" aria-pressed="${String(v === scope)}">${v[0].toUpperCase() + v.slice(1)} <span class="n">${count(v)}</span></button>`)}`);
   // build: a POSIX single-quoted word, so a title with $ or a quote copies as itself.
   const shq = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
     // build: only an https github.com URL becomes a link, as v1's _link allows.
@@ -57,9 +59,9 @@ addEventListener('DOMContentLoaded', () => {
   // The Filed view (sd:5488): its rows, by key, and whether it is the shown view.
   let FILED = [], FBY = new Map(), FILEDVIEW = false;
   const u0 = new URLSearchParams(location.search);
-  // Show hidden (sd:5753) draws the hidden rows on the Open table instead of the rest.
-  let HIDDEN = u0.get('hidden') === '1';
-  const inView = r => r.hidden === HIDDEN;
+  // Open | Hidden | All (sd:6701, after sd:5753's toggle): which rows the Open table draws, kept as ?hidden=.
+  let HID = window.shell.aside.mode('hidden');
+  const inView = r => window.shell.aside.shows(HID, r.hidden), HIDDEN = () => HID === 'aside';
   let scope = SCOPES.includes(u0.get('scope')) ? u0.get('scope') : 'all';
   // The lane filter: an open lane, or `github`, the open rows GitHub already merged or closed (the fourth lamp).
   let lane = [...ORDER, 'github'].includes(u0.get('lane')) ? u0.get('lane') : null;
@@ -168,7 +170,7 @@ addEventListener('DOMContentLoaded', () => {
         run: o => window.shell.post('/api/contributions/dismiss', { key: o.key, revision: o.revision })
           .then(() => { landed(o, { dismissed: true }); reread(); return `Dismissed · ${o.label}`; }, e => { load(); throw e; }) },
       // build (sd:5486): Hide and Unhide, the view state Designs' Hide writes; Undo posts the other value. Nothing expires it.
-      ...[[true, 'hide', 'Hide', 'Hides this contribution from the open rows and counts; Undo shows it again.', 'eye-off', 'Hidden', '. Show hidden lists it.'],
+      ...[[true, 'hide', 'Hide', 'Hides this contribution from the open rows and counts; Undo shows it again.', 'eye-off', 'Hidden', '. Hidden lists it.'],
         [false, 'unhide', 'Unhide', 'Shows this contribution in the open rows again; Undo hides it.', 'eye', 'Unhidden', '']].map(([hidden, id, label, does, icon, done, after]) => (
         { id: `contribution.${id}`, on: 'contribution', label, does, key: 'h', icon, risk: 'undo',
           when: o => o.hidden === hidden ? (hidden ? 'already hidden' : 'not hidden') : STORE ? `Hide is off: ${STORE}` : true,
@@ -207,7 +209,7 @@ addEventListener('DOMContentLoaded', () => {
   function renderHead() {
     const c = DOC.collector || {}, st = FRESH[c.state] || 'unknown';
     put(document.getElementById('sub'), html`Pull requests and issues you opened or owe · <span id="open-n">${n(openN(scope))}</span> open · read <time class="rel" datetime="${DOC.read}"></time>`);
-    document.querySelectorAll('#scope input').forEach(i => { i.checked = i.value === scope; const b = i.nextElementSibling?.querySelector('b'); if (b) b.textContent = n(openN(i.value)); });
+    scopeSeg(v => n(openN(v)));
     const cnt = g => tot(g);
     const LANES = [
       ['newly_unblocked', 'Newly unblocked', 'git-merge', 'caution', 'ready'],
@@ -255,10 +257,10 @@ addEventListener('DOMContentLoaded', () => {
   // No carried row in the scope: a cut document may still count open rows there, which the limit left out (review 4, PR #72).
   function empty() {
     // Rows are left out only when the document says it cut some; otherwise a count from the last read may lag a write.
-    const where = scope === 'all' ? 'any' : scope, left = !DOC.truncated ? 0 : HIDDEN ? tot('hidden') : openN(scope);
-    if (HIDDEN && STORE) return `Hidden not read: ${STORE}`;
-    return left ? `${plural(left, HIDDEN ? 'hidden row' : 'open row')} in ${where} repositories ${left === 1 ? 'was' : 'were'} left out by the limit; v1 /classic/contributions lists every one.`
-      : HIDDEN ? `Nothing hidden in ${where} repositories` : `Nothing open in ${where} repositories`;
+    const where = scope === 'all' ? 'any' : scope, left = !DOC.truncated ? 0 : HIDDEN() ? tot('hidden') : openN(scope);
+    if (HID !== 'open' && STORE) return `Hidden not read: ${STORE}`;
+    return left ? `${plural(left, HIDDEN() ? 'hidden row' : 'open row')} in ${where} repositories ${left === 1 ? 'was' : 'were'} left out by the limit; v1 /classic/contributions lists every one.`
+      : HIDDEN() ? `Nothing hidden in ${where} repositories` : `Nothing open in ${where} repositories`;
   }
   function renderRows() {
     const all = scoped(), rows = shown(), v = q.value.trim();
@@ -270,14 +272,13 @@ addEventListener('DOMContentLoaded', () => {
     const cut = DOC.truncated ? `The document lists ${n(DOC.rows.length)} of ${n(DOC.open_total)} open rows; v1 /classic/contributions lists every one.` : '';
     f.hidden = !(lane || v || cut);
     f.textContent = [lane || v ? (rows.length ? `${rows.length} of ${all.length} shown${lane ? ' · ' + LABEL[lane] : ''}${v ? ` · “${v}”` : ''}. Esc clears.` : `Nothing matches${v ? ` “${v}”` : ''}. Esc clears.`) : '', cut].filter(Boolean).join(' ');
-    title.textContent = HIDDEN ? 'Hidden' : 'Open';
-    put(document.getElementById('tally'), HIDDEN ? html`${n(tot('hidden'))} hidden`
+    title.textContent = { open: 'Open', aside: 'Hidden', all: 'All' }[HID];
+    put(document.getElementById('tally'), HIDDEN() ? html`${n(tot('hidden'))} hidden`
       : html`<span class="g-caution">▲ ${n(tot('newly_unblocked') + tot('awaiting_you'))} yours</span><span class="g-queued">◌ ${n(tot('awaiting_them'))} theirs</span><span class="g-unknown">▨ ${n(tot('unknown'))} unknown freshness</span>`);
     const sort = L.sort !== LIST.sort || L.dir !== LIST.dir ? { sort: L.sort, dir: L.dir > 0 ? 'asc' : 'desc' } : {};
-    // The Open table's filter bar (sd:5753): Show hidden, with the hidden rows in the scope.
-    put(document.getElementById('open-filters'), window.shell.list.fbar(window.shell.list.fseg('hidden', 'Hidden',
-      [{ v: '1', pressed: HIDDEN, label: html`${I('eye-off')}Show hidden <span class="n">${n(tot('hidden'))}</span>` }])));
-    window.shell.url({ ...(scope !== 'all' && { scope }), ...(lane && { lane }), ...(HIDDEN && { hidden: 1 }), ...(v && { q: v }), ...sort });
+    // The Open table's filter bar: Open | Hidden | All (sd:6701), counted in the scope.
+    put(document.getElementById('open-filters'), window.shell.list.fbar(window.shell.aside.seg('hidden', 'Hidden', HID, { open: openN(scope), aside: tot('hidden') })));
+    window.shell.url({ ...(scope !== 'all' && { scope }), ...(lane && { lane }), ...(HID !== 'open' && { hidden: window.shell.aside.param(HID) }), ...(v && { q: v }), ...sort });
   }
 
   // ---------- Filed (sd:5488) ----------
@@ -478,10 +479,10 @@ addEventListener('DOMContentLoaded', () => {
   function render() { renderHead(); renderSettled(); renderRows(); renderFiled(); }
 
   // ---------- Events ----------
-  // A lane lamp filters the Open rows it counts, so it shows the Open view and turns Show hidden off.
-  document.getElementById('annunciator').addEventListener('click', e => { const c = e.target.closest('button.cell'); if (c) { HIDDEN = false; setLane(c.dataset.cell); window.shell.view.show('open'); } });
-  document.getElementById('open-filters').addEventListener('click', e => { if (DOC && e.target.closest('[data-f="hidden"]')) { HIDDEN = !HIDDEN; applyFilter(); } });
-  document.getElementById('scope').addEventListener('change', e => setScope(e.target.value));
+  // A lane lamp filters the Open rows it counts, so it shows the Open view and shows Open rows.
+  document.getElementById('annunciator').addEventListener('click', e => { const c = e.target.closest('button.cell'); if (c) { HID = 'open'; setLane(c.dataset.cell); window.shell.view.show('open'); } });
+  document.getElementById('open-filters').addEventListener('click', e => { const b = e.target.closest('button[data-aside="hidden"]'); if (DOC && b) { HID = b.dataset.v; applyFilter(); } });
+  document.getElementById('scope').addEventListener('click', e => { const b = e.target.closest('button[data-scope]'); if (b) setScope(b.dataset.scope); });
   document.getElementById('rows-head').addEventListener('click', e => { if (DOC && window.shell.list.sortBy(e, L)) window.shell.list.keepFocus(e, applyFilter); });
   put(document.getElementById('rows-head'), window.shell.list.sortHead(COLS, L)); // drawn before the read, so a failed one keeps the columns
   document.addEventListener('contributions:scope', e => setScope(e.detail));
@@ -514,7 +515,7 @@ addEventListener('DOMContentLoaded', () => {
   // Not read: every box says so, and the state slot above says why.
   function blank() {
     put(document.getElementById('sub'), html`Pull requests and issues you opened or owe · not read`);
-    document.querySelectorAll('#scope b').forEach(b => { b.textContent = ''; });
+    scopeSeg(() => '');
     put(document.getElementById('annunciator'), html``);
     put(document.getElementById('source'), html``);
     put(tbody, html`<tr class="lane"><td colspan="4"><span class="label">Not read: ${FAILED}</span></td></tr>`);

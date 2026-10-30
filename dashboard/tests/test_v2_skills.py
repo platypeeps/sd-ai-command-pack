@@ -65,7 +65,7 @@ COMMANDS = [
     ["skill.apply", "skill", "Apply", "a", "confirm"],
     ["skill.scan", "use surfaces", "Scan", "s", "safe"],
     # The Intake view (system sd:5478): Remove has Undo, which tracks the repository again.
-    ["skill.intake.refresh", "tracked repo", "Refresh", "e", "safe"],
+    ["skill.intake.refresh", "tracked repo", "Refresh skills", "e", "safe"],
     ["skill.intake.untrack", "tracked repo", "Remove", "m", "undo"],
     ["skill.intake.track", "untracked repo", "Track", "t", "safe"],
 ]
@@ -690,8 +690,8 @@ R.err = ELS['ad-err'].textContent;""")
         self.assertEqual(re.findall(r'data-facet="(\w+)" data-state="(\w+)"', lamps), [("path", "ok"), ("contrib", "ok"), ("unused", "caution")])
         self.assertIn('data-open="hygiene" data-state="caution"', lamps)
         self.assertIn('data-open="surfaces" data-state="ok"', lamps)
-        self.assertEqual([tag for tag, _ in cell_grammar(self, lamps)], ["button", "div", "button", "div", "button", "a", "a", "button"])
-        self.assertEqual([tag for tag, _ in cell_grammar(self, lamps)], ["button", "div", "button", "div", "button", "a", "a", "button"])
+        self.assertEqual([tag for tag, _ in cell_grammar(self, lamps)], ["button", "div", "button", "div", "button", "a", "a"])
+        self.assertEqual([tag for tag, _ in cell_grammar(self, lamps)], ["button", "div", "button", "div", "button", "a", "a"])
         self.assertEqual(out["R"]["sub"], "The sd pack catalog: 3 skills. 2 on paths, 0 on trial, 1 in contrib.")
         self.assertEqual(out["R"]["tally"], "3 uses this week · 1 catalog skills used")
         self.assertEqual(out["attention"], {"state": "caution", "n": 2, "what": "unused path skills and use-record faults"})

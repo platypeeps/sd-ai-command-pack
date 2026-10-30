@@ -613,19 +613,21 @@ shellRun(cmd('contribution.dismiss'), ext); await flush(); R.off = cmd('contribu
     VIEWS = ("(path, body) => { if (path === '/api/contributions/view') { DOC.rows.find(r => r.key === body.key).hidden = body.hidden;"
              " return [200, { key: body.key, hidden: body.hidden }]; } return [200, DOC]; }")
 
-    #: A click on the Open table's Show hidden toggle (sd:5753).
-    SHOW_HIDDEN = "ELS['open-filters'].listeners.click[0]({ target: { closest: s => s === '[data-f=\"hidden\"]' ? {} : null } });"
+    #: A click on the Open table's Open | Hidden | All (sd:5753, sd:6701).
+    PRESS = "ELS['open-filters'].listeners.click[0]({ target: { closest: s => s === 'button[data-aside=\"hidden\"]' ? { dataset: { v: '%s' } } : null } });"
+    SHOW_HIDDEN, SHOW_OPEN, SHOW_ALL = PRESS % "aside", PRESS % "open", PRESS % "all"
 
     def test_a_hidden_row_leaves_the_open_rows_and_show_hidden_lists_it_with_unhide(self):
-        # sd:5486: Open lists the unhidden rows. sd:5753: Show hidden, a toggle in the Open table's filter bar, lists the
-        # hidden ones alone; the URL keeps it, and a second press turns it off.
+        # sd:5486: Open lists the unhidden rows. sd:5753, sd:6701: Hidden, in the Open table's Open | Hidden | All, lists
+        # the hidden ones alone and All lists every row; the URL keeps the choice, and Open drops it.
         self.hidden()
         out = self.run_page(f"""R.rows = ELS.rows.html; R.lamps = ELS.annunciator.html; R.tally = ELS.tally.html; R.bar = ELS['open-filters'].html;
 {self.SHOW_HIDDEN} R.hidden = ELS.rows.html; R.title = ELS['open-title'].textContent; R.htally = ELS.tally.html;
 R.bar2 = ELS['open-filters'].html; R.url = OUT.urls[OUT.urls.length - 1];
 R.off = [cmd('contribution.hide').when(C.get('{ONE}')), cmd('contribution.unhide').when(C.get('{ONE}')),
   cmd('contribution.unhide').when(C.get('github:{EXTERNAL}'))];
-{self.SHOW_HIDDEN} R.back = ELS.rows.html; R.url2 = OUT.urls[OUT.urls.length - 1];""")
+{self.SHOW_ALL} R.all = ELS.rows.html; R.url3 = OUT.urls[OUT.urls.length - 1];
+{self.SHOW_OPEN} R.back = ELS.rows.html; R.url2 = OUT.urls[OUT.urls.length - 1];""")
         ids = r'<tr data-id="([^"]+)"'
         self.assertNotIn(ONE, re.findall(ids, out["R"]["rows"]))
         self.assertEqual(len(re.findall(ids, out["R"]["rows"])), 3)
@@ -634,10 +636,11 @@ R.off = [cmd('contribution.hide').when(C.get('{ONE}')), cmd('contribution.unhide
         self.assertEqual(re.findall(ids, out["R"]["hidden"]), [ONE])
         self.assertEqual((out["R"]["title"], out["R"]["htally"]), ("Hidden", "1 hidden"))
         self.assertEqual(out["R"]["off"], ["already hidden", True, "not hidden"])
-        toggle = r'data-f="hidden" data-v="1" aria-pressed="(\w+)">.*?Show hidden <span class="n">(\d+)</span>'
-        self.assertEqual(re.findall(toggle, out["R"]["bar"]), [("false", "1")])
-        self.assertEqual(re.findall(toggle, out["R"]["bar2"]), [("true", "1")])
-        self.assertEqual((out["R"]["url"], out["R"]["url2"]), ({"hidden": 1}, {}))
+        seg = r'data-aside="hidden" data-v="(\w+)" aria-pressed="(\w+)">\w+ <span class="n">(\d+)</span>'
+        self.assertEqual(re.findall(seg, out["R"]["bar"]), [("open", "true", "3"), ("aside", "false", "1"), ("all", "false", "4")])
+        self.assertEqual(re.findall(seg, out["R"]["bar2"])[1], ("aside", "true", "1"))
+        self.assertEqual(len(re.findall(ids, out["R"]["all"])), 4)
+        self.assertEqual((out["R"]["url"], out["R"]["url3"], out["R"]["url2"]), ({"hidden": "1"}, {"hidden": "all"}, {}))
         self.assertNotIn("hidden", out["counts"], "Hidden is no view, so no tab carries its count")
         self.assertNotIn(ONE, re.findall(ids, out["R"]["back"]))
         self.assertEqual(out["attention"]["n"], 1)
@@ -648,7 +651,7 @@ await lastUndo().undo(); await flush(); R.back = ELS.rows.html;""", answer=self.
         self.assertEqual(out["confirms"], [])
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/contributions/view", {"key": ONE, "hidden": True}],
                                                          ["/api/contributions/view", {"key": ONE, "hidden": False}]])
-        self.assertEqual(out["toasts"][0], ["Hidden · Fix it's $HOME. Show hidden lists it.", True])
+        self.assertEqual(out["toasts"][0], ["Hidden · Fix it's $HOME. Hidden lists it.", True])
         self.assertNotIn(ONE, re.findall(r'<tr data-id="([^"]+)"', out["R"]["rows"]))
         self.assertIn(ONE, re.findall(r'<tr data-id="([^"]+)"', out["R"]["back"]), "Undo did not bring the row back")
         self.assertEqual(out["gets"].count("/api/contributions/page"), 3, "Hide or its Undo did not read again")
@@ -692,7 +695,7 @@ R.rows = ELS.rows.html;""", answer=self.VIEWS)
                                 search=search, extra=moved % json.dumps(hash))
             self.assertEqual(out["moved"], moved_to, (search, hash))
             self.assertEqual(re.findall(ids, out["R"]["rows"]), [ONE], (search, hash))
-            self.assertIn('data-f="hidden" data-v="1" aria-pressed="true"', out["R"]["bar"])
+            self.assertIn('data-aside="hidden" data-v="aside" aria-pressed="true"', out["R"]["bar"])
             self.assertNotIn(ONE, re.findall(ids, out["R"]["lamped"]))
             self.assertNotIn("hidden", out["urls"][-1])
         out = self.run_page("", extra=moved % json.dumps("#view=settled"))
@@ -1242,12 +1245,13 @@ ELS.annunciator.listeners.click[0]({ target: lamp }); R.on = where(); R.html = E
         self.assertLess(page.index('id="view-settled"'), page.index('<section class="filed" id="view-filed"'))
         self.assertLess(page.index('<section id="view-open"'), page.index('<section class="settled" id="view-settled"'))
 
-    def test_the_scope_buttons_keep_name_and_count_on_one_line(self):
-        """sd:5750: .seg span is a grid, so All and its <b> count stacked as two rows, and the group shrank in the toolbar."""
-        css = (V2 / "static" / "contributions.css").read_text(encoding="utf-8")
-        rules = dict(re.findall(r"(?m)^(\.repo-scope(?: span)?) \{ ([^}]*) \}$", css))
-        self.assertIn("grid-auto-flow: column", rules.get(".repo-scope span", ""), "a scope button's count sits under its name")
-        self.assertIn("flex: none", rules.get(".repo-scope", ""), "the toolbar may shrink the scope group and wrap its buttons")
+    def test_the_scope_is_the_shells_segment_group(self):
+        """sd:6693: the scope radios (.seg) were shorter than Tasks' realm tabs; the scope is the shell's .vseg now."""
+        page = (V2 / "contributions.html").read_text(encoding="utf-8")
+        self.assertIn('<div class="vseg" id="scope" role="group" aria-label="Repositories"></div>', page)
+        self.assertNotIn("repo-scope", (V2 / "static" / "contributions.css").read_text(encoding="utf-8"))
+        out = self.run_page("R.scope = ELS.scope.html;")
+        self.assertRegex(out["R"]["scope"], r'^<button type="button" data-scope="all" aria-pressed="true">All <span class="n">\d+</span></button>')
 
     def test_trackers_is_a_link_beside_the_views_not_a_second_open(self):
         # sd:5064: the Open | Settled tabs are the page's views; the old Open | Trackers switch repeated Open.

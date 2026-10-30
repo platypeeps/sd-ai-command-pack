@@ -34,6 +34,8 @@
   <!-- The toolbar standard (sd:5281): row 1, the views then the page's filter; the count sits on the table's title line. -->
   <div class="toolbar" id="toolbar">
     <div id="viewswitch"></div>
+    <!-- One set-aside pattern (sd:6701): Open | Parked | All, the shell's .vseg. -->
+    <div class="vseg" id="parked-seg" role="group" aria-label="Pieces shown"></div>
     <div class="shift" id="shift">
       <label class="sr" for="shift-in">Capture an idea or find a piece</label>
       <div class="field">
@@ -44,7 +46,7 @@
       </div>
       <div class="preview" id="shift-preview" hidden></div>
     </div>
-    <div class="views">
+    <div class="tools">
       <!-- The layout menu Tasks uses (shell.viewPick, sd:5641): one icon button; its menu lists Board and Editor. -->
       <div class="viewpick">
         <button type="button" class="viewpick-btn" id="view-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="view-menu" aria-label="View: Board"><svg class="i" aria-hidden="true"><use href="#i-kanban"/></svg></button>
@@ -53,7 +55,6 @@
           <button type="button" role="menuitemradio" data-view="editor" aria-checked="false"><svg class="i" aria-hidden="true"><use href="#i-pen-line"/></svg><span>Editor</span><kbd>v e</kbd></button>
         </div>
       </div>
-      <button class="chip" type="button" id="show-parked" aria-pressed="false">Parked <span id="parked-n"></span></button>
     </div>
   </div>
   <div class="strip" id="strip" aria-label="Pipeline summary"></div>

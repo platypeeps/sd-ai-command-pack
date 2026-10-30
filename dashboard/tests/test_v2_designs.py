@@ -181,7 +181,7 @@ class TheScript(unittest.TestCase):
         self.assertEqual(out["R"]["exec"], [False, None, None, None, None])
 
     def test_hide_and_unhide_are_the_rows_act(self):
-        # sd:5457: the row shows Hide (or Unhide, under Show hidden) on every page and brief row.
+        # sd:5457: the row shows Hide (or Unhide, under Hidden) on every page and brief row.
         rows = {"page": f"{PAGES}/tasks.html", "brief": "product:brand"}
         out = self.run_page(f"const ROWS_ = {json.dumps(rows)};"
                             " R.primary = Object.fromEntries(Object.entries(ROWS_).map(([t, id]) => [t, REG.filter(c => c.on === t && c.primary?.(C.get(id))).map(c => c.id)]));")
@@ -215,14 +215,15 @@ class TheScript(unittest.TestCase):
         self.assertIn("brief only · a brief and no page yet", rows)
         self.assertEqual(re.findall(r'data-filter="(\w+)" data-state="(\w+)"', lamps),
                          [("recent", "ok"), ("stale", "caution"), ("noshot", "caution"), ("dirty", "caution"), ("brief", "ok")])
-        self.assertEqual(cell_grammar(self, lamps), [("button", s) for s in ("ok", "caution", "caution", "caution", "ok", None)])
+        self.assertEqual(cell_grammar(self, lamps), [("button", s) for s in ("ok", "caution", "caution", "caution", "ok")])
         self.assertEqual(re.findall(r'data-filter="(\w+)"[^>]*>.*?<b>(\d+)</b>', lamps, re.S),
                          [("recent", "2"), ("stale", "1"), ("noshot", "1"), ("dirty", "1"), ("brief", "1")])
         self.assertEqual(out["text"]["sub"], "4 pages in 2 products")
         self.assertEqual(out["text"]["src"], "~/repos/example/ui-design at abc1234")
         self.assertEqual(out["page_attention"], {"state": "caution", "n": 3, "what": "pages uncommitted or without a current screenshot"})
 
-    SHOW_HIDDEN = "ELS.filters.listeners.click[0]({ target: { closest: s => s === '[data-fclear], [data-f]' ? { dataset: { f: 'hidden', v: '1' } } : null } });"
+    PRESS = "ELS.filters.listeners.click[0]({ target: { closest: s => s === '[data-fclear], [data-f], [data-aside]' ? { dataset: { aside: 'hidden', v: '%s' } } : null } });"
+    SHOW_HIDDEN, SHOW_ALL = PRESS % "aside", PRESS % "all"
 
     def hidden_doc(self):
         """The ledger with the stale page hidden."""
@@ -233,20 +234,22 @@ class TheScript(unittest.TestCase):
         return doc
 
     def test_a_hidden_row_leaves_the_ledger_the_lamps_and_the_badge_and_show_hidden_lists_it(self):
-        # sd:3447: the stale page is hidden, so the Shot stale lamp and the badge drop it. sd:5753: Show hidden, a toggle in
-        # the filter bar, lists the hidden rows alone; the lamps and the Pages tab count the rows the ledger draws.
+        # sd:3447: the stale page is hidden, so the Shot stale lamp and the badge drop it. sd:5753, sd:6701: Hidden, in the
+        # filter bar's Open | Hidden | All, lists the hidden rows alone; the lamps and the Pages tab count the rows drawn.
         out = self.run_page(f"R.lamps = ELS.annunciator.html; R.rows = ELS.rows.html; R.counts = {{ ...OUT.counts }}; R.bar = ELS.filters.html; {self.SHOW_HIDDEN}"
                             " R.hidden = ELS.rows.html; R.lamps2 = ELS.annunciator.html; R.bar2 = ELS.filters.html;"
                             " R.unhide = cmd('design.unhide').when(C.get('" + PAGES + "/tasks.html'));"
-                            " R.hide = cmd('design.hide').when(C.get('" + PAGES + "/tasks.html'));", answer=f"(path) => [200, {json.dumps(self.hidden_doc())}]")
+                            " R.hide = cmd('design.hide').when(C.get('" + PAGES + "/tasks.html'));"
+                            f" {self.SHOW_ALL} R.all = ELS.rows.html; R.url3 = OUT.urls[OUT.urls.length - 1];", answer=f"(path) => [200, {json.dumps(self.hidden_doc())}]")
         self.assertEqual(re.findall(r'data-filter="(\w+)"[^>]*>.*?<b>(\d+)</b>', out["R"]["lamps"], re.S),
                          [("recent", "2"), ("stale", "0"), ("noshot", "1"), ("dirty", "1"), ("brief", "1")])
         self.assertNotIn(f"{PAGES}/tasks.html", out["R"]["rows"])
-        self.assertEqual((out["R"]["counts"], out["counts"]), ({"pages": 4}, {"pages": 1}))
-        toggle = r'data-f="hidden" data-v="1" aria-pressed="(\w+)">.*?Show hidden <span class="n">(\d+)</span>'
-        self.assertEqual(re.findall(toggle, out["R"]["bar"]), [("false", "1")])
-        self.assertEqual(re.findall(toggle, out["R"]["bar2"]), [("true", "1")])
-        self.assertEqual(out["urls"][-1], {"hidden": 1})
+        self.assertEqual((out["R"]["counts"], out["counts"]), ({"pages": 4}, {"pages": 5}))
+        seg = r'data-aside="hidden" data-v="(\w+)" aria-pressed="(\w+)">\w+ <span class="n">(\d+)</span>'
+        self.assertEqual(re.findall(seg, out["R"]["bar"]), [("open", "true", "4"), ("aside", "false", "1"), ("all", "false", "5")])
+        self.assertEqual(re.findall(seg, out["R"]["bar2"])[1], ("aside", "true", "1"))
+        self.assertEqual(len(re.findall(r'<tr data-id="([^"]+)"', out["R"]["all"])), 5)
+        self.assertEqual(out["R"]["url3"], {"hidden": "all"})
         self.assertIn("Clear all", out["R"]["bar2"])
         self.assertEqual(re.findall(r'<tr data-id="([^"]+)"', out["R"]["hidden"]), [f"{PAGES}/tasks.html"])
         self.assertEqual(re.findall(r'data-filter="(\w+)"[^>]*>.*?<b>(\d+)</b>', out["R"]["lamps2"], re.S),
@@ -269,14 +272,14 @@ class TheScript(unittest.TestCase):
         out = self.run_page(f"{self.SHOW_HIDDEN} click({{ s: '.annunciator .cell', dataset: {{ filter: 'noshot' }} }}); R.rows = ELS.rows.html; R.empty = ELS.empty.textContent;",
                             answer=f"(path) => [200, {json.dumps(self.hidden_doc())}]")
         self.assertEqual(re.findall(r'<tr data-id="([^"]+)"', out["R"]["rows"]), [])
-        self.assertEqual(out["urls"][-1], {"f": "noshot", "hidden": 1})
+        self.assertEqual(out["urls"][-1], {"f": "noshot", "hidden": "1"})
 
     def test_hide_posts_the_row_and_undo_posts_it_back(self):
         out = self.run_page(f"shellRun(cmd('design.hide'), C.get('{PAGES}/notes.html')); await flush();"
                             " cmd('design.hide').undo(C.get('" + PAGES + "/notes.html')); await flush();")
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/designs/view", {"id": f"{PAGES}/notes.html", "hidden": True}],
                                                          ["/api/designs/view", {"id": f"{PAGES}/notes.html", "hidden": False}]])
-        self.assertEqual(out["toasts"][0], "Hidden: designs/pages/notes.html. Show hidden lists it.")
+        self.assertEqual(out["toasts"][0], "Hidden: designs/pages/notes.html. Hidden lists it.")
 
     def test_an_unread_store_hides_nothing_and_turns_hide_off_with_its_reason(self):
         doc = json.loads(json.dumps(DOC))
@@ -314,17 +317,19 @@ class TheScript(unittest.TestCase):
         the pressed lamp and the query as tokens, then Clear all; the count stays once, on the title line."""
         bar = "ELS.filters.listeners.%s[0]({ target: %s });"
         out = self.run_page("R.bar = ELS.filters.html; R.tally = OUT.counts.pages;"
-                            + bar % ("click", "{ closest: s => s === '[data-fclear], [data-f]' ? { dataset: { f: 'q', v: '' } } : null }")
+                            + bar % ("click", "{ closest: s => s === '[data-fclear], [data-f], [data-aside]' ? { dataset: { f: 'q', v: '' } } : null }")
                             + " R.bar2 = ELS.filters.html; R.url2 = OUT.urls[OUT.urls.length - 1]; R.input = (OUT.shift ?? null);"
-                            + bar % ("click", "{ closest: s => s === '[data-fclear], [data-f]' ? { dataset: { f: 'state', v: 'ok' } } : null }")
+                            + bar % ("click", "{ closest: s => s === '[data-fclear], [data-f], [data-aside]' ? { dataset: { f: 'state', v: 'ok' } } : null }")
                             + " R.url3 = OUT.urls[OUT.urls.length - 1];"
-                            + bar % ("click", "{ closest: s => s === '[data-fclear], [data-f]' ? { dataset: { fclear: '' } } : null }")
+                            + bar % ("click", "{ closest: s => s === '[data-fclear], [data-f], [data-aside]' ? { dataset: { fclear: '' } } : null }")
                             + " R.bar4 = ELS.filters.html; R.url4 = OUT.urls[OUT.urls.length - 1]; R.tally4 = OUT.counts.pages;"
                             + bar % ("change", "{ dataset: { pick: 'product' }, type: 'select-one', value: 'brand' }")
                             + " R.rows5 = ELS.rows.html; R.url5 = OUT.urls[OUT.urls.length - 1];",
                             search="?f=stale&q=tasks")
         R = out["R"]
-        self.assertTrue(R["bar"].startswith('<div class="fbar" role="group" aria-label="Filters"><div class="fseg" role="group" aria-label="State">'), R["bar"][:120])
+        # sd:6701: Open | Hidden | All sits at the bar's left, then the state.
+        self.assertTrue(R["bar"].startswith('<div class="fbar" role="group" aria-label="Filters"><div class="vseg" role="group" aria-label="Hidden rows">'), R["bar"][:120])
+        self.assertIn('</div>\n    <div class="fseg" role="group" aria-label="State">', R["bar"])
         self.assertEqual(re.findall(r'data-f="state" data-v="(\w+)" aria-pressed="false" title="[^"]*: (\d+)"', R["bar"]),
                          [("caution", "3"), ("ok", "1"), ("queued", "1")])
         self.assertIn('<select id="f-product" class="fsel" data-pick="product"><option value="" selected>All products</option>'

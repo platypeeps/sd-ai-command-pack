@@ -249,7 +249,7 @@ class TheDigestCard(ReaderCase):
         self.assertIn("Nothing merged, failed or waiting since yesterday.", quiet)
         self.doc["digest"] = {"error": "database is locked"}
         failed = self.run_page("R.digest = ELS.digest.html;")["R"]["digest"]
-        self.assertIn("The digest was not read: database is locked. Refresh tries again.", failed)
+        self.assertIn("The digest was not read: database is locked. Read again tries again.", failed)
 
     def test_unknown_failures_are_said_never_a_quiet_night(self):
         """sd:6259: a job or lane read that failed leaves the failures unknown."""

@@ -2,7 +2,7 @@
 
 What this slice promises: `/api/watches` lists every market row with its status and its last refresh, the newest
 `Last full refresh:` date in its profile, and never calls an active watch fresh past `STALE_DAYS`; it carries the
-market-watch job's state and why its last run failed. Refresh all is Run now on that job; Refresh runs one watch's
+market-watch job's state and why its last run failed. Refresh watches is Run now on that job; Refresh watch runs one watch's
 refresh in herdr and Add watch files a candidate row, both through `/api/actions/run`, which reads every id against the
 store and refuses before anything runs.
 
@@ -276,9 +276,9 @@ R.after = ELS.rows.html; R.shift = OUT.shift;""")
 
     def test_refresh_all_runs_the_job_with_the_revision_the_page_read(self):
         out = self.run_page("const j = OBJ.get('job:market-watch'); R.label = cmd('jobs.retry').label; C.run(cmd('jobs.retry'), j); await flush();")
-        self.assertEqual(out["R"]["label"], "Refresh all")
+        self.assertEqual(out["R"]["label"], "Refresh watches")
         self.assertIn(["/api/jobs/market-watch/retry", {"revision": self.doc["job"]["revision"]}, 64], out["posts"])
-        self.assertIn(["Refresh all started · market-watch refreshes the next three active watches", False], out["toasts"])
+        self.assertIn(["Refresh watches started · market-watch refreshes the next three active watches", False], out["toasts"])
         self.assertEqual(out["gets"], ["/api/watches", "/api/watches"], "the job's line reads again")
 
     def test_refresh_runs_one_active_watch_and_is_off_on_any_other(self):

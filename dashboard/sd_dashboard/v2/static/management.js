@@ -190,9 +190,7 @@ function lamps() {
   if (DOC?.jobs) { const failed = CRON.filter(c => c.rank === 'warning').length; set('schedules', failed ? 'warning' : 'ok', html`<b>${failed}</b> failed ${failed ? '■ ' : ''}of ${CRON.length}`); }
   else set('schedules', 'unknown', html`▨ not read`);
   put(document.getElementById('annunciator'), cells([...window.PAGE_VIEWS.map(v => ({ button: true, state: L[v.id].state, pressed: v.id === view,
-    attrs: html` data-view="${v.id}"`, label: v.label, mark: I(LOOK[v.id]), val: L[v.id].val, sr: `state ${L[v.id].state} · shows ${v.label}` })),
-    { button: true, attrs: html` id="refresh"`, label: 'Observed', mark: I('rotate-ccw'),
-      val: html`<span class="ph">${READ ? html`<b>${hhmm(READ)}</b> UTC` : 'not read'}</span> · <span class="ph">refresh</span>` }]));
+    attrs: html` data-view="${v.id}"`, label: v.label, mark: I(LOOK[v.id]), val: L[v.id].val, sr: `state ${L[v.id].state} · shows ${v.label}` }))]));
 }
 
 // ---------- Lists: sort, filter, page (shell.list, sd:2682) ----------
@@ -276,7 +274,7 @@ function renderRepos() {
   shell.view.count('repos', rows.length);
   put(el, html`<div class="sec-head"><h2 id="repos-h">Repos <button class="help" type="button" aria-label="Help: Repos" data-help="<b>The sd-db repo table is the enumeration.</b> One row per registered checkout. Open a repo for its settings page: the sd-db row, its review declaration and GitHub protection, each with the route an edit takes.">${I('circle-help')}</button></h2>
       <p class="tally">${hides(rows.length, ALL.length, 'repo')}<span>${REPOS.length} registered</span><span>${managed} managed</span><span>${auto} lane merge auto</span></p>
-      <p class="tally" id="git-tally">${GIT ? html`${c.repos ?? 0} checkouts under ${tilde(GIT.root || '') || 'the fleet root'} · ${c.dirty ?? 0} dirty · ${c.ahead ?? 0} ahead · ${GIT.repos.filter(g => g.state === 'behind').length} behind default · git read ${seen(GIT)}` : html`<span class="g-unknown">▨</span> git state not read: ${why('git')}`} <button class="btn quiet sm" type="button" data-refresh-repos>${I('rotate-ccw')}<span>Refresh</span></button></p></div>
+      <p class="tally" id="git-tally">${GIT ? html`${c.repos ?? 0} checkouts under ${tilde(GIT.root || '') || 'the fleet root'} · ${c.dirty ?? 0} dirty · ${c.ahead ?? 0} ahead · ${GIT.repos.filter(g => g.state === 'behind').length} behind default · git read ${seen(GIT)}` : html`<span class="g-unknown">▨</span> git state not read: ${why('git')}`} <button class="btn quiet sm" type="button" data-cmd="repos.refresh" data-obj="repos:git">${I('rotate-ccw')}<span>Refresh git state</span></button></p></div>
     <div class="filters toolbar-2">${filterBar(html`${filterSeg('managed', 'Managed', ['yes', 'no'], RS.managed)}${filterSeg('merge', 'Lane merge', ['auto', 'manual'], RS.merge)}${filterSeg('cols', 'Columns', ['git', 'settings'], RS.cols)}`, repoChips().length)}</div>
     ${rows.length ? html`<table class="ledger" aria-labelledby="repos-h" data-tfilter="page" data-toolbar="toolbar"><thead>${shell.list.sortHead(repoCols(), RS)}</thead>
       <tbody>${shown.map(r => html`<tr data-id="${'repo:' + r.path}" data-repo="${r.path}">
@@ -290,12 +288,10 @@ function renderRepos() {
       : html`<p class="empty">No repo matches ${text.q ? `“${text.q}”` : 'these filters'}. <button class="linkbtn" type="button" data-clear>Clear filters</button></p>`}
     ${RS.cols === 'settings' ? html`<p class="note">Managed and Merge switch from a row's actions, each one sd-db repo verb on the hub. Floor and Copilot are read-only here: they change through the row's review declaration, drafted from its ${I('settings')} settings page. Required checks are the nightly protection reading; Python and Node are the versions the checkout pins.</p>` : ''}`);
 }
-// Refresh (sd:5614): the post writes nothing, but an answered post makes the next read wait for a new git reading (sd:4955).
-const refreshRepos = () => window.shell.post('/api/repos/refresh', {}).then(reread)
-  .then(() => shell.toast('Repos refreshed'), e => shell.toast(`Not refreshed: ${e.message || e}`));
+// Refresh git state (sd:5614, sd:6697): the post writes nothing, but an answered post makes the next read wait for a new git reading (sd:4955).
+const refreshRepos = () => window.shell.post('/api/repos/refresh', {}).then(reread).then(() => 'Git state refreshed');
 document.getElementById('view-repos').addEventListener('click', e => {
   if (e.target.closest('.rowact')) return;
-  if (e.target.closest('[data-refresh-repos]')) return void refreshRepos();
   const cols = e.target.closest('[data-f="cols"]');
   if (cols) { RS.cols = cols.dataset.v === 'settings' ? 'settings' : 'git'; if (!repoCols().some(c => c[0] === RS.sort)) RS.sort = 'name'; renderRepos(); return setURL(); }
   const f = e.target.closest('[data-f="managed"], [data-f="merge"]'), tr = e.target.closest('tr[data-repo]');
@@ -629,6 +625,7 @@ function objects() {
     { id: 'wt:live', type: 'live worktrees', label: `${SESS.registered - SESS.abandoned} live worktrees` },
     ...SESS.processes.map((p, i) => ({ id: `proc:${i}`, type: 'process', label: p.command })));
   SERVICES.forEach(s => out.push({ id: `svc:${s.label}`, type: 'service', label: s.name, name: s.label, running: s.state === 'running', revision: s.revision, caps: s.capabilities || {} }));
+  out.push({ id: 'repos:git', type: 'git state', label: 'Git state' });
   if (SATS) out.push({ id: 'sats:request', type: 'satellite refresh', label: 'Refresh satellites', request: SATS.request },
     ...SATS.satellites.map(x => ({ id: `sat:${x.host}`, type: 'satellite', label: x.host })));
   if (UPLOAD?.set_up) out.push({ id: 'upload:link', type: 'upload link', label: `${UPLOAD.prefix} upload link`, state: UPLOAD.link_state });
@@ -730,6 +727,9 @@ function registerCommands() {
       consequence: o => `Stops ${o.name} through launchd. Start brings it back.`, run: o => landing(service(o, 'stop'), () => `Stop requested · ${o.label}`) },
     { id: 'svc.start', on: 'service', label: 'Start', does: 'Starts the service through launchd.', key: 'a', risk: 'safe', when: o => capWhy(o, 'start', !o.running || 'already running'), cli: o => `sd services start ${o.name}`,
       run: o => landing(service(o, 'start'), () => `Start requested · ${o.label}`) },
+    // sd:6697: Refresh <what>, a registered command whose tip names the source and what it writes.
+    { id: 'repos.refresh', on: 'git state', label: 'Refresh git state', does: 'Reads every checkout\'s git state under the fleet root again; writes nothing.', icon: 'rotate-ccw', risk: 'safe', primary: () => true,
+      cli: () => 'no CLI: the next fleet reading reads git', sends: () => 'POST /api/repos/refresh {}', executes: true, run: () => refreshRepos() },
     // sd:5108: one request row in the hub database; each satellite's next repo-sync follow run (every 5 min) answers it.
     { id: 'sats.refresh', on: 'satellite refresh', label: 'Refresh satellites', does: 'Asks each satellite to follow the hub\'s pins and run machine-setup update --apply.', icon: 'rotate-ccw', risk: 'confirm', primary: () => true,
       cli: () => 'no CLI: the dashboard writes the refresh.request row', executes: true,
@@ -1213,7 +1213,7 @@ window.PAGE_COMMANDS = [
 // reread after a write keeps the rows and says the write landed.
 let reading = null, FAILED = '';
 const load = () => reading.load();
-// Read again (sd:5638): the shell's head button reads the management document again, as the Observed lamp does.
+// Read again (sd:5638): the shell's head button reads the management document again.
 window.PAGE_AGAIN = { title: 'Read the management document again', run: load };
 const reread = () => reading.reread();
 function adopt(doc) {
@@ -1253,7 +1253,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('shell:view', e => { if (e.detail.id !== view) { showView(e.detail.id); lamps(); } });
   document.getElementById('annunciator').addEventListener('click', e => {
     const c = e.target.closest('button.cell'); if (!c) return;
-    if (c.id === 'refresh') load(); else shell.view.show(c.dataset.view);
+    shell.view.show(c.dataset.view);
   });
   reading = shell.read({
     source: '/api/management', what: 'repos, the lane, sessions, services and jobs', adopt, clear, draw,
