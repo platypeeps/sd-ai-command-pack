@@ -212,15 +212,17 @@ def issue_write(method: Any = "update", **target: Any) -> str:
                    tool_input={key: value for key, value in fields.items() if value is not None})
 
 
-class AManagedRepositoryWithGithubIssuesOn(Fixture):
-    """sd:4827. `repo.github_issues` on lets an agent close a reporter's issue
-    in this repository, and nothing else: an update aimed at this repository's
-    remote passes; filing an issue, and an update aimed anywhere else, do not."""
+class AManagedRepositoryWithIssuesAsk(Fixture):
+    """sd:4827, pack sd:6849. `policy.issues: ask` lets an agent close a
+    reporter's issue in this repository once the operator approves it in the
+    harness prompt, and nothing else: an update aimed at this repository's
+    remote asks; filing an issue, and an update aimed anywhere else, do not.
+    `read` and `off` deny the update."""
 
     def setUp(self) -> None:
         super().setUp()
         self.register(managed=True)
-        self.switch("on")
+        self.switch("ask")
 
     def switch(self, value: str) -> None:
         connection = sd_db.connect(home=self.home)
@@ -229,9 +231,9 @@ class AManagedRepositoryWithGithubIssuesOn(Fixture):
         finally:
             connection.close()
 
-    def test_an_update_of_this_repository_passes(self) -> None:
-        self.assert_silent(issue_write())
-        self.assert_silent(issue_write(owner="Example", repo="MANAGED"))
+    def test_an_update_of_this_repository_asks_the_operator(self) -> None:
+        self.assertIn("--kind question", self.assert_asked(issue_write()))
+        self.assert_asked(issue_write(owner="Example", repo="MANAGED"))
 
     def test_filing_an_issue_is_still_denied(self) -> None:
         self.assertIn("sd task add", self.assert_denied(issue_write("create", title="x")))
@@ -253,21 +255,23 @@ class AManagedRepositoryWithGithubIssuesOn(Fixture):
             with self.subTest(method=method):
                 self.assert_denied(issue_write(method))
 
-    def test_off_denies_the_update_again(self) -> None:
-        self.switch("off")
-        self.assert_denied(issue_write())
+    def test_read_and_off_deny_the_update(self) -> None:
+        for value in ("read", "off"):
+            with self.subTest(value=value):
+                self.switch(value)
+                self.assertIn("sd task add", self.assert_denied(issue_write()))
 
     def test_a_linked_worktree_passes_as_its_main_checkout(self) -> None:
         git(self.repo, "-c", "user.name=t", "-c", "user.email=t@example.test",
             "commit", "-q", "--allow-empty", "-m", "seed")
         worktree = self.tmp / "wt"
         git(self.repo, "worktree", "add", "-q", str(worktree))
-        self.assert_silent(issue_write(), cwd=worktree)
+        self.assert_asked(issue_write(), cwd=worktree)
         self.assert_denied(issue_write("create"), cwd=worktree)
 
     def test_a_setting_that_cannot_be_read_denies(self) -> None:
         """Failures: once the row is managed, an unread setting is not a pass."""
-        with mock.patch.object(sd_db.repos, "github_issues", side_effect=sd_db.errors.SchemaTooOld(34, 35)):
+        with mock.patch.object(sd_db.repos, "issues_policy", side_effect=sd_db.errors.SdDbError("unread")):
             self.assert_denied(issue_write())
 
 

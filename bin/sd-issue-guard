@@ -34,10 +34,12 @@ everywhere: `issue_write` is the one route an external issue takes. A managed ta
 operator does not manage, or one not registered at all -- gets `ask`: the
 harness prompts the operator, who decides each external issue on its own.
 
-One exception (sd:4827): a repository whose row has `github_issues` on takes
-issues from outside reporters, and an agent closes them when their sd items are
-done. There `mcp__github__issue_write` with `method: update` passes when its
-`owner`/`repo` name that row's GitHub remote. Filing an issue stays denied.
+One exception (sd:4827, pack sd:6849): a repository whose `policy` declaration
+has `issues: ask` takes issues from outside reporters, and an agent closes them
+when their sd items are done, each write approved by the operator. There
+`mcp__github__issue_write` with `method: update` asks when its `owner`/`repo`
+name that row's GitHub remote: the harness prompt is the approval. `read` and
+`off` deny it. Filing an issue stays denied.
 
 What counts as filing an issue from the shell: `gh` in command position --
 first in a pipeline segment, after `VAR=value` assignments and the wrappers
@@ -61,6 +63,12 @@ MCP_TOOL = "mcp__github__issue_write"
 ASK = (
     "{target} is not a repository the operator manages. Filing or changing an "
     "issue there is the operator's decision, one issue at a time."
+)
+
+ASK_OWN = (
+    "This repository's policy is issues=ask: the operator approves each issue "
+    "write. In an unattended run, draft it on the item instead with "
+    "`sd task note <n> \"<draft>\" --kind question`."
 )
 
 REASON = (
@@ -200,8 +208,8 @@ def decision(where: Path, payload: dict) -> tuple[str, str] | None:
     """`("deny", reason)`, `("ask", reason)` or None for a call that files or changes an issue.
 
     Deny: the target is a repository the operator manages, and the call is not
-    an update of that repository's own issue with `github_issues` on. Ask: the
-    call names a target the operator does not manage.
+    an update of that repository's own issue with `policy.issues` ask. Ask:
+    that update, or a call that names a target the operator does not manage.
 
     Every way of not knowing the repository is managed is False: no library,
     no database, no git, no row. The cost of a wrong False is an issue filed;
@@ -239,11 +247,11 @@ def decision(where: Path, payload: dict) -> tuple[str, str] | None:
         except Exception:  # noqa: BLE001 - as above
             return None
         try:
-            allowed = (updates_own_issue(payload, row["remote"], sd_db)
-                       and sd_db.repos.github_issues(connection, key))
+            asks = (updates_own_issue(payload, row["remote"], sd_db)
+                    and sd_db.repos.issues_policy(connection, key) == "ask")
         except Exception:  # noqa: BLE001 - an unread exception grants nothing
-            allowed = False
-        return None if allowed else ("deny", REASON)
+            asks = False
+        return ("ask", ASK_OWN) if asks else ("deny", REASON)
     finally:
         connection.close()
 

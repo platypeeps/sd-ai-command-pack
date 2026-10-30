@@ -778,14 +778,17 @@ def mine_issues(connection: sqlite3.Connection) -> dict[str, list[dict]]:
 
 
 def intake_repos(connection: sqlite3.Connection) -> dict[str, str]:
-    """Each repository with `github_issues` on, to the GitHub `owner/name` its remote names (sd:4880).
+    """Each repository whose `policy.issues` is `read` or `ask`, to the GitHub `owner/name` its remote names
+    (sd:4880, pack sd:6849).
 
     The shadow sync searches these for every issue, not only the operator's,
     and `intake_issues` reads what it stored. A repository whose remote is not
     on github.com has no GitHub issues to take, so it is left out.
     """
     found: dict[str, str] = {}
-    for row in connection.execute("SELECT path, remote FROM repo WHERE github_issues = 1 ORDER BY path"):
+    for row in connection.execute(
+            "SELECT path, remote FROM repo WHERE json_valid(declarations) "
+            "AND json_extract(declarations, '$.policy.issues') IN ('read', 'ask') ORDER BY path"):
         remote = parse_remote(row["remote"])
         if remote.kind == "github":
             found[row["path"]] = f"{remote.owner}/{remote.name}"
@@ -793,7 +796,7 @@ def intake_repos(connection: sqlite3.Connection) -> dict[str, str]:
 
 
 def intake_issues(connection: sqlite3.Connection) -> dict[str, list[dict]]:
-    """Each `github_issues` repository's open third-party issues that no sd item carries (sd:4880).
+    """Each intake repository's open third-party issues that no sd item carries (sd:4880).
 
     `{path: [row, ...]}`, newest `last_seen` first. Third-party is an author
     who is not the operator, and the operator's login is the author of every
@@ -982,55 +985,50 @@ def set_dependabot(connection: sqlite3.Connection, path: Path | str, value: str)
     return row["path"], "yes" if row["dependabot"] else "no"
 
 
-#: The words `repo github-issues` takes, mapped to what the column holds.
-#: A switch reads `on|off`, the owner's words for it (sd:4810).
-GITHUB_ISSUES_VALUES = {"on": 1, "off": 0}
+#: The words `repo github-issues` takes: the `policy` declaration's `issues` key (pack sd:6849), which
+#: migration 45 moved the `github_issues` column into. `off` is no key; there is no `auto` (note #34749).
+ISSUES = ("off", "read", "ask")
 
 
 def set_github_issues(connection: sqlite3.Connection, path: Path | str, value: str) -> tuple[str, str]:
-    """Set whether one repository takes third-party GitHub issues. Returns `(path, before)`.
+    """Set one repository's `policy.issues`, keeping its other policy keys. Returns `(path, before)`.
 
-    `before` is the word, `on` or `off`. Same refusals as `set_runner_merge`:
-    a value that is not one of the two words, exactly, and a path no row holds.
+    `off` removes the key, and a policy left empty goes with it. Same
+    refusals as `set_runner_merge`: a value that is not one of `ISSUES`,
+    exactly, and a path no row holds.
     """
-    if value not in GITHUB_ISSUES_VALUES:
-        raise RepoRefusal(f"{value!r} is not a github-issues setting; expected on or off")
+    if value not in ISSUES:
+        raise RepoRefusal(f"{value!r} is not a github-issues setting; expected {', '.join(ISSUES)}")
     given = str(Path(path).expanduser().resolve())
     probe = paths.keys(given)
     with transaction(connection):
         row = connection.execute(
-            f"SELECT path, github_issues FROM repo WHERE path IN ({paths.placeholders(probe)})",
+            f"SELECT path, declarations FROM repo WHERE path IN ({paths.placeholders(probe)})",
             probe).fetchone()
         if row is None:
             raise RepoRefusal(
                 f"{given} is not a registered repository; run `bin/sd-db repo add {given}`")
-        connection.execute("UPDATE repo SET github_issues = ?, updated_at = ? WHERE path = ?",
-                           (GITHUB_ISSUES_VALUES[value], now(), row["path"]))
-    return row["path"], "on" if row["github_issues"] else "off"
+        held = _declarations(row["declarations"], row["path"])
+        policy = dict(held.get("policy") or {})
+        before = policy.pop("issues", "off")
+        if value != "off":
+            policy["issues"] = value
+        held = {**held, "policy": policy} if policy else {k: v for k, v in held.items() if k != "policy"}
+        connection.execute("UPDATE repo SET declarations = ?, updated_at = ? WHERE path = ?",
+                           (_declarations_text(held) if held else None, now(), row["path"]))
+    return row["path"], before
 
 
-def github_issues(connection: sqlite3.Connection, path: Path | str) -> bool:
-    """Whether one repository takes third-party GitHub issues (sd:4827).
+def issues_policy(connection: sqlite3.Connection, path: Path | str) -> str:
+    """One repository's `policy.issues`: `off`, `read` or `ask` (pack sd:6849).
 
-    True only when its row holds 1. No row reads False, the column default:
-    a repository the table does not hold has not been switched on. A store
-    not yet at 35 raises `SchemaTooOld` rather than reading as off, so a
-    caller decides what an unread setting means.
+    `read`: agents read its third-party issues and map each to an sd item.
+    `ask`: also, each write an agent drafts waits for the operator. No row
+    and no key read `off`. A declaration that does not read raises.
     """
-    from .database import schema_version
-    from .errors import SchemaTooOld
-    from .schema import SCHEMA_VERSION
-
-    probe = paths.keys(str(Path(path).expanduser().resolve()))
-    try:
-        row = connection.execute(
-            f"SELECT github_issues FROM repo WHERE path IN ({paths.placeholders(probe)}) ORDER BY path",
-            probe).fetchone()
-    except sqlite3.OperationalError as error:
-        if "no such column" in str(error):
-            raise SchemaTooOld(schema_version(connection), SCHEMA_VERSION) from error
-        raise
-    return row is not None and row["github_issues"] == 1
+    held = declarations(connection, path) or {}
+    value = (held.get("policy") or {}).get("issues", "off")
+    return value if value in ISSUES else "off"
 
 
 #: A Jira project key as `repo.jira_project` holds it: the spelling `channels`
@@ -1044,7 +1042,7 @@ def set_jira_project(connection: sqlite3.Connection, path: Path | str, value: st
     """Set the Jira project one repository files issues in. Returns `(path, before)`.
 
     `value` is a key such as `EXAMPLE`, or `off` for none. `before` is the key
-    replaced, or `off`. Same refusals as `set_github_issues`: a value that is
+    replaced, or `off`. Same refusals as `set_runner_merge`: a value that is
     neither, exactly, and a path no row holds.
     """
     if value != JIRA_OFF and not JIRA_PROJECT.fullmatch(value):
