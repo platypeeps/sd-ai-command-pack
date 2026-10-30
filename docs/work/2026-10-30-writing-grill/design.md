@@ -31,6 +31,14 @@ The questions also list on Decide, since they are question notes.
 Pack sd:6699 (Apply review) adds `{"apply": "adversarial"}` to the same Fix route.
 The two branches touch the same lines of `fix_session.py`; whichever lands second merges them by hand.
 
+## Acceptance criteria
+
+- Grill on a piece with a draft starts claude in herdr on the grill prompt, in the piece's repository.
+- `/api/writing` gives each piece its open questions, with options, and its count of rulings.
+- Details shows the first open question; an option or typed answer posts `/api/decisions/answer`.
+- Apply answers is off, on the page and the server, while a question is open or before one is answered.
+- Grill on an item that is not a piece, or an unknown `grill` value, launches nothing.
+
 ## Failure table
 
 | Step | State moved | Failure | Recovery | Test |
