@@ -84,6 +84,15 @@ class TheDocument(ScreenCase):
         self.assertEqual((candidate["fresh"], candidate["url"]), ("idle", "https://maybe.example.test"))
         self.assertEqual((paused["stage"], paused["fresh"]), ("paused", "idle"))
 
+    def test_each_watch_carries_the_revision_a_stage_move_sends(self):
+        """sd:6694: Activate, Pause and Unpause post /api/items/<n>/stage with the row's revision."""
+        from sd_db import workflow
+
+        ids = seed(self.connection)
+        rows = {r["id"]: r for r in watches_screen.document(self.connection, now=NOW, jobs=self.jobs)["rows"]}
+        for item in ids.values():
+            self.assertEqual(rows[item]["revision"], workflow.item_state(self.connection, item)["revision"])
+
     def test_the_bound_is_stale_days(self):
         days = watches_screen.STALE_DAYS
         market(self.connection, "Edge", "active", profile((date(2026, 9, 6) - timedelta(days=days)).isoformat()))
@@ -287,6 +296,34 @@ C.run(cmd('watch.refresh'), stale); await flush(); C.run(cmd('watch.refresh'), m
         self.assertEqual([p[:2] for p in out["posts"]], [["/api/actions/run", {"action": "watch.refresh", "item": self.ids["stale"]}]])
         self.assertIn("watch.refresh", out["confirms"])
         self.assertIn(["off: candidate: market-watch refreshes active watches only", False], out["toasts"])
+
+    def test_each_stage_move_shows_only_on_the_stage_it_moves_from(self):
+        """sd:6694: Activate on a candidate, Pause on an active watch, Unpause on a paused one; a declined one gets none."""
+        declined = market(self.connection, "Gone Co", "declined")
+        self.doc["rows"].append(dict(self.doc["rows"][0], id=declined, title="Gone Co", stage="declined"))
+        ids = dict(self.ids, declined=declined)
+        out = self.run_page(f"""const ids = {json.dumps(ids)}, MOVES = ['watch.activate', 'watch.pause', 'watch.unpause'];
+R.on = {{}}; for (const k of ['candidate', 'stale', 'paused', 'declined']) {{ const o = OBJ.get('watch:' + ids[k]);
+  R.on[k] = MOVES.filter(m => cmd(m).when(o) === true && cmd(m).primary(o)); }}
+R.why = cmd('watch.pause').when(OBJ.get('watch:' + ids.candidate));
+R.labels = MOVES.map(m => [cmd(m).label, cmd(m).risk, cmd(m).key]);""")
+        r = out["R"]
+        self.assertEqual(r["on"], {"candidate": ["watch.activate"], "stale": ["watch.pause"], "paused": ["watch.unpause"], "declined": []})
+        self.assertEqual(r["why"], "candidate: Pause moves an active watch")
+        self.assertEqual(r["labels"], [["Activate", "undo", "a"], ["Pause", "undo", "p"], ["Unpause", "undo", "p"]])
+
+    def test_activate_moves_the_stage_with_the_rows_revision_and_undo_moves_it_back(self):
+        candidate = self.ids["candidate"]
+        row = next(r for r in self.doc["rows"] if r["id"] == candidate)
+        answer = ("(p, b) => p === '/api/watches' ? [200, " + json.dumps(self.doc) + "]"
+                  " : p.endsWith('/stage') ? [200, { item: { id: " + str(candidate) + " }, revision: b.stage === 'active' ? 'r2' : 'r3', mirror: { ok: true } }]"
+                  " : [404, { error: 'no answer' }]")
+        out = self.run_page(f"""const o = OBJ.get('watch:{candidate}'), c = cmd('watch.activate');
+const v = await c.run(o); R.text = v.text; await c.undo(o, v); await flush();""", answer)
+        self.assertEqual([p[:2] for p in out["posts"]], [[f"/api/items/{candidate}/stage", {"revision": row["revision"], "stage": "active"}],
+                                                        [f"/api/items/{candidate}/stage", {"revision": "r2", "stage": "candidate"}]])
+        self.assertEqual(out["R"]["text"], "Maybe Co is active · market-watch refreshes it from its next run")
+        self.assertEqual(out["gets"], ["/api/watches", "/api/watches", "/api/watches"], "each move reads the watches again")
 
     def test_add_watch_posts_the_url_and_name_typed_and_reads_again(self):
         out = self.run_page("""FIELD_VALUES = { url: 'https://github.com/example/widget-agent', name: '' };
