@@ -135,6 +135,13 @@ FAKE = textwrap.dedent('''
             sys.exit(4)
         raw = {"path": "work.txt", "line": 1, "severity": "high", "summary": "a blocker", "family": "correctness"}
         findings = review.dispose([review._finding(raw)], "high")  # the record shape `--json` prints
+        if mode == "gate_failed":
+            print(json.dumps({"status": "gate_failed", "cleared_status": "clean", "findings": [],
+                              "subject": {"head": git("-C", work, "rev-parse", "HEAD")},
+                              "check": {"status": "fail", "checks": [
+                                  {"command": ["make", "check"], "exit_code": 2, "failed_steps": ["make target audit"],
+                                   "failure": "audit: a long line"}]}}))
+            sys.exit(0)
         print(json.dumps({"status": "blocking" if mode == "blocking" else "clean",
                           "subject": {"head": git("-C", work, "rev-parse", "HEAD")},
                           "findings": findings if mode == "blocking" else []}))
@@ -500,6 +507,16 @@ class Supervise(Case):
         self.plan(claude=["pass", "fix1"], sd_review=["blocking", "clean"])
         self.assertEqual(self.supervisor().run()["step"], "enqueued")
         self.assertEqual(self.latest()["review_round"], 1)
+
+    def test_a_failed_gate_goes_back_to_the_builder(self):
+        """A review that cleared over a failed gate is a blocker to fix, not an unknown answer (runs 155-203)."""
+        self.press()
+        self.write_pr()
+        self.plan(claude=["pass", "fix1"], sd_review=["gate_failed", "clean"])
+        self.assertEqual(self.supervisor().run()["step"], "enqueued")
+        self.assertEqual(len(self.calls("sd-review")), 2)
+        fix = [call["argv"] for call in self.calls("claude")][1]
+        self.assertIn("make target audit", fix[fix.index("-p") + 1], "the fix names the failed gate step")
 
     def test_an_unknown_review_is_retried_once(self):
         self.press()
