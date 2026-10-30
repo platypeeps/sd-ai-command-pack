@@ -274,9 +274,10 @@ class TheTrack(ReaderCase):
         self.assertEqual((plot.count('<line class="land"'), plot.count('<rect class="fail"'), plot.count('<circle class="brief"'),
                           plot.count('<rect class="sess"')), (2, 1, 0, 1))
         self.assertIn('aria-label="Last 24 hours: 2 landed, 1 job failed, 0 briefs filed, 1 session started"', plot)
-        self.assertIn('<a href="?row=job%3Anightly-sync%3A7">', plot)
+        # sd:6714: each mark names the row a click selects.
+        self.assertIn('<a href="?row=job%3Anightly-sync%3A7" data-id="job:nightly-sync:7">', plot)
         self.assertIn("sd:8 &lt;b&gt;Eight&lt;/b&gt;", out["R"]["rows"])
-        self.assertEqual(out["R"]["rows"].count("<tr>"), 4)
+        self.assertEqual(out["R"]["rows"].count("<tr data-id="), 4)
         self.assertIn('status=blocked&amp;realm=all">Blocked</a></li><li><b>27</b>', out["R"]["key"])
         self.assertFalse(out["R"]["table"])
 
@@ -307,7 +308,7 @@ class TheTrack(ReaderCase):
         900-unit width that square is 24 px. The square sits between the Jobs (36-44) and Live (72-75) lanes."""
         self.doc["track"] = {**self.TRACK, "briefs": [{"at": "2026-09-06T08:00:00Z", "id": "brief:3", "what": "brief 3 filed"}]}
         plot = self.run_page(self.DRAWN)["R"]["plot"]
-        link = re.search(r'<a href="\?row=brief%3A3">(.*?)</a>', plot, re.S).group(1)
+        link = re.search(r'<a href="\?row=brief%3A3" data-id="brief:3">(.*?)</a>', plot, re.S).group(1)
         hit = re.search(r'<rect class="hit" x="([\d.]+)" y="(\d+)" width="(\d+)" height="(\d+)">', link)
         dot = re.search(r'<circle class="brief" cx="([\d.]+)" cy="(\d+)" r="([\d.]+)"', link)
         self.assertIsNotNone(hit, link)
