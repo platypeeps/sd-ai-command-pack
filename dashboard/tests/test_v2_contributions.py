@@ -913,6 +913,17 @@ R.after = ELS.details.html;""")
         self.assertIn(f"<dt>Linked</dt><dd>{github} {jira}</dd>", out["R"]["d"])
         self.assertNotIn("Contribution 3", out["R"]["after"])
 
+    def test_the_repo_is_its_own_column_and_the_title_leads_with_its_number(self):
+        # sd:6696: Repo is a sortable column after the state; the title reads "#<n> <title>" and the meta line drops both.
+        out = self.run_page("R.head = ELS['rows-head'].html; R.rows = ELS.rows.html;")
+        self.assertEqual(re.findall(r'data-sort="(\w+)"', out["R"]["head"]), ["repo", "what", "at"])
+        row = re.search(r'<tr data-id="github:https://github.com/example/project/pull/1".*?</tr>', out["R"]["rows"], re.S).group(0)
+        self.assertIn('<td class="repo">example/project</td>', row)
+        self.assertRegex(row, r'<td class="what"><button type="button">#1 [^<]+</button>')
+        self.assertNotRegex(row, r'class="meta">[^<]*(example/project|#1)')
+        self.assertIn('<td class="repo">local</td>', out["R"]["rows"])
+        self.assertEqual(out["R"]["rows"].count('colspan="5"'), out["R"]["rows"].count('<tr class="lane"'))
+
     def test_a_link_the_page_cannot_open_safely_is_not_drawn(self):
         # The server filters too; the page draws only an https link it can name.
         self.doc["rows"][0]["linked"] = [{"url": "javascript:alert(1)", "kind": "jira", "key": "ABC-1"}, "ABC-2"]
@@ -937,7 +948,7 @@ R.ext = ELS.rows.html; R.bars = ELS.bars.html;""")
         ids = r'<tr data-id="([^"]+)"'
         out = self.run_page(f"R.head = ELS['rows-head'].html; R.rows = ELS.rows.html; {click.format(k='at')} R.up = ELS.rows.html; R.url = OUT.urls[OUT.urls.length - 1];"
                             f" {click.format(k='what')} R.what = ELS.rows.html; R.head2 = ELS['rows-head'].html;")
-        self.assertEqual(re.findall(r'data-sort="(\w+)"', out["R"]["head"]), ["what", "at"])
+        self.assertEqual(re.findall(r'data-sort="(\w+)"', out["R"]["head"]), ["repo", "what", "at"])
         self.assertEqual(re.findall(r'aria-sort="(\w+)"[^>]*><button[^>]*data-sort="(\w+)"', out["R"]["head"]), [("descending", "at")])
         mine = ["github:https://github.com/example/project/pull/1", "issue:" + ISSUE]
         self.assertEqual(re.findall(ids, out["R"]["rows"]), mine + ["github:" + EXTERNAL, "item:4"])
@@ -1047,7 +1058,8 @@ document.dispatchEvent(new CustomEvent('contributions:scope', { detail: 'externa
         row = next(r for r in self.doc["rows"] if r["key"] == "item:4")
         row["has_draft"] = True
         out = self.run_page("R.rows = ELS.rows.html;")
-        self.assertIn("local  · Unfiled issue draft", out["R"]["rows"])
+        self.assertIn('<td class="repo">local</td>', out["R"]["rows"])
+        self.assertIn('<span class="meta">Unfiled issue draft</span>', out["R"]["rows"])
 
     def test_the_page_text_names_the_route_make_task_posts(self):
         # Review 4 of PR #72 (0435ca1e4fbb): the help and the page note still said a followup through /api/items.

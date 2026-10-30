@@ -3,7 +3,9 @@
 Contributions is at `/contributions` (sd:2113): the open rows of the
 contributions projection v1 renders, in lanes by who acts next, with each
 row's repository scope (internal when sd's repo table holds it) and settled
-rows counted per repository. `GET /api/contributions/page`
+rows counted per repository. Each open row names its repository in a
+sortable Repo column (`local` for none), and its title leads with its
+number (sd:6696). `GET /api/contributions/page`
 (`contribution_screen.document`) carries at most `OPEN_LIMIT` open rows and
 says when it cut some; its per-scope counts, which the badge, lamps and tallies
 read, cover every open row. It sends no local path: a checkout reads

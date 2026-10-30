@@ -77,6 +77,18 @@ def _activity(row) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _merge(row) -> dict:
+    """A pull request's `review`, `checks` and `mergeable` as sd shadow sync stored them, and `ready` (pack sd:6711).
+
+    `ready` is True for an approved pull request with green or no checks and no conflict, None when one of the three
+    was not read: a pull request whose state was not read is never ready.
+    """
+    review, checks, mergeable = row.get("review_decision"), row.get("checks"), row.get("mergeable")
+    ready = None if None in (review, checks, mergeable) else (
+        review == "approved" and checks in ("success", "none") and mergeable == "mergeable")
+    return {"review": review, "checks": checks, "mergeable": mergeable, "ready": ready}
+
+
 def _ref(url: str) -> tuple[str, str | None, int | None]:
     """`(kind, owner/name, number)` from a GitHub pull request or issue address; kind is "" for any other address."""
     for kind, pattern in (("pull", contributions.PULL), ("issue", contributions.ISSUE)):
@@ -156,7 +168,8 @@ def document(connection: sqlite3.Connection, *, now: str) -> dict:
                  "mine": row.get("reason") == "assigned" or _mine(row) or bool(contribution),
                  # sd:5633: what a row's Details show, each None when the store did not record it.
                  **{name: row.get(name) for name in FACTS}, "attention": list(contribution.get("reasons") or []),
-                 "checkout": checkouts.get(f"github.com/{str(row['repo']).lower()}")}
+                 "checkout": checkouts.get(f"github.com/{str(row['repo']).lower()}"),
+                 **_merge(row)}
         if state == "open":
             found["pulls" if row["kind"] == "pull" else "issues"].append(entry)
         elif what not in ("merged", "closed"):

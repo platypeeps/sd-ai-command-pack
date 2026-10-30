@@ -22,13 +22,13 @@
     const A = DOC.days[d], out = [];
     A.merges.forEach(m => out.push({ id: m.id, type: 'merge', label: m.ref, at: m.at, g: G.ok, s: m.what, small: m.ref, repo: m.repo || '(no repository)',
       facts: [['Repository', m.repo || '—'], ['Pull request', m.ref], ['Commit', m.commit.slice(0, 12)], ['Merged', stamp(m.at)], ...(m.item ? [['Item', `sd:${m.item}`]] : [])],
-      src: 'sd-ship delivery note (ship.note_merge)', open: m.url ? [m.url, 'Open the pull request'] : null }));
+      src: 'sd-ship delivery note (ship.note_merge)', url: m.url, pr: m.pr }));
     A.done.forEach(x => out.push({ id: x.id, type: 'done task', label: `#${x.item} ${x.title}`, at: x.at, g: G.ok, s: x.title, small: `#${x.item}`, item: x.item,
       facts: [['Item', `#${x.item}`], ['Kind', x.kind], ['Repository', x.repo || 'none'], ['From', x.from], ['Done at', stamp(x.at)], ['By', x.by || 'not recorded']],
       src: 'sd.db note.kind = status_change, "-> done"', open: [window.shell.itemHref(x.item), 'Open in Tasks'] }));
     return out;
   }
-  const rowHtml = o => html`<li class="row" data-id="${o.id}" aria-selected="${o.id === selected ? 'true' : 'false'}"><span class="t" title="${o.at.replace('T', ' ').replace('Z', ' UTC')}">${local(o.at)}</span><span class="g g-${o.g[0]}" aria-hidden="true">${o.g[1]}</span><button class="s" type="button" data-open="${o.id}"><span class="sr">${o.g[0]} · ${o.type} · </span>${o.s}${o.small ? html`<small>${o.small}</small>` : ''}</button>${window.shell.commands.rowActions(o.id)}</li>`;
+  const rowHtml = o => html`<li class="row" data-id="${o.id}" aria-selected="${o.id === selected ? 'true' : 'false'}"><span class="t" title="${o.at.replace('T', ' ').replace('Z', ' UTC')}">${local(o.at)}</span><span class="g g-${o.g[0]}" aria-hidden="true">${o.g[1]}</span><button class="s" type="button" data-open="${o.id}"><span class="sr">${o.g[0]} · ${o.type} · </span>${o.s}${o.small ? html`<small>${o.small}</small>` : ''}</button>${window.shell.commands.rowActions(o.id, { icons: true })}</li>`;
   const LIMIT = 12;
   function list(objs, key) {
     const open = expanded.has(key), shown = open ? objs : objs.slice(0, LIMIT);
@@ -77,7 +77,7 @@
     put(el, html`<div class="kind"><span class="label">${o.type}</span><span class="tag">observed</span></div>
       <h2>${o.s}</h2>
       <dl>${o.facts.map(([k, v]) => html`<dt>${k}</dt><dd>${v}</dd>`)}<dt>Day</dt><dd>${long(day)} (${DOC.tz})</dd></dl>
-      ${o.open ? html`<p><a class="open-link" href="${o.open[0]}">${o.open[1]}</a></p>` : ''}
+      ${window.shell.commands.bar(o.id)}${o.open ? html`<p><a class="open-link" href="${o.open[0]}">${o.open[1]}</a></p>` : ''}
       <p class="note">Source: ${o.src}. Read ${DOC.read.replace('T', ' ').replace('Z', ' UTC')}.</p>`);
   }
   function select(id, open) {
@@ -137,6 +137,8 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     const S = window.shell, C = S.commands;
+    // sd:6695: a merge row opens its pull request, an icon on the row and a button in Details (commands.js).
+    C.register(window.commands.openPullRequest({ on: 'merge', pr: o => ({ repo: (o.url || '').match(/github\.com\/([^/]+\/[^/]+)\/pull\//)?.[1], number: o.pr, url: o.url }) }));
     reader = S.read(spec);
     S.attention(window.PAGE_ATTENTION);
     $('prev').addEventListener('click', () => window.notesDay(-1));
