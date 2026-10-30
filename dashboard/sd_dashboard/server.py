@@ -184,6 +184,8 @@ def route(connection: sqlite3.Connection, path: str, parameters, *, now: str, se
 
 #: The one ref the dashboard files under (sd:4840): Today's issue intake names a GitHub issue, `github:<owner>/<repo>#N`.
 GITHUB_REF = re.compile(r"github:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[1-9][0-9]{0,9}")
+#: Health's Fix on a Dependabot row (sd:6685): one open item per repository, reused while it is open.
+DEPENDABOT_REF = re.compile(r"dependabot:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+")
 
 
 def capture_ref(connection, *, ref, who, **values):
@@ -198,6 +200,13 @@ def capture_ref(connection, *, ref, who, **values):
 
     with workflow.transaction(connection):
         filed = writes.item_by_external(connection, "task-ref", ref)
+        if filed is not None and DEPENDABOT_REF.fullmatch(ref):
+            # A Dependabot ref names a repository, not one alert: its open item is reused, and a done one gives the
+            # ref up (`<ref>@<id>`), so the next Fix files anew under the unique (source, external_id) index.
+            if filed["status"] != "done":
+                return workflow.item_state(connection, filed["id"])
+            writes.set_item_fields(connection, filed["id"], external_id=f"{ref}@{filed['id']}")
+            filed = None
         if filed is not None:
             raise workflow.WorkflowError(f"sd:{filed['id']} ({filed['status']}) already carries --ref {ref}")
         state = workflow.capture_task(connection, who=who, **values)
@@ -558,11 +567,16 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
         kind = values.pop("kind", "task")
         parent = values.pop("followup_of", None)
         ref = values.pop("ref", None)
-        if ref is not None and (kind != "task" or not isinstance(ref, str) or not GITHUB_REF.fullmatch(ref)):
-            raise ValueError("A ref files a task, and names a GitHub issue as github:<owner>/<repo>#<number>.")
+        if ref is not None and (kind != "task" or not isinstance(ref, str)
+                                or not (GITHUB_REF.fullmatch(ref) or DEPENDABOT_REF.fullmatch(ref))):
+            raise ValueError("A ref files a task, and names a GitHub issue as github:<owner>/<repo>#<number>"
+                             " or a repository's alerts as dependabot:<owner>/<repo>.")
         if kind == "task":
             if parent is not None:
                 raise ValueError("Only a followup item names the item it follows up.")
+            if ref is not None and DEPENDABOT_REF.fullmatch(ref):
+                # Fix starts the session on it at once, so no draft is queued.
+                return lambda connection: capture_ref(connection, ref=ref, who="dashboard", **values)
             if ref is not None:
                 return lambda connection: capture_drafted(
                     connection, lambda: capture_ref(connection, ref=ref, who="dashboard", **values), who="dashboard")
