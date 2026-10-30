@@ -28,7 +28,7 @@
         cli: o => `sd reports brief show ${shq(o.id)}`, run: o => { location.href = shell.itemPage(o.item); return `#${o.item} opens`; } },
       // build: no verb deletes a task, so no Undo: the capture form shows the line and files it only on Capture.
       { id: 'brief.task', on: 'brief', label: 'Make task', does: 'Opens Capture with the brief\'s title, to file it as a task.', key: 'k', risk: 'safe',
-        cli: o => `sd task add ${shq(o.label)}`, run: o => { shell.capture(o, o.label); return 'Check the title, then Capture'; } },
+        cli: o => `sd task add --priority 3 ${shq(o.label)}`, run: o => { shell.capture(o, o.label); return 'Check the title, then Capture'; } },
       { id: 'brief.open', on: 'brief', label: 'Open in Obsidian', does: 'Opens the brief\'s vault copy in Obsidian.', key: 'o', risk: 'safe', executes: false,
         when: o => !!o.open || o.copy || 'no vault copy for this brief', cli: o => `open ${shq(o.open)}`,
         run: o => { window.open(o.open, '_blank', 'noopener'); return 'Obsidian opens the copy'; } },

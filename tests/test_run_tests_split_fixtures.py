@@ -217,11 +217,12 @@ class SplitModuleFixtures(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 self.assertIn(f"test runner: workers={workers} ", result.stdout)
 
-    def test_local_workers_follow_the_gate_cap_so_the_pool_holds_twice_the_cores(self) -> None:
-        """sd:2607: the cap a holder names, else this run's own, sets the workers; CI and an explicit count win."""
-        for environment, workers in (({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "4", "SD_GATE_SLOTS": "0"}, 8),
-                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "2", "SD_GATE_SLOTS": "0"}, 16),
-                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "8", "SD_GATE_SLOTS": "0"}, 4),
+    def test_local_workers_follow_the_gate_cap_so_the_pool_holds_the_cores(self) -> None:
+        """sd:2607, sd:6823: the cap a holder names, else this run's own, sets the workers; CI and an explicit count win."""
+        for environment, workers in (({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "4", "SD_GATE_SLOTS": "0"}, 4),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "3", "SD_GATE_SLOTS": "0"}, 5),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "2", "SD_GATE_SLOTS": "0"}, 8),
+                                     ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "8", "SD_GATE_SLOTS": "0"}, 2),
                                      ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "1", "SD_GATE_SLOTS": "0"}, 16),
                                      ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "64", "SD_GATE_SLOTS": "0"}, 1),
                                      ({"FIXTURE_CORES": "16", "SD_GATE_POOL_SIZE": "0", "SD_GATE_SLOTS": "0"}, 8),

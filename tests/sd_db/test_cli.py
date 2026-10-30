@@ -485,6 +485,26 @@ class TheMigrationVerbs(MigrationVerbCase):
         completed = self.sd_db("repo", "declare", str(self.checkout), "experiment", "off")
         self.assertIn("experiment declared -> none", completed.stdout)
 
+    def test_repo_declare_sets_a_policy_and_refuses_auto_in_an_org_repository(self):
+        """sd:6715. The `policy` kind holds a repository's rules; an org repository never takes `auto`."""
+        self.sd_db("repo", "add", str(self.checkout))
+        value = {"mode": "org", "commit": "ask", "issues": "read", "merge_method": "squash",
+                 "review": {"human": 1, "bots": "triage"},
+                 "commit_convention": {"types": ["feat", "fix", "doc"], "aliases": {"docs": "doc"}, "body": "required"}}
+        completed = self.sd_db("repo", "declare", str(self.checkout), "policy", json.dumps(value))
+        self.assertIn("policy none -> declared", completed.stdout)
+        self.assertEqual(json.loads(self.sd_db("repo", "declare", str(self.checkout), "policy").stdout), value)
+        for word, rule in (('{"mode": "org", "commit": "auto"}', "commit is ask in a org repository"),
+                           ('{"issues": "auto"}', "issues takes off, read or ask"),
+                           ('{"mode": "team"}', "mode is one of managed, org, external"),
+                           ('{"review": {"human": -1}}', "human is the number of approvals"),
+                           ('{"commit_convention": {"types": ["doc"], "aliases": {"docs": "docz"}}}', "names no declared type"),
+                           ('{"freeze": {}}', "unknown key(s) freeze")):
+            with self.subTest(word=word):
+                completed = self.sd_db("repo", "declare", str(self.checkout), "policy", word, expect=1)
+                self.assertIn(rule, completed.stderr)
+        self.assertEqual(json.loads(self.sd_db("repo", "declare", str(self.checkout), "policy").stdout), value)
+
     def test_repo_list_managed_prints_only_the_managed_rows(self):
         other = self.home / "other"
         subprocess.run(["git", "init", "-q", str(other)], check=True, capture_output=True)

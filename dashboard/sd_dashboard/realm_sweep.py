@@ -171,7 +171,8 @@ The sweep's settings:
 Followups. For each action the operator owns, keep one sd item:
 - Read the open items once: `sd store items --open --json`.
 - An open item that covers the action gets a note: `sd task note <id> "<what changed>" --kind followup`.
-- Otherwise file one: `{add} --ref {realm}-sweep:<source>-<id> "<title>"`. <source> is gmail, drive, notion, jira or
+- Otherwise file one: `{add} --priority <1-4> --ref {realm}-sweep:<source>-<id> "<title>"`, 3 unless it is due within
+  two weeks (2) or urgent (1): sd refuses an item without a priority (sd:6726). <source> is gmail, drive, notion, jira or
   github. <id> names the one message or comment that asks, never its whole thread, file, page, issue or pull request,
   which can ask again later: a Gmail message id; a Jira issue key and comment id (`ABC-12/10023`); a GitHub
   owner/repo#number and comment or review id (`owner/repo#7/123`); a Notion comment id. Where nothing finer than the

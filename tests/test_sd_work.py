@@ -55,10 +55,18 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual(result.returncode, code, result.stdout + result.stderr)
         return result
 
+    def test_an_add_without_a_priority_is_refused_but_an_idea_files(self):
+        """sd:6726: a work item is filed ranked; an idea is not ranked."""
+        refused = self.call("task", "add", "Unranked", code=1).stderr
+        self.assertIn("sd task add needs --priority 1-4 for a task", refused)
+        self.assertIn("needs --priority 1-4 for a followup", self.call("task", "add", "F", "--kind", "followup", code=1).stderr)
+        self.call("task", "add", "An idea", "--kind", "work-idea")
+        self.call("task", "add", "Ranked", "--priority", 3)
+
     def test_experiment_designates_and_refuses_a_bad_parent(self):
         """sd:3982: `--experiment` writes the designation; a task of itself or of an undesignated item refuses."""
-        first = json.loads(self.call("task", "add", "An experiment", "--json").stdout)["item"]["id"]
-        second = json.loads(self.call("task", "add", "A task", "--json").stdout)["item"]["id"]
+        first = json.loads(self.call("task", "add", "--priority", "3", "An experiment", "--json").stdout)["item"]["id"]
+        second = json.loads(self.call("task", "add", "--priority", "3", "A task", "--json").stdout)["item"]["id"]
         self.assertIn("task of itself",
                       self.call("task", "edit", second, "--experiment", f"of:{second}", code=1).stderr)
         self.assertIn(f"sd:{first} is not designated experiment",
@@ -71,7 +79,7 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual((designation["as"], designation["of"]), ("task", first))
 
     def test_task_lifecycle_outside_checkout_and_stale_edit(self):
-        state = json.loads(self.call("task", "add", "Check the workflow", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Check the workflow", "--json").stdout)
         item = state["item"]["id"]
         edited = json.loads(self.call(
             "task", "edit", item, "--priority", 1, "--due", "2026-09-08",
@@ -114,7 +122,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_an_edit_with_no_field_names_the_edit_command(self):
         """sd:5065: the refusal names the command that fixes it."""
-        item = json.loads(self.call("task", "add", "A task", "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "A task", "--json").stdout)["item"]["id"]
         refused = self.call("task", "edit", item, code=1)
         self.assertIn(f"`sd task edit {item} --due YYYY-MM-DD`", refused.stderr)
 
@@ -126,9 +134,9 @@ class TaskCLI(unittest.TestCase):
 
     def test_store_items_since_lists_only_rows_created_or_updated_since(self):
         """sd:5065: `--since` takes a date (00:00 UTC) or a duration; a bad value names both forms."""
-        old = json.loads(self.call("task", "add", "Old", "--json").stdout)["item"]["id"]
-        new = json.loads(self.call("task", "add", "New", "--json").stdout)["item"]["id"]
-        touched = json.loads(self.call("task", "add", "Touched", "--json").stdout)["item"]["id"]
+        old = json.loads(self.call("task", "add", "--priority", "3", "Old", "--json").stdout)["item"]["id"]
+        new = json.loads(self.call("task", "add", "--priority", "3", "New", "--json").stdout)["item"]["id"]
+        touched = json.loads(self.call("task", "add", "--priority", "3", "Touched", "--json").stdout)["item"]["id"]
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             connection.execute("UPDATE item SET created_at = '2026-01-01T00:00:00+00:00', "
                                "updated_at = '2026-01-02T00:00:00+00:00' WHERE id = ?", (old,))
@@ -153,7 +161,7 @@ class TaskCLI(unittest.TestCase):
         reading it changes nothing: the revision after is the one before.
         """
 
-        state = json.loads(self.call("task", "add", "Read me", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Read me", "--json").stdout)
         item = state["item"]["id"]
         self.call("task", "note", item, "--body", "A note")
         canonical = json.loads(self.call("store", "item", item, "--json").stdout)
@@ -206,7 +214,7 @@ class TaskCLI(unittest.TestCase):
         environment = self.shimmed(self.RECORDING_CANCEL)
         record = self.home / "cancel.json"
         environment["SD_TEST_CANCEL"] = str(record)
-        state = json.loads(self.call("task", "add", "Superseded", "--kind", "followup",
+        state = json.loads(self.call("task", "add", "--priority", "3", "Superseded", "--kind", "followup",
                                      "--no-repo", "--json").stdout)
         item = state["item"]["id"]
         for verb, guard in (("task", True), ("work", None)):
@@ -230,7 +238,7 @@ class TaskCLI(unittest.TestCase):
         environment = self.shimmed(
             "import sd_db.progress as progress\n"
             "progress.__dict__.pop('task_guard', None)\n")
-        state = json.loads(self.call("task", "add", "Not cancellable here", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Not cancellable here", "--json").stdout)
         item = state["item"]["id"]
         result = subprocess.run(
             [sys.executable, str(ROOT / "bin" / "sd"), "task", "cancel", str(item),
@@ -245,21 +253,21 @@ class TaskCLI(unittest.TestCase):
                          ("planning", state["revision"]))
 
     def test_task_cancel_needs_a_reason(self):
-        item = json.loads(self.call("task", "add", "No reason given", "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "No reason given", "--json").stdout)["item"]["id"]
         refused = self.call("task", "cancel", item, code=2)
         self.assertIn("--reason", refused.stderr)
         self.assertIn("--reason", self.call("task", "cancel", "--help").stdout)
 
     def test_cli_and_today_query_agree(self):
         for title in ("One", "Two"):
-            state = json.loads(self.call("task", "add", title, "--json").stdout)
+            state = json.loads(self.call("task", "add", "--priority", "3", title, "--json").stdout)
             self.call("task", "status", state["item"]["id"], "in_progress")
         with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
             expected = [dict(row) for row in sd_db.reads.today_items(connection)]
         self.assertEqual(json.loads(self.call("today", "--json").stdout), expected)
 
     def test_note_defaults_to_comment_without_creating_a_followup(self):
-        state = json.loads(self.call("task", "add", "Parent task", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Parent task", "--json").stdout)
         item = state["item"]["id"]
         result = json.loads(self.call("task", "note", item, "--body", "A useful observation",
                                       "--json").stdout)
@@ -283,7 +291,7 @@ class TaskCLI(unittest.TestCase):
     def test_add_and_note_record_the_harness_session_id(self):
         """pack sd:6023: add, note and an answer record `CLAUDE_CODE_SESSION_ID`; unset, the user as before."""
         session = self.harness("session-under-test")
-        item = json.loads(self.call("task", "add", "Filed by a session", "--json", env=session).stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Filed by a session", "--json", env=session).stdout)["item"]["id"]
         asked = json.loads(self.call("task", "note", item, "Which?", "--kind", "question", "--json",
                                      env=session).stdout)["note"]["id"]
         self.call("task", "note", item, "This one", "--kind", "decision", "--answers", asked, env=session)
@@ -294,7 +302,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_a_status_move_records_the_harness_session_id(self):
         """pack sd:6046: `sd task status` recorded the user where add and note record the session."""
-        item = json.loads(self.call("task", "add", "Moved by a session", "--json", env=self.harness()).stdout)
+        item = json.loads(self.call("task", "add", "--priority", "3", "Moved by a session", "--json", env=self.harness()).stdout)
         state = json.loads(self.call("task", "status", item["item"]["id"], "in_progress", "--json",
                                      env=self.harness("session-under-test")).stdout)
         self.assertEqual([(note["body"].split(" by ")[0], note["session"]) for note in state["notes"]],
@@ -304,7 +312,7 @@ class TaskCLI(unittest.TestCase):
         """pack sd:6046: Claude Code sets `AI_AGENT` in the lead's Bash as in a teammate's, so it tells
         neither apart; a mark from it hid the lead's own notes from its trail."""
         lead = self.harness("session-under-test", "claude-code_2-1-303_agent")
-        item = json.loads(self.call("task", "add", "Filed by the lead", "--json", env=lead).stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Filed by the lead", "--json", env=lead).stdout)["item"]["id"]
         state = json.loads(self.call("task", "note", item, "Lead ruling", "--kind", "decision", "--json",
                                      env=lead).stdout)
         self.assertEqual([note["session"] for note in state["notes"]], ["session-under-test", "session-under-test"])
@@ -313,7 +321,7 @@ class TaskCLI(unittest.TestCase):
         """pack sd:6046: a teammate shares its lead's session id; `bin/sd-session-beat` exports
         `SD_AGENT_SESSION=<session>:<agent>` into its Bash call, and add, note and status record it."""
         mate = self.harness("session-under-test", mark="session-under-test:agent-1")
-        item = json.loads(self.call("task", "add", "Filed by a teammate", "--json", env=mate).stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Filed by a teammate", "--json", env=mate).stdout)["item"]["id"]
         self.call("task", "note", item, "Teammate ruling", "--kind", "decision", env=mate)
         self.call("task", "status", item, "in_progress", env=mate)
         stray = self.harness("session-under-test", mark="session-other:agent-1")
@@ -324,7 +332,7 @@ class TaskCLI(unittest.TestCase):
     def test_the_beat_hooks_rewrite_runs_sd_under_the_teammates_mark(self):
         """pack sd:6046: the command `bin/sd-session-beat` hands back, run by a shell as Claude Code
         runs it, records the teammate's mark; the lead's call comes back unchanged."""
-        item = json.loads(self.call("task", "add", "Shared", "--json", env=self.harness()).stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Shared", "--json", env=self.harness()).stdout)["item"]["id"]
         command = f"{shlex.quote(sys.executable)} {ROOT / 'bin' / 'sd'} task note {item} Marked --json"
 
         def rewritten(payload: dict) -> str:
@@ -344,7 +352,7 @@ class TaskCLI(unittest.TestCase):
 
     def done_item(self, *merge_note):
         """A task closed by hand, optionally carrying a merge comment first."""
-        item = json.loads(self.call("task", "add", "Delivered twice", "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Delivered twice", "--json").stdout)["item"]["id"]
         if merge_note:
             self.call("task", "note", item, "--body", merge_note[0])
         self.call("task", "status", item, "done")
@@ -373,7 +381,7 @@ class TaskCLI(unittest.TestCase):
     def test_a_delivery_with_no_pull_request_names_its_commit(self):
         """The transition sentence `--delivered-by` and `sd work deliver` write."""
         sha = "b" * 40
-        item = json.loads(self.call("task", "add", "Delivered", "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Delivered", "--json").stdout)["item"]["id"]
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             workflow.change_status(connection, item, "done", who="fixture",
                                    reason=f"delivered at {sha} on origin/main")
@@ -385,7 +393,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_answers_records_the_decision_and_resolves_the_question_in_one_write(self):
         """sd:5014: a decision note left its question in Decisions waiting until a second verb resolved it."""
-        item = json.loads(self.call("task", "add", "Asks", "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Asks", "--json").stdout)["item"]["id"]
         asked = self.question(item)
         state = json.loads(self.call("task", "note", item, "Database rows", "--kind", "decision",
                                      "--answers", asked, "--json").stdout)
@@ -397,8 +405,8 @@ class TaskCLI(unittest.TestCase):
         self.assertNotIn("Decisions waiting", self.call("today").stdout)
 
     def test_answers_refuses_and_writes_nothing(self):
-        item = json.loads(self.call("task", "add", "Asks", "--json").stdout)["item"]["id"]
-        other = json.loads(self.call("task", "add", "Asks too", "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Asks", "--json").stdout)["item"]["id"]
+        other = json.loads(self.call("task", "add", "--priority", "3", "Asks too", "--json").stdout)["item"]["id"]
         asked, theirs = self.question(item), self.question(other)
         comment = json.loads(self.call("task", "note", item, "Plain", "--json").stdout)["note"]["id"]
         settled = self.question(item, "Settled?")
@@ -418,7 +426,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_answers_writes_both_or_neither(self):
         """A resolve that fails after the ruling is written leaves no ruling behind."""
-        item = json.loads(self.call("task", "add", "Asks", "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Asks", "--json").stdout)["item"]["id"]
         asked = self.question(item)
         before = json.loads(self.call("task", "show", item, "--json").stdout)
         args = argparse.Namespace(item=item, kind="decision", answers=asked)
@@ -494,7 +502,7 @@ class TaskCLI(unittest.TestCase):
     def test_option_refuses_an_unknown_label_or_a_plain_question_and_writes_nothing(self):
         """sd:5065: an unknown label names the valid ones; `--option` needs `--answers` on a batch question."""
         item, asked = self.batch_question()
-        plain = json.loads(self.call("task", "add", "Asks", "--json").stdout)["item"]["id"]
+        plain = json.loads(self.call("task", "add", "--priority", "3", "Asks", "--json").stdout)["item"]["id"]
         question = self.question(plain)
         for name, row, flags, said in (
                 ("unknown label", item, ("--answers", asked, "--option", "Maybe"), "its options are Approve, Reject"),
@@ -538,7 +546,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_all_public_note_kinds_parse_and_persist_without_internal_kinds(self):
         self.assertEqual(set(NOTE_KINDS), {"comment", "followup", "question", "decision", "proposal"})
-        state = json.loads(self.call("task", "add", "Parent task", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Parent task", "--json").stdout)
         item = state["item"]["id"]
         initial_notes = state["notes"]
         initial_ids = {note["id"] for note in initial_notes}
@@ -568,14 +576,14 @@ class TaskCLI(unittest.TestCase):
         """
         self.assertEqual(workflow.HAND_KINDS,
                          ("task", "personal", "followup", "work-idea", "personal-idea"))
-        default = json.loads(self.call("task", "add", "Standalone work", "--json").stdout)
+        default = json.loads(self.call("task", "add", "--priority", "3", "Standalone work", "--json").stdout)
         self.assertEqual(default["item"]["kind"], "task")
 
         filed = {}
         for kind in workflow.HAND_KINDS:
             with self.subTest(kind=kind):
                 state = json.loads(
-                    self.call("task", "add", f"A {kind}", "--kind", kind, "--json").stdout)
+                    self.call("task", "add", "--priority", "3", f"A {kind}", "--kind", kind, "--json").stdout)
                 self.assertEqual(state["item"]["kind"], kind)
                 readback = json.loads(
                     self.call("store", "item", state["item"]["id"], "--json").stdout)
@@ -585,7 +593,7 @@ class TaskCLI(unittest.TestCase):
 
         for kind in ("work", "report", "dep", "skill-review", "proposal", "idea", "nonsense"):
             with self.subTest(refused=kind):
-                refused = self.call("task", "add", f"Not a {kind}", "--kind", kind, code=2)
+                refused = self.call("task", "add", "--priority", "3", f"Not a {kind}", "--kind", kind, code=2)
                 self.assertIn("invalid choice", refused.stderr)
 
         rows = json.loads(self.call("store", "items", "--json").stdout)
@@ -605,21 +613,21 @@ class TaskCLI(unittest.TestCase):
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
 
-        ordinary = json.loads(self.call("task", "add", "Ordinary", "--json", cwd=root).stdout)
+        ordinary = json.loads(self.call("task", "add", "--priority", "3", "Ordinary", "--json", cwd=root).stdout)
         self.assertEqual(ordinary["item"]["repo"], sd_lib.stored_repo(root))
 
         for kind in sorted(workflow.REPO_LESS_KINDS):
             with self.subTest(kind=kind):
                 filed = json.loads(
-                    self.call("task", "add", f"A {kind}", "--kind", kind, "--json",
+                    self.call("task", "add", "--priority", "3", f"A {kind}", "--kind", kind, "--json",
                               cwd=root).stdout)
                 self.assertIsNone(filed["item"]["repo"])
-                refused = self.call("task", "add", "Insisting", "--kind", kind, "--here",
+                refused = self.call("task", "add", "--priority", "3", "Insisting", "--kind", kind, "--here",
                                     cwd=root, code=1)
                 self.assertIn(f"a {kind} item carries no repository", refused.stderr)
 
         redundant = json.loads(
-            self.call("task", "add", "Said twice", "--kind", "personal", "--no-repo",
+            self.call("task", "add", "--priority", "3", "Said twice", "--kind", "personal", "--no-repo",
                       "--json", cwd=root).stdout)
         self.assertIsNone(redundant["item"]["repo"])
 
@@ -647,22 +655,22 @@ class TaskCLI(unittest.TestCase):
         """
         root = self._checkout("reviewed")
         unregistered = json.loads(self.call(
-            "task", "add", "Before registering", "--kind", "followup", "--json",
+            "task", "add", "--priority", "3", "Before registering", "--kind", "followup", "--json",
             cwd=root).stdout)
         self.assertIsNone(unregistered["item"]["repo"])
         self.assertIn("not a registered repository", self.call(
-            "task", "add", "Insisting", "--kind", "followup", "--here", cwd=root,
+            "task", "add", "--priority", "3", "Insisting", "--kind", "followup", "--here", cwd=root,
             code=1).stderr)
 
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
 
         filed = json.loads(self.call(
-            "task", "add", "Review finding", "--kind", "followup", "--json", cwd=root).stdout)
+            "task", "add", "--priority", "3", "Review finding", "--kind", "followup", "--json", cwd=root).stdout)
         self.assertEqual((filed["item"]["kind"], filed["item"]["repo"]),
                          ("followup", sd_lib.stored_repo(root)))
         here = json.loads(self.call(
-            "task", "add", "Said here", "--kind", "followup", "--here", "--json",
+            "task", "add", "--priority", "3", "Said here", "--kind", "followup", "--here", "--json",
             cwd=root).stdout)
         self.assertEqual(here["item"]["repo"], sd_lib.stored_repo(root))
 
@@ -670,16 +678,16 @@ class TaskCLI(unittest.TestCase):
         subprocess.run(["git", "worktree", "add", "-q", "-b", "side", str(linked)],
                        cwd=str(root), check=True, capture_output=True, text=True)
         from_worktree = json.loads(self.call(
-            "task", "add", "From a worktree", "--kind", "followup", "--json",
+            "task", "add", "--priority", "3", "From a worktree", "--kind", "followup", "--json",
             cwd=linked).stdout)
         self.assertEqual(from_worktree["item"]["repo"], sd_lib.stored_repo(root))
 
         opted_out = json.loads(self.call(
-            "task", "add", "Nowhere", "--kind", "followup", "--no-repo", "--json",
+            "task", "add", "--priority", "3", "Nowhere", "--kind", "followup", "--no-repo", "--json",
             cwd=root).stdout)
         self.assertIsNone(opted_out["item"]["repo"])
         outside = json.loads(self.call(
-            "task", "add", "Outside", "--kind", "followup", "--json").stdout)
+            "task", "add", "--priority", "3", "Outside", "--kind", "followup", "--json").stdout)
         self.assertIsNone(outside["item"]["repo"])
 
         with sd_db.connect(sd_db.default_path(self.home), write=False) as connection:
@@ -694,7 +702,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_edit_clears_a_stale_branch(self):
         """sd:2729. `--clear-branch` is the one way a stale branch name leaves a row."""
-        state = json.loads(self.call("task", "add", "Worked on a branch", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Worked on a branch", "--json").stdout)
         item = state["item"]["id"]
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             sd_db.writes.set_item_fields(connection, item, branch="feat/gone")
@@ -725,7 +733,7 @@ class TaskCLI(unittest.TestCase):
         environment = self.shimmed(self.RECORDING_EDIT)
         record = self.home / "edit.json"
         environment["SD_TEST_EDIT"] = str(record)
-        state = json.loads(self.call("task", "add", "Parked at P4", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Parked at P4", "--json").stdout)
         item = state["item"]["id"]
         self.call("task", "edit", item, "--unpark", "--if-revision", state["revision"], env=environment)
         self.assertEqual(json.loads(record.read_text()), {
@@ -735,7 +743,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_edit_park_parks_once_and_refuses_unpark_and_a_done_item(self):
         """sd:5905. `--park` stamps `parked_at` now, the reverse of `--unpark`."""
-        item = json.loads(self.call("task", "add", "Not now", "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Not now", "--json").stdout)["item"]["id"]
         parked = json.loads(self.call("task", "edit", item, "--park", "--json").stdout)
         self.assertRegex(parked["item"]["parked_at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\+00:00$")
         self.assertEqual(parked["notes"][-1]["body"], f"Parked by {getpass.getuser()}")
@@ -745,7 +753,7 @@ class TaskCLI(unittest.TestCase):
                          parked["revision"])
         self.assertIn("not allowed with argument",
                       self.call("task", "edit", item, "--park", "--unpark", code=2).stderr)
-        done = json.loads(self.call("task", "add", "Shipped", "--json").stdout)["item"]["id"]
+        done = json.loads(self.call("task", "add", "--priority", "3", "Shipped", "--json").stdout)["item"]["id"]
         self.call("task", "status", done, "done")
         self.assertIn("is done", self.call("task", "edit", done, "--park", code=1).stderr)
         self.assertIn("--park", self.call("task", "edit", "--help").stdout)
@@ -759,7 +767,7 @@ class TaskCLI(unittest.TestCase):
             sd_db.repos.add(connection, first, home=self.home)
             sd_db.repos.add(connection, second, home=self.home)
         state = json.loads(self.call(
-            "task", "add", "Filed off its checkout", "--kind", "followup", "--json").stdout)
+            "task", "add", "--priority", "3", "Filed off its checkout", "--kind", "followup", "--json").stdout)
         item = state["item"]["id"]
         self.assertIsNone(state["item"]["repo"])
 
@@ -805,7 +813,7 @@ class TaskCLI(unittest.TestCase):
                 for kind in sorted(workflow.REPO_LESS_KINDS):
                     self.assertIn(kind, text)
                 self.assertNotIn("four", text)
-        add = " ".join(self.call("task", "add", "--help").stdout.split()).replace("- ", "-")
+        add = " ".join(self.call("task", "add", "--priority", "3", "--help").stdout.split()).replace("- ", "-")
         self.assertIn("a followup takes a checkout as a task does", add)
         self.assertIn("personal, work-idea and personal-idea carry no repository", add)
 
@@ -838,32 +846,32 @@ class TaskCLI(unittest.TestCase):
         root = self._checkout("project")
 
         unregistered = json.loads(
-            self.call("task", "add", "Before registering", "--json", cwd=root).stdout)
+            self.call("task", "add", "--priority", "3", "Before registering", "--json", cwd=root).stdout)
         self.assertIsNone(unregistered["item"]["repo"])
         self.assertIn("not a registered repository",
-                      self.call("task", "add", "Insisting", "--here", cwd=root, code=1).stderr)
+                      self.call("task", "add", "--priority", "3", "Insisting", "--here", cwd=root, code=1).stderr)
 
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
 
-        filed = json.loads(self.call("task", "add", "Inside", "--json", cwd=root).stdout)
+        filed = json.loads(self.call("task", "add", "--priority", "3", "Inside", "--json", cwd=root).stdout)
         self.assertEqual(filed["item"]["repo"], sd_lib.stored_repo(root))
 
         linked = self.home / "linked"
         subprocess.run(["git", "worktree", "add", "-q", "-b", "side", str(linked)],
                        cwd=str(root), check=True, capture_output=True, text=True)
         from_worktree = json.loads(
-            self.call("task", "add", "From a worktree", "--json", cwd=linked).stdout)
+            self.call("task", "add", "--priority", "3", "From a worktree", "--json", cwd=linked).stdout)
         self.assertEqual(from_worktree["item"]["repo"], sd_lib.stored_repo(root))
 
         opted_out = json.loads(
-            self.call("task", "add", "Neither", "--no-repo", "--json", cwd=root).stdout)
+            self.call("task", "add", "--priority", "3", "Neither", "--no-repo", "--json", cwd=root).stdout)
         self.assertIsNone(opted_out["item"]["repo"])
 
-        outside = json.loads(self.call("task", "add", "Outside", "--json").stdout)
+        outside = json.loads(self.call("task", "add", "--priority", "3", "Outside", "--json").stdout)
         self.assertIsNone(outside["item"]["repo"])
 
-        self.call("task", "add", "Both", "--here", "--no-repo", cwd=root, code=2)
+        self.call("task", "add", "--priority", "3", "Both", "--here", "--no-repo", cwd=root, code=2)
 
     def test_store_items_here_lists_only_this_checkouts_items(self):
         """sd:3197. `--here` resolves the checkout as `task add --here` does, and refuses as it does."""
@@ -874,10 +882,10 @@ class TaskCLI(unittest.TestCase):
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
             sd_db.repos.add(connection, other, home=self.home)
-        self.call("task", "add", "Mine", cwd=root)
-        self.call("task", "add", "Theirs", cwd=other)
-        self.call("task", "add", "Nobody's", "--no-repo", cwd=root)
-        done = json.loads(self.call("task", "add", "Mine, done", "--json", cwd=root).stdout)["item"]["id"]
+        self.call("task", "add", "--priority", "3", "Mine", cwd=root)
+        self.call("task", "add", "--priority", "3", "Theirs", cwd=other)
+        self.call("task", "add", "--priority", "3", "Nobody's", "--no-repo", cwd=root)
+        done = json.loads(self.call("task", "add", "--priority", "3", "Mine, done", "--json", cwd=root).stdout)["item"]["id"]
         self.call("task", "status", done, "done")
         linked = self.home / "listed-linked"
         subprocess.run(["git", "worktree", "add", "-q", "-b", "side", str(linked)],
@@ -902,7 +910,7 @@ class TaskCLI(unittest.TestCase):
             sd_db.repos.add(connection, first, home=self.home)
             sd_db.repos.add(connection, second, home=self.home)
 
-        state = json.loads(self.call("task", "add", "Filed nowhere", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Filed nowhere", "--json").stdout)
         item = state["item"]["id"]
         self.assertIsNone(state["item"]["repo"])
 
@@ -939,7 +947,7 @@ class TaskCLI(unittest.TestCase):
         root = self._checkout("recorded")
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
-        state = json.loads(self.call("task", "add", "Mis-filed", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Mis-filed", "--json").stdout)
         item = state["item"]["id"]
         before = {note["id"] for note in state["notes"]}
         moved = json.loads(self.call("task", "edit", item, "--belongs-to", root, "--json").stdout)
@@ -958,7 +966,7 @@ class TaskCLI(unittest.TestCase):
         root = self._checkout("visible")
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
-        item = json.loads(self.call("task", "add", "Mis-filed", "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Mis-filed", "--json").stdout)["item"]["id"]
 
         # The move, made from inside the destination, where "which repository"
         # is otherwise answered by where the caller is standing.
@@ -991,7 +999,7 @@ class TaskCLI(unittest.TestCase):
     def test_an_unregistered_repository_is_refused_without_moving_the_row(self):
         """The `repo` table is the authority, and a refusal changes nothing."""
         stranger = self._checkout("stranger")
-        state = json.loads(self.call("task", "add", "Stays put", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Stays put", "--json").stdout)
         item = state["item"]["id"]
         refused = self.call("task", "edit", item, "--belongs-to", stranger, code=1)
         self.assertIn("not registered", refused.stderr)
@@ -1018,7 +1026,7 @@ class TaskCLI(unittest.TestCase):
         """sd:4740. `~/...`, `.` and an absolute path each set the repo from a detached HEAD."""
         root = self._detached("detached")
         for spelling, cwd in ((f"~/{root.name}", self.home), (".", root), (str(root), self.home)):
-            item = json.loads(self.call("task", "add", "Mis-filed", "--json").stdout)["item"]["id"]
+            item = json.loads(self.call("task", "add", "--priority", "3", "Mis-filed", "--json").stdout)["item"]["id"]
             self.call("task", "edit", item, "--belongs-to", spelling, cwd=cwd)
             row = json.loads(self.call("store", "item", item, "--json").stdout)["item"]
             self.assertEqual(row["repo"], sd_lib.stored_repo(root), spelling)
@@ -1026,7 +1034,7 @@ class TaskCLI(unittest.TestCase):
     def test_a_belongs_to_that_changed_nothing_is_a_refusal_naming_the_path(self):
         """sd:4740. A library that returns the row unchanged exited 0 and printed it."""
         root = self._detached("dropped")
-        state = json.loads(self.call("task", "add", "Mis-filed", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Mis-filed", "--json").stdout)
         item = state["item"]["id"]
         environment = self.shimmed(self.DROPPING_EDIT)
         refused = self.call("task", "edit", item, "--belongs-to", f"~/{root.name}", code=1, env=environment)
@@ -1039,13 +1047,13 @@ class TaskCLI(unittest.TestCase):
     def test_a_no_repo_that_changed_nothing_is_a_refusal(self):
         """sd:4740. The same read-back guards the clearing spelling."""
         root = self._detached("kept")
-        item = json.loads(self.call("task", "add", "Filed", "--belongs-to", str(root), "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Filed", "--belongs-to", str(root), "--json").stdout)["item"]["id"]
         refused = self.call("task", "edit", item, "--no-repo", code=1, env=self.shimmed(self.DROPPING_EDIT))
         self.assertIn(f"expected item {item} to belong to no checkout", refused.stderr)
 
     def test_a_home_that_cannot_be_expanded_is_a_refusal_not_a_traceback(self):
         """sd:1000 (1c0e15d3a773): `~nobody/x` raised RuntimeError out of `expanduser`."""
-        state = json.loads(self.call("task", "add", "Stays put", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Stays put", "--json").stdout)
         refused = self.call("task", "edit", state["item"]["id"], "--belongs-to",
                             "~sd-no-such-user-1000/x", code=1)
         self.assertIn("--belongs-to: cannot expand ~sd-no-such-user-1000/x", refused.stderr)
@@ -1053,7 +1061,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_json_help_names_where_the_item_id_is(self):
         """sd:5742: a caller read `.get('id')` off `task add --json`, printed `None` and filed the item twice."""
-        filed = json.loads(self.call("task", "add", "Shape", "--json").stdout)
+        filed = json.loads(self.call("task", "add", "--priority", "3", "Shape", "--json").stdout)
         self.assertNotIn("id", filed)
         self.assertIsInstance(filed["item"]["id"], int)
         for verb in (("task", "add"), ("task", "edit"), ("task", "show"), ("task", "status")):
@@ -1062,7 +1070,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_here_help_names_the_registration_the_refusal_needs(self):
         """sd:1000 (6b9855085e9c): the help said any checkout; the refusal needs a registered one."""
-        said = " ".join(self.call("task", "add", "--help").stdout.split())
+        said = " ".join(self.call("task", "add", "--priority", "3", "--help").stdout.split())
         self.assertIn("refuse unless this is a checkout registered in the sd database", said)
 
     def test_add_belongs_to_files_the_item_into_another_checkout_in_one_call(self):
@@ -1074,22 +1082,22 @@ class TaskCLI(unittest.TestCase):
         linked = self.home / "first-linked"
         subprocess.run(["git", "worktree", "add", "-q", "-b", "side", str(linked)],
                        cwd=str(first), check=True, capture_output=True, text=True, env=clean_environment())
-        filed = json.loads(self.call("task", "add", "For the other repo", "--belongs-to", linked,
+        filed = json.loads(self.call("task", "add", "--priority", "3", "For the other repo", "--belongs-to", linked,
                                      "--json", cwd=second).stdout)
         self.assertEqual(filed["item"]["repo"], sd_lib.stored_repo(first))
-        here = json.loads(self.call("task", "add", "Here", "--belongs-to", ".", "--json", cwd=second).stdout)
+        here = json.loads(self.call("task", "add", "--priority", "3", "Here", "--belongs-to", ".", "--json", cwd=second).stdout)
         self.assertEqual(here["item"]["repo"], sd_lib.stored_repo(second))
         before = json.loads(self.call("store", "items", "--json").stdout)
-        refused = self.call("task", "add", "Nowhere", "--belongs-to", stranger, code=1)
+        refused = self.call("task", "add", "--priority", "3", "Nowhere", "--belongs-to", stranger, code=1)
         self.assertIn("not registered", refused.stderr)
-        personal = self.call("task", "add", "Mine", "--kind", "personal", "--belongs-to", first, code=1)
+        personal = self.call("task", "add", "--priority", "3", "Mine", "--kind", "personal", "--belongs-to", first, code=1)
         self.assertIn("--belongs-to: a personal item carries no repository", personal.stderr)
         self.assertEqual(json.loads(self.call("store", "items", "--json").stdout), before)
         for other in ("--here", "--no-repo"):
-            self.call("task", "add", "Both", "--belongs-to", first, other, code=2)
+            self.call("task", "add", "--priority", "3", "Both", "--belongs-to", first, other, code=2)
 
     def test_belongs_to_and_no_repo_are_the_same_field_and_cannot_both_be_given(self):
-        state = json.loads(self.call("task", "add", "One or the other", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "One or the other", "--json").stdout)
         self.call("task", "edit", state["item"]["id"], "--belongs-to", self.home,
                   "--no-repo", code=2)
         self.assertIn("requires a field",
@@ -1112,7 +1120,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_kind_help_says_the_kinds_come_from_the_installed_library(self):
         """sd:1000 (0f93e3b2bf82): a followup takes a checkout only on an sd_db from sd:809 on."""
-        said = " ".join(self.call("task", "add", "--help").stdout.split())
+        said = " ".join(self.call("task", "add", "--priority", "3", "--help").stdout.split())
         self.assertIn("from the kinds the installed sd_db offers", said)
         self.assertIn("(an sd_db older than sd:809 files it with none)", said)
 
@@ -1158,7 +1166,7 @@ class TaskCLI(unittest.TestCase):
         root = self._checkout("reclassified")
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             sd_db.repos.add(connection, root, home=self.home)
-        state = json.loads(self.call("task", "add", "Not work at all", "--json", cwd=root).stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Not work at all", "--json", cwd=root).stdout)
         item = state["item"]["id"]
         self.assertEqual((state["item"]["kind"], state["item"]["repo"]),
                          ("task", sd_lib.stored_repo(root)))
@@ -1179,7 +1187,7 @@ class TaskCLI(unittest.TestCase):
         self.assertEqual(json.loads(self.call("store", "item", item, "--json").stdout), moved)
 
     def test_edit_refuses_a_produced_kind_at_the_parser_without_touching_the_row(self):
-        state = json.loads(self.call("task", "add", "Stays a task", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Stays a task", "--json").stdout)
         item = state["item"]["id"]
         for kind in ("report", "work", "dep", "skill-review", "proposal", "idea", "nonsense"):
             with self.subTest(kind=kind):
@@ -1190,7 +1198,7 @@ class TaskCLI(unittest.TestCase):
 
     def test_the_library_s_kind_refusal_reaches_the_caller_without_a_traceback(self):
         """A contribution task keeps its kind, and `edit_item` is what says so."""
-        state = json.loads(self.call("task", "add", "Upstream pull request", "--json").stdout)
+        state = json.loads(self.call("task", "add", "--priority", "3", "Upstream pull request", "--json").stdout)
         item = state["item"]["id"]
         with sd_db.connect(sd_db.default_path(self.home), write=True) as connection:
             sd_db.writes.set_item_fields(
@@ -1207,8 +1215,8 @@ class TaskCLI(unittest.TestCase):
     def test_refusals_and_usage_have_distinct_exit_codes(self):
         self.assertIn("no item", self.call("store", "item", 9999, code=1).stderr)
         self.call("task", "add", "Task", "--priority", 9, code=2)
-        self.assertIn("Git checkout", self.call("task", "add", "Task", "--here", code=1).stderr)
-        self.call("task", "add", "Task", "--due", "tomorrow", code=1)
+        self.assertIn("Git checkout", self.call("task", "add", "--priority", "3", "Task", "--here", code=1).stderr)
+        self.call("task", "add", "--priority", "3", "Task", "--due", "tomorrow", code=1)
 
 
 class TaskRef(unittest.TestCase):
@@ -1219,19 +1227,19 @@ class TaskRef(unittest.TestCase):
     call = TaskCLI.call
 
     def add(self, *arguments):
-        return json.loads(self.call("task", "add", *arguments, "--json").stdout)
+        return json.loads(self.call("task", "add", "--priority", "3", *arguments, "--json").stdout)
 
     def rows(self):
         return json.loads(self.call("store", "items", "--json").stdout)
 
     def test_help_lists_ref(self):
-        self.assertIn("--ref", self.call("task", "add", "--help").stdout)
+        self.assertIn("--ref", self.call("task", "add", "--priority", "3", "--help").stdout)
 
     def test_a_second_add_with_the_same_ref_refuses_and_leaves_the_row(self):
         """sd:3703. Two items filed with `--ref sd:3399` overwrote sd:3407 twice; an add files, an edit changes."""
         first = self.add("repo-sync failed", "--kind", "followup", "--ref", "job:repo-sync:42",
                          "--body", "log at line 9")
-        refused = self.call("task", "add", "repo-sync failed: core", "--kind", "followup",
+        refused = self.call("task", "add", "--priority", "3", "repo-sync failed: core", "--kind", "followup",
                             "--ref", "job:repo-sync:42", "--body", "", code=1)
         item = first["item"]["id"]
         self.assertIn(f"sd:{item} (planning) already carries --ref job:repo-sync:42", refused.stderr)
@@ -1252,7 +1260,7 @@ class TaskRef(unittest.TestCase):
                 else:
                     self.call("task", "cancel", item, "--reason", "not needed")
                 before = json.loads(self.call("store", "item", item, "--json").stdout)
-                refused = self.call("task", "add", "other work", "--kind", "followup", "--ref", ref, code=1)
+                refused = self.call("task", "add", "--priority", "3", "other work", "--kind", "followup", "--ref", ref, code=1)
                 self.assertIn(f"sd:{item} ({before['item']['status']}) already carries", refused.stderr)
                 self.assertEqual(json.loads(self.call("store", "item", item, "--json").stdout), before)
         later = self.add("repo-sync failed", "--kind", "followup", "--ref", "job:repo-sync:44")
@@ -1261,8 +1269,8 @@ class TaskRef(unittest.TestCase):
 
     def test_add_prints_the_new_id_first(self):
         """sd:3703. sd:3161 was a second add made to read the first one's id back."""
-        shown = self.call("task", "add", "one row").stdout
-        self.assertRegex(shown.splitlines()[0], r"^\S+ sd:\d+  planning  one row$")
+        shown = self.call("task", "add", "--priority", "3", "one row").stdout
+        self.assertRegex(shown.splitlines()[0], r"^\S+ sd:\d+  planning  one row · P3$")
 
     def test_today_carries_the_ref(self):
         state = self.add("HOA alarm follow-up", "--ref", "hoa:a2-vsd")
@@ -1278,7 +1286,7 @@ class TaskRef(unittest.TestCase):
             (("--ref", "job:x", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY"), "--recur"),
         ):
             with self.subTest(arguments=arguments):
-                refused = self.call("task", "add", "x", *arguments, code=1)
+                refused = self.call("task", "add", "--priority", "3", "x", *arguments, code=1)
                 self.assertIn(reason, refused.stderr)
         self.assertEqual(self.rows(), [])
 
@@ -1297,7 +1305,7 @@ class Recurrence(unittest.TestCase):
     call = TaskCLI.call
 
     def add(self, *arguments):
-        return json.loads(self.call("task", "add", *arguments, "--json").stdout)
+        return json.loads(self.call("task", "add", "--priority", "3", *arguments, "--json").stdout)
 
     def test_add_stores_the_rule_with_the_library_s_default_anchor(self):
         state = self.add("File the weekly report", "--due", "2026-01-01", "--recur", "freq=weekly")
@@ -1308,7 +1316,7 @@ class Recurrence(unittest.TestCase):
         self.assertEqual(anchored["item"]["recurrence_anchor"], "completion")
 
     def test_add_prints_the_rule_without_json(self):
-        shown = self.call("task", "add", "Weekly", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY").stdout
+        shown = self.call("task", "add", "--priority", "3", "Weekly", "--due", "2026-01-01", "--recur", "FREQ=WEEKLY").stdout
         self.assertIn("recurs FREQ=WEEKLY (schedule)", shown)
 
     def test_a_recurring_followup_takes_its_rule(self):
@@ -1331,7 +1339,7 @@ class Recurrence(unittest.TestCase):
         )
         for arguments, message in cases:
             with self.subTest(arguments=arguments):
-                refused = self.call("task", "add", "Refused", *arguments, code=1)
+                refused = self.call("task", "add", "--priority", "3", "Refused", *arguments, code=1)
                 self.assertIn(message, refused.stderr)
                 self.assertNotIn("Traceback", refused.stderr)
         self.assertEqual(json.loads(self.call("store", "items", "--json").stdout), before)
@@ -1379,7 +1387,7 @@ class Recurrence(unittest.TestCase):
                 (("--due", "2026-01-10", "--recur", "FREQ=WEEKLY", "--recur-lead", "soon"), 2, "invalid int"),
                 (("--due", "2026-01-10", "--recur-lead", "3"), 1, "recurrence_lead needs a recurrence rule")):
             with self.subTest(arguments=arguments):
-                refused = self.call("task", "add", "Refused", *arguments, code=code)
+                refused = self.call("task", "add", "--priority", "3", "Refused", *arguments, code=code)
                 self.assertIn(message, refused.stderr)
                 self.assertNotIn("Traceback", refused.stderr)
         self.assertEqual(json.loads(self.call("store", "items", "--json").stdout), before)
@@ -1789,13 +1797,13 @@ class OneItemIdSpelling(unittest.TestCase):
                 sd_notes.item_id(text)
 
     def test_task_show_takes_sd_and_item_spellings(self):
-        item = json.loads(self.call("task", "add", "Spell me", "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Spell me", "--json").stdout)["item"]["id"]
         for spelling in (f"sd:{item}", f"item:{item}"):
             shown = json.loads(self.call("task", "show", spelling, "--json").stdout)
             self.assertEqual(shown["item"]["id"], item)
 
     def test_note_body_is_positional_and_body_flag_still_works(self):
-        item = json.loads(self.call("task", "add", "Note me", "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Note me", "--json").stdout)["item"]["id"]
         positional = json.loads(self.call("task", "note", item, "Positional text", "--json").stdout)
         self.assertEqual(positional["note"]["body"], "Positional text")
         flagged = json.loads(self.call("task", "note", item, "--body", "Flag text", "--json").stdout)
@@ -1827,7 +1835,7 @@ class FieldEditsFold(unittest.TestCase):
     call = TaskCLI.call
 
     def test_show_folds_field_edits_unless_audit(self):
-        item = json.loads(self.call("task", "add", "Fold me", "--json").stdout)["item"]["id"]
+        item = json.loads(self.call("task", "add", "--priority", "3", "Fold me", "--json").stdout)["item"]["id"]
         self.call("task", "edit", item, "--priority", 2)
         self.call("task", "edit", item, "--due", "2026-12-01")
         self.call("task", "note", item, "--body", "Updated priority by hand, a person wrote this")
@@ -1862,7 +1870,7 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
     call = TaskCLI.call
 
     def task(self, title, *flags):
-        return json.loads(self.call("task", "add", title, *flags, "--json").stdout)["item"]["id"]
+        return json.loads(self.call("task", "add", "--priority", "3", title, *flags, "--json").stdout)["item"]["id"]
 
     def test_today_prints_each_section_and_marks_overdue(self):
         late = self.task("Late one", "--due", "2020-01-02")
