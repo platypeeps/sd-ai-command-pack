@@ -35,7 +35,7 @@ class Drive:
                       "MAIN": [], "CIS": [("pump.jpg", "PIC1", "image/jpeg"), ("manual.pdf", "DOC1", "application/pdf"),
                                           ("Layout.url", "LNK1", "text/plain")], "WA2": []}
         self.text = {"LNK1": "[InternetShortcut]\nURL=https://drive.google.com/file/d/TARGET/view\n"}
-        self.calls, self.fail, self.say, self.made = [], {}, {}, 0
+        self.calls, self.fail, self.say, self.listed, self.made = [], {}, {}, {}, 0
 
     def __call__(self, tool, arguments, what):
         self.calls.append((tool, arguments))
@@ -44,7 +44,11 @@ class Drive:
         if tool in self.say:
             return self.say[tool]
         if tool == "list_drive_items":
+            if arguments["folder_id"] in self.listed:
+                return self.listed[arguments["folder_id"]]
             rows = self.items.get(arguments["folder_id"], [])
+            if not rows:
+                return f"No items found in folder '{arguments['folder_id']}'."
             return f"Found {len(rows)} items in folder '{arguments['folder_id']}' for x@example.invalid:\n" + "\n".join(
                 f'- Name: "{name}" (ID: {ident}, Type: {mime}, Created: 2026-10-30T00:00:00Z, Last Edited By: A '
                 f'<a@example.invalid>) Link: https://drive.google.com/open?id={ident}' for name, ident, mime in rows)
@@ -140,6 +144,25 @@ class TheListing(Case):
         self.assertEqual(status, 503)
         self.assertIn("refused", body["error"])
         self.assertEqual(hoa_attach.listing(self.connection, {"asset": ["NOPE"]})[0], 400)
+
+
+    def test_a_listing_drive_did_not_answer_is_no_empty_folder(self):
+        # An error text, a page of a longer listing, or a header that does not
+        # count its lines: none is a folder's whole listing.
+        for said in ("Error: The user has exceeded their Drive API quota",
+                     "Found 1 items in folder 'MAIN' for x@example.invalid:\nnextPageToken: abc",
+                     "Found 2 items in folder 'MAIN' for x@example.invalid:", ""):
+            self.drive.listed["MAIN"] = said
+            with self.subTest(said=said):
+                staged = self.stage()
+                status, body = self.attach({"asset": "V-01", "sha256": staged["sha256"], "name": "a.jpg"})
+                self.assertEqual((status, self.drive.writes()), (503, []))
+                self.assertIn("Nothing was written", body["error"])
+                got = hoa_attach.listing(self.connection, {"asset": ["V-01"]})
+                self.assertIsInstance(got, tuple, "an unreadable listing read as a folder")
+                self.assertEqual(got[0], 503)
+                self.assertIn("unreadable", got[1]["error"])
+        self.assertEqual(self.drive.writes(), [], "an unreadable listing makes no folder")
 
 
 class TheUpload(Case):

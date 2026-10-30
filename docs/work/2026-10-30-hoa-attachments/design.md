@@ -58,6 +58,7 @@ Add no store. An asset's attachments are its Drive folder's listing.
 | Find subfolder | none | Cistern renamed or gone | 503 names the folder; nothing written | same |
 | Find subfolder | none | two folders of one name | 503 names both ids; merge in Drive | same |
 | Any call | none | workspace-mcp down or token expired | 503 "Nothing was written"; re-login in workspace-mcp | `test_each_failure_says_whether_drive_holds_the_file` |
+| List folder | none | an error text, a partial page, or a miscounted listing | 503 "unreadable"; no folder made, nothing written | `test_a_listing_drive_did_not_answer_is_no_empty_folder` |
 | Stage bytes | a staged file | upload cut short | `stage` removes the part file | `test_an_upload_that_drips_is_stopped_at_its_whole_bound` (`test_source_intake`) |
 | Stage bytes | none | wrong suffix or over 20 MB | 400 names the rule | `test_a_staging_refusal_names_the_suffixes_and_the_cap` |
 | Make asset folder | a Drive folder | two first uploads race | one lock per server; a second server's race shows as two folders, then the row above | `test_the_first_upload_to_a_valve_makes_its_folder_once_and_writes_the_bytes` |

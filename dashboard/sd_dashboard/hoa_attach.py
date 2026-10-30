@@ -114,8 +114,16 @@ def _asset(connection, ident: object) -> dict:
 
 
 def _children(account: str, folder: str) -> list[dict]:
+    """The folder's whole listing; `LookupError` for any answer that is not one, so none reads as empty."""
     said = _call("list_drive_items", {"user_google_email": account, "folder_id": folder, "page_size": 200}, "the listing")
-    return [match.groupdict() for match in ITEM.finditer(said)]
+    if said.strip() == f"No items found in folder '{folder}'.":
+        return []
+    header = re.match(rf"Found (\d+) items in folder '{re.escape(folder)}' for ", said)
+    rows = [match.groupdict() for match in ITEM.finditer(said)]
+    # A nextPageToken is one page of a longer listing: a folder past it could be missed and made twice.
+    if not header or int(header[1]) != len(rows) or "nextPageToken:" in said:
+        raise LookupError(f"workspace-mcp's listing of {folder} is unreadable: {said[:200]}")
+    return rows
 
 
 def _one(account: str, parent: str, name: str) -> str | None:
