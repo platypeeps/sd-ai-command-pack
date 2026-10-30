@@ -76,9 +76,9 @@ addEventListener('DOMContentLoaded', () => {
   const words = r => [r.title, r.repo, r.url, LABEL[r.lane], ...(r.reasons || [])].join(' ').toLowerCase();
   // The header sorts the rows inside their lane (sd:3455, the shell's list grammar). Observed, newest first, is the server's
   // order and the default; a tie keeps it. The lane carries the state, so State has no order of its own.
-  const SORTS = { what: r => String(r.title || '').toLowerCase(), at: r => Date.parse(r.observed_at) || 0 };
+  const SORTS = { repo: r => String(r.repo || 'local').toLowerCase(), what: r => String(r.title || '').toLowerCase(), at: r => Date.parse(r.observed_at) || 0 };
   const LIST = { sort: 'at', dir: -1, size: 50 }, L = window.shell.list.listParams(u0, { ...LIST, page: 1 }, { sorts: Object.keys(SORTS), size: LIST.size });
-  const COLS = [[null, html`<span class="sr">State</span>`], ['what', 'Contribution'], ['at', 'Observed'], [null, 'Act']];
+  const COLS = [[null, html`<span class="sr">State</span>`], ['repo', 'Repo'], ['what', 'Contribution'], ['at', 'Observed'], [null, 'Act']];
   const order = (a, b) => { const x = SORTS[L.sort](a), y = SORTS[L.sort](b); return (x < y ? -1 : x > y ? 1 : 0) * L.dir; };
   const shown = () => { const v = q.value.trim().toLowerCase(); return scoped().filter(r => inLane(r) && (!v || words(r).includes(v))).sort(order); };
   // The reader (read.js) puts the objects adopt returns and retires the ones a reading no longer lists: the pick is dropped
@@ -243,8 +243,9 @@ addEventListener('DOMContentLoaded', () => {
     const f = r.freshness;
     return html`<tr data-id="${r.key}" data-lane="${r.lane}" aria-selected="${String(r.key === selected)}">
       <td class="g g-${r.s}"><span aria-hidden="true">${GLYPH[r.s]}</span><span class="sr">${r.s}</span></td>
-      <td class="what"><button type="button">${r.title}</button>
-        <span class="meta">${r.repo || 'local'} ${num(r)} · ${filed(r)}${settledMeta(r)}</span>
+      <td class="repo">${r.repo || 'local'}</td>
+      <td class="what"><button type="button">${[num(r), r.title].filter(Boolean).join(' ')}</button>
+        <span class="meta">${filed(r)}${settledMeta(r)}</span>
         ${links(r).length ? html`<span class="links">${links(r)}</span>` : ''}
         ${r.reasons.length ? html`<span class="reason">${String(r.reasons[r.reasons.length - 1]).slice(0, 180)}</span>` : ''}</td>
       <td class="obs">${f.status === 'current' ? html`<span class="g-ok" aria-hidden="true">●</span>` : html`<span class="g-unknown" title="${f.reason}">▨</span>`}<time class="rel" datetime="${r.observed_at || ''}" data-empty="never"></time><span class="sr"> · ${f.status}</span></td>
@@ -265,9 +266,9 @@ addEventListener('DOMContentLoaded', () => {
   function renderRows() {
     const all = scoped(), rows = shown(), v = q.value.trim();
     put(document.getElementById('rows-head'), window.shell.list.sortHead(COLS, L));
-    const head = l => html`<tr class="lane" data-lane="${l}"><td colspan="4"><span class="label">${LABEL[l]} · ${rows.filter(r => r.lane === l).length}</span></td></tr>`;
+    const head = l => html`<tr class="lane" data-lane="${l}"><td colspan="5"><span class="label">${LABEL[l]} · ${rows.filter(r => r.lane === l).length}</span></td></tr>`;
     putKeep(tbody, html`${rows.length ? ORDER.filter(l => rows.some(r => r.lane === l)).map(l => [head(l), rows.filter(r => r.lane === l).map(rowHtml)])
-      : html`<tr class="lane"><td colspan="4"><span class="label">${all.length ? `Nothing matches${v ? ` “${v}”` : ''}` : empty()}</span></td></tr>`}`);
+      : html`<tr class="lane"><td colspan="5"><span class="label">${all.length ? `Nothing matches${v ? ` “${v}”` : ''}` : empty()}</span></td></tr>`}`);
     const f = document.getElementById('filtered');
     const cut = DOC.truncated ? `The document lists ${n(DOC.rows.length)} of ${n(DOC.open_total)} open rows; v1 /classic/contributions lists every one.` : '';
     f.hidden = !(lane || v || cut);
@@ -518,7 +519,7 @@ addEventListener('DOMContentLoaded', () => {
     scopeSeg(() => '');
     put(document.getElementById('annunciator'), html``);
     put(document.getElementById('source'), html``);
-    put(tbody, html`<tr class="lane"><td colspan="4"><span class="label">Not read: ${FAILED}</span></td></tr>`);
+    put(tbody, html`<tr class="lane"><td colspan="5"><span class="label">Not read: ${FAILED}</span></td></tr>`);
     put(ftbody, html`<tr class="lane"><td colspan="4"><span class="label">Not read: ${FAILED}</span></td></tr>`);
     put(document.getElementById('filed-tally'), html``);
     put(document.getElementById('filed-source'), html``);
