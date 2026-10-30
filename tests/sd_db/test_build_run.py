@@ -284,6 +284,13 @@ class Judge(unittest.TestCase):
         missing[-1] = json.dumps({k: v for k, v in json.loads(missing[-1]).items() if k != "permission_denials"})
         self.assertEqual(build_run.judge(missing)["state"], "unknown")
 
+    def test_judge_skips_a_trailing_lifecycle_line(self):
+        """Claude Code writes a command_lifecycle line after the result (build 168 read as unknown)."""
+        tail = json.dumps({"type": "command_lifecycle", "state": "completed", "session_id": "s1"})
+        self.assertEqual(build_run.judge(self.lines() + [tail])["state"], "pass")
+        self.assertEqual(build_run.judge(self.lines(is_error=True) + [tail, tail])["state"], "failed")
+        self.assertEqual(build_run.judge(self.lines()[:1] + [tail])["state"], "unknown")
+
     def test_judge_refuses_another_sessions_line(self):
         """A judge pass is tied to the run's own session: a result of another session is unknown."""
         self.assertEqual(build_run.judge(self.lines(session_id="s2"))["state"], "unknown")

@@ -179,6 +179,9 @@ def judge(lines: list[str], *, session: str | None = None) -> dict:
     another session is no evidence for this run.
     """
     text = [line for line in lines if line.strip()]
+    # Claude Code ends a run with a command_lifecycle line after the result.
+    while text and '"type":"command_lifecycle"' in text[-1].replace(" ", ""):
+        text.pop()
     init = None
     for line in text:
         try:
