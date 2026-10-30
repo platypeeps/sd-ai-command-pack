@@ -296,9 +296,9 @@ class TheDocument(Collectors, ScreenCase):
         self.assertEqual([(a["id"], a["read"]) for a in areas],
                          [("disk", True), ("cred", True), ("wt", True),
                           ("br", True), ("dep", True), ("sec", True), ("ports", True), ("prot", True), ("svc", True),
-                          ("ctr", True), ("mir", True), ("doc", True)])
+                          ("ctr", True), ("mir", True), ("doc", True), ("aws", True)])
         for area in areas:
-            if area["id"] not in ("wt", "br", "ports", "prot", "svc", "ctr", "cred", "dep", "sec", "mir", "doc"):
+            if area["id"] not in ("wt", "br", "ports", "prot", "svc", "ctr", "cred", "dep", "sec", "mir", "doc", "aws"):
                 self.assertTrue(area["missing"], f"{area['id']} names nothing it does not read")
             if not area["read"]:
                 self.assertEqual((area["rows"], area["error"], area["source"]), ([], "", None))
@@ -769,6 +769,34 @@ class TheDocument(Collectors, ScreenCase):
         area = self.area("cred")
         self.assertEqual((area["rows"], area["error"]), ([], "the credentials heartbeat has no probe list"))
 
+    def test_aws_is_one_machine_row_by_region_with_age_and_a_console_link(self):
+        """sd:6713: my running AWS resources from the nightly read; a failed read is unknown, never clean."""
+        self.assertEqual(health_screen.VIEW_OF["aws"], "machine")
+        self.assertEqual(self.area("aws")["rows"][0]["what"], "AWS resources not yet observed")
+        record_state(self.connection, "heartbeat", key=credentials.HEARTBEAT_KEY, timestamp="2026-09-06T03:10:00Z",
+                     body={"probes": []})
+        self.assertEqual(self.area("aws")["rows"][0]["what"], "AWS read not configured")
+        resources = [{"type": "EC2 instance", "profile": "me", "region": "us-west-2", "id": "i-1", "name": "box",
+                      "since": "2026-09-01T00:00:00Z"},
+                     {"type": "CloudFormation stack", "profile": "me", "region": "us-east-1",
+                      "id": "arn:aws:cloudformation:us-east-1:000000000000:stack/web/x", "name": "web",
+                      "since": "2026-09-06T01:00:00Z"}]
+        record_state(self.connection, "heartbeat", key=credentials.HEARTBEAT_KEY, timestamp="2026-09-06T03:11:00Z",
+                     body={"probes": [], "aws": {"resources": resources, "errors": []}})
+        (row,) = self.area("aws")["rows"]
+        self.assertEqual((row["state"], row["what"], row["detail"]),
+                         ("ok", "2 running AWS resources", "us-east-1 1 · us-west-2 1"))
+        self.assertEqual(row["list"], [
+            {"text": "us-east-1 · CloudFormation stack web · under a day",
+             "href": "https://us-east-1.console.aws.amazon.com/cloudformation/home?region=us-east-1#/stacks/stackinfo"
+                     "?stackId=arn%3Aaws%3Acloudformation%3Aus-east-1%3A000000000000%3Astack%2Fweb%2Fx"},
+            {"text": "us-west-2 · EC2 instance box · 5 days",
+             "href": "https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#InstanceDetails:instanceId=i-1"}])
+        record_state(self.connection, "heartbeat", key=credentials.HEARTBEAT_KEY, timestamp="2026-09-06T03:12:00Z",
+                     body={"probes": [], "aws": {"resources": [], "errors": ["me us-east-1 EC2 instance: aws exited 255"]}})
+        (row,) = self.area("aws")["rows"]
+        self.assertEqual((row["state"], row["what"]), ("unknown", "0 running AWS resources; 1 read failed"))
+
     def test_merged_branches_are_one_row_per_repo_and_a_checked_out_one_is_its_own(self):
         br = self.doc()["areas"][3]
         rows = {row["id"]: row for row in br["rows"]}
@@ -1090,7 +1118,7 @@ class TheDocument(Collectors, ScreenCase):
         doc = self.doc(fleet=slow(fleet_of(TREES)), ports=slow(ports_snapshot),
                        disk=slow(scan_of(DISK)), branches=slow(scan_of(BRANCHES)))
         self.assertEqual([(area["id"], area["error"], bool(area["rows"])) for area in doc["areas"] if area["read"]],
-                         [(key, "", True) for key in ("disk", "cred", "wt", "br", "dep", "sec", "ports", "prot", "svc", "ctr", "mir", "doc")])
+                         [(key, "", True) for key in ("disk", "cred", "wt", "br", "dep", "sec", "ports", "prot", "svc", "ctr", "mir", "doc", "aws")])
 
     def test_a_reader_past_the_page_budget_is_its_area_error_and_the_page_does_not_wait(self):
         # The reader answers only once the page has returned, so a page that
@@ -2241,6 +2269,19 @@ await c.run(o); await flush();""", "body => [200, { ok: true, row: body.row, don
         self.assertIn("<li>/work/wt-a (feat/a)</li>", details)
         self.assertIn("<dt>Source</dt><dd>the fleet&#39;s .git/worktrees registrations</dd>", details)
 
+    def test_an_aws_resource_in_details_links_to_its_console_page(self):
+        """sd:6713: a list entry with an href is a new-tab link; a plain one stays text."""
+        record_state(self.connection, "heartbeat", key=credentials.HEARTBEAT_KEY, timestamp="2026-09-06T03:10:00Z",
+                     body={"probes": [], "aws": {"resources": [{"type": "EC2 instance", "region": "us-west-2", "id": "i-1",
+                                                               "name": "box", "since": "2026-09-01T00:00:00Z"}],
+                                                 "errors": ["me us-east-1 CloudFormation stack: aws exited 255"]}})
+        out = self.run_page("document.dispatchEvent(new CustomEvent('shell:open', { detail: 'aws' })); R.d = ELS.details.html;",
+                            view="machine")
+        details = out["R"]["d"]
+        self.assertIn('<a class="ext" href="https://us-west-2.console.aws.amazon.com/ec2/home?region=us-west-2#InstanceDetails:'
+                      'instanceId=i-1" target="_blank" rel="noopener noreferrer">us-west-2 · EC2 instance box · 5 days', details)
+        self.assertIn("<li>me us-east-1 CloudFormation stack: aws exited 255</li>", details)
+
     def test_the_first_read_opens_the_first_row_in_details(self):
         out = self.run_page("R.d = document.getElementById('details').html || '';", view="machine")
         self.assertIn("<h2>Mac data is 85% full</h2>", out["R"]["d"],
@@ -2272,7 +2313,7 @@ ANSWER = path => path === '/api/health/summary' ? [200, SUMMARY_DOC] : new Promi
         out = self.run_page("OUT.gets = [];" + switch.format(v="machine") + "R.areas = BODY().html;"
                             + switch.format(v="checkouts") + "R.back = BODY().html; R.again = OUT.gets.slice();")
         self.assertEqual(out["R"]["again"], ["/api/health/machine", "/api/health/summary"], "a view opened before was read again")
-        self.assertEqual(re.findall(r'<section class="area" id="a-(\w+)"', out["R"]["areas"]), ["disk", "ports", "svc", "ctr", "doc"])
+        self.assertEqual(re.findall(r'<section class="area" id="a-(\w+)"', out["R"]["areas"]), ["disk", "ports", "svc", "ctr", "doc", "aws"])
         # sd:5840: Containers heads its rows with the count and the checkouts they mount.
         self.assertRegex(out["R"]["areas"], r"<p class=\"counts\">2 containers running · \d mount a checkout under ")
         self.assertEqual(re.findall(r'<section class="area" id="a-(\w+)"', out["R"]["back"]), ["wt", "br"])
