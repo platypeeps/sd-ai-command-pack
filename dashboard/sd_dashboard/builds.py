@@ -238,7 +238,7 @@ def _retry_state(connection, run: dict) -> dict:
     """Retry on an ended run: only the lead's latest run, released, whose bundle ended blocked or cancelled.
 
     A bundle blocks on a `blocked` outcome and on a second loss at one step, whose run keeps the loss as its
-    outcome (`interrupted`, `timed_out`, `error_max_turns`); the lead assignment's `blocked` status covers both.
+    outcome (`build.LOSSES`); the lead assignment's `blocked` status covers both.
     A cancelled bundle keeps its worktree too, so Send to builder may resume it (pack sd:6020).
     """
     current = runner.queue_state(connection, run["assignment"])
