@@ -152,13 +152,38 @@ class ShipLockHolder(unittest.TestCase):
         bound timed from `hold()` returning also counted the holder's late
         wake-up under load, and failed at 3.1 s against 2.5 s (sd:2597).
         """
+        self.assert_acquired_within_a_poll()
+
+    def test_the_wait_bound_leaves_out_the_lane_read_under_the_lock(self):
+        """The lane read after the flock is no part of the wait.
+
+        Under gate load that database read took seconds, and the bound
+        failed at 5.6 s against 1.5 s (gate 2026-10-30); here it is slow
+        on purpose.
+        """
+        owner = ship._owner
+
+        def slow(*args):
+            time.sleep(2.0)
+            owner(*args)
+        with patch.object(ship, "_owner", slow):
+            self.assert_acquired_within_a_poll()
+
+    def assert_acquired_within_a_poll(self):
+        # The flock is taken when its lane read starts: `_owner`'s second
+        # call, `held_then`. Its read under the lock is no part of the wait.
+        owner, starts = ship._owner, []
+
+        def timed(*args):
+            starts.append(time.monotonic())
+            owner(*args)
         child = self.hold(seconds=1.0)
-        with ship.repository_lock(self.database, REPOSITORY, wait=10, holder={"item": 9}):
-            acquired = time.monotonic()
+        with patch.object(ship, "_owner", timed), \
+                ship.repository_lock(self.database, REPOSITORY, wait=10, holder={"item": 9}):
             self.assertEqual(json.loads(self.lock_path().read_text())["pid"], os.getpid())
         word, released = child.stdout.readline().split()
-        self.assertEqual(word, "released")
-        self.assertLess(acquired - float(released), ship.WAIT_POLL_SECONDS + 1.0)
+        self.assertEqual((word, len(starts)), ("released", 2))
+        self.assertLess(starts[-1] - float(released), ship.WAIT_POLL_SECONDS + 1.0)
 
     def test_a_negative_wait_is_refused(self):
         with self.assertRaises(WorkflowError):
