@@ -35,6 +35,7 @@
 .ledger .links a:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 @media (pointer: coarse) { .ledger .links a { display: inline-flex; align-items: center; min-height: var(--row-touch); } }
 .ledger .reason { display: block; margin-top: var(--space-3xs); font-size: var(--text-xs); color: var(--color-ink-2); }
+.ledger .repo { font: 400 var(--text-xs)/1.4 var(--font-data); color: var(--color-ink-2); overflow-wrap: anywhere; } /* sd:6696 */
 .ledger .obs { font: 400 var(--text-xs)/1.4 var(--font-data); color: var(--color-muted); }
 .ledger .obs > .g-ok, .ledger .obs > .g-unknown { margin-right: var(--space-2xs); } /* the glyph sat on the age (sd:5487) */
 .ledger .act { text-align: right; }
@@ -78,11 +79,11 @@
 @media (max-width: 899px) {
   .ledger thead { display: none; }
   .ledger, .ledger tbody { display: block; }
-  .ledger tbody tr { display: grid; grid-template-columns: 2rem minmax(0, 1fr); grid-template-areas: "g what" ". obs" ". act"; border-bottom: var(--rule-hair) solid var(--color-rule-2); padding: var(--space-xs) 0; }
+  .ledger tbody tr { display: grid; grid-template-columns: 2rem minmax(0, 1fr); grid-template-areas: "g repo" "g what" ". obs" ". act"; border-bottom: var(--rule-hair) solid var(--color-rule-2); padding: var(--space-xs) 0; }
   .ledger tbody tr.lane { display: block; border-bottom: var(--rule-hair) solid var(--color-rule); padding: var(--space-md) 0 var(--space-2xs); }
   .ledger tr.lane td { display: block; padding: 0 var(--space-xs); border: 0; }
   .ledger td { height: auto; border: 0; padding: 0 var(--space-xs); }
-  .ledger .g { grid-area: g; } .ledger .what { grid-area: what; } .ledger .obs { grid-area: obs; padding-top: var(--space-2xs); } .ledger .act { grid-area: act; text-align: left; padding-top: var(--space-xs); }
+  .ledger .g { grid-area: g; } .ledger .repo { grid-area: repo; } .ledger .what { grid-area: what; } .ledger .obs { grid-area: obs; padding-top: var(--space-2xs); } .ledger .act { grid-area: act; text-align: left; padding-top: var(--space-xs); }
   .row-acts { justify-content: flex-start; }
   .ledger tbody tr[aria-selected="true"] { background: var(--color-accent-bg); box-shadow: inset var(--rule-lamp) 0 0 var(--color-accent); }
   .ledger tbody tr[aria-selected="true"] td { background: transparent; box-shadow: none; }
