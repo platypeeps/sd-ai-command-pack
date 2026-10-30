@@ -462,12 +462,17 @@ shellRun(cmd('jobs.log'), C.get('job:nightly-sync')); await flush(); R.details =
         # sd:5064: the lanes are the Cadence view and the lamps sit above both, so each shows the Timeline it filtered.
         self.assertEqual(out["shown"], ["timeline", "timeline"])
 
-    def test_a_tick_on_the_cadence_chart_opens_its_event_on_the_timeline(self):
+    def test_a_tick_on_the_cadence_chart_stays_and_shows_its_event_with_its_commands(self):
+        # sd:6681: a tick no longer leaves for the Timeline; Details shows the event and its commands (Run now on a job run).
+        tick = "ELS.lanes.listeners.click[0]({ target: { closest: s => s === 'rect.tick' ? { dataset: { id: '%s' } } : null } });"
+        bar = "C.bar = id => mk`<div class=\"bar\">${REG.filter(c => c.on === C.get(id).type).map(c => c.label).join(' | ')}</div>`;"
         merge = next(e["id"] for e in self.doc["events"] if e["k"] == "merge")
-        out = self.run_page("ELS.lanes.listeners.click[0]({ target: { closest: s => s === 'rect.tick' ? { dataset: { id: '%s' } } : null } });"
-                            "R.details = ELS.details.html;" % merge)
-        self.assertEqual(out["shown"], ["timeline"])
+        out = self.run_page(tick % merge + "R.details = ELS.details.html;" + tick % "job:nightly-sync" + "R.job = ELS.details.html;", pre=bar)
+        self.assertEqual(out["shown"], [])
         self.assertIn("system#41", out["R"]["details"])
+        self.assertIn("Open on GitHub", out["R"]["details"])
+        self.assertIn("Run now", out["R"]["job"])  # jobs.retry
+        self.assertIn("Show log", out["R"]["job"])
 
     def test_the_timeline_is_the_first_view_and_the_lane_chart_the_cadence_view(self):
         page = (V2 / "activity.html").read_text(encoding="utf-8")
