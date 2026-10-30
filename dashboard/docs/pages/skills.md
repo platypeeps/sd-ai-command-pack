@@ -51,10 +51,15 @@ refresh's time and result; the repositories skills came from that are not
 tracked sit under the table, each with Track. Track a repository takes a
 `https://github.com/<owner>/<repo>` URL and a scope.
 `POST /api/skills/intake/tracking` (`skill_intake.tracking`) runs `--track`,
-`--untrack` or `--refresh` with that one URL. Refresh fetches the default
-branch and lists its new, changed, blocked, removed and unread skills; Show
-report puts one skill's intake report in Details, where Approve is the same
-as Evaluate's. A refresh installs nothing. Remove stops tracking and keeps
+`--untrack` or `--refresh` with that one URL. Review (`--refresh`) fetches
+the default branch and lists its new, changed, blocked, removed and unread
+skills; Show report puts one skill's intake report in Details, where Approve
+is the same as Evaluate's. Review installs nothing. Refresh
+(`--refresh --apply`, sd:6686) asks first, then installs the new revision of
+each installed skill whose verdict is install, through the same approval;
+it installs no new skill and leaves a declined or folded one, naming why.
+Details lists each update with its Rollback. Both show in the row. A Refresh
+with no answer is not known: Review shows what is installed. Remove stops tracking and keeps
 the installed skills; its Undo tracks the repository again with its scope,
 without its last refresh. A list write with no answer is reported as not
 known, and the list is read again.

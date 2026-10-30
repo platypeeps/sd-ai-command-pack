@@ -93,6 +93,8 @@ def skill_intake(args: argparse.Namespace) -> int:
         raise SkillRefusal("--rollback takes the name of an installed skill, as the report printed it")
     if listing and args.approve:
         raise SkillRefusal("--approve installs one skill: give its URL, as the refresh printed it")
+    if args.apply and not args.refresh:
+        raise SkillRefusal("--apply goes with --refresh URL")
     if listing and args.scope and not args.track:
         raise SkillRefusal("--scope goes with a source or --track")
     try:
@@ -132,7 +134,8 @@ def register_extra(verbs: Any) -> None:
     tracking.add_argument("--track", metavar="URL", help="track a https://github.com/<owner>/<repo> repository")
     tracking.add_argument("--untrack", metavar="URL", help="stop tracking a repository; its installed skills stay")
     tracking.add_argument("--refresh", metavar="URL",
-                          help="judge every skill of a tracked repository at its default branch; installs nothing")
+                          help="judge every skill of a tracked repository at its default branch; "
+                               "installs nothing without --apply")
     intake.add_argument("--scope", choices=("pack", "user"),
                         help="pack: contrib/ with the sd- prefix (default for a URL); user: ~/.claude/skills")
     intake.add_argument("--approve", metavar="REVISION",
@@ -140,6 +143,8 @@ def register_extra(verbs: Any) -> None:
     intake.add_argument("--rollback", action="store_true",
                         help="swap an installed skill with the copy its last install replaced; "
                              "with --approve REVISION it writes")
+    intake.add_argument("--apply", action="store_true",
+                        help="with --refresh: install the new revision of each installed skill whose verdict is install")
     intake.add_argument("--json", action="store_true")
     intake.set_defaults(handler=skill_intake)
     for parser in (review, applying):

@@ -47,7 +47,8 @@ row is first written, the list is read from the installed skills' Provenance,
 the `skills` CLI's `~/.agents/.skill-lock.json`, and the GitHub origin of any
 git checkout a user skill links into. `--refresh <repo URL>` judges each skill
 there and lists the new and changed ones, each with its approval line; it
-installs nothing. `--untrack` stops tracking, and installed skills stay.
+installs nothing. With `--apply` it also installs the new revision of each
+installed skill whose verdict is install, and prints each one's rollback. `--untrack` stops tracking, and installed skills stay.
 An install keeps the copy it replaced. `sd skill intake <name> --rollback`
 shows the swap back to that copy, and `--approve` makes it; a second
 rollback undoes the first. It refuses a locally edited copy, and a pack

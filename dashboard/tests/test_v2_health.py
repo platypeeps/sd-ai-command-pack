@@ -1668,6 +1668,7 @@ class TheScript(Collectors, ScreenCase):
             ["protection.settings", "branch protection", "safe", "o", False, False],
             ["collector.sync", "collector", "safe", "r", None, False],
             ["dependabot alerts.review", "dependabot alerts", "safe", "o", False, False],
+            ["dependabot alerts.fix", "dependabot alerts", "safe", "f", True, False],
             ["secret scanning.review", "secret scanning", "safe", "o", False, False],
             ["credential.probe", "credential", "safe", "r", True, False],
         ] + [[f"{t}.snooze", t, "undo", "z", None, True] for t in SNOOZED_TYPES]
@@ -1682,6 +1683,26 @@ R.said = ['dependabot alerts.review', 'secret scanning.review'].map(id => cmd(id
         self.assertEqual(out["R"]["opened"], [["https://github.com/example/anvil/security/dependabot", "_blank"],
                                               ["https://github.com/example/anvil/security/secret-scanning", "_blank"]])
         self.assertEqual(out["R"]["said"], ["Opened on GitHub in a new tab"] * 2)
+
+    def test_fix_on_a_dependabot_row_files_the_repos_item_then_posts_its_fix_route(self):
+        """sd:6685: Fix files (or reuses) the repo's `dependabot:<slug>` item, then posts /api/items/<id>/fix."""
+        doc = health_screen.document(self.connection, now=NOW, fleet=fleet_of(TREES), ports=ports_snapshot,
+                                     protection=protection_of(ALERTED))
+        out = self.run_page("""ANSWER = (path, body) => HEALTH_READ(path) ? HEALTH(path)
+  : path === '/api/items' ? [201, { item: { id: 77 }, revision: 'a'.repeat(64) }]
+  : path === '/api/items/77/fix' ? [200, { fix: { session: 'builder', pane: 'p1' } }] : [404, { error: 'no answer' }];
+const c = cmd('dependabot alerts.fix'), o = C.get('dep:/checkouts/alpha');
+R.label = c.label; R.ask = !!c.askFirst; R.on = c.when(o); R.says = c.consequence(o);
+shellRun(c, o); await flush();""", doc, view="github")
+        self.assertEqual((out["R"]["label"], out["R"]["ask"], out["R"]["on"]), ("Fix", True, True))
+        self.assertIn("group/alpha", out["R"]["says"])
+        posts = [post[:2] for post in out["posts"]]
+        self.assertEqual(posts[0][0], "/api/items")
+        self.assertEqual({k: posts[0][1][k] for k in ("repo", "ref")},
+                         {"repo": "/checkouts/alpha", "ref": "dependabot:group/alpha"})
+        self.assertIn("1 critical or high", posts[0][1]["body"])
+        self.assertEqual(posts[1], ["/api/items/77/fix", {"revision": "a" * 64}])
+        self.assertEqual(out["toasts"][-1][0], "Fix started · #77 · builder session in herdr pane p1")
 
     def test_an_area_with_no_reader_is_an_unknown_lamp_that_names_what_it_does_not_read(self):
         doc = health_screen.document(self.connection, now=NOW, fleet=fleet_of(TREES), ports=ports_snapshot, protection=protection_of(PROTECTION))

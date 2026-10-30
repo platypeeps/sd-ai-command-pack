@@ -170,5 +170,79 @@ class TheQuestion(Times):
                                  "error": "The hub database did not answer"})
 
 
+class TheFlakes(TheQuestion):
+    """pack sd:6739: a gate that fails and then passes at the same head files the failed suite as a defect."""
+
+    HEAD, OTHER = "a" * 40, "b" * 40
+
+    def ended(self, entry: str, item: int, minutes: float, status: str, head: str, reason: str = "") -> None:
+        self.row(entry, minutes, item=item, title=f"item {item}", status=status, head=head, reason=reason,
+                 finished_at=at(minutes))
+
+    def failed(self, entry: str, minutes: float, suite: str, head: str | None = None) -> None:
+        self.ended(entry, 7, minutes, "failed", head or self.HEAD,
+                   f"the repository gate failed: check (exit 2): failed shard {suite}: 33s exit=1\n"
+                   f"failing: ERROR: test_x ({suite}.Case.test_x)\nfailing: TimeoutError: timed out")
+
+    def flakes(self, now: float = NOW) -> list:
+        sd_lane.flake_items(self.connection, REPOSITORY, "/repos/pack", now=now)
+        return self.connection.execute(
+            "SELECT item.id, item.title, item.status, item.priority, item.external_id, item.repo, note.body "
+            "FROM item JOIN note ON note.item = item.id AND note.kind = 'comment' "
+            "WHERE item.external_id LIKE 'flake:%' ORDER BY note.id").fetchall()
+
+    def test_a_pass_at_the_failed_head_files_one_item_for_the_suite(self):
+        self.failed("e1", 60, "dashboard.tests.test_email_draft")
+        self.ended("e2", 7, 30, "merged", self.HEAD)
+        [found] = self.flakes()
+        self.assertEqual((found["title"], found["status"], found["priority"], found["external_id"], found["repo"]),
+                         ("Flaky suite dashboard.tests.test_email_draft: make it hermetic", "planning", 2,
+                          "flake:dashboard.tests.test_email_draft", "/repos/pack"))
+        self.assertIn(f"failed at {self.HEAD[:12]}", found["body"])
+        self.assertIn("TimeoutError: timed out", found["body"])
+        # The next run notes nothing new for the same head.
+        self.assertEqual(len(self.flakes(NOW + 600)), 1)
+
+    def test_a_second_flake_of_the_suite_reuses_its_open_item(self):
+        self.failed("e1", 90, "tests.test_sd_install")
+        self.ended("e2", 7, 80, "prepared", self.HEAD)
+        self.failed("e3", 60, "tests.test_sd_install", self.OTHER)
+        self.ended("e4", 8, 30, "merged", self.OTHER)
+        found = self.flakes()
+        self.assertEqual(len(found), 2)
+        self.assertEqual(len({row["id"] for row in found}), 1)
+
+    def test_a_done_item_reopens_when_its_suite_flakes_again(self):
+        self.failed("e1", 90, "tests.test_sd_install")
+        self.ended("e2", 7, 80, "merged", self.HEAD)
+        [first] = self.flakes()
+        self.connection.execute("UPDATE item SET status = 'done' WHERE id = ?", (first["id"],))
+        self.failed("e3", 60, "tests.test_sd_install", self.OTHER)
+        self.ended("e4", 8, 30, "merged", self.OTHER)
+        found = self.flakes()
+        self.assertEqual((len(found), found[-1]["id"], found[-1]["status"]), (2, first["id"], "planning"))
+
+    def test_a_pass_at_a_new_head_or_a_review_stop_files_nothing(self):
+        self.failed("e1", 60, "tests.test_sd_install")
+        self.ended("e2", 7, 30, "merged", self.OTHER)
+        self.ended("e3", 8, 50, "failed", self.OTHER, "local review blocking: 1/1 completed")
+        self.ended("e4", 8, 20, "merged", self.OTHER)
+        self.assertEqual(self.flakes(), [])
+
+    def test_a_pass_before_the_failure_or_outside_the_window_files_nothing(self):
+        self.ended("e1", 7, 90, "merged", self.HEAD)
+        self.failed("e2", 60, "tests.test_sd_install")
+        self.failed("e3", 9 * 24 * 60, "tests.test_bin_help", self.OTHER)
+        self.ended("e4", 8, 8 * 24 * 60, "merged", self.OTHER)
+        self.assertEqual(self.flakes(), [])
+
+    def test_a_hub_that_does_not_answer_is_named_and_stops_nothing(self):
+        refused = sd_lane.LaneError("The hub database did not answer", code=sd_lane.HUB_UNAVAILABLE)
+        with mock.patch.object(sd_lane, "queue_for", return_value=mock.Mock(repository=REPOSITORY)), \
+                mock.patch.object(sd_lane, "on_hub", side_effect=refused):
+            filed = sd_lane.file_flakes(pathlib.Path("/repos/pack"), "/repos/pack", {})
+        self.assertEqual(filed, {"path": "/repos/pack", "flakes": None, "error": "The hub database did not answer"})
+
+
 if __name__ == "__main__":
     unittest.main()
