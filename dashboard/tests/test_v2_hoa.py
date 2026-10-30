@@ -470,6 +470,16 @@ R.after = ELS.map.html;""")
         self.assertIn("Valves <b>1</b>", out["R"]["legend"])
         self.assertEqual(re.findall(r'data-asset="([^"]+)"', out["R"]["after"]), ["TANK-01", "WELL-A2"])
 
+    def test_the_tank_is_the_cistern_with_its_buried_glyph(self):
+        # sd:6691: the legend and Details name the tank type Cistern; its glyph is a tank under a ground line.
+        out = self.run_page("""R.map = ELS.map.html; R.legend = ELS.legend.html;
+document.dispatchEvent(new CustomEvent('shell:open', { detail: 'asset:TANK-01' })); R.det = ELS.details.html;""")
+        self.assertIn("Cisterns <b>1</b>", out["R"]["legend"])
+        self.assertNotIn("Tanks", out["R"]["legend"])
+        tank = re.search(r'data-asset="TANK-01".*?</g>', out["R"]["map"]).group(0)
+        self.assertRegex(tank, r'class="[^"]*\bground\b')
+        self.assertIn("Cistern · TANK-01", out["R"]["det"])
+
     def tract_doc(self):
         """The fixture's base plus a common tract, a tiny common tract and a road parcel: synthetic AINs, as the county prints land use."""
         doc = self.doc()

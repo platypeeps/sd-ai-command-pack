@@ -127,7 +127,7 @@ main { container-type: inline-size; }
 .asset { color: var(--color-series-1); cursor: pointer; }
 .asset .halo { fill: none; stroke: var(--color-paper); stroke-width: 4; stroke-linejoin: round; }
 .asset .body { fill: currentColor; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
-.asset .line { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.asset .line, .legend .line { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
 .asset.st-out { color: var(--color-muted); }
 .asset.st-out .body { fill: var(--color-paper); }
 .asset.st-unknown { color: var(--color-unknown); }
