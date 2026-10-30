@@ -109,7 +109,7 @@ Check each class your change touches before you commit.
   a background exit did not wake idle builders, and they sat about 4 hours unreported.
 - Give every Bash call `timeout: 600000`. The `sd-builder-guard` hook denies a background call, a shorter timeout,
   a leading `sleep`, `Monitor`, any line naming `git` then `stash`, except `stash list` and `stash show`,
-  and `pkill` or `killall`: a pattern ends other sessions' gates; kill only a pid you started (sd:6815).
+  and any line naming `pkill` or `killall`: a pattern ends other sessions' gates; kill only your own pid (sd:6815).
 
 ## Report
 

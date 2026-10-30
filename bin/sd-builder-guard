@@ -20,9 +20,11 @@ for builders only and the lead's own background watches keep working.
   rounds found shell forms a parser missed. A mention, such as a commit
   message, is a false deny the refusal says how to rephrase; a builder is
   not hostile, and a miss costs lost work.
-- Bash with `pkill` or `killall` in command position: denied (sd:6815). A
+- Bash with the word `pkill` or `killall` anywhere: denied (sd:6815). A
   pattern matches every session's processes: `pkill -f "sd-check --json"`
   ended another job's queued gate. `kill <pid>` of its own process passes.
+  A text scan, as for stash: a prefix (`sudo -n`, `command`, `env`), a
+  keyword (`then`) or `sh -c` hid the kill from a command-position match.
 
 It denies rather than rewriting the input with `updatedInput`. Every matching
 PreToolUse hook runs in parallel and the last `updatedInput` to arrive wins, so
@@ -78,11 +80,12 @@ PATTERN_KILL = (
     "A builder never kills by pattern: pkill and killall match another "
     "session's gate as well as its own, and one ended a queued sd gate post. "
     "End only a process you started, by its id: kill <pid>, or kill -- -<pgid> "
-    "for its group."
+    "for its group. A line that only mentions the word is refused too: put "
+    "that text in a file."
 )
 
-#: `pkill` or `killall` first on a line or after a separator, past `sudo` or a path.
-PATTERN_KILLS = re.compile(r"(?:^|[;&|(])\s*(?:sudo\s+)?(?:\S*/)?(?:pkill|killall)\b", re.MULTILINE)
+#: The word `pkill` or `killall`, wherever it stands on the line.
+PATTERN_KILLS = re.compile(r"(?<![\w.-])(?:pkill|killall)(?![\w.-])")
 
 SLEEP = re.compile(r"\s*sleep(\s|;|&|\||$)")
 
