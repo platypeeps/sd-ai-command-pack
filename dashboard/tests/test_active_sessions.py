@@ -136,6 +136,28 @@ class Join(ScreenCase):
         found = self.read(fleet_doc=sessions([tree(f"{self.wt}/e", f"fix-{item}")]))
         self.assertEqual([], found["rows"])
 
+    def test_a_clean_worktree_whose_head_landed_is_not_a_live_session(self):
+        """sd:6710: an open item's clean worktree at the head a Landed note names is cleanup, not work; a dirty one
+        is still live."""
+        import subprocess
+
+        def git(path, *args):
+            return subprocess.run(["git", "-C", path, *args], check=True, capture_output=True, text=True,
+                                  env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t",
+                                       "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}).stdout.strip()
+
+        landed, dirty = self.item("landed", status="in_progress"), self.item("dirty", status="in_progress")
+        for item, name in ((landed, "m"), (dirty, "n")):
+            path = f"{self.wt}/{name}"
+            os.makedirs(path)
+            git(path, "init", "-q")
+            git(path, "commit", "-q", "--allow-empty", "-m", "x")
+            self.note(item, f"Landed: merged at 0123456789ab (head {git(path, 'rev-parse', 'HEAD')[:12]}). Cleanup.",
+                      kind="comment")
+        Path(f"{self.wt}/n/new.txt").write_text("x")
+        found = self.read(fleet_doc=sessions([tree(f"{self.wt}/m", f"sd{landed}-a"), tree(f"{self.wt}/n", f"sd{dirty}-b")]))
+        self.assertEqual([(dirty, "worktree")], [(row["item"], row["kind"]) for row in found["rows"]])
+
     def test_a_fleet_that_could_not_be_read_is_a_reason_and_the_lane_still_answers(self):
         item = self.item("lane only")
         lane(self.connection, item, worktree=f"{self.wt}/f", status="pending")
