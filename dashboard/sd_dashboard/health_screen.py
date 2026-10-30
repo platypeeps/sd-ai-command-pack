@@ -716,6 +716,9 @@ def _credential_row(probe: dict, now: datetime) -> dict:
     name, pid = probe.get("name") or probe.get("id") or "?", probe.get("id") or "?"
     row = {"id": f"cred:{pid}", "type": "credential", "kind": "Credentials · " + name.split(" (")[0],
            "facts": {"Credential": name}, "cli": CREDENTIALS_CLI}
+    if isinstance(probe.get("signin"), str):
+        # sd:6722: Sign in starts the login in herdr; the server reads the line again from disk, never from this row.
+        row["signin"] = probe["signin"]
     facts = row["facts"]
     for key, label in (("present", "Present"), ("valid", "Accepted"), ("signed_in", "Signed in"), ("expires", "Expires")):
         if key in probe:
@@ -735,7 +738,8 @@ def _credential_row(probe: dict, now: datetime) -> dict:
         return {**row, "state": "warning", "what": f"{name}: absent", "detail": "not set in the job's environment (env.sh)"}
     if probe.get("valid") is False or probe.get("signed_in") is False:
         return {**row, "state": "warning", "what": f"{name}: rejected",
-                "detail": "the service refused it" if "valid" in probe else "gh auth status failed"}
+                "detail": "the service refused it" if "valid" in probe else
+                "signed out: Sign in starts the login" if "signin" in row else "gh auth status failed"}
     if probe.get("reason"):
         return {**row, "state": "unknown", "what": f"{name}: not read", "detail": probe["reason"]}
     if probe.get("expires"):
