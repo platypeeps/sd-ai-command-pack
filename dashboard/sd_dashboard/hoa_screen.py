@@ -40,14 +40,14 @@ from sd_db import SdDbError, operations, repos, workflow, writes
 from . import hoa_download, sweep
 from .documents import _config_dir, pipe_lines
 
-__all__ = ["ALARM_ROOT", "REFRESH_JOBS", "SOURCE_AGES", "SOURCE_SECONDS", "SOON_DAYS", "STALE_DAYS", "THRESHOLDS", "TREND_DAYS", "acknowledge", "acknowledge_many", "alarm_key", "document",
+__all__ = ["ALARM_DAYS", "ALARM_ROOT", "REFRESH_JOBS", "SOURCE_AGES", "SOURCE_SECONDS", "SOON_DAYS", "STALE_DAYS", "THRESHOLDS", "acknowledge", "acknowledge_many", "alarm_key", "document",
            "thresholds"]
 
 #: The folder name that picks the checkout out of the repo table.
 FOLDER = "hoa"
 
-#: Rows the trends carry: the page's widest range (30d).
-TREND_DAYS = 30
+#: Days of alarm events the page carries; the trends carry every row, for the All range (sd:6689).
+ALARM_DAYS = 30
 
 #: An item due within this many days is caution; one past its due date is a warning.
 SOON_DAYS = 7
@@ -142,10 +142,10 @@ def _mission(folder: Path | None, today: date) -> dict:
         latest = rows[-1][stamp] if rows else ""
         out["files"].append({"name": name, "rows": len(rows), "latest": latest, "error": ""})
         if key == "alarms":
-            since = (_day(latest) - timedelta(days=TREND_DAYS)).isoformat() if rows else ""
+            since = (_day(latest) - timedelta(days=ALARM_DAYS)).isoformat() if rows else ""
             out[key] = [row for row in rows if row[stamp] >= since]
         else:
-            out[key] = rows[-TREND_DAYS:]
+            out[key] = rows
     broken = [f["error"] for f in out["files"] if f["error"]]
     if broken:
         out["error"] = "; ".join(broken)
