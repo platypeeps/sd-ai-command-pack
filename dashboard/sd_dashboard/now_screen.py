@@ -657,6 +657,31 @@ def lane_summary(queue: dict) -> dict:
             "unread_why": "; ".join(f"{Path(str(p.get('repo') or '?')).name}: {p.get('error') or 'no reason given'}" for p in problems[:3])}
 
 
+def motion(connection: sqlite3.Connection, active: dict, lanes: list[dict]) -> dict:
+    """In motion's Details and Fix (sd:6714): each session row gains its item's kind and revision, and its place in a lane.
+
+    `lane` is "<repo>: <state>", with the position for a next entry, or "" when no lane lists the item. An item whose
+    revision could not be read has "" there, so Fix says it is off rather than post a stale click.
+    """
+    rows = active.get("rows") or []
+    numbers = sorted({row["item"] for row in rows})
+    try:
+        revisions = reads.revisions(connection, numbers) if numbers else {}
+        kinds = {number: (reads.item_by_id(connection, number) or {"kind": ""})["kind"] for number in numbers}
+    except (SdDbError, sqlite3.Error):
+        revisions, kinds = {}, {}
+    place: dict[int, str] = {}
+    for lane in lanes:
+        for entry in lane.get("rows") or []:
+            if entry.get("item") is not None and entry.get("state"):
+                state = f"next, position {entry['position']}" if entry["state"] == "next" else entry["state"]
+                place.setdefault(entry["item"], f"{lane['repo']}: {state}")
+    for row in rows:
+        row.update(revision=revisions.get(row["item"], ""), item_kind=kinds.get(row["item"], ""),
+                   lane=place.get(row["item"], ""))
+    return active
+
+
 TRACK_HOURS = 24
 
 
@@ -817,7 +842,7 @@ def builders(connection: sqlite3.Connection, now: str) -> dict:
             items = []
             for member in build.run(connection, run["id"])["members"]:
                 item = reads.item_by_id(connection, member["item"])
-                items.append({"item": member["item"], "title": item["title"] if item else ""})
+                items.append({"item": member["item"], "title": item["title"] if item else "", "assignment": member["id"]})
             beat = _at(run["heartbeat_at"] or run["created_at"])
             quiet = (clock - beat).total_seconds() if beat else None
             stalled = run["step"] != "enqueued" and (quiet is None or quiet >= build.STALE_SECONDS)
@@ -921,6 +946,7 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
     listed = needs([*shown, *dark, *reports, *threads, *grills], work=work, live=live, today=now[:10],
                    lanes=queue.get("lanes") or [], briefs=reported["briefs"])
     summary = lane_summary(queue)
+    motion(connection, active, queue.get("lanes") or [])
     return {"now": now, "sources": sources, "observed": observed, "rows": shown, "active": active,
             "snoozed": held, "snooze_error": snooze_error,
             "work": work, "work_error": work_error, "needs": listed, "lane": summary,

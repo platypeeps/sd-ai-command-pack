@@ -37,7 +37,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
   const { html, put } = window.markup;
   const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
 
-  let DOC = null, NEEDS = [], ALL = new Map(), SNOOZED = [], ACTIVE = null, srcFilter = null, intent = null, query = '', picked = [];
+  let DOC = null, NEEDS = [], ALL = new Map(), OTHER = new Map(), SNOOZED = [], ACTIVE = null, srcFilter = null, intent = null, query = '', picked = [];
   const OPEN = new Set(), FULL = new Set(); // the groups opened, and the ones showing every member
   let motionAll = false;
   const $ = id => document.getElementById(id);
@@ -77,7 +77,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     $('details').setAttribute('data-swap', ''); requestAnimationFrame(() => $('details').removeAttribute('data-swap'));
     if (open) shell.openPane('tab-details');
   }
-  const listed = id => ALL.has(id);
+  const listed = id => ALL.has(id) || OTHER.has(id);
   const day = iso => String(iso || '').slice(0, 10), hm = iso => String(iso || '').slice(11, 16);
 
   function details(r) {
@@ -110,9 +110,55 @@ window.PAGE_FILTER = { '': 'Needs you' };
       ${SRC[r.source]?.[2] ? html`<p><a href="${SRC[r.source][2]}">Open ${SRC[r.source][0]} in ${SRC[r.source][3]}</a></p>` : ''}${act}`;
   }
   function select(id, open) {
-    const r = ALL.get(id); if (!r) return;
+    const r = ALL.get(id), o = OTHER.get(id);
+    if (!r) return o && pick(id, o.draw, open);
     pick(id, () => details(r), open);
     shell.suggest([`Why is ${r.what.split(' ')[0]} on this list?`, 'What else changed around this time?', 'Rank what I should do in the next hour']);
+  }
+
+  // The rows outside Needs you (sd:6714): In motion's items, the builder runs and the day track's marks. A click selects
+  // each as a Needs you row: its object for the shell's commands and how its Details draw. A job or brief mark whose row
+  // left Needs you (snoozed, seen, or cleared by a later read) says so in Details.
+  const markId = m => m.lane === 'landed' ? `landed:${m.item}` : m.lane === 'live' ? `live:${m.item}` : m.id;
+  function others(doc) {
+    const found = new Map(), runs = (doc.builders || {}).rows || [], T = doc.track || {}, live = new Map();
+    ((doc.active || {}).rows || []).forEach(r => { if (!live.has(r.item)) live.set(r.item, []); live.get(r.item).push(r); });
+    live.forEach((rows, item) => {
+      const b = runs.find(x => x.items.some(it => it.item === item)), n = b && b.items.find(it => it.item === item).assignment;
+      found.set(`live:${item}`, { obj: { type: 'live item', label: `#${item} ${rows[0].title}`, item, revision: rows[0].revision, itemKind: rows[0].item_kind, run: b && b.run, n },
+        draw: () => liveDetails(item, rows, b, n) });
+    });
+    runs.forEach(b => found.set(`run:${b.run}`, { obj: { type: 'build run', label: `Build run ${b.run}` }, draw: () => runDetails(b) }));
+    (T.landed || []).forEach(m => found.set(`landed:${m.item}`, { obj: { type: 'delivered item', label: m.what, item: m.item }, draw: () => landedDetails(m) }));
+    [['jobs', 'Job', '/management', 'Jobs in Management'], ['briefs', 'Brief', '/briefs', 'Briefs']].forEach(([k, kind, href, where]) => (T[k] || [])
+      .filter(m => !ALL.has(m.id)).forEach(m => found.set(m.id, { obj: { type: 'day mark', label: m.what }, draw: () => html`<p class="kind"><span class="g-unknown" aria-hidden="true">${GLYPH.unknown}</span> ${kind} · not listed</p>
+        <h2>${m.what}</h2><dl><dt>At</dt><dd>${day(m.at)} ${hm(m.at)} UTC</dd></dl>
+        <p class="why">This mark's row is no longer on Needs you: it was snoozed, marked seen, or a later read cleared it.</p><p><a href="${href}">Open ${where}</a></p>` })));
+    return found;
+  }
+  function liveDetails(item, rows, b, n) {
+    const sure = rows.every(r => r.verified), s = sure ? 'ok' : 'unknown', top = rows[0];
+    return html`<p class="kind"><span class="g-${s}" aria-hidden="true">${GLYPH[s]}</span> In motion · ${sure ? 'live' : 'a launch not confirmed'}</p>
+      <h2><a href="${shell.itemHref(item)}">#${item} ${top.title}</a></h2>
+      <dl><dt>Status</dt><dd>${top.status}</dd><dt>Lane</dt><dd>${top.lane || 'not in a lane'}</dd>
+        ${b ? html`<dt>Builder</dt><dd><b>${b.stage}</b> · step ${b.step} · ${b.state}</dd><dt>ETA</dt><dd>${b.eta ? clock(b.eta) : 'not known'} · ${b.eta_why}</dd><dt>Assignment</dt><dd>#${String(n)}</dd>`
+          : html`<dt>Builder</dt><dd>no build run holds it</dd>`}</dl>
+      <h3>Sessions</h3><ul class="sessions">${rows.map(r => html`<li>${r.verified ? '' : html`<span class="g-unknown" title="not confirmed">${GLYPH.unknown} </span>`}${r.session}${r.elapsed ? html` · ${r.elapsed}` : ''}<span class="via">${r.via}</span></li>`)}</ul>
+      <h3>Act</h3>${shell.commands.bar(`live:${item}`)}`;
+  }
+  function runDetails(b) {
+    const s = BSTATE[b.state] || 'warning';
+    return html`<p class="kind"><span class="g-${s}" aria-hidden="true">${GLYPH[s]}</span> Builder run · ${b.state}</p>
+      <h2>${b.repo} · ${b.stage}</h2>
+      <dl><dt>Run</dt><dd>${b.run}</dd><dt>Stage</dt><dd>${b.stage} · step ${b.step}</dd><dt>Started</dt><dd>${clock(b.started)} · ${b.elapsed} ago</dd>
+        <dt>ETA</dt><dd>${b.eta ? clock(b.eta) : 'not known'} · ${b.eta_why}</dd><dt>Model</dt><dd>${b.model || 'not recorded'}</dd><dt>Spent</dt><dd>${usd(b.usd)}</dd></dl>
+      <h3>Items</h3><ul class="members">${b.items.map(it => html`<li><a href="${shell.itemHref(it.item)}">#${it.item} ${it.title}</a>${it.assignment ? html`<span class="via">assignment #${String(it.assignment)}</span>` : ''}</li>`)}</ul>
+      <p><a href="/queue">Open the builds in Queue</a></p>`;
+  }
+  function landedDetails(m) {
+    return html`<p class="kind"><span class="g-ok" aria-hidden="true">${GLYPH.ok}</span> Landed · ok</p>
+      <h2><a href="${shell.itemHref(m.item)}">${m.what}</a></h2><dl><dt>Delivered</dt><dd>${day(m.at)} ${hm(m.at)} UTC</dd></dl>
+      <h3>Act</h3>${shell.commands.bar(`landed:${m.item}`)}`;
   }
 
   // The lamps (sd:5921): each number counts the rows its filter shows; a source that was not read is unknown, never ok.
@@ -168,6 +214,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
   // The selected row, and the picked ones, marked again on the rows a redraw made.
   function mark(id) {
     $('rows').querySelectorAll('tr[data-id]').forEach(tr => { tr.setAttribute('aria-selected', tr.dataset.id === id); tr.toggleAttribute('data-picked', picked.includes(tr.dataset.id)); });
+    ['active', 'builds', 'track-rows'].forEach(t => $(t).querySelectorAll('tr[data-id]').forEach(tr => tr.setAttribute('aria-selected', tr.dataset.id === id)));
   }
   const BAND_NAME = { broken: 'Broken', look: 'Look', queued: 'Queued' };
   function line(r, member) {
@@ -223,7 +270,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
   }
 
   // In motion (sd:3466, sd:5921): the document's `active`, one row per open item, its sessions in the row, longest-running
-  // first; the first five, then "N more". Its title opens the item on Tasks. A launch herdr could not confirm is ▨, not ●;
+  // first; the first five, then "N more". A click shows the item in Details (sd:6714). A launch herdr could not confirm is ▨, not ●;
   // a source that was not read is said under the table, never an empty list. The tally counts the lanes; Queue has the rest.
   const SOURCE = { fleet: 'worktrees and processes', lane: 'lane entries', launch: 'Fix notes', herdr: 'herdr agents' };
   const clock = iso => new Date(iso).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' });
@@ -233,7 +280,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     rows.forEach(r => { const last = items[items.length - 1]; if (last && last.item === r.item) last.rows.push(r); else items.push({ item: r.item, title: r.title, rows: [r] }); });
     const shown = motionAll ? items : items.slice(0, SHOWN), more = items.length - shown.length;
     put($('active'), a.error ? html`<tr class="empty"><td colspan="5">Sessions could not be read: ${a.error}. Read again tries again.</td></tr>`
-      : items.length ? html`${shown.map(it => { const sure = it.rows.every(r => r.verified), s = sure ? 'ok' : 'unknown', top = it.rows[0]; return html`<tr data-item="${it.item}">
+      : items.length ? html`${shown.map(it => { const sure = it.rows.every(r => r.verified), s = sure ? 'ok' : 'unknown', top = it.rows[0]; return html`<tr data-item="${it.item}" data-id="live:${it.item}" aria-selected="${String(row() === `live:${it.item}`)}">
         <td class="g g-${s}" title="${sure ? 'live' : 'a launch not confirmed: herdr was not read'}">${GLYPH[s]}</td>
         <td class="what"><a href="${window.shell.itemHref(it.item)}">#${it.item} ${it.title}</a></td>
         <td class="detail"><ul class="sessions">${it.rows.map(r => html`<li>${r.verified ? '' : html`<span class="g-unknown" title="not confirmed">${GLYPH.unknown} </span>`}${r.session}${r.elapsed ? html` · ${r.elapsed}` : ''}<span class="via">${r.via}</span></li>`)}</ul></td>
@@ -255,7 +302,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     const B = DOC.builders || { rows: [], error: 'the document carried no builder runs' };
     $('builds-table').hidden = !B.rows.length && !B.error;
     put($('builds'), B.error ? html`<tr class="empty"><td colspan="5">Builder runs could not be read: ${B.error}. Read again tries again.</td></tr>`
-      : html`${B.rows.map(b => { const s = BSTATE[b.state] || 'warning'; return html`<tr data-run="${b.run}">
+      : html`${B.rows.map(b => { const s = BSTATE[b.state] || 'warning'; return html`<tr data-run="${b.run}" data-id="run:${b.run}" aria-selected="${String(row() === `run:${b.run}`)}">
         <td class="g g-${s}" title="${b.state === 'stalled' ? `stalled: no beat for ${Math.round(b.quiet / 60)}m` : b.state}">${GLYPH[s]}</td>
         <td class="what"><ul class="sessions">${b.items.map(it => html`<li><a href="${window.shell.itemHref(it.item)}">#${it.item} ${it.title}</a></li>`)}</ul><span class="via">${b.repo} · ${b.model || 'model not recorded'} · ${usd(b.usd)} so far</span></td>
         <td class="detail"><b>${b.stage}</b><span class="via">step ${b.step} · ${b.state}</span></td>
@@ -282,7 +329,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     const ticks = [];
     for (let t = Math.ceil(t0 / 36e5) * 36e5; t <= t1; t += 36e5) if (new Date(t).getHours() % 3 === 0) ticks.push(t);
     const mark = m => { const at = x(m.at), tip = html`<title>${hm(m.at)} UTC · ${m.what}</title>`;
-      return html`<a href="${markHref(m.lane, m)}">${m.lane === 'landed' ? html`<line class="land" x1="${at}" y1="10" x2="${at}" y2="26">${tip}</line>`
+      return html`<a href="${markHref(m.lane, m)}" data-id="${markId(m)}">${m.lane === 'landed' ? html`<line class="land" x1="${at}" y1="10" x2="${at}" y2="26">${tip}</line>`
         : m.lane === 'jobs' ? html`<rect class="fail" x="${(at - 4).toFixed(1)}" y="36" width="8" height="8">${tip}</rect>`
         // sd:6232: a solid dot, a shape no other lane uses, inside a clear 24-unit square that takes the press.
         : m.lane === 'briefs' ? html`<rect class="hit" x="${(at - 12).toFixed(1)}" y="46" width="24" height="24">${tip}</rect><circle class="brief" cx="${at}" cy="58" r="4.5"/>`
@@ -298,7 +345,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
       <li><a href="/tasks?view=list&amp;due=week&amp;realm=all">Due this week</a></li><li><b>${K2.due_week}</b></li>
       <li><a href="/tasks?view=list&amp;status=blocked&amp;realm=all">Blocked</a></li><li><b>${K2.blocked}</b></li>`);
     $('track-table').hidden = !marks.length;
-    put($('track-rows'), html`${[...marks].sort((a, b) => a.at < b.at ? 1 : -1).map(m => html`<tr><td class="when"><time datetime="${m.at}">${clock(m.at)}</time></td><td>${m.label}</td><td class="what"><a href="${markHref(m.lane, m)}">${m.what}</a></td></tr>`)}`);
+    put($('track-rows'), html`${[...marks].sort((a, b) => a.at < b.at ? 1 : -1).map(m => html`<tr data-id="${markId(m)}" aria-selected="${String(row() === markId(m))}"><td class="when"><time datetime="${m.at}">${clock(m.at)}</time></td><td>${m.label}</td><td class="what"><a href="${markHref(m.lane, m)}">${m.what}</a></td></tr>`)}`);
   }
 
   // Since yesterday (sd:6002): the document's `digest`, merged per repo with the PRs folded under the lines, failed with
@@ -339,7 +386,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     put($('details'), html`<p class="why">${!DOC ? 'Nothing is selected: Today could not be read.' : NEEDS.length ? 'No row matches the filter, so nothing is selected. Esc clears it.' : 'Nothing is selected: nothing needs you.'}</p>`);
   }
   const reconcile = () => shell.reconcile({ rows: $('rows').querySelectorAll('tr[data-id]'), current: row(),
-    keep: () => false, select: id => select(id, false), clear: unselect });
+    keep: id => OTHER.has(id), select: id => select(id, false), clear: unselect });
   function applyFilter() { needsTable(); reconcile(); }
 
   // ---------- Reading (build, sd:2483): shell.read reads /api/now ----------
@@ -349,11 +396,12 @@ window.PAGE_FILTER = { '': 'Needs you' };
   function adopt(doc) {
     DOC = doc; NEEDS = doc.needs || []; SNOOZED = doc.snoozed; ACTIVE = doc.active || null;
     ALL = new Map(); NEEDS.forEach(r => { ALL.set(r.id, r); (r.members || []).forEach(m => ALL.set(m.id, m)); });
+    OTHER = others(doc);
     document.body.dataset.observed = doc.now;
-    return { objects: [...[...ALL.values()].map(objectOf), ...SNOOZED.map(window.snooze.object)],
+    return { objects: [...[...ALL.values()].map(objectOf), ...[...OTHER].map(([id, o]) => ({ id, ...o.obj })), ...SNOOZED.map(window.snooze.object)],
              state: doc.snooze_error ? window.snooze.unread(doc.snooze_error, '/api/now') : null };
   }
-  function clear(err) { DOC = null; NEEDS = []; ALL = new Map(); SNOOZED = []; ACTIVE = null; failed = err.message; delete document.body.dataset.observed; }
+  function clear(err) { DOC = null; NEEDS = []; ALL = new Map(); OTHER = new Map(); SNOOZED = []; ACTIVE = null; failed = err.message; delete document.body.dataset.observed; }
   function draw() {
     if (DOC) return render();
     // Nothing from the last read stays on screen: rows, counts, lamps, the observed time, the selection and the badge.
@@ -469,6 +517,16 @@ window.PAGE_FILTER = { '': 'Needs you' };
         askFirst: o => o.members.length > BULK, consequence: o => `Writes ${o.members.length} snoozes, one per member; each member comes back on its own after a week or by Unsnooze.`,
         cli: () => 'no sd verb: the dashboard writes one snooze per member (POST /api/snooze)',
         run: o => each(o, m => ({ page: 'today', row: m.id, until: week(), seen: m.seen })).then(() => `Snoozed ${o.members.length} for a week · ${o.label}`) },
+      // In motion and the day track (sd:6714): an item in motion opens, shows its builder's assignment, or gets a Fix
+      // session, posted with the revision the read gave; a landed item opens.
+      { id: 'today.live.open', on: 'live item', label: 'Open item', does: 'Opens the item on Tasks.', key: 'o', icon: 'arrow-up-right', risk: 'safe', executes: false, primary: () => true,
+        cli: o => `sd task show ${o.item}`, run: o => shell.openItem(o.item) },
+      { ...K.showAssignment({ primary: () => false, run: o => { select(`run:${o.run}`, true); return `Assignment #${o.n} shown in Details`; } }),
+        id: 'today.live.assignment', on: 'live item', key: 'a', does: 'Shows the builder run that holds the item, with its assignment, in Details.', when: o => !!o.n || 'no build run holds this item' },
+      K.fix('live item', { item: o => o.item, report: o => o.itemKind === 'report', when: o => !!o.revision || 'its revision was not read; Fix it from Tasks',
+        post: (o, path) => post(path, { revision: o.revision }) }),
+      { id: 'today.landed.open', on: 'delivered item', label: 'Open item', does: 'Opens the item on Tasks.', key: 'o', icon: 'arrow-up-right', risk: 'safe', executes: false, primary: () => true,
+        cli: o => `sd task show ${o.item}`, run: o => shell.openItem(o.item) },
       { id: 'today.group.read', on: 'brief group', label: 'Read', does: 'Opens Briefs.', key: 'o', icon: 'book-open', risk: 'safe', executes: false, primary: () => true,
         cli: () => 'sd reports brief list', run: go('/briefs', 'Briefs opens') },
       { id: 'today.group.seen', on: 'brief group', label: 'Mark all seen', does: 'Marks every new brief seen, one mark each, until its text grows.', key: 's', risk: 'safe',
@@ -486,7 +544,18 @@ window.PAGE_FILTER = { '': 'Needs you' };
       if (more) { FULL.add(more.dataset.more); return needsTable(); }
       const tr = e.target.closest('tr[data-id]'); if (tr) select(tr.dataset.id, true);
     });
-    $('active').addEventListener('click', e => { if (e.target.closest('#motion-more')) { motionAll = true; motion(); } });
+    // sd:6714: a plain click on a row of In motion, the builder runs or the day track selects it, as a Needs you row's
+    // does, its link included; a modifier click leaves the link to the browser, so it opens a new tab.
+    const pickRow = sel => e => {
+      const a = e.target.closest('a'); if (a && (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) return;
+      const t = e.target.closest(sel); if (!t || !listed(t.dataset.id)) return;
+      if (a) e.preventDefault();
+      select(t.dataset.id, true);
+    };
+    $('active').addEventListener('click', e => { if (e.target.closest('#motion-more')) { motionAll = true; return motion(); } pickRow('tr[data-id]')(e); });
+    $('builds').addEventListener('click', pickRow('tr[data-id]'));
+    $('track-rows').addEventListener('click', pickRow('tr[data-id]'));
+    $('track-plot').addEventListener('click', pickRow('[data-id]'));
     $('intents').addEventListener('click', e => {
       const c = e.target.closest('[data-intent]'); if (!c) return;
       intent = c.dataset.intent && c.dataset.intent !== intent ? c.dataset.intent : null; intents(); applyFilter();
@@ -515,6 +584,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
       first: () => $('rows').querySelector('tr[data-id]')?.dataset.id,
       // ?row= on a group member opens its group, so the selection is a row on screen.
       select: id => {
+        if (OTHER.has(id)) return select(id, false);
         const g = NEEDS.find(r => (r.members || []).some(m => m.id === id));
         if (g && !OPEN.has(g.id)) { OPEN.add(g.id); FULL.add(g.id); needsTable(); }
         return [...$('rows').querySelectorAll('tr[data-id]')].some(tr => tr.dataset.id === id) ? select(id, false) : reconcile();
