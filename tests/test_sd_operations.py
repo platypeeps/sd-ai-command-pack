@@ -215,6 +215,18 @@ class OperationsCLI(unittest.TestCase):
         self.assertEqual((code, output), (0, "skipped: the tick ran past 0.2 s\n"))
         self.connection.close.assert_called_once()
 
+    def test_a_hung_log_folder_probe_claims_nothing_within_its_bound(self):
+        """pack sd:6749: a stat on a hung bulk volume blocked the tick before its alarm was set."""
+        run = self.builds()
+        with patch.object(cli, "PROBE_SECONDS", 0.2, create=True), \
+                patch.object(cli.os, "access", side_effect=lambda *_: time.sleep(5)), \
+                patch.object(Path, "is_dir", return_value=True):
+            started = time.monotonic()
+            code, _ = self.tick(run)
+        self.assertLess(time.monotonic() - started, 2)
+        self.assertEqual(code, 0)
+        self.assertIn("did not answer in 0.2 s", run.dispatch.call_args.kwargs["why"])
+
     def test_an_unwritable_run_log_skips_its_spawn_with_exit_0(self):
         """pack sd:6494: EPERM opening a run's supervisor log failed every tick with rc=1."""
         run = self.builds()

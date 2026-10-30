@@ -12,6 +12,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -141,6 +142,8 @@ BIN = Path(__file__).resolve().parent
 GATE_SECONDS = 15
 #: The tick's own bound, under the build-dispatch job's 90 s JOB_TIMEOUT: past it the tick skips (pack sd:6494).
 TICK_SECONDS = 75
+#: The log-folder probe's bound: a stat on a hung bulk volume never returns, even to the tick's alarm (pack sd:6749).
+PROBE_SECONDS = 5
 
 
 def build_modules() -> tuple[Any, Any, Any]:
@@ -158,6 +161,18 @@ def log_root() -> Path | None:
     import sd_lib
     value = sd_lib.core_setting("bulk_storage_root")
     return Path(os.path.expanduser(value)) if value else None
+
+
+def writable(root: Path) -> bool | None:
+    """Whether `root` is a writable folder; None when the volume does not answer in `PROBE_SECONDS`.
+
+    The probe runs in a daemon thread: a hung stat holds only that thread, and the process still exits.
+    """
+    answer: list[bool] = []
+    probe = threading.Thread(target=lambda: answer.append(root.is_dir() and os.access(root, os.W_OK)), daemon=True)
+    probe.start()
+    probe.join(PROBE_SECONDS)
+    return answer[0] if answer else None
 
 
 def gate_load() -> tuple[float | None, float | None]:
@@ -244,8 +259,9 @@ def dispatch_builds(args: argparse.Namespace) -> int:
         root, why = None, f"{error}, so a build run has no log folder"
     if root is None and not why:
         why = "sd.bulk_storage_root is unset, so a build run has no log folder"
-    elif root is not None and not (root.is_dir() and os.access(root, os.W_OK)):
-        why = f"the log folder {root} is not writable"
+    elif root is not None and (ready := writable(root)) is not True:
+        why = (f"the log folder {root} is not writable" if ready is False
+               else f"the log folder {root} did not answer in {PROBE_SECONDS:g} s")
 
     def overdue(*_: Any) -> None:
         raise Overdue
