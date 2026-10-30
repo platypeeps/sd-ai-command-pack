@@ -99,6 +99,15 @@ class StubSd:
         return path.read_text(encoding="utf-8").splitlines() if path.exists() else []
 
 
+class TheWaits(unittest.TestCase):
+    """sd:6809: each read runs the stub `sd`, which the server bounds at `SD_SECONDS`; the client waits past that bound."""
+
+    def test_every_class_whose_server_runs_sd_waits_past_its_bound(self):
+        # Gate 2026-10-30 07:19 MDT, load ~50: a client that waited 5 s timed out while the server's 5 s run went on.
+        for case in (TheFleetSet, TheSweepSettings, TheDashboardSettings):
+            self.assertGreater(case.http_timeout, settings_screen.SD_SECONDS + 5, case.__name__)
+
+
 class TheRegistration(Registers, unittest.TestCase):
     page, section, route, api = "settings", "Settings", "/settings", ("/api/settings", "/api/settings/fleet", "/api/settings/row", "/api/settings/list")
 
@@ -142,6 +151,9 @@ class TheFleetRead(unittest.TestCase):
 class TheFleetSet(BrowserSession):
     """sd:3989: POST /api/settings/fleet {key, value} runs `sd config set sd.<key> <value>` and answers the value it replaced.
     A refusal is a 400 with sd's reason; a run past the bound is an unknown outcome (504), and the next read shows the value."""
+
+    #: The server runs the stub `sd` within `SD_SECONDS` at each read; wait past it (sd:6809).
+    http_timeout = settings_screen.SD_SECONDS + 10
 
     def setUp(self):
         super().setUp()
@@ -189,6 +201,9 @@ class TheFleetSet(BrowserSession):
 class TheSweepSettings(BrowserSession):
     """sd:5109: the Sweeps section reads and writes the sweep settings as workflow database rows, never a config file.
     A set names the value shown; a row changed since refuses with 409; an empty value unsets; another key is a 400."""
+
+    #: The server runs the stub `sd` within `SD_SECONDS` at each read; wait past it (sd:6809).
+    http_timeout = settings_screen.SD_SECONDS + 10
 
     def setUp(self):
         super().setUp()
@@ -240,6 +255,9 @@ class TheSweepSettings(BrowserSession):
 class TheDashboardSettings(BrowserSession):
     """sd:5109: the Dashboard section lists the dashboard lists and the adversarial review's model and effort as rows.
     A list saves with the digest of the source and text shown, parsed first; the first Save imports the old file."""
+
+    #: The server runs the stub `sd` within `SD_SECONDS` at each read; wait past it (sd:6809).
+    http_timeout = settings_screen.SD_SECONDS + 10
 
     def setUp(self):
         super().setUp()
