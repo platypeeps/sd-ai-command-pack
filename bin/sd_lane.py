@@ -52,7 +52,8 @@ database and runs it under one runner lock per repository:
   watch    print each gate end a lane or builder log records, once; with
            `--item N`, repeated, wait until each item's newest entry that is
            not cancelled ends, print one line each, and exit 0 only when all
-           merged (sd:3565).
+           merged (sd:3565); a merged item's kept worktree and branch go
+           once its builder stopped (`reap`, sd:6727), as in `prune`.
 
 The verbs are the queue's only writers, each in one hub database
 transaction, so a terminal and a dashboard reorder it the same way. A change
@@ -140,7 +141,9 @@ branch with `--force-with-lease` while the worktree's tip is the merged head.
 It never removes a builder's worktree: no lock excludes its builder, and a
 write through a handle opened before removal is lost. The entry's `remove`
 holds the command that removes the worktree and its branch once the builder
-stops, and the note names the host that holds it.
+stops, and the note names the host that holds it. `watch --item` and
+`prune` run it once the tree is clean, no session holds it and the build
+dispatcher's run ended (`reap`, sd:6727).
 It notes the item with the merge commit, what the cleanup did, a `git
 branch` recover command and that command. `sd-ship merge` keeps the
 checkout it runs in (sd:3477); a worktree already gone, as an older
@@ -212,6 +215,7 @@ import dataclasses
 import fcntl
 import functools
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -2114,6 +2118,111 @@ def clean_up(entry: dict[str, Any], head: str | None, main: pathlib.Path, branch
     return "Cleanup: " + ", ".join(done), remove
 
 
+def builder_busy(connection: Any, tree: pathlib.Path, item: int) -> str:
+    """'' when the builder of `item` stopped and no live session here holds `tree`; else why it stays (sd:6727).
+
+    The Health page's Remove merged check (`health_cleanup._held`), and the
+    build dispatcher's: an assignment still active, or a run not released.
+    """
+    sd_lib.import_sd_db()
+    from sd_db import build, sessions  # noqa: PLC0415 - on_hub required sd_db
+    held = sessions.describe(sessions.holders(connection, str(tree), machine=this_host()))
+    # Filtered here, not in SQL: bin/'s bandit audit refuses an interpolated query.
+    active = next((row for row in connection.execute("SELECT id, status FROM assignment WHERE item = ?", (item,))
+                   if row["status"] in build.ACTIVE), None)
+    return held or (f"build assignment {active['id']} of item {item} is active" if active else "") or (
+        build._held(connection, item) or "")
+
+
+def local_data(tree: pathlib.Path) -> str:
+    """'' when no process works in `tree` and it holds only committed files and build output; else why it stays.
+
+    `git worktree remove` deletes ignored files without --force, so an
+    ignored `.env` or run output keeps the tree. `--untracked-files=all`
+    overrides `status.showUntrackedFiles=no`, which hides ignored files too. Build output is the Health
+    page's Remove merged rule (`health_collectors._disposable`), read by name
+    as `sd_operations` reads the dashboard: it is not on bin/'s lint path.
+    """
+    status = lane_git(tree, "status", "--porcelain", "-z", "--ignored", "--untracked-files=all")
+    if status is None:
+        return "its status was not read"
+    try:
+        if str(BIN.parent / "dashboard") not in sys.path:
+            sys.path.insert(0, str(BIN.parent / "dashboard"))
+        collectors = importlib.import_module("sd_dashboard.health_collectors")
+        disposable = collectors._disposable
+        # A build, server or agent no registry names may still work there; git removes it under them all.
+        cwds = collectors._cwds(collectors.Walk(30, "the process read"))
+    except Exception as error:  # noqa: BLE001 - not knowing what is disposable or who works there keeps the tree
+        return f"the build output rule or the process list was not read: {error}"
+    if cwds is None:
+        return "not known whether a process works in it: lsof gave no answer"
+    real = os.path.realpath(tree)
+    if busy := next((cwd for cwd in cwds if cwd == real or cwd.startswith(real + os.sep)), None):
+        return f"a process works in {busy}"
+    for entry in filter(None, status.split("\0")):
+        if not entry.startswith("!! "):  # the first entry that is not ignored answers, before a rename's second path
+            return "it has uncommitted changes"
+        if not disposable(entry[3:]):
+            return f"it holds ignored files that are not build output: {entry[3:]}"
+    return ""
+
+
+def reap_refusal(queue: Queue, entry: dict[str, Any], tree: pathlib.Path, main: pathlib.Path, branch: str) -> str:
+    """'' when `reap` may remove the merged `tree`; else why it stays."""
+    head = str(entry.get("head") or "")
+    default = (lane_git(main, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or "").removeprefix("origin/")
+    if tree.resolve() == main or not branch or branch in {default, "main", "master"}:
+        return "it is the main checkout or on the default branch"
+    # A new task branch started at the merged head shares the tip, not the merge: removal would delete it.
+    if branch != (merged := str(entry.get("branch") or "")):
+        return f"it is on {branch}, not the merged branch {merged}"
+    if not head or lane_git(tree, "rev-parse", "HEAD") != head:
+        return f"its tip is not the merged head {head[:12]}"
+    if kept := local_data(tree):
+        return kept
+    try:
+        return on_hub(queue, lambda connection: builder_busy(connection, tree, int(entry["item"])))
+    except LaneError as error:
+        return f"the hub was not read: {error}"
+
+
+def reap(queue: Queue, entry: dict[str, Any], note: Note | None = None) -> str:
+    """Remove a merged entry's kept worktree and its branch once its builder stopped (sd:6727); '' for nothing to do.
+
+    Only the worktree the landing kept (`remove`), never the main checkout,
+    the default branch or a lane worktree. A dirty, moved, held or running
+    one stays with the landing's note, and the next watch or prune tries
+    again. `git worktree remove` without --force refuses a dirty tree and
+    `update-ref -d` a moved branch on their own; the remote branch goes only
+    at the merged head, with a lease.
+    """
+    if entry.get("status") != "merged" or not entry.get("remove") or entry.get("lane_worktree"):
+        return ""
+    tree, head = pathlib.Path(str(entry["worktree"])), str(entry.get("head") or "")
+    if not tree.is_dir():
+        return ""
+    main = sd_lib.main_worktree_root(tree).resolve()
+    branch = lane_git(tree, "branch", "--show-current") or ""
+    if kept := reap_refusal(queue, entry, tree, main, branch):
+        return f"kept {tree}: {kept}"
+    if lane_git(main, "worktree", "remove", str(tree)) is None or tree.exists():
+        return f"kept {tree}: git worktree remove refused it"
+    gone = [f"worktree {tree}"]
+    if lane_git(main, "update-ref", "-d", f"refs/heads/{branch}", head) is not None:
+        gone.append(f"branch {branch}")
+    listed = lane_git(main, "ls-remote", "origin", f"refs/heads/{branch}")
+    if listed and listed.split()[0] == head and lane_git(
+            main, "push", "-q", f"--force-with-lease=refs/heads/{branch}:{head}", "origin", "--delete", branch) is not None:
+        gone.append(f"origin/{branch}")
+    said = f"Removed: {', '.join(gone)} (merged head {head[:12]}); the builder had stopped."
+    try:
+        (note or default_note)(int(entry["item"]), said, main)
+    except Exception:  # noqa: BLE001 - the removal stands; the watch prints it
+        pass
+    return said
+
+
 @contextlib.contextmanager
 def lane_root_lock(lanes: pathlib.Path, mode: int) -> Iterator[None]:
     """`flock` the lane root folder itself, made first, so no lane can start outside the lock (sd:3273)."""
@@ -3779,6 +3888,8 @@ def watch_items(queue: Queue, items: list[int], write: Callable[[str], Any] = pr
                 write(f"{item_ref(item, queue.repository)} none: no lane entry that is not cancelled")
             elif status == "merged":
                 write(f"{item_ref(item, queue.repository)} merged at {str(entry.get('merge_commit') or '')[:12]}")
+                if said := reap(queue, entry):  # sd:6727
+                    write(f"{item_ref(item, queue.repository)} {said}")
             else:
                 write(f"{item_ref(item, queue.repository)} {status}: "
                       f"{entry.get('reason') or entry.get('code') or 'no reason recorded'}")
@@ -3857,8 +3968,8 @@ def add_lane_verbs(commands: Any) -> None:
     runner.add_argument("--budget", type=float, metavar="SECONDS",
                         help="claim no entry after this many seconds; a hosted run passes what is left of its own")
     pruner = verbs.add_parser("prune", help="delete each local branch no worktree holds whose changes are on origin's "
-                                            "default branch or in a merged lane head's tree; remote branches and "
-                                            "worktrees stay (sd:5700)")
+                                            "default branch or in a merged lane head's tree (sd:5700), and each "
+                                            "merged entry's kept worktree whose builder stopped (sd:6727)")
     pruner.add_argument("--dry-run", action="store_true", help="report what would go; delete nothing")
     pruner.add_argument("--json", action="store_true", help="print one JSON object")
     watcher = verbs.add_parser("watch", help="print each gate end a log under the lane root records, once")
@@ -3921,9 +4032,13 @@ def lane_prune(root: pathlib.Path, environ: dict[str, str], *, dry_run: bool, as
     queue = queue_for(root, environ)
     entries = on_hub(queue, lambda connection: stored(connection, queue.repository))
     heads = [str(row.get("head") or row.get("expected_head") or "") for row in entries if row.get("status") == "merged"]
-    result = prune_landed(sd_lib.main_worktree_root(root).resolve(), heads, dry_run=dry_run)
+    main = sd_lib.main_worktree_root(root).resolve()
+    worktrees = [] if dry_run else [said for row in entries if (said := reap(queue, row))]  # sd:6727, first
+    result = {**prune_landed(main, heads, dry_run=dry_run), "worktrees": worktrees}
     if as_json:
         return succeed(result)
+    for line in worktrees:
+        print(line)
     verb = "would delete" if dry_run else "deleted"
     for row in result["landed"] if dry_run else result["deleted"]:
         print(f"{verb} {row['branch']} at {row['tip']}")

@@ -13,6 +13,8 @@ The page is `v2/watches.html`; it holds no rows. It reads one JSON document, `/a
   revision and Run now capability, its last run's stamp (`management_screen.last_run`) and the last line its run
   printed (`said`), which is why a failed run failed. A job that is not installed is `{"name", "error"}`.
 
+Each row carries its `revision`: Activate, Pause and Unpause post it to `/api/items/<n>/stage` (sd:6694).
+
 Nothing here writes. Refresh all posts `/api/jobs/market-watch/retry`; Refresh and Add watch post `/api/actions/run`
 (`watch.refresh`, `watch.add` in `run_actions`). A store that does not read raises, so the route answers 500 with the
 cause and the page says the watches were not read.
@@ -62,7 +64,7 @@ def _source(body: str) -> str:
     return found.group(0).rstrip(".,;:")
 
 
-def _row(row, today: date) -> dict:
+def _row(row, today: date, revision: str) -> dict:
     fields, body = row["fields"], row.get("body") or ""
     stage = row.get("stage") or ""
     refreshed = _refreshed(body)
@@ -73,7 +75,7 @@ def _row(row, today: date) -> dict:
     return {"id": row["id"], "title": row["title"], "stage": stage, "kind": _text(fields.get("content-type")),
             "area": _text(fields.get("area")), "slug": _text(fields.get("slug")), "description": _text(fields.get("description")),
             "added": _text(fields.get("dateCreated"))[:10], "url": url, "host": host, "url_text": "" if url else text,
-            "refreshed": refreshed, "age": age, "fresh": fresh}
+            "refreshed": refreshed, "age": age, "fresh": fresh, "revision": revision}
 
 
 def _job(connection, backend) -> dict:
@@ -93,8 +95,10 @@ def _job(connection, backend) -> dict:
 
 def document(connection, *, now: str, jobs=None) -> dict:
     """`/api/watches`: the market rows in the store's order, the page sorts them, and the market-watch job."""
-    from sd_db import records
+    from sd_db import reads, records
 
     today = datetime.fromisoformat(now.replace("Z", "+00:00")).date()
+    rows = records.list_rows(connection, "market")
+    revisions = reads.revisions(connection, [row["id"] for row in rows]) if rows else {}
     return {"read": now, "today": today.isoformat(), "stale_days": STALE_DAYS,
-            "rows": [_row(row, today) for row in records.list_rows(connection, "market")], "job": _job(connection, jobs)}
+            "rows": [_row(row, today, revisions[row["id"]]) for row in rows], "job": _job(connection, jobs)}
