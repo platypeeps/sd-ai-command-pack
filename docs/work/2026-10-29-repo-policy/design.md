@@ -2,6 +2,7 @@
 title: Per-repo policy for org repositories, held in the repo row
 created: 2026-10-29
 item: sd:6715
+branch: build/sd-210
 ---
 
 # Design — repo-policy
