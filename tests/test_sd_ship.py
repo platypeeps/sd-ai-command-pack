@@ -4008,9 +4008,15 @@ roles:
 
     def test_without_wait_a_held_lock_refuses_at_once(self):
         self.hold_ship_lock(self.operation().repository)
-        # sd:6489: at once means no poll, not a wall-clock bound that flakes under load.
+        # sd:6489: at once means no poll, not a wall-clock bound that flakes under load. Only the lock helper's
+        # sleep counts: a process-wide patch also caught an unrelated sleep under gate load (2026-10-30 03:08 MDT).
+        from unittest import mock
+
+        from sd_db import runner_journal
+
+        polled = mock.Mock(wraps=runner_journal.time, sleep=mock.Mock(side_effect=AssertionError("the lock polled")))
         with patch.object(ship.Ship, "merge", side_effect=AssertionError("ran under a held lock")), \
-                patch("time.sleep", side_effect=AssertionError("the lock polled")):
+                patch.object(runner_journal, "time", polled):
             with self.assertRaisesRegex(Exception, "another ship operation owns this repository"):
                 ship.dispatch(self.root, self.connection, self.database,
                               self.args("merge", "--manual", "--expected-head", "0" * 40), receipts, False)

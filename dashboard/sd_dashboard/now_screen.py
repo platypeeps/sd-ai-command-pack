@@ -665,7 +665,8 @@ def track(connection: sqlite3.Connection, now: str, *, rows: list[dict], briefs:
     """The day track (sd:5921): the last 24 hours, rolling, as marks in four lanes, and its key's four counts.
 
     Landed is each item a merge delivered (`sd_db.today.delivered`); Jobs each failed run at its log time; Briefs each new
-    brief at its filing; Live each session's start. Every mark names its row. A read that failed is `error`, so the page
+    brief at its filing; Live each session running now, from its start or
+    the window's, whichever is later. Every mark names its row. A read that failed is `error`, so the page
     says the track was not read, never an empty day.
     """
     from sd_db import today
@@ -690,7 +691,9 @@ def track(connection: sqlite3.Connection, now: str, *, rows: list[dict], briefs:
                        for row in rows if row["kind"] == "job" and row.get("state") == "failed"),
         "briefs": within({"at": _utc(row["at"]) if row.get("at") else None, "id": row["id"], "what": row["subj"]}
                          for row in briefs),
-        "live": within({"at": _utc(row["started"]) if row.get("started") else None, "id": f"session:{row['item']}:{n}",
+        # A session running now is live however long ago it started (sd:6710): it spans from the window's start.
+        "live": within({"at": max(_utc(row["started"]), since) if row.get("started") else None,
+                        "id": f"session:{row['item']}:{n}",
                         "item": row["item"], "what": f"sd:{row['item']} {row['session']}"}
                        for n, row in enumerate(active.get("rows") or [])),
     }

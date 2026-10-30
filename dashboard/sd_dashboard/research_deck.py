@@ -210,6 +210,9 @@ def run(record: Path, lock: int | None = None) -> int:
     if document.get("verb") == "review":
         # The report is the run's point, pass or fail: the checks and the checklist no script can do.
         document["output"] = log.read_text(encoding="utf-8", errors="replace")[-REPORT_CHARS:]
+    elif document.get("verb") == "render":
+        # A render queues the Notion mirrors and a session writes them later (sd:6698): the page lists what it queued.
+        document["mirrors"] = [line for line in said if line.startswith("mirror: ")][:50]
     document.update(state="failed" if reason else "done", reason=reason,
                     finished=_iso(datetime.datetime.now(datetime.timezone.utc)))
     if lock is not None:

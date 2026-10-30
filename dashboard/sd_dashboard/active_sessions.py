@@ -103,6 +103,9 @@ class Unread(ValueError):
 
 
 #: What a source's read may raise: each marks that source unread, and the rest of `/api/now` still answers.
+#: The head a lane merge landed (`sd_lane`'s Landed note): a clean worktree still at it is cleanup, not work (sd:6710).
+LANDED_HEAD = re.compile(r"^Landed: merged at [0-9a-f]{7,40} \(head ([0-9a-f]{7,40})\)", re.ASCII)
+
 UNREAD = (ValueError, OverflowError, TypeError, KeyError, IndexError, AttributeError, OSError, sqlite3.Error, SdDbError)
 
 
@@ -317,8 +320,9 @@ def _sessions(entries, launches, trees, procs, agents, now: datetime) -> list[di
     """
     found: list[dict] = []
 
-    def add(item, kind, session, started, via, verified=True):
-        found.append({"item": item, "kind": kind, "session": session, "at": started, "via": via, "verified": verified})
+    def add(item, kind, session, started, via, verified=True, real=""):
+        found.append({"item": item, "kind": kind, "session": session, "at": started, "via": via, "verified": verified,
+                      "real": real})
 
     by_worktree = {entry["real"]: entry for entry in sorted(entries, key=lambda row: row["enqueued"]) if entry["real"]}
     joined: dict[str, int] = {}
@@ -331,7 +335,7 @@ def _sessions(entries, launches, trees, procs, agents, now: datetime) -> list[di
         else:
             continue
         joined[tree["real"]] = item
-        add(item, "worktree", f"Worktree {tree['name']}", tree["at"], via)
+        add(item, "worktree", f"Worktree {tree['name']}", tree["at"], via, real=tree["real"])
     for entry in entries:
         if entry["status"] == "running":
             add(entry["item"], "lane", entry["session"], entry["started"], f"lane entry {entry['id']}")
@@ -356,6 +360,37 @@ def _sessions(entries, launches, trees, procs, agents, now: datetime) -> list[di
         elif trees_in:
             add(joined[trees_in[0]], "agent", agent["session"], None, f"cwd in worktree {Path(trees_in[0]).name}")
     return found
+
+
+def _git(real: str, *args: str) -> str | None:
+    """`git -C real args`'s output, or None when git did not answer."""
+    try:
+        done = subprocess.run(["git", "-C", real, *args], capture_output=True, text=True, timeout=5, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def _landed(connection, rows: list[dict]) -> set[str]:
+    """The worktrees among `rows` that are clean at a head a Landed note on their item names (sd:6710).
+
+    git runs only for a worktree whose item has such a note. A git that did not answer keeps the worktree live: not
+    known to be landed is not landed.
+    """
+    heads: dict[int, list[str]] = {}
+    out = set()
+    for row in rows:
+        if row["kind"] != "worktree" or not row["real"]:
+            continue
+        if row["item"] not in heads:
+            heads[row["item"]] = [found[1] for note in reads.item_notes(connection, row["item"])
+                                  if _is_text(note["body"]) and (found := LANDED_HEAD.match(note["body"]))]
+        if not heads[row["item"]]:
+            continue
+        head = _git(row["real"], "rev-parse", "HEAD")
+        if head and any(head.startswith(prefix) for prefix in heads[row["item"]]) and _git(row["real"], "status", "--porcelain") == "":
+            out.add(row["real"])
+    return out
 
 
 def document(connection, *, now: str, sessions: dict, sessions_error: str = "", herdr=None) -> dict:
@@ -403,9 +438,11 @@ def document(connection, *, now: str, sessions: dict, sessions_error: str = "", 
         found = _sessions(entries, launches, trees, procs, agents, clock)
     except UNREAD as failure:
         return {"rows": [], "sources": sources, "error": f"the join failed: {_reason(failure)}"}
+    found = [row for row in found if row["item"] in open_items]
+    landed = read("fleet", lambda: _landed(connection, found), set())
     rows = []
     for row in found:
-        if row["item"] not in open_items:
+        if row["kind"] == "worktree" and row["real"] in landed:
             continue
         item = items[row["item"]]
         seconds = int((clock - row["at"]).total_seconds()) if row["at"] else None
