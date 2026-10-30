@@ -384,3 +384,41 @@ def mock_lanes(read):
     from sd_dashboard import now_screen
 
     return patch.object(now_screen, "_lanes", read)
+
+
+class TheApplyReview(FixCase):
+    """pack sd:6699: Apply review on a piece starts claude on the fixed apply prompt, in the piece's repository."""
+
+    def piece(self, report=True):
+        from sd_db import upsert_repo, writing
+
+        folder = self.work / "content" / "2026" / "fixture"
+        folder.mkdir(parents=True)
+        (folder / "index.md").write_text("---\ntitle: Fixture piece\nstatus: review\n---\n\n## Draft\n\nAn argument.\n")
+        if report:
+            (folder / "adversarial.md").write_text("Adversarial fixture report\n")
+        upsert_repo(self.connection, str(self.work), pieces_source="file")
+        item = writing.import_piece(self.connection, str(self.work), "2026/fixture", who="operator")["item"]["id"]
+        upsert_repo(self.connection, str(self.work), pieces_source="row")
+        return item
+
+    def test_apply_review_starts_the_apply_prompt_in_the_pieces_repository(self):
+        self.running()
+        item = self.piece()
+        status, _, state = self.fix(item, apply="adversarial")
+        self.assertEqual(status, 200, state)
+        self.assertEqual(self.calls()[1][:4], ["workspace", "create", "--cwd", str(self.work)])
+        sent = self.calls()[3][3]
+        self.assertEqual(sent, fix_session.prompt("idea", item, apply=True))
+        for said in (f"adversarial review of piece sd:{item}", "sd writing reconcile", "--artifact adversarial",
+                     "Commit nothing", "publish nothing"):
+            self.assertIn(said, sent)
+        self.assertEqual(state["fix"]["session"], "apply-review")
+
+    def test_apply_review_needs_a_piece_with_its_report(self):
+        self.running()
+        for item in (self.task(), self.piece(report=False)):
+            status, _, said = self.fix(item, apply="adversarial")
+            self.assertEqual(status, 400, said)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.fix(self.task(), apply="other")[0], 400)

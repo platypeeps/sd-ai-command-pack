@@ -30,6 +30,20 @@
         err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Fix again`); }) };
   }
 
+  // Apply review (pack sd:6699): Fix with apply: adversarial. claude edits the draft for each adversarial.md finding or
+  // rejects it with a reason, and records each there; the edit stays uncommitted and nothing is published. `ready(o)` is
+  // true or why not; `post(o, path, body)` answers the server's reply.
+  function applyReview(on, { item, ready, post }) {
+    return { id: `${on}.apply-review`, on, label: 'Apply review', does: 'Asks first, then starts claude in herdr to apply adversarial.md to the draft.',
+      icon: 'bot', risk: 'safe', askFirst: true, executes: true, when: ready,
+      cli: () => 'no sd verb: the dashboard runs local-herdr/herdr.sh launch',
+      sends: o => `POST /api/items/${item(o)}/fix {apply: "adversarial", revision}`,
+      consequence: o => `Opens a herdr workspace in the piece's repository and starts claude on #${item(o)}: it edits the draft for each adversarial.md finding or rejects it with a reason, and records each in adversarial.md. The edit stays uncommitted for you to read; nothing is published.`,
+      run: o => Promise.resolve().then(() => post(o, `/api/items/${item(o)}/fix`, { apply: 'adversarial' })).then(
+        out => `Apply review started · #${item(o)} · herdr pane ${out.fix.pane}`,
+        err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Apply review again`); }) };
+  }
+
   // Run now (jobs.retry): `sd jobs retry`, which sends the kickstart; the run-now pack allows an idle job's run too (sd:4982).
   // `job(o)` names the row's facts: { name, service, failed, exit,
   // capability }; capability is operations.inventory's retry answer, and its reason is the off text. Exit 127 is "command
@@ -137,6 +151,7 @@
   const settled = r => (r.state === 'failed' && r.item == null) || r.filed != null;
   function settledText(r) {
     if (r.state === 'failed') return `Adversarial review failed · run ${r.id}: ${r.reason || 'no reason recorded'}${r.filed && r.filed !== 'written' ? ` · ${r.filed}` : ''}`;
+    if (r.kind === 'piece' && r.filed === 'written') return `Adversarial review written · run ${r.id} · ${r.result}`;
     return r.filed === 'written' ? `Adversarial review filed · run ${r.id} · brief sd:${r.brief_item}; Details links it` : `Adversarial review done · run ${r.id} · ${r.filed}`;
   }
   function follow(key, run) {
@@ -318,5 +333,5 @@
       ${state ? html`<p class="why">${state}</p>` : ''}</section>`;
   }
 
-  window.commands = { answered, fix, retry, runAction, showLog, logLine, printJob, showAssignment, openPullRequest, syncCollector, adversarialReview, reviewPane, published, PUB_STATE, pubLegend, publishCommands, publishPane };
+  window.commands = { answered, fix, applyReview, retry, runAction, showLog, logLine, printJob, showAssignment, openPullRequest, syncCollector, adversarialReview, reviewPane, published, PUB_STATE, pubLegend, publishCommands, publishPane };
 })();

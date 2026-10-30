@@ -211,6 +211,7 @@ addEventListener('DOMContentLoaded', () => {
   // each other's inverse, so each undoes the other with the revision its own write returned.
   let target = null, reading = null;
   const P_ = o => byId(o.id);
+  const reviewed = p => { const a = p.files['adversarial.md'], d = p.files['index.md']; return !!(a && d && a.mtime > d.mtime); };
   const nextOf = p => target && p.next.includes(target) ? target : p.next[0];
   const write = (p, suffix, body) => window.shell.post(`/api/items/${p.id}/${suffix}`, { ...body, revision: p.revision })
     .then(out => { reading?.reread(); return out; }, e => { reading?.load(); throw e; });
@@ -252,7 +253,18 @@ addEventListener('DOMContentLoaded', () => {
       when: o => { const P = publishState(P_(o)); return P.ok || P.why.join(' '); },
       consequence: () => 'Publishes to the destinations in sd-plugin.json; the canonical destination comes first. The publication claim records the URL. It posts outside, so the dashboard sends nothing: copy the two lines.',
       run: o => `Copy the two lines to publish #${P_(o).id}; publishing posts outside, so the dashboard does not run them` },
+    // pack sd:6699: Refresh review is the shared adversarial review with kind piece; it rewrites the piece's adversarial.md.
+    window.commands.adversarialReview('piece', { id: 'piece.review', label: 'Refresh review',
+      does: 'Starts a codex review of the draft in the background; it rewrites adversarial.md.',
+      payload: o => ({ kind: 'piece', target: String(o.id) }),
+      when: o => { const p = P_(o); return !p ? 'not listed' : p.words ? true : 'no draft to review yet'; } }),
+    // Apply review is the shared Fix with apply: adversarial; the page reads again once the session starts.
+    window.commands.applyReview('piece', { item: o => P_(o).id,
+      ready: o => { const p = P_(o); return !p ? 'not listed' : reviewed(p) || 'adversarial.md is older than the draft; run Refresh review first'; },
+      post: (o, path, body) => window.shell.post(path, { ...body, revision: P_(o).revision }).then(out => { reading?.reread(); return out; }) }),
   ];
+  // A piece's review that lands rewrites adversarial.md, so the page reads again for its time.
+  document.addEventListener('adversarial:run', e => { if (e.detail.run.kind === 'piece' && e.detail.run.filed) reading?.reread(); });
   C.register(...CMDS);
   const cmd = id => CMDS.find(c => c.id === id);
   function move(id, to) {
