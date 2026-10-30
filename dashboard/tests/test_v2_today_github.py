@@ -177,6 +177,22 @@ class TheDetails(ScreenCase):
         merged = next(row for row in found["settled"] if row["ref"] == "example/anvil#10")
         self.assertEqual(merged["merged_at"], "2026-09-04T10:00:00Z")
 
+    def test_a_pull_request_is_ready_when_approved_green_and_mergeable_and_not_read_is_never_ready(self):
+        """pack sd:6711: the Ready to merge filter's answer, from what sd shadow sync stored."""
+        seed(self)
+        for number, review, checks, mergeable in ((1, "approved", "success", "mergeable"), (3, "approved", "none", "mergeable"),
+                                                  (4, "approved", "failure", "mergeable"), (5, "approved", "success", "conflicting"),
+                                                  (6, "review_required", "success", "mergeable")):
+            upsert_shadow(self.connection, tracker="github", url=f"{HUB}/example/anvil/pull/{number}", repo="example/anvil",
+                          number=number, kind="pull", title=f"example/anvil pull {number}", state="open",
+                          review_decision=review, checks=checks, mergeable=mergeable)
+        self.connection.commit()
+        found = {row["number"]: row for row in today_github.document(self.connection, now=NOW)["pulls"]}
+        self.assertEqual({n: found[n]["ready"] for n in (1, 2, 3, 4, 5, 6)},
+                         {1: True, 2: None, 3: True, 4: False, 5: False, 6: False})
+        self.assertEqual((found[1]["review"], found[1]["checks"], found[1]["mergeable"]), ("approved", "success", "mergeable"))
+        self.assertEqual((found[2]["review"], found[2]["checks"], found[2]["mergeable"]), (None, None, None))
+
 
 def answered(stdout="", returncode=0, stderr=""):
     """A stand-in for subprocess.run: records each call and answers as gh would."""
@@ -337,6 +353,23 @@ class TheScript(unittest.TestCase):
         self.assertIn("1 merged or closed row with no date recorded", out["R"]["closed"])
         self.assertIn("2 pull requests", out["R"]["tally"])
         self.assertEqual(out["R"]["search"], "?prs=closed")
+
+    def test_ready_to_merge_keeps_only_approved_green_mergeable_rows_and_names_the_ones_not_read(self):
+        """pack sd:6711: the State segment's ready to merge; a row whose merge state was not read is counted, never kept."""
+        found = doc(pulls=[entry(1, ready=True, review="approved", checks="success", mergeable="mergeable"),
+                           entry(2, ready=False, review="approved", checks="failure", mergeable="mergeable"),
+                           entry(3, ready=None, review=None, checks=None, mergeable=None),
+                           entry(4, ready=False, review="approved", checks="success", mergeable="conflicting")],
+                    settled=[entry(5, state="merged", at_what="merged", ready=True)])
+        out = self.run_page(
+            "show(); await flush(); R.bar = ELS['github-filters'].html; filter('prs', 'ready'); R.ready = ELS['github-sections'].html;"
+            " R.search = location.search; R.pressed = ELS['github-filters'].html;",
+            f"(path, body) => [200, {json.dumps(found)}]")
+        self.assertIn('data-f="prs" data-v="ready" aria-pressed="false">ready to merge <span class="n">1</span>', out["R"]["bar"])
+        self.assertEqual([n for n in (1, 2, 3, 4, 5) if f"pull/{n}\"" in out["R"]["ready"]], [1])
+        self.assertIn("1 open pull request whose review, checks or merge state was not read", out["R"]["ready"])
+        self.assertIn('data-v="ready" aria-pressed="true"', out["R"]["pressed"])
+        self.assertEqual(out["R"]["search"], "?prs=ready")
 
     def test_mine_is_the_default_and_all_adds_what_others_opened(self):
         # sd:5757, sd:5899: mine keeps what is assigned to you or opened by you (the read's `mine`); a pull request
