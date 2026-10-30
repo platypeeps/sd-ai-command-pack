@@ -9,8 +9,10 @@
 // A skill the intake installed in ~/.claude/skills (sd:3997) is a "user skill": the Adopt panel lists it with Re-import, which
 // runs the intake with the user scope. It is no catalog row, so Try, Review, Promote and Demote are not on it.
 // The Intake view (system sd:5478) lists the repositories `sd skill intake --tracked` names, from /api/skills/intake/repos.
-// Track, Refresh skills and Remove post /api/skills/intake/tracking; Remove keeps the installed skills and its Undo tracks the
-// repository again. A refresh lists each skill's intake report and installs nothing: Approve under a report is the intake's.
+// Track, Review, Refresh and Remove post /api/skills/intake/tracking; Remove keeps the installed skills and its Undo tracks the
+// repository again. Review lists each skill's intake report and installs nothing: Approve under a report is the intake's.
+// Refresh (pack sd:6686) asks first, then installs the new revision of each installed skill whose verdict is install, and
+// lists each with its Rollback; it installs no new skill.
 // Rollback (system sd:5779) posts the same route with rollback: true and shows the swap back to the copy the last install
 // replaced, with the pack skills the import informed; Approve rollback asks first and posts the revision that report printed.
 const { html, put, plural, cells } = window.markup;
@@ -446,7 +448,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
       <td class="name"><button type="button">${r.url}</button><p>${r.scope === 'user' ? 'user · ~/.claude/skills' : 'pack · contrib/'}</p></td>
       <td class="avail">${r.skills.length ? r.skills.map(x => x.name).join(', ') : 'none installed'}</td>
       <td class="avail">${refreshed(r)}</td>
-      <td class="act">${C.rowActions(id)}</td></tr>`; })
+      <td class="act">${C.rowActions(id, { icons: true })}</td></tr>`; })
       : html`<tr class="lane"><td colspan="5">${REPOS ? 'No repository is tracked.' : REPO_FAILED ? `Not read: ${REPO_FAILED}` : 'Not read yet.'}</td></tr>`}`);
     put(document.getElementById('intake-untracked'), html`${REPOS?.untracked.length ? html`<h3>Adopted from, not tracked</h3>
       <ul class="imported">${REPOS.untracked.map(u => html`<li><span><b>${u.url}</b><span class="src">${u.skills.map(x => x.name).join(', ')}</span></span>${C.rowActions(`source:${u.url}`)}</li>`)}</ul>` : ''}`);
@@ -460,7 +462,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
     const url = repoOf(id), tracked = id.startsWith('repo:');
     const r = REPOS && (tracked ? REPOS.repos : REPOS.untracked).find(x => x.url === url); if (!r) return false;
     selected = id; markRepos(); C.select(id);
-    const [g, st, why] = tracked ? repoGlyph(r) : ['▨', 'unknown', 'Not tracked: Refresh skills does not read it'];
+    const [g, st, why] = tracked ? repoGlyph(r) : ['▨', 'unknown', 'Not tracked: Review and Refresh do not read it'];
     put(details, html`<p class="kind"><span class="g-${st}" aria-hidden="true">${g}</span> ${tracked ? `Tracked repository · ${r.scope}` : 'Adopted from, not tracked'}</p>
       <h2>${url}</h2><p class="desc">${why}.</p>
       <dl><dt>Adopted</dt><dd>${r.skills.length ? r.skills.map(x => `${x.name} (${x.scope})`).join(' · ') : 'no installed skill'}</dd>
@@ -474,11 +476,15 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
     const slot = document.getElementById('refresh-slot'), at = REFRESH[repoOf(selected)];
     if (!slot || !String(selected).startsWith('repo:')) return;
     if (!at) return put(slot, html``);
-    if (at.wait) return put(slot, html`<p class="why" role="status"><span class="g-queued" aria-hidden="true">◌</span> Refreshing ${repoOf(selected)}: fetching its default branch and reading each skill. Nothing installs.</p>`);
+    if (at.wait) return put(slot, html`<p class="why" role="status"><span class="g-queued" aria-hidden="true">◌</span> ${at.apply ? 'Refreshing' : 'Reviewing'} ${repoOf(selected)}: fetching its default branch and reading each skill. ${at.apply ? 'Each installed skill whose report says install updates.' : 'Nothing installs.'}</p>`);
     if (at.error) return put(slot, html`<p class="err" role="alert"><span class="g-unknown" aria-hidden="true">▨</span> ${at.error}</p>`);
     const out = at.report, listed = out.skills.map((r, i) => [r, i]).filter(([r]) => bucket(r) !== 'unchanged'), same = out.skills.length - listed.length;
-    put(slot, html`<section class="intake" aria-labelledby="refresh-h"><h3 id="refresh-h">Refresh at ${out.branch} ${out.commit.slice(0, 12)}</h3>
-      <p class="verdict"><b>${out.result}</b> · nothing installed${out.recorded ? '' : ` · not saved to the list: ${out.unrecorded}`}</p>
+    const applied = out.applied || [], skipped = out.skipped || [], unsure = out.unknown || [];
+    put(slot, html`<section class="intake" aria-labelledby="refresh-h"><h3 id="refresh-h">${out.applied ? 'Refresh' : 'Review'} at ${out.branch} ${out.commit.slice(0, 12)}</h3>
+      <p class="verdict"><b>${out.result}</b>${out.applied ? '' : ' · nothing installed'}${out.recorded ? '' : ` · not saved to the list: ${out.unrecorded}`}</p>
+      ${applied.length ? html`<h3>Updated</h3><ul class="imported">${applied.map((a, i) => html`<li><span><b><span class="g-ok" aria-hidden="true">●</span> ${a.skill} · updated to ${a.commit.slice(0, 12)}</b><span class="src">${a.scope} · revision ${a.revision}${a.installed_commit ? ` · was ${a.installed_commit.slice(0, 12)}` : ''}</span></span><button class="btn quiet sm" type="button" data-rollback-skill="${i}">Rollback</button></li>`)}</ul>` : ''}
+      ${unsure.length ? html`<h3>Not known</h3><ul class="imported">${unsure.map(k => html`<li><span><b><span class="g-unknown" aria-hidden="true">▨</span> ${k.skill} · not known</b><span class="src">${k.why}</span></span></li>`)}</ul>` : ''}
+      ${skipped.length ? html`<h3>Not updated</h3><ul class="imported">${skipped.map(k => html`<li><span><b><span class="g-caution" aria-hidden="true">▲</span> ${k.skill} · left as is</b><span class="src">${k.why}</span></span></li>`)}</ul>` : ''}
       ${listed.length ? html`<ul class="imported">${listed.map(([r, i]) => { const [g0, st0, label] = BUCKET[bucket(r)] || BUCKET.failed, [g, st] = !r.error && refused(r) ? ['■', 'warning'] : [g0, st0];
         return html`<li><span><b><span class="g-${st}" aria-hidden="true">${g}</span> ${r.skill || r.path || 'repository root'} · ${label}</b><span class="src">${r.error || `${r.verdict.action} · ${r.verdict.reason}`}</span></span>${r.error ? '' : html`<button class="btn quiet sm" type="button" data-report="${i}">Show report</button>`}</li>`; })}</ul>` : ''}
       ${same ? html`<p class="why">${plural(same, 'skill')} ${same === 1 ? 'matches' : 'match'} the installed copy.</p>` : ''}
@@ -490,19 +496,26 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
     const r = out.skills[Number(b.dataset.report)]; if (!r || r.error) return;
     intake = { for: selected, body: { source: r.url, scope: r.scope }, report: r }; drawIntake();
   });
-  // A refresh's answer is a report, not a write the list must show: it reads the list again for the refresh time it saved.
-  function refresh(o) {
-    REFRESH[o.url] = { wait: true }; if (intake?.for === `repo:${o.url}`) intake = null;
+  // Rollback under a refresh's update: the skill's rollback report, as Catalog's Rollback shows it; Approve rollback writes.
+  details.addEventListener('click', e => {
+    const b = e.target.closest('[data-rollback-skill]'), out = REFRESH[repoOf(selected)]?.report; if (!b || !out?.applied) return;
+    const a = out.applied[Number(b.dataset.rollbackSkill)]; if (a) evaluate(selected, { source: a.skill, scope: a.scope, rollback: true });
+  });
+  // A review's or refresh's answer is a report, not a write the list must show: it reads the list again for the time it saved.
+  // Review (apply false) installs nothing; Refresh (apply true) installs each update its report says install.
+  function refresh(o, apply = false) {
+    const was = REFRESH[o.url]?.report;
+    REFRESH[o.url] = { wait: true, apply, was }; if (intake?.for === `repo:${o.url}`) intake = null;
     drawRepos(); if (selected === `repo:${o.url}`) showRepo(selected);
-    return window.shell.post(TRACKING, { action: 'refresh', url: o.url }).then(out => {
+    return window.shell.post(TRACKING, { action: 'refresh', url: o.url, ...(apply ? { apply: true } : {}) }).then(out => {
       REFRESH[o.url] = { report: out };
       // Until the reread lands, the row shows the time and result this refresh saved.
       const row = REPOS?.repos.find(x => x.url === o.url); if (row && out.recorded) Object.assign(row, { refreshed: out.refreshed, result: out.result });
-      drawRepos(); drawRefresh(); repoReader.reread();
-      return `Refreshed ${o.url}: ${out.result}. Nothing installed`;
+      drawRepos(); drawRefresh(); repoReader.reread(); if (apply) reread();
+      return apply ? `Refreshed ${o.url}: ${plural((out.applied || []).length, 'skill')} updated${out.unknown?.length ? `, ${out.unknown.length} not known` : ''}` : `Reviewed ${o.url}: ${out.result}. Nothing installed`;
     }, e => {
-      REFRESH[o.url] = { error: e.message }; drawRepos(); drawRefresh(); repoReader.load();
-      if (e.status === 502) return `Refresh of ${o.url} not finished: ${e.message}`;
+      REFRESH[o.url] = { error: e.message }; drawRepos(); drawRefresh(); repoReader.load(); if (apply) reread();
+      if (e.status === 502) return `${apply ? 'Refresh' : 'Review'} of ${o.url} not finished: ${e.message}`;
       throw e;
     });
   }
@@ -512,7 +525,7 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
   function showTrack() {
     selected = 'track'; C.select(null); markRepos();
     put(details, html`<p class="kind">${I('plus')} Track a repository</p><h2>Track a repository</h2>
-      <p class="desc">Refresh skills reads a tracked repository's default branch and lists its new and changed skills, each with its intake report. Nothing installs until you approve a report.</p>
+      <p class="desc">Review reads a tracked repository's default branch and lists its new and changed skills, each with its intake report. Refresh also installs the new revision of each installed skill whose report says install.</p>
       <form class="form" id="track-form" novalidate><label>Repository<input id="tr-url" placeholder="https://github.com/owner/repo" autocomplete="off" aria-describedby="tr-err"></label>
         <div class="row"><label class="target">New skills install to<select id="tr-scope"><option value="pack">pack · contrib/</option><option value="user">user · ~/.claude/skills</option></select></label>
           <button class="btn" type="submit">Track</button></div>
@@ -533,16 +546,22 @@ const shq = window.shell.shq; // every value in a line the operator copies is si
   }
   document.getElementById('track-btn').addEventListener('click', () => showTrack());
   const REPO_COMMANDS = [
-    { id: 'skill.intake.refresh', on: 'tracked repo', label: 'Refresh skills', does: 'Fetches the repository and lists its new and changed skills; installs nothing.', key: 'e', risk: 'safe', icon: 'rotate-ccw', primary: () => true,
-      when: o => REFRESH[o.url]?.wait ? 'refreshing now' : true,
+    { id: 'skill.intake.review', on: 'tracked repo', label: 'Review', does: 'Fetches the repository and lists its new and changed skills; installs nothing.', key: 'e', risk: 'safe', icon: 'search', primary: () => true,
+      when: o => REFRESH[o.url]?.wait ? 'reading it now' : true,
       cli: o => `sd skill intake --refresh ${shq(o.url)}`, run: o => { select(`repo:${o.url}`, true); return refresh(o); } },
+    // sd:6686: the consequence names each update the last Review found; before one, it says the rule.
+    { id: 'skill.intake.refresh', on: 'tracked repo', label: 'Refresh skills', does: 'Installs each installed skill\'s new revision its report says install; Rollback undoes each.', risk: 'confirm', icon: 'download',
+      when: o => REFRESH[o.url]?.wait ? 'reading it now' : true,
+      consequence: o => { const seen = REFRESH[o.url]?.report, due = (seen?.skills || []).filter(r => !r.error && r.mode === 're-import' && r.verdict.action === 'install' && !refused(r));
+        return `This fetches ${o.url} and installs the new revision of each installed skill whose report says install${seen ? due.length ? `: ${due.map(r => `${r.skill} (${r.scope}) to revision ${r.revision}`).join(', ')}` : '; the last Review found none' : ''}. It installs no new skill and leaves a declined or folded one as it is. Each update keeps the copy it replaced, so its Rollback undoes it.`; },
+      cli: o => `sd skill intake --refresh ${shq(o.url)} --apply`, run: o => { select(`repo:${o.url}`, true); return refresh(o, true); } },
     { id: 'skill.intake.untrack', on: 'tracked repo', label: 'Remove', does: 'Stops tracking this repository; its installed skills stay. Undo tracks it again.', key: 'm', risk: 'undo',
       cli: o => `sd skill intake --untrack ${shq(o.url)}`,
       run: o => window.shell.post(TRACKING, { action: 'untrack', url: o.url }).then(out => { delete REFRESH[o.url]; repoReader.reread();
         return { text: `Stopped tracking ${o.url}; its installed skills stay`, removed: out.removed }; }, unknown(o, 'Removal')),
       // Undo tracks the repository again with the scope it had; its last refresh time and result are not restored.
       undo: (o, v) => trackPost(o.url, v?.removed?.scope || o.scope).then(() => { repoReader.reread(); }, e => { repoReader.load(); throw e; }) },
-    { id: 'skill.intake.track', on: 'untracked repo', label: 'Track', does: 'Adds this repository to the tracked list, so Refresh skills reads it.', key: 't', risk: 'safe', icon: 'plus', primary: () => true,
+    { id: 'skill.intake.track', on: 'untracked repo', label: 'Track', does: 'Adds this repository to the tracked list, so Review and Refresh read it.', key: 't', risk: 'safe', icon: 'plus', primary: () => true,
       cli: o => `sd skill intake --track ${shq(o.url)}`, run: o => trackPost(o.url).then(() => { repoReader.reread(); return `Tracking ${o.url}`; }, unknown(o, 'Tracking')) },
   ];
   repoRows.addEventListener('click', e => {
