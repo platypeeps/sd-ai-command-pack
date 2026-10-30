@@ -736,6 +736,7 @@ def enqueue_entry(worktree: pathlib.Path, item: int, title: str, body_file: path
     def refuse_before_push(base: str) -> None:
         refuse_stacked(worktree, branch, base, head, queued)
         check_lines(worktree, title, body, base, head)
+        check_convention(worktree, title, base, head, queue.environ)
         check_docs(worktree, body, base)
         if claim == "deliver":  # an associate-only claim closes nothing (sd:3365)
             commits, parents = branch_commits(worktree, base, head), branch_parents(worktree, base, head)
@@ -787,6 +788,49 @@ def check_lines(worktree: pathlib.Path, title: str, body: str, base: str, head: 
         sd_ship_body.refuse_unconventional_title(title)
     except Refusal as error:
         raise LaneError(f"{error}; nothing was queued", code=error.workflow["blocker"]["code"]) from None
+
+
+def check_convention(worktree: pathlib.Path, title: str, base: str, head: str, environ: dict[str, str]) -> None:
+    """Refuse a title or branch commit the repository's declared `commit_convention` refuses (sd:6715).
+
+    The title is the squash subject: an alias type in it passes, since
+    `sd-ship merge` rewrites it; its footer and body ride the squash body,
+    which merge checks. A branch commit is checked whole, and an alias in
+    it is refused with the reworded subject: an org's commit lint reads
+    the pull request's commits. A merge commit is the lane's catch-up, not
+    the author's, so it is exempt. No declaration checks nothing here.
+    """
+    try:
+        declared = sd_lib.repo_declaration(worktree, "policy", environ)
+    except (sd_lib.DatabaseUnreadable, sd_lib.ConfigError) as error:
+        raise LaneError(f"the repository's policy was not read, so its commit convention is unknown: {error}; "
+                        "nothing was queued", code=HUB_UNAVAILABLE) from None
+    if not declared or "commit_convention" not in declared:
+        return
+    policy = sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py")
+    convention = declared["commit_convention"]
+    merges = lane_git(worktree, "rev-list", "--merges", f"refs/remotes/origin/{base}..{head}")
+    if merges is None:
+        raise LaneError(f"Cannot read the merges {head} adds to origin/{base}; fetch origin, then enqueue "
+                        "again. Nothing was queued or pushed.", code=PUBLISH_UNKNOWN)
+    broke = []
+    try:
+        policy.check_message(title, {**convention, "body": "optional", "footer": None})
+    except policy.ConventionRefused as error:
+        broke.append(f"the title: {error}")
+    for sha, message in branch_commits(worktree, base, head):
+        if sha in merges.split():
+            continue
+        try:
+            subject = policy.check_message(message, convention).split("\n", 1)[0]
+        except policy.ConventionRefused as error:
+            broke.append(f"commit {sha[:12]}: {error}")
+            continue
+        if subject != message.split("\n", 1)[0]:
+            broke.append(f"commit {sha[:12]}: reword its subject to {subject!r}")
+    if broke:
+        raise LaneError("the repository's commit convention refuses " + "; ".join(broke) + "; nothing was queued",
+                        code="commit_convention")
 
 
 def branch_commits(worktree: pathlib.Path, base: str, head: str) -> list[tuple[str, str]]:

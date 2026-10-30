@@ -2445,6 +2445,53 @@ class CitedCloses(SharedQueue):
                          (sd_lane.HUB_UNAVAILABLE, [], False))
 
 
+class CommitConvention(SharedQueue):
+    """sd:6715, run 210 blocker: enqueue applies the repository's declared `commit_convention` to the title
+    and each branch commit, before anything is pushed or queued. A lane merge commit is exempt."""
+
+    CONVENTION = {"types": ["feat", "fix", "doc"], "aliases": {"docs": "doc"}, "body": "required",
+                  "footer": r"^Ref: LOG-\d+$"}
+
+    def declare(self, convention: dict) -> None:
+        import sd_db
+        from sd_db.repos import set_declaration
+        self.register_items(0)
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            set_declaration(connection, str(self.repo), "policy", {"mode": "org", "commit_convention": convention})
+        finally:
+            connection.close()
+
+    def enqueue(self, tree: pathlib.Path, title: str) -> dict:
+        return sd_lane.enqueue_entry(tree, 1, title, self.body, self.environ, claim="deliver")
+
+    def test_a_commit_the_convention_refuses_is_named_before_any_push(self) -> None:
+        self.declare(self.CONVENTION)
+        tree, [bare, alias, _] = self.committed(
+            "topic", "fix: no body", "docs: words\n\nWhy.\n\nRef: LOG-1", "fix: good\n\nWhy.\n\nRef: LOG-2")
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            self.enqueue(tree, "chore: the slice")
+        self.assertEqual((refused.exception.code, self.rows(), "push" in self.git_verbs, self.remote_tip("topic")),
+                         ("commit_convention", [], False, None))
+        message = str(refused.exception)
+        self.assertIn("the title: type 'chore' is not one of feat, fix, doc", message)
+        self.assertIn(f"commit {bare[:12]}: no footer line matches", message)
+        self.assertIn(f"commit {alias[:12]}: reword its subject to 'doc: words'", message)
+
+    def test_conforming_commits_and_a_lane_merge_are_queued(self) -> None:
+        self.declare(self.CONVENTION)
+        tree, _ = self.committed("topic", "fix: good\n\nWhy.\n\nRef: LOG-2")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "main moves")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(tree, "merge", "-q", "--no-ff", "-m", "chore: merge origin/main", "origin/main")
+        entry = self.enqueue(tree, "docs: the slice")
+        self.assertEqual(entry["status"], "pending")
+
+    def test_no_declared_convention_changes_nothing(self) -> None:
+        tree, _ = self.committed("topic", "chore: no body")
+        self.assertEqual(self.enqueue(tree, "chore: the slice")["status"], "pending")
+
+
 class LineLimits(SharedQueue):
     """sd:5793: enqueue refuses a title over 63 characters, or a body or commit line over 72.
 
