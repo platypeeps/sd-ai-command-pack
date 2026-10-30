@@ -196,7 +196,48 @@ let polling = 0;
       <h2>${a.name}</h2>
       ${dl([['Status', a.status], ['Accuracy', a.accuracy], ['Position', `${a.lat.toFixed(5)}, ${a.lng.toFixed(5)}`], ['Updated', a.updated], ['Source', a.source]])}
       ${a.notes ? html`<p class="note">${a.notes}</p>` : ''}${extra}
+      <h3 class="label">Attachments</h3><div id="attach" class="attach"></div>
       <h3 class="label">Act</h3>${window.shell.commands.bar(id)}`, id, open);
+    drawAttachments(a);
+  }
+  // ---------- Attachments (sd:6690) ----------
+  // An asset's documents and pictures are its Drive folder's listing (hoa_attach.py). Upload and Reference write there,
+  // on the operator's press only; a Reference is a small .url file naming a Drive link. Pictures come through the server.
+  function attachRow(f) {
+    const href = f.kind === 'link' ? (f.target || f.link) : f.link;
+    return html`<li>${f.kind === 'picture' ? html`<a href="${f.link}" target="_blank" rel="noopener"><img class="thumb" src="/api/hoa/attachments/picture?id=${encodeURIComponent(f.id)}" alt="${f.name}" loading="lazy"></a>` : ''}<a href="${href}" target="_blank" rel="noopener">${f.name}</a> <span class="k">${f.kind}</span></li>`;
+  }
+  const attachForms = () => html`<form class="attach-form" data-attach="upload"><input type="file" name="file" required aria-label="File to upload"><button class="btn quiet sm" type="submit">Upload</button></form>
+    <form class="attach-form" data-attach="reference"><input type="url" name="link" required placeholder="Drive link" aria-label="Drive link to reference"><input type="text" name="name" placeholder="Name" aria-label="Reference name"><button class="btn quiet sm" type="submit">Reference</button></form>
+    <p class="why" role="status" data-attach-said>Upload and Reference write into this asset's folder in the water committee's Drive.</p>`;
+  async function drawAttachments(a) {
+    const live = window.shell.shown('attach', `asset:${a.id}`, () => selected); if (!live || !$('attach')) return;
+    put($('attach'), html`<p class="note">Reading Drive…</p>`);
+    let out;
+    try { out = await window.shell.getJSON(`/api/hoa/attachments?asset=${encodeURIComponent(a.id)}`); }
+    catch (err) { if (live() && $('attach')) put($('attach'), unknownBlock(err.message)); return; }
+    if (!live() || !$('attach')) return;
+    put($('attach'), html`${out.files.length ? html`<ul class="attach-list">${out.files.map(attachRow)}</ul>` : html`<p class="note">None yet.</p>`}${
+      out.folder ? html`<p class="why"><a href="${out.folder}" target="_blank" rel="noopener">Open the folder in Drive</a></p>` : ''}${attachForms()}`);
+    $('attach').querySelectorAll('form[data-attach]').forEach(form => form.addEventListener('submit', e => { e.preventDefault(); attach(a, form); }));
+  }
+  async function attach(a, form) {
+    const S = window.shell, button = form.querySelector('button'), said = $('attach').querySelector('[data-attach-said]');
+    button.disabled = true; button.setAttribute('aria-busy', 'true'); said.textContent = 'Writing to Drive…';
+    try {
+      if (form.dataset.attach === 'upload') {
+        const f = form.elements.file.files[0];
+        const staged = await S.post('/api/hoa/attach/file', f, { 'X-SD-File-Name': encodeURIComponent(f.name) });
+        await S.post('/api/hoa/attach', { asset: a.id, sha256: staged.sha256, name: f.name });
+      } else {
+        const name = form.elements.name.value.trim();
+        await S.post('/api/hoa/attach', { asset: a.id, link: form.elements.link.value.trim(), ...(name ? { name } : {}) });
+      }
+      drawAttachments(a);
+    } catch (err) {
+      said.textContent = err.message; said.className = 'state-unknown';
+      button.disabled = false; button.removeAttribute('aria-busy');
+    }
   }
   function selectTract(key, open) {
     const l = LOTS.find(x => (x.ain || x.label) === key); if (!l) return;
