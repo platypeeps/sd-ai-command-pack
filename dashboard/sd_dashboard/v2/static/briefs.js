@@ -85,10 +85,8 @@ addEventListener('DOMContentLoaded', () => {
       // build (sd:3459): the brief-copies heartbeat. Off is quiet; failed is caution, since Read never needs a copy.
       { state: LAMP[c.state] || 'unknown', href: LAMP[c.state] === 'ok' ? undefined : COPIES_ROW, attrs: html` title="${c.reason || `rendered ${c.at}`}"`, label: 'Vault copies', mark: I('hard-drive-download'),
         val: html`<span class="ph"><b>${c.state}</b></span>${c.at ? html` · <span class="ph">${c.at.slice(5, 16).replace('T', ' ')} UTC</span>` : ''}` },
-      { button: true, attrs: html` id="refresh"`, label: 'Observed', mark: I('rotate-ccw'), val: read },
     ]));
   }
-  document.getElementById('annunciator').addEventListener('click', e => { if (e.target.closest('#refresh')) briefs.load(); });
 
   // ---------- Cadence strip (hand-rolled SVG, patterns.md § Charts) ----------
   const W = 700, H = 24;
@@ -257,7 +255,7 @@ addEventListener('DOMContentLoaded', () => {
   window.PAGE_LIST = { rows: () => tbody.querySelectorAll('tr[data-id]'), current: () => selected, select: id => select(id, false), clear: () => !!active() && (clearAll(), true) };
 
   // ---------- Start (build: read /api/briefs through shell.read, then draw) ----------
-  // The reader (read.js, sd:2418) holds the guards: of overlapping Observed clicks only the newest read draws, a brief the
+  // The reader (read.js, sd:2418) holds the guards: of overlapping reads only the newest draws, a brief the
   // read no longer lists runs no command, and a selection whose brief is gone moves to the first shown brief or clears.
   const briefs = shell.read({
     source: '/api/briefs', what: 'the briefs',
@@ -292,6 +290,6 @@ addEventListener('DOMContentLoaded', () => {
   });
   readURL();
   briefs.load();
-  // Read again (sd:5638): the shell's head button reads the briefs again, as the Observed lamp does.
+  // Read again (sd:5638): the shell's head button reads the briefs again; sd:6697 dropped the Observed lamp.
   window.PAGE_AGAIN = { title: 'Read the briefs again', run: () => briefs.load() };
 });

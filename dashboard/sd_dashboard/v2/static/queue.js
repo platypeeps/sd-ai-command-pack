@@ -212,8 +212,8 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
       <div><dt>gates running / cap</dt><dd>${gates.error ? html`▨ <small>${gates.error}</small>` : html`${gates.running} / ${gates.cap}<small>${gates.waiting} waiting</small>`}</dd></div>
       <div><dt>read</dt><dd>${at(DOC.read)}<small>${DOC.read.replace('T', ' ').replace('Z', ' UTC')}</small></dd></div>`);
     $('edits').textContent = DOC.edits;
-    const lanes = DOC.lanes.filter(l => inView(l)), every = lanes.flatMap(l => l.rows), chip = (v, n) => html`<button type="button" class="chip" data-show="${v}" aria-pressed="${String(show === v)}">${v} <span class="n">${String(n)}</span></button>`;
-    put($('show'), html`<span class="label">Show</span><div class="chips">${chip('active', every.filter(r => ACTIVE.includes(r.state)).length)}${chip('all', every.length)}</div>`);
+    const lanes = DOC.lanes.filter(l => inView(l)), every = lanes.flatMap(l => l.rows), chip = (v, n) => html`<button type="button" data-show="${v}" aria-pressed="${String(show === v)}">${v[0].toUpperCase() + v.slice(1)} <span class="n">${String(n)}</span></button>`;
+    put($('show'), html`${chip('active', every.filter(r => ACTIVE.includes(r.state)).length)}${chip('all', every.length)}`);
     // A lane with nothing to show (and no write result) folds into the Idle line (sd:5640, sd:5921).
     const busyLanes = lanes.filter(l => drawn(l).length || said[l.path]), idle = lanes.filter(l => !busyLanes.includes(l));
     busyLanes.sort((a, b) => (count(b, 'blocked') > 0) - (count(a, 'blocked') > 0) || (count(b, 'merging') > 0) - (count(a, 'merging') > 0));

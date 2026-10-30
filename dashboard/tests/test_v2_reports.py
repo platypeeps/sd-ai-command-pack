@@ -635,7 +635,7 @@ R.type = C.get('r{n}').type; R.rows = ELS.rows.html; R.cad = ELS['cad-body'].htm
         self.assertEqual(out["R"]["weekly"], ["none", "none", "ok", "none", "none", "none", "none"])
         self.assertRegex(out["R"]["lamps"], r'data-fam="sync"[^>]*data-state="warning"')
         self.assertRegex(out["R"]["lamps"], r'data-fam="scan"[^>]*data-state="ok"')
-        self.assertEqual(cell_grammar(self, out["R"]["lamps"]), [("button", "warning"), ("button", "ok"), ("div", "unknown"), ("button", None)])
+        self.assertEqual(cell_grammar(self, out["R"]["lamps"]), [("button", "warning"), ("button", "ok"), ("div", "unknown")])
         self.assertIn("■ 1 failed last run", out["R"]["tally"])
         self.assertEqual(out["attention"], {"state": "warning", "n": 1, "what": "reports want you"})
 

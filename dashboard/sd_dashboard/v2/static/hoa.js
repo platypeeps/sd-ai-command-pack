@@ -96,11 +96,9 @@ let polling = 0;
     mission: 'Age of the newest row in the Mission export. Source: the hoa checkout\'s tools/source-ages.py. CLI: python3 tools/source-ages.py',
   };
   function lamps() {
-    const clock = { button: true, cls: 'clock', attrs: html` id="refresh"`, label: html`<span><span class="live" aria-hidden="true"></span> Observed</span>`, mark: html`<kbd>r</kbd>`,
-      val: html`<span class="ph"><b>${DOC ? DOC.read.slice(11, 16) : '—'}</b>${DOC ? ' UTC' : ''}</span>`, small: 'refresh',
-      tip: 'When this page read /api/hoa. Press it, or r, to read again.' };
+    // sd:6697: no Observed clock; the shell's Read again (or r) is the page's one re-read.
     put($('annunciator'), cells([...CELLS.map(c => ({ button: true, state: c.state, attrs: html` data-cell="${c.id}"${c.open ? html` data-open="${c.open}"` : ''}`,
-      label: c.label, mark: html`<span class="${c.state === 'ok' ? 'g' : ''}" aria-hidden="true">${GLYPH[c.state]}</span>`, val: html`<span class="ph">${c.val}</span>`, small: c.small, tip: TIPS[c.id] })), clock]));
+      label: c.label, mark: html`<span class="${c.state === 'ok' ? 'g' : ''}" aria-hidden="true">${GLYPH[c.state]}</span>`, val: html`<span class="ph">${c.val}</span>`, small: c.small, tip: TIPS[c.id] }))]));
   }
   // The badge is the read's own (sd:3446, hoa_screen._attention), the cells above that can light.
   function attention() {
@@ -411,8 +409,9 @@ let polling = 0;
     const C = window.shell.commands, f = DOC?.items, shown = obShow === 'all' ? TASKS() : OB, n = k => shown.filter(o => o.kind === k).length;
     const kinds = [...new Set([...KINDS, ...shown.map(o => o.kind)])].filter(n);
     if (!kinds.includes(kind)) kind = 'all';
-    const seg = (v, word, count) => ({ v, pressed: obShow === v, title: `${word}: ${count}`, label: html`${word} <span class="n">${String(count)}</span>` });
-    put($('ob-show'), DOC && !f.error ? window.shell.list.fseg('tasks', 'Tasks shown', [seg('open', 'Open', OB.length), seg('all', 'All', TASKS().length)]) : html``);
+    // sd:6693: Open | All is the shell's .vseg, the size of every other segment group.
+    const seg = (v, word, count) => html`<button type="button" data-f="tasks" data-v="${v}" aria-pressed="${String(obShow === v)}">${word} <span class="n">${String(count)}</span></button>`;
+    put($('ob-show'), DOC && !f.error ? html`${seg('open', 'Open', OB.length)}${seg('all', 'All', TASKS().length)}` : html``);
     put($('ob-kinds'), html`${['all', ...kinds].map(k => html`<button class="chip" type="button" data-kind="${k}" aria-pressed="${String(k === kind)}">${k === 'all' ? 'All' : k} <b>${k === 'all' ? shown.length : n(k)}</b></button>`)}`);
     put($('ob-head'), window.shell.list.sortHead(OB_COLS, OB_ST));
     const rows = obRows();
@@ -542,7 +541,6 @@ let polling = 0;
 
     $('annunciator').addEventListener('click', e => {
       const c = e.target.closest('button.cell'); if (!c) return;
-      if (c.id === 'refresh') { load(); return; }
       const k = c.dataset.open; if (!k) return;
       if (k.startsWith('day:')) $('trends').scrollIntoView({ behavior: reduce() ? 'auto' : 'smooth' });
       select(k, true);

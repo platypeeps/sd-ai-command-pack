@@ -63,7 +63,6 @@ function lamps() {
   // A lamp with nothing to filter is a div that says why (design.md § Lamps); the partial read above the table says the rest.
   // build: the HTML count is the documents roots.
   out.push({ state: 'unknown', label: 'HTML reports', mark: I('file-text'), val: html`${DOC.html == null ? html`<span class="ph">not read</span>` : html`<span class="ph"><b>${DOC.html}</b> folders</span>`} · <span class="ph">not indexed</span>` });
-  out.push({ button: true, attrs: html` id="refresh"`, label: 'Observed', mark: I('rotate-ccw'), val: html`<span class="ph">${READ ? html`<b>${READ.slice(11, 16)}</b> UTC` : 'not read'}</span> · <span class="ph">refresh</span>` });
   put(byId('annunciator'), cells(out));
 }
 // The shell's state slot (design.md § State slot). build: it names every source that was not read and a family list
@@ -143,7 +142,6 @@ byId('filters').addEventListener('click', e => {
 });
 byId('annunciator').addEventListener('click', e => {
   const c = e.target.closest('button.cell'); if (!c) return;
-  if (c.id === 'refresh') return load(); // build: refresh reads /api/reports again, not the whole page
   F.fam = F.fam === c.dataset.fam ? '' : c.dataset.fam;
   document.querySelectorAll('.cell[data-fam]').forEach(x => x.setAttribute('aria-pressed', String(x.dataset.fam === F.fam)));
   L.page = 1; renderRows(); window.shell.view.show('reports'); // a lamp filters the list, so it shows the list
@@ -278,7 +276,7 @@ window.PAGE_COMMANDS = [
 // says a change landed that did not.
 let reader = null, D = null;
 const load = () => reader.load(), reload = () => reader.reread();
-// Read again (sd:5638): the shell's head button reads the reports again, as the Observed lamp does.
+// Read again (sd:5638): the shell's head button reads the reports again.
 window.PAGE_AGAIN = { title: 'Read the reports again', run: load };
 async function write(path, body) {
   let out;

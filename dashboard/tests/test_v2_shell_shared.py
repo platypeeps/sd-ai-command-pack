@@ -656,7 +656,7 @@ class TheCells(unittest.TestCase):
     def test_todays_server_drawn_lamps_follow_the_same_grammar(self):
         today = (V2 / "today.html").read_text(encoding="utf-8")
         lamps = re.search(r'<ul class="annunciator" id="annunciator">(.*?)</ul>', today, re.S).group(1)
-        self.assertEqual(cell_grammar(self, re.sub(r">\s+<li>", "><li>", lamps)), [("button", "unknown")] * 6 + [("a", "unknown")] * 2 + [("button", None)])
+        self.assertEqual(cell_grammar(self, re.sub(r">\s+<li>", "><li>", lamps)), [("button", "unknown")] * 6 + [("a", "unknown")] * 2)
         self.assertNotIn('class="cell', PAGE_JS["today.js"])
 
     def test_a_spec_becomes_a_button_a_link_or_a_div(self):
@@ -665,7 +665,7 @@ class TheCells(unittest.TestCase):
     val: html`<b>2</b> gone`, sr: 'state caution' }]).text;
   R.link = cells([{ href: '?row=a&b', state: 'ok', label: 'Use', mark: html`<span class="g" aria-hidden="true">●</span>`, val: '1 row', small: 'from claude' }]).text;
   R.div = cells([null, { state: 'unknown', cls: 'clock', label: '<x>', val: 'not read' }, false]).text;
-  R.plain = cells([{ button: true, attrs: html` id="refresh"`, label: 'Observed', val: 'now' }]).text;
+  R.plain = cells([{ button: true, attrs: html` id="plain"`, label: 'Plain', val: 'now' }]).text;
   try { cells([{ attrs: ' onclick="x()"', label: 'a', val: 'b' }]); R.refused = false; } catch (e) { R.refused = e instanceof TypeError; }""")
         self.assertEqual(out["button"], '<li><button class="cell" type="button" data-area="wt" data-state="caution" aria-pressed="true">'
                          '<span class="lbl">Worktrees<svg class="i" aria-hidden="true"><use href="#i-folder"/></svg></span>'
@@ -673,7 +673,7 @@ class TheCells(unittest.TestCase):
         self.assertEqual(out["link"], '<li><a class="cell" href="?row=a&amp;b" data-state="ok"><span class="lbl">Use<span class="g" aria-hidden="true">●</span></span>'
                          '<span class="val">1 row<small>from claude</small></span></a></li>')
         self.assertEqual(out["div"], '<li><div class="cell clock" data-state="unknown"><span class="lbl">&lt;x&gt;</span><span class="val">not read</span></div></li>')
-        self.assertEqual(out["plain"], '<li><button class="cell" type="button" id="refresh"><span class="lbl">Observed</span><span class="val">now</span></button></li>')
+        self.assertEqual(out["plain"], '<li><button class="cell" type="button" id="plain"><span class="lbl">Plain</span><span class="val">now</span></button></li>')
         self.assertTrue(out["refused"])
         self.assertEqual(cell_grammar(self, out["button"] + out["link"] + out["div"] + out["plain"]),
                          [("button", "caution"), ("a", "ok"), ("div", "unknown"), ("button", None)])
@@ -1174,11 +1174,6 @@ class TheToolbarBoxesAlign(unittest.TestCase):
         self.assertIsNotNone(body, "no row-1 rule zeroes the margin of the switch, the box around it and a chip group")
         self.assertIn("margin: 0;", body)
 
-    def test_a_chip_group_in_row_one_has_no_margin(self):
-        # sd:5639: queue.css gives .fgroup a bottom margin, so Queue's Show chips sat above the centre of the Lanes switch.
-        self.assertIn("margin: 0 0 var(--space-md)", self.rule((STATIC / "queue.css").read_text(encoding="utf-8"), ".fgroup"))
-        self.assertIn(".toolbar > .fgroup", SHELL_CSS)
-
     def test_the_switch_and_the_shapeshift_box_take_one_height_token(self):
         row = self.rule(SHELL_CSS, ".toolbar")
         self.assertIsNotNone(row, "the row-1 height token is declared on .toolbar")
@@ -1194,6 +1189,124 @@ class TheToolbarBoxesAlign(unittest.TestCase):
         body = self.rule(SHELL_CSS, ".toolbar .viewswitch [role=\"tab\"], .toolbar .vseg > button")
         self.assertIsNotNone(body)
         self.assertIn("min-height: 0;", body)
+
+
+class EveryToolbarHasOneOrder(unittest.TestCase):
+    """sd:6693 (operator, 2026-10-29): "the filter should be to the left" of the page's actions, and every segment group the
+    size of Tasks'. Every row-1 toolbar on every page holds, in order, its segments (the shell's view switch, a place switch
+    or a .vseg), then the filter (the Shapeshift bar, then the column filter), then the page's actions in one .tools at the
+    right. HOA's Alarms row put the column filter after Acknowledge all; Queue's Show chips, Contributions' scope radios,
+    Metrics' range chips and HOA's Tasks segments each drew a segment group of another size."""
+
+    PAGES = sorted(V2.glob("*.html"))
+    SEGMENTS = {"viewswitch", "place-switch", "vseg"}
+
+    @staticmethod
+    def rows(page):
+        """Each toolbar on `page` as its direct children's (classes, id), in order."""
+        tags, out = tree(page), {}
+        for (_t, cls, id_, _a), up in tags:
+            if up and "toolbar" in up[-1][1]:
+                out.setdefault(id(up[-1][3]), []).append((cls, id_))
+        return list(out.values())
+
+    def kind(self, cls, id_):
+        if cls & self.SEGMENTS or id_ == "viewswitch":
+            return 0
+        if cls & {"shift", "tgrid", "chips"}:
+            return 1
+        return 2 if "tools" in cls else None
+
+    def test_segments_then_the_filter_then_the_actions_in_every_toolbar(self):
+        for page in self.PAGES:
+            for row in self.rows(page):
+                # A help button explains the control before it, wherever that sits.
+                kinds = [self.kind(c, i) for c, i in row if "help" not in c]
+                with self.subTest(page=page.name, row=[sorted(c) or i for c, i in row]):
+                    self.assertNotIn(None, kinds, "a toolbar child that is no segment group, filter or .tools")
+                    self.assertEqual(kinds, sorted(kinds), "out of order: segments, filter, then actions")
+
+    def test_the_shell_puts_its_filters_after_the_segments_and_before_the_actions(self):
+        js = (STATIC / "shell.js").read_text(encoding="utf-8")
+        self.assertIn("const segs = shiftRow.querySelectorAll(':scope > :is(.viewswitch, #viewswitch, .place-switch, .vseg)');", js)
+        self.assertIn("segEnd ? (segHelp || segEnd).after(el) : shiftRow.prepend(el);", js)
+        self.assertIn("tools = row?.querySelector(':scope > .tools');", js)
+        self.assertIn("tools ? tools.before(bar) : row ? row.append(bar) : twrap(t).before(bar);", js)
+        self.assertIn(".toolbar > .tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2xs); margin-left: auto; }", SHELL_CSS)
+
+    def test_one_segment_size_from_one_rule(self):
+        # The view switch's tab and a .vseg button share one rule, so a state group is the size of Tasks' realm tabs.
+        self.assertIn('.viewswitch [role="tab"], .vseg > button { display: inline-flex;', SHELL_CSS)
+        self.assertNotRegex(SHELL_CSS, r"(?m)^\.vseg > button \{ display")
+        for name, css in PAGE_CSS.items():
+            with self.subTest(css=name):
+                self.assertNotRegex(wide(css), r"\.(vseg|viewswitch|repo-scope)\b[^{]*\{", "a page sizes a segment group")
+
+
+class EverySetAsideIsOneSegmentGroup(unittest.TestCase):
+    """sd:6701 (operator, 2026-10-29): "I want one consistent way everywhere". Writing's Parked chip, the Show hidden toggles
+    (Contributions, Designs, GitHub's issues, a place's issues), Documents' Hidden chip and Tasks' Parked only in Scope each
+    set rows aside their own way. Every one is now shell.aside: a .vseg of Open | Parked or Hidden | All with its counts."""
+
+    PAGES = {"writing.js": "parked", "contributions.js": "hidden", "designs.js": "hidden", "issues.js": "hidden",
+             "places.js": "issues-hidden", "documents.js": "hidden", "tasks.js": "parked"}
+
+    def test_the_shell_reads_the_choice_from_the_url_and_counts_each_segment(self):
+        found = re.search(r"\n  // aside:start\n(.*?)\n  // aside:end\n", SHELL_JS, re.S)
+        self.assertIsNotNone(found, "shell.js has no aside block")
+        out = run_js(found.group(1) + """
+  R.modes = ['', '?hidden=1', '?hidden=all', '?hidden=x'].map(s => { location.search = s; return aside.mode('hidden'); });
+  R.shows = [['open', true], ['open', false], ['aside', true], ['aside', false], ['all', true]].map(([m, a]) => aside.shows(m, a));
+  R.params = ['open', 'aside', 'all'].map(aside.param);
+  R.seg = aside.seg('parked', 'Parked', 'aside', { open: 4, aside: 2 }).text;""")
+        self.assertEqual(out["modes"], ["open", "aside", "all", "open"])
+        self.assertEqual(out["shows"], [False, True, True, False, True])
+        self.assertEqual(out["params"], [None, "1", "all"])
+        self.assertEqual(re.findall(r'data-v="(\w+)" aria-pressed="(\w+)">(\w+) <span class="n">(\d+)</span>', out["seg"]),
+                         [("open", "false", "Open", "4"), ("aside", "true", "Parked", "2"), ("all", "false", "All", "6")])
+        self.assertTrue(out["seg"].startswith('<div class="vseg" role="group" aria-label="Parked rows">'))
+
+    def test_no_page_keeps_a_set_aside_toggle_of_its_own(self):
+        pages = [p.read_text(encoding="utf-8") for p in V2.glob("*.html")] + list(PAGE_JS.values())
+        for text in pages:
+            for toggle in ("Show hidden", "show-parked", "f-hidden", "Parked only", "Hide hidden"):
+                self.assertNotIn(toggle, text)
+
+    def test_every_page_that_sets_rows_aside_draws_the_shells_group(self):
+        for name, key in self.PAGES.items():
+            with self.subTest(page=name):
+                self.assertRegex(PAGE_JS[name], r"shell\.aside\.(seg|buttons)\('" + re.escape(key) + "'")
+                self.assertRegex(PAGE_JS[name], rf"shell\.aside\.mode\('{key}'[,)]")
+
+
+class EveryPageHasOneReadAgain(unittest.TestCase):
+    """sd:6697 (operator, 2026-10-29): one Read again and Refresh model, as Research has it. The shell's head button
+    (window.PAGE_AGAIN) is the one re-read control on a page: no Observed cell re-reads and no page draws its own Read
+    again. Every source refresh is a Refresh <what> command, so its label names what it refreshes."""
+
+    PAGES = {**PAGE_JS, **{p.name: p.read_text(encoding="utf-8") for p in V2.glob("*.html")}}
+
+    def test_no_page_draws_a_second_read_again_control(self):
+        for name, text in self.PAGES.items():
+            with self.subTest(page=name):
+                self.assertNotIn('id="refresh"', text, "an Observed cell that reads the page again")
+                self.assertNotRegex(text, r">\s*Read again\s*<", "a page's own Read again button")
+
+    def test_the_r_key_presses_read_again(self):
+        line = SHELL_JS.split("if (e.key === 'r')")[1].split("\n")[0]
+        self.assertIn("document.getElementById('read-again')", line)
+        self.assertIn("a.click()", line)
+
+    def test_every_refresh_label_names_what_it_refreshes(self):
+        bare = re.compile(r"""label: '(Refresh(?: all)?)'|>\s*(Refresh(?: all)?)\s*</(?:button|span|h2)""")
+        for name, text in self.PAGES.items():
+            with self.subTest(page=name):
+                self.assertEqual([m.group(0) for m in bare.finditer(text)], [], "a Refresh that names no object")
+
+    def test_watches_refresh_says_it_runs_the_market_watch_job(self):
+        js = PAGE_JS["watches.js"]
+        self.assertIn("label: 'Refresh watches'", js)
+        self.assertRegex(js, r"label: 'Refresh watches'[^}]*does: '[^']*market-watch job")
 
 
 class EveryDisclosureHasOneArrow(unittest.TestCase):

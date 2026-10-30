@@ -11,20 +11,18 @@
 // (issues.with_github), and `github` names that read when it failed. State open, the default, hides a closed row; with
 // closed (?iss=closed) shows it, as the Pull requests view's State does.
 // sd:6175: Hide and Unhide on a row of either list post /api/github/issues/view, the view state Contributions' Hide writes,
-// each with Undo. A hidden row leaves its list, the tally and the tab count; Show hidden, in each list's filter bar and kept
-// as ?hidden=1, lists the hidden rows instead, with Unhide. A view store the read could not read hides nothing and turns
+// each with Undo. A hidden row leaves its list, the tally and the tab count; Open | Hidden | All (sd:6701), at the left of
+// each list's filter bar and kept as ?hidden=1 or ?hidden=all, lists the hidden rows alone, with Unhide, or every row. A view store the read could not read hides nothing and turns
 // both commands off with its reason.
 (() => {
   const { html, put } = window.markup;
   const $ = id => document.getElementById(id);
-  const I = n => html`<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
   let ISSUES = [], STORE = '';
-  const showHidden = () => new URLSearchParams(location.search).get('hidden') === '1';
-  const inView = r => !!r.hidden === showHidden();
+  const hid = () => window.shell.aside.mode('hidden'), showHidden = () => hid() === 'aside';
+  const inView = r => window.shell.aside.shows(hid(), r.hidden);
   // The read's view state: why Hide is off, or '' when it read.
   const storeOff = store => !store ? 'the read carried no view state' : store.available ? '' : store.reason || 'the view store was not read';
-  const hiddenSeg = n => window.shell.list.fseg('hidden', 'Hidden',
-    [{ v: '1', pressed: showHidden(), label: html`${I('eye-off')}Show hidden <span class="n">${String(n)}</span>` }]);
+  const hiddenSeg = (open, hidden) => window.shell.aside.seg('hidden', 'Hidden', hid(), { open, aside: hidden });
   const oid = r => `iss:${r.key}`;
   const title = r => html`<button type="button" data-iss-open="${oid(r)}">${r.title || r.ref}</button>`;
   const selected = r => html` data-id="${oid(r)}" aria-selected="${String(window.shell?.row?.() === oid(r))}"`;
@@ -34,10 +32,10 @@
   function draw({ issues = [], error = '', github = '', store } = READ) {
     READ = { issues, error, github, store };
     ISSUES = error ? [] : issues; STORE = storeOff(store);
-    // Every count below is of the rows in view: the unhidden ones, or the hidden ones under Show hidden.
+    // Every count below is of the rows in view: the unhidden ones, the hidden ones under Hidden, or both under All.
     const pool = ISSUES.filter(inView), open = pool.filter(isOpen), rows = closedToo() ? pool : open, L = window.shell?.list;
-    const hiddenN = ISSUES.filter(r => r.hidden && (closedToo() || isOpen(r))).length;
-    put($('issues'), error ? html`<tr class="empty"><td colspan="4">Issues could not be read: ${error}. Refresh tries again.</td></tr>`
+    const hiddenN = ISSUES.filter(r => r.hidden && (closedToo() || isOpen(r))).length, openN = ISSUES.filter(r => !r.hidden && (closedToo() || isOpen(r))).length;
+    put($('issues'), error ? html`<tr class="empty"><td colspan="4">Issues could not be read: ${error}. Read again tries again.</td></tr>`
       : html`${rows.length ? rows.map(r => html`<tr${selected(r)}>
         <td class="ref">${r.url ? html`<a href="${r.url}">${r.tracker} ${r.ref}</a>` : html`${r.tracker} ${r.ref}`}</td>
         <td class="what">${title(r)}</td>
@@ -45,10 +43,10 @@
         <td class="why">${isOpen(r) ? r.reason : `${r.state} · ${r.reason}`}</td></tr>`)
       : html`<tr class="empty"><td colspan="4">${showHidden() ? `No ${closedToo() ? '' : 'open '}issue is hidden.`
         : `No ${closedToo() ? '' : 'open '}issue is assigned to you or filed by you.`}</td></tr>`}${
-        github ? html`<tr class="empty"><td colspan="4">Your GitHub issues outside the repos' issue sources were not read: ${github}. Refresh tries again.</td></tr>` : ''}`);
+        github ? html`<tr class="empty"><td colspan="4">Your GitHub issues outside the repos' issue sources were not read: ${github}. Read again tries again.</td></tr>` : ''}`);
     put($('issues-tally'), pool.length && !error ? html`<span>${open.length} ${showHidden() ? 'hidden' : 'open'}</span>${closedToo() ? html`<span>${pool.length - open.length} closed in 7 d</span>` : ''}` : html``);
-    if (L) put($('issues-filters'), error ? html`` : L.fbar(html`${L.fseg('iss', 'State', [['open', open.length], ['closed', pool.length]].map(([v, n]) =>
-      ({ v, pressed: closedToo() === (v === 'closed'), label: html`${v === 'open' ? 'open' : 'with closed'} <span class="n">${String(n)}</span>` })))}${hiddenSeg(hiddenN)}`));
+    if (L) put($('issues-filters'), error ? html`` : L.fbar(html`${hiddenSeg(openN, hiddenN)}${L.fseg('iss', 'State', [['open', open.length], ['closed', pool.length]].map(([v, n]) =>
+      ({ v, pressed: closedToo() === (v === 'closed'), label: html`${v === 'open' ? 'open' : 'with closed'} <span class="n">${String(n)}</span>` })))}`));
     // The Your issues tab (sd:5080): the open rows not hidden, whichever list shows.
     window.shell?.view?.count('issues', error ? null : ISSUES.filter(r => isOpen(r) && !r.hidden).length);
     objects();
@@ -61,12 +59,12 @@
     window.shell.url(p.toString()); draw();
     $('issues-filters').querySelector?.(`[data-v="${v}"]`)?.focus();
   }
-  // Show hidden (sd:6175): one ?hidden=1 for both lists, as Contributions keeps it.
-  function pickHidden(bar) {
-    const p = new URLSearchParams(location.search);
-    if (showHidden()) p.delete('hidden'); else p.set('hidden', '1');
+  // Open | Hidden | All (sd:6175, sd:6701): one ?hidden= for both lists, as Contributions keeps it.
+  function pickHidden(bar, v) {
+    const p = new URLSearchParams(location.search), param = window.shell.aside.param(v);
+    if (param) p.set('hidden', param); else p.delete('hidden');
     window.shell.url(p.toString()); draw(); drawIntake();
-    $(bar).querySelector?.('[data-f="hidden"]')?.focus();
+    $(bar).querySelector?.(`[data-aside="hidden"][data-v="${v}"]`)?.focus();
   }
   // A Hide or Unhide that landed moves its row at once; the page then reads again (github.js), and a refusal reads again too.
   function landed(key, hidden) {
@@ -89,7 +87,7 @@
       ${REFUSED.has(r.key) ? html`<p class="refused" role="alert">Not filed: ${REFUSED.get(r.key)}</p>` : ''}`;
   }
   function drawIntake() {
-    put($('intake'), FAILED ? html`<tr class="empty"><td colspan="5">Issue intake could not be read: ${FAILED}. Refresh tries again.</td></tr>`
+    put($('intake'), FAILED ? html`<tr class="empty"><td colspan="5">Issue intake could not be read: ${FAILED}. Read again tries again.</td></tr>`
       : INTAKE.filter(inView).length ? html`${INTAKE.filter(inView).map(r => html`<tr${selected(r)}${BUSY.has(r.key) ? html` aria-busy="true"` : ''}>
         <td class="ref">${r.url ? html`<a href="${r.url}">GitHub ${r.ref}</a>` : html`GitHub ${r.ref}`}</td>
         <td class="what">${title(r)}</td>
@@ -100,7 +98,7 @@
     const waiting = INTAKE.filter(r => !FILED.has(r.key) && !r.hidden).length, hiddenN = INTAKE.filter(r => r.hidden).length;
     put($('intake-tally'), INTAKE.length && !FAILED ? html`<span>${showHidden() ? `${hiddenN} hidden` : `${waiting} waiting`}</span>` : html``);
     const L = window.shell?.list;
-    if (L) put($('intake-filters'), FAILED ? html`` : L.fbar(hiddenSeg(hiddenN)));
+    if (L) put($('intake-filters'), FAILED ? html`` : L.fbar(hiddenSeg(INTAKE.length - hiddenN, hiddenN)));
     window.shell?.view?.count('intake', FAILED ? null : waiting); // the Intake tab
     objects();
   }
@@ -119,8 +117,8 @@
   document.addEventListener('click', e => {
     const s = e.target?.closest?.('#issues-filters [data-f="iss"]');
     if (s) return pickState(s.dataset.v);
-    const h = e.target?.closest?.('#issues-filters [data-f="hidden"], #intake-filters [data-f="hidden"]');
-    if (h) return pickHidden(h.closest?.('#intake-filters') ? 'intake-filters' : 'issues-filters');
+    const h = e.target?.closest?.('#issues-filters [data-aside="hidden"], #intake-filters [data-aside="hidden"]');
+    if (h) return pickHidden(h.closest?.('#intake-filters') ? 'intake-filters' : 'issues-filters', h.dataset.v);
     const b = e.target && e.target.closest && e.target.closest('#intake button[data-key]');
     if (b) return file(b.dataset.key);
     const opened = e.target?.closest?.('[data-iss-open]');
@@ -176,7 +174,7 @@
       risk: 'safe', primary: () => true, when: o => !!o.url || 'the stored address is not a web address', cli,
       run: o => { window.open(o.url, '_blank', 'noopener'); return `${label} in a new tab`; } });
     // sd:6175: Hide and Unhide, the view state Contributions' Hide writes; Undo posts the other value. Nothing expires it.
-    const hides = on => [[true, 'hide', 'Hide', 'Hides this issue from its list and counts; Undo shows it again.', 'eye-off', 'Hidden', '. Show hidden lists it.'],
+    const hides = on => [[true, 'hide', 'Hide', 'Hides this issue from its list and counts; Undo shows it again.', 'eye-off', 'Hidden', '. Hidden lists it.'],
       [false, 'unhide', 'Unhide', 'Shows this issue in its list again; Undo hides it.', 'eye', 'Unhidden', '']].map(([hidden, id, label, does, icon, done, after]) => (
       { id: `${on}.${id}`, on, label, does, key: 'h', icon, risk: 'undo',
         when: o => o.hidden === hidden ? (hidden ? 'already hidden' : 'not hidden') : STORE ? `Hide is off: ${STORE}` : true,

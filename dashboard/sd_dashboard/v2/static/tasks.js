@@ -67,10 +67,12 @@ addEventListener('DOMContentLoaded', () => {
     : 'Select a task to see its fields and moves.';
   const note = t => t.unlisted ? html`<p class="why">The list, board and matrix leave #${t.id} out: ${t.unlisted}.</p>`
     : LINK === t.key && !visible().some(x => x.key === t.key) ? html`<p class="why">The view or filters hide #${t.id}; it stays selected until you pick another.</p>` : '';
-  // The rows every view lists: a parked row shows only under Scope's Parked only (sd:3012), and a scheduled occurrence, a
-  // repeating task's next row before due minus its lead (reads.opens_on_clause, pack sd:5648), under Scheduled only.
+  // The rows every view lists: a parked row shows only under Parked or All (sd:3012, sd:6701), and a scheduled occurrence,
+  // a repeating task's next row before due minus its lead (reads.opens_on_clause, pack sd:5648), under Scheduled only.
   const listed = () => tasks.filter(t => !t.parked && !t.scheduled);
-  const scoped = t => F.active.has('parked') ? !!t.parked : !t.parked && !!t.scheduled === F.active.has('scheduled');
+  let PARKED = 'open';
+  const scoped = t => t.parked ? window.shell.aside.shows(PARKED, true)
+    : window.shell.aside.shows(PARKED, false) && !!t.scheduled === F.active.has('scheduled');
   // sd:6263: the shown realm tab (PAGE_VIEWS above). A row's area is the server's (places.area_of), the rule the HOA and
   // Home pages' Tasks views use, so HOA and Home hold their rows; its realm is places.realm_of (sd:5064). Metrics' and
   // Today's links name ?realm=all, as sd:5753's filter kept it: an address's ?realm= shows that tab.
@@ -108,7 +110,7 @@ addEventListener('DOMContentLoaded', () => {
   // page take the query v1 /backlog took (status, age, active=1, q, page), so Operations' histogram bars and the capture
   // check land here with their filter. sd:6233: Status has no dropdown now; an address's ?status= (Today's Landed 24h and
   // Blocked) still narrows, and its chip clears it.
-  // build (sd:3012): Parked swaps the listed rows for the ones the nightly prune parked, for triage's Unpark.
+  // build (sd:3012): Parked (sd:6701) swaps the listed rows for the ones the nightly prune parked, for triage's Unpark.
   // build (sd:3977): Base narrows to one vault base's rows; it shows once a row has a base.
   const F = { kind: new Set(), repo: new Set(), p: new Set(), due: new Set(), status: new Set(), age: new Set(), active: new Set() };
   // sd:5649: the list's optional columns the Columns menu shows, kept in the address as ?cols=.
@@ -135,9 +137,9 @@ addEventListener('DOMContentLoaded', () => {
       combo('p', 'Priority', [['1', 'P1'], ['2', 'P2'], ['3', 'P3'], ['4', 'P4'], ['', 'unset']].map(([v, l]) => [v || 'unset', l]))}${
       combo('due', 'Due', DUE_OPTS, html`<button class="help" type="button" aria-label="Help: due filter" data-help="Buckets count from today. <b>≤ 7 days</b> is the same window the matrix calls urgent. An old link may name two buckets; they widen the view, and filters narrow it.">${ICON('circle-help')}</button>`)}${
       combo('age', 'In status', AGES.map(a => [a.key, a.label]), html`<button class="help" type="button" aria-label="Help: in status filter" data-help="Days since the task's last status change, in the buckets the Operations Progress histogram counts (<code>reads.age_bucket</code>). A bar there opens its bucket here.">${ICON('circle-help')}</button>`)}${
-      // sd:5643: Scope holds Parked too, as one choice: open and done (the default), open only, or the parked rows only.
-      // sd:5649: and Scheduled only, the repeating tasks' next rows that have not opened yet.
-      combo('active', 'Scope', [['1', 'Open only'], ['parked', 'Parked only'], ['scheduled', 'Scheduled only']], html`<button class="help" type="button" aria-label="Help: scope filter" data-help="<b>Open only</b> hides Done tasks, as the Operations histogram counts only open ones. The nightly prune parks an open P4 task untouched for 30 days, and a planning task that never ran untouched for 90 days; parked tasks stay off every other scope. <b>Parked only</b> lists them, and <b>Unpark</b> brings one back with its fields and history. Completing a repeating task opens its next row at once; it stays off every other scope, and off Today, until its due date less its lead. <b>Scheduled only</b> lists those rows with the day each opens.">${ICON('circle-help')}</button>`, 'Open and done')}${
+      // sd:5643: Scope is one choice: open and done (the default) or open only; sd:5649: or Scheduled only, the repeating
+      // tasks' next rows that have not opened yet. Parked left it for the toolbar's Open | Parked | All (sd:6701).
+      combo('active', 'Scope', [['1', 'Open only'], ['scheduled', 'Scheduled only']], html`<button class="help" type="button" aria-label="Help: scope filter" data-help="<b>Open only</b> hides Done tasks, as the Operations histogram counts only open ones. The nightly prune parks an open P4 task untouched for 30 days, and a planning task that never ran untouched for 90 days; parked tasks show under the toolbar's <b>Parked</b> or <b>All</b>, and <b>Unpark</b> brings one back with its fields and history. Completing a repeating task opens its next row at once; it stays off every other scope, and off Today, until its due date less its lead. <b>Scheduled only</b> lists those rows with the day each opens.">${ICON('circle-help')}</button>`, 'Open and done')}${
       // sd:5649: the list's optional columns, hidden by default. Not a filter: no chip, and Clear all keeps it.
       view === 'list' && LEAD ? window.shell.list.pick('cols', 'Columns', COL_OPTS, SHOW.cols, { all: 'Default', multi: true }) : ''}${
       // sd:6233: the board's Done column, off by default. Not a filter either: the list and the matrix ignore it.
@@ -148,7 +150,7 @@ addEventListener('DOMContentLoaded', () => {
   const FNAME = { kind: 'Kind', repo: 'Repo', p: 'Priority', due: 'Due', status: 'Status', age: 'In status', active: 'Scope' };
   const kindWord = v => (v.startsWith('base:') ? `${v.slice(5)} (plugin kind)` : v);
   const fvalue = (k, v) => k === 'kind' ? kindWord(v) : k === 'p' ? (v && v !== 'unset' ? 'P' + v : 'unset') : k === 'due' ? DUE_OPTS.find(o => o[0] === v)?.[1] || v : k === 'status' ? slabel(v)
-    : k === 'age' ? AGES.find(a => a.key === v)?.label || v : k === 'active' ? ({ parked: 'Parked only', scheduled: 'Scheduled only' }[v] || 'Open only') : v;
+    : k === 'age' ? AGES.find(a => a.key === v)?.label || v : k === 'active' ? (v === 'scheduled' ? 'Scheduled only' : 'Open only') : v;
   const activeFilters = () => [...FKEYS.flatMap(k => [...F[k]].map(v => ({ key: `${k}:${v}`, label: `${FNAME[k]}: ${fvalue(k, v)}` }))), ...(Q ? [{ key: 'q', label: `Text: ${Q}` }] : [])];
   document.getElementById('filters').addEventListener('click', e => {
     if (e.target.closest('[data-unfilter-all]')) { clearFilters(); return; }
@@ -535,6 +537,9 @@ addEventListener('DOMContentLoaded', () => {
     const w = SWEEP_NAME[place()] && SWEEPS?.[place()];
     // Each realm tab carries its tasks (sd:5524), so the line under the title counts none.
     window.PAGE_VIEWS.forEach(v => window.shell.view.count(v.id, listed().filter(t => inPlace(t, v.id)).length));
+    // Open counts as the realm tab does: the listed rows, not the scheduled ones.
+    const held = tasks.filter(t => t.parked && inPlace(t)).length;
+    put(document.getElementById('parked-seg'), window.shell.aside.buttons('parked', 'Parked', PARKED, { open: placed().length, aside: held }));
     put(document.getElementById('subhead'), html`${parked ? `${parked} parked · ` : ''}${scheduled ? `${scheduled} scheduled · ` : ''}read ${READ ? html`<time class="rel" datetime="${READ}"></time>` : 'not yet'} · ${SUB[view]}${why}${w ? html` · <span class="sweep" data-sweep="${place()}">${SWEEP_NAME[place()]} ${sweepText(w)} ${C.rowActions('sweep:' + place())}</span>` : ''}`);
   }
   // The view menu (sd:5064): one button shows the current view's icon; its menu lists the three, one checked. The shell
@@ -548,6 +553,10 @@ addEventListener('DOMContentLoaded', () => {
     subhead();
     render();
   }
+  document.getElementById('parked-seg').addEventListener('click', e => {
+    const b = e.target.closest('button[data-aside="parked"]'); if (!b) return;
+    PARKED = b.dataset.v; L.page = 1; subhead(); render();
+  });
   function readFilterURL() {
     const q = new URLSearchParams(location.search);
     FKEYS.forEach(key => (q.get(key) || '').split(',').filter(Boolean).forEach(v => F[key].add(v)));
@@ -555,9 +564,10 @@ addEventListener('DOMContentLoaded', () => {
     (q.get('base') || '').split(',').filter(Boolean).forEach(v => F.kind.add(`base:${v}`));
     // An age v1 would not accept is dropped, as v1 dropped it; active takes 1 only, as v1's ?active=1 did.
     [...F.age].forEach(v => { if (!AGES.some(a => a.key === v)) F.age.delete(v); });
-    // An older address's ?parked=1 is Scope's Parked only now (sd:5643).
-    if (q.get('parked') === '1') { F.active.clear(); F.active.add('parked'); }
-    [...F.active].forEach(v => { if (!['1', 'parked', 'scheduled'].includes(v)) F.active.delete(v); });
+    // ?parked=1 or all picks Parked or All (sd:6701); sd:5643's ?active=parked is Parked too.
+    PARKED = window.shell.aside.mode('parked', q);
+    if (F.active.delete('parked')) PARKED = 'aside';
+    [...F.active].forEach(v => { if (!['1', 'scheduled'].includes(v)) F.active.delete(v); });
     (q.get('cols') || '').split(',').filter(v => COL_OPTS.some(o => o[0] === v)).forEach(v => SHOW.cols.add(v));
     SHOW.done = q.get('done') === '1';
     find.value = (q.get('q') || '').trim(); Q = find.value.toLowerCase();
@@ -569,6 +579,7 @@ addEventListener('DOMContentLoaded', () => {
     const q = new URLSearchParams(); q.set('view', view);
     FKEYS.forEach(key => { if (F[key].size) q.set(key, [...F[key]].join(',')); });
     if (Q) q.set('q', Q);
+    const pp = window.shell.aside.param(PARKED); if (pp) q.set('parked', pp);
     if (SHOW.cols.size) q.set('cols', [...SHOW.cols].join(','));
     if (SHOW.done) q.set('done', '1');
     if (view === 'list') window.shell.list.listQuery(q, L, LIST);

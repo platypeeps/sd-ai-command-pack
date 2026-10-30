@@ -116,7 +116,7 @@
       line.hidden = !n;
     }
     if (!LIST) {
-      put(tb, html`<tr class="empty"><td colspan="4">Decisions could not be read: ${failed}. Refresh tries again.</td></tr>`);
+      put(tb, html`<tr class="empty"><td colspan="4">Decisions could not be read: ${failed}. Read again tries again.</td></tr>`);
       put($('decisions-tally'), html``); window.decideCount?.('decisions', null);
       return;
     }
