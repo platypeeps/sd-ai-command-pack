@@ -107,7 +107,7 @@
     const resolveFollowup = o => write(`/api/notes/${o.source.followups[0]}/resolve`, { revision: o.source.revision })
       .then(() => `Followup resolved · note ${o.source.followups[0]}`);
     const reopen = (o, acked) => write(`/api/reports/${o.n}/reopen`, { revision: acked.revision }).then(() => true);
-    const task = on => ({ id: `${on}.task`, on, label: 'Make task', does: 'Opens Capture to file a task about this report.', key: 'k', risk: 'safe', journal: () => 'new', cli: o => `sd task add ${shq(o.label)}`, run: o => { shell.capture(o, '', `${on}.task`); return null; } }); // the filed task is the write
+    const task = on => ({ id: `${on}.task`, on, label: 'Make task', does: 'Opens Capture to file a task about this report.', key: 'k', risk: 'safe', journal: () => 'new', cli: o => `sd task add --priority 3 ${shq(o.label)}`, run: o => { shell.capture(o, '', `${on}.task`); return null; } }); // the filed task is the write
     // sd:5886: the server prints the job's log, as commands.js's Show log does, and Details shows it under the report.
     const log = on => ({ id: `${on}.log`, on, label: 'Show log', does: 'Prints the job\'s last 200 log lines in Details.', key: 'l', risk: 'safe', executes: true, when: o => logOf(o) || 'this report came from sd-db, not a job log', cli: o => window.commands.logLine(o.job),
       sends: o => `POST /api/actions/run {action: job.log, job: ${o.job}}`, run: o => window.commands.runAction(o, 'job.log', { job: o.job }) });
