@@ -4207,6 +4207,31 @@ class CancelMerged(SharedQueue):
         self.assertEqual(refused.exception.code, sd_lane.PUBLISH_UNKNOWN)
         self.assertEqual(self.entries()[0]["status"], "prepared")
 
+    def test_a_done_items_prepared_entry_whose_head_is_absent_here_is_cancelled(self) -> None:
+        """pack sd:6805: a head another machine queued, never fetched here, cannot be read; a done item's
+        merged receipt is the proof. While the item is open the absent head stays unknown and refuses."""
+        import sd_db
+        self.prepared()
+        absent = "3" * 40
+        sd_lane.update(self.store(), lambda rows: rows[0].update(expected_head=absent))
+        self.merged_receipt("topic-1", 1, "2" * 40)
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual(refused.exception.code, sd_lane.PUBLISH_UNKNOWN)
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            if connection.execute("SELECT 1 FROM item WHERE id = 1").fetchone():
+                connection.execute("UPDATE item SET status = 'done' WHERE id = 1")
+            else:
+                connection.execute("INSERT INTO item(id, kind, title, status, created_at, updated_at) VALUES "
+                                   "(1, 'task', 'one', 'done', '2026-10-09T00:00:00Z', '2026-10-09T00:00:00Z')")
+            connection.commit()
+        finally:
+            connection.close()
+        cancelled = sd_lane.cancel(self.repo, 1, self.environ)
+        self.assertEqual((cancelled["status"], [row["status"] for row in self.entries()]), ("cancelled", ["cancelled"]))
+        self.assertIn(f"sd:1 is done; its receipt merged at {'1' * 40}", cancelled["reason"])
+
     def test_an_unreadable_receipt_proves_no_merge_and_blocks_no_other_cancel(self) -> None:
         """Failures: a receipt that cannot be read is no proof, so it refuses, and a pending cancel is as before."""
         import sd_db
