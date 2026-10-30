@@ -278,7 +278,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     }
     const t0 = Date.parse(T.since), t1 = Date.parse(T.until), X0 = 64, W = 900, x = at => (X0 + (W - X0 - 8) * (Date.parse(at) - t0) / (t1 - t0)).toFixed(1);
     const marks = LANES.flatMap(([k, label]) => T[k].map(m => ({ ...m, lane: k, label })));
-    const said = `Last 24 hours: ${T.landed.length} landed, ${plural(T.jobs.length, 'job')} failed, ${plural(T.briefs.length, 'brief')} filed, ${plural(T.live.length, 'session')} started`;
+    const said = `Last 24 hours: ${T.landed.length} landed, ${plural(T.jobs.length, 'job')} failed, ${plural(T.briefs.length, 'brief')} filed, ${plural(T.live.length, 'session')} live`;
     const ticks = [];
     for (let t = Math.ceil(t0 / 36e5) * 36e5; t <= t1; t += 36e5) if (new Date(t).getHours() % 3 === 0) ticks.push(t);
     const mark = m => { const at = x(m.at), tip = html`<title>${hm(m.at)} UTC · ${m.what}</title>`;
@@ -291,7 +291,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
       ${ticks.map(t => html`<line class="grid" x1="${x(new Date(t).toISOString())}" y1="6" x2="${x(new Date(t).toISOString())}" y2="80"/><text class="axis" x="${x(new Date(t).toISOString())}" y="94" text-anchor="middle">${String(new Date(t).getHours()).padStart(2, '0')}:00</text>`)}
       ${LANES.map(([, label, y]) => html`<text class="lane-l" x="0" y="${y + 4}">${label}</text>`)}
       ${marks.map(mark)}<line class="now" x1="${x(T.until)}" y1="4" x2="${x(T.until)}" y2="82"/></svg>`
-      : html`<p class="why">Nothing landed, failed, was filed or started in the last 24 hours.</p>`);
+      : html`<p class="why">Nothing landed, failed, was filed or ran in the last 24 hours.</p>`);
     const K2 = T.key;
     put($('flowkey'), html`<li><a href="/tasks?view=list&amp;status=done&amp;age=0&amp;realm=all">Landed 24h</a></li><li><b>${K2.landed}</b></li>
       <li><a href="/queue">Landing</a></li><li><b>${K2.landing}</b></li>

@@ -223,6 +223,20 @@ class TheTrack(ReportsCase):
         self.assertEqual(found["live"], [])
         self.assertEqual(found["key"], {"landed": 1, "landing": 1, "due_week": 1, "blocked": 3})
 
+    def test_a_session_started_before_the_window_is_live_from_the_windows_start(self):
+        """sd:6710: Live shows every session running now; one started days ago spans the whole window."""
+        from sd_db import today
+
+        active = {"rows": [{"item": 5585, "session": "Worktree old", "started": "2026-09-02T08:00:00Z"},
+                           {"item": 9, "session": "Worktree new", "started": "2026-09-06T11:30:00Z"}]}
+        with mock.patch.object(today, "delivered", return_value=[]), \
+                mock.patch.object(today, "planned", return_value=[]), \
+                mock.patch.object(today, "blocked", return_value=[]):
+            found = now_screen.track(self.connection, NOW, rows=[], briefs=[], active=active,
+                                     lane={"merging": 0, "next": 0})
+        self.assertEqual([(m["at"], m["item"]) for m in found["live"]],
+                         [("2026-09-05T12:00:00Z", 5585), ("2026-09-06T11:30:00Z", 9)])
+
     def test_a_read_that_failed_is_its_reason(self):
         import sqlite3
 

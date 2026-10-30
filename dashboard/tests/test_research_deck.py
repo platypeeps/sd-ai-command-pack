@@ -74,7 +74,10 @@ if mode == "fail":
     sys.exit(1)
 if mode == "sleep":
     time.sleep(30)
-if mode != "silent":
+if mode == "mirror":
+    print("mirror: queued 10-notes/notes.md -> notion:abc")
+    print("mirror: 20-report/report.md: unchanged since it was last mirrored; not queued again")
+if mode not in ("silent", "mirror"):
     os.makedirs("docs/dashboard", exist_ok=True)
     open("docs/dashboard/deck.pptx", "wb").write(b"pptx")
     print("wrote docs/dashboard/deck.pptx: 3 slides")
@@ -231,6 +234,18 @@ class BuildDeck(unittest.TestCase):
             self.assertEqual(research_deck.run(record), 1)
         self.assertTrue(json.loads(record.read_text(encoding="utf-8"))["reason"].startswith("sd-research-kit render exited 1: "))
         self.assertTrue(callable(research_deck.request({"repo": "research/nodeck"}, verb="render")))
+
+    def test_a_render_keeps_its_mirror_lines_for_the_page(self):
+        """sd:6698: a render queues the Notion mirrors and a session writes them later; the run keeps the kit's
+        `mirror:` lines, so Details can say which were queued."""
+        brief(self.root, "research/nodeck", deck=False)
+        status, run = research_deck.start("research/nodeck", self.root, verb="render", spawn=self.spawn)
+        record = research_deck.state_dir() / "runs" / f"{run['id']}.json"
+        with mock.patch.dict(os.environ, {"FAKE_MODE": "mirror"}):
+            self.assertEqual(research_deck.run(record), 0)
+        self.assertEqual(research_deck.status(run["id"])[1]["mirrors"],
+                         ["mirror: queued 10-notes/notes.md -> notion:abc",
+                          "mirror: 20-report/report.md: unchanged since it was last mirrored; not queued again"])
 
     def test_review_runs_the_kits_review_and_keeps_its_report_for_the_page(self):
         """sd:5655: Review runs `sd-research-kit review` in the checkout; the run keeps what it printed, pass or fail."""
