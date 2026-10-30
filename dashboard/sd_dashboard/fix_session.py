@@ -27,6 +27,11 @@ answers them on Writing's Details through `/api/decisions/answer`. `{"grill": "a
 which edits the draft to follow each ruling and leaves the edit uncommitted; it is refused while a question is open or
 before one is answered.
 
+**Apply review on a piece** (pack sd:6699). Writing posts `/api/items/<id>/fix` with `{"apply": "adversarial"}` for a
+piece whose `adversarial.md` exists: step 2 then starts claude on `APPLY`, which edits the draft for each finding or
+rejects it with a reason, records each with `sd writing reconcile`, and leaves the edit an uncommitted diff in the
+piece's repository. It commits, stages and publishes nothing.
+
 **Fix on a Today Now row** (sd:5652). Today posts `/api/now/fix` with a Now row's id for the rows no other command
 addresses: a repo ahead, dirty or pinned, the abandoned worktrees, and every dark row but the pull request collector's
 (a failed job shows Run now, a pull request Open on GitHub and the pull request collector Re-run collector, each
@@ -52,7 +57,7 @@ from sd_db import operations, paths, workflow
 from sd_db.config import system_checkout
 from sd_db.errors import SdDbError
 
-__all__ = ["ANSWERS", "CHECKOUT", "GRILL", "HERDR", "NOTE", "TIMEOUT", "prompt", "request", "row_prompt", "row_request", "start", "start_row"]
+__all__ = ["ANSWERS", "APPLY", "CHECKOUT", "GRILL", "HERDR", "NOTE", "TIMEOUT", "prompt", "request", "row_prompt", "row_request", "start", "start_row"]
 
 #: The system checkout (`SYSTEM_TOOLS_ROOT`, sd:5987): a report that names no repo is fixed here.
 CHECKOUT = system_checkout()
@@ -75,6 +80,12 @@ GRILL = ("Grill piece sd:{id} for its author. Read `sd task show {id}` for the p
 ANSWERS = ("Apply the grill answers to piece sd:{id}. Read `sd task show {id}`: each `Ruling on note #N` decision answers "
            "question note #N. Read the `## Draft` of the piece's index.md and edit it so it follows each answer. Leave "
            "the draft edit an uncommitted diff for the operator to read. Commit nothing, stage nothing and publish nothing.")
+APPLY = ("Apply the adversarial review of piece sd:{id}. Read `sd task show {id}` for the piece's path, then its "
+         "adversarial.md and the `## Draft` of its index.md. Check each finding at its source: where it holds, edit the "
+         "draft; where it does not, reject it with a reason. Write what became of each finding, applied or rejected with "
+         "its reason, to a note file and record it with `sd writing reconcile --piece <year/slug> --artifact adversarial "
+         "--note-file <file>`. Leave the draft edit an uncommitted diff for the operator to read. Commit nothing, stage "
+         "nothing and publish nothing.")
 DEBUG = ("Use the sd-debug skill on report sd:{id}: read `sd task show {id}` and the job's log, find the root cause "
          "and fix it. Acknowledge the report (`sd reports acknowledge {id}`) only after a clean run.")
 
@@ -112,9 +123,9 @@ def row_prompt(kind: str, *, source: str = "") -> str:
     return ROW[kind].format(checkout=CHECKOUT, pack=pack_library().parent, source=source)
 
 
-def prompt(kind: str, item: int, *, grill: str | None = None) -> str:
-    """The text the new session starts on: a piece's grill step, a debug session for a report, else a builder."""
-    text = {"ask": GRILL, "apply": ANSWERS}.get(grill) or (DEBUG if kind == "report" else BUILD)
+def prompt(kind: str, item: int, *, grill: str | None = None, apply: bool = False) -> str:
+    """The text the new session starts on: a piece's grill step or Apply review, a debug session for a report, else a builder."""
+    text = {"ask": GRILL, "apply": ANSWERS}.get(grill) or (APPLY if apply else DEBUG if kind == "report" else BUILD)
     return text.format(id=int(item))
 
 
@@ -131,7 +142,7 @@ def checkout(row: dict) -> Path:
     return directory
 
 
-def start(connection, item: int, *, expected_revision: str, who: str, grill: str | None = None):
+def start(connection, item: int, *, expected_revision: str, who: str, grill: str | None = None, apply: bool = False):
     """Steps 1 to 3 above: the item's state with the note, and `fix`; or `(status, {"error"})` when no session is known."""
     with LAUNCHING:
         state = workflow.item_state(connection, item)
@@ -144,9 +155,12 @@ def start(connection, item: int, *, expected_revision: str, who: str, grill: str
             raise workflow.WorkflowError(f"item {item} is a routine brief; Fix starts no debug session for one (sd:3459)")
         if grill:
             _grillable(row, state["notes"], grill)
+        if apply:
+            _reviewed(row)
         directory = checkout(row)
-        session = {"ask": "grill", "apply": "apply-answers"}.get(grill) or ("debug" if row["kind"] == "report" else "builder")
-        pane = _launch(directory, f"sd-{item}", prompt(row["kind"], item, grill=grill))
+        session = ({"ask": "grill", "apply": "apply-answers"}.get(grill)
+                   or ("apply-review" if apply else "debug" if row["kind"] == "report" else "builder"))
+        pane = _launch(directory, f"sd-{item}", prompt(row["kind"], item, grill=grill, apply=apply))
         if isinstance(pane, tuple):
             return pane
         where = paths.key(str(directory))
@@ -171,6 +185,16 @@ def _grillable(row: dict, notes: list[dict], grill: str) -> None:
         raise workflow.WorkflowError(f"{asked} grill question{'s are' if asked > 1 else ' is'} open; answer them first")
     if not any(note["kind"] == "decision" and note["body"].startswith("Ruling on note #") for note in notes):
         raise workflow.WorkflowError("no grill question is answered yet; answer one grill question first")
+
+
+def _reviewed(row: dict) -> None:
+    """Apply review's item: a piece with an `adversarial.md`, else `WorkflowError` naming what is missing."""
+    from sd_db import writing
+
+    if row["kind"] != "idea" or not row.get("piece"):
+        raise workflow.WorkflowError(f"item {row['id']} is not a writing piece; Apply review applies a piece's review")
+    if not writing.piece_files(row).get("adversarial.md"):
+        raise workflow.WorkflowError(f"{row['piece']} has no adversarial.md; run Refresh review first")
 
 
 def _launch(directory: Path, label: str, text: str):
@@ -251,6 +275,7 @@ def row_request(values: dict, *, fleet=None, jobs=None):
 
 def request(number: int, values: dict, revision: str):
     """The POST's checks, before the server opens a writer; the write as `action_route` returns one."""
-    if values not in ({}, {"grill": "ask"}, {"grill": "apply"}):
-        raise ValueError("Fix takes only the item revision, and on a piece grill: ask or apply.")
-    return lambda connection: start(connection, number, expected_revision=revision, who="dashboard", grill=values.get("grill"))
+    if values not in ({}, {"grill": "ask"}, {"grill": "apply"}, {"apply": "adversarial"}):
+        raise ValueError("Fix takes only the item revision, and on a piece grill: ask or apply, or apply: adversarial.")
+    return lambda connection: start(connection, number, expected_revision=revision, who="dashboard", grill=values.get("grill"),
+                                    apply="apply" in values)

@@ -24,6 +24,10 @@ wrote the work: codex, at the model and effort the `adversarial.model` and `adve
           (`_fetch`), so codex's sandbox needs no network. The brief names the row's key in its front matter, which is
           how `source_reviews` finds a row's reviews: a re-run files a brief of its own, and a ledger edit that keeps
           the key keeps them.
+  piece   a writing piece's item id (pack sd:6699). The runner takes `sd writing adversarial`'s own steps on the
+          database the server reads: the `writing-draft` lens, codex read-only in the piece's repository, and the report
+          written to the piece's `adversarial.md` with its draft stamp. It files no brief and no batch: the piece's
+          Apply review (`fix_session`) acts on the report, and the item's note names it.
 
 `start` runs in the POST, in four steps, and answers 202 at once:
 
@@ -87,7 +91,7 @@ __all__ = ["DEEP", "EFFORT", "GATE", "KINDS", "MODEL", "NOTE", "QUEUE", "SETTING
 CHECKOUT = system_checkout()
 GATE = CHECKOUT / "local-adversarial-gate" / "adversarial-gate.sh"
 RANK = CHECKOUT / "local-adversarial-gate" / "rank.py"
-KINDS = ("task", "brief", "repo", "change", "deep", "source")
+KINDS = ("task", "brief", "repo", "change", "deep", "source", "piece")
 #: The model and effort when no `adversarial.model` or `adversarial.effort` row names one.
 MODEL = "gpt-6-astra"
 EFFORT = "high"
@@ -134,7 +138,7 @@ TITLE_CHARS = 120
 WHY_BYTES = 3000
 EVIDENCE_CHARS = 300
 EVIDENCE_LINES = 5
-RUN_ID = re.compile(r"(task|brief|repo|change|deep|source)-[A-Za-z0-9._-]{1,60}-[0-9]{8}T[0-9]{6}Z")
+RUN_ID = re.compile(r"(task|brief|repo|change|deep|source|piece)-[A-Za-z0-9._-]{1,60}-[0-9]{8}T[0-9]{6}Z")
 REF = re.compile(r"[A-Za-z0-9._/-]{1,200}")
 #: A line the lenses ask for under each hypothesis, bulleted or bold or neither.
 TAG = re.compile(r"^\s*(?:[-*+]\s+)?(?:\*\*)?(Recommendation|Evidence|Repo)(?:\*\*)?\s*:(?:\*\*)?\s*(.*?)\s*$", re.IGNORECASE)
@@ -143,6 +147,7 @@ RESERVED = re.compile(r"^[ \t]*(Option|Subject|Evidence):")
 
 NOTE = ("Adversarial review ({model}, {effort} effort): brief {stem} (sd:{brief}); recommendations: {count}, to pick in "
         "review batch {batches}. Top hypotheses: {titles}. These are hypotheses for a person to check, not findings.")
+WRITTEN = "Adversarial review ({model}): adversarial.md for {piece} written; Apply review acts on its findings."
 FAILED = "Adversarial review failed ({model}, {effort} effort): {reason}. Input: {input}."
 
 
@@ -315,6 +320,16 @@ def _resolve_brief(connection, target) -> dict:
             f"- filed as: {row.get('external_id') or 'unknown'}\n\n## Brief\n\n{_text(row.get('body')).strip() or '(empty)'}\n")
     return {"checkout": checkout, "repo": checkout, "label": str(row["id"]), "item": row["id"], "input": text,
             "sets": {}}
+
+
+def _resolve_piece(connection, target) -> dict:
+    from sd_db import writing
+
+    item = _item_id(target, "target")
+    brief = writing.adversarial_brief(connection, item)
+    root = Path(brief["root"])
+    return {"checkout": root, "repo": root, "label": str(item), "item": item, "input": None, "sets": {},
+            "result": (root / brief["draft"]).with_name("adversarial.md"), "extra": {"piece": brief["piece"]}}
 
 
 def _registered(connection, path) -> Path | None:
@@ -530,6 +545,8 @@ def _resolve(connection, kind: str, target, base, item, body, pr, source=None) -
         return _resolve_task(connection, target)
     if kind == "brief":
         return _resolve_brief(connection, target)
+    if kind == "piece":
+        return _resolve_piece(connection, target)
     if kind in ("repo", "deep"):
         return _resolve_repo(connection, target)
     if pr is not None:
@@ -576,7 +593,7 @@ def start(connection, kind: str, target, *, base=None, item=None, body=None, pr=
         record = runs / f"{run_id}.json"
         if record.exists():
             return 409, {"error": f"Run {run_id} started this second; start it again in a moment."}
-        result = runs / f"{run_id}.md"
+        result = plan.get("result") or runs / f"{run_id}.md"
         written = runs / f"{run_id}.input.md" if plan["input"] is not None else None
         sets = {**plan["sets"], **({"INPUT_PATH": str(written)} if written else {})}
         # `render` reads its --set values one per line, so a newline would end one early.
@@ -896,7 +913,9 @@ def _file(document: dict) -> str | None:
     try:
         with transaction(connection):
             fields, body = {}, None
-            if document["state"] == "done":
+            if document["state"] == "done" and document["kind"] == "piece":
+                body = WRITTEN.format(model=document["model"], piece=document["piece"])
+            elif document["state"] == "done":
                 fields, body = _file_done(connection, document)
             else:
                 body = FAILED.format(model=document["model"], effort=document["effort"], reason=document["reason"],
@@ -1070,6 +1089,31 @@ def _reason(log: str, code: int, document: dict) -> str:
     return f"{said[-1]} (exit {code})" if said else f"the gate exited {code} with no message"
 
 
+def _piece(document: dict) -> str | None:
+    """A piece's review, as `sd writing adversarial` takes it, on the server's database; None when the report landed."""
+    for folder in (str(Path(document["library"]).parent / "bin"), document["library"]):
+        if folder not in sys.path:
+            sys.path.insert(0, folder)
+    try:
+        import argparse
+
+        import sd_db
+        import sd_writing
+        from sd_db import writing
+
+        connection = sd_db.connect(document["database"])
+    except Exception as problem:  # noqa: BLE001 - the runner has no one else to tell
+        return f"the review did not start: {type(problem).__name__}: {problem}"
+    try:
+        sd_writing.adversarial(writing, connection, document["item"],
+                               argparse.Namespace(model=document["model"], timeout=document["timeout"]))
+    except Exception as problem:  # noqa: BLE001 - a refusal is the run's reason
+        return str(problem) or type(problem).__name__
+    finally:
+        connection.close()
+    return None
+
+
 def run(record: Path, lock: int | None = None) -> int:
     """The runner: the gate, its outcome and the filing; the exit code is 0 for a done run and 1 for a failed one.
 
@@ -1078,6 +1122,23 @@ def run(record: Path, lock: int | None = None) -> int:
     document = json.loads(record.read_text(encoding="utf-8"))
     document.update(state="running", pid=os.getpid())
     _write(record, document)
+    reason = _piece(document) if document["kind"] == "piece" else _gate(document, record, lock)
+    finished = _iso(datetime.datetime.now(datetime.timezone.utc))
+    document.update(state="failed" if reason else "done", reason=reason, finished=finished)
+    if _files(document):
+        _write(record, document)
+        problem = _file(document)
+        document["filed"] = "written" if problem is None else f"not written: {problem}"
+    # The gate has exited, so this is the lock's last descriptor: it goes before the write a page reads as settled,
+    # so a review started at once finds the lock free.
+    if lock is not None:
+        os.close(lock)
+    _write(record, document)
+    return 1 if reason else 0
+
+
+def _gate(document: dict, record: Path, lock: int | None) -> str | None:
+    """`adversarial-gate.sh` on the run, bounded; the reason it failed, or None when it wrote its result."""
     # A deep review is the gate's `deep`, which runs claude on `lenses/deep.md`; every other kind is codex's `run`.
     if document["kind"] == "source":
         # The source as the input's last section, fetched here so codex's sandbox needs no network (sd:5101).
@@ -1113,18 +1174,7 @@ def run(record: Path, lock: int | None = None) -> int:
         reason = f"{_engine(document)} exited 0 but wrote no result"
     else:
         reason = None
-    finished = _iso(datetime.datetime.now(datetime.timezone.utc))
-    document.update(state="failed" if reason else "done", reason=reason, finished=finished)
-    if _files(document):
-        _write(record, document)
-        problem = _file(document)
-        document["filed"] = "written" if problem is None else f"not written: {problem}"
-    # The gate has exited, so this is the lock's last descriptor: it goes before the write a page reads as settled,
-    # so a review started at once finds the lock free.
-    if lock is not None:
-        os.close(lock)
-    _write(record, document)
-    return 1 if reason else 0
+    return reason
 
 
 if __name__ == "__main__":

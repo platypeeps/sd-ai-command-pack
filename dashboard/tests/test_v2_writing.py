@@ -227,6 +227,8 @@ COMMANDS = [
     ["piece.publish", "Publish", "u", "confirm", False],
     ["piece.grill", "Grill", None, "safe", False],
     ["piece.apply-answers", "Apply answers", None, "safe", False],
+    ["piece.review", "Refresh review", None, "safe", False],
+    ["piece.apply-review", "Apply review", None, "safe", False],
 ]
 
 SHELL_MORE = r"""
@@ -384,6 +386,35 @@ R.icon = btn.html;""")
         self.assertIn("Question 1 of 1", out["R"]["html"])
         self.assertIn('id="grill-text"', out["R"]["html"])
         self.assertEqual(out["posts"][0][1], {"item": 12, "note": 72, "option": "The cost of a gate", "revision": f"{12:064x}"})
+
+    def test_refresh_review_starts_the_pieces_adversarial_review(self):
+        """pack sd:6699: Refresh review posts the shared adversarial route with kind piece."""
+        run = "{ id: 'piece-12-20260920T100000Z', kind: 'piece', item: 12, result: '/w/adversarial.md'"
+        answer = (f"(path) => path === '/api/writing' ? [200, DOC] : path === '/api/adversarial' ? [202, {run}, state: 'queued' }}]"
+                  f" : [200, {run}, state: 'done', filed: 'written' }}]")
+        out = self.run_page("shellRun(cmd('piece.review'), C.get('12')); await flush(); await flush();", answer=answer)
+        self.assertEqual(out["posts"][0][:2], ["/api/adversarial", {"kind": "piece", "target": "12"}])
+        toasts = [t[0] for t in out["toasts"]]
+        self.assertIn("Review started · run piece-12-20260920T100000Z", toasts)
+        self.assertIn("Adversarial review written · run piece-12-20260920T100000Z · /w/adversarial.md", toasts)
+        self.assertEqual(out["gets"][-1], "/api/writing", "the page did not read again once the review landed")
+
+    def test_apply_review_shows_once_adversarial_md_is_newer_than_the_draft(self):
+        """pack sd:6699: Apply review asks first, then posts Fix with apply: adversarial and the revision."""
+        newer = "DOC.pieces[1].files['adversarial.md'] = { bytes: 1024, mtime: '2026-09-21T10:00:00Z' };\n"
+        out = self.run_page("R.off = [cmd('piece.apply-review').when(C.get('12')), cmd('piece.apply-review').when(C.get('11'))];")
+        self.assertEqual(out["R"]["off"], ["adversarial.md is older than the draft; run Refresh review first"] * 2)
+        out = self.run_page("R.on = cmd('piece.apply-review').when(C.get('12')); shellRun(cmd('piece.apply-review'), C.get('12')); await flush();",
+                            answer="(path) => path === '/api/writing' ? [200, DOC] : [200, { fix: { session: 'apply-review', pane: 'w9:p1' } }]",
+                            prelude=newer)
+        self.assertIs(out["R"]["on"], True)
+        self.assertEqual(out["confirms"], ["piece.apply-review"])
+        self.assertEqual(out["posts"][0][:2], ["/api/items/12/fix", {"apply": "adversarial", "revision": f"{12:064x}"}])
+        self.assertEqual(out["toasts"][-1], ["Apply review started · #12 · herdr pane w9:p1", False])
+
+    def test_the_page_loads_the_shared_commands_before_its_script(self):
+        page = (V2 / "writing.html").read_text(encoding="utf-8")
+        self.assertLess(page.index('<script src="/ui/commands.js">'), page.index('<script src="/ui/writing.js">'))
 
     def test_off_moves_name_their_reason(self):
         out = self.run_page("const w = (id, key) => cmd(id).when(C.get(key));"
