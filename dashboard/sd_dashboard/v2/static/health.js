@@ -437,8 +437,13 @@
           .then(filed => depFix.run({ ...o, filed: filed.item.id, filedRevision: filed.revision })) },
       { id: 'secret scanning.review', on: 'secret scanning', label: 'Review on GitHub', does: 'Opens the secret scanning alerts on GitHub in a new tab.', key: 'o', icon: 'arrow-up-right', risk: 'safe', primary: () => true,
         executes: false, when: o => !!o.slug || 'no github.com remote: there is no alerts page', cli: o => o.cli, run: o => openAlerts(o, 'secret-scanning') },
-      { id: 'credential.probe', on: 'credential', label: 'Probe again', does: 'Probes the credentials again and shows the result in Details.', key: 'r', icon: 'rotate-ccw', risk: 'safe', primary: () => true, executes: true,
-        cli: o => o.cli, sends: () => 'POST /api/actions/run {action: credentials.probe}', run: o => run(o, 'credentials.probe') },
+      // sd:6722: one row's probe family only, so a Google check does not wait on claude mcp list.
+      { id: 'credential.probe', on: 'credential', label: 'Probe again', does: 'Probes this credential again and shows the result in Details.', key: 'r', icon: 'rotate-ccw', risk: 'safe', primary: () => true, executes: true,
+        cli: o => o.cli, sends: o => `POST /api/actions/run {action: check.run, row: ${o.id}}`, run: o => run(o, 'check.run', { row: o.id }) },
+      // sd:6722: Sign in starts the login in a herdr pane, where the browser consent opens; Re-check reads the row again after.
+      { id: 'credential.signin', on: 'credential', label: 'Sign in', does: 'Starts this login in a herdr pane; finish the consent in the browser.', key: 'i', icon: 'log-in', risk: 'safe', executes: true,
+        primary: o => o.state !== 'ok', when: o => !!o.signin || 'this credential has no sign-in', cli: o => o.signin || o.cli,
+        sends: o => `POST /api/actions/run {action: credentials.signin, probe: ${o.id.replace(/^cred:/, '')}}`, run: o => run(o, 'credentials.signin', { probe: o.id.replace(/^cred:/, '') }) },
     );
     // Snooze (sd:1896) and Ignore (sd:5470) on every row type; an ok row wants nothing, so it has nothing to snooze.
     window.snooze.register(C, { page: 'health', ignore: true, reread: () => load(), off: o => o.state === 'ok' && 'an ok row has nothing to snooze',

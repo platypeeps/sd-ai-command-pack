@@ -166,6 +166,26 @@ class TheReads(Run):
                 status, _, body = self.post("/api/actions/run", ids)
                 self.assertEqual((status, body["output"], body["line"]), (200, "GitHub PAT: ok\ngh CLI: failed", "sd-db credentials"))
 
+    def test_sign_in_starts_the_login_read_from_disk_in_herdr(self):
+        """sd:6722: the probe names the login; `credentials.signin` reads it again, and an unknown one runs nothing."""
+        launched = []
+        with patch("sd_db.credentials.signin", lambda probe, env: "! sdm-login" if probe == "sdm" else None), \
+             patch.object(fix_session, "_launch", lambda directory, label, text: launched.append((label, text)) or "p1"):
+            status, body = self.run_("credentials.signin", probe="sdm")
+            self.assertEqual((status, body["exit"], body["label"]), (200, 0, "Sign in"))
+            status, body = self.run_("credentials.signin", probe="aws:nope")
+        self.assertEqual(status, 400)
+        self.assertIn("aws:nope is not a credential this machine can sign in", body["error"])
+        self.assertEqual(launched, [("signin-sdm", "! sdm-login")])
+
+    def test_a_credential_rows_re_check_runs_its_own_probe_only(self):
+        seen = []
+        with patch("sd_db.credentials.check", lambda connection, env, **only: seen.append(only) or {"probes": []}):
+            for row in ("cred:google:a@example.test", "cred:stale"):
+                status, _, _ = self.post("/api/actions/run", {"action": "check.run", "row": row})
+                self.assertEqual(status, 200)
+        self.assertEqual(seen, [{"only": "google:a@example.test"}, {}])
+
     def test_read_state_reads_only_a_tile_in_the_tile_list(self):
         tiles = "tile|Water|binary_sensor.water_leak|Leak\n"
         with patch.object(home_screen, "_current", lambda connection, config: ("file", tiles)), \

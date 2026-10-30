@@ -738,7 +738,7 @@ R.kept = C.get('2026-09-06 - Fun Events').type;""", [fewer])
 R.cli = cmd('brief.task').cli(C.get('2026-09-04 - Intel Brief'));
 R.hook = typeof window.SHELL_CAPTURE;""")
         self.assertEqual(out["captures"], [["2026-09-04 - Intel Brief", "2026-09-04 - Intel Brief"]])
-        self.assertEqual(out["R"]["cli"], "sd task add '2026-09-04 - Intel Brief'")
+        self.assertEqual(out["R"]["cli"], "sd task add --priority 3 '2026-09-04 - Intel Brief'")
         # sd:3520: the shell's default capture files it (test_v2_shell_shared); Briefs keeps no hook of its own.
         self.assertEqual(out["posts"], [])
         self.assertEqual(out["R"]["hook"], "undefined")

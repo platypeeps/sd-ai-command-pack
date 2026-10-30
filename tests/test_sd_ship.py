@@ -1616,6 +1616,70 @@ roles:
             self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(self.operation().state["copilot_reviews"][0]["status"], "completed")
 
+    def test_a_policy_merge_method_other_than_squash_refuses_before_any_merge(self):
+        """sd:6715. sd-ship merges by squash only: its trailers ride the squash message. A policy that says
+        rebase or merge refuses, naming it, rather than landing a squash the repository did not ask for."""
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "rebase"})
+        self.prepare()
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, "policy declares merge_method rebase") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "policy_merge_method")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+
+    def test_the_squash_message_takes_the_declared_convention(self):
+        """sd:6715, run 210 blocker. The squash subject's alias type is rewritten before GitHub writes it; a
+        squash message the convention still refuses (no footer) refuses the merge, naming the rule."""
+        set_declaration(self.connection, str(self.operator), "policy", {"commit_convention": {
+            "types": ["doc", "fix"], "aliases": {"docs": "doc"}, "footer": r"^Ref: LOG-\d+$"}})
+        self.prepare("--title", "docs: words")
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, r"no footer line matches") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "commit_convention")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        set_declaration(self.connection, str(self.operator), "policy", {"commit_convention": {
+            "types": ["doc", "fix"], "aliases": {"docs": "doc"}}})
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertTrue(self.remote.pull(1).title.startswith("doc: words (#1)\n\n"), self.remote.pull(1).title)
+
+    def test_a_declared_footer_in_the_body_moves_into_the_trailer_block(self):
+        """sd:6715, review of build 244. squash_body adds a paragraph of Item:/Delivers: trailers after the body,
+        so the author's `Ref: LOG-1` footer sat in the second-last paragraph and the convention refused it."""
+        set_declaration(self.connection, str(self.operator), "policy", {"commit_convention": {
+            "footer": r"^Ref: LOG-\d+$"}})
+        body = self.directory / "body.md"
+        body.write_text("Concrete change.\n\nRef: LOG-1\n")
+        self.prepare("--title", "fix: words", "--body-file", str(body))
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        message = self.remote.pull(1).title
+        self.assertEqual(message.count("Ref: LOG-1"), 1, message)
+        self.assertIn("Ref: LOG-1", message.rstrip("\n").split("\n\n")[-1], message)
+
+    def test_dismissed_approval_holds_the_merge(self):
+        """sd:6715, design § Failure table. review.human is read at merge time, bound to the head commit: an
+        approval of an earlier commit (dismissed by a push) or by a bot holds the merge; one of the head merges."""
+        set_declaration(self.connection, str(self.operator), "policy", {"review": {"human": 1}})
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+        review = {"state": "APPROVED", "submitted_at": "2026-09-19T20:00:00Z", "body": ""}
+        self.double.review_payload["reviews"] = [
+            {**review, "user": {"login": "reviewer-a", "type": "User"}, "commit_id": "0" * 40},
+            {**review, "user": {"login": "helper[bot]", "type": "Bot"}, "commit_id": head},
+            {**review, "user": {"login": "reviewer-b", "type": "User"}, "commit_id": head},
+            {**review, "state": "DISMISSED", "user": {"login": "reviewer-b", "type": "User"}, "commit_id": head}]
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, r"requires 1 human approval of .*; 0 approve it") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "approval_required")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        self.double.review_payload["reviews"].append(
+            {**review, "user": {"login": "reviewer-a", "type": "User"}, "commit_id": head})
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+
     def test_a_pending_refusal_names_who_did_review_the_head(self):
         """sd:3499. A renamed Copilot bot's review read as pending forever,
         with "wait, then retry"; the refusal names the logins that reviewed the head."""

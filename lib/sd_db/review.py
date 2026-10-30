@@ -835,7 +835,8 @@ def _approval_task(connection: sqlite3.Connection, batch: dict, question: dict, 
     Its repo is the batch's, else the one the header's Source names (`_source_repo`).
     """
     repo = batch["item"]["repo"] or _source_repo(connection, batch["header"]["source"])
-    task = workflow.capture_task(connection, title=question["text"].splitlines()[0], body=body,
+    # P3, the usual rank: an automated filer names one (sd:6726); the operator moves it from there.
+    task = workflow.capture_task(connection, title=question["text"].splitlines()[0], body=body, priority=3,
                                  repo=repo, who=who, session=session)["item"]["id"]
     writes.set_item_fields(connection, task, source=REF_SOURCE, external_id=f"{APPROVED}:{question['note']}")
     return task
