@@ -2,7 +2,7 @@
 
 What this slice promises: `/hoa` answers under the shared policy and loads its
 script before `shell.js`; `/api/hoa` reads the checkout the repo table holds
-under the folder name `hoa` (sd:3985; no config file names it): the asset map, the Mission export's last 30 days, and the
+under the folder name `hoa` (sd:3985; no config file names it): the asset map, every row of the Mission export, and the
 checkout's open items of every kind ranked overdue, due soon, then the rest. Each
 source is guarded on its own, so a file that is missing or does not parse is
 that part's error and the page shows it as unknown with the reason, never as
@@ -182,11 +182,13 @@ class TheDocument(Fixture):
         self.assertIn("no repo named hoa", doc["items"]["error"])
         self.assertEqual((doc["mission"]["analog"], doc["assets"]["features"], doc["items"]["rows"]), ([], [], []))
 
-    def test_the_export_is_its_last_30_days_and_its_age(self):
+    def test_the_trends_are_every_row_of_the_export_and_its_age(self):
+        """sd:6689: the 6m, 1y and All chips need every daily row, not the last 30."""
         m = self.doc()["mission"]
         self.assertEqual(m["error"], "")
         self.assertEqual([f["rows"] for f in m["files"]], [48, 32, 5])
-        self.assertEqual((len(m["analog"]), m["analog"][-1]["date"], m["pump"][-1]["date"]), (30, "2026-09-05", "2026-09-04"))
+        self.assertEqual((len(m["analog"]), m["analog"][0]["date"], m["analog"][-1]["date"], m["pump"][-1]["date"]),
+                         (48, "2026-07-20", "2026-09-05", "2026-09-04"))
         self.assertEqual((m["latest"], m["age_days"], m["stale"]), ("2026-09-05", 1, False))
         # 30 days back from the newest alarm: the July row is gone, oldest first.
         self.assertEqual([a["event"] for a in m["alarms"]], ["Generator Running", "A2 VSD Alarm", "A2 VSD Normal", "Tank Low Alarm"])
@@ -212,7 +214,7 @@ class TheDocument(Fixture):
         self.assertIn("pump-daily.csv has no a2_runtime_hours", files["pump-daily.csv"])
         self.assertEqual(files["alarm-events.csv"], "alarm-events.csv is not in the export folder")
         self.assertEqual(files["analog-daily.csv"], "")
-        self.assertEqual(len(doc["mission"]["analog"]), 30)
+        self.assertEqual(len(doc["mission"]["analog"]), 48)
         self.assertIn("pump-daily.csv has no", doc["mission"]["error"])
         self.assertIn("assets.geojson did not parse", doc["assets"]["error"])
         self.assertEqual(len(doc["base"]["features"]), 4)
@@ -706,6 +708,16 @@ class TheTrendStatistics(Fixture):
         runtime = self.figure(trends, "runtime")
         self.assertIn('data-ext="min"', runtime)
         self.assertIn('data-ext="max"', runtime)
+
+    def test_the_all_chip_draws_the_oldest_row_and_6m_and_1y_are_offered(self):
+        """sd:6689: 6m, 1y and All join 7d and 30d; All (0) draws every row the export holds."""
+        chips = re.findall(r'data-range="(\d+)"[^>]*>([^<]+)<', (V2 / "hoa.html").read_text(encoding="utf-8"))
+        self.assertEqual(chips, [("1", "24h"), ("7", "7d"), ("30", "30d"), ("183", "6m"), ("365", "1y"), ("0", "All")])
+        click = ("const chip = { dataset: { range: '0' }, getAttribute: () => null }; "
+                 "ELS.range.listeners.click[0]({ target: { closest: s => s === '.chip' ? chip : null } }); ")
+        tank = self.figure(self.trends(body=click), "tank")
+        self.assertIn('aria-label="Tank level, 48 days"', tank)
+        self.assertIn("<th scope=\"row\">2026-07-20</th>", tank)
 
     def test_an_even_window_with_a_gap_reads_the_mean_of_its_middle_two_and_skips_the_gap(self):
         doc = self.doc()

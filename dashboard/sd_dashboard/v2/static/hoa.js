@@ -297,7 +297,8 @@ let polling = 0;
     { key: 'aquifer', title: 'Aquifer', unit: 'ft', file: 'analog', y: 'aquifer_ft_mean', lo: 'aquifer_ft_min', hi: 'aquifer_ft_max', kind: 'line', src: 'analog-daily.csv' },
   ];
   const TW = 300, TH = 72;
-  const rowsOf = s => (DOC ? DOC.mission[s.file] : []).filter(r => num(r[s.y]) && (!s.lo || (num(r[s.lo]) && num(r[s.hi])))).slice(-range);
+  // range is days; All is 0 and draws every row the export holds (sd:6689).
+  const rowsOf = s => (DOC ? DOC.mission[s.file] : []).filter(r => num(r[s.y]) && (!s.lo || (num(r[s.lo]) && num(r[s.hi])))).slice(range ? -range : 0);
   // sd:4969: the window's min is its lowest daily low and its max its highest daily high (the plotted value on a series with
   // no band); the median is of the plotted daily values, the middle one or the mean of the middle two.
   const lowOf = (s, r) => +r[s.lo || s.y], highOf = (s, r) => +r[s.hi || s.y];
