@@ -93,6 +93,8 @@ Rules:
   The body is public, so it names no local path (the worktree, a home directory): use repo-relative paths.
   The body carries no `Closes:` line: enqueue takes items by `--item` and refuses one (sd:3704).
 - Leave the worktree clean, with your commits on the branch.
+- End only a process you started, by its pid: never `pkill` or `killall`, which end other sessions'
+  gates too (sd:6815).
 - An item that needs the operator: record it with `sd task note N '<question>' --kind question` and skip it.
 
 Your final message is your report: the commits, the tests run with their result lines, and anything not done.

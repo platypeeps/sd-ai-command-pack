@@ -124,7 +124,9 @@ def _scorecard(connection, now):
 
 
 def _age(connection, now):
-    rows = [row for row in reads.backlog_items(connection, now=now) if row["status"] != "done" and not is_scheduled(row)]
+    # pack sd:6743: as Tasks, which the bars open, it counts no idea kind.
+    rows = [row for row in reads.backlog_items(connection, now=now)
+            if row["status"] != "done" and not is_scheduled(row) and row["kind"] not in reads.IDEA_KINDS]
     return {"error": "", "buckets": [{"key": b.key, "label": b.label, "lower": b.lower, "upper": b.upper, "ready_to_send": b.counts["ready_to_send"],
                                       "other": b.counts["other"]} for b in reads.age_histogram(rows, now=now)]}
 
