@@ -325,6 +325,15 @@ const v = await c.run(o); R.text = v.text; await c.undo(o, v); await flush();"""
         self.assertEqual(out["R"]["text"], "Maybe Co is active · market-watch refreshes it from its next run")
         self.assertEqual(out["gets"], ["/api/watches", "/api/watches", "/api/watches"], "each move reads the watches again")
 
+    def test_a_stage_move_whose_mirror_failed_says_so(self):
+        """sd:6694 review: the stage route can land and still leave the vault mirror stale; the toast names it, as Tasks does."""
+        candidate = self.ids["candidate"]
+        answer = ("(p, b) => p === '/api/watches' ? [200, " + json.dumps(self.doc) + "]"
+                  " : p.endsWith('/stage') ? [200, { item: { id: " + str(candidate) + " }, revision: 'r2', mirror: { ok: false, reason: 'disk full' } }]"
+                  " : [404, { error: 'no answer' }]")
+        out = self.run_page(f"""R.text = (await cmd('watch.activate').run(OBJ.get('watch:{candidate}'))).text;""", answer)
+        self.assertEqual(out["R"]["text"], "Maybe Co is active · market-watch refreshes it from its next run · mirror not updated: disk full")
+
     def test_add_watch_posts_the_url_and_name_typed_and_reads_again(self):
         out = self.run_page("""FIELD_VALUES = { url: 'https://github.com/example/widget-agent', name: '' };
 C.run(cmd('watch.add'), OBJ.get('watches')); await flush();

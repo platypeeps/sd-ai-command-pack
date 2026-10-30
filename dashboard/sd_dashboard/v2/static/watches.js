@@ -136,7 +136,8 @@
   const move = (id, label, key, from, to, does, done) => ({ id, on: 'watch', label, does, key, risk: 'undo', executes: true,
     primary: o => o.stage === from, when: o => o.stage === from || `${o.stage}: ${label} moves ${from === 'active' ? 'an' : 'a'} ${from} watch`,
     cli: () => 'no sd verb: sd store set refuses a status the kind keeps for a person', sends: o => `POST /api/items/${o.item}/stage {revision, stage: ${to}}`,
-    run: o => stage(o, to, o.revision).then(out => ({ text: `${o.title} is ${to} · ${done}`, revision: out.revision })),
+    run: o => stage(o, to, o.revision).then(out => ({ text: `${o.title} is ${to} · ${done}${out.mirror && !out.mirror.ok
+      ? ` · mirror not updated: ${out.mirror.reason || 'see Health'}` : ''}`, revision: out.revision })),
     undo: (o, v) => stage(o, from, v.revision) });
   const register = () => window.shell.commands.register(
     { ...window.commands.retry({ job, run: kick }), label: 'Refresh watches', primary: () => true,
