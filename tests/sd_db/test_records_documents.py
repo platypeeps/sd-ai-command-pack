@@ -92,7 +92,7 @@ class ThePlan(DocumentsCase):
 class TheMove(DocumentsCase):
     def test_a_moved_row_leaves_tasks_today_and_the_counts_and_keeps_its_id_and_notes(self):
         self.assertTrue({self.video, self.book} <= self.listed())
-        add_note(self.db, self.book, "question", "Which edition?\nOption: first\nOption: second", session="operator")
+        add_note(self.db, self.book, "question", "Which edition?\nOption: first (Recommended)\nOption: second", session="operator")
         # Due and blocked rows, so Today's sections would show them.
         self.db.execute("UPDATE item SET due='2026-10-20' WHERE id=?", (self.video,))
         self.db.execute("UPDATE item SET due='2026-11-20' WHERE id=?", (self.book,))

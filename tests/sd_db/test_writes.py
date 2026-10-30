@@ -126,6 +126,17 @@ class TheOtherWrites(WriteCase):
         with self.assertRaisesRegex(sqlite3.IntegrityError, "CHECK constraint failed"):
             add_note(self.connection, item, "comment", "no", exit_code=1)
 
+    def test_a_question_carries_options_and_a_pick(self):
+        """pack sd:6708: a bare question, one option, or none recommended is refused, naming the shape."""
+        item = create_item(self.connection, kind="task", title="Ask")
+        for body in ("Which store?", "Which store?\nOption: Rows (Recommended)",
+                     "Which store?\nOption: Rows\nOption: Files"):
+            with self.subTest(body=body), self.assertRaisesRegex(SdDbError, "two or more `Option:` lines"):
+                add_note(self.connection, item, "question", body)
+        add_note(self.connection, item, "question", "Which store?\nOption: Rows (Recommended)\nOption: Files")
+        add_note(self.connection, item, "question", "Label it.\nOption: Yes\nOption: No", labelling=True)
+        self.assertEqual(len(self.notes(item, "question")), 2)
+
     def test_one_tracker_re_reading_a_url_updates_its_own_row(self):
         upsert_shadow(self.connection, tracker="github", url="u", title="first")
         upsert_shadow(self.connection, tracker="github", url="u", title="second")

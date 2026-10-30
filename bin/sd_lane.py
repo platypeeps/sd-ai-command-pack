@@ -1249,7 +1249,7 @@ def wait_question(connection: Any, repository: str, path: str, *, now: float) ->
         f"The median lane wait in {repository} was {round(times['wait'] / 60)} min over the last {times['days']} days "
         f"({times['entries']} entries; median gate {round((times['gate'] or 0) / 60)} min; slowest sd:"
         f"{slowest.get('item')} at {round((slowest.get('total') or 0) / 60)} min). That is past an hour. "
-        "Run more than one entry of this lane at a time?\nOption: Plan parallel lanes\nOption: Not now"))
+        "Run more than one entry of this lane at a time?\nOption: Plan parallel lanes (Recommended)\nOption: Not now"))
 
 
 def ask_wait(checkout: pathlib.Path, path: str, environ: dict[str, str]) -> dict[str, Any] | None:

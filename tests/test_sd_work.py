@@ -284,7 +284,7 @@ class TaskCLI(unittest.TestCase):
         """pack sd:6023: add, note and an answer record `CLAUDE_CODE_SESSION_ID`; unset, the user as before."""
         session = self.harness("session-under-test")
         item = json.loads(self.call("task", "add", "Filed by a session", "--json", env=session).stdout)["item"]["id"]
-        asked = json.loads(self.call("task", "note", item, "Which?", "--kind", "question", "--json",
+        asked = json.loads(self.call("task", "note", item, "Which?\nOption: Yes (Recommended)\nOption: No", "--kind", "question", "--json",
                                      env=session).stdout)["note"]["id"]
         self.call("task", "note", item, "This one", "--kind", "decision", "--answers", asked, env=session)
         state = json.loads(self.call("task", "note", item, "Plain", "--json", env=self.harness()).stdout)
@@ -380,7 +380,7 @@ class TaskCLI(unittest.TestCase):
         result = self.call("task", "note", item, "--body", "Late note")
         self.assertIn(f"delivered by commit {sha[:12]}", result.stderr)
 
-    def question(self, item, body="Which store?\nOption: Pack store\nOption: Database rows"):
+    def question(self, item, body="Which store?\nOption: Pack store (Recommended)\nOption: Database rows"):
         return json.loads(self.call("task", "note", item, body, "--kind", "question", "--json").stdout)["note"]["id"]
 
     def test_answers_records_the_decision_and_resolves_the_question_in_one_write(self):
@@ -401,7 +401,7 @@ class TaskCLI(unittest.TestCase):
         other = json.loads(self.call("task", "add", "Asks too", "--json").stdout)["item"]["id"]
         asked, theirs = self.question(item), self.question(other)
         comment = json.loads(self.call("task", "note", item, "Plain", "--json").stdout)["note"]["id"]
-        settled = self.question(item, "Settled?")
+        settled = self.question(item, "Settled?\nOption: Yes (Recommended)\nOption: No")
         self.call("note", "resolve", settled)
         for name, flags, said in (
                 ("no decision kind", ("--answers", asked), "--kind decision"),
@@ -542,12 +542,16 @@ class TaskCLI(unittest.TestCase):
         item = state["item"]["id"]
         initial_notes = state["notes"]
         initial_ids = {note["id"] for note in initial_notes}
+        # pack sd:6708: a question carries its options and a pick, or the CLI refuses it and writes nothing.
+        refused = self.call("task", "note", item, "--kind", "question", "--body", "Recorded question", code=1)
+        self.assertIn("two or more `Option:` lines and one recommended", refused.stderr)
         for kind in NOTE_KINDS:
             with self.subTest(kind=kind):
+                body = f"Recorded {kind}" + ("\nOption: Yes (Recommended)\nOption: No" if kind == "question" else "")
                 state = json.loads(self.call("task", "note", item, "--kind", kind,
-                    "--body", f"Recorded {kind}", "--if-revision", state["revision"], "--json").stdout)
+                    "--body", body, "--if-revision", state["revision"], "--json").stdout)
                 self.assertEqual(state["note"]["kind"], kind)
-                self.assertEqual(state["note"]["body"], f"Recorded {kind}")
+                self.assertEqual(state["note"]["body"], body)
         before = json.loads(self.call("store", "item", item, "--json").stdout)
         self.assertEqual([note["kind"] for note in before["notes"] if note["id"] not in initial_ids], list(NOTE_KINDS))
         self.assertEqual([note for note in before["notes"] if note["id"] in initial_ids], initial_notes)
@@ -1874,7 +1878,7 @@ class TodayIsTheDashboardsToday(unittest.TestCase):
         self.call("task", "note", closed, "--body", "Owed on a done item", "--kind", "followup")
         self.call("task", "status", closed, "done", "--reason", "test")
         asked = json.loads(self.call("task", "note", open_item, "--kind", "question", "--json",
-                                     "--body", "Which store?\nOption: Pack store\nOption: Database rows").stdout)
+                                     "--body", "Which store?\nOption: Pack store (Recommended)\nOption: Database rows").stdout)
         log = self.home / "run.log"
         log.write_text("Observed drift.\nSD_REPORT_ATTENTION: two stale rows\n")
         report = json.loads(self.call(

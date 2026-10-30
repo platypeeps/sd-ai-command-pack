@@ -62,7 +62,7 @@ class TheBadge(ReportsCase):
         grilled = create_item(self.connection, kind="task", title="Weekly grill", source="task-ref",
                               external_id="grill:2026-09-07")
         for number in range(3):
-            add_note(self.connection, grilled, "question", f"Keep mechanism {number}?\nOption: Keep\nOption: Drop")
+            add_note(self.connection, grilled, "question", f"Keep mechanism {number}?\nOption: Keep (Recommended)\nOption: Drop")
         rows = [row for row in self.today()["needs"] if row["id"] == f"grill:{grilled}"]
         self.assertEqual([(row["band"], row["item"], row["what"], row["detail"]) for row in rows],
                          [("queued", grilled, "Grill ready: 3 questions", "say 'grill' in a fresh session")])
@@ -79,14 +79,14 @@ class TheBadge(ReportsCase):
 
         grilled = create_item(self.connection, kind="task", title="Weekly grill", source="task-ref",
                               external_id="grill:2026-09-07")
-        add_note(self.connection, grilled, "question", "Keep mechanism?\nOption: Keep\nOption: Drop")
+        add_note(self.connection, grilled, "question", "Keep mechanism?\nOption: Keep (Recommended)\nOption: Drop")
         row = next(row for row in self.today()["needs"] if row["id"] == f"grill:{grilled}")
         self.assertTrue(row.get("seen"), "the Grill ready row carries no seen, so Snooze posts none")
         self.post_snooze(f"grill:{grilled}", row["seen"])
         doc = self.today()
         self.assertNotIn(f"grill:{grilled}", [row["id"] for row in doc["needs"]])
         self.assertIn(f"grill:{grilled}", [row["id"] for row in doc["snoozed"]])
-        add_note(self.connection, grilled, "question", "Keep another?\nOption: Keep\nOption: Drop")
+        add_note(self.connection, grilled, "question", "Keep another?\nOption: Keep (Recommended)\nOption: Drop")
         self.assertIn(f"grill:{grilled}", [row["id"] for row in self.today()["needs"]])
 
     def test_a_blocked_lane_entry_is_a_broken_row_and_outranks_a_report(self):

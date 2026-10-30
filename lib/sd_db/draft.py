@@ -32,7 +32,7 @@ from . import build, paths
 from .build import LOSSES, REAP_READS, RETRIES, Probe, kill_group
 from .database import transaction
 from .runner import RUNNABLE_KINDS, restoration_pending
-from .writes import add_note, create_assignment
+from .writes import add_note, create_assignment, recommended
 from .writes import now as clock
 
 SCOPE = build.DRAFT
@@ -153,7 +153,8 @@ def parse(result: object) -> tuple[str, list[str]] | None:
 
     The reply starts with `## Spec`, which holds text; an optional
     `## Questions` follows with at most `QUESTIONS_MAX` questions, each its
-    text and then two or more `Option:` lines. A Questions section that says
+    text and then two or more `Option:` lines, one recommended (pack
+    sd:6708). A Questions section that says
     only "None" holds none. Each question returns as the note body Decide
     reads: its text, then one `Option:` line per choice.
     """
@@ -194,6 +195,10 @@ def parse(result: object) -> tuple[str, list[str]] | None:
         text = [line for line in block if not _OPTION.match(line)]
         options = [found[1] for found in map(_OPTION.match, block) if found is not None]
         if not text or len(options) < 2 or not all(options) or len(set(options)) != len(options):
+            return None
+        body = "\n".join([*text, *(f"Option: {option}" for option in options)])
+        # `add_note` refuses a question with no pick (pack sd:6708): such a reply writes nothing.
+        if recommended(body, options) is None:
             return None
         questions.append("\n".join([*text, *(f"Option: {option}" for option in options)]))
     return spec, questions

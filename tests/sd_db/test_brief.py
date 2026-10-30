@@ -131,7 +131,7 @@ class TheBound(BriefCase):
         super().setUp()
         self.finished = self.item("finished work", branch="feat/live", status="done")
         self.note(self.finished, "a followup on a done item, still open")
-        self.note(self.finished, "a question on a done item, still open", kind="question")
+        self.note(self.finished, "a question on a done item, still open\nOption: Yes (Recommended)\nOption: No", kind="question")
         self.live = self.item("live work", branch="feat/live")
         # Every kind the schema knows but `status_change`, which only
         # `transition` writes and which `create_item` wrote already.
@@ -142,7 +142,7 @@ class TheBound(BriefCase):
             started="2026-09-10T09:00:00+00:00", ended="2026-09-10T09:01:00+00:00",
             exit_code=0, output_path="/nowhere",
         )
-        self.question = self.note(self.live, "an open question", kind="question",
+        self.question = self.note(self.live, "an open question\nOption: Yes (Recommended)\nOption: No", kind="question",
                                   at="2026-09-09T05:30:00+00:00")
         # Enough followups to pass eight kilobytes several times over: two
         # hundred, each about a hundred bytes.

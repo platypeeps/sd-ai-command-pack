@@ -137,7 +137,7 @@ class TheQuestion(Times):
         self.assertIsNotNone(note)
         self.assertEqual(found["title"], "Decide: parallel lanes for example/pack")
         self.assertIn("median lane wait in example/pack was 100 min", found["body"])
-        self.assertTrue(found["body"].endswith("\nOption: Plan parallel lanes\nOption: Not now"))
+        self.assertTrue(found["body"].endswith("\nOption: Plan parallel lanes (Recommended)\nOption: Not now"))
         # The next run asks nothing while that question is open.
         self.assertIsNone(sd_lane.wait_question(self.connection, REPOSITORY, "/repos/pack", now=NOW + 600))
         self.assertEqual(len(self.questions()), 1)

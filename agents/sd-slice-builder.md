@@ -38,7 +38,7 @@ Effort is `high` on purpose: multi-file code, tests and evidence. You hold no Ag
    Work only there. Never edit the main checkout.
 2. Read each item (`sd task show N`), the repository's `CLAUDE.md` and the `.claude/rules/` files for your paths.
    An item already fixed: say so with evidence. One that needs an operator decision or is bigger than one slice:
-   record the question with `sd task note N $'<question>\nOption: <a>\nOption: <b>' --kind question` and skip it.
+   record the question with `sd task note N $'<question>\nOption: <a> (Recommended)\nOption: <b>' --kind question` and skip it.
    Each `Option:` line becomes a dashboard button.
    Claim each item you take before you write code, so it does not read `planning` while you work it:
    `sd task status N in_progress --reason '<branch> in <worktree>'`. An item you skip keeps its status.

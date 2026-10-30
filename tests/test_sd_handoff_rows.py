@@ -246,7 +246,7 @@ class TheBriefIsTheLibrarys(RowCase):
     def test_the_hook_injects_the_brief_verbatim(self):
         item = self.item()
         self.followup(item, "rebase onto main")
-        sd_db.add_note(self.connection, item, "question", "which tag?\nthe pin or HEAD")
+        sd_db.add_note(self.connection, item, "question", "which tag?\nthe pin or HEAD\nOption: Yes (Recommended)\nOption: No")
         sd_db.add_note(self.connection, item, "decision", "we chose sqlite")
         self.followup(item, "answer the review")
         brief = sd_db.note_brief(self.connection, str(self.root), branch="")
@@ -261,7 +261,7 @@ class TheBriefIsTheLibrarys(RowCase):
         next session too.
         """
         item = self.item()
-        note = sd_db.add_note(self.connection, item, "question", "which tag?")
+        note = sd_db.add_note(self.connection, item, "question", "which tag?\nOption: Yes (Recommended)\nOption: No")
         self.assertIn(f"#{note} ", self.injected())
 
     def test_the_cut_names_the_list_verb(self):
@@ -607,7 +607,7 @@ class TheLister(RowCase):
     def test_every_note_is_listed_oldest_first_with_kind_id_and_resolution(self):
         item = self.item()
         first = self.followup(item, "wire the hook")
-        question = sd_db.add_note(self.connection, item, "question", "which tag?\nthe pin or HEAD")
+        question = sd_db.add_note(self.connection, item, "question", "which tag?\nthe pin or HEAD\nOption: Yes (Recommended)\nOption: No")
         decision = sd_db.add_note(self.connection, item, "decision", "we chose sqlite")
         sd_db.resolve_note(self.connection, first)
         code, out, err = self.note(["list", str(item)])
@@ -619,9 +619,9 @@ class TheLister(RowCase):
         self.assertRegex(lines[2], rf"^- \[followup #{first} \d{{4}}-\d\d-\d\d, "
                                    rf"resolved \d{{4}}-\d\d-\d\d\] wire the hook$")
         self.assertRegex(lines[3], rf"^- \[question #{question} [0-9-]+\] which tag\?$")
-        self.assertEqual(lines[4], "  the pin or HEAD")
-        self.assertRegex(lines[5], rf"^- \[decision #{decision} [0-9-]+\] we chose sqlite$")
-        self.assertEqual(len(lines), 6, lines)
+        self.assertEqual(lines[4:7], ["  the pin or HEAD", "  Option: Yes (Recommended)", "  Option: No"])
+        self.assertRegex(lines[7], rf"^- \[decision #{decision} [0-9-]+\] we chose sqlite$")
+        self.assertEqual(len(lines), 8, lines)
 
     def test_an_item_with_no_notes_says_so(self):
         item = self.item()

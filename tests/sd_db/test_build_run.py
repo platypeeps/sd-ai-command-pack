@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from sd_db import build, build_run, draft, operations, runner, sessions
+from sd_db import build, build_run, draft, operations, runner, sessions, writes
 from sd_db.database import connect
 from sd_db.migrate import initialise
 from sd_db.ship import this_host
@@ -362,7 +362,7 @@ class Supervise(Case):
         self.press()
         self.write_pr()
         self.plan(claude=["pass"], sd_review=["clean"])
-        add_note(self.db, self.items[0], "question", "Which option?")
+        add_note(self.db, self.items[0], "question", "Which option?\nOption: Yes (Recommended)\nOption: No")
         ended = self.supervisor().run()
         self.assertEqual(ended["outcome"], "blocked")
         self.assertIn("open question", ended["blocked"])
@@ -372,7 +372,7 @@ class Supervise(Case):
         self.press(2)
         self.write_pr()
         self.plan(claude=["pass"], sd_review=["clean"])
-        add_note(self.db, self.items[1], "question", "Which option?")
+        add_note(self.db, self.items[1], "question", "Which option?\nOption: Yes (Recommended)\nOption: No")
         self.assertEqual(self.supervisor().run()["step"], "enqueued")
         enqueue = next(call["argv"] for call in self.calls("sd-ship") if "enqueue" in call["argv"])
         self.assertEqual([enqueue[n + 1] for n, arg in enumerate(enqueue) if arg == "--item"], [str(self.items[0])])
@@ -453,6 +453,10 @@ class Supervise(Case):
         self.assertEqual(self.statuses(), ["blocked"])
         self.assertEqual(len(self.questions()), 1)
         self.assertIn("denied Bash", self.questions()[0])
+        # pack sd:6708: the same call twice is no transient denial, so the pick is a changed brief.
+        _, options = writes.parse(self.questions()[0])
+        self.assertEqual(writes.recommended(self.questions()[0], options),
+                         options.index("Change the brief, then requeue (Recommended)"))
 
     def test_the_brief_keeps_the_builder_in_its_worktree(self):
         """pack sd:6723: the brief holds the three lines, and the builder may commit with -m or -F."""

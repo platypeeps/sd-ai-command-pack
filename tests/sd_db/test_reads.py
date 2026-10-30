@@ -688,7 +688,7 @@ class BatchedRevisions(unittest.TestCase):
         add_note(self.connection, noted, "followup", "second")
         moved = create_item(self.connection, kind="task", title="Moved", status="planning")
         transition(self.connection, moved, "in_progress", who="operator")
-        resolved = add_note(self.connection, moved, "question", "which?")
+        resolved = add_note(self.connection, moved, "question", "which?\nOption: Yes (Recommended)\nOption: No")
         self.connection.execute("UPDATE note SET resolved_at = ? WHERE id = ?", (NOW, resolved))
         self.connection.execute("UPDATE item SET fields = ? WHERE id = ?", (b'{"a": 1}', bare))
         self.connection.commit()
