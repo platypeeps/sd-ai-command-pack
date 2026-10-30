@@ -2858,5 +2858,81 @@ class TheNoteHarnessSessionColumn(SchemaCase):
         self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
 
 
+
+class TheShadowMergeStateColumns(SchemaCase):
+    """Migration 44 (pack sd:6711). `shadow.review_decision`, `checks` and
+    `mergeable`: a pull request's review, check and merge state, for the Ready
+    to merge filter. Added, not rebuilt: every existing row reads NULL, not
+    read, and keeps its other values; a failed file leaves 43; the reverse
+    returns 43's shape."""
+
+    VERSION = 44
+    COLUMNS = "id, tracker, url, kind, state, first_seen, last_seen"
+    ROWS = [(1, "github", "https://github.com/example/anvil/pull/1", "pull", "open", "t1", "t2"),
+            (2, "github", "https://github.com/example/anvil/issues/2", "issue", "closed", "t1", "t3")]
+    ADDED = ("review_decision", "checks", "mergeable")
+
+    def _before(self):
+        self.migrate_through(self.VERSION - 1)
+        raw = sqlite3.connect(self.path)
+        raw.executemany(f"INSERT INTO shadow ({self.COLUMNS}) VALUES ({', '.join('?' * 7)})", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def _rows(self, connection):
+        return [tuple(row) for row in connection.execute(f"SELECT {self.COLUMNS} FROM shadow ORDER BY id")]
+
+    def _columns(self, connection):
+        return [row[1] for row in connection.execute("PRAGMA table_info(shadow)")]
+
+    def test_every_existing_row_arrives_at_null_and_keeps_its_values_and_a_rerun_applies_nothing(self):
+        """Failure table, rows "old database" and "second run"."""
+        self._before()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied),
+                         (self.VERSION - 1, list(range(self.VERSION, SCHEMA_VERSION + 1))))
+        self.assertEqual(migrate(self.path).applied, [])
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertEqual(self._rows(connection), self.ROWS)
+        self.assertEqual([tuple(row) for row in connection.execute(
+            f"SELECT {', '.join(self.ADDED)} FROM shadow ORDER BY id")], [(None, None, None)] * 2)
+
+    def test_a_failed_file_leaves_the_store_at_43_and_a_rerun_finishes_it(self):
+        """Failure table, row "interrupted migration"."""
+        self._before()
+        raw = sqlite3.connect(self.path)
+        raw.execute("ALTER TABLE shadow ADD COLUMN mergeable TEXT")
+        raw.commit()
+        raw.close()
+        with self.assertRaises(sqlite3.OperationalError):
+            self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        self.assertNotIn("review_decision", self._columns(raw))
+        raw.execute("ALTER TABLE shadow DROP COLUMN mergeable")
+        raw.commit()
+        raw.close()
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+    def test_the_reverse_returns_the_file_to_the_prior_version(self):
+        """Failure table, row "rollback to the previous commit"."""
+        self._before()
+        self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        raw.execute("UPDATE shadow SET review_decision = 'approved', checks = 'success', mergeable = 'mergeable' WHERE id = 1")
+        raw.commit()
+        raw.close()
+        text = dict(schema_module.migrations())[self.VERSION].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual(self._rows(raw), self.ROWS)
+        self.assertFalse(set(self.ADDED) & set(self._columns(raw)))
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+
 if __name__ == "__main__":
     unittest.main()
