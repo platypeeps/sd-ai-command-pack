@@ -197,6 +197,12 @@ class EveryCommandSaysWhatItDoes(unittest.TestCase):
         self.assertIn("const list = cmdsFor(o).filter(c => c.bar !== false);", block("bar"))
         self.assertNotIn("c.bar", block("openMenu"))
 
+    def test_a_command_marked_menu_false_stays_off_the_row_menu_but_keeps_its_key(self):
+        # sd:6687: the ⋯ menu skips `menu: false`; its key, in the menu too, still runs it.
+        menu = block("openMenu")
+        self.assertIn("const on = live(o).filter(c => c.menu !== false);", menu)
+        self.assertIn("const c = menuObj && live(menuObj).find(x => x.key === e.key);", SHELL)
+
     def test_the_row_menu_shows_does_as_the_items_second_line(self):
         menu = block("openMenu")
         self.assertRegex(menu, r'<span>\$\{c\.label\}[^<]*</span><small>\$\{doesOf\(c, o\)\}</small>')

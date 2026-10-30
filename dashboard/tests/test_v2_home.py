@@ -374,6 +374,13 @@ class ThePage(BrowserSession):
         for path in re.findall(r'(?:src|href)="(/ui/[^"]+)"', body):
             self.assertEqual(self.request(path)[0], 200, path)
 
+    def test_a_hidden_headline_draws_no_box(self):
+        """sd:6688: `.headline` sets display, which beats the hidden attribute home.js sets when no headline line
+        names an entity; only a `[hidden]` rule after it keeps the empty button off the page."""
+        css = (V2 / "static" / "home.css").read_text(encoding="utf-8")
+        self.assertIn(".headline[hidden] { display: none; }", css)
+        self.assertGreater(css.index(".headline[hidden]"), css.index(".headline {"))
+
     def test_the_rail_opens_the_new_page(self):
         self.assertEqual(v2.SECTIONS.get("Home"), "/home")
         self.assertNotIn("Home", v2.CLASSIC)

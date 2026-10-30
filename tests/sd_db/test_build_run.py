@@ -420,8 +420,15 @@ class Supervise(Case):
         leader = subprocess.Popen([sys.executable, "-c", "import os\nif os.fork() == 0: os._exit(0)\nos._exit(0)"],
                                   start_new_session=True)
         self.addCleanup(leader.wait)
-        while subprocess.run(["ps", "-o", "stat=", "-p", str(leader.pid)], capture_output=True,
-                             text=True).stdout.strip()[:1] != "Z":
+        # Every member, not only the leader: under gate load the forked child still ran when the leader was
+        # already a zombie, so the group read alive (2026-10-30 04:07 MDT).
+        def states():
+            rows = subprocess.run(["ps", "-A", "-o", "pgid=,stat="], capture_output=True, text=True).stdout.split("\n")
+            return [row.split()[1] for row in rows if row.split() and row.split()[0] == str(leader.pid)]
+
+        deadline = time.monotonic() + 30
+        while not states() or any(state[:1] != "Z" for state in states()):
+            self.assertLess(time.monotonic(), deadline, f"the group never became zombies: {states()}")
             time.sleep(0.05)
         self.assertIs(build.Probe.group(leader.pid), False)
         self.assertTrue(self.supervisor().end_group(leader.pid))
