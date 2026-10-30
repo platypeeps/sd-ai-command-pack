@@ -178,7 +178,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
       <td class="detail">${r.detail}</td>
       <td class="src">${src ? I(src[1]) : ''}${r.source}</td>
       <td class="num age">${age(r.at)}</td>
-      <td class="act">${shell.commands.rowActions(r.id)}</td></tr>`;
+      <td class="act">${shell.commands.rowActions(r.id, { icons: r.band === 'broken' })}</td></tr>`;
   }
   // Needs you: the rows the lamp, the intent and the text keep, a band head where the band changes, and each open group's
   // members under it. Nothing hides a row after the draw: a filter draws the list again.
@@ -399,25 +399,18 @@ window.PAGE_FILTER = { '': 'Needs you' };
         out => reading.reread().then(() => K.answered(out, o.job, 'retried', `Retry started · ${o.job}`)),
         err => { load(); throw err.status ? err : new Error(`no answer (${err.message}), so whether launchd started it is not known; Today is read again`); }) });
     const open = K.openPullRequest({ pr: o => ({ repo: o.repo, number: o.number }), primary: o => !!o.repo });
-    // Fix (sd:5652): each Now row's act, routed by kind to what already addresses it: a failed or interrupted job's Run now,
-    // a pull request's Open on GitHub, the pull request collector's Re-run collector, and for every other row claude in
-    // herdr on it (fix_session.start_row). Fix is the route's own declaration under its label, so its when, ask, line and
-    // run are the route's: a row the route is off for has Fix off with that reason, never a Fix that does nothing.
+    // Fix (sd:5652, sd:6709): commands.fix's label, key and icon, always claude in herdr on the row (fix_session.start_row).
+    // A row whose act is something else shows that command under its own name: a job's Run now, a pull request's Open on
+    // GitHub, the pull request collector's Re-run collector.
     const sync = K.syncCollector({ reread: () => reading.reread(), page: 'Today' });
-    const session = { label: 'Claude in herdr', does: 'Asks first, then starts claude in herdr to fix this row.', askFirst: true,
+    const prs = o => o.id === 'dark:prs';
+    const session = (on, when) => ({ ...K.fix(on, { item: o => o.id, report: () => false, when, post: null }), primary: () => true,
+      does: 'Asks first, then starts claude in herdr to fix this row.',
       cli: () => 'no sd verb: the dashboard runs local-herdr/herdr.sh launch', sends: o => `POST /api/now/fix ${JSON.stringify({ row: o.id })}`,
       consequence: o => `Opens a herdr workspace and starts claude on "${o.label}", in ${o.type === 'repo' ? 'its checkout' : 'the system checkout'}. A second Fix starts a second session: look in herdr first.`,
       run: o => window.shell.post('/api/now/fix', { row: o.id }).then(
         out => reading.reread().then(() => `Fix started · ${o.label} · claude in herdr workspace ${out.fix.workspace}, pane ${out.fix.pane}`),
-        err => { load(); throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Fix again`); }) };
-    const fix = (on, glyph, route) => {
-      const via = (k, none) => (o, v) => { const r = route(o), f = r[k]; return typeof f === 'function' ? f(o, v) : f === undefined ? none : f; };
-      return { id: `${on}.fix`, on, label: 'Fix', key: 'f', icon: glyph, risk: 'safe',
-        does: o => { const d = route(o).does; return typeof d === 'function' ? d(o) : d; },
-        when: via('when', true), askFirst: via('askFirst', false), consequence: via('consequence', ''), cli: via('cli', ''), sends: via('sends', ''),
-        primary: o => { const r = route(o); return (!r.when || r.when(o) === true) && (!r.primary || !!r.primary(o)); },
-        run: (o, v) => route(o).run(o, v) };
-    };
+        err => { load(); throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Fix again`); }) });
     // A group's act on every member (sd:5921): one write each, through the route a member row's own act posts.
     const each = (o, body) => Promise.all(o.members.map(m => window.shell.post('/api/snooze', body(m))))
       .then(() => reading.reread(), err => { load(); throw err; });
@@ -426,11 +419,10 @@ window.PAGE_FILTER = { '': 'Needs you' };
     const lane = action => o => post('/api/queue/move', { repo: o.repoPath, item: o.item, action, revision: o.laneRevision, head: o.head });
     const go = (href, said) => () => { location.href = href; return said; };
     C.register(
-      fix('job', 'play', () => retry),
-      fix('pull request', 'arrow-up-right', () => open),
-      fix('collector', 'bot', o => o.id === 'dark:prs' ? sync : session),
-      fix('repo', 'bot', () => session),
-      fix('sessions', 'bot', () => session),
+      session('collector', o => !prs(o) || 'Re-run collector fixes the pull request collector'),
+      session('repo'),
+      session('sessions'),
+      { ...sync, when: o => prs(o) || 'only the pull request collector re-runs from Today' },
       retry,
       // Each row kind's commands from the page that shows it in full (sd:3449).
       K.showLog({ job: o => ({ name: o.job }) }),

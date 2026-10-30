@@ -753,52 +753,48 @@ const DARK = s => ({ rank: 0, kind: 'dark', id: `dark:${s}`, what: `${s} could n
 """
 
 
+# A row's icon actions, as shell.js's rowActions draws them with { icons: true }: every live command that has an icon.
+ICONS = """const icons = id => { const o = C.get(id); return REG.filter(c => c.on === o.type && (!c.when || c.when(o) === true) && c.icon).map(c => [c.id, c.label, c.icon]); };
+OUT.drawn = {}; C.rowActions = (id, opt) => { OUT.drawn[id] = !!(opt && opt.icons); return mk``; };
+"""
+
+
 class TheNowFix(ReaderCase):
-    """sd:5652: every Now row has a Fix, its act where the kind has a route, routed to what already addresses the kind;
-    a row with no route has Fix off with the reason."""
+    """sd:6709: one Fix, commands.fix's label and icon, always claude in herdr on the problem. A row whose act is
+    something else shows that command under its own name: a job's Run now, a pull request's Open on GitHub, the pull
+    request collector's Re-run collector. A broken row shows its icon actions, Fix among them."""
 
-    def test_fix_is_each_routed_rows_act(self):
-        out = self.run_page(ACT + """DOC0.needs.push(PR, DARK('prs'), DARK('jobs')); refresh(); await flush();
-R.acts = ['job:nightly-sync:7', 'ahead:pushy:1', 'pr:example/project#4:4', 'dark:prs', 'dark:jobs'].map(act);""")
-        self.assertEqual(out["R"]["acts"], [["job.fix", "Fix", "play"], ["repo.fix", "Fix", "bot"],
-                                            ["pull request.fix", "Fix", "arrow-up-right"], ["collector.fix", "Fix", "bot"],
-                                            ["collector.fix", "Fix", "bot"]])
+    def test_every_fix_is_the_one_fix_icon(self):
+        out = self.run_page("R.fix = REG.filter(c => c.label === 'Fix').map(c => [c.id, c.icon, c.key]);")
+        self.assertTrue(out["R"]["fix"])
+        self.assertEqual({(icon, key) for _, icon, key in out["R"]["fix"]}, {("bot", "f")}, out["R"]["fix"])
 
-    def test_fix_on_a_failed_job_is_its_run_now(self):
-        row = self.doc["needs"][0]
-        out = self.run_page("""ANSWER = (path, body) => path === '/api/now' ? [200, DOC0] : [200, { request: { status: 'accepted', message: 'launchctl accepted the request' } }];
-const c = cmd('job.fix'), o = C.get('job:nightly-sync:7'); R.line = [c.cli(o), c.sends(o), c.key];
-shellRun(c, o); await flush();""")
-        self.assertEqual(out["posts"], [["/api/jobs/nightly-sync/retry", {"revision": row["revision"]}, 64]])
-        self.assertEqual(out["toasts"][-1]["msg"], "Retry started · nightly-sync")
-        self.assertEqual(out["R"]["line"], ["sd jobs retry nightly-sync", "launchctl kickstart fixture/nightly-sync", "f"])
+    def test_a_job_and_a_pull_request_show_their_own_command_not_fix(self):
+        out = self.run_page(ACT + """DOC0.needs.push(PR, DARK('prs')); refresh(); await flush();
+R.fix = REG.filter(c => c.label === 'Fix').map(c => c.on);
+R.acts = ['job:nightly-sync:7', 'pr:example/project#4:4', 'dark:prs', 'ahead:pushy:1'].map(act);""")
+        self.assertNotIn("job", out["R"]["fix"])
+        self.assertNotIn("pull request", out["R"]["fix"])
+        self.assertEqual(out["R"]["acts"], [["jobs.retry", "Run now", "play"], ["pr.open", "Open on GitHub", "arrow-up-right"],
+                                            ["collector.sync", "Re-run collector", "rotate-ccw"], ["repo.fix", "Fix", "bot"]])
 
-    def test_after_exit_127_fix_asks_first_and_print_stays_the_act(self):
+    def test_a_broken_row_shows_fix_among_its_icon_actions(self):
+        out = self.run_page(ICONS + ACT + """DOC0.needs.push(DARK('jobs'), DARK('prs')); refresh(); await flush();
+R.drawn = OUT.drawn; R.jobs = icons('dark:jobs'); R.prs = icons('dark:prs');""")
+        self.assertTrue(out["R"]["drawn"]["dark:jobs"], "a broken row draws its icon actions, not the primary alone")
+        self.assertIn(["collector.fix", "Fix", "bot"], out["R"]["jobs"])
+        self.assertNotIn("collector.fix", [c for c, _, _ in out["R"]["prs"]])
+        self.assertIn(["collector.sync", "Re-run collector", "rotate-ccw"], out["R"]["prs"])
+
+    def test_after_exit_127_print_stays_the_act(self):
         self.doc["needs"][0]["exit"] = 127
-        out = self.run_page(ACT + """ANSWER = (path, body) => path === '/api/now' ? [200, DOC0] : [200, { request: { status: 'accepted', message: 'ok' } }];
-R.act = act('job:nightly-sync:7'); R.says = cmd('job.fix').consequence(C.get('job:nightly-sync:7'));
-shellRun(cmd('job.fix'), C.get('job:nightly-sync:7')); await flush();""")
+        out = self.run_page(ACT + "R.act = act('job:nightly-sync:7');")
         self.assertEqual(out["R"]["act"], ["jobs.print", "Print", "terminal"])
-        self.assertIn("exit 127", out["R"]["says"])
-        self.assertEqual(out["confirms"], ["job.fix"])
 
-    def test_a_job_with_no_route_has_fix_off_with_the_reason(self):
-        self.doc["needs"][0].update(state="unloaded", retry=None, capability=None)
-        out = self.run_page(ACT + "R.act = act('job:nightly-sync:7'); shellRun(cmd('job.fix'), C.get('job:nightly-sync:7')); await flush();")
-        self.assertNotEqual((out["R"]["act"] or [None])[0], "job.fix")
-        self.assertEqual(out["toasts"][-1]["msg"], "off: no failed run to retry")
-        self.assertEqual(out["posts"], [])
-
-    def test_fix_on_a_pull_request_opens_it_on_github(self):
-        out = self.run_page(ACT + """DOC0.needs.push(PR); refresh(); await flush();
-shellRun(cmd('pull request.fix'), C.get('pr:example/project#4:4')); await flush();""")
-        self.assertEqual(out["opened"], "https://github.com/example/project/pull/4")
-        self.assertEqual(out["toasts"][-1]["msg"], "Opened on GitHub in a new tab")
-
-    def test_fix_on_the_dark_pull_request_collector_runs_its_sync(self):
+    def test_run_now_on_the_dark_pull_request_collector_runs_its_sync(self):
         out = self.run_page(ACT + """ANSWER = (path, body) => path === '/api/shadow/state' ? [200, { running: false, trackers: [] }] : path === '/api/now' ? [200, DOC0] : [202, { started: true }];
 DOC0.needs.push(DARK('prs')); refresh(); await flush();
-shellRun(cmd('collector.fix'), C.get('dark:prs')); await flush();""")
+shellRun(cmd('collector.sync'), C.get('dark:prs')); await flush();""")
         self.assertEqual([p for p, _, _ in out["posts"]], ["/api/shadow/sync"])
         self.assertIn("/api/shadow/state", out["gets"])
         self.assertEqual(out["toasts"][-1]["msg"], "Shadow sync started · Today reads again when it ends")

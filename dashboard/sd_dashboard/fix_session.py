@@ -23,8 +23,8 @@ the first one's note in the revision and is refused.
 
 **Fix on a Today Now row** (sd:5652). Today posts `/api/now/fix` with a Now row's id for the rows no other command
 addresses: a repo ahead, dirty or pinned, the abandoned worktrees, and every dark row but the pull request collector's
-(a failed job's Fix is its Run now, a pull request's its Open on GitHub, the pull request collector's its sync, all in
-the page). `start_row` reads that source again and launches only while the read still raises the row: a row it no longer
+(a failed job shows Run now, a pull request Open on GitHub and the pull request collector Re-run collector, each
+under its own name, sd:6709). `start_row` reads that source again and launches only while the read still raises the row: a row it no longer
 raises is `StaleItem` (409), and a read that failed says whether the row stands is not known (503). A dark row, whole or
 in part (sd:5954), is confirmed by Today's own read, `now_screen.document`, which turns each failed read into its dark
 row. A repo row starts in the checkout that read names; the rest start in this checkout.
