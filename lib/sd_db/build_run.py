@@ -714,6 +714,14 @@ class Supervisor:
         if status == "blocking":
             return {"status": status, "blockers": [row for row in findings
                                                    if isinstance(row, dict) and row.get("disposition") == "blocking"]}
+        if status == "gate_failed":  # the review cleared and the repository's gate failed: the builder fixes it
+            checks = (answer.get("check") or {}).get("checks") or []
+            return {"status": status, "blockers": [
+                {"path": " ".join(map(str, row.get("command") or ["gate"])), "line": "-",
+                 "summary": "; ".join(map(str, row.get("failed_steps") or [])) + ": "
+                 + str(row.get("failure") or "")[-1500:]}
+                for row in checks if isinstance(row, dict) and row.get("exit_code")] or [
+                {"path": "gate", "line": "-", "summary": "the repository gate failed; see the review output"}]}
         return None
 
     @staticmethod
