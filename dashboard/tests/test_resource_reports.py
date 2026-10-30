@@ -222,7 +222,14 @@ cat {str(root)!r}/"$3.json"
         vault = stub / "vault" / "System" / "Databases" / "Blog Ideas"
         vault.mkdir(parents=True)
         (vault / "Vault note.md").write_text("---\nstatus: inbox\ndateCreated: 2026-01-01\n---\n")
-        with patch.dict(os.environ, {"PATH": f"{stub}:{os.environ['PATH']}", "OBSIDIAN_VAULT": str(stub / "vault")}):
+        # The real tile under a 60-second ceiling: at five, a loaded gate refused it (sd:6777).
+        tile, _ = self.tile(
+            "import importlib.util, sys\n"
+            f"spec = importlib.util.spec_from_file_location('sd_tile', {str(reports_screen.TILE)!r})\n"
+            "sd_tile = importlib.util.module_from_spec(spec)\nspec.loader.exec_module(sd_tile)\n"
+            "sd_tile.TILE_SECONDS = 60.0\nsys.exit(sd_tile.main(sys.argv[1:]))\n")
+        with tile, patch.dict(reports_screen.VIEW_SECONDS, {"queues": 60.0}), \
+                patch.dict(os.environ, {"PATH": f"{stub}:{os.environ['PATH']}", "OBSIDIAN_VAULT": str(stub / "vault")}):
             html = str(reports_screen.resources({"resource": ["queues"]}))
         return html, (stub / "calls").read_text().splitlines()
 
