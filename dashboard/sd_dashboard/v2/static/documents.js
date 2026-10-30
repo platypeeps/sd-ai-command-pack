@@ -220,8 +220,8 @@ const DRAFT = { id: 'draft:request', type: 'document request draft', label: 'new
 // line's --belongs-to says; a root that is no checkout's docs/dashboard names none.
 const REQUEST = { id: 'document.request', on: 'document request draft', label: 'Request', does: 'Files this request as a task; Undo closes it.', icon: 'plus', risk: 'undo', primary: () => true, executes: true,
   when: o => (o.repoError || (!o.title ? 'type what you need first' : !o.repo ? 'name the repository: add repo:<name>' : true)), cli: o => o.cmd,
-  sends: o => `POST /api/items {title, body${o.checkout ? ', repo' : ''}${o.due ? ', due' : ''}}`,
-  run: o => window.shell.post('/api/items', { title: `Document request: ${o.title}`, body: `repo=${o.repo} kind=${o.kind} skill=${o.skill}`,
+  sends: o => `POST /api/items {title, body, priority${o.checkout ? ', repo' : ''}${o.due ? ', due' : ''}}`,
+  run: o => window.shell.post('/api/items', { title: `Document request: ${o.title}`, body: `repo=${o.repo} kind=${o.kind} skill=${o.skill}`, priority: 3,
     ...(o.checkout ? { repo: o.checkout } : {}), ...(o.due ? { due: o.due } : {}) })
     .then(out => ({ text: `Request filed · #${out.item.id} · ${o.title}`, item: out.item.id, revision: out.revision })),
   undo: (o, v) => window.shell.post(`/api/items/${v.item}/cancel-task`, { reason: 'withdrawn on Documents right after filing', revision: v.revision }) };
@@ -461,7 +461,7 @@ function renderShift() {
     reqEl.hidden = false;
     const checkout = ROOTS.find(r => r.key === repo)?.checkout || '';
     Object.assign(DRAFT, { title, repo, checkout, kind, skill, due: p.due,
-      cmd: `sd task add ${shq('Document request: ' + title)}${checkout ? ` --belongs-to ${shPath(checkout)}` : ''} --body ${shq(`repo=${repo} kind=${kind} skill=${skill}`)}${p.due ? ` --due ${shq(p.due)}` : ''}` });
+      cmd: `sd task add ${shq('Document request: ' + title)}${checkout ? ` --belongs-to ${shPath(checkout)}` : ''} --body ${shq(`repo=${repo} kind=${kind} skill=${skill}`)}${p.due ? ` --due ${shq(p.due)}` : ''} --priority 3` });
     put(reqEl, html`<p class="why">Request creates an item for ${repo}; Undo closes it. ${skill === 'choose' ? 'No skill matches this kind yet; name one with skill:.' : `The item names ${skill}.`}</p>
       <div class="actions">${shell.commands.rowActions(DRAFT.id)}</div>`);
     F.text = ''; render();

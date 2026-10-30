@@ -441,6 +441,28 @@ class TheHookStaysSilent(unittest.TestCase):
         self.addCleanup(setattr, sd_handoff_rows, "brief_for", original)
         self.assertEqual(restore.followup_lines("/nowhere"), [])
 
+    def test_a_declared_policy_is_one_line_and_none_or_a_failed_read_is_none(self):
+        """sd:6715: the session-start summary prints the repository's policy before the agent acts."""
+        import sd_lib
+
+        original = sd_lib.repo_declaration
+        self.addCleanup(setattr, sd_lib, "repo_declaration", original)
+        sd_lib.repo_declaration = lambda root, kind: {"mode": "org", "issues": "read", "review": {"human": 1}}
+        self.assertEqual(restore.policy_lines("/nowhere"),
+                         ["Repository policy (sd-db repo declare . policy): mode=org, commit=ask, push=ask, pr=ask, "
+                          "merge=squash, issues=read, review=human(1)"])
+        sd_lib.repo_declaration = lambda root, kind: None
+        self.assertEqual(restore.policy_lines("/nowhere"), [])
+
+        def unread(root, kind):
+            raise sd_lib.DatabaseUnreadable("locked")
+
+        sd_lib.repo_declaration = unread
+        # A failed read is not "no policy": that would read as managed defaults and lift an org repository's
+        # ask rules, so the session is told to read the policy before it commits, pushes or opens a PR.
+        self.assertEqual(restore.policy_lines("/nowhere"), [restore.POLICY_UNREAD.format(reason="locked")])
+        self.assertIn("before you commit, push or open a pull request", restore.POLICY_UNREAD)
+
     def test_the_reader_never_writes(self):
         """A read that claimed would hand the second session nothing.
 

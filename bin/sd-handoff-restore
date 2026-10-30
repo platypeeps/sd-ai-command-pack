@@ -333,6 +333,32 @@ def followup_lines(root: str) -> list[str]:
         return []
 
 
+#: The line for a policy that could not be read (sd:6715). No policy reads as the managed defaults, so a failed
+#: read said nothing would lift an org repository's ask rules for as long as the database is down.
+POLICY_UNREAD = (
+    "Repository policy unavailable: the policy declaration could not be read ({reason}). "
+    "This repository may require asking first: run `sd-db repo declare . policy` and get a successful read "
+    "before you commit, push or open a pull request here."
+)
+
+
+def policy_lines(root: str) -> list[str]:
+    """The repository's policy in one line (sd:6715), so an agent sees what it may do before it acts.
+
+    No declaration is no line, and so is no `sd_handoff_rows`, the pre-install state. A read that failed is
+    `POLICY_UNREAD`, never no line: startup goes on, and the session is told to read the policy first.
+    """
+    try:
+        import sd_handoff_rows
+    except ImportError:
+        return []
+    try:
+        line = sd_handoff_rows.policy_for(root)
+    except BaseException as error:  # noqa: BLE001 - a hook never breaks session startup
+        return [POLICY_UNREAD.format(reason=str(error) or type(error).__name__)]
+    return [line] if line else []
+
+
 def emit(context: str, out) -> None:
     payload = {
         "hookSpecificOutput": {
@@ -448,6 +474,7 @@ def run(stdin_text: str, environ: dict[str, str], out) -> int:
 
     root, cwd = resolve_root(payload, environ)
     sections = [section for section in (packet_section(root, cwd, environ),) if section]
+    sections.extend(policy_lines(root))
     sections.extend(followup_lines(root))
     if sections:
         emit("\n".join(sections), out)

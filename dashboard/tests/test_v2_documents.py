@@ -793,9 +793,9 @@ R.r = [r.executes, r.when(d), r.cli(d)]; shellRun(r, d); await flush(); R.toast 
         executes, when, cli = out["R"]["r"]
         self.assertEqual((executes, when), (True, True))
         self.assertEqual(cli, "sd task add 'Document request: water summary' --belongs-to ~/'repos/lab'"
-                              " --body 'repo=lab kind=research skill=sd-research-repo'")
+                              " --body 'repo=lab kind=research skill=sd-research-repo' --priority 3")
         self.assertEqual([p[:2] for p in out["posts"]],
-                         [["/api/items", {"title": "Document request: water summary", "body": "repo=lab kind=research skill=sd-research-repo",
+                         [["/api/items", {"title": "Document request: water summary", "body": "repo=lab kind=research skill=sd-research-repo", "priority": 3,
                                           "repo": "~/repos/lab"}],
                           ["/api/items/72/cancel-task", {"reason": "withdrawn on Documents right after filing", "revision": "r72"}]])
         self.assertEqual(out["R"]["toast"], "Request filed · #72 · water summary")
@@ -826,7 +826,7 @@ R.exact = ask('request memo repo:lab'); R.unique = ask('request memo repo:ci'); 
 input.listeners.input.forEach(f => f()); input.listeners.input.forEach(f => f());
 R.cli = cmd('document.request').cli(C.get('draft:request'));""")
         self.assertEqual(out["R"]["cli"], "sd task add 'Document request: budget memo' --belongs-to ~/'repos/civic'"
-                                          " --body 'repo=civic kind=report skill=sd-writer'")
+                                          " --body 'repo=civic kind=report skill=sd-writer' --priority 3")
 
     def test_each_read_state_is_said_in_the_slot(self):
         out = self.run_page("")

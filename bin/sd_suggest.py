@@ -145,7 +145,7 @@ def suggest_publish(args) -> int:
 
         state = workflow.capture_task(
             connection, title=title,
-            body=f"{row['body']}\n\nFrom proposal note {args.note}.",
+            body=f"{row['body']}\n\nFrom proposal note {args.note}.", priority=3,  # a filer names a rank (sd:6726)
             repo=repo, who=getpass.getuser(),
         )
     except sd_db.SdDbError as error:
