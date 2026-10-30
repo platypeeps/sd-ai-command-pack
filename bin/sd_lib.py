@@ -1280,8 +1280,9 @@ def repo_ci(connection: Any, root: pathlib.Path | str) -> str:
 
 
 #: The kinds a repository row declares (sd:5109), the library's `repos.DECLARATION_KINDS`:
-#: the first four each the object a `.github/sd-<kind>.json` file held before migration 37.
-DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status", "experiment")
+#: the first four each the object a `.github/sd-<kind>.json` file held before migration 37;
+#: `policy` the repository's rules for agents (sd:6715).
+DECLARATION_KINDS = ("review", "gate_reuse", "check_scope", "status", "experiment", "policy")
 
 
 def repo_declaration(root: pathlib.Path | str, kind: str, environ: Mapping[str, str] | None = None) -> Any:
@@ -1356,6 +1357,8 @@ def declaration_problems(kind: str, value: Any) -> list[str]:
         from sd_db import repos  # noqa: PLC0415 - this commit's lib (sd:3278)
 
         return repos.experiment_problems(value)
+    if kind == "policy":
+        return sibling("sd_repo_policy", "sd_repo_policy.py").problems(value)
     return [f"{kind!r} is not a declaration kind; expected {', '.join(DECLARATION_KINDS)}"]
 
 
