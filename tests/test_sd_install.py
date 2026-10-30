@@ -4647,6 +4647,10 @@ class CodexMetadataTests(InstallerHarness):
 class StrictVerificationTests(InstallerHarness):
     def setUp(self):
         super().setUp()
+        # sd:6724: a 5 s help or git bound failed a passing verify at load 30-37; these tests read codes, not the bound.
+        patcher = unittest.mock.patch.object(sd_install, "VERIFY_TIMEOUT", 60)
+        patcher.start()
+        self.addCleanup(patcher.stop)
         self.checkout = self.checkout_with_commands("sd", "sd-review", "sd-ship", "sd-hook")
         for command in (self.checkout / "bin").iterdir():
             command.write_text("#!/bin/sh\nexit 0\n")
@@ -4881,7 +4885,7 @@ class StrictVerificationTests(InstallerHarness):
             result = sd_install.verify_help(self.ctx, "sd", str(self.home / ".local" / "bin" / "sd"))
             self.assertEqual(result["code"], "help_failed")
             self.assertEqual(run.call_args.args[0], [str(self.home / ".local" / "bin" / "sd"), "--help"])
-            self.assertEqual(run.call_args.kwargs["timeout"], 5)
+            self.assertEqual(run.call_args.kwargs["timeout"], sd_install.VERIFY_TIMEOUT)
         with unittest.mock.patch.object(sd_install, "verify_help", return_value=sd_install.verify_result("smoke", "help_failed")):
             self.assertIn("help_failed", self.codes())
         with unittest.mock.patch.object(sd_install, "verify_source", side_effect=[sd_install.verify_result("source"), sd_install.verify_result("source", "source_commit_changed")]) as source:
