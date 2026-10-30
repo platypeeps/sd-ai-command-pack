@@ -143,6 +143,16 @@ class TheSections(TodayCase):
         self.assertEqual([(row["id"], row["why"]) for row in today.blocked(self.connection)],
                          [(vendor, "Waits on the vendor"), (bare, ""), (waiting, "Waiting on Alex for the keys")])
 
+    def test_planned_and_blocked_leave_out_the_idea_kinds(self):
+        """pack sd:6743: ideas show in the Writing and Vault views only, never in a work count."""
+        work = self.item("Work", due="2026-09-30")
+        stuck = self.item("Stuck", status="blocked")
+        for kind in ("idea", "work-idea", "personal-idea"):
+            self.item(f"A dated {kind}", kind=kind, due="2026-09-30")
+            self.item(f"A blocked {kind}", kind=kind, status="blocked")
+        self.assertEqual([row["id"] for row in today.planned(self.connection, now=NOW)], [work])
+        self.assertEqual([row["id"] for row in today.blocked(self.connection)], [stuck])
+
     def test_decisions_and_followups_leave_out_plain_questions_and_reports_own(self):
         asked = self.item("Asked")
         decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack\nOption: Rows")

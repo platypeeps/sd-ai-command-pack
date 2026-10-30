@@ -48,6 +48,7 @@ from test_workflow_actions import BrowserSession
 V2 = Path(v2.__file__).resolve().parent
 NOTES_JS = (V2 / "static" / "notes.js").read_text(encoding="utf-8")
 MARKUP_JS = (V2 / "static" / "markup.js").read_text(encoding="utf-8")
+COMMANDS_JS = (V2 / "static" / "commands.js").read_text(encoding="utf-8")
 
 #: Six hours behind UTC, all year: NOW (12:00 UTC) is 06:00 on 2026-09-06 here.
 BEHIND = "Etc/GMT+6"
@@ -256,7 +257,7 @@ class ThePage(NoVault, BrowserSession):
         self.assertIn("<title>Notes · system</title>", body)
         self.assertEqual(Refused(body).found, [])
         scripts = re.findall(r'<script src="/ui/([^"?]+)', body)
-        self.assertEqual(scripts, ["theme.js", "markup.js", "icons.js", "sections.js", "read.js", "notes.js", "shell.js"])
+        self.assertEqual(scripts, ["theme.js", "markup.js", "icons.js", "sections.js", "read.js", "commands.js", "notes.js", "shell.js"])
         for path in re.findall(r'(?:src|href)="(/ui/[^"]+)"', body):
             self.assertEqual(self.request(path)[0], 200, path)
 
@@ -294,7 +295,7 @@ class TheScript(Fixture):
                   + f"\nvar DOC = {json.dumps(doc)}, STATUS = {status}, QUICK = {json.dumps(list(quick))}, KEPT = {json.dumps(list(kept))};\n"
                   + "ANSWER = (path, body) => path === '/api/notes' ? [STATUS, DOC] : path === '/api/notes/quick' ? QUICK"
                   + " : path === '/api/notes/quick/add' ? KEPT : [404, { error: 'no answer' }];\n"
-                  + NOTES_JS + "\nvar R = {};\n(async () => { try {\n(WIN_LISTENERS.DOMContentLoaded || []).forEach(f => f());\n"
+                  + COMMANDS_JS + NOTES_JS + "\nvar R = {};\n(async () => { try {\n(WIN_LISTENERS.DOMContentLoaded || []).forEach(f => f());\n"
                   + "(DOC_LISTENERS.DOMContentLoaded || []).forEach(f => f());\nawait flush();\n"
                   + body + "\n} catch (e) { OUT.error = String(e) + ' ' + e.stack; } })();\n"
                   + "function run() { OUT.R = R; OUT.toasts = OUT.toasts.map(t => [t.msg, !!t.undo]); return JSON.stringify(OUT); }\n")
@@ -357,7 +358,31 @@ open('merge:{self.merges[1]}'); R.det = ELS.details.html;""")
         self.assertIn("Finish the page", r["daily"])
         self.assertIn("system#7", r["daily"])
         self.assertIn("Source: sd-ship delivery note (ship.note_merge)", r["det"])
-        self.assertIn('href="https://github.com/example-org/system/pull/7"', r["det"])
+        # sd:6695: the pull request opens from the Act bar's button, not a text link.
+        self.assertIn('<div class="bar"></div>', r["det"])
+
+    def test_a_merge_row_opens_its_pull_request_from_an_icon_and_a_details_button(self):
+        """sd:6695: a delivery row draws its icons and Details its Act bar, not a text link; a done task has no such act."""
+        merge = f"merge:{self.merges[0]}"
+        out = self.run_page(f"""C.rowActions = (id, o) => mk`<i data-ra="${{id}}" data-icons="${{String(!!(o && o.icons))}}"></i>`;
+C.bar = id => REG.some(c => c.on === C.get(id).type) ? mk`<div class="bar" data-bar="${{id}}"></div>` : mk``; window.open = (u, t, f) => {{ R.opened = [u, t, f]; }};
+window.notesDay(-1); window.notesDay(1); R.daily = ELS.daily.html;
+open('{merge}'); R.det = ELS.details.html;
+R.reg = REG.filter(c => c.label === 'Open on GitHub').map(c => [c.id, c.on, c.icon]);
+R.on = cmd('merge.open').when(C.get('{merge}')); R.cli = cmd('merge.open').cli(C.get('{merge}'));
+cmd('merge.open').run(C.get('{merge}'));
+window.notesDay(-1); open(DOC.days['2026-09-05'].done[0].id); R.done = ELS.details.html;""")
+        r = out["R"]
+        self.assertEqual(r["reg"], [["merge.open", "merge", "arrow-up-right"]])
+        self.assertIn(f'<i data-ra="{merge}" data-icons="true"></i>', r["daily"])
+        self.assertIs(r["on"], True)
+        self.assertEqual(r["cli"], "gh pr view 41 --repo example-org/system --web")
+        self.assertEqual(r["opened"], ["https://github.com/example-org/system/pull/41", "_blank", "noopener"])
+        self.assertIn(f'data-bar="{merge}"', r["det"])
+        self.assertNotIn("Open the pull request", r["det"])
+        self.assertIn("Finish the page", r["done"])
+        self.assertNotIn("data-bar", r["done"])
+        self.assertIn(">Open in Tasks</a>", r["done"])
 
     def test_the_kept_quick_notes_are_listed_newest_first(self):
         out = self.run_page("R.list = ELS['qn-list'].html; R.keep = ELS['qn-keep'].disabled;")

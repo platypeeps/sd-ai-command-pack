@@ -1535,6 +1535,130 @@ class Landing(Lane):
         self.assertFalse(tree.exists())
         self.assertEqual(git(self.repo, "branch", "--list", "topic"), "")
 
+    def watched(self, *items: int) -> list[str]:
+        lines: list[str] = []
+        self.assertEqual(sd_lane.watch_items(self.store(), list(items), write=lines.append), 0)
+        return lines
+
+    def test_the_watch_after_a_merge_removes_a_clean_stopped_worktree_and_its_branches(self) -> None:
+        """sd:6727: the operator ran the landing note's removal command by hand three times in one day."""
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        git(self.origin, "update-ref", "refs/heads/topic", head)  # a remote branch the landing left
+        removed = f"Removed: worktree {tree}, branch topic, origin/topic (merged head {head[:12]})"
+        lines = self.watched(1)
+        self.assertEqual(lines, ["pack sd:1 merged at c0ffeec0ffee", f"pack sd:1 {removed}; the builder had stopped."])
+        self.assertFalse(tree.exists())
+        self.assertEqual(git(self.repo, "branch", "--list", "topic"), "")
+        self.assertEqual(self.remote_branches(), ["main"])
+        self.assertEqual(self.notes[-1][1], f"{removed}; the builder had stopped.")
+        self.assertEqual(self.watched(1), ["pack sd:1 merged at c0ffeec0ffee"])  # gone: nothing left to do
+
+    def test_a_held_dirty_or_moved_merged_worktree_is_kept_and_tried_again(self) -> None:
+        import sd_db
+        from sd_db import sessions
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        landed = len(self.notes)
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            sessions.beat(connection, "session-a", machine=sd_lane.this_host(), cwd=None,
+                          found=sessions.worktrees([str(tree)]))
+            connection.commit()
+            [line] = self.watched(1)[1:]
+            self.assertIn(f"kept {tree}: a live session holds it", line)
+            sessions.end(connection, "session-a")
+            connection.commit()
+        finally:
+            connection.close()
+        (tree / "scratch").write_text("x\n", encoding="utf-8")
+        self.assertEqual(self.watched(1)[1:], [f"pack sd:1 kept {tree}: it has uncommitted changes"])
+        (tree / "scratch").unlink()
+        git(tree, "commit", "-q", "--allow-empty", "-m", "later")
+        self.assertEqual(self.watched(1)[1:], [f"pack sd:1 kept {tree}: its tip is not the merged head {head[:12]}"])
+        self.assertTrue(tree.exists())
+        self.assertEqual(len(self.notes), landed)  # the landing's note, with its command, still stands
+        git(tree, "reset", "-q", "--hard", head)
+        self.assertEqual(self.watched(1)[1][:24], "pack sd:1 Removed: workt")
+
+    def test_a_merged_worktree_on_another_branch_at_the_merged_head_is_kept(self) -> None:
+        """Review of sd:6727: a new task branch started at the merged head is not the merged branch."""
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        git(tree, "switch", "-q", "-c", "next-task")
+        self.assertEqual(self.watched(1)[1:], [f"pack sd:1 kept {tree}: it is on next-task, not the merged branch "
+                                               "topic"])
+        self.assertTrue(tree.exists())
+        self.assertEqual(git(tree, "rev-parse", "refs/heads/next-task"), head)
+
+    def test_an_active_build_assignment_keeps_a_merged_worktree(self) -> None:
+        import sd_db
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            connection.execute("PRAGMA foreign_keys = OFF")
+            connection.execute("INSERT INTO assignment (id, item, role, status) VALUES (9, 1, 'author', 'done')")
+            connection.execute("INSERT INTO assignment (id, item, role, status) VALUES (7, 1, 'author', 'running')")
+            connection.commit()
+            self.assertEqual(self.watched(1)[1:], [f"pack sd:1 kept {tree}: build assignment 7 of item 1 is active"])
+            connection.execute("UPDATE assignment SET status = 'done' WHERE id = 7")
+            connection.commit()
+        finally:
+            connection.close()
+        self.assertEqual(self.watched(1)[1][:24], "pack sd:1 Removed: workt")
+
+    def test_ignored_data_beyond_build_output_keeps_a_merged_worktree(self) -> None:
+        """Review of sd:6727: `git worktree remove` deletes ignored files without --force."""
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        (self.repo / ".git/info/exclude").write_text(".env\n__pycache__/\n", encoding="utf-8")
+        (tree / "__pycache__").mkdir()
+        (tree / "__pycache__/a.pyc").write_bytes(b"x")
+        (tree / ".env").write_text("TOKEN=local\n", encoding="utf-8")
+        self.assertEqual(self.watched(1)[1:], [f"pack sd:1 kept {tree}: it holds ignored files that are not "
+                                               "build output: .env"])
+        self.assertEqual((tree / ".env").read_text(encoding="utf-8"), "TOKEN=local\n")
+        (tree / ".env").unlink()
+        self.assertEqual(self.watched(1)[1][:24], "pack sd:1 Removed: workt")  # build output alone goes
+        self.assertFalse(tree.exists())
+
+    def test_ignored_data_keeps_the_worktree_whatever_status_shows_by_default(self) -> None:
+        """Review of sd:6727: `status.showUntrackedFiles=no` hides ignored files from a bare status too."""
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        git(self.repo, "config", "status.showUntrackedFiles", "no")
+        (self.repo / ".git/info/exclude").write_text(".env\n", encoding="utf-8")
+        (tree / ".env").write_text("TOKEN=local\n", encoding="utf-8")
+        self.assertEqual(self.watched(1)[1:], [f"pack sd:1 kept {tree}: it holds ignored files that are not "
+                                               "build output: .env"])
+        self.assertEqual((tree / ".env").read_text(encoding="utf-8"), "TOKEN=local\n")
+
+    def test_a_process_working_in_a_merged_worktree_keeps_it(self) -> None:
+        """Review of sd:6727: a build or server no registry names still runs there; an unread list keeps it too."""
+        tree, head = self.topic()
+        self.merge_lands(tree, 1, head)
+        self.drain()
+        sleeper = subprocess.Popen(["sleep", "60"], cwd=tree)  # noqa: S607 - a stand-in for a manual build
+        try:
+            [line] = self.watched(1)[1:]
+            self.assertIn(f"kept {tree}: a process works in ", line)
+        finally:
+            sleeper.kill()
+            sleeper.wait()
+        from sd_dashboard import health_collectors
+        with mock.patch.object(health_collectors, "_cwds", return_value=None):
+            self.assertEqual(self.watched(1)[1:], [f"pack sd:1 kept {tree}: not known whether a process works "
+                                                   "in it: lsof gave no answer"])
+        self.assertTrue(tree.exists())
+        self.assertEqual(self.watched(1)[1][:24], "pack sd:1 Removed: workt")
+
     def test_a_worktree_the_merge_removed_is_landed_from_the_lane_root(self) -> None:
         """sd:3096. `sd-ship merge` removes a clean worktree (sd:3006); git cannot name the main
         checkout from a directory that is gone, so the landing used to read the dead path as the main

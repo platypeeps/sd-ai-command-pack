@@ -82,7 +82,8 @@ COLUMNS = {
                            "created_at updated_at released_at step heartbeat_at model session_id "
                            "builder_pgid builder_start review_round doubts"},
     "shadow": {"none": "id tracker repo url number kind title state author first_seen last_seen reason "
-                       "merged_at closed_at branch linked_issues updated_at created_at filed status assignee"},
+                       "merged_at closed_at branch linked_issues updated_at created_at filed status assignee "
+                       "review_decision checks mergeable"},
     "skill_use": {"key": "cwd", "none": "id timestamp skill surface mode"},
     "state": {"key": "key", "history": "body", "none": "id kind timestamp resolved_at"},
     "trial": {"none": "id skill started expires"},
@@ -261,7 +262,8 @@ class TheMigration(AThirteenStore):
         # `status_source` back at `row`, which every row here held, and 025's
         # puts `satellite_gate` back so 020's can drop it. 041's goes first of
         # all: the one later column on `item`, whose rows this compares, after
-        # 043's `note.harness_session` and 042's build columns on `runner_run`.
+        # 044's `shadow` merge columns, 043's `note.harness_session` and 042's build columns on `runner_run`.
+        connection.executescript(reverse_script("044_shadow_merge_state.sql"))
         connection.executescript(reverse_script("043_note_harness_session.sql"))
         connection.executescript(reverse_script("042_runner_run_build.sql"))
         connection.executescript(reverse_script("041_recurrence_lead.sql"))
