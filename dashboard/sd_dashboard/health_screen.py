@@ -924,12 +924,12 @@ def _doctor_rows(found: dict) -> tuple[list[dict], dict]:
         if check["mark"] in DOCTOR_STATE:
             text = check["text"]
             rows.append({"id": "doc:" + hashlib.sha256(text.encode("utf-8")).hexdigest()[:12],
-                         "state": DOCTOR_STATE[check["mark"]], "type": "check", "what": text.split(" — ")[0],
+                         "state": DOCTOR_STATE[check["mark"]], "type": "doctor check", "what": text.split(" — ")[0],
                          "detail": " ".join([text, *check["more"]]), "kind": f"Doctor · {check['mark']}",
                          "facts": {"Line": check["mark"]}, "cli": DOCTOR_CLI})
     passed = [check for check in found["checks"] if check["mark"] == "ok"]
     rest = [check for check in found["checks"] if check["mark"] in ("--", "SKIP")]
-    rows.append({"id": "doc:ok", "state": "ok", "type": "check",
+    rows.append({"id": "doc:ok", "state": "ok", "type": "doctor check",
                  "what": f"{len(passed)} doctor {_plural(len(passed), 'check passes', 'checks pass')}",
                  "detail": f"{len(rest)} not checked here · {found['fails']} hard {_plural(found['fails'], 'failure', 'failures')}",
                  "kind": "Doctor", "facts": {"Passed": str(len(passed)), "Not checked": str(len(rest))},

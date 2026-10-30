@@ -184,6 +184,8 @@ def route(connection: sqlite3.Connection, path: str, parameters, *, now: str, se
 
 #: The one ref the dashboard files under (sd:4840): Today's issue intake names a GitHub issue, `github:<owner>/<repo>#N`.
 GITHUB_REF = re.compile(r"github:[A-Za-z0-9._-]+/[A-Za-z0-9._-]+#[1-9][0-9]{0,9}")
+#: A Health doctor row's ref (pack sd:6684): `doc:<hash>` as `doctor:<hash>`, filed in the system repo.
+DOCTOR_REF = re.compile(r"doctor:[0-9a-f]{12}")
 
 
 def capture_ref(connection, *, ref, who, **values):
@@ -201,6 +203,27 @@ def capture_ref(connection, *, ref, who, **values):
         if filed is not None:
             raise workflow.WorkflowError(f"sd:{filed['id']} ({filed['status']}) already carries --ref {ref}")
         state = workflow.capture_task(connection, who=who, **values)
+        writes.set_item_fields(connection, state["item"]["id"], source="task-ref", external_id=ref)
+        return workflow.item_state(connection, state["item"]["id"])
+
+
+def capture_doctor(connection, *, ref, who, **values):
+    """The open item that holds a doctor finding, else a new one in the system repo that takes the ref (pack sd:6684).
+
+    Fix on a doctor row posts here before it starts a session, so a second Fix reuses the item. A done item no longer
+    holds the finding: its ref moves to the new one, since the unique index allows one item per ref.
+    """
+    from sd_db import writes
+    from sd_db.config import system_checkout
+
+    with workflow.transaction(connection):
+        filed = writes.item_by_external(connection, "task-ref", ref)
+        if filed is not None and filed["status"] != "done":
+            return workflow.item_state(connection, filed["id"])
+        if filed is not None:
+            writes.set_item_fields(connection, filed["id"], source=None, external_id=None)
+        values.pop("repo", None)
+        state = workflow.capture_task(connection, who=who, repo=str(system_checkout()), **values)
         writes.set_item_fields(connection, state["item"]["id"], source="task-ref", external_id=ref)
         return workflow.item_state(connection, state["item"]["id"])
 
@@ -558,6 +581,8 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
         kind = values.pop("kind", "task")
         parent = values.pop("followup_of", None)
         ref = values.pop("ref", None)
+        if kind == "task" and parent is None and isinstance(ref, str) and DOCTOR_REF.fullmatch(ref):
+            return lambda connection: capture_doctor(connection, ref=ref, who="dashboard", **values)
         if ref is not None and (kind != "task" or not isinstance(ref, str) or not GITHUB_REF.fullmatch(ref)):
             raise ValueError("A ref files a task, and names a GitHub issue as github:<owner>/<repo>#<number>.")
         if kind == "task":
