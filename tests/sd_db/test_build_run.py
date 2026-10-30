@@ -679,6 +679,10 @@ class Supervise(Case):
         """Pack sd:6626: run 137 copied its commit's Closes: trailer into the body; enqueue refuses it."""
         self.assertIn("The body carries no `Closes:` line", build_run.BRIEF)
 
+    def test_the_brief_forbids_a_kill_by_pattern(self):
+        """Pack sd:6815: build 268's `pkill -f "sd-check --json"` ended the vault job's queued gate."""
+        self.assertIn("never `pkill` or `killall`", build_run.BRIEF)
+
     def test_a_requeued_bundle_briefs_the_findings_sent_to_its_branch(self):
         """Pack sd:6020: Send to builder writes a finding note and queues the bundle again; the fresh builder's brief
         names the finding and the branch it resumes, and leaves out a note from before the bundle's first run."""
