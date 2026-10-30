@@ -62,6 +62,23 @@ class CaptureActions(BrowserSession):
         self.assertIn("already carries", result["error"])
         self.assertEqual(self.snapshot(), before)
 
+    def test_a_dependabot_ref_reuses_its_open_item_and_files_anew_after_done(self):
+        """sd:6685: Health's Fix files `dependabot:<owner>/<repo>` once while that item is open, and queues no draft."""
+        upsert_repo(self.connection, "/repos/one")
+        body = {"title": "Dependabot: 2 open alerts", "repo": "/repos/one", "ref": "dependabot:example/project"}
+        status, _, first = self.post("/api/items", body)
+        self.assertEqual(status, 201)
+        status, _, again = self.post("/api/items", body)
+        self.assertEqual((status, again["item"]["id"]), (201, first["item"]["id"]))
+        self.assertEqual(self.connection.execute("SELECT count(*) FROM assignment").fetchone()[0], 0)
+        workflow.change_status(self.connection, first["item"]["id"], "done", who="operator",
+                               expected_revision=again["revision"])
+        status, _, later = self.post("/api/items", body)
+        self.assertEqual(status, 201)
+        self.assertNotEqual(later["item"]["id"], first["item"]["id"])
+        self.assertEqual(writes.item_by_external(self.connection, "task-ref", "dependabot:example/project")["id"],
+                         later["item"]["id"])
+
     def test_a_ref_that_is_not_a_github_issue_or_on_a_followup_is_refused(self):
         before = self.snapshot()
         for payload in ({"title": "x", "ref": "job:repo-sync:42"}, {"title": "x", "ref": "github:example/project#0"},

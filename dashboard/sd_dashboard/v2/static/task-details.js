@@ -299,7 +299,7 @@
     // sd:5752: on a place page Done, or Done → next occurrence for a repeating task, is the row's act whatever its status.
     const nextIs = (o, s) => view() === 'place' ? s === 'done' : view() === 'list' && NEXT[T(o)?.status] === s;
     const STATUS_CMD = Object.fromEntries(STATUSES.map(([s, name], i) => [s, {
-      id: `item.status.${s}`, on: 'item', label: `Status → ${name}`, key: String(i + 1), risk: 'undo', bulk: true, icon: STATUS_ICON[s], bar: false,
+      id: `item.status.${s}`, on: 'item', label: `Status → ${name}`, key: String(i + 1), risk: 'undo', bulk: true, icon: STATUS_ICON[s], bar: false, menu: false,
       primary: o => !draftFirst(T(o)) && nextIs(o, s) && !(s === 'done' && repeats(T(o))),
       when: o => { const t = T(o); return t ? moveOn(s, t) : 'the task is no longer listed'; },
       cli: o => rowOr(o, t => cliMove(t, s)),
@@ -345,6 +345,7 @@
     }
     // sd:5295: the Details' Status, Priority and Due fields do what Status →, Done → next occurrence, Edit → P1-4, Edit and Move
     // to do, so those stay off its Act bar (`bar: false`); 1-5, e, m, the ⋯ menu, the palette and the bulk bar still run them.
+    // sd:6687: Status → and Edit → P leave the row ⋯ menu too (`menu: false`); keys 1-5, the palette and bulk keep them.
     C.register(
       ...Object.values(STATUS_CMD), COMPLETE,
       // Edit sets priority and due date in one dialog. Its save carries the Undo, so the shell's own feedback stays safe.
@@ -361,7 +362,7 @@
       // Priorities 1–4, workflow.edit_item's range, each a bulk edit with Undo (sd:3012 triage re-prioritizes in bulk). A row
       // already at the priority is refused as its write leaves, not by `when`: the bar offers only what every picked row is
       // on for, so a pick that mixes priorities would otherwise offer none.
-      ...[1, 2, 3, 4].map(n => ({ id: `item.p${n}`, on: 'item', label: `Edit → P${n}`, risk: 'undo', bulk: true, icon: 'flag-triangle-right', bar: false,
+      ...[1, 2, 3, 4].map(n => ({ id: `item.p${n}`, on: 'item', label: `Edit → P${n}`, risk: 'undo', bulk: true, icon: 'flag-triangle-right', bar: false, menu: false,
         when: o => { const t = T(o); return !t ? 'the task is no longer listed' : EDITABLE(t) || noEdit(t); },
         cli: o => rowOr(o, t => `sd task edit ${t.id} --priority ${n}`),
         run: o => { const t = must(o), was = t.p; return editRun(t, { p: n }, () => `${label(t)} P${was || '–'} → P${n}`, { check: r => r.p !== n || `it is already P${n}` }); },

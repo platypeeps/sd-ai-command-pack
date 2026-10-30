@@ -273,7 +273,7 @@ class TheTrack(ReaderCase):
         plot = out["R"]["plot"]
         self.assertEqual((plot.count('<line class="land"'), plot.count('<rect class="fail"'), plot.count('<circle class="brief"'),
                           plot.count('<rect class="sess"')), (2, 1, 0, 1))
-        self.assertIn('aria-label="Last 24 hours: 2 landed, 1 job failed, 0 briefs filed, 1 session started"', plot)
+        self.assertIn('aria-label="Last 24 hours: 2 landed, 1 job failed, 0 briefs filed, 1 session live"', plot)
         self.assertIn('<a href="?row=job%3Anightly-sync%3A7">', plot)
         self.assertIn("sd:8 &lt;b&gt;Eight&lt;/b&gt;", out["R"]["rows"])
         self.assertEqual(out["R"]["rows"].count("<tr>"), 4)
@@ -326,7 +326,7 @@ class TheTrack(ReaderCase):
     def test_a_day_with_no_mark_is_one_line_not_an_empty_axis(self):
         self.doc["track"] = {**self.TRACK, "landed": [], "jobs": [], "live": [], "key": {**self.TRACK["key"], "landed": 0}}
         out = self.run_page(self.DRAWN)
-        self.assertIn("Nothing landed, failed, was filed or started in the last 24 hours.", out["R"]["plot"])
+        self.assertIn("Nothing landed, failed, was filed or ran in the last 24 hours.", out["R"]["plot"])
         self.assertNotIn("<svg", out["R"]["plot"])
         self.assertTrue(out["R"]["table"])
 

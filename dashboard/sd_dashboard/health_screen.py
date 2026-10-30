@@ -620,7 +620,8 @@ def _dependency_rows(found: list[dict], *, now: str) -> tuple[list[dict], dict]:
             grave = sum(severity.get(level, 0) for level in ("critical", "high")) or part.get("more")
             rows.append({
                 "id": f"dep:{repo['repo']}", "state": "warning" if grave else "caution", "type": "dependabot alerts",
-                "slug": repo.get("slug"),
+                "slug": repo.get("slug"), "repo_path": repo["repo"],
+                "grave": sum(severity.get(level, 0) for level in ("critical", "high")),
                 "what": f"{name}: {count} open Dependabot {_plural(part['open'], 'alert', 'alerts')}",
                 "detail": " · ".join([f"{severity[level]} {level}" for level in ("critical", "high", "medium", "low", "unknown")
                                       if severity.get(level)] + ["severity past the first page not read"] * bool(part.get("more")))

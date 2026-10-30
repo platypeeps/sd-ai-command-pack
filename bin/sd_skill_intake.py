@@ -702,6 +702,18 @@ def _roll(destination: pathlib.Path, restore: pathlib.Path | None) -> None:
     _drop(stage)
 
 
+def local_edits(destination: pathlib.Path) -> list[str]:
+    """The paths changed since the intake last wrote `destination`, from its kept `wrote.json`; raises when unrecorded."""
+
+    entry = kept(destination)
+    try:
+        wrote = json.loads((entry / "wrote.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError) as error:
+        raise IntakeError(f"cannot read {entry / 'wrote.json'}: {error}") from error
+    now = installed_digests(destination)
+    return sorted(path for path in set(wrote) | set(now) if wrote.get(path) != now.get(path))
+
+
 def rollback(name: str, *, scope: str | None, approve: str | None, root: pathlib.Path,
              home: pathlib.Path) -> dict[str, Any]:
     """Report the swap of an installed skill with its kept copy; with `approve`, make it.
@@ -714,11 +726,10 @@ def rollback(name: str, *, scope: str | None, approve: str | None, root: pathlib
     scope, destination = _held(name, scope, root, home)
     entry = kept(destination)
     try:
-        wrote = json.loads((entry / "wrote.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError) as error:
-        raise IntakeError(f"cannot read {entry / 'wrote.json'}: {error}; nothing written") from error
+        changed = local_edits(destination)
+    except IntakeError as error:
+        raise IntakeError(f"{error}; nothing written") from error
     now = installed_digests(destination)
-    changed = sorted(path for path in set(wrote) | set(now) if wrote.get(path) != now.get(path))
     if changed:
         raise IntakeError(f"{destination} changed since the intake wrote it ({', '.join(map(_printable, changed))}): "
                           "a local edit; nothing written")
@@ -1268,8 +1279,63 @@ def record_refresh(connection: Any, repo: str, at: str, result: str, root: pathl
     return why
 
 
-def refresh(connection: Any, url: str, root: pathlib.Path, home: pathlib.Path, today: str) -> dict[str, Any]:
-    """Survey one tracked repository and record when and how it went. Nothing installs.
+def _skip(skill: dict[str, Any]) -> str | None:
+    """Why an applying refresh leaves this skill alone; None for an installed skill it updates."""
+
+    if "error" in skill:
+        return None  # already listed as gone or failed
+    if any(f["severity"] == ADOPT.REFUSE for f in skill["risk"]):
+        return "a refusal blocks it"
+    if skill["mode"] == "new":
+        return "new skill: Refresh installs none; approve its report to add it"
+    if skill["mode"] != "re-import":
+        return None  # unchanged, or blocked by a refusal above
+    if skill["verdict"]["action"] != "install":
+        return f"verdict {skill['verdict']['action']}: {skill['verdict']['reason']}"
+    # A re-import's diff and revision cover a local edit too, so an automatic approval would overwrite it.
+    try:
+        edited = local_edits(pathlib.Path(skill["destination"]))
+    except IntakeError as error:
+        return f"no record of what the intake wrote ({error}); approve its report to update it"
+    if edited:
+        return f"a local edit since the intake wrote it ({', '.join(edited)}); approve its report to replace it"
+    return None
+
+
+def apply_updates(report: dict[str, Any], root: pathlib.Path, home: pathlib.Path, today: str) -> None:
+    """Install each changed installed skill whose verdict is install, through `intake` with its report's revision.
+
+    The approval re-fetches and checks that revision, so a source that moved since the survey installs nothing.
+    Each install keeps the copy it replaced, so `--rollback` undoes it (pack sd:6686).
+    """
+
+    applied, skipped, unknown = [], [], []
+    for skill in report["skills"]:
+        why = _skip(skill)
+        if why is not None:
+            skipped.append({"skill": skill["skill"], "scope": skill["scope"], "why": why})
+            continue
+        if "error" in skill or skill["mode"] != "re-import":
+            continue
+        try:
+            done = intake(skill["url"], scope=skill["scope"], approve=skill["revision"], root=root, home=home, today=today)
+        except IntakeError as error:
+            # Raised before the swap (a moved revision, a refusal, a bad staged path): nothing written.
+            skipped.append({"skill": skill["skill"], "scope": skill["scope"], "why": f"not installed: {error}"})
+            continue
+        except OSError as error:
+            # install() may fail after the new copy is in place, as /api/skills/intake also reads it: unknown.
+            unknown.append({"skill": skill["skill"], "scope": skill["scope"],
+                            "why": f"outcome not known: {error}; Review shows what is installed"})
+            continue
+        applied.append({"skill": done["skill"], "scope": done["scope"], "url": done["url"], "commit": done["commit"],
+                        "installed_commit": done["installed_commit"], "revision": done["revision"]})
+    report["applied"], report["skipped"], report["unknown"] = applied, skipped, unknown
+
+
+def refresh(connection: Any, url: str, root: pathlib.Path, home: pathlib.Path, today: str,
+            apply: bool = False) -> dict[str, Any]:
+    """Survey one tracked repository and record when and how it went; with `apply`, update its installed skills.
 
     A failed survey is recorded as failed and raised. A failed record leaves the
     report standing, `recorded` false and `unrecorded` saying why.
@@ -1286,6 +1352,10 @@ def refresh(connection: Any, url: str, root: pathlib.Path, home: pathlib.Path, t
     except (IntakeError, OSError) as error:
         record_refresh(connection, entry["url"], at, f"failed: {_printable(str(error))}", root, home)
         raise IntakeError(str(error)) from error
+    if apply:
+        apply_updates(report, root, home, today)
+        report["result"] += f"; {len(report['applied'])} updated" + (
+            f", {len(report['unknown'])} not known" if report["unknown"] else "")
     why = record_refresh(connection, entry["url"], at, report["result"], root, home)
     return {**report, "refreshed": at, "recorded": not why, "unrecorded": why}
 
@@ -1314,6 +1384,11 @@ def refresh_text(report: dict[str, Any]) -> str:
         if skill["mode"] in ("new", "re-import") and not any(f["severity"] == ADOPT.REFUSE for f in skill["risk"]):
             line += f"\n    approve: sd skill intake {skill['url']} --scope {skill['scope']} --approve {skill['revision']}"
         out.append(line)
+    for each in report.get("applied", []):
+        out.append(f"updated: {each['skill']} ({each['scope']}) to {each['commit'][:12]} · rollback: "
+                   f"sd skill intake {each['skill']} --rollback --scope {each['scope']}")
+    out += [f"skipped: {each['skill']}: {each['why']}" for each in report.get("skipped", [])]
+    out += [f"not known: {each['skill']}: {each['why']}" for each in report.get("unknown", [])]
     return _printable("\n".join(out))
 
 
@@ -1321,7 +1396,8 @@ def run_tracking(args: argparse.Namespace, connection: Any, root: pathlib.Path, 
     """`--tracked`, `--track URL`, `--untrack URL` and `--refresh URL`: the list and one repository's survey."""
 
     if args.refresh:
-        report = refresh(connection, args.refresh, root, home, datetime.date.today().isoformat())
+        report = refresh(connection, args.refresh, root, home, datetime.date.today().isoformat(),
+                         apply=getattr(args, "apply", False))
         print(json.dumps(report, ensure_ascii=False) if args.json else refresh_text(report))
         return 0
     if args.track:

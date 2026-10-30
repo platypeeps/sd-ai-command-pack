@@ -1265,6 +1265,76 @@ def ask_wait(checkout: pathlib.Path, path: str, environ: dict[str, str]) -> dict
     return {"path": path, "wait_question": note} if note else None
 
 
+#: The suite a gate failure names: `sd-check`'s `failed shard <suite>:` summary (pack sd:6739).
+FAILED_SUITE = re.compile(r"\bfailed shard (\S+?):")
+#: The statuses a gate passed in: the head the gate ran at is proved good.
+GATE_PASSED = ("merged", "prepared")
+
+
+def flake_items(connection: Any, repository: str, path: str, *, now: float, days: int = TIMES_DAYS) -> list[int]:
+    """File each same-head gate flake of `repository` as a suite defect (pack sd:6739); the note ids written.
+
+    A flake is a failed entry whose reason names a failed suite (`FAILED_SUITE`), then a later entry that passed
+    (`GATE_PASSED`) at that head, `head` or else `expected_head`, within `days`: the same commit failed and passed,
+    so the suite, not the change, is at fault. Each suite has one item, `task-ref` `flake:<suite>`, opened in
+    `path`'s repo the first time and reopened when done; each flake is one comment on it, written once per head.
+    """
+    require_sd_db()
+    from sd_db import writes  # noqa: PLC0415
+
+    since = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - days * 86400))
+    ended = sorted((entry for entry in stored(connection, repository) if isinstance(entry.get("finished_at"), str)),
+                   key=lambda entry: entry["finished_at"])
+    failed: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    written = []
+    for entry in ended:
+        head = entry.get("head") or entry.get("expected_head")
+        if not isinstance(head, str):
+            continue
+        reason = str(entry.get("reason") or "")
+        if entry.get("status") == "failed":
+            failed.setdefault(head, []).extend((suite, entry) for suite in FAILED_SUITE.findall(reason))
+            continue
+        if entry.get("status") not in GATE_PASSED or entry["finished_at"] < since:
+            continue
+        for suite, failure in failed.pop(head, []):
+            key = f"flake:{suite}"
+            found = connection.execute("SELECT id, status FROM item WHERE source = 'task-ref' AND external_id = ?",
+                                       (key,)).fetchone()
+            mark = f"failed at {head[:12]}"
+            if found is not None and connection.execute(
+                    "SELECT 1 FROM note WHERE item = ? AND kind = 'comment' AND instr(body, ?) > 0",
+                    (found["id"], mark)).fetchone():
+                continue
+            if found is None:
+                item = writes.create_item(connection, kind="task", title=f"Flaky suite {suite}: make it hermetic",
+                                          repo=path, priority=2, source="task-ref", external_id=key)
+            else:
+                item = found["id"]
+                if found["status"] == "done":
+                    writes.transition(connection, item, "planning", who="sd-lane",
+                                      reason=f"{suite} flaked again in {repository}")
+            failing = [line for line in str(failure.get("reason")).splitlines() if line.startswith("failing: ")][:2]
+            written.append(writes.add_note(connection, item, "comment", (
+                f"Gate flake in {repository}: {suite} {mark} (sd:{failure.get('item')}, {failure['finished_at']}) "
+                f"and passed at the same head (sd:{entry.get('item')}, {entry['finished_at']}). Fix the suite at "
+                "its root with a test that fails first." + "".join(f"\n{line}" for line in failing))))
+    return written
+
+
+def file_flakes(checkout: pathlib.Path, path: str, environ: dict[str, str]) -> dict[str, Any] | None:
+    """`flake_items` for a lane this machine hosts, after its run, in one hub transaction (pack sd:6739).
+
+    A failure is named in the run's answer and stops nothing: the next run files what this one missed.
+    """
+    try:
+        queue = queue_for(checkout, environ)
+        notes = on_hub(queue, lambda connection: flake_items(connection, queue.repository, path, now=time.time()))
+    except (LaneError, sd_lib.ConfigError, OSError, sqlite3.Error) as error:
+        return {"path": path, "flakes": None, "error": str(error)}
+    return {"path": path, "flakes": notes} if notes else None
+
+
 def newest_entry(connection: Any, repository: str, item: int | None,
                  skip: tuple[str, ...] = ()) -> dict[str, Any] | None:
     """`item`'s newest entry by `enqueue_order` whose status is not in `skip`, or None (sd:3412).
@@ -3372,7 +3442,8 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     run lasts, a lane whose worker ended and that got new work starts again
     (`new_work`, sd:5809), rather than wait for a later scheduled run.
     Once the lanes ended, each hosted lane whose median wait passed an hour
-    files the parallel-lanes question (`ask_wait`, pack sd:6006).
+    files the parallel-lanes question (`ask_wait`, pack sd:6006), and each same-head gate flake files its
+    suite as a defect (`file_flakes`, pack sd:6739).
     A build refusal on the repo-table read (`BUILD_FAULTS`) skips the run
     with exit 0: the satellite's follow fixes it, not a retry (sd:6425).
     """
@@ -3426,9 +3497,9 @@ def run_hosted(environ: dict[str, str], ship: Ship = default_ship, gate: Gate = 
     lanes += run_parallel(order, start or inline, deadline, functools.partial(lane_room, environ),
                           functools.partial(new_work, environ))
     for path, checkout in hosted:  # after the lanes ran: a slow read never holds a lane back (pack sd:6006)
-        asked = ask_wait(checkout, path, environ)
-        if asked:
-            lanes.append(asked)
+        for asked in (ask_wait(checkout, path, environ), file_flakes(checkout, path, environ)):
+            if asked:
+                lanes.append(asked)
     return {"lanes": lanes}
 
 
