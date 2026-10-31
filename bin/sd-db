@@ -26,7 +26,7 @@ from typing import Any
 #: The verbs `sd_db.jobs.cli` answers; `sd-db` hands each one straight to it.
 CLI_VERBS = ("init", "migrate", "status", "fence", "restore", "repo", "item", "work",
              "import", "verify", "usage", "judgments", "review", "credentials",
-             "records")
+             "records", "telemetry")
 
 USAGE = """\
 sd-db: the workflow database's verbs, run from this checkout's lib/.
@@ -34,7 +34,7 @@ sd-db: the workflow database's verbs, run from this checkout's lib/.
 Usage: sd-db <verb> [arguments]
 
   init, migrate, status, fence, restore, repo, item, work, import,
-  verify, usage, judgments, review, credentials, records
+  verify, usage, judgments, review, credentials, records, telemetry
               sd_db.jobs.cli answers these, with the arguments given.
               `repo declare PATH KIND JSON` first passes the JSON through
               the pack reader of KIND, and refuses what it refuses.

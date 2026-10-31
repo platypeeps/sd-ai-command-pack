@@ -1,7 +1,9 @@
 // Watches (sd:6264): the store's market rows and the market-watch job that refreshes them (watches_screen.py). The page
 // reads /api/watches through the shell's reader and draws the Documents list grammar: a filter bar, a sorted and paged
 // ledger, and the one Details pane. Refresh watches (sd:6697) is Run now on the job (commands.retry, /api/jobs/market-watch/retry);
-// Refresh watch and Add watch run watch.refresh and watch.add through /api/actions/run (commands.runAction), and Details shows
+// Refresh watch, Add watch, Remove, Restore and Delete run watch.refresh, watch.add, watch.remove, watch.restore and
+// watch.delete through
+// /api/actions/run (commands.runAction), and Details shows
 // the answer. A refresh date is the profile's own: an active watch past the bound reads stale, never fresh.
 (() => {
   const { html, put, plural } = window.markup;
@@ -162,7 +164,20 @@
     // After Refresh watch, so a stale active row keeps Refresh as its primary.
     move('watch.activate', 'Activate', 'a', 'candidate', 'active', 'Makes this candidate an active watch; market-watch starts refreshing it.', 'market-watch refreshes it from its next run'),
     move('watch.pause', 'Pause', 'p', 'active', 'paused', 'Pauses this watch; market-watch stops refreshing it.', 'market-watch skips it until it is unpaused'),
-    move('watch.unpause', 'Unpause', 'p', 'paused', 'active', 'Makes this paused watch active again.', 'market-watch refreshes it from its next run'));
+    move('watch.unpause', 'Unpause', 'p', 'paused', 'active', 'Makes this paused watch active again.', 'market-watch refreshes it from its next run'),
+    // sd:6703: Remove retires (stage declined, which market-watch skips); Delete removes the row for good.
+    { id: 'watch.remove', on: 'watch', label: 'Remove', does: 'Declines the watch: market-watch stops refreshing it; its profile stays.', key: 'm', risk: 'confirm', executes: true,
+      when: o => o.stage !== 'declined' || 'declined already', consequence: o => `This moves ${o.title} to declined. market-watch refreshes it no more; its profile and Sources stay, and Delete removes it for good.`,
+      cli: o => `no sd verb: the dashboard moves #${o.item} to declined, as Tasks moves it`, sends: o => `POST /api/actions/run {action: watch.remove, item: ${o.item}}`,
+      run: o => window.commands.runAction(o, 'watch.remove', { item: o.item }).then(said => reader.reread().then(() => said)) },
+    { id: 'watch.restore', on: 'watch', label: 'Restore', does: 'Brings a declined watch back as a candidate; Activate makes it active.', key: 'e', risk: 'confirm', executes: true,
+      when: o => o.stage === 'declined' || `${o.stage}: Restore brings back a declined watch`, consequence: o => `This moves ${o.title} from declined to candidate. Activate makes it active again.`,
+      cli: o => `no sd verb: the dashboard moves #${o.item} to candidate, as Tasks moves it`, sends: o => `POST /api/actions/run {action: watch.restore, item: ${o.item}}`,
+      run: o => window.commands.runAction(o, 'watch.restore', { item: o.item }).then(said => reader.reread().then(() => said)) },
+    { id: 'watch.delete', on: 'watch', label: 'Delete', does: 'Deletes the watch\'s row for good, with its profile and Sources.', key: 'x', risk: 'confirm', executes: true,
+      consequence: o => `This deletes ${o.title} (#${o.item}) for good: its profile, its Sources and its notes are lost. sd-db item remove files a removal record and backs the store up first. Remove keeps them.`,
+      cli: o => `sd-db item remove ${o.item} --who dashboard --reason ${shq(`Deleted on the dashboard: sdw.market ${o.title}`)}`, sends: o => `POST /api/actions/run {action: watch.delete, item: ${o.item}}`,
+      run: o => window.commands.runAction(o, 'watch.delete', { item: o.item }).then(said => reader.reread().then(() => said)) });
   window.PAGE_LIST = { rows: () => $('rows').querySelectorAll('tr[data-id]'), current: () => SELECTED, select: key => show(key) };
   document.addEventListener('DOMContentLoaded', () => {
     reader = start();
