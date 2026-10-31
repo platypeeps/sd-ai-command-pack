@@ -1693,6 +1693,33 @@ roles:
         self.assertIn(f"Item: sd:{self.item}", tip)
         self.assertIn("Refs: sd:43", messages[1])
 
+    def test_a_whitespace_only_blank_line_still_ends_the_trailer_block_a_rebase_rewrites(self):
+        """sd:6790 review. Git and `trailer_block` take a space- or tab-only line as the blank one before
+        the trailers; sanitizing must split there too, or a builder's `Closes:` lands and closes."""
+        for blank in (" ", "\t", " \t", "\r"):
+            with self.subTest(blank=repr(blank)):
+                message = f"fix: partial sd:1\n{blank}\nCloses: sd:43\nDelivers: sd:44"
+                self.assertTrue(ship.sd_lib._closes(message, "sd:43"), "the unsanitized message closes")
+                cleaned = ship.without_closes(message)
+                for number in ("sd:43", "sd:44"):
+                    self.assertFalse(ship.sd_lib._closes(cleaned, number), cleaned)
+                self.assertIn("Refs: sd:43", cleaned)
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "rebase"})
+        _git(self.root, "commit", "--amend", "-q", "--cleanup=verbatim", "-m",
+             "change\n\t\nDelivers: sd:43\nAuthored-with: human")
+        _git(self.root, "commit", "--allow-empty", "-q", "--cleanup=verbatim", "-m",
+             "fix: tip\n \nCloses: sd:42\nAuthored-with: human")
+        _git(self.root, "push", "-q", "--force", "origin", "topic")
+        self.prepare()
+        base = _git(self.root, "rev-parse", "origin/main")
+        messages = _git(self.root, "log", "--format=%B%x1e", f"{base}..HEAD").split("\x1e")
+        for message in messages:
+            for number in ("sd:42", "sd:43"):
+                self.assertFalse(ship.sd_lib._closes(message, number), message)
+        tip = ship.sd_lib.trailer_block(messages[0])
+        self.assertIn("Refs: sd:42", tip)
+        self.assertIn(f"Item: sd:{self.item}", tip)
+
     def test_a_rebase_that_would_drop_a_merge_commits_own_edit_refuses(self):
         """sd:6790 review. Linearizing drops merge commits; a catch-up merge that also edited a file would
         lose that edit, so prepare refuses when the replayed tree differs and pushes nothing."""

@@ -458,9 +458,11 @@ def without_closes(message: str) -> str:
     the receipt leaves open.
     """
     text = message.strip()
-    rest, separator, last = text.rpartition("\n\n")
-    if not separator or not sd_lib.trailer_block(text):
+    # The last boundary `trailer_block` reads, a whitespace-only line too, or a `Closes:` survives.
+    boundaries = list(sd_lib.PARAGRAPH.finditer(text))
+    if not boundaries or not sd_lib.trailer_block(text):
         return text
+    rest, last = text[:boundaries[-1].start()], text[boundaries[-1].end():]
     lines: list[str] = []
     for line in last.splitlines():
         if line.startswith(CLOSING_TRAILERS):
@@ -2491,9 +2493,10 @@ class Ship(SharedReview):
         Joined to the tip's own trailer block when it has one, so git reads both as one; the trailers an
         earlier prepare wrote are taken out first. `~N` names how many commits land, and is left out at one.
         """
-        subject, _, rest = without_closes(original).partition("\n\n")
+        subject, *rest_ = sd_lib.PARAGRAPH.split(without_closes(original), maxsplit=1)
+        rest = rest_[0] if rest_ else ""
         if sd_lib.trailer_block(original):
-            paragraphs = rest.split("\n\n")
+            paragraphs = sd_lib.PARAGRAPH.split(rest)
             kept = [line for line in paragraphs[-1].splitlines() if not line.startswith(SHIP_TRAILERS)]
             rest = "\n\n".join(paragraphs[:-1] + (["\n".join(kept)] if kept else []))
         trailers = self.ship_trailers(reviewed + (f" ~{landed}" if landed > 1 else ""))

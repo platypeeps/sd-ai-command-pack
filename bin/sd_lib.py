@@ -3069,6 +3069,10 @@ _TRAILER_LINE = re.compile(r"^[A-Za-z0-9-]+[ \t]*:")
 _CONTINUATION = re.compile(r"^[ \t]+\S")
 
 
+#: The boundary between paragraphs: a line that is blank or whitespace only, as git reads it.
+PARAGRAPH = re.compile(r"\n[ \t]*\r?\n")
+
+
 def trailer_block(message: str) -> str:
     """The trailer block of `message`, the end of `message.rstrip()`; `""` when it has none.
 
@@ -3084,7 +3088,7 @@ def trailer_block(message: str) -> str:
     spelled once here so the readers cannot drift.
     """
     text = message.rstrip()
-    paragraphs = re.split(r"\n[ \t]*\r?\n", text)
+    paragraphs = PARAGRAPH.split(text)
     lines = paragraphs[-1].splitlines()
     if not lines or not _TRAILER_LINE.match(lines[0]):
         return ""
