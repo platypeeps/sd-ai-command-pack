@@ -306,8 +306,9 @@ def sweep(connection, *, git: Collection[str] = ("git",)) -> list[str]:
     A blocked or cancelled run keeps its worktree for Retry, and a later build
     may land the same items; the lane squash-merges, so the branch reads
     unpushed forever (pack sd:6909). Kept: an unreleased run on the path, an
-    item of any run on it not done, a dirty or unread worktree, a live session
-    other than a builder's. The paths removed.
+    item of any run on it not done, a dirty or unread worktree, one holding an
+    ignored or untracked file, a locked one, a live session other than a
+    builder's. The paths removed.
 
     An item marked done is no proof its commits landed: a squash merge leaves
     no ancestry to check, and an item can be closed by hand. So the branch
@@ -335,7 +336,9 @@ def sweep(connection, *, git: Collection[str] = ("git",)) -> list[str]:
         if entry["keep"] or not Path(work).is_dir():
             continue
         try:
-            if _read([*git, "-C", work, "status", "--porcelain"]).strip():
+            # `git worktree remove` deletes ignored files, and untracked ones that config hides from
+            # status: a tree that holds any keeps them, build output too, since no list names it disposable.
+            if _read([*git, "-C", work, "status", "--porcelain", "--ignored", "--untracked-files=all"]).strip():
                 continue
         except Unread:
             continue

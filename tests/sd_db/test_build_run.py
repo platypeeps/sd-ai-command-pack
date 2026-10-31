@@ -991,7 +991,10 @@ class Sweep(Case):
     def blocked(self):
         self.press()
         self.plan(claude=["deny"])
-        self.assertEqual(self.supervisor().run()["outcome"], "blocked")
+        ended = self.supervisor().run()
+        self.assertEqual(ended["outcome"], "denied")  # pack sd:6723: the first denial requeues once
+        self.plan(claude=["deny"])
+        self.assertEqual(self.supervisor(ended["retry"]).run()["outcome"], "blocked")
         self.db.execute("UPDATE runner_run SET released_at = ?", (build_run.now(),))
         self.db.commit()
         return Path(self.bundle["work_path"])
@@ -1060,6 +1063,34 @@ class Sweep(Case):
         self.db.execute("UPDATE runner_run SET released_at = NULL")
         self.db.commit()
         self.assertEqual(build_run.sweep(self.db), [], "an unreleased run still owns it")
+        self.assertTrue(work.is_dir())
+
+    def test_an_ignored_file_keeps_the_worktree(self):
+        """Lane review: `git worktree remove` deletes ignored files, and plain `status --porcelain` omits them."""
+        work = self.blocked()
+        self.done()
+        common = Path(support.git(work, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        (common / "info").mkdir(exist_ok=True)
+        (common / "info" / "exclude").write_text(".env\n")
+        (work / ".env").write_text("TOKEN=change-me\n")
+        self.assertEqual(support.git(work, "status", "--porcelain"), "", "the plain read sees a clean tree")
+        self.assertEqual(build_run.sweep(self.db), [])
+        self.assertEqual((work / ".env").read_text(), "TOKEN=change-me\n")
+        self.assertNotEqual(self.branches(), "")
+
+    def test_an_untracked_file_hidden_by_config_keeps_the_worktree(self):
+        work = self.blocked()
+        self.done()
+        support.git(self.repo, "config", "status.showUntrackedFiles", "no")
+        (work / "notes.txt").write_text("x")
+        self.assertEqual(build_run.sweep(self.db), [])
+        self.assertTrue((work / "notes.txt").exists())
+
+    def test_a_locked_worktree_is_kept(self):
+        work = self.blocked()
+        self.done()
+        support.git(self.repo, "worktree", "lock", str(work))
+        self.assertEqual(build_run.sweep(self.db), [])
         self.assertTrue(work.is_dir())
 
 
