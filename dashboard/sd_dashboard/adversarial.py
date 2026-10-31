@@ -1106,7 +1106,8 @@ def _piece(document: dict) -> str | None:
         return f"the review did not start: {type(problem).__name__}: {problem}"
     try:
         sd_writing.adversarial(writing, connection, document["item"],
-                               argparse.Namespace(model=document["model"], timeout=document["timeout"]))
+                               argparse.Namespace(model=document["model"], effort=document["effort"],
+                                                  timeout=document["timeout"]))
     except Exception as problem:  # noqa: BLE001 - a refusal is the run's reason
         return str(problem) or type(problem).__name__
     finally:

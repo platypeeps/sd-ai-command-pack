@@ -1102,6 +1102,17 @@ class ThePieceReview(AdversarialCase):
         self.assertIn("adversarial.md for 2026/fixture", self.comments(self.piece)[-1])
         self.assertEqual(self.batches(), [], "a piece's review files no review batch")
 
+    def test_the_runner_sends_the_recorded_model_and_effort_to_codex(self):
+        """pack sd:6978: the effort the run records is the one codex runs at, not codex's default."""
+        writes.set_setting(self.connection, "adversarial.model", "gpt-fixture")
+        writes.set_setting(self.connection, "adversarial.effort", "low")
+        run = self.started()
+        with patch.object(self.sd_writing, "_render", return_value="Review the draft hostilely."):
+            adversarial.run(self.runs / f"{run['id']}.json")
+        document = json.loads((self.runs / f"{run['id']}.json").read_text())
+        self.assertEqual((document["model"], document["effort"]), ("gpt-fixture", "low"))
+        self.assertEqual(self.codex_argv()[:5], ["exec", "-m", "gpt-fixture", "-c", "model_reasoning_effort=low"])
+
     def test_a_draft_too_short_to_review_is_refused_and_starts_nothing(self):
         (self.folder / "index.md").write_text("---\ntitle: Fixture piece\n---\n\n## Draft\n\nToo short.\n")
         with patch.object(adversarial.subprocess, "Popen") as popen, self.assertRaisesRegex(Exception, "only 2 words"):
