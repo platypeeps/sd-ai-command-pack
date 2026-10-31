@@ -456,19 +456,43 @@ class Supervise(Case):
                                                        (self.items[0],))]
 
     def test_judge_last_line_not_exit(self):
-        """Failure table, Judge: exit 0 (here 3) with a permission denial blocks with a question; the exit code is no verdict."""
+        """Failure table, Judge: exit 0 (here 3) with a permission denial is a denial; the exit code is no verdict.
+
+        pack sd:6723: the first denial requeues the run once at its step, with no question, and the retry's
+        brief carries the denied call; the second blocks with the question."""
         self.press()
         self.plan(claude=["deny"])
         ended = self.supervisor().run()
-        self.assertEqual(ended["outcome"], "blocked")
+        self.assertEqual(ended["outcome"], "denied")
+        self.assertEqual((self.statuses(), self.questions()), (["in_progress"], []))
+        self.assertEqual(self.calls("sd-review"), [], "no review after a denial")
+        retry = build.run(self.db, ended["retry"])
+        self.assertEqual((retry["step"], retry["session_id"], retry["run"]), ("building", "session-fixture", 2))
+        self.plan(claude=["deny"])
+        again = self.supervisor(retry["id"]).run()
+        prompt = self.calls("claude")[-1]["argv"]
+        prompt = prompt[prompt.index("-p") + 1]
+        self.assertIn("permission denied: Bash `git push`", prompt)
+        self.assertIn("never amend", prompt)
+        self.assertEqual(again["outcome"], "blocked")
         self.assertEqual(self.statuses(), ["blocked"])
         self.assertEqual(len(self.questions()), 1)
         self.assertIn("denied Bash", self.questions()[0])
-        self.assertEqual(self.calls("sd-review"), [], "no review after a denial")
-        # pack sd:6708: a first denial looks transient, so the pick is a requeue.
+        # pack sd:6708: the same denial after a requeue needs the brief changed.
         _, options = writes.parse(self.questions()[0])
         self.assertEqual(writes.recommended(self.questions()[0], options),
-                         options.index("Requeue as is (Recommended)"))
+                         options.index("Change the brief, then requeue (Recommended)"))
+
+    def test_the_brief_keeps_the_builder_in_its_worktree(self):
+        """pack sd:6723: the brief holds the three lines, and the builder may commit with -m or -F."""
+        self.press()
+        self.plan(claude=["pass"])
+        self.supervisor().run()
+        argv = self.calls("claude")[0]["argv"]
+        prompt = argv[argv.index("-p") + 1]
+        self.assertIn("Write no file outside the worktree", prompt)
+        self.assertIn("never amend", prompt)
+        self.assertIn("Bash(git commit -F:*)", argv[argv.index("--allowedTools"):argv.index("--permission-mode")])
 
     def test_a_success_line_passes_whatever_the_exit_code(self):
         self.press()
@@ -660,6 +684,29 @@ class Supervise(Case):
         self.assertFalse(locked.armed, "the lock was met")
         self.assertEqual(code, 0)
         self.assertEqual(len(self.calls("claude")), 1)
+        row = build.run(self.db, self.bundle["id"])
+        self.assertEqual((row["step"], row["outcome"]), ("reviewing", None))
+
+    def test_a_beat_the_lock_refuses_skips_the_beat(self):
+        """pack sd:6741: a beat whose lock outlasts every retry is skipped, not raised. Before, the
+        `database is locked` escaped `child` and the supervisor died at reviewing (6 of 9 losses)."""
+        self.press()
+        build.write(self.db, self.bundle["id"], step="reviewing")
+        self.plan(claude=["slow"])
+        supervisor = self.supervisor()
+        supervisor.logs.mkdir(parents=True, exist_ok=True)
+        real = build.beat
+        refused: list[str] = []
+
+        def beat(connection, ident):
+            if not refused:
+                refused.append(ident)
+                raise sqlite3.OperationalError("database is locked")
+            return real(connection, ident)
+
+        with mock.patch.object(build, "beat", beat):
+            code = supervisor.child([*self.tools.claude, "-p", "x"], cwd=self.root, name="locked")
+        self.assertEqual((refused, code), ([self.bundle["id"]], 0))
         row = build.run(self.db, self.bundle["id"])
         self.assertEqual((row["step"], row["outcome"]), ("reviewing", None))
 
