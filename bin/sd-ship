@@ -28,6 +28,7 @@ import sd_local_gate
 import sd_ship_body
 import sd_ship_dispositions as sd_ship_dispositions
 import sd_ship_hold
+import sd_ship_jenkins
 import sd_ship_squash
 from sd_ship_bindings import binding_manifest, review_binding
 from sd_ship_history import ItemHistory, digest
@@ -2211,7 +2212,7 @@ class Ship(SharedReview):
         # Under `repo.ci = local` no remote check is coming, and `gh pr checks
         # --watch` fails on a pull request that has none; the local gate
         # below runs to completion in this process, so it is the wait (sd:1875).
-        if self.args.watch and not self.state.get("watch_started") and self.api.ci != "local":
+        if self.args.watch and not self.state.get("watch_started") and self.api.ci != "local" and not self.jenkins_ci():
             self.save(watch_started=True)
             run(self.root, ["gh", "pr", "checks", str(observed["number"]), "--repo", self.repository,
                             "--watch", "--fail-fast"], timeout=self.args.wait_seconds)
@@ -2282,10 +2283,15 @@ class Ship(SharedReview):
         return self.reconcile()
 
     def merge_rules(self, base: str, number: int, head: str, protection: dict) -> None:
-        """The base ruleset's merge methods, then the repository's policy (sd:6715)."""
+        """The base ruleset's merge methods, the repository's policy (sd:6715), then its Jenkins job (sd:6880)."""
         squash_allowed(base, protection)
         self.freeze_hold()
         self.policy_hold(number, head)
+        jenkins = self.jenkins_ci()
+        if jenkins:  # the job the policy names is the CI, waited on at this exact head
+            sd_ship_jenkins.wait_green(jenkins, number, head,
+                                       wait_seconds=self.args.wait_seconds if self.args.watch else 0)
+            self.api.jenkins_green = head
 
     def still_allowed(self, base: str, number: int, head: str, protection: dict) -> None:
         """`still_gated`, then the policy again: an approval can be dismissed during the gate's minutes."""
@@ -2333,6 +2339,11 @@ class Ship(SharedReview):
                           f"{head[:12]}; {len(approved)} approve it{': ' + ', '.join(approved) if approved else ''}",
                           code="approval_required", state="operator_decision",
                           next_action=f"Ask {who} to approve the pull request at this head, then retry merge.")
+
+    def jenkins_ci(self) -> dict | None:
+        """The policy's `ci` when it names Jenkins, else None (sd:6880)."""
+        ci = (self.declared_policy() or {}).get("ci") or {}
+        return ci if ci.get("provider") == "jenkins" else None
 
     def declared_policy(self) -> dict | None:
         """The repository's `policy` declaration, None for none; a failed read refuses (sd:6715)."""

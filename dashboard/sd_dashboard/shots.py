@@ -3,7 +3,9 @@
 `dashboard.sh shots --out DIR PAGE...` serves this checkout on a copy of the
 database, so a capture writes nothing to the store, and has headless Chrome
 draw each page dark and light, at desktop and phone width. It prints one PNG
-path per line, for the pull-request body.
+path per line, for the pull-request body. `--changed BASE` draws the pages
+the diff from BASE changes instead (`pages_for`); the lane's prepare step in
+this repository runs that, as a warning (sd:6728).
 
 Chrome's command-line `--screenshot` cannot set the theme: theme.js reads it
 from localStorage. So this drives Chrome over `--remote-debugging-pipe`, the
@@ -46,6 +48,10 @@ TALLEST = 4000
 SETTLE_SECONDS = 30
 #: How long Chrome has to answer one DevTools call; apart from the settle wait, so a test can bound that alone.
 ANSWER_SECONDS = 30
+
+
+#: Where the pages live: `<page>.html` and `static/<page>.js|css`.
+V2 = Path(__file__).resolve().parent / "v2"
 
 
 class ShotFailed(Exception):
@@ -203,6 +209,33 @@ def chrome() -> str:
     return pack_module("sd_research_publish").chrome()
 
 
+def pages_for(paths: list[str]) -> list[str]:
+    """The pages files under `v2/` draw, in page order: `home.html` and `static/home-kiosk.js` are `/home`.
+
+    A static file no page's name begins, such as `tokens.css`, is shared, so
+    it draws `/home`; any other file draws nothing.
+    """
+    from .v2.pages import PAGES
+
+    found = set()
+    for path in paths:
+        name = Path(path).name
+        if "/" not in path and name.endswith(".html"):
+            found |= {page.routes[0] for page in PAGES if page.html == name}
+        elif path.startswith("static/") and name.endswith((".js", ".css")):
+            stem = name.rsplit(".", 1)[0]
+            # ponytail: a shared file draws Home alone; name its pages here if a shared change needs more.
+            found |= {page.routes[0] for page in PAGES if stem.startswith(page.name)} or {"/home"}
+    return [page.routes[0] for page in PAGES if page.routes[0] in found]
+
+
+def changed(base: str) -> list[str]:
+    """`pages_for` the files `V2` changed since its merge base with `base`."""
+    names = subprocess.run(["git", "-C", str(V2), "diff", "--name-only", "--relative", "%s...HEAD" % base, "--", "."],
+                           capture_output=True, text=True, timeout=60, check=True).stdout.split()
+    return pages_for(names)
+
+
 def free_port() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
@@ -215,8 +248,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True, help="folder for the PNGs")
     parser.add_argument("--database", type=Path, default=None,
                         help="the store to copy (default: this machine's sd.db)")
-    parser.add_argument("pages", nargs="+", metavar="PAGE", help="a page address, such as /tasks")
+    parser.add_argument("--changed", metavar="BASE", help="draw the pages the diff from BASE changes, not PAGE")
+    parser.add_argument("pages", nargs="*", metavar="PAGE", help="a page address, such as /tasks")
     arguments = parser.parse_args(argv)
+    if bool(arguments.changed) == bool(arguments.pages):
+        parser.error("name pages or --changed BASE, not both")
+    if arguments.changed:
+        try:
+            arguments.pages = changed(arguments.changed)
+        except (OSError, subprocess.SubprocessError) as problem:
+            print("shots: cannot read the diff from %s: %s" % (arguments.changed, problem), file=sys.stderr)
+            return 1
+        if not arguments.pages:
+            return 0
     for page in arguments.pages:
         if not page.startswith("/"):
             parser.error("%s: a page is an address that starts with /" % page)

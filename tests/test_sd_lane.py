@@ -4064,6 +4064,18 @@ class AnyHost(SharedQueue):
         answer = sd_lane.sd_ship_workflow.failure("merge", LaneElsewhere("example/pack", "build-2", None))
         self.assertEqual(answer["workflow"]["blocker"]["code"], "lane_elsewhere")
 
+    def test_enqueue_off_the_lane_host_forwards_to_it(self) -> None:
+        """Failure table, lane host routing: enqueue elsewhere records the entry for the lane host (sd:6884)."""
+        self.repo_row("build-2")
+        entry = sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
+        self.assertEqual((entry["status"], entry["forwarded_to"]), ("pending", "build-2"))
+        self.assertEqual(self.entries()[0]["forwarded_to"], "build-2")
+
+    def test_enqueue_on_the_lane_host_forwards_nothing(self) -> None:
+        self.repo_row(sd_lane.this_host())
+        entry = sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
+        self.assertNotIn("forwarded_to", entry)
+
     def test_every_verb_but_run_works_off_the_lane_host(self) -> None:
         """Failure table, verbs: with the lane on another host, the queue verbs work here; only `run` refuses."""
         import argparse
@@ -5009,7 +5021,7 @@ class HostedParallel(Lane):
                 if argv[4] == "1":
                     sd_lane.enqueue_entry(self.zeta_feature, 3, "fix: three", self.body, self.environ, manual=True,
                                           claim="deliver")
-                    late.wait(5)
+                    late.wait(60)  # bounds a hang, not a speed: a loaded gate starts item 3 late
                 else:
                     late.set()
                 seen.append(f"end {argv[4]}")
@@ -5327,6 +5339,66 @@ class FailureNotes(SharedQueue):
         self.make_dead()
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([item for item, _ in self.lane_notes()], [1])
+
+
+
+#: A `dashboard.sh` whose `shots --out DIR --changed BASE` draws home in two variants, or fails with FAKE_SHOTS=fail.
+FAKE_SHOTS = """#!/bin/sh
+[ "$1 $2 $4" = "shots --out --changed" ] || exit 9
+[ "$FAKE_SHOTS" = fail ] && { echo "shots: no Chrome found" >&2; exit 1; }
+mkdir -p "$3"
+for variant in dark-1440 light-375; do : > "$3/home-$variant.png"; echo "$3/home-$variant.png"; done
+"""
+
+
+class Shots(Lane):
+    """sd:6728: the lane draws the dashboard pages a branch changed, names them in the body, records the PNGs."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.bodies: list[str] = []
+
+    def ship(self, argv: list[str], log: pathlib.Path) -> dict:
+        if argv[2] == "prepare":
+            self.bodies.append(pathlib.Path(argv[argv.index("--body-file") + 1]).read_text(encoding="utf-8"))
+        return super().ship(argv, log)
+
+    def dashboard(self) -> None:
+        script = self.feature / "dashboard" / "dashboard.sh"
+        script.parent.mkdir()
+        script.write_text(FAKE_SHOTS, encoding="utf-8")
+        script.chmod(0o755)
+        git(self.feature, "add", ".")
+        git(self.feature, "commit", "-q", "-m", "dashboard")
+
+    def run_one(self) -> dict:
+        sd_lane.enqueue_entry(self.feature, 7, "fix: Topic", self.body, self.environ, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        return entry
+
+    def test_a_changed_page_is_named_in_the_body_and_its_pngs_on_the_entry(self) -> None:
+        self.dashboard()
+        entry = self.run_one()
+        self.assertEqual(entry["status"], "prepared")
+        self.assertEqual([pathlib.Path(file).name for file in entry["shots"]], ["home-dark-1440.png", "home-light-375.png"])
+        self.assertTrue(all(pathlib.Path(file).is_file() for file in entry["shots"]))
+        [body] = self.bodies
+        self.assertTrue(body.startswith("Item: sd:1\n\n## Screenshots\n"), body)
+        self.assertIn("\n- home: dark 1440, light 375\n", body)
+        self.assertNotIn(str(self.tmp), body)
+
+    def test_a_failed_capture_is_a_warning_and_prepare_still_runs(self) -> None:
+        self.dashboard()
+        with mock.patch.dict(os.environ, {"FAKE_SHOTS": "fail"}):
+            entry = self.run_one()
+        self.assertEqual((entry["status"], entry["shots_warning"], "shots" in entry),
+                         ("prepared", "shots: no Chrome found", False))
+        self.assertEqual(self.bodies, ["Item: sd:1\n"])
+
+    def test_a_repository_without_the_dashboard_draws_nothing(self) -> None:
+        entry = self.run_one()
+        self.assertEqual(("shots" in entry, "shots_warning" in entry, self.bodies), (False, False, ["Item: sd:1\n"]))
 
 
 if __name__ == "__main__":

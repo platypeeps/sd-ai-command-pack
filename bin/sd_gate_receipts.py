@@ -258,7 +258,10 @@ def tree_binding(tree: pathlib.Path, head: str, inputs: str, base: str | None,
                 "inputs": inputs, "scope": {"mode": scope.mode, "fork": fork_tree(tree, scope.fork) if fork else scope.fork,
                                              "command": list(scope.command),
                                              **({"tools": list(scope.tools)} if scope.tools is not None else {})},
-                "detection": {"source": detection.source, "commands": detection.commands}}
+                "detection": {"source": detection.source, "commands": detection.commands},
+                # sd:6882: the policy's test recipe; which env names are set binds in `machine_binding`'s env digest
+                "recipe": sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py").recipe_digest(
+                    sd_lib.repo_declaration(tree, "policy"), {})}
     except Exception:  # an input that cannot be named binds nothing; the check runs
         return None
     return part if binding_commands(part) else None

@@ -144,5 +144,45 @@ class RequiredServices(ServiceFixture):
         self.assertEqual((report["scope"]["mode"], report["status"]), ("docs-only", "pass"))
 
 
+class TestRecipe(ServiceFixture):
+    """sd:6882. The policy's `test` recipe: env names that must be set, a setup before the checks, a teardown after."""
+
+    def recipe(self, check: str = "check", **test: object) -> pathlib.Path:
+        """Declare `test` on the row and a local check that logs `check`; the log each step appends to."""
+        log = self.root / "log"
+        seed_declaration(pathlib.Path(clean_home()), self.root, "policy", {"test": test})
+        ending = "raise SystemExit(3)\n" if check == "fail" else ""
+        (self.root / "step.py").write_text(f"open({str(log)!r}, 'a').write({check + chr(10)!r})\n{ending}")
+        self.declare(check=f"{shlex.quote(sys.executable)} step.py")
+        return log
+
+    def test_setup_runs_before_the_checks_and_teardown_after(self) -> None:
+        log = self.recipe(setup="echo setup >> log", teardown="echo teardown >> log")
+        report = self.report(expect=0)
+        self.assertEqual(log.read_text().split(), ["setup", "check", "teardown"])
+        self.assertEqual([(row["name"], row["status"]) for row in report["recipe"]],
+                         [("setup", "pass"), ("teardown", "pass")])
+
+    def test_a_missing_env_name_fails_every_check_unrun(self) -> None:
+        log = self.recipe(env=["SD_TEST_RECIPE_TOKEN"], setup="echo setup >> log")
+        report = self.report(expect=1)
+        check = next(row for row in report["checks"] if row["name"] == "check")
+        self.assertEqual((check["status"], check["exit_code"]), ("fail", None))
+        self.assertIn("needs SD_TEST_RECIPE_TOKEN set", check["reason"])
+        self.assertFalse(log.exists(), "a step ran though the recipe's env was missing")
+
+    def test_a_failed_setup_fails_the_checks_unrun_and_still_tears_down(self) -> None:
+        log = self.recipe(setup="exit 4", teardown="echo teardown >> log")
+        report = self.report(expect=1)
+        check = next(row for row in report["checks"] if row["name"] == "check")
+        self.assertIn("setup failed", check["reason"])
+        self.assertEqual(log.read_text().split(), ["teardown"])
+
+    def test_a_failed_check_still_tears_down(self) -> None:
+        log = self.recipe("fail", teardown="echo teardown >> log")
+        self.assertEqual(self.report(expect=1)["status"], "fail")
+        self.assertEqual(log.read_text().split(), ["fail", "teardown"])
+
+
 if __name__ == "__main__":
     unittest.main()
