@@ -714,7 +714,7 @@ function registerCommands() {
       undo: undoOf },
     ...Object.values(ROUTE).map(([type]) => ({ id: `${type.split(' ')[0].toLowerCase().replace('-', '')}.withdraw`, on: type, label: 'Withdraw', does: 'Drops this proposal from the list; nothing was run.', risk: 'safe', executes: false,
       run: o => { withdraw(o.key, true); return `Proposal withdrawn · ${o.title}`; } })),
-    window.commands.showAssignment({ run: o => { selectRow(`${o.id.split(':')[0]}:${o.n}`, true); return `Assignment #${o.n} shown in Details`; } }),
+    window.commands.showAssignment(),
     // build: the item opens in Tasks, whose Details read it.
     { id: 'item.show', on: 'item', label: 'Open item', does: 'Opens the work item.', key: 'o', icon: 'arrow-up-right', risk: 'safe', primary: () => true, cli: o => `sd task show ${o.item}`, executes: false,
       run: o => window.shell.openItem(o.item) },
