@@ -3002,6 +3002,16 @@ class TheIssuesPolicyMove(SchemaCase):
                          [("/one", 1), ("/three", 1), ("/two", 0)])
         self.assertEqual(self._declared(raw), {"/one": None, "/three": {"policy": {"mode": "org"}, "review": {"x": 1}},
                                                "/two": {"policy": {"mode": "org"}}})
+        # The column sits where 35 put it, so a backup restore compares `repo` to 44's shape.
+        reference = sqlite3.connect(":memory:")
+        self.addCleanup(reference.close)
+        paths.install(reference)
+        for version, path in schema_module.migrations():
+            if version < self.VERSION:
+                reference.executescript(path.read_text(encoding="utf-8"))
+        self.assertEqual(raw.execute("PRAGMA table_info(repo)").fetchall(),
+                         reference.execute("PRAGMA table_info(repo)").fetchall())
+        self.assertEqual(raw.execute("PRAGMA foreign_key_check").fetchall(), [])
         self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
 
 
