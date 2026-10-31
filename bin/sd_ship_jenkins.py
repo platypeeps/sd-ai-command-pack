@@ -1,8 +1,9 @@
 """`sd-ship merge` waits on the Jenkins job a repository's policy names (sd:6880, repo-policy design § Failure table).
 
 `policy.ci = {"provider": "jenkins", "url": ..., "job": "folder/job/PR-{pr}"}`. The job's recent builds are read
-from Jenkins' JSON API; a build counts for the head only when the head's SHA appears in its actions (the git
-plugin's `lastBuiltRevision`, or the branch source's PR revision), never by branch name. Jenkins unreachable, a
+from Jenkins' JSON API; a build counts for the head only when one of its revision fields (the git plugin's
+`lastBuiltRevision.SHA1`, or the branch source's `revision.hash` or `pullHash`) equals the head's SHA, never by
+branch name or a substring. Jenkins unreachable, a
 StrongDM sign-out included, holds as `ci_unreachable`: unknown is never green. sd-ship reads the job; it never
 triggers or edits one.
 """
@@ -43,9 +44,21 @@ def head_build(ci: dict, number: int, head: str, opener: Callable[..., Any] = ur
         raise jenkins_unreachable(ci, f"HTTP {error.code}") from None
     except (OSError, ValueError, AttributeError) as error:
         raise jenkins_unreachable(ci, str(error) or type(error).__name__) from None
-    # ponytail: the SHA anywhere in the build's actions, not one plugin's field; narrow if a plugin echoes others
-    return next((build for build in builds if isinstance(build, dict) and head in json.dumps(build.get("actions"))),
-                None)
+    return next((build for build in builds if isinstance(build, dict) and head in built_revisions(build)), None)
+
+
+def built_revisions(build: dict) -> set[str]:
+    """The SHAs `build` names as built, compared whole: the git plugin's `lastBuiltRevision.SHA1` and the branch
+    source's `revision.hash` and `revision.pullHash`. No other field ties a build to a commit."""
+    found = set()
+    for action in build.get("actions") or []:
+        if not isinstance(action, dict):
+            continue
+        for key, fields in (("lastBuiltRevision", ("SHA1",)), ("revision", ("hash", "pullHash"))):
+            revision = action.get(key)
+            if isinstance(revision, dict):
+                found |= {revision[field] for field in fields if isinstance(revision.get(field), str)}
+    return found
 
 
 def jenkins_unreachable(ci: dict, why: str) -> Refusal:

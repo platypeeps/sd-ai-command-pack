@@ -160,6 +160,16 @@ class JenkinsWait(unittest.TestCase):
         green = {"builds": [build("SUCCESS", sha="b" * 40), build("SUCCESS")]}
         self.assertEqual(sd_ship_jenkins.wait_green(JENKINS, 1, HEAD, wait_seconds=0, opener=answering(green))["number"], 7)
 
+    def test_a_sha_that_only_contains_the_head_is_not_the_head(self):
+        """Review of build 317: a substring match accepted SHA1 'b' + head + 'c' and any field echoing the head."""
+        padded = build("SUCCESS", sha="b" + HEAD + "c")
+        echoed = {**build("SUCCESS", sha="c" * 40), "actions": [{"causes": [{"shortDescription": HEAD}]}]}
+        pulled = {**build("SUCCESS", sha="c" * 40), "actions": [{"revision": {"hash": "d" * 40, "pullHash": HEAD}}]}
+        for builds, found in (([padded], None), ([echoed], None), ([pulled], 7)):
+            with self.subTest(builds=builds):
+                self.assertEqual((sd_ship_jenkins.head_build(JENKINS, 1, HEAD, answering({"builds": builds}))
+                                  or {}).get("number"), found)
+
     def test_a_running_build_is_polled_until_it_ends(self):
         opener, slept = answering({"builds": [build(None, building=True)]}, {"builds": [build("FAILURE")]}), []
         with self.assertRaises(sd_ship_jenkins.Refusal) as caught:
