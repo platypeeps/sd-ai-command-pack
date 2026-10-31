@@ -62,7 +62,7 @@ section.lane > header .src { margin-left: 0; flex-basis: 100%; font: 400 var(--t
 @media (pointer: coarse) {
   .qrow { min-height: var(--row-touch); }
   .qrow .ctl .btn, .lanes .act .btn, .lanes .what .pick { min-height: var(--row-touch); min-width: var(--row-touch); }
-  #builds details.ended summary { display: flex; align-items: center; min-height: var(--row-touch); }
+  #ended details.ended summary { display: flex; align-items: center; min-height: var(--row-touch); }
 }
 @media (max-width: 899px) {
   .lanes thead { display: none; }
@@ -81,5 +81,6 @@ section.lane > header .src { margin-left: 0; flex-basis: 100%; font: 400 var(--t
 /* Builds (pack sd:6095): the panel above the lanes reuses the entry rows; its heading sits close under the toolbar. */
 #builds { margin: 0 0 var(--space-lg); }
 #builds .times-h { margin-top: var(--space-md); }
-#builds details.ended { margin-top: var(--space-xs); }
-#builds details.ended summary { font: 400 var(--text-xs)/1.6 var(--font-data); color: var(--color-muted); cursor: pointer; }
+/* Ended runs (sd:6973): a native <details> after the lanes, closed by default; its summary reads as the idle line. */
+#ended details.ended { margin-top: var(--space-lg); }
+#ended details.ended summary { font: 400 var(--text-xs)/1.6 var(--font-data); color: var(--color-muted); cursor: pointer; }

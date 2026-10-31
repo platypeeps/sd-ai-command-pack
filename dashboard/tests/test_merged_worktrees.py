@@ -111,6 +111,15 @@ class TheReading(Merged):
                                        "wt-busy": f"a process works in {busy}/sub"})
         self.assertEqual(self.row()["removable"], [str(built)])
 
+    def test_a_tree_a_live_session_holds_reads_as_kept_not_removable(self):
+        """pack sd:6683: the read keeps a held tree, so Remove merged is not offered for a tree it would refuse."""
+        held = self.tree("held")
+        sessions.beat(self.connection, "session-a", machine=this_host(), cwd=None,
+                      found=sessions.worktrees([str(held)]))
+        row = self.row()
+        self.assertEqual((row["removable"], row["state"]), ([], "queued"))
+        self.assertIn("a live session holds it: session-", self.kept()["wt-held"])
+
     def test_a_process_probe_that_gave_no_answer_keeps_every_tree(self):
         self.tree("one")
         (self.root / "lsof-fails").write_text("")
@@ -157,6 +166,11 @@ class TheWrite(Merged):
         row = self.row()
         sessions.beat(self.connection, "session-a", machine=this_host(), cwd=None,
                       found=sessions.worktrees([str(held)]))
+        # pack sd:6683: the hold moves the row, so the page's revision is stale and nothing goes.
+        with self.assertRaises(workflow.StaleItem):
+            self.write(row["id"], row["revision"])
+        self.assertTrue(one.is_dir())
+        row = self.row()
         answer = self.write(row["id"], row["revision"])
         self.assertEqual(answer["done"], ["origin/feat/one", str(one)])
         self.assertEqual([entry["name"] for entry in answer["refused"]], [str(held)])

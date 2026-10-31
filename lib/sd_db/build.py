@@ -61,7 +61,8 @@ REPO_CAP = 3
 BUNDLE_MAX = 3
 BUDGET_MINUTES = 60
 #: A supervisor beats every 30 s; one silent this long, or unspawned this long after its claim, is lost.
-STALE_SECONDS = 180
+#: 600, not 180: a beat a held lock skips no longer ends a 60-minute build (pack sd:6741).
+STALE_SECONDS = 600
 #: Lost runs one bundle may retry before it blocks.
 RETRIES = 1
 # The note on an item a blocked run parked (pack sd:6132).
@@ -87,7 +88,8 @@ _SAME = " AND ".join(f"{name} IS ?" for name in REAP_READS)
 #: A fix resumes at its review, which reads the head the fix left.
 RESUME = {"claimed": "worktree", "fixing": "reviewing"}
 #: The outcomes that count as a loss at a step; a second one at the same step blocks the bundle.
-LOSSES = ("interrupted", "timed_out", "error_max_turns")
+#: `denied` is a builder refused a tool call (pack sd:6723).
+LOSSES = ("interrupted", "timed_out", "error_max_turns", "denied")
 #: The steps from `enqueued` on: the lease is released, the members are `done`, and step 7 releases the run.
 #: Only `enqueued` has no supervisor, so only it is left out of the reap.
 LANE_STEPS = ("enqueued", "checking", "cleaning")
