@@ -160,6 +160,8 @@ def summary(value: dict | None) -> str:
         if convention.get("footer"):
             parts.append(f"footer={convention['footer']}")
         parts += [f"title<={convention['title_max']}", f"lines<={convention['line_max']}"]
+    if value.get("links"):  # the repositories work here may also change (sd:6883)
+        parts.append("links=" + "|".join(value["links"]))
     return "Repository policy (sd-db repo declare . policy): " + ", ".join(parts)
 
 

@@ -39,6 +39,13 @@ class Policy(unittest.TestCase):
                          r"merge=squash, issues=read, review=human(1), types=feat|fix|doc|chore, aliases=docs->doc, "
                          r"body=required, footer=^Ref: LOG-\d+$, title<=63, lines<=72")
 
+    def test_the_session_start_line_names_the_linked_repositories(self):
+        line = sd_repo_policy.summary({**ORG, "links": ["~/repos/system", "~/repos/platypeeps/sd-writing"]})
+        self.assertTrue(line.endswith(", links=~/repos/system|~/repos/platypeeps/sd-writing"), line)
+        self.assertEqual(sd_repo_policy.summary({"links": ["~/repos/system"]}),
+                         "Repository policy (sd-db repo declare . policy): mode=managed, commit=auto, push=auto, "
+                         "pr=auto, merge=squash, issues=off, review=none, links=~/repos/system")
+
     def test_an_alias_is_rewritten_before_the_commit(self):
         message = "docs: say how\n\nThe body.\n\nRef: LOG-12\n"
         self.assertEqual(sd_repo_policy.check_message(message, ORG["commit_convention"]),
