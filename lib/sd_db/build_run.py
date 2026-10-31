@@ -88,6 +88,11 @@ Rules:
 - Write the pull-request body, with `## Summary` and `## Test plan`, to {body}; quote each fail-first line.
   The body is public, so it names no local path (the worktree, a home directory): use repo-relative paths.
   The body carries no `Closes:` line: enqueue takes items by `--item` and refuses one (sd:3704).
+- Fence each failure table and any other line over 72 characters in the body in a code block.
+- Use synthetic names in tests and commits (`operator`, `example.test`), never a real person, host or path:
+  the pre-push leak guard refuses them.
+- Before your report, check the commits since origin/main and the body for both: the supervisor runs
+  the enqueue's line check and the leak guard after you, and sends each failure back to fix.
 - Leave the worktree clean, with your commits on the branch.
 - End only a process you started, by its pid: never `pkill` or `killall`, which end other sessions'
   gates too (sd:6815).
@@ -343,11 +348,13 @@ class Supervisor:
     def __init__(self, connection, ident: str, *, tools: Tools, log_root: Path,
                  cited: Callable[[Path, str, str, str], Collection[int] | None], environ: dict | None = None,
                  beat_seconds: float = BEAT_SECONDS, timeout: float = TIMEOUT_SECONDS, grace: float = GRACE_SECONDS,
-                 probe=Probe):
+                 probe=Probe, checked: Callable[[Path, str, str, str, str], list[str]] | None = None):
         """`cited(worktree, base, head, body)` is the items the lane reads the branch as delivering, None when unread:
-        the lane's own reader, which lives beside it in `bin/`."""
+        the lane's own reader, which lives beside it in `bin/`. `checked(worktree, base, head, title, body)` is
+        what enqueue and its push would refuse, the line check and the leak guard (pack sd:6926); None checks
+        nothing."""
         self.db: Any = Patient(connection)  # duck-types the connection the writes are annotated with
-        self.ident, self.tools, self.probe, self.cited = ident, tools, probe, cited
+        self.ident, self.tools, self.probe, self.cited, self.checked = ident, tools, probe, cited, checked
         self.beat_seconds, self.timeout, self.grace = beat_seconds, timeout, grace
         self.row = build.run(self.db, ident)
         self.logs = log_dir(log_root, self.row["repo"])
@@ -444,6 +451,10 @@ class Supervisor:
     def reviewing(self) -> str | dict:
         self.enter("reviewing")
         head = self.head()
+        # What enqueue would refuse goes back to the builder before a review is spent (pack sd:6926).
+        refused = self.prechecked(head)
+        if refused:
+            return self.blocked_round([{"path": "enqueue check", "line": "-", "summary": text} for text in refused])
         answer: dict | None = None
         for _attempt in range(2):
             out = self.out("review")
@@ -458,10 +469,19 @@ class Supervisor:
         if answer["status"] in ("clean", "advisory"):
             self.reviewed = head
             return "enqueuing"
+        return self.blocked_round(answer["blockers"])
+
+    def prechecked(self, head: str) -> list[str]:
+        if self.checked is None:
+            return []
+        title, body = (path.read_text(encoding="utf-8") if path.exists() else "" for path in (self.title, self.body))
+        return self.checked(self.work, self.base(), head, title.strip(), body)
+
+    def blocked_round(self, blockers: list[dict]) -> str | dict:
         rounds = (self.fresh()["review_round"] or 0) + 1
         if not build.write(self.db, self.ident, review_round=rounds):
             raise Lost
-        self.blockers = answer["blockers"]
+        self.blockers = blockers
         if rounds >= REVIEW_ROUNDS:
             return self.finish("blocked", f"{rounds} review rounds left blockers: {self.summary(self.blockers)}")
         return self.fix()

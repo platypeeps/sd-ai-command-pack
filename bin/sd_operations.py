@@ -224,6 +224,39 @@ def cited(worktree: Path, base: str, head: str, body: str) -> set[int] | None:
     return set(sd_ship_body.cited_ids(body, commits, parents))
 
 
+def enqueue_refusals(worktree: Path, base: str, head: str, title: str, body: str, *,
+            environ: dict[str, str] | None = None) -> list[str]:
+    """What `lane enqueue` and its push would refuse, as the builder can fix it (pack sd:6926).
+
+    The lane's own line check over the title, the body and each commit
+    `head` adds to `base`, then the leak guard over the same range when
+    the repository's pre-push hook runs it. A guard that cannot answer
+    adds nothing: the push still checks.
+    """
+    import sd_lane
+    from sd_db.config import system_checkout
+    branch = base.removeprefix("origin/")
+    found = []
+    try:
+        sd_lane.check_lines(worktree, title, body, branch, head)
+    except sd_lane.LaneError as error:
+        found.append(str(error))
+    hook = subprocess.run(["git", "-C", str(worktree), "rev-parse", "--git-path", "hooks/pre-push"],
+                          capture_output=True, text=True, check=False).stdout.strip()
+    try:
+        guarded = "local-leak-guard" in (Path(worktree) / hook).read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        guarded = False
+    guard = system_checkout(environ) / "local-leak-guard" / "leak-guard.sh"
+    if guarded and guard.is_file():
+        done = subprocess.run(["sh", str(guard), "check", "--range", f"refs/remotes/origin/{branch}..{head}"],
+                              cwd=worktree, capture_output=True, text=True, timeout=60, env=environ, check=False)
+        if done.returncode == 1:
+            found.append("the pre-push leak guard refuses these commits; replace each private value with a "
+                         "synthetic one (operator, example.test):\n" + done.stderr.strip()[-1500:])
+    return found
+
+
 def tools(build_run: Any) -> Any:
     return build_run.Tools(claude=["claude"], review=[str(BIN / "sd-review")], ship=[str(BIN / "sd-ship")],
                            lint=[str(BIN / "sd-docs-lint")])
@@ -325,7 +358,7 @@ def supervise_build(args: argparse.Namespace) -> int:
             result = build_run.DraftSupervisor(connection, args.run, tools=tools(build_run), log_root=root).run()
         else:
             result = build_run.Supervisor(connection, args.run, tools=tools(build_run), log_root=root,
-                                          cited=cited).run()
+                                          cited=cited, checked=enqueue_refusals).run()
     except (sd_db.SdDbError, ValueError) as error:
         raise WorkRefusal(str(error)) from error
     finally:

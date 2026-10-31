@@ -679,6 +679,36 @@ class Supervise(Case):
         self.assertIn("limit 72", ended["blocked"])
         self.assertIn("72 characters or less outside a code fence", build_run.BRIEF)
 
+    def test_an_enqueue_refusal_goes_back_to_the_builder(self):
+        """Pack sd:6926: run 14299dfe passed review, then enqueue refused its body lines; the builder fixes it."""
+        self.press()
+        self.write_pr(body="## Summary\n\n" + "x" * 80 + "\n")
+        self.plan(claude=["pass", "fix1", "fix2"], sd_review=["clean"])
+        ended = self.supervisor(checked=ADAPTER.enqueue_refusals).run()
+        self.assertEqual(ended["outcome"], "blocked")
+        self.assertEqual(self.calls("sd-review"), [], "no review is spent on a branch enqueue refuses")
+        fix = [call["argv"] for call in self.calls("claude")][1]
+        self.assertIn("body line 3 is 80 characters (limit 72)", fix[fix.index("-p") + 1])
+        self.assertIn("Fence each failure table", build_run.BRIEF)
+        self.assertIn("`example.test`", build_run.BRIEF)
+
+    def test_the_leak_guard_is_checked_before_the_review(self):
+        """Pack sd:6926: the pre-push leak guard refused a test's real first name only at enqueue."""
+        system = self.root / "system"
+        guard = system / "local-leak-guard" / "leak-guard.sh"
+        guard.parent.mkdir(parents=True)
+        guard.write_text('echo "  $(git rev-parse --short HEAD) added (path withheld: it matches)" >&2\nexit 1\n')
+        head = support.git(self.repo, "rev-parse", "HEAD")
+        environ = {**os.environ, "SYSTEM_TOOLS_ROOT": str(system)}
+        self.assertEqual(ADAPTER.enqueue_refusals(self.repo, "origin/main", head, "fix: x", "", environ=environ), [],
+                         "no leak-guard hook, no leak-guard check")
+        hook = self.repo / ".git" / "hooks" / "pre-push"
+        hook.write_text("#!/bin/sh\n# installed by local-leak-guard\n")
+        found = ADAPTER.enqueue_refusals(self.repo, "origin/main", head, "fix: x", "", environ=environ)
+        self.assertEqual(len(found), 1, found)
+        self.assertIn("leak guard refuses these commits", found[0])
+        self.assertIn("path withheld", found[0])
+
     def test_a_body_the_lint_refuses_blocks_naming_the_line(self):
         """Pack sd:6402: the lint's failures go to stderr; the block names them, and the brief warns."""
         self.press()
