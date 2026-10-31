@@ -4062,13 +4062,29 @@ roles:
         self.assertIn("waited 5s", str(refused.exception))
 
     def test_merge_wait_runs_once_the_holder_releases(self):
-        """sd:1937. With the lock released at 2 s, `--wait 5` runs the merge once."""
-        self.hold_ship_lock(self.operation().repository, seconds=2)
-        started = time.monotonic()
-        with patch.object(ship.Ship, "merge", return_value={"ok": True}) as merge:
-            ship.dispatch(self.root, self.connection, self.database, self.locked_merge("--wait", "5"), receipts, False)
+        """sd:1937. The holder ends at the waiter's first poll, so `--wait` runs the merge once.
+
+        The release follows the poll, not a clock: a holder that slept 2 s against a 5 s wait missed it on a loaded
+        gate. Killing the holder frees its flock, as an exit does.
+        """
+        from sd_db import runner_journal
+
+        holder = self.hold_ship_lock(self.operation().repository)
+        sleep, polls = runner_journal.time.sleep, []
+
+        def poll(seconds):
+            polls.append(seconds)
+            if len(polls) == 1:
+                holder.kill()
+                holder.wait()
+            sleep(seconds)
+
+        clock = SimpleNamespace(monotonic=runner_journal.time.monotonic, sleep=poll)
+        with patch.object(ship.Ship, "merge", return_value={"ok": True}) as merge, \
+                patch.object(runner_journal, "time", clock):
+            ship.dispatch(self.root, self.connection, self.database, self.locked_merge("--wait", "600"), receipts, False)
         self.assertEqual(merge.call_count, 1)
-        self.assertLess(time.monotonic() - started, 2 + receipts.WAIT_POLL_SECONDS + 2)
+        self.assertGreaterEqual(len(polls), 1, "the merge never waited for the held lock")
 
     def test_without_wait_a_held_lock_refuses_at_once(self):
         self.hold_ship_lock(self.operation().repository)
