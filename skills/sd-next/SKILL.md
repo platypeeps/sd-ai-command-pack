@@ -24,7 +24,8 @@ Use the tables `sd today` prints: a heading `<Section> (<count>)`, a header row,
 Copy rows from `sd today`; do not rewrite them as prose. Give five sections, in this order:
 
 1. **Done recently**: the `Delivered` table and its `+N closed by hand` line. Its When column is the local time each change landed.
-2. **Landing soon**: the `Landing now` table, with the running builders added as rows. Position and the time each entry started or was queued come from the table. The lane records no ETA; do not invent one.
+2. **Landing soon**: the `Landing now` table, with the running builders added as rows.
+   For what is ready, building or landing, copy the `Queues` table (pack sd:6946). Position and the time each entry started or was queued come from the table. The lane records no ETA; do not invent one.
 3. **Open items and followups**: the `Attention`, `Operations, this machine`, `Decisions`, `Blocked` and `Followups` tables, with the gate line under `Operations, this machine` and the `+N review questions wait` line under `Decisions` when `sd today` prints one.
 4. **This session**: one table of the threads from step 2, with the columns ID (the item, or `-`), Repo, State (`unfiled`, `filed`, `unlanded` or `running`), Title and When.
 5. **Next steps**: a numbered list the operator picks from by number. Put the recommended step first and mark it. Each step names its item with its repo (`system sd:5103`, not a bare `sd:5103`; `fleet sd:5103` for an item in no repository) and one action, and a duration ("about 20 minutes") or a delivery time ("by 15:00 MDT"). Draw the steps from decisions waiting, failed lane entries, this machine's findings (`Operations, this machine`), `Planned` (soonest first), `Unscheduled` (highest priority first) and this session's threads.
