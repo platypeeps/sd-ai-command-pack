@@ -1119,6 +1119,11 @@ def status_changes(connection: sqlite3.Connection, item: int) -> list[sqlite3.Ro
     )
 
 
+def assignment_exists(connection: sqlite3.Connection, assignment: int) -> bool:
+    """Whether the store holds assignment `assignment` (Show assignment's check, sd:6682)."""
+    return connection.execute("SELECT 1 FROM assignment WHERE id = ?", (assignment,)).fetchone() is not None
+
+
 def item_assignments(connection: sqlite3.Connection, item: int) -> list[sqlite3.Row]:
     """The item's assignments with their cost, which is a sum and never a row."""
     return list(

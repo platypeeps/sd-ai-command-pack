@@ -51,6 +51,13 @@ optionally `services_start: <how to start them>`. Before any step, sd-check
 connects to each; one that does not answer fails every check unrun, naming it
 and the start hint, so a stopped database does not read as a code error.
 sd-check never starts a service. A dry run and a docs-only scope probe nothing.
+
+A repository whose `policy` declaration has a `test` recipe (sd:6882,
+`bin/sd_repo_policy.py`) gets it around the checks: each name in `env` must be
+set, or every check fails unrun naming the missing ones; `setup` runs in the
+slot before the checks, and a failed setup fails them unrun; `teardown` runs
+after them whatever they did, and a failed teardown is reported, not a check
+failure. A dry run and a docs-only scope run neither.
 """
 
 from __future__ import annotations
@@ -405,6 +412,9 @@ def render(result: dict[str, object], stream: TextIO) -> None:
     precheck = result.get("precheck")
     if isinstance(precheck, dict):
         checks = [precheck, *checks]
+    recipe = result.get("recipe")
+    if isinstance(recipe, list):
+        checks = [*recipe[:1], *checks, *recipe[1:]] if recipe[0]["name"] == "setup" else [*checks, *recipe]
     for record in checks:
         command = record["command"]
         shown = " ".join(command) if isinstance(command, list) else "-"
@@ -536,6 +546,57 @@ def service_refusal(declared: tuple[list[tuple[str, str, int]], str] | None) -> 
     return f"required service not answering, so this did not run: {', '.join(closed)}{hint}"
 
 
+def test_recipe(root: pathlib.Path) -> dict:
+    """The policy's `test` recipe (sd:6882), `{}` for none; a failed policy read is a `ConfigError`, never no recipe."""
+    try:
+        policy = sd_lib.repo_declaration(root, "policy") or {}
+    except sd_lib.DatabaseUnreadable as error:
+        raise sd_lib.ConfigError(f"the repository's test recipe is unknown: {error}") from None
+    return policy.get("test") or {}
+
+
+def env_refusal(recipe: Mapping[str, object], environ: Mapping[str, str]) -> str | None:
+    """Why the run may not start: the recipe's `env` names not set; None when all are."""
+    names = recipe.get("env")
+    missing = [name for name in names if not environ.get(name)] if isinstance(names, list) else []
+    return f"the test recipe needs {', '.join(missing)} set, so this did not run" if missing else None
+
+
+def run_recipe_step(root: pathlib.Path, recipe: Mapping[str, object], name: str, timeout: int,
+                    environ: Mapping[str, str]) -> dict[str, object] | None:
+    """The recipe's `setup` or `teardown` run through `sh -c`; None when the recipe has none."""
+    command = recipe.get(name)
+    if not isinstance(command, str) or not command.strip():
+        return None
+    argv = ["/bin/sh", "-c", command]
+    record: dict[str, object] = {"name": name, "command": argv, "output_path": None,
+                                 "failed_shards": [], "failed_steps": [], "failure": ""}
+    record_run(record, argv, root, timeout, environ)
+    return record
+
+
+def recipe_execute(root: pathlib.Path, detection: sd_lib.Detection, args: argparse.Namespace, budget: int,
+                   environ: Mapping[str, str], scope: sd_check_scope.Scope | None) -> dict[str, object]:
+    """`execute` between the recipe's setup and teardown (sd:6882); a failed setup fails every check unrun."""
+    recipe = getattr(args, "recipe", None) or {}
+    if scope is not None and scope.mode == sd_check_scope.DOCS_ONLY:
+        recipe = {}
+    started = time.monotonic()
+    steps = [step for step in [run_recipe_step(root, recipe, "setup", budget, environ)] if step]
+    try:
+        left = max(1, int(budget - (time.monotonic() - started))) if steps else budget
+        if steps and steps[0]["status"] == FAIL:
+            result = execute(root, detection, args.only, False, left, environ,
+                             "the test recipe's setup failed, so this did not run", scope)
+        else:
+            result = execute(root, detection, args.only, False, left, environ, scope=scope)
+    finally:
+        steps += [step for step in [run_recipe_step(root, recipe, "teardown", budget, environ)] if step]
+    if steps:
+        result["recipe"] = steps
+    return result
+
+
 def run_precheck(root: pathlib.Path, detection: sd_lib.Detection, args: argparse.Namespace,
                  environ: Mapping[str, str]) -> dict[str, object] | None:
     """The repository's precheck, run before the slot wait (sd:2604); None when it defines none or the run is narrowed.
@@ -571,7 +632,8 @@ def gated_execute(root: pathlib.Path, detection: sd_lib.Detection, args: argpars
     started = time.monotonic()
     unslotted = sd_gate_slots.holder_environment(base, 0)
     docs_only = scope is not None and scope.mode == sd_check_scope.DOCS_ONLY
-    refused = None if docs_only else service_refusal(getattr(args, "services", None))
+    refused = None if docs_only else (service_refusal(getattr(args, "services", None))
+                                      or env_refusal(getattr(args, "recipe", None) or {}, base))
     if refused is not None:
         return execute(root, detection, args.only, False, args.timeout, unslotted, refused, scope)
     first = run_precheck(root, detection, args, unslotted)
@@ -590,7 +652,7 @@ def gated_execute(root: pathlib.Path, detection: sd_lib.Detection, args: argpars
                              f"no gate slot came free within {queued}s", scope)
         else:
             budget = left if args.slot_timeout else max(1, int(left - slot.waited))
-            result = execute(root, detection, args.only, False, budget, children, scope=scope)
+            result = recipe_execute(root, detection, args, budget, children, scope)
     finally:
         if slot is not None:
             slot.release()
@@ -637,6 +699,7 @@ def main(argv: list[str] | None = None) -> int:
             raise UsageError("--record-receipt requires an actual full check")
         args.scope = run_scope(args, root, detection)
         args.services = required_services(root)
+        args.recipe = test_recipe(root)
         before, controlled = None, None
         with contextlib.ExitStack() as outputs:  # a recorded run's build folders go when it ends (sd:2327)
             if args.record_receipt:

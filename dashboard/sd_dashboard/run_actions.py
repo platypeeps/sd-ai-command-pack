@@ -9,6 +9,7 @@ mounted volume, a port number, a Home Assistant tile, a registered repo row, a c
 | ------------------ | -------------------------------------------- | --------------------------------------------- |
 | job.log            | an installed job (`operations.job_state`)    | `cron-jobs.sh logs <job> 200`                 |
 | job.print          | the same; its launchd service                | `launchctl print <service>`                   |
+| assignment.get     | an assignment row's number                   | `sd assignments get <n>`                      |
 | storage.du         | a configured storage folder or one inside it | `du -k -d 1 <folder>`, largest first          |
 | volume.df          | a mount point or a configured storage folder | `df -h <path>`                                |
 | port.lsof          | an integer port                              | `lsof -nP -iTCP:<port> -sTCP:LISTEN`          |
@@ -148,6 +149,18 @@ def job_log(connection, values, jobs=None) -> Step:
 def job_print(connection, values, jobs=None) -> Step:
     state = _job(connection, _fields(values, {"job"}), jobs)
     return Step(line=f"launchctl print {state['service']}", argv=("launchctl", "print", state["service"]))
+
+
+def assignment_get(connection, values, jobs=None) -> Step:
+    """Show assignment (sd:6682): the record `sd assignments get` prints, for an assignment row the store holds."""
+    from sd_db import reads
+
+    n = _fields(values, {"assignment"})["assignment"]
+    if type(n) is not int or n < 1:
+        raise ValueError("Name the assignment by its number; nothing ran.")
+    if not reads.assignment_exists(connection, n):
+        raise ValueError(f"#{n} is not an assignment; nothing ran.")
+    return Step(line=f"sd assignments get {n}", argv=(_command("sd"), "assignments", "get", str(n)))
 
 
 def _storage_roots(connection) -> list[Path]:
@@ -601,6 +614,7 @@ def watch_add(connection, values, jobs=None) -> Step:
 ACTIONS = {
     "job.log": ("Show log", job_log),
     "job.print": ("Print", job_print),
+    "assignment.get": ("Show assignment", assignment_get),
     "storage.du": ("Show biggest", storage_du),
     "volume.df": ("Show use", volume_df),
     "port.lsof": ("Inspect listener", port_lsof),

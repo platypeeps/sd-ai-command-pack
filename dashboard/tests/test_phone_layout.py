@@ -131,5 +131,15 @@ class TheBuildControls(unittest.TestCase):
                 self.assertTrue(any("min-height: var(--row-touch)" in body for body in touch), f"{selector} in {name}")
 
 
+class TheRowIcons(unittest.TestCase):
+    def test_the_row_actions_sit_on_the_published_marks_middle(self):
+        # pack sd:6704: .pub sat on the middle and .rowact on the baseline, so Read
+        # drew 4 px above the marks in a Briefs or Documents act cell (headless Chrome).
+        for selector in (".pub", ".pub + .rowact"):
+            with self.subTest(selector):
+                found = [body for sels, body in rules(SHELL_CSS) if selector in sels]
+                self.assertTrue(any("vertical-align: middle" in body for body in found), selector)
+
+
 if __name__ == "__main__":
     unittest.main()

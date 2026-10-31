@@ -1050,7 +1050,7 @@ class TheScript(PageScript):
             ["declaration.write", "declaration change", "undo", "p", True, True],
             ["sddb.withdraw", "sd-db change", "safe", None, False, False],
             ["declaration.withdraw", "declaration change", "safe", None, False, False],
-            ["asg.get", "assignment", "safe", "o", False, False],
+            ["asg.get", "assignment", "safe", "o", True, False],
             ["item.show", "item", "safe", "o", False, False],
             ["wt.prune", "worktrees", "confirm", "p", None, False],
             ["svc.restart", "service", "confirm", "t", None, False],

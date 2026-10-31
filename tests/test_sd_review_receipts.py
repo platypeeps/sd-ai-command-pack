@@ -353,7 +353,27 @@ class ReceiptTests(ReviewFixture):
         self.assertNotEqual(absent["files"]["policy:review_declaration"], policy["files"]["policy:review_declaration"])
         self.assertNotIn("policy:.github/sd-review.json", policy["files"])
         with mock.patch.object(declared, "repo_declaration", side_effect=declared.DatabaseUnreadable("down")), \
-                self.assertRaisesRegex(receipts.Unavailable, "the review declaration cannot be read: down"):
+                self.assertRaisesRegex(receipts.Unavailable, "the review declaration or test recipe cannot be read: down"):
+            receipts.check_binding(self.root, self.env)
+
+    def test_the_test_recipe_and_its_env_bind(self):
+        """Review of build 317: a policy `test` recipe (sd:6882) changes what a run executes, so a changed setup, a
+        newly required env name or that name's being set moves the binding; an unread policy refuses it."""
+        def declared(recipe):
+            return lambda root, kind: {"test": recipe} if kind == "policy" else None
+        bindings = []
+        needs = {"setup": "exit 1", "env": ["SD_RECIPE_TOKEN"]}
+        for recipe in ({"setup": "true"}, {"setup": "exit 1"}, needs):
+            with mock.patch.object(receipts.sd_lib, "repo_declaration", side_effect=declared(recipe)):
+                bindings.append(receipts.check_binding(self.root, self.env)["files"].get("policy:test_recipe"))
+        self.assertEqual(len(set(bindings)), 3, bindings)
+        with mock.patch.object(receipts.sd_lib, "repo_declaration", side_effect=declared(needs)):
+            policy = receipts.sd_lib.repo_declaration(self.root, "policy")
+        digest = receipts.sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py").recipe_digest
+        self.assertNotEqual(digest(policy, {}), digest(policy, {"SD_RECIPE_TOKEN": "x"}))
+        with mock.patch.object(receipts.sd_lib, "repo_declaration",
+                               side_effect=receipts.sd_lib.DatabaseUnreadable("down")), \
+                self.assertRaises(receipts.Unavailable):
             receipts.check_binding(self.root, self.env)
 
     def test_recorded_checks_run_under_one_locale_whatever_the_caller_sets(self):
