@@ -131,6 +131,14 @@ class JenkinsWait(unittest.TestCase):
                 self.assertTrue(sd_repo_policy.problems({"ci": ci}))
         self.assertIn("ci=jenkins", sd_repo_policy.summary({"mode": "org", "ci": JENKINS}))
 
+    def test_the_test_key_takes_a_recipe(self):
+        """sd:6882. `test` is setup and teardown commands and the env names the checks need."""
+        self.assertEqual(sd_repo_policy.problems({"test": {"setup": "make db", "env": ["DB_URL"], "teardown": "x"}}), [])
+        for test in ({"setup": ""}, {"setup": 1}, {"env": "DB_URL"}, {"env": ["1X"]}, {"env": ["A B"]},
+                     {"before": "x"}, []):
+            with self.subTest(test=test):
+                self.assertTrue(sd_repo_policy.problems({"test": test}))
+
     def test_the_job_path_names_each_folder_and_the_pull_request(self):
         self.assertEqual(sd_ship_jenkins.job_url(JENKINS, 12),
                          "http://127.0.0.1:10168/job/team/job/repo/job/PR-12")

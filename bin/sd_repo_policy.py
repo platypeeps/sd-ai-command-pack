@@ -30,6 +30,9 @@ CONVENTION_FIELDS = ("types", "aliases", "body", "footer", "title_max", "line_ma
 #: `ci`: the provider `sd-ship merge` waits on, its base URL and the job path; `{pr}` in the job is the PR number.
 CI_FIELDS = ("provider", "url", "job")
 CI_PROVIDERS = ("jenkins",)
+#: `test`: run `setup` before the checks and `teardown` after them; each name in `env` must be set.
+TEST_FIELDS = ("setup", "env", "teardown")
+ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*\Z")
 #: Slice 2's keys (design § Slices): accepted as objects now, so a preset written for both slices declares once.
 LATER = ("ci", "release", "test", "links")
 
@@ -119,6 +122,20 @@ def _ci_problems(ci: Any, where: str) -> list[str]:
     return found
 
 
+def _test_problems(test: Any, where: str) -> list[str]:
+    """`test`: the recipe `sd-check` runs around the checks (sd:6882)."""
+    if not isinstance(test, dict):
+        return [f"{where} is a JSON object"]
+    extra = sorted(set(test) - set(TEST_FIELDS))
+    found = [f"{where}: unknown key(s) {', '.join(extra)}"] if extra else []
+    found += [f"{where}: {key} is a shell command" for key in ("setup", "teardown")
+              if key in test and not (isinstance(test[key], str) and test[key].strip())]
+    if "env" in test and not (isinstance(test["env"], list)
+                              and all(isinstance(name, str) and ENV_NAME.match(name) for name in test["env"])):
+        found.append(f"{where}: env is a list of environment variable names")
+    return found
+
+
 def problems(value: Any) -> list[str]:
     """Why `value` is not a `policy` declaration; empty when it is one."""
     where = "the policy declaration"
@@ -144,7 +161,9 @@ def problems(value: Any) -> list[str]:
         found += _convention_problems(value["commit_convention"], f"{where}: commit_convention")
     if "ci" in value:
         found += _ci_problems(value["ci"], f"{where}: ci")
-    found += [f"{where}: {key} is a JSON object" for key in LATER if key in value and key not in ("links", "ci")
+    if "test" in value:
+        found += _test_problems(value["test"], f"{where}: test")
+    found += [f"{where}: {key} is a JSON object" for key in LATER if key in value and key not in ("links", "ci", "test")
               and not isinstance(value[key], dict)]
     if "links" in value and not _words(value["links"]):
         found.append(f"{where}: links is a list of registered paths")
