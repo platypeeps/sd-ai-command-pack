@@ -1804,7 +1804,7 @@ class Landing(Lane):
             raise OSError("the store is locked")
         sd_lane.run_lane(self.repo, self.environ, self.ship, note=broken)
         entry = self.entries()[0]
-        self.assertEqual(entry["status"], "prepared")
+        self.assertEqual(entry["status"], "merged")
         self.assertIn("the store is locked", entry["note"])
         self.assertIn("fast-forward", entry["fast_forward"])
 
