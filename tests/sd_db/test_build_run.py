@@ -709,6 +709,22 @@ class Supervise(Case):
         self.assertIn("leak guard refuses these commits", found[0])
         self.assertIn("path withheld", found[0])
 
+    def test_a_failed_build_is_pushed_once(self):
+        """Pack sd:6946: the tick pushes a blocked run once on ntfy; a failed send is tried again."""
+        self.press()
+        build.end(self.db, self.bundle["id"], "blocked", "the review left blockers")
+        sent = self.root / "sent.txt"
+        notify = self.root / "notify"
+        notify.write_text(f'#!/bin/sh\necho "$@" >> {sent}\nexit "${{FAKE_EXIT:-0}}"\n')
+        notify.chmod(0o755)
+        environ = {**os.environ, "SD_NOTIFY": str(notify)}
+        self.assertEqual(ADAPTER.push_failures(self.db, {**environ, "FAKE_EXIT": "1"}), [])
+        self.assertEqual(ADAPTER.push_failures(self.db, environ), [f"build:{self.bundle['id']}"])
+        self.assertEqual(ADAPTER.push_failures(self.db, environ), [])
+        lines = sent.read_text().splitlines()
+        self.assertEqual(len(lines), 2, "one failed send, one that landed, none after")
+        self.assertIn(f"-t Build blocked: sd:{self.items[0]} -c ntfy", lines[1])
+
     def test_a_body_the_lint_refuses_blocks_naming_the_line(self):
         """Pack sd:6402: the lint's failures go to stderr; the block names them, and the brief warns."""
         self.press()

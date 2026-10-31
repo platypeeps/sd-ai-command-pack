@@ -8,6 +8,7 @@ import importlib
 import json
 import math
 import os
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -257,6 +258,33 @@ def enqueue_refusals(worktree: Path, base: str, head: str, title: str, body: str
     return found
 
 
+def push_failures(connection: Any, environ: dict[str, str] | None = None) -> list[str]:
+    """Push each lane entry or build run that failed or blocked, once, on ntfy (pack sd:6946); the keys sent.
+
+    The send goes through `SD_NOTIFY` or `notify` on PATH, as `sd-db
+    backup` reports a failure. A key is recorded only once its send
+    landed, so a failed send is tried again next tick. Success pushes
+    nothing.
+    """
+    from sd_db import today
+    from sd_db.writes import record_state
+    env = os.environ if environ is None else environ
+    notify = env.get("SD_NOTIFY") or shutil.which("notify", path=env.get("PATH"))
+    if not notify:
+        return []
+    sent = []
+    for row in today.push_due(connection):
+        try:
+            done = subprocess.run([notify, "-t", row["title"], "-c", "ntfy", row["body"]], capture_output=True,
+                                  timeout=30, env=env, check=False, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if done.returncode == 0:
+            record_state(connection, "watermark", key=today.PUSHED + row["key"], body=row["title"])
+            sent.append(row["key"])
+    return sent
+
+
 def tools(build_run: Any) -> Any:
     return build_run.Tools(claude=["claude"], review=[str(BIN / "sd-review")], ship=[str(BIN / "sd-ship")],
                            lint=[str(BIN / "sd-docs-lint")])
@@ -330,6 +358,7 @@ def tick(sd_db: Any, build: Any, build_run: Any, root: Path | None, why: str, un
         result = build_run.dispatch(connection, owner="build-dispatch", load=load, load_cap=load_cap,
                                     interactive=interactive_builders(connection, build_run.now(), build_run.paths.key),
                                     spawn=spawn, lane=lane, why=why)
+        result["pushed"] = push_failures(connection)
     except (sd_db.SdDbError, ValueError, OSError) as error:
         raise WorkRefusal(str(error)) from error
     finally:

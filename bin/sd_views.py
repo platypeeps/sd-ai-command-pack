@@ -32,11 +32,11 @@ TITLE_MIN = 16
 #: The widest any other column grows; longer text is cut, so Title keeps its room.
 CELL_MAX = 32
 #: Each section's heading.
-HEADINGS = {"attention": "Attention", "operations": "Operations, this machine", "decisions": "Decisions", "landing": "Landing now", "delivered": "Delivered",
+HEADINGS = {"attention": "Attention", "operations": "Operations, this machine", "decisions": "Decisions", "landing": "Landing now", "queues": "Queues", "delivered": "Delivered",
             "planned": "Planned", "blocked": "Blocked", "unscheduled": "Unscheduled", "followups": "Followups",
             "work": "Work"}
 #: The sections that print whole.
-UNCAPPED = frozenset({"work"})
+UNCAPPED = frozenset({"work", "queues"})
 
 Cell = Callable[[dict[str, Any]], str]
 
@@ -117,6 +117,7 @@ def columns(section: str, now: datetime.datetime) -> list[tuple[str, Cell]]:
         "attention": [("Why", lambda row: row.get("why") or "-")],
         "decisions": [("Note", lambda row: f"#{row['note']}")],
         "landing": [("Position", lambda row: str(row["place"]) if row.get("place") else "-")],
+        "queues": [("Queue", lambda row: row["queue"]), ("Detail", lambda row: str(row.get("detail") or "-"))],
         "delivered": [("PR", lambda row: f"#{row['pr']}" if row.get("pr") else "-"),
                       ("Commit", lambda row: (row.get("commit") or "-")[:9])],
         "planned": [("Due", lambda row: day(row["due"], now))],
@@ -126,7 +127,7 @@ def columns(section: str, now: datetime.datetime) -> list[tuple[str, Cell]]:
         "work": [("Due", lambda row: day(row["due"], now, zone=False) if row.get("due") else "-"),
                  ("Priority", lambda row: f"P{row['priority']}" if row.get("priority") is not None else "-")],
     }
-    moment = {"attention": when("at"), "decisions": when("at"), "landing": when("since", local),
+    moment = {"attention": when("at"), "decisions": when("at"), "landing": when("since", local), "queues": when("since"),
               "delivered": when("at", local), "planned": when("due", days), "blocked": when("since"),
               "unscheduled": when("created_at"), "followups": when("at"), "work": when("status_since")}[section]
     return [("ID", _id), ("Repo", _repo), ("State", STATES.get(section, _state)), *own[section],
