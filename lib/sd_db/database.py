@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -124,6 +125,36 @@ def set_schema_version(connection: sqlite3.Connection, version: int) -> None:
 #: is a database in use, not a failure, and five seconds is longer than any
 #: write this library makes.
 BUSY_TIMEOUT = 5000
+
+#: The waits, in seconds, before a statement a locked database refused is sent again (pack sd:6588, sd:6855).
+#: With each try's own `busy_timeout` they total about a minute, well under `build.STALE_SECONDS`.
+LOCK_WAITS = (1, 2, 4, 8, 16)
+
+
+class Patient:
+    """A connection whose statement a locked database refused outside a transaction is sent again.
+
+    A statement refused outside a transaction (a `BEGIN`, a read, one
+    autocommit write) wrote nothing, so a retry cannot write twice; one
+    inside a transaction fails as it did. Each try waits its `busy_timeout`.
+    A build supervisor (sd:6588) and `sd-ship` (sd:6855) hold one.
+    """
+
+    def __init__(self, connection):
+        self.connection = connection
+
+    def __getattr__(self, name: str):
+        return getattr(self.connection, name)
+
+    def execute(self, sql: str, parameters=()):
+        for wait in (*LOCK_WAITS, None):
+            try:
+                return self.connection.execute(sql, parameters)
+            except sqlite3.OperationalError as error:
+                if wait is None or self.connection.in_transaction or not (
+                        "locked" in str(error) or "busy" in str(error)):
+                    raise
+            time.sleep(wait)
 
 
 def _configure(connection: sqlite3.Connection, *, write: bool) -> None:

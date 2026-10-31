@@ -21,7 +21,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
-from sd_dashboard import command_journal, pr_merge
+from sd_dashboard import command_journal, land, pr_merge
 from sd_db import upsert_repo, upsert_shadow, workflow, writes
 from support import ScreenCase
 from test_health_cleanup import FIXTURE_GIT, git
@@ -315,6 +315,14 @@ class Refusals(Copy, ScreenCase):
 
 
 class Route(Copy, BrowserSession):
+    #: Past a git step's own bound: the merge runs several, and a 5 s request gave up while the server still ran them
+    #: at gate load (pack sd:6700), as sd:6648 found for other routes.
+    http_timeout = land.GIT_SECONDS + 30
+
+    def test_a_request_outwaits_a_git_steps_bound(self):
+        """A 5 s request gave up on a merge whose git steps the server still ran, at gate load (pack sd:6700)."""
+        self.assertGreater(self.http_timeout, land.GIT_SECONDS)
+
     def test_the_page_previews_with_a_get_and_merges_with_a_post_which_the_journal_records(self):
         _, head = self.pull()
         status, _, body = self.request(f"/api/today/github/merge/preview?repo={REPO}&number=5",

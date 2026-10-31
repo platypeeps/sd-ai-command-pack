@@ -1230,7 +1230,7 @@ def issue(number, *, state="open", url=None, **extra):
 
 
 class TheIntakeSearch(SyncCase):
-    """sd:4880. A repository with `github_issues` on has every open issue synced,
+    """sd:4880. A repository with `policy.issues` ask has every open issue synced,
     not only the operator's: an unwindowed sweep lists them, older than the
     watermark too, such as a repository switched on today, and a stored open
     issue a complete sweep did not list is closed."""
@@ -1243,7 +1243,7 @@ class TheIntakeSearch(SyncCase):
 
         upsert_repo(self.connection, "/srv/example/benchmark", remote=f"git@github.com:{self.REPO}.git")
         upsert_repo(self.connection, "/srv/example/other", remote="https://github.com/example-org/other")
-        self.connection.execute("UPDATE repo SET github_issues = 1 WHERE path = '/srv/example/benchmark'")
+        self.connection.execute("UPDATE repo SET declarations = '{\"policy\":{\"issues\":\"ask\"}}' WHERE path = '/srv/example/benchmark'")
 
     def reasons(self):
         return {row["url"].rsplit("/", 1)[1]: (row["state"], row["reason"]) for row in self.shadow().values()}
@@ -1466,7 +1466,7 @@ class TheIntakeSearch(SyncCase):
 
         for number in range(6):
             upsert_repo(self.connection, f"/srv/example/r{number}", remote=f"https://github.com/example-org/r{number}")
-        self.connection.execute("UPDATE repo SET github_issues = 1")
+        self.connection.execute("UPDATE repo SET declarations = '{\"policy\":{\"issues\":\"ask\"}}'")
         runner = QueryGh(lambda query: [])
         result = sync(self.connection, now=self.now, runner=runner)
         self.assertTrue(result.ok, result.reason)
@@ -1475,7 +1475,7 @@ class TheIntakeSearch(SyncCase):
         self.assertEqual(len({part for query in intake for part in query.split() if part.startswith("repo:")}), 8)
 
     def test_a_repository_switched_off_is_searched_no_more(self):
-        self.connection.execute("UPDATE repo SET github_issues = 0")
+        self.connection.execute("UPDATE repo SET declarations = NULL")
         runner = QueryGh(lambda query: [])
         sync(self.connection, now=self.now, runner=runner)
         self.assertEqual(len(runner.queries), 4)
@@ -1498,7 +1498,7 @@ class TheStaleRead(SyncCase):
         from sd_db.writes import upsert_repo
 
         upsert_repo(self.connection, "/srv/example/benchmark", remote=f"git@github.com:{self.INTAKE}.git")
-        self.connection.execute("UPDATE repo SET github_issues = 1")
+        self.connection.execute("UPDATE repo SET declarations = '{\"policy\":{\"issues\":\"ask\"}}'")
 
     def url(self, number, repo=OTHER):
         return f"https://github.com/{repo}/issues/{number}"

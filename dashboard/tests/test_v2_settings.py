@@ -47,7 +47,7 @@ MARKUP_JS = (V2 / "static" / "markup.js").read_text(encoding="utf-8")
 
 #: A stand-in `sd`: `config list sd --json` prints the fleet keys and one machine key, each fleet value read from
 #: $SD_STUB/<key> (`database`), else unset (`default`); `config set` writes $SD_STUB/<key>, prints what sd prints, then
-#: does what $SD_STUB/mode says: `refuse` exits 1 before writing, `slow` sleeps past the bound after writing.
+#: does what $SD_STUB/mode says: `refuse` exits 1 before writing.
 STUB = r"""#!/bin/sh
 echo "$*" >> "$SD_STUB/calls"
 mode=$(cat "$SD_STUB/mode" 2>/dev/null)
@@ -70,7 +70,6 @@ case "$1 $2" in
     was=$(cat "$SD_STUB/$key" 2>/dev/null || echo "(unset)")
     printf '%s' "$4" > "$SD_STUB/$key"
     echo "$3: $was -> $4 (workflow database)"
-    [ "$mode" = slow ] && exec sleep 5
     exit 0 ;;
 esac
 exit 2
@@ -167,13 +166,17 @@ class TheFleetSet(BrowserSession):
         self.assertIsNone(self.sd.held("copilot_review"))
 
     def test_a_run_past_the_bound_is_unknown_and_the_next_read_shows_the_value(self):
-        self.sd.mode("slow")
-        with mock.patch.object(settings_screen, "SD_SECONDS", 1.0):
+        # sd:6809: the set finishes, then the bound is spent; no real clock races the stub's write under load.
+        ran = settings_screen._sd
+
+        def past_the_bound(*args):
+            ran(*args)
+            raise subprocess.TimeoutExpired(["sd", *args], settings_screen.SD_SECONDS)
+        with mock.patch.object(settings_screen, "_sd", past_the_bound):
             status, _, answer = self.post("/api/settings/fleet", {"key": "copilot_review", "value": "always"})
         self.assertEqual(status, 504, answer)
         self.assertTrue(answer["unknown"])
         self.assertIn("unknown", answer["error"])
-        self.sd.mode("")
         status, _, body = self.request("/api/settings", headers={"Cookie": self.cookie})
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)["fleet"][1]["value"], "always")
