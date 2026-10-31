@@ -79,12 +79,15 @@ window.PAGE_VIEWS = [{ id: 'personal', label: 'Personal' },
     const C = window.shell.commands;
     DOC.lanes.forEach(l => l.rows.filter(r => r.state !== 'building').forEach(r => C.put({ id: entryId(l, r), type: 'entry', label: `sd:${r.item}`, item: r.item, worktree: r.worktree, repo: l.repo })));
   }
+  // The PNGs the lane drew of the row's changed dashboard pages (sd:6728), or why it drew none: a warning, not a stop.
+  const shots = r => r.shots ? html` · screenshots ${r.shots.map((f, i) => html`${i ? ', ' : ''}<a href="${f.url}" target="_blank" rel="noopener">${f.name}</a>`)}`
+    : r.shots_warning ? html` · screenshots not drawn: ${r.shots_warning}` : '';
   function row(lane, r, last) {
     const [g, st, facts] = VIEW[r.state](r);
     const subject = r.state === 'building' ? html`<code>${r.builder}</code>` : html`<code>sd:${String(r.item)}</code>${r.title}`;
     const ctl = r.state === 'next' ? controls(lane, r, last) : r.state === 'blocked' ? again(lane, r) : r.state === 'cancelled' ? back(lane, r) : r.state === 'merging' ? free(lane, r) : html``;
     const id = r.state === 'building' ? null : entryId(lane, r);
-    return html`<li class="qrow" data-state="${r.state}"${r.held ? html` data-held=""` : ''}><span class="g g-${g[0]}" aria-hidden="true">${g[1]}</span><span class="st">${st}</span><span class="s"><span><span class="sr">${g[2] || g[0]} · </span>${subject}</span><small>${facts}</small></span><span class="ends">${ctl}${id ? window.shell.commands.rowActions(id) : ''}</span></li>`;
+    return html`<li class="qrow" data-state="${r.state}"${r.held ? html` data-held=""` : ''}><span class="g g-${g[0]}" aria-hidden="true">${g[1]}</span><span class="st">${st}</span><span class="s"><span><span class="sr">${g[2] || g[0]} · </span>${subject}</span><small>${facts}${shots(r)}</small></span><span class="ends">${ctl}${id ? window.shell.commands.rowActions(id) : ''}</span></li>`;
   }
   const count = (l, st) => l.rows.filter(r => r.state === st).length;
   function lane(l) {

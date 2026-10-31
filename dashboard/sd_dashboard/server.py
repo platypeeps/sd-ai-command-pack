@@ -852,6 +852,8 @@ class Dashboard(BaseHTTPRequestHandler):
             return self._document(path[len("/documents/") :])
         if path.startswith("/designs/"):
             return self._design(path[len("/designs/") :])
+        if path.startswith("/lane-shots/"):
+            return self._lane_shot(path[len("/lane-shots/") :])
         if path.startswith("/research/deck/"):
             return self._research_deck(context, path[len("/research/deck/") :])
         if path == "/home/assistant":
@@ -1303,6 +1305,25 @@ class Dashboard(BaseHTTPRequestHandler):
         if kind.startswith("text/html"):
             return self._send(200, body, kind, policy=POLICY)
         self._send(200, body, kind, overrides=FONT_HEADERS if kind.startswith("font/") else ASSET_HEADERS)
+
+    def _lane_shot(self, tail: str) -> None:
+        """sd:6728: one PNG the lane drew of a changed page, `<repo>/lane/logs/shots-<item>-<stamp>/<page>.png`."""
+        from . import pack_module
+        from .designs import ASSET_HEADERS, read, resolve
+
+        try:
+            root = pack_module("sd_lane").lane_root(dict(os.environ))
+        except ImportError:
+            root = None
+        shape = re.fullmatch(r"[^/]+/lane/logs/shots-[^/]+/[^/]+\.png", tail)
+        found = resolve(tail, root) if root is not None and shape else None
+        if found is None:
+            return self._send(404, error_page(404, "No such screenshot.").encode("utf-8"), "text/html; charset=utf-8")
+        try:
+            body = read(found[0])
+        except OSError as problem:
+            return self._send(503, error_page(503, str(problem)).encode("utf-8"), "text/html; charset=utf-8")
+        self._send(200, body, found[1], overrides=ASSET_HEADERS)
 
     def _v2_asset(self, name: str, query: str = "") -> None:
         from .v2 import asset

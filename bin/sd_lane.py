@@ -346,6 +346,8 @@ NOT_STARTED = ("make post-merge unknown", "make post-merge did not start")
 RUN_BUDGET_SECONDS = JOB_SECONDS - ENTRY_SECONDS - POST_MERGE_SECONDS - 5 * 60
 #: A claim's lease beyond its prepare's bound: the checkout before it and the writes after (sd:3481).
 LEASE_SLACK_SECONDS = 1800
+#: The bound on the screenshots of a branch's changed dashboard pages, inside that slack (sd:6728).
+SHOTS_SECONDS = 300
 #: A `post-merge` rule in a Makefile, not a `post-merge :=` variable.
 POST_MERGE_RULE = re.compile(r"^post-merge\s*:(?!=)", re.MULTILINE)
 #: The bound on one `git` step of a publish: a fetch or a push crosses the network.
@@ -1852,8 +1854,12 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
     if not at_head(worktree, entry["expected_head"]):
         return {"status": "skipped", "code": HEAD_MOVED, "reason": "the worktree's HEAD moved from the queued head"}
     stamp = time.strftime("%Y%m%dT%H%M%S", time.gmtime())
+    shot = draw_shots(worktree, logs / f"shots-{item}-{stamp}")
+    if shot.get("shots"):
+        entry = {**entry, "body": with_shots(str(entry.get("body") or ""), shot["shots"])}
     prepared, prepare_log = prepare_step(entry, worktree, logs / f"prepare-{item}-{stamp}", ship, renewed)
-    fields: dict[str, Any] = {"prepare_log": str(prepare_log), "log_host": this_host(), "head": prepared.get("head")}
+    fields: dict[str, Any] = {"prepare_log": str(prepare_log), "log_host": this_host(), "head": prepared.get("head"),
+                              **shot}
     stopped = prepare_stop(entry, worktree, prepared)
     if stopped is not None and stopped.get("reconciled"):
         advance()  # the claim still holds, and the lane is still here, before the landing (sd:3482)
@@ -1874,6 +1880,49 @@ def process(entry: dict[str, Any], queue: Queue, ship: Ship, advance: Callable[[
                 "reason": str(merged.get("error") or merged.get("code") or "merge did not confirm")[:REASON_CHARS],
                 **({"hub_fault": True} if answered_hub_fault(merged) else {})}
     return {**fields, "status": "merged", "merge_commit": merged.get("merge_commit")}
+
+
+def draw_shots(worktree: pathlib.Path, out: pathlib.Path) -> dict[str, Any]:
+    """`dashboard.sh shots` of each dashboard page the branch changed, as a warning, never a stop (sd:6728).
+
+    `{}` in a repository without `dashboard/dashboard.sh` or when no page
+    changed; `shots` names the PNGs, for the body and the Queue row; and
+    `shots_warning` says why none were drawn.
+    """
+    script = worktree / "dashboard" / "dashboard.sh"
+    if not script.is_file():
+        return {}
+    base = origin_tip(worktree)
+    if base is None:
+        return {"shots_warning": "no origin/HEAD, origin/main or origin/master to diff against"}
+    try:
+        child = subprocess.Popen([str(script), "shots", "--out", str(out), "--changed", base], cwd=worktree,
+                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                                 start_new_session=True)
+    except OSError as error:
+        return {"shots_warning": f"dashboard.sh shots did not start: {error}"}
+    try:
+        stdout, stderr = child.communicate(timeout=SHOTS_SECONDS)
+    except subprocess.TimeoutExpired:
+        end_group(child.pid, signal.SIGKILL)  # its Chrome too: the session it leads
+        child.communicate()
+        return {"shots_warning": f"dashboard.sh shots took over {SHOTS_SECONDS} s"}
+    if child.returncode:
+        said = stderr.strip().splitlines() or [f"exit {child.returncode}"]
+        return {"shots_warning": said[-1][:REASON_CHARS]}
+    files = [line for line in stdout.splitlines() if line.endswith(".png")]
+    return {"shots": files} if files else {}
+
+
+def with_shots(body: str, files: list[str]) -> str:
+    """`body` and a Screenshots section naming each page and its variants; the PNGs stay local (sd:6728)."""
+    pages: dict[str, list[str]] = {}
+    for file in files:
+        page, theme, width = pathlib.Path(file).stem.rsplit("-", 2)
+        pages.setdefault(page, []).append(f"{theme} {width}")
+    lines = [f"- {page}: {', '.join(variants)}" for page, variants in pages.items()]
+    return (f"{body.rstrip()}\n\n## Screenshots\n\nThe lane drew each changed dashboard page.\n"
+            "The Queue row links the PNGs.\n\n" + "\n".join(lines) + "\n")
 
 
 def prepare_step(entry: dict[str, Any], worktree: pathlib.Path, log: pathlib.Path, ship: Ship,
@@ -2497,6 +2546,14 @@ def record_post_merge(entries: list[dict[str, Any]], token: str, ran: str | None
             row["post_merge"] = POST_MERGE_OWED if retry else {"ran": ran or "no post-merge rule", "at": stamp_now()}
 
 
+def origin_tip(tree: pathlib.Path) -> str | None:
+    """The commit of origin's default branch as `tree` last fetched it: origin/HEAD, main or master; None if none."""
+    names = [(lane_git(tree, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or "").removeprefix("origin/"),
+             "main", "master"]
+    return next((ref for ref in (lane_git(tree, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{name}")
+                                 for name in names if name) if ref), None)
+
+
 def origin_makefile(main: pathlib.Path) -> tuple[str, str | None]:
     """`(text, reason)`: origin's default-branch Makefile for a pinned checkout, read without touching HEAD.
 
@@ -2507,10 +2564,7 @@ def origin_makefile(main: pathlib.Path) -> tuple[str, str | None]:
     where = f"the pinned checkout {main}"
     if lane_git(main, "fetch", "-q", "origin") is None:
         return "", f"make post-merge unknown: git fetch failed in {where}"
-    names = [(lane_git(main, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or "").removeprefix("origin/"),
-             "main", "master"]
-    tip = next((ref for ref in (lane_git(main, "rev-parse", "--verify", "-q", f"refs/remotes/origin/{name}")
-                                for name in names if name) if ref), None)
+    tip = origin_tip(main)
     if tip is None:
         return "", f"make post-merge unknown: no origin/HEAD, origin/main or origin/master in {where}"
     listed = lane_git(main, "ls-tree", tip, "--", "Makefile")

@@ -28,6 +28,8 @@ import sys
 import tempfile
 import time
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
 from unittest import mock
 
@@ -140,6 +142,15 @@ class Lane:
     def calls(self):
         return [line.split() for line in self.log.read_text().splitlines()]
 
+    def shot_entries(self):
+        """sd:6728: item 5 carries two PNGs the lane drew and one outside its logs; item 4 the warning of none."""
+        drawn = self.lane / "logs" / "shots-5-20260906T090000"
+        drawn.mkdir()
+        (drawn / "home-dark-1440.png").write_bytes(b"\x89PNG\r\n\x1a\nshot")
+        files = [str(drawn / "home-dark-1440.png"), str(drawn / "home-light-375.png"), "/elsewhere/x-dark-1440.png"]
+        self.list([{**e, "shots": files} if e["item"] == 5 else {**e, "shots_warning": "shots: no Chrome found"}
+                   if e["item"] == 4 else e for e in self.entries()])
+
 
 class TheRows(Lane, ScreenCase):
     """`queue_screen.document` from the fixture `lane list`, the gate log and `sd gate status`."""
@@ -157,6 +168,15 @@ class TheRows(Lane, ScreenCase):
                 conf.write_text(text)
             with self.subTest(realm=realm), mock.patch.object(places, "REALMS_CONFIG", conf):
                 self.assertEqual([lane["realm"] for lane in queue_screen.document(self.connection, now=NOW)["lanes"]], [realm])
+
+    def test_a_row_links_each_screenshot_the_lane_drew_and_says_why_it_drew_none(self):
+        self.shot_entries()
+        rows = {row.get("item"): row for row in self.doc()["lanes"][0]["rows"]}
+        self.assertEqual(rows[5]["shots"], [
+            {"name": "home-dark-1440", "url": "/lane-shots/system/lane/logs/shots-5-20260906T090000/home-dark-1440.png"},
+            {"name": "home-light-375", "url": "/lane-shots/system/lane/logs/shots-5-20260906T090000/home-light-375.png"}])
+        self.assertEqual((rows[4]["shots_warning"], "shots" in rows[4], "shots" in rows[7]),
+                         ("shots: no Chrome found", False, False))
 
     def test_each_of_the_six_states_has_its_row(self):
         rows = self.doc()["lanes"][0]["rows"]
@@ -1041,6 +1061,34 @@ class TheInProcessRead(RealLane):
         self.assertIn("database is locked", doc["problems"][0]["error"])
 
 
+class TheShotRoute(Lane, BrowserSession):
+    """sd:6728: `/lane-shots/` serves a PNG under a lane's `logs/shots-*`, and nothing else under the lane root."""
+
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.dict(os.environ, {"SD_LANE_ROOT": str(self.lane.parent.parent)})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.shot_entries()
+
+    def fetch(self, path):
+        try:
+            with urllib.request.urlopen(self.base + path, timeout=10) as answer:
+                return answer.status, answer.headers["Content-Type"], answer.read()
+        except urllib.error.HTTPError as error:
+            with error:
+                return error.code, None, b""
+
+    def test_a_drawn_png_is_served_and_any_other_file_is_not(self):
+        self.assertEqual(self.fetch("/lane-shots/system/lane/logs/shots-5-20260906T090000/home-dark-1440.png"),
+                         (200, "image/png", b"\x89PNG\r\n\x1a\nshot"))
+        for path in ("/lane-shots/system/lane/logs/prepare-3-20260906T115500.log",
+                     "/lane-shots/system/lane/logs/shots-5-20260906T090000/home-light-375.png",
+                     "/lane-shots/system/lane/logs/shots-5-20260906T090000/../../logs/x.png",
+                     "/lane-shots/system/lane/gate-stale.log"):
+            self.assertEqual(self.fetch(path)[0], 404, path)
+
+
 class TheScript(Lane, ScreenCase):
     """queue.js against the document `queue_screen` builds from the fixture."""
 
@@ -1128,6 +1176,14 @@ R.after = ELS.builds.html;""")
         self.assertEqual([post[:2] for post in out["posts"]], [["/api/queue/builds/retry", {
             "assignment": 6, "revision": "c" * 64, "finding": "The label reads wrong on phones"}]])
         self.assertIn("sd:6 sent to the builder with your finding.", out["R"]["after"])
+
+    def test_a_row_draws_its_screenshot_links_and_a_warning(self):
+        """sd:6728: the Queue row links the local PNGs; a failed capture says why, as a warning."""
+        self.shot_entries()
+        lanes = self.run_page("R.lanes = ELS.details.html;")["R"]["lanes"]
+        self.assertIn('screenshots <a href="/lane-shots/system/lane/logs/shots-5-20260906T090000/home-dark-1440.png" '
+                      'target="_blank" rel="noopener">home-dark-1440</a>, <a ', lanes)
+        self.assertIn("screenshots not drawn: shots: no Chrome found", lanes)
 
     def test_each_state_renders_its_glyph_and_label(self):
         lanes = self.run_page("R.lanes = ELS.details.html;")["R"]["lanes"]

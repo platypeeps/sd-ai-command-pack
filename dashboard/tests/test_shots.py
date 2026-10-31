@@ -123,7 +123,7 @@ class Capture(FakeChrome):
         self.assertEqual(list(self.out.glob("*.png")), [])
 
 
-class Main(FakeChrome):
+class Served(FakeChrome):
     def setUp(self) -> None:
         super().setUp()
         self.database = self.root / "sd.db"
@@ -143,6 +143,8 @@ class Main(FakeChrome):
             code = shots.main(["--database", str(self.database), "--out", str(self.out), *pages])
         return code, "".join(out), "".join(err)
 
+
+class Main(Served):
     def test_main_serves_a_copy_so_the_store_is_never_written(self) -> None:
         before = self.database.read_bytes()
         served = []
@@ -180,6 +182,49 @@ class Main(FakeChrome):
             code, out, err = self.run_main("/tasks")
         self.assertEqual(code, 1)
         self.assertIn("no Chrome", err)
+
+
+class Changed(Served):
+    """sd:6728: the lane draws the pages a branch changed, from `--changed BASE`."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.v2 = self.root / "repo" / "v2"
+        (self.v2 / "static").mkdir(parents=True)
+        for name in ("home.html", "tasks.html", "static/tokens.css"):
+            (self.v2 / name).write_text("old\n")
+        self.git("init", "-q")
+        self.git("add", ".")
+        self.git("-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-qm", "base")
+        self.base = self.git("rev-parse", "HEAD").strip()
+        patch = mock.patch.object(shots, "V2", self.v2)
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def git(self, *args: str) -> str:
+        return subprocess.run(["git", "-C", str(self.v2), *args], check=True, capture_output=True, text=True).stdout
+
+    def commit(self, name: str) -> None:
+        (self.v2 / name).write_text("new\n")
+        self.git("-c", "user.name=t", "-c", "user.email=t@example.test", "commit", "-qam", "change")
+
+    def test_a_change_to_home_html_draws_home_in_every_variant(self) -> None:
+        self.commit("home.html")
+        code, out, err = self.run_main("--changed", self.base)
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn(str(self.out / "home-light-1440.png"), out.splitlines())
+        self.assertEqual(len(out.splitlines()), 4)
+
+    def test_a_branch_that_changes_no_page_draws_nothing(self) -> None:
+        code, out, err = self.run_main("--changed", self.base)
+        self.assertEqual((code, out, err), (0, "", ""))
+        self.assertFalse(self.out.exists())
+
+    def test_files_map_to_their_pages_and_a_shared_file_to_home(self) -> None:
+        self.assertEqual(shots.pages_for(["tasks.html", "static/queue.css", "static/home-kiosk.js", "pages/home.py"]),
+                         ["/home", "/queue", "/tasks"])
+        self.assertEqual(shots.pages_for(["static/tokens.css"]), ["/home"])
+        self.assertEqual(shots.pages_for(["health.html", "static/places.js"]), ["/fleet-health", "/places"])
 
 
 class Launcher(unittest.TestCase):
