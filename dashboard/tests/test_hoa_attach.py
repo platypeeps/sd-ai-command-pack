@@ -232,6 +232,20 @@ class TheUpload(Case):
                     self.assertIn("Whether Drive holds the file is not known", body["error"])
         self.assertTrue((self.root / "intake" / "staged" / staged["sha256"]).exists())
 
+    def test_a_folder_answer_naming_no_created_folder_writes_nothing_into_it(self):
+        staged = self.stage()
+        upload = {"asset": "V-01", "sha256": staged["sha256"], "name": "a.jpg"}
+        reference = {"asset": "V-01", "link": "https://drive.google.com/file/d/X/view"}
+        for said in ("Error creating folder. Parent folder ID: MAIN", "Successfully created folder 'V-02' (ID: NEW9) "
+                     "in folder x.", "Successfully created folder 'V-01' (ID: N/A) in folder x.", ""):
+            self.drive.say["create_drive_folder"] = said
+            for values in (upload, reference):
+                with self.subTest(said=said, values=values):
+                    status, body = self.attach(values)
+                    self.assertEqual(status, 504)
+                    self.assertIn("is not known", body["error"])
+        self.assertEqual({call[0] for call in self.drive.writes()}, {"create_drive_folder"}, "no file into a guess")
+
     def test_the_request_takes_a_file_or_a_link_and_nothing_else(self):
         for bad in ({"asset": "V-01"}, {"asset": "V-01", "sha256": "0" * 64, "link": "https://drive.google.com/x"},
                     {"asset": "V-01", "link": "https://drive.google.com/x", "path": "/etc/passwd"}, {"link": "x"}):

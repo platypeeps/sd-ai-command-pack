@@ -77,15 +77,17 @@ def _first(parameters: dict, name: str):
 
 
 def _write(tool: str, arguments: dict, what: str) -> str:
-    """The id of the file the one write made: an answer naming no such file is `Unknown`, as is no answer."""
+    """The id of the file or folder the one write made: an answer naming no such one is `Unknown`, as is no answer."""
     try:
         said = _call(tool, arguments, what)
     except LookupError as error:
         raise Unknown(str(error)) from None
-    # Only workspace-mcp's success line, for this file name, confirms the write; any other text may hide an error.
-    made = re.search(rf"Successfully created file '{re.escape(arguments['file_name'])}' \(ID: ([\w-]+)\)", said)
+    # Only workspace-mcp's success line, for this name, confirms the write; any other text may hide an error.
+    kind = "folder" if "folder_name" in arguments else "file"
+    name = re.escape(arguments[f"{kind}_name"])
+    made = re.search(rf"Successfully created {kind} '{name}' \(ID: ([\w-]+)\)", said)
     if not made:
-        raise Unknown(f"workspace-mcp answered without a created file: {said[:200]}")
+        raise Unknown(f"workspace-mcp answered without a created {kind}: {said[:200]}")
     return made[1]
 
 
@@ -146,12 +148,8 @@ def _folder(connection, ident: object, *, make: bool) -> tuple[dict, str, str | 
         return asset, account, parent
     folder = _one(account, parent, own)
     if folder is None and make:
-        said = _call("create_drive_folder", {"user_google_email": account, "folder_name": own,
-                                             "parent_folder_id": parent}, "the folder")
-        made = re.search(r"ID:\s*([\w-]+)", said)
-        if not made:
-            raise LookupError(f"workspace-mcp answered without a folder id: {said[:200]}")
-        folder = made[1]
+        folder = _write("create_drive_folder", {"user_google_email": account, "folder_name": own,
+                                                "parent_folder_id": parent}, "the folder")
     return asset, account, folder
 
 
