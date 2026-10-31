@@ -946,8 +946,15 @@ class TheDocument(Collectors, ScreenCase):
         self.stub("du", self.stalled())
         # The walk's clock holds still, so df spends none of the 1 s however
         # long it takes to start, and du alone meets its timeout (sd:2667).
+        # Each command's own timeout is wall time, so only du keeps it: a
+        # loaded gate started df past 1 s and failed the area.
+        real_run = subprocess.run
+
+        def run(argv, **kwargs):
+            return real_run(argv, **{**kwargs, **({} if argv[0] == "du" else {"timeout": 60})})
         with patch.dict(os.environ, {"PATH": f"{stub}{os.pathsep}{os.environ['PATH']}"}), \
-                patch.object(health_collectors, "time", HeldClock()):
+                patch.object(health_collectors, "time", HeldClock()), \
+                patch.object(health_collectors.subprocess, "run", run):
             doc = self.doc(disk=lambda connection: REAL_DISK_SCAN(connection, within=1, listed=listed, repo_paths=[]))
         disk = doc["areas"][0]
         self.assertFalse(self.finished.exists(), "the page waited on du instead of stopping it")
