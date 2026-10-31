@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.util
 import math
 import re
 import sys
@@ -236,7 +237,10 @@ def shadow_sync(args) -> int:
             if recovery and name != "github":
                 print(f"shadow sync[{name}]: skipped (recovery window is GitHub's)")
                 continue
-            result = sd_db.sync_shadow(connection, tracker=name, **options)
+            # sd:6712: a scheduled GitHub run files the pull request alerts; a library without them is not asked.
+            alerts = {"alerts": True} if name == "github" and not recovery and importlib.util.find_spec(
+                "sd_db.pr_attention") else {}
+            result = sd_db.sync_shadow(connection, tracker=name, **options, **alerts)
             code = max(code, report_sync(result, name=name, strict=strict))
     except tuple(refused) as error:
         print(f"sd: {error}", file=sys.stderr)
