@@ -3,7 +3,8 @@
 `document` is each piece's stage, gates and next moves as `writing.piece_state` gives them, its files' sizes, and the
 opening of its draft. The repository goes out by its folder name only, so no local path leaves. Its `attention` is the
 page's rail badge (sd:3446, `_attention`). Each piece's `realm` is `places.realm_of` of its repo, the rule Tasks' Realm
-filter uses (sd:5064).
+filter uses (sd:5064). Its `grill` is its open question notes and the count of its rulings (pack sd:6700): Details
+walks the questions, and Apply answers waits until none is open.
 """
 
 from pathlib import Path
@@ -11,6 +12,7 @@ from pathlib import Path
 from sd_db import writing
 from sd_db.workflow import WorkflowError
 
+from .decisions import RULING, parse
 from .markup import href
 from .places import realm_of, realms
 
@@ -49,10 +51,18 @@ def document(connection, *, now):
             "ready_recorded": bool(row["ready_digest"]) and row["ready_digest"] == gates["digest"],
             "publication": {"claim": live["id"], "url": live["url"], "phase": live["phase"], "href": href(live["url"])} if live else None,
             "next": state["available_stages"], "corrections": state["correction_stages"],
-            "files": files, "draft": draft, "words": words,
+            "files": files, "draft": draft, "words": words, "grill": _grill(full["notes"]),
         })
     return {"read": now, "stages": list(writing.STAGES), "pieces": pieces, "attention": _attention(pieces),
             "realms": {key: found[key] for key in ("state", "source", "problems")}}
+
+
+def _grill(notes) -> dict:
+    """The piece's open questions, oldest first, with their options; and how many questions it has ruled on."""
+    asked = [{"note": note["id"], "question": question, "options": options}
+             for note in notes if note["kind"] == "question" and note["resolved_at"] is None
+             for question, options in [parse(note["body"])]]
+    return {"open": asked, "answered": sum(1 for note in notes if note["kind"] == "decision" and RULING.match(note["body"]))}
 
 
 def _gate_state(piece) -> str:

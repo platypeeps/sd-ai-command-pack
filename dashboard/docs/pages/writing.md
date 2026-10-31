@@ -13,6 +13,15 @@ same route with `correct`. Park and Revive post `/park` and `/revive` and
 undo each other. Publish and Capture are copy only. The page reads through
 the shell's reader, `read.js`. The old list was retired in sd:3402.
 
+Grill (pack sd:6700) asks first, then posts Fix with `{"grill": "ask"}`:
+claude in herdr reads the draft and writes 5 to 10 question notes on the
+piece. `/api/writing` gives each piece `grill`, its open questions and the
+count of its rulings, and Details walks the first open question with a
+button per option or a box for words; each answer posts
+`/api/decisions/answer`, as Decide does. Apply answers, once every question
+is answered, posts Fix with `{"grill": "apply"}`: claude edits the draft to
+follow each ruling and leaves the edit uncommitted.
+
 Not read yet, so drawn as gaps:
 
 - the vault's blog ideas column: the design read `sd store list sdw.blog-idea`,

@@ -163,10 +163,24 @@ addEventListener('DOMContentLoaded', () => {
         <span class="label">Publish gate</span>
         ${P.ok ? html`<p class="why">Open: stage Ready, gates pass, readiness recorded for this draft. Publish is copy only, since it posts outside: <code>sd writing publication-claim</code>, then <code>publication-dispatch</code> on the recorded claim.</p>` : html`<p class="why">Closed. Publish stays off until each of these clears:</p><ul>${P.why.map(w => html`<li>${w}</li>`)}</ul>`}
       </div>
+      ${grillPane(p)}
       <h3>Act</h3>${C.bar(String(p.id))}
       <div class="actions"><button class="btn quiet sm" type="button" id="open-ed">${ICON('pen-line')}Open in editor</button></div>
       <p class="foot">Observed ${utc(D.read)} from the workflow database and the piece files in <code>${p.repo}/${p.folder}/${p.piece}/</code>.</p>`);
     el.querySelector('#open-ed')?.addEventListener('click', () => setView('editor'));
+  }
+
+  // pack sd:6700: the first open grill question, with a button per option or a box for words.
+  function grillPane(p) {
+    const g = p.grill || { open: [], answered: 0 }, q = g.open[0];
+    if (!q) return g.answered ? html`<h3 class="label">Grill</h3><p class="why">${g.answered} answered, none open. Apply answers edits the draft to follow them.</p>` : '';
+    return html`<h3 class="label">Grill</h3><div class="grill" aria-label="Grill question">
+      <p class="why">Question 1 of ${g.open.length}${g.answered ? ` · ${g.answered} answered` : ''}</p>
+      <p class="q">${q.question}</p>
+      ${q.options.length ? html`<div class="actions">${q.options.map(o => html`<button class="btn sm" type="button" data-grill-answer="${o}">${o}</button>`)}</div>`
+        : html`<label class="label" for="grill-text">Your answer</label><textarea id="grill-text" rows="3"></textarea>
+          <div class="actions"><button class="btn sm" type="button" data-grill-answer="">Answer</button></div>`}
+    </div>`;
   }
 
   // ---------- Editor ----------
@@ -218,6 +232,17 @@ addEventListener('DOMContentLoaded', () => {
     .then(out => ({ text: parked ? `#${p.id} parked` : `#${p.id} revived at ${SL[p.stage] || p.stage}`, revision: out.revision })); };
   const parkUndo = parked => (o, v) => window.shell.post(`/api/items/${o.id}/${parked ? 'revive' : 'park'}`, { revision: v.revision })
     .then(() => reading?.reread(), e => { reading?.load(); throw e; });
+  const asked = p => { const n = p.grill?.open.length; return n ? `${markup.plural(n, 'grill question')} open; answer them first` : ''; };
+  const grillPost = (o, path, body) => window.shell.post(path, { ...body, revision: P_(o).revision }).then(out => { reading?.reread(); return out; });
+  // An answer is Decide's: /api/decisions/answer writes the ruling and resolves the question under the piece's revision.
+  document.getElementById('details').addEventListener('click', e => {
+    const b = e.target.closest?.('[data-grill-answer]'), p = byId(selected), q = p?.grill?.open[0];
+    if (!b || !q) return;
+    const option = (b.dataset.grillAnswer || document.getElementById('details').querySelector('#grill-text')?.value || '').trim();
+    if (!option) { toast('Type an answer first.'); return; }
+    window.shell.post('/api/decisions/answer', { item: p.id, note: q.note, option, revision: p.revision })
+      .then(() => reading?.reread(), err => { toast(`#${p.id} not answered: ${err.message}`); reading?.load(); });
+  });
   const CMDS = [
     { id: 'piece.stage', on: 'piece', label: 'Stage', does: 'Moves the piece to its next stage; going back needs a reason.', key: 's', icon: 'arrow-up-right', risk: 'confirm',
       cli: o => `sd writing stage --piece ${P_(o).piece} --stage ${nextOf(P_(o)) || '…'}`,
@@ -252,6 +277,11 @@ addEventListener('DOMContentLoaded', () => {
       when: o => { const P = publishState(P_(o)); return P.ok || P.why.join(' '); },
       consequence: () => 'Publishes to the destinations in sd-plugin.json; the canonical destination comes first. The publication claim records the URL. It posts outside, so the dashboard sends nothing: copy the two lines.',
       run: o => `Copy the two lines to publish #${P_(o).id}; publishing posts outside, so the dashboard does not run them` },
+    // pack sd:6700: Grill writes the piece's questions as notes; Details walks them; Apply answers edits the draft to follow them.
+    window.commands.grill('piece', 'ask', { item: o => P_(o).id, post: grillPost,
+      ready: o => { const p = P_(o); return !p ? 'not listed' : !p.words ? 'no draft to grill yet' : asked(p) || true; } }),
+    window.commands.grill('piece', 'apply', { item: o => P_(o).id, post: grillPost,
+      ready: o => { const p = P_(o); return !p ? 'not listed' : asked(p) || (p.grill?.answered ? true : 'no grill question answered yet; press Grill first'); } }),
   ];
   C.register(...CMDS);
   const cmd = id => CMDS.find(c => c.id === id);
