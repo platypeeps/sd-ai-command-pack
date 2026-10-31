@@ -362,6 +362,11 @@ class Supervisor:
         self.blockers: list[dict] = []
         self.last_beat = 0.0
         self.env = _environ(environ)
+        # Claude Code's own OTel, where the machine turns it on, joins the run's
+        # trace by these (pack sd:6943); the switch and endpoint are system sd:6944's.
+        self.env["OTEL_RESOURCE_ATTRIBUTES"] = ",".join(filter(None, (
+            self.env.get("OTEL_RESOURCE_ATTRIBUTES"), f"sd.build_run={ident}",
+            "sd.items=" + ";".join(str(item) for item in (self.lead, *self.others)))))
 
     # ----------------------------------------------------------- the walk
 
