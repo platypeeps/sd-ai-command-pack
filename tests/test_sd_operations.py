@@ -146,7 +146,7 @@ class OperationsCLI(unittest.TestCase):
     def builds(self):
         """`sd_db.build` and `sd_db.build_run` fakes; `dispatch` answers an empty tick."""
         build, run = types.ModuleType("sd_db.build"), types.ModuleType("sd_db.build_run")
-        run.dispatch = Mock(return_value={"reaped": [], "moved": [], "claimed": ["r1"], "drafted": [], "spawned": ["r1"], "why": ""})
+        run.dispatch = Mock(return_value={"reaped": [], "moved": [], "swept": [], "claimed": ["r1"], "drafted": [], "spawned": ["r1"], "why": ""})
         run.now = Mock(return_value="2026-10-25T09:00:00+00:00")
         run.paths = types.SimpleNamespace(key=lambda value: value, expand=Path)
         run.Tools = lambda **tools: types.SimpleNamespace(**tools)
@@ -179,7 +179,7 @@ class OperationsCLI(unittest.TestCase):
         sys.modules["sd_db.build"].run = Mock(return_value={"repo": "/repo"})
         run.spawn, run.log_dir = Mock(), lambda root, repo: root
         run.dispatch.side_effect = lambda connection, **kwargs: (kwargs["spawn"]("r1"), {
-            "reaped": [], "moved": [], "claimed": [], "drafted": [], "spawned": ["r1"], "why": ""})[1]
+            "reaped": [], "moved": [], "swept": [], "claimed": [], "drafted": [], "spawned": ["r1"], "why": ""})[1]
         with patch.object(cli, "gate_load", return_value=(1.0, 0.0)), \
                 patch.object(cli, "interactive_builders", return_value=[]), \
                 patch.object(cli, "log_root", return_value=Path("/bulk")):
@@ -222,7 +222,7 @@ class OperationsCLI(unittest.TestCase):
         run.log_dir = lambda root, repo: root
         run.spawn = Mock(side_effect=PermissionError(1, "Operation not permitted"))
         run.dispatch.side_effect = lambda connection, **kwargs: (kwargs["spawn"]("r1"), {
-            "reaped": [], "moved": [], "claimed": [], "drafted": [], "spawned": ["r1"], "why": ""})[1]
+            "reaped": [], "moved": [], "swept": [], "claimed": [], "drafted": [], "spawned": ["r1"], "why": ""})[1]
         code, output = self.tick(run)
         self.assertEqual(code, 0)
         self.assertIn("spawned 0; no claim: cannot start r1's supervisor", output)

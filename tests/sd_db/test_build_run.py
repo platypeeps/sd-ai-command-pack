@@ -906,6 +906,61 @@ class Tick(Case):
         self.assertEqual((row["step"], row["outcome"], row["released_at"]), ("enqueued", None, None))
 
 
+class Sweep(Case):
+    """pack sd:6909: a blocked or cancelled build's worktree goes once every item it names is done."""
+
+    def blocked(self):
+        self.press()
+        self.plan(claude=["deny"])
+        self.assertEqual(self.supervisor().run()["outcome"], "blocked")
+        self.db.execute("UPDATE runner_run SET released_at = ?", (build_run.now(),))
+        self.db.commit()
+        return Path(self.bundle["work_path"])
+
+    def done(self):
+        self.db.execute("UPDATE item SET status = 'done' WHERE id = ?", (self.items[0],))
+        self.db.commit()
+
+    def branches(self):
+        return support.git(self.repo, "branch", "--list", self.bundle["branch"])
+
+    def test_a_blocked_build_whose_items_are_done_is_removed(self):
+        work = self.blocked()
+        self.done()
+        self.assertEqual(build_run.sweep(self.db), [str(work)])
+        self.assertFalse(work.exists())
+        self.assertEqual(self.branches(), "")
+        self.assertEqual(build_run.sweep(self.db), [], "a removed worktree is not swept again")
+
+    def test_the_tick_sweeps(self):
+        work = self.blocked()
+        self.done()
+        result = build_run.dispatch(self.db, owner="fixture", spawn=lambda ident: None, lane=lambda row, items: None,
+                                    load=1.0, load_cap=40.0, interactive=[], root=self.root / "worktrees")
+        self.assertEqual(result["swept"], [str(work)])
+
+    def test_an_open_item_keeps_the_worktree(self):
+        work = self.blocked()
+        self.assertEqual(build_run.sweep(self.db), [])
+        self.assertTrue(work.is_dir())
+        self.assertNotEqual(self.branches(), "")
+
+    def test_a_dirty_or_held_or_open_worktree_is_kept(self):
+        work = self.blocked()
+        self.done()
+        (work / "stray.txt").write_text("x")
+        self.assertEqual(build_run.sweep(self.db), [])
+        (work / "stray.txt").unlink()
+        sessions.beat(self.db, "session-other", machine=this_host(), cwd=None,
+                      found=sessions.worktrees([str(work)]))
+        self.assertEqual(build_run.sweep(self.db), [])
+        self.db.execute("DELETE FROM state WHERE kind = 'heartbeat'")
+        self.db.execute("UPDATE runner_run SET released_at = NULL")
+        self.db.commit()
+        self.assertEqual(build_run.sweep(self.db), [], "an unreleased run still owns it")
+        self.assertTrue(work.is_dir())
+
+
 class Drafts(Case):
     """The draft supervisor and the tick's draft claim (pack sd:6361), with the fake `claude`."""
 

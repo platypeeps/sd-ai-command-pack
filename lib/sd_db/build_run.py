@@ -278,10 +278,55 @@ def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=P
     return moved
 
 
+def sweep(connection, *, git: Collection[str] = ("git",)) -> list[str]:
+    """Remove each build worktree, and its branch, that no run owns any more once every item it names is done.
+
+    A blocked or cancelled run keeps its worktree for Retry, and a later build
+    may land the same items; the lane squash-merges, so the branch reads
+    unpushed forever (pack sd:6909). Kept: an unreleased run on the path, an
+    item of any run on it not done, a dirty or unread worktree, a live session
+    other than a builder's. The paths removed.
+    """
+    rows = connection.execute(
+        "SELECT runner_run.work_path, runner_run.repo, runner_run.branch, runner_run.session_id, "
+        "runner_run.released_at, item.status FROM runner_run "
+        "JOIN assignment ON assignment.id = runner_run.assignment OR assignment.parent = runner_run.assignment "
+        "JOIN item ON item.id = assignment.item WHERE assignment.scope = ? AND runner_run.work_path IS NOT NULL",
+        (build.SCOPE,)).fetchall()
+    paths_: dict[str, dict] = {}
+    for row in rows:
+        entry = paths_.setdefault(row["work_path"], {"repo": row["repo"], "branch": row["branch"], "keep": False,
+                                                     "sessions": set()})
+        entry["keep"] |= row["released_at"] is None or row["status"] != "done"
+        entry["sessions"].add(row["session_id"])
+    removed = []
+    for work, entry in paths_.items():
+        if entry["keep"] or not Path(work).is_dir():
+            continue
+        try:
+            if _read([*git, "-C", work, "status", "--porcelain"]).strip():
+                continue
+        except Unread:
+            continue
+        if sessions.holders(connection, work, machine=this_host(), exclude=tuple(filter(None, entry["sessions"]))):
+            continue
+        repo = str(paths.expand(entry["repo"]))
+        try:
+            _read([*git, "-C", repo, "worktree", "remove", work])
+        except Unread:
+            continue
+        removed.append(work)
+        try:
+            _read([*git, "-C", repo, "branch", "-D", entry["branch"]])
+        except Unread:
+            pass  # the worktree is gone; a branch left over costs nothing
+    return removed
+
+
 def dispatch(connection, *, owner: str, load: float | None, load_cap: float | None, interactive: list[dict] | None,
              spawn: Callable[[str], Any], lane: Callable[[dict, list[int]], dict | None], why: str = "",
              root: Path | None = None, probe=Probe, kill=build.kill_group) -> dict:
-    """One tick: heartbeat, reap, watch the lane, claim, spawn; what each did.
+    """One tick: heartbeat, reap, watch the lane, sweep, claim, spawn; what each did.
 
     `load`, `load_cap` and `interactive` are read before the claim, outside
     the database; any unread (None) means no claim this tick, as does `why`,
@@ -290,6 +335,7 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
     record_state(connection, "heartbeat", key=HEARTBEAT, body={"pid": os.getpid(), "owner": owner})
     reaped = build.reap(connection, probe=probe, kill=kill) + draft.reap(connection, probe=probe, kill=kill)
     moved = watch(connection, lane=lane, probe=probe)
+    swept = sweep(connection)
     claimed: list[str] = []
     while not why and len(claimed) < build.MACHINE_CAP:
         try:
@@ -312,7 +358,7 @@ def dispatch(connection, *, owner: str, load: float | None, load_cap: float | No
         if row["outcome"] is None and row["supervisor_pid"] is None and row["step"] != "enqueued":
             spawn(row["id"])
             spawned.append(row["id"])
-    return {"reaped": reaped, "moved": moved, "claimed": claimed, "drafted": drafted, "spawned": spawned, "why": why}
+    return {"reaped": reaped, "moved": moved, "swept": swept, "claimed": claimed, "drafted": drafted, "spawned": spawned, "why": why}
 
 
 def spawn(argv: list[str], *, log: Path) -> int:
