@@ -164,7 +164,7 @@ class ShipDouble(GitHubDouble):
             return 200, {"login": "fixture"}
         if method == "GET" and path == prefix:
             code, value = super()._route(method, path, body)
-            value["allow_squash_merge"] = True
+            value.update(allow_squash_merge=True, allow_rebase_merge=True, allow_merge_commit=True)
             value["permissions"]["admin"] = self.admin
             return code, value
         if method == "GET" and path == f"{prefix}/collaborators":
@@ -253,7 +253,8 @@ class ShipDouble(GitHubDouble):
             if self.moved:
                 self.remote.commit_on(pull.head, "raced\n\nAuthored-with: human", files={"raced.py": "changed\n"})
             pull.merged_head = pull.head_sha(self.remote)
-            pull.title = body["commit_title"] + "\n\n" + body["commit_message"]
+            if "commit_title" in body:  # a rebase takes no message (sd:6790)
+                pull.title = body["commit_title"] + "\n\n" + body["commit_message"]
             commit = self.remote.merge(number, sha=body["sha"], method=body["merge_method"])
             if self.lose_merge:
                 raise RemoteRefusal(503, "merge response lost")
@@ -1631,15 +1632,106 @@ roles:
         with patch.object(ship.time, "sleep"):
             self.assertEqual(self.merge()["phase"], "merged")
 
-    def test_a_policy_merge_method_other_than_squash_refuses_before_any_merge(self):
-        """sd:6715. sd-ship merges by squash only: its trailers ride the squash message. A policy that says
-        rebase or merge refuses, naming it, rather than landing a squash the repository did not ask for."""
+    def delivering(self):
+        """`prepare --deliver` with the acceptance file a delivery needs."""
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [
+            {"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))
+        return self.prepare("--deliver", "--acceptance-file", str(acceptance))
+
+    def rebase_branch(self):
+        """The fixture commit named for the item, a second commit, and a `fixup!` of the first (sd:6790)."""
         set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "rebase"})
-        self.prepare()
+        _git(self.root, "commit", "--amend", "-q", "-m", f"change\n\nRefs: sd:{self.item}\nAuthored-with: human")
+        _git(self.root, "push", "-q", "--force", "origin", "topic")  # as `lane enqueue` pushes the tip
+        (self.root / "second.py").write_text("second = 1\n")
+        _git(self.root, "add", "second.py")
+        _git(self.root, "commit", "-q", "-m", f"fix: second\n\nCloses: sd:{self.item}\nAuthored-with: human")
+        (self.root / "src.py").write_text("value = 2\n")
+        _git(self.root, "commit", "-q", "-am", "fixup! change\n\nAuthored-with: human")
+        return _git(self.root, "rev-parse", "origin/main")
+
+    def test_a_rebase_policy_lands_each_commit_with_the_trailers_on_the_tip(self):
+        """sd:6790. Under merge_method rebase prepare folds the fixup, puts Item:, Delivers: and
+        `Reviewed-base: <base> ~2` on the tip, and force-pushes it with a lease; the merge lands both
+        commits by rebase and reconcile delivers the item at the landed tip."""
+        base = self.rebase_branch()
+        self.delivering()
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertEqual(_git(self.remote.path, "rev-parse", "topic"), head)
+        self.assertEqual(_git(self.root, "rev-list", "--count", f"{base}..{head}"), "2")
         with patch.object(ship.time, "sleep"):
-            with self.assertRaisesRegex(ship.Refusal, "policy declares merge_method rebase") as caught:
+            result = self.merge()
+        self.assertEqual(result["phase"], "merged")
+        landed = _git(self.remote.path, "log", "--format=%B%x1e", f"{base}..main").split("\x1e")
+        tip, first = landed[0].strip(), landed[1].strip()
+        self.assertTrue(tip.startswith("fix: second\n\n"), tip)
+        self.assertIn(f"Item: sd:{self.item}\nDelivers: sd:{self.item}\nReviewed-base: {base} ~2", tip)
+        self.assertEqual(ship.sd_lib.trailer_block(tip).count("Closes:"), 1, tip)
+        self.assertTrue(first.startswith("change\n\n") and "Delivers:" not in first, first)
+        self.assertEqual(_git(self.remote.path, "show", "main:src.py"), "value = 2")
+        self.assertEqual(result["merge_commit"], _git(self.remote.path, "rev-parse", "main"))
+        self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id = ?", (self.item,)).fetchone()[0],
+                         "done")
+
+    def test_a_rebase_branch_commit_naming_no_item_refuses_at_prepare(self):
+        """sd:6790. A rebase lands every commit on main as it is, so one that names no item refuses before
+        the review or a push."""
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "rebase"})
+        _git(self.root, "commit", "--allow-empty", "-q", "-m", "fix: tip\n\nAuthored-with: human")
+        with self.assertRaisesRegex(ship.Refusal, r"commit [0-9a-f]{12} \('change'\) names no item") as caught:
+            self.prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "commit_convention")
+        self.assertEqual(self.remote.pull_requests, {})
+
+    def test_a_rebase_tip_a_later_commit_buried_is_written_again(self):
+        """sd:6790. A commit after prepare leaves the old tip's trailers mid-branch and a tip without them;
+        merge refuses that head, and the next prepare writes the trailers on the new tip."""
+        self.rebase_branch()
+        self.delivering()
+        _git(self.root, "commit", "--allow-empty", "-q", "-m", f"fix: third\n\nRefs: sd:{self.item}\nAuthored-with: human")
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaises(ship.Refusal):
                 self.merge()
-        self.assertEqual(caught.exception.workflow["blocker"]["code"], "policy_merge_method")
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+        self.assertIn(" ~3", _git(self.root, "show", "-s", "--format=%B", head))
+        pull = self.remote.pull(1)
+        pull.checks = [{**row, "head_sha": head} for row in pull.checks]
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_rebase_push_refuses_a_remote_head_this_checkout_never_held(self):
+        """sd:6790. The force push is leased to a head this branch had; another writer's push refuses."""
+        self.rebase_branch()
+        self.remote.commit_on("topic", "someone else\n\nAuthored-with: human", files={"other.py": "x = 1\n"})
+        with self.assertRaisesRegex(ship.Refusal, "which this checkout never held"):
+            self.delivering()
+        self.assertEqual(self.remote.pull_requests, {})
+
+    def test_a_merge_policy_lands_a_merge_commit_carrying_the_trailers(self):
+        """sd:6790. merge_method merge sends a merge commit whose message carries Item: and Delivers:."""
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "merge"})
+        self.delivering()
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        parents = _git(self.remote.path, "rev-list", "--parents", "-n", "1", "main").split()
+        self.assertEqual(len(parents), 3)
+        self.assertIn(f"Delivers: sd:{self.item}", _git(self.remote.path, "show", "-s", "--format=%B", "main"))
+
+    def test_a_policy_method_the_repository_disallows_refuses_before_any_merge(self):
+        """sd:6790. A policy that says rebase where GitHub's repository setting forbids it refuses."""
+        self.rebase_branch()
+        self.prepare()
+        route = self.double._route
+        def forbid(method, path, body):
+            code, value = route(method, path, body)
+            if method == "GET" and path == f"/repos/{self.remote.slug}":
+                value["allow_rebase_merge"] = False
+            return code, value
+        with patch.object(self.double, "_route", forbid), patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, "rebase merging is disabled"):
+                self.merge()
         self.assertNotEqual(self.remote.pull(1).state, "MERGED")
 
     def test_the_squash_message_takes_the_declared_convention(self):

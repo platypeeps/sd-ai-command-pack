@@ -2756,22 +2756,32 @@ def _spellings(item: "str | tuple[str, ...]") -> tuple[str, ...]:
     return (item,) if isinstance(item, str) else tuple(item)
 
 
-def held_at_merge(message: str, parents: str) -> bool | None:
+def held_at_merge(message: str, parents: str, ancestor: "Callable[[int], str] | None" = None) -> bool | None:
     """Whether this squash landed on a parent other than the one its review
     covered; `None` when its trailer block names no reviewed base.
 
     `parents` is git's `%P` for the commit, first parent first. Reconcile and
     every trailer reader ask this one question, so the row's hold and git's
     answer cannot disagree about the same commit (#1179).
+
+    A rebase merge lands N commits, and its tip says `Reviewed-base: <sha> ~N`
+    (sd:6790): the base is then the tip's Nth ancestor, which `ancestor(N)`
+    names. Without `ancestor` such a tip is held, never assumed delivered.
     """
     for line in message.rstrip().rsplit("\n\n", 1)[-1].splitlines():
         name, _, value = line.rstrip().partition(" ")
         if name == REVIEWED_BASE_TRAILER:
+            sha, _, landed = value.strip().partition(" ~")
+            if landed:
+                if ancestor is None or not landed.isdigit():
+                    return True
+                return sha != ancestor(int(landed))
             return value.strip() != (parents.split() or [""])[0]
     return None
 
 
-def _closes(message: str, item: "str | tuple[str, ...]", parents: str | None = None) -> bool:
+def _closes(message: str, item: "str | tuple[str, ...]", parents: str | None = None,
+            ancestor: "Callable[[int], str] | None" = None) -> bool:
     """True when this message's trailer block -- its last paragraph, which is
     what makes a trailer a trailer -- closes `item`. Reading the whole message
     would let a commit that quoted a trailer close the item it named.
@@ -2785,7 +2795,7 @@ def _closes(message: str, item: "str | tuple[str, ...]", parents: str | None = N
     written before the base advanced under it. A later closing commit, written
     once the combined tree is verified, closes the item as usual.
     """
-    if parents is not None and held_at_merge(message, parents):
+    if parents is not None and held_at_merge(message, parents, ancestor):
         return False
     wanted = _spellings(item)
     for line in trailer_block(message).splitlines():
@@ -2800,8 +2810,13 @@ def _closed_by(root: pathlib.Path, ref: str, item: "str | tuple[str, ...]") -> b
     resolve closes nothing. `--grep` only narrows the walk; `_closes` decides."""
     grep = f"{DELIVERS_TRAILER}|{CLOSES_TRAILER}"
     raw = git_output(["log", "--format=%H%x1f%P%x1f%B%x1e", "-E", "--grep", grep, ref], root) or ""
-    return any(_closes(message, item, parents)
-               for _, parents, message in (c.split("\x1f", 2) for c in raw.split("\x1e") if c.count("\x1f") >= 2))
+    return any(_closes(message, item, parents, functools.partial(_ancestor, root, commit.strip()))
+               for commit, parents, message in (c.split("\x1f", 2) for c in raw.split("\x1e") if c.count("\x1f") >= 2))
+
+
+def _ancestor(root: pathlib.Path, commit: str, count: int) -> str:
+    """`commit`'s `count`th first-parent ancestor, or `""` when git cannot name it."""
+    return git_output(["rev-parse", f"{commit}~{count}"], root) or ""
 
 
 def upstream(root: pathlib.Path) -> tuple[str, str]:
