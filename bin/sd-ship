@@ -2416,12 +2416,17 @@ class Ship(SharedReview):
         """Rewrite each commit after `onto` whose message carries a closing trailer (`without_closes`).
 
         Same trees and authors; a commit with nothing to change and an unchanged parent is kept as it is,
-        and so is the tip an earlier prepare wrote (`prepared`), whose trailers `compose_tip` checks.
+        and so is the tip an earlier prepare wrote (`prepared`) while it is still the tip: `compose_tip`
+        checks its trailers again. Buried under a later commit, it is kept only while it closes what the new
+        tip closes; otherwise it is rewritten like any other, or its `Delivers:` would close an item the
+        current claim dropped, and the review it had restarts (`reviewed_head_orphaned`).
         """
         parent = onto
-        for commit in git(self.root, "rev-list", "--reverse", f"{onto}..HEAD").split():
+        commits = git(self.root, "rev-list", "--reverse", f"{onto}..HEAD").split()
+        for commit in commits:
             message = git(self.root, "show", "-s", "--format=%B", commit)
-            changed = message.strip() if commit == prepared else without_closes(message)
+            kept = commit == prepared and (commit == commits[-1] or self.closes_alike(message))
+            changed = message.strip() if kept else without_closes(message)
             if changed == message.strip() and git(self.root, "rev-parse", f"{commit}^") == parent:
                 parent = commit
                 continue
@@ -2431,6 +2436,12 @@ class Ship(SharedReview):
                                      "-p", parent, "-F", "-"], input=changed + "\n")
         if parent != current_head(self.root):
             git(self.root, "reset", "-q", "--keep", parent)
+
+    def closes_alike(self, message: str) -> bool:
+        """Whether `message` closes just what a tip prepared now would (sd:6790)."""
+        def closes(text: str) -> list[str]:
+            return sorted(line for line in text.splitlines() if line.startswith(CLOSING_TRAILERS))
+        return closes(message) == closes(self.compose_tip(message, "", 1)[0])
 
     def refuse_landing_commit(self, commit: str) -> None:
         """Refuse a commit a rebase would land on the base without an item or against the convention (sd:6790)."""
@@ -2498,7 +2509,10 @@ class Ship(SharedReview):
         """
         listed = git(self.root, "ls-remote", "origin", f"refs/heads/{self.branch}").split()
         remote = listed[0] if listed else ""
-        known = {head, before, str(self.state.get("head") or "")}
+        # Each reviewed head was this checkout's, a review `--restart-review` set aside too.
+        reviews = [self.state] + list(self.state.get("superseded_reviews") or [])
+        known = {head, before, str(self.state.get("head") or "")} | {
+            str(entry.get("head")) for review in reviews for entry in review.get("passes") or []}
         # A commit this clone lacks is someone else's push, never an ancestor.
         if remote and remote not in known and not sd_ship_squash.reaches(self.root, remote, before):
             raise Refusal(f"origin/{self.branch} is at {remote[:12]}, which this checkout never held; "

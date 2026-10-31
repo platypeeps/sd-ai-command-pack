@@ -1713,6 +1713,30 @@ roles:
         self.assertEqual(_git(self.root, "rev-parse", "HEAD"), head)
         self.assertEqual(_git(self.remote.path, "rev-parse", "topic"), pushed)
 
+    def test_a_buried_prepared_tip_closes_nothing_the_new_claim_dropped(self):
+        """sd:6790 review. A prepare delivering this item and a second one writes both on the tip; a later
+        commit buries it, and a prepare naming this item alone must leave no `Delivers:` of the second on
+        any landed commit. That rewrites the reviewed tip, so the review restarts."""
+        self.rebase_branch()
+        other = create_item(self.connection, kind="work", title="other", status="in_progress",
+                            repo=str(self.operator), branch="topic")
+        acceptance = self.directory / "acceptance.json"
+        acceptance.write_text(json.dumps({"item": self.item, "complete": True, "criteria": [
+            {"criterion": "actual scope", "passed": True, "evidence": "fixture-check-pass"}]}))
+        self.prepare("--deliver", "--acceptance-file", str(acceptance), "--item", str(other))
+        self.assertIn(f"Delivers: sd:{other}", _git(self.root, "show", "-s", "--format=%B", "HEAD"))
+        _git(self.root, "commit", "--allow-empty", "-q", "-m", f"fix: third\n\nRefs: sd:{self.item}\nAuthored-with: human")
+        with self.assertRaises(ship.Refusal) as caught:
+            self.prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "reviewed_head_orphaned")
+        self.prepare("--restart-review", "the claim dropped an item")
+        base = _git(self.root, "rev-parse", "origin/main")
+        messages = [part.strip() for part in _git(self.root, "log", "--format=%B%x1e", f"{base}..HEAD").split("\x1e")]
+        for message in messages:
+            self.assertFalse(ship.sd_lib._closes(message, f"sd:{other}"), message)
+        for buried in messages[1:]:
+            self.assertNotIn("Reviewed-base:", buried)
+
     def test_a_rebase_branch_commit_naming_no_item_refuses_at_prepare(self):
         """sd:6790. A rebase lands every commit on main as it is, so one that names no item refuses before
         the review or a push."""
