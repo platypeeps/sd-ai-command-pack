@@ -274,16 +274,18 @@ A database not yet migrated exits 1 too; neither case answers an empty list.
 
 ## GitHub issues
 
-`repo.github_issues` is 1 for a repository that takes GitHub issues from outside reporters (sd:4827, system sd:4810).
-Every row starts at 0, off: agents use no GitHub issues there and file work as sd items.
-On, an agent maps each open issue to one sd item, comments for the reporter and closes the issue when the item is done.
-The design is `docs/work/2026-10-16-repo-github-issues/design.md`.
+The `policy` declaration's `issues` key says whether a repository takes GitHub issues from outside reporters (sd:4827, pack sd:6849).
+Migration 45 moved the `repo.github_issues` column into it: a row that was on reads `ask`, and the column is gone.
+No key reads `off`: agents use no GitHub issues there and file work as sd items.
+`read`: an agent maps each open issue to one sd item and writes nothing on GitHub.
+`ask`: also, it comments for the reporter and closes the issue when the item is done, each write approved by the operator in the harness prompt (`sd-issue-guard` asks); an unattended run drafts it as a `--kind question` note instead.
+There is no `auto` (note #34749).
 
-    bin/sd-db repo github-issues PATH on        # or off; prints before -> after
+    bin/sd-db repo github-issues PATH ask       # or read, off; prints before -> after
 
-`repo list` shows it as `on` or `off`, between `ci` and `lane_host`; `runner_merge` stays the last field.
-`repos.github_issues` reads it for code: no row reads off, and a database not yet migrated raises `SchemaTooOld`.
-`sd shadow sync` stores every open issue of an `on` repository with a github.com remote, not only the operator's (sd:4880): an unwindowed `is:issue is:open` sweep lists them, five repositories per search, whatever the window.
+`repo list` shows it between `ci` and `lane_host`; `runner_merge` stays the last field.
+`repos.issues_policy` reads it for code: no row and no key read `off`.
+`sd shadow sync` stores every open issue of a `read` or `ask` repository with a github.com remote, not only the operator's (sd:4880): an unwindowed `is:issue is:open` sweep lists them, five repositories per search, whatever the window.
 Absence from a search does not close a row, since GitHub's index can omit an open issue: after a complete sweep, each stored open issue of its repositories that neither it nor this run's buckets saw is read directly (`GET repos/{owner}/{repo}/issues/{n}`, on the sync's budget).
 Only the read's own answer closes it: state `closed`, a `pull_request` key, another issue number, or HTTP 410, which GitHub gives for a deleted issue and for a repository whose Issues are disabled (pack sd:5415); its url spelling decides nothing, so an issue that still answers open under its number stays open, renamed or transferred. Any other failed, refused or over-budget read, a 404 too, leaves it open and prints `intake sweep incomplete`.
 A failed or capped sweep reads and closes nothing, holds no cursor and prints the same line.

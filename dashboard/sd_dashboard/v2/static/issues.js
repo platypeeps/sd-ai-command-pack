@@ -75,7 +75,7 @@
   const view = (o, hidden) => window.shell.post('/api/github/issues/view', { key: o.key, hidden })
     .then(v => { landed(o.key, hidden); window.githubIssues?.again(); return v; }, e => { window.githubIssues?.again(); throw e; });
 
-  // Issue intake (sd:4840), on GitHub: each github_issues repo's open third-party issues no item carries (issues.intake over
+  // Issue intake (sd:4840), on GitHub: each policy.issues read or ask repo's open third-party issues no item carries (issues.intake over
   // sd_db.repos.intake_issues). File as item posts /api/items with the issue's title, repo and ref, the item `sd task add
   // --ref github:<owner>/<repo>#N` files; the row then names the item until the next read leaves it out. A refusal, such as
   // a ref another item already carries, stays on the row. Rows are keyed by that ref.
