@@ -336,6 +336,13 @@ It also checks `experiment` itself (`repos.experiment_problems`), since the dash
 No database on the machine, or a store before 37, reads as nothing declared; a failed read is unknown and each reader refuses or runs in full.
 The `.github/` files are no longer read.
 
+    bin/sd-db repo freeze PATH                      # the open window, or not frozen
+    bin/sd-db repo freeze PATH UNTIL 'reason'       # freeze until UNTIL, at most 31 days
+    bin/sd-db repo freeze PATH off                  # lift it
+
+A freeze window is a `freeze` state row keyed by the repository's GitHub `owner/name`, not a declaration: it is short-lived (sd:6879).
+Inside a window the lane claims no entry, so every entry stays pending in order, and `sd-ship merge` refuses with `freeze_window`.
+
 ## `judgments`: what the judgment models cost, by stage
 
 `bin/sd-db judgments` compares the stages that route a decision through a judgment model.

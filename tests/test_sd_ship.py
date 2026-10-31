@@ -1616,6 +1616,21 @@ roles:
             self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(self.operation().state["copilot_reviews"][0]["status"], "completed")
 
+    def test_a_freeze_window_refuses_the_merge_and_a_lift_lets_it_land(self):
+        """sd:6879. sd-ship merge reads the repository's freeze window before the gate and refuses inside it."""
+        from sd_db.writes import set_freeze
+        self.prepare()
+        repository = self.operation().repository
+        set_freeze(self.connection, repository, "2099-01-01T00:00:00Z", "release 4.2", now="2098-12-31T00:00:00Z")
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, "is frozen until 2099-01-01T00:00:00\\+00:00: release 4.2") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "freeze_window")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        set_freeze(self.connection, repository, None)
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+
     def test_a_policy_merge_method_other_than_squash_refuses_before_any_merge(self):
         """sd:6715. sd-ship merges by squash only: its trailers ride the squash message. A policy that says
         rebase or merge refuses, naming it, rather than landing a squash the repository did not ask for."""
