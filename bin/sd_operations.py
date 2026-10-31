@@ -235,6 +235,8 @@ def enqueue_refusals(worktree: Path, base: str, head: str, title: str, body: str
     adds nothing: the push still checks.
     """
     import sd_lane
+    import sd_lib
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
     from sd_db.config import system_checkout
     branch = base.removeprefix("origin/")
     found = []
@@ -242,8 +244,7 @@ def enqueue_refusals(worktree: Path, base: str, head: str, title: str, body: str
         sd_lane.check_lines(worktree, title, body, branch, head)
     except sd_lane.LaneError as error:
         found.append(str(error))
-    hook = subprocess.run(["git", "-C", str(worktree), "rev-parse", "--git-path", "hooks/pre-push"],
-                          capture_output=True, text=True, check=False).stdout.strip()
+    hook = sd_lib.git_output(["rev-parse", "--git-path", "hooks/pre-push"], Path(worktree)) or ""
     try:
         guarded = "local-leak-guard" in (Path(worktree) / hook).read_text(encoding="utf-8")
     except (OSError, ValueError):
@@ -266,6 +267,8 @@ def push_failures(connection: Any, environ: dict[str, str] | None = None) -> lis
     landed, so a failed send is tried again next tick. Success pushes
     nothing.
     """
+    import sd_lib
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
     from sd_db import today
     from sd_db.writes import record_state
     env = os.environ if environ is None else environ
