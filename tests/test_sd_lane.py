@@ -4043,6 +4043,18 @@ class AnyHost(SharedQueue):
         answer = sd_lane.sd_ship_workflow.failure("merge", LaneElsewhere("example/pack", "build-2", None))
         self.assertEqual(answer["workflow"]["blocker"]["code"], "lane_elsewhere")
 
+    def test_enqueue_off_the_lane_host_forwards_to_it(self) -> None:
+        """Failure table, lane host routing: enqueue elsewhere records the entry for the lane host (sd:6884)."""
+        self.repo_row("build-2")
+        entry = sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
+        self.assertEqual((entry["status"], entry["forwarded_to"]), ("pending", "build-2"))
+        self.assertEqual(self.entries()[0]["forwarded_to"], "build-2")
+
+    def test_enqueue_on_the_lane_host_forwards_nothing(self) -> None:
+        self.repo_row(sd_lane.this_host())
+        entry = sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
+        self.assertNotIn("forwarded_to", entry)
+
     def test_every_verb_but_run_works_off_the_lane_host(self) -> None:
         """Failure table, verbs: with the lane on another host, the queue verbs work here; only `run` refuses."""
         import argparse

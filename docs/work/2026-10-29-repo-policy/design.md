@@ -80,7 +80,7 @@ Rejected: a column per key (16 columns for 30 rows, and a migration per new key)
 | Release: bump PR in the deploy repo | a branch and a PR there | the PR opens but the tag was already deployed | the chain reads the current `key` value first and stops if equal | `test_release_skips_a_bump_already_deployed` |
 | Release: merge when green | the deploy repo's main | CI red, or a freeze window opens mid-chain | the chain leaves the PR open with the reason; no merge inside a window; rerun resumes at this step | `test_freeze_window_stops_the_chain_before_merge` |
 | Release: verify the rollout | none | verify fails | the chain reports the failed verify and the merged version; rollback is the org's process, never automatic | `test_failed_verify_reports_and_rolls_nothing_back` |
-| Lane host routing | the lane entry | an enqueue on a machine that is not the lane host | refused with the host to run it on (sd:6619 cancelled after a wrong-host enqueue) | `test_enqueue_off_lane_host_refuses` |
+| Lane host routing | the lane entry | an enqueue on a machine that is not the lane host | forwarded, never refused (note #36885): the entry goes in the shared queue, names the host in `forwarded_to`, and that host runs it from origin | `test_enqueue_off_the_lane_host_forwards_to_it` |
 
 ## Slices
 
