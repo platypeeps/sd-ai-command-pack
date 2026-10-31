@@ -5,15 +5,16 @@
   Data: /api/queue (queue_screen.document: sd-ship lane list per managed repository, its builder gate logs, sd gate status,
   the load average), read when the page opens, on Read again and every 30 s while the page is visible.
   Layout (sd:5921): one ledger row per active lane (pips, head of lane, one primary action); idle lanes on one line;
-  the open lane's entries in Details. Under them, each lane's last 7 days: median wait, median gate time and the
-  slowest entry (pack sd:6006). Show: active rows (merging, next, held, building, blocked) by default; All adds
+  the open lane's entries in Details. Last 7 days, its own tab (sd:6973, ?tab=times): each lane's median wait,
+  median gate time and the slowest entry (pack sd:6006). Show: active rows (merging, next, held, building, blocked) by default; All adds
   cancelled and landed rows.
   Writes: /api/queue/move, which runs sd-ship lane move|hold|release|cancel|retry and nothing else; cancel, a running
   row's Release (lane cancel --expected-claim) and approve ask first; a cancelled row's Re-queue (lane retry
   --expected-head) runs at once, as Retry does. An entry's Adversarial review posts /api/adversarial (sd:5064).
   Builds (pack sd:6095): /api/queue/builds (builds.panel), above the lanes: one row per open build run (items, repo,
-  model, step, elapsed, last output, cost, Cancel, Log) in its state, working, waiting on me, stalled or lost, and the
-  ended runs under Show All (?show=all, pack sd:6834), each with Show assignment and Retry on a blocked one. Cancel
+  model, step, elapsed, last output, cost, Cancel, Log) in its state, working, waiting on me, stalled or lost. The
+  ended runs, under Show All (?show=all, pack sd:6834), sit at the bottom, after the lanes, in a <details> closed by
+  default (sd:6973), each with Show assignment and Retry on a blocked one. Cancel
   posts /api/assignments/<lead>/cancel and asks first; Retry posts /api/queue/builds/retry and runs at once.
   Nothing here is sample data.
 -->
@@ -42,16 +43,18 @@
   <div id="state" hidden></div>
   <dl class="readings" id="readings" aria-label="Machine readings"></dl>
   <p class="edits" id="edits">Edits take effect at the next item boundary.</p>
-  <!-- The toolbar standard (sd:5281): row 1, the realm tabs (pack sd:6016), the Show chips, then the shell's Shapeshift bar,
-       which filters the lane ledger (sd:5539). -->
+  <!-- The toolbar standard (sd:5281): row 1, the realm tabs (pack sd:6016), the Queue | Last 7 days tabs (sd:6973),
+       the Show chips, then the shell's Shapeshift bar, which filters the lane ledger (sd:5539). -->
   <div class="toolbar" id="toolbar" data-shift>
     <div id="viewswitch"></div>
+    <div class="vseg" id="tab" role="group" aria-label="Queue or last 7 days"></div>
     <div class="vseg" id="show" role="group" aria-label="Lane rows shown"></div>
   </div>
   <section id="builds" aria-labelledby="builds-h"></section>
   <div id="lanes"></div>
   <p class="idle" id="idle"></p>
-  <section id="times" aria-label="Lane times"></section>
+  <section id="ended" aria-label="Ended build runs"></section>
+  <section id="times" aria-label="Lane times" hidden></section>
   <div id="adv"></div>
 </main>
 <div class="details" id="details"><p class="why">Reading the lanes…</p></div>
