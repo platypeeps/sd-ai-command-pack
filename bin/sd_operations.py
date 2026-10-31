@@ -8,6 +8,7 @@ import importlib
 import json
 import math
 import os
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -224,6 +225,69 @@ def cited(worktree: Path, base: str, head: str, body: str) -> set[int] | None:
     return set(sd_ship_body.cited_ids(body, commits, parents))
 
 
+def enqueue_refusals(worktree: Path, base: str, head: str, title: str, body: str, *,
+            environ: dict[str, str] | None = None) -> list[str]:
+    """What `lane enqueue` and its push would refuse, as the builder can fix it (pack sd:6926).
+
+    The lane's own line check over the title, the body and each commit
+    `head` adds to `base`, then the leak guard over the same range when
+    the repository's pre-push hook runs it. A guard that cannot answer
+    adds nothing: the push still checks.
+    """
+    import sd_lane
+    import sd_lib
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+    from sd_db.config import system_checkout
+    branch = base.removeprefix("origin/")
+    found = []
+    try:
+        sd_lane.check_lines(worktree, title, body, branch, head)
+    except sd_lane.LaneError as error:
+        found.append(str(error))
+    hook = sd_lib.git_output(["rev-parse", "--git-path", "hooks/pre-push"], Path(worktree)) or ""
+    try:
+        guarded = "local-leak-guard" in (Path(worktree) / hook).read_text(encoding="utf-8")
+    except (OSError, ValueError):
+        guarded = False
+    guard = system_checkout(environ) / "local-leak-guard" / "leak-guard.sh"
+    if guarded and guard.is_file():
+        done = subprocess.run(["sh", str(guard), "check", "--range", f"refs/remotes/origin/{branch}..{head}"],
+                              cwd=worktree, capture_output=True, text=True, timeout=60, env=environ, check=False)
+        if done.returncode == 1:
+            found.append("the pre-push leak guard refuses these commits; replace each private value with a "
+                         "synthetic one (operator, example.test):\n" + done.stderr.strip()[-1500:])
+    return found
+
+
+def push_failures(connection: Any, environ: dict[str, str] | None = None) -> list[str]:
+    """Push each lane entry or build run that failed or blocked, once, on ntfy (pack sd:6946); the keys sent.
+
+    The send goes through `SD_NOTIFY` or `notify` on PATH, as `sd-db
+    backup` reports a failure. A key is recorded only once its send
+    landed, so a failed send is tried again next tick. Success pushes
+    nothing.
+    """
+    import sd_lib
+    sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+    from sd_db import today
+    from sd_db.writes import record_state
+    env = os.environ if environ is None else environ
+    notify = env.get("SD_NOTIFY") or shutil.which("notify", path=env.get("PATH"))
+    if not notify:
+        return []
+    sent = []
+    for row in today.push_due(connection):
+        try:
+            done = subprocess.run([notify, "-t", row["title"], "-c", "ntfy", row["body"]], capture_output=True,
+                                  timeout=30, env=env, check=False, stdin=subprocess.DEVNULL)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if done.returncode == 0:
+            record_state(connection, "watermark", key=today.PUSHED + row["key"], body=row["title"])
+            sent.append(row["key"])
+    return sent
+
+
 def tools(build_run: Any) -> Any:
     return build_run.Tools(claude=["claude"], review=[str(BIN / "sd-review")], ship=[str(BIN / "sd-ship")],
                            lint=[str(BIN / "sd-docs-lint")])
@@ -297,6 +361,7 @@ def tick(sd_db: Any, build: Any, build_run: Any, root: Path | None, why: str, un
         result = build_run.dispatch(connection, owner="build-dispatch", load=load, load_cap=load_cap,
                                     interactive=interactive_builders(connection, build_run.now(), build_run.paths.key),
                                     spawn=spawn, lane=lane, why=why)
+        result["pushed"] = push_failures(connection)
     except (sd_db.SdDbError, ValueError, OSError) as error:
         raise WorkRefusal(str(error)) from error
     finally:
@@ -325,7 +390,7 @@ def supervise_build(args: argparse.Namespace) -> int:
             result = build_run.DraftSupervisor(connection, args.run, tools=tools(build_run), log_root=root).run()
         else:
             result = build_run.Supervisor(connection, args.run, tools=tools(build_run), log_root=root,
-                                          cited=cited).run()
+                                          cited=cited, checked=enqueue_refusals).run()
     except (sd_db.SdDbError, ValueError) as error:
         raise WorkRefusal(str(error)) from error
     finally:

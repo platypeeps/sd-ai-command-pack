@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import subprocess
 import time
 import uuid
 from collections.abc import Iterator
@@ -131,6 +132,47 @@ BUSY_TIMEOUT = 5000
 LOCK_WAITS = (1, 2, 4, 8, 16)
 
 
+#: The tag a lock refusal's holder report starts with, so a refusal is reported once.
+HOLDERS = "holders (pid, elapsed, command):"
+
+
+def lock_holders(connection) -> str:
+    """Who else has the database's files open, for a write a held lock refused (pack sd:6948).
+
+    SQLite names no lock holder and macOS `lsof` shows no fcntl lock, so
+    this lists every other process with the database, its WAL or its
+    shared memory open: one of them holds the write transaction, and its
+    elapsed time points at the long one. A read that fails says so.
+    """
+    try:
+        path = next(row[2] for row in connection.execute("PRAGMA database_list") if row[1] == "main")
+        files = [name for name in (path, path + "-wal", path + "-shm") if path and os.path.exists(name)]
+        if not files:  # `lsof` with no file lists every process
+            return f"{HOLDERS} no database file"
+        found = subprocess.run(["lsof", "-t", "--", *files], capture_output=True, text=True, timeout=10,
+                               check=False).stdout
+        pids = sorted({int(word) for word in found.split() if word.isdigit()} - {os.getpid()})
+        if not pids:
+            return f"{HOLDERS} no other process has it open"
+        listed = subprocess.run(["ps", "-o", "pid=,etime=,command=", "-p", ",".join(map(str, pids))],
+                                capture_output=True, text=True, timeout=10, check=False).stdout
+    except (sqlite3.Error, StopIteration, OSError, subprocess.SubprocessError) as error:
+        return f"{HOLDERS} unread: {type(error).__name__}"
+    rows = [" ".join(line.split(None, 2))[:200] for line in listed.splitlines() if line.strip()]
+    return f"{HOLDERS} " + "; ".join(rows[:10] or map(str, pids))
+
+
+def _reported(connection, error: sqlite3.OperationalError) -> sqlite3.OperationalError:
+    """`error`, with the lock holders when a lock refused it and none are named yet."""
+    text = str(error)
+    if HOLDERS in text or not ("locked" in text or "busy" in text):
+        return error
+    reported = sqlite3.OperationalError(f"{text}; {lock_holders(connection)}")
+    for key in ("sqlite_errorcode", "sqlite_errorname"):
+        setattr(reported, key, getattr(error, key, None))
+    return reported
+
+
 class Patient:
     """A connection whose statement a locked database refused outside a transaction is sent again.
 
@@ -153,6 +195,8 @@ class Patient:
             except sqlite3.OperationalError as error:
                 if wait is None or self.connection.in_transaction or not (
                         "locked" in str(error) or "busy" in str(error)):
+                    if wait is None:
+                        raise _reported(self.connection, error) from error
                     raise
             time.sleep(wait)
 
@@ -289,7 +333,10 @@ def transaction(connection: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     # Public workflows compose named writes. A savepoint lets an inner write
     # fail independently while the outer transaction still owns the commit.
     savepoint = f"sd_{uuid.uuid4().hex}" if connection.in_transaction else None
-    connection.execute(f"SAVEPOINT {savepoint}" if savepoint else "BEGIN IMMEDIATE")
+    try:
+        connection.execute(f"SAVEPOINT {savepoint}" if savepoint else "BEGIN IMMEDIATE")
+    except sqlite3.OperationalError as error:
+        raise _reported(connection, error) from error
     try:
         yield connection
     except BaseException:

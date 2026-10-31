@@ -141,7 +141,7 @@ addEventListener('DOMContentLoaded', () => {
       const signal = unread ? html`<td class="u">not read</td><td class="u">not read</td>`
         : recorded.length ? html`<td>${last ? html`<time datetime="${last}">${last.slice(5)}</time>` : 'none read'}</td><td>${days}</td>`
         : html`<td class="u">not recorded</td><td class="u">not recorded</td>`;
-      return html`<tr data-topic="${t.title}"><td class="what"><a href="${shell.itemHref(t.item)}">${t.title}</a></td><td>${t.slug || '–'}</td><td>${t.stage || '–'}</td>${signal}<td>${t.memory || (t.memory_lines === 0 ? 'empty' : lines(t.memory_lines, 'Memory'))}${t.memory_lines > 1 ? html`<small>${plural(t.memory_lines, 'line')}</small>` : ''}</td><td class="r">${lines(t.sources, 'Sources', 'source', 'empty')}</td></tr>`;
+      return html`<tr data-topic="${t.title}"><td class="what"><a href="${shell.itemHref(t.item)}">${t.title}</a></td><td>${t.slug || '–'}</td><td>${t.stage || '–'}</td>${signal}<td>${t.memory || (t.memory_lines === 0 ? 'empty' : lines(t.memory_lines, 'Memory'))}${t.memory_lines > 1 ? html`<small>${plural(t.memory_lines, 'line')}</small>` : ''}</td><td class="r">${lines(t.sources, 'Sources', 'source', 'empty')}</td><td class="act">${C.rowActions(`topic:${t.item}`)}</td></tr>`;
     })}`);
     const note = TOPICS?.state === 'error' ? `The topics were not read: ${TOPICS.reason}. Reload retries it.`
       : !TOPICS ? '' : !rows.length ? 'The workflow database holds no topic row.'
@@ -257,6 +257,28 @@ addEventListener('DOMContentLoaded', () => {
   // ---------- Start (build: read /api/briefs through shell.read, then draw) ----------
   // The reader (read.js, sd:2418) holds the guards: of overlapping reads only the newest draws, a brief the
   // read no longer lists runs no command, and a selection whose brief is gone moves to the first shown brief or clears.
+  // sd:6703: Add topic files a candidate; Remove retires a topic (the brief routines read active ones only), Restore
+  // brings a retired one back as a candidate, and Delete removes its row for good. Each runs through /api/actions/run and reads the page again.
+  const shq = v => `'${String(v ?? '').replace(/'/g, "'\\''")}'`;
+  const ranAgain = (o, action, ids) => window.commands.runAction(o, action, ids).then(said => briefs.reread().then(() => said));
+  C.register(
+    { id: 'topic.add', on: 'topic list', label: 'Add topic', does: 'Files a candidate topic; you activate it in Tasks.', key: 'a', icon: 'plus', risk: 'safe', executes: true,
+      fields: () => [{ name: 'title', label: 'Title', required: true, help: 'Its slug is the title in lower case, words joined by hyphens.' }],
+      consequence: () => 'This files a candidate topic row with sd store add. The brief routines read it once you make it active.',
+      cli: (o, v) => `sd store add sdw.topic ${shq(v?.title || 'TITLE')}`, sends: () => 'POST /api/actions/run {action: topic.add, title}',
+      run: (o, v) => ranAgain(o, 'topic.add', { title: v?.title || '' }) },
+    { id: 'topic.remove', on: 'topic', label: 'Remove', does: 'Retires the topic: no brief routine reads it; its Memory and Sources stay.', key: 'm', risk: 'confirm', executes: true,
+      when: o => o.stage !== 'retired' || 'retired already', consequence: o => `This moves ${o.label} to retired. The brief routines read it no more; its Memory and Sources stay, and Delete removes it for good.`,
+      cli: o => `no sd verb: the dashboard moves #${o.item} to retired, as Tasks moves it`, sends: o => `POST /api/actions/run {action: topic.remove, item: ${o.item}}`,
+      run: o => ranAgain(o, 'topic.remove', { item: o.item }) },
+    { id: 'topic.delete', on: 'topic', label: 'Delete', does: 'Deletes the topic\'s row for good, with its Memory and Sources.', key: 'x', risk: 'confirm', executes: true,
+      consequence: o => `This deletes ${o.label} (#${o.item}) for good: its body, its Memory and its Sources are lost. sd-db item remove files a removal record and backs the store up first. Remove keeps them.`,
+      cli: o => `sd-db item remove ${o.item} --who dashboard --reason ${shq(`Deleted on the dashboard: sdw.topic ${o.label}`)}`, sends: o => `POST /api/actions/run {action: topic.delete, item: ${o.item}}`,
+      run: o => ranAgain(o, 'topic.delete', { item: o.item }) },
+    { id: 'topic.restore', on: 'topic', label: 'Restore', does: 'Brings a retired topic back as a candidate; you activate it in Tasks.', key: 'e', risk: 'confirm', executes: true,
+      when: o => o.stage === 'retired' || `${o.stage || 'no stage'}: Restore brings back a retired topic`, consequence: o => `This moves ${o.label} from retired to candidate. The brief routines read it once you make it active.`,
+      cli: o => `no sd verb: the dashboard moves #${o.item} to candidate, as Tasks moves it`, sends: o => `POST /api/actions/run {action: topic.restore, item: ${o.item}}`,
+      run: o => ranAgain(o, 'topic.restore', { item: o.item }) });
   const briefs = shell.read({
     source: '/api/briefs', what: 'the briefs',
     adopt: doc => {
@@ -276,7 +298,8 @@ addEventListener('DOMContentLoaded', () => {
         : !BRIEFS.length ? { kind: 'empty', title: 'No briefs', text: 'The workflow database holds no routine brief.', source }
         : READER.skipped || capped() ? { kind: 'partial', text: [READER.skipped ? `${plural(READER.skipped, 'row')} skipped: not a brief.` : '', capped() ? `Showing the newest ${READER.shown}; older briefs are in the database. Counts before ${oldest().slice(5)} are not read.` : ''].filter(Boolean).join(' '), source }
         : null;
-      return { objects: BRIEFS.map(window.briefDetails.object), state };
+      const topics = TOPICS.rows.map(t => ({ id: `topic:${t.item}`, type: 'topic', label: t.title, item: t.item, stage: t.stage }));
+      return { objects: [...BRIEFS.map(window.briefDetails.object), ...topics, { id: 'topics', type: 'topic list', label: 'Topics' }], state };
     },
     // Nothing from the last read stays on screen: rows, lanes and the observed time.
     clear: err => { READ = null; READER = { state: 'error', reason: err.message, total: 0, shown: 0 }; COPIES = null; BRIEFS = [];

@@ -56,6 +56,8 @@ PACKAGE = HERE / "sd_db"
 ALLOWED = {
     ("registry.py", "beside"): "seam 7: the registry's bytes are the one exception, served by the protocol (step 9)",
     ("migrate.py", "migrate"): "opens with create=True, which `hub.Hub.open` refuses with HubOnly first",
+    ("database.py", "lock_holders"): "names the file of a connection a local SQLite lock just refused; "
+                                     "it reads no rows (pack sd:6948)",
 }
 
 

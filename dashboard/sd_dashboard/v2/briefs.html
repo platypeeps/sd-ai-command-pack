@@ -57,11 +57,12 @@
     </section>
     <section id="view-topics" aria-labelledby="top-h" hidden>
       <div class="sec-head">
-        <h2 id="top-h">Topics <button class="help" type="button" aria-label="Help: Topics" data-help="<b>One row per research topic,</b> active first. Last signal is the newest brief in the read that names the topic among its signal topics; days counts those briefs' days in the range. Memory is the newest line of the topic's Memory section, and Sources counts its Sources lines; the hub's brief routines rewrite both. A topic opens on Tasks, where it is edited.">
+        <h2 id="top-h">Topics <button class="help" type="button" aria-label="Help: Topics" data-help="<b>One row per research topic,</b> active first. Last signal is the newest brief in the read that names the topic among its signal topics; days counts those briefs' days in the range. Memory is the newest line of the topic's Memory section, and Sources counts its Sources lines; the hub's brief routines rewrite both. A topic opens on Tasks, where it is edited. Remove retires a topic; Delete removes its row for good.">
           <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+        <div class="tools"><button class="btn quiet" type="button" data-cmd="topic.add" data-obj="topics">Add topic…</button></div>
       </div>
       <table class="ledger" aria-labelledby="top-h">
-        <thead><tr><th scope="col">Topic</th><th scope="col">Slug</th><th scope="col">Stage</th><th scope="col">Last signal</th><th scope="col">In range</th><th scope="col">Memory</th><th scope="col" class="r">Sources</th></tr></thead>
+        <thead><tr><th scope="col">Topic</th><th scope="col">Slug</th><th scope="col">Stage</th><th scope="col">Last signal</th><th scope="col">In range</th><th scope="col">Memory</th><th scope="col" class="r">Sources</th><th scope="col" class="act"><span class="sr">Actions</span></th></tr></thead>
         <tbody id="topic-rows"></tbody>
       </table>
       <p class="note" id="topic-note"></p>
