@@ -1680,6 +1680,24 @@ roles:
         with patch.object(ship.time, "sleep"):
             self.assertEqual(self.merge()["phase"], "merged")
 
+    def test_a_jenkins_policy_holds_the_merge_until_the_head_build_is_green(self):
+        """sd:6880, design § Failure table. A policy naming Jenkins makes its job the CI: an unreachable Jenkins
+        holds the merge as ci_unreachable, never green; a green build of the head merges."""
+        ci = {"provider": "jenkins", "url": "http://127.0.0.1:9", "job": "team/repo/PR-{pr}"}
+        set_declaration(self.connection, str(self.operator), "policy", {"ci": ci})
+        self.prepare()
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaises(ship.Refusal) as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "ci_unreachable")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        head = _git(self.root, "rev-parse", "HEAD")
+        green = {"result": "SUCCESS", "building": False, "actions": [{"lastBuiltRevision": {"SHA1": head}}]}
+        with patch.object(ship.time, "sleep"), \
+                patch.object(ship.sd_ship_jenkins, "head_build", return_value=green) as read:
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(read.call_args.args[:3], (ci, 1, head))
+
     def test_a_pending_refusal_names_who_did_review_the_head(self):
         """sd:3499. A renamed Copilot bot's review read as pending forever,
         with "wait, then retry"; the refusal names the logins that reviewed the head."""

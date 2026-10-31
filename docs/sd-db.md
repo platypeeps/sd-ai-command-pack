@@ -322,7 +322,7 @@ Each key is a kind; each value is the object the old `.github/` file held, or fo
 | `check_scope` | `sd-check --base` docs-only scope | `.github/sd-check-scope.json` |
 | `status` | `sd-status` accepted gaps, `sd-ship merge` declared gap | `.github/sd-status.json` |
 | `experiment` | the system dashboard's research project link: `page` and `data_source`, Notion ids, and optional `url` and `title` (sd:5302) | none |
-| `policy` | the repository's rules for agents (`bin/sd_repo_policy.py`, sd:6715): `mode`, `commit`, `push`, `pr`, `merge_method`, `issues`, `review`, `commit_convention`; an org or external repository never takes `auto`; no kind reads as today's managed defaults. `sd-ship merge` reads it at merge time: a `merge_method` other than squash refuses, and `review.human` holds the merge until that many humans approve the head | none |
+| `policy` | the repository's rules for agents (`bin/sd_repo_policy.py`, sd:6715): `mode`, `commit`, `push`, `pr`, `merge_method`, `issues`, `review`, `commit_convention`; an org or external repository never takes `auto`; no kind reads as today's managed defaults. `sd-ship merge` reads it at merge time: a `merge_method` other than squash refuses, and `review.human` holds the merge until that many humans approve the head; `ci` `{provider: jenkins, url, job}` makes the merge wait for a green Jenkins build of the head (`{pr}` in `job` is the PR number), and an unreachable Jenkins holds it as `ci_unreachable` | none |
 
     bin/sd-db repo declare PATH                     # every kind, as JSON
     bin/sd-db repo declare PATH review              # one kind
