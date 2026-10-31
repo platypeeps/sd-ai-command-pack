@@ -38,10 +38,12 @@ import sd_lib  # noqa: E402
 PY = shlex.quote(sys.executable)
 
 #: A check that counts itself in and out under a lock and keeps the highest
-#: count it saw, so the test reads how many checks ran at once.
+#: count it saw, so the test reads how many checks ran at once. It holds
+#: until the test's release file appears, not for a fixed time: a 1.5 s
+#: sleep let a load-stalled gate start after the others ended (sd:6798).
 COUNTING_CHECK = """
-import fcntl, os, sys, time
-counter = sys.argv[1]
+import fcntl, os, pathlib, sys, time
+counter, release = sys.argv[1], pathlib.Path(sys.argv[2])
 def step(delta):
     with open(counter, "a+") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
@@ -52,7 +54,9 @@ def step(delta):
         handle.truncate()
         handle.write(f"{now} {max(now, peak)}")
 step(1)
-time.sleep(1.5)
+end = time.time() + 120
+while not release.exists() and time.time() < end:
+    time.sleep(0.05)
 step(-1)
 """
 
@@ -170,10 +174,16 @@ class GateSlotFixture(unittest.TestCase):
 
 class ConcurrentGates(GateSlotFixture):
     def test_n_concurrent_gates_never_run_more_checks_than_the_cap(self):
-        counter = self.tmp / "counter"
+        counter, release = self.tmp / "counter", self.tmp / "release"
+        self.addCleanup(release.touch)
         counting = self.script("count.py", COUNTING_CHECK)
-        root = self.repo("repo", f"{PY} {shlex.quote(str(counting))} {shlex.quote(str(counter))}")
+        root = self.repo("repo", " ".join([PY, *(shlex.quote(str(part)) for part in (counting, counter, release))]))
         gates = [self.start(root, self.env(SD_GATE_SLOTS="2")) for _ in range(5)]
+        # Two checks hold both slots and three gates queue behind them, however slow each start.
+        self.assertTrue(wait_until(lambda: counter.exists() and counter.read_text().split()[:1] == ["2"]
+                                   and len(list((self.slots / "queue").glob("*.ticket"))) == 3, 300),
+                        "two checks never ran at once with three gates queued")
+        release.touch()
         results = [self.finish(gate) for gate in gates]
         for code, report, err in results:
             self.assertEqual(code, 0, err)

@@ -321,6 +321,9 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
     roll back, that member ends `blocked` with the reason, and nothing else
     changes, so the next claim takes the rest.
 
+    Each member's `item.branch` becomes the run's branch, so a design-only
+    build is not left with an empty one (pack sd:6756).
+
     A queued build whose repository `queue` would now refuse (unmanaged, no
     remote, a satellite lane host: `_repo_refusal`) ends `blocked` with that
     reason before the bundle is picked, its item left as it is, and the same
@@ -361,6 +364,7 @@ def claim(connection, *, owner: str, load: float | None, load_cap: float | None,
                 for row in bundle:
                     transition(connection, row["item"], "in_progress", who="build",
                                reason=f"build run {ident} claimed assignment {row['id']}")
+                    set_item_fields(connection, row["item"], branch=branch(lead))
         except _Moved:
             moved = connection.execute(
                 f"SELECT assignment.id, assignment.item, item.status FROM assignment JOIN item ON item.id = assignment.item "
