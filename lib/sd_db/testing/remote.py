@@ -205,8 +205,17 @@ class FixtureRemote:
         _git(work, "fetch", "-q", "origin", pull.base)
         _git(work, "checkout", "-q", "-B", pull.base, "FETCH_HEAD")
         _git(work, "fetch", "-q", "origin", pull.head)
-        _git(work, "merge", "-q", "--squash", "FETCH_HEAD")
-        _git(work, "commit", "-m", pull.title or f"{pull.head} (#{number})")
+        title = pull.title or f"{pull.head} (#{number})"
+        if method == "rebase":
+            # GitHub replays each commit with its own message and a new
+            # committer, so every landed SHA differs from the branch's.
+            for commit in _git(work, "rev-list", "--reverse", "--no-merges", f"{pull.base}..FETCH_HEAD").split():
+                _git(work, "-c", "user.name=GitHub", "cherry-pick", "--allow-empty", commit)
+        elif method == "merge":
+            _git(work, "merge", "-q", "--no-ff", "-m", title, "FETCH_HEAD")
+        else:
+            _git(work, "merge", "-q", "--squash", "FETCH_HEAD")
+            _git(work, "commit", "-m", title)
         _git(work, "push", "-q", "origin", pull.base)
         pull.merge_commit_sha = _git(work, "rev-parse", "HEAD")
         pull.state = "MERGED"
