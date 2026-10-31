@@ -4,7 +4,9 @@ the repo table holds as `hoa`. The page has no classic screen to keep: v1 had no
 write for many keys. Run sweep posts /api/hoa/sweep (sd:5095), which starts the
 checkout's tools/sweep.py in the background; GET /api/hoa/sweep/status reads its last run. Download posts
 /api/hoa/download (sd:5626), which opens the source's portal in a Claude Chrome session, waits for the operator's login,
-then runs the checkout's download; /api/hoa's `downloads` part reads each source's last run."""
+then runs the checkout's download; /api/hoa's `downloads` part reads each source's last run. An asset's attachments
+(sd:6690) are its Drive folder's listing, GET /api/hoa/attachments; its pictures come through
+/api/hoa/attachments/picture; Upload and Reference post /api/hoa/attach (`hoa_attach`)."""
 
 from __future__ import annotations
 
@@ -35,6 +37,24 @@ def _download(payload, principal):
     return hoa_download.request(dict(payload))
 
 
+def _attachments(read):
+    from ... import hoa_attach
+
+    return hoa_attach.listing(read.connection, read.parameters)
+
+
+def _picture(read):
+    from ... import hoa_attach
+
+    return hoa_attach.picture(read.connection, read.parameters)
+
+
+def _attach(payload, principal):
+    from ... import hoa_attach
+
+    return hoa_attach.request(dict(payload))
+
+
 def _ack(payload, principal):
     from ... import hoa_screen
 
@@ -56,6 +76,8 @@ PAGE = Page(
     api=(Api("/api/hoa", _read), Api("/api/hoa/alarm", write=_ack), Api("/api/hoa/alarms", write=_ack_many),
          Api("/api/hoa/sweep", write=_run_sweep),
          Api("/api/hoa/sweep/status", _sweep), Api("/api/hoa/download", write=_download),
+         Api("/api/hoa/attachments", _attachments, query=True), Api("/api/hoa/attachments/picture", _picture, query=True),
+         Api("/api/hoa/attach", write=_attach),
          *place_views("hoa", ("briefs", "reports"))),
     count="/api/hoa",
 )

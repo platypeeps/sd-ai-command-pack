@@ -152,7 +152,9 @@ class OperationsCLI(unittest.TestCase):
         run.Tools = lambda **tools: types.SimpleNamespace(**tools)
         for patcher in (patch.dict(sys.modules, {"sd_db.build": build, "sd_db.build_run": run}),
                         patch.object(sd_db, "build", build, create=True),
-                        patch.object(sd_db, "build_run", run, create=True)):
+                        patch.object(sd_db, "build_run", run, create=True),
+                        # The tick's failure push reads the real database; these fakes have none.
+                        patch.object(cli, "push_failures", return_value=[])):
             patcher.start()
             self.addCleanup(patcher.stop)
         return run

@@ -87,7 +87,8 @@ _SAME = " AND ".join(f"{name} IS ?" for name in REAP_READS)
 #: A fix resumes at its review, which reads the head the fix left.
 RESUME = {"claimed": "worktree", "fixing": "reviewing"}
 #: The outcomes that count as a loss at a step; a second one at the same step blocks the bundle.
-LOSSES = ("interrupted", "timed_out", "error_max_turns")
+#: `denied` is a builder refused a tool call (pack sd:6723).
+LOSSES = ("interrupted", "timed_out", "error_max_turns", "denied")
 #: The steps from `enqueued` on: the lease is released, the members are `done`, and step 7 releases the run.
 #: Only `enqueued` has no supervisor, so only it is left out of the reap.
 LANE_STEPS = ("enqueued", "checking", "cleaning")

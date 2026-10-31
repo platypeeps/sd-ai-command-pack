@@ -216,6 +216,7 @@ window.PAGE_FILTER = { '': 'Needs you' };
     $('unread').hidden = !unread.length;
     $('unread').textContent = unread.map(([k, why]) => `${k} could not be read: ${why}. Read again tries again.`).join(' ');
     motion();
+    queues();
     digest();
     dayTrack();
     spendLine();
@@ -262,6 +263,27 @@ window.PAGE_FILTER = { '': 'Needs you' };
         <td class="when"><time datetime="${b.started}" title="${b.started.slice(11, 16)} UTC">${clock(b.started)}</time><span class="via">${b.elapsed} ago</span></td>
         <td class="num" title="${b.eta_why}">${b.eta ? html`<time datetime="${b.eta}">${clock(b.eta)}</time>` : 'not known'}<span class="via">${b.eta ? 'ETA' : b.eta_why}</span></td></tr>`; })}`);
     return B;
+  }
+
+  // Queues (pack sd:6946): the document's `queues`, ready items, the build queue and the merge lane in one table, as
+  // `sd today` prints it, with one chip per repo. A failed or blocked row is ■, a running one ●, a waiting one ◌.
+  // A read that failed says so, never an empty queue.
+  const QSTATE = { failed: 'warning', blocked: 'warning', skipped: 'warning', running: 'ok' };
+  let qRepo = null;
+  function queues() {
+    const Q = DOC.queues || { rows: [], error: 'the document carried no queues' };
+    const repos = [...new Set(Q.rows.map(r => r.repo || 'fleet'))].sort();
+    if (!repos.includes(qRepo)) qRepo = null;
+    put($('queues-repos'), repos.length > 1 ? html`<button class="chip" type="button" data-qrepo="" aria-pressed="${String(!qRepo)}">All <b>${Q.rows.length}</b></button>${repos.map(r => html`<button class="chip" type="button" data-qrepo="${r}" aria-pressed="${String(qRepo === r)}">${r.split('/').pop()} <b>${Q.rows.filter(x => (x.repo || 'fleet') === r).length}</b></button>`)}` : html``);
+    const rows = Q.rows.filter(r => !qRepo || (r.repo || 'fleet') === qRepo), n = q => rows.filter(r => r.queue === q).length;
+    put($('queues-tally'), html`<span>${n('ready')} ready</span><span>${plural(n('build'), 'build')}</span><span>${n('lane')} in the lane</span><a href="/queue">Queue</a>`);
+    put($('queues'), Q.error ? html`<tr class="empty"><td colspan="4">The queues could not be read: ${Q.error}. Read again tries again.</td></tr>`
+      : rows.length ? html`${rows.map(r => { const s = QSTATE[r.status] || 'queued'; return html`<tr data-item="${r.id}">
+        <td class="g g-${s}" title="${r.status}">${GLYPH[s]}</td>
+        <td class="what"><a href="${window.shell.itemHref(r.id)}">#${r.id} ${r.title}</a><span class="via">${r.repo || 'fleet'}</span></td>
+        <td class="detail"><b>${r.queue}</b> · ${r.status}${r.place ? ` · position ${r.place}` : ''}<span class="via">${r.detail}</span></td>
+        <td class="num">${r.since ? age(r.since) : 'not known'}</td></tr>`; })}`
+      : html`<tr class="empty"><td colspan="4">Nothing is ready, building or in the lane.</td></tr>`);
   }
 
   // The day track (sd:5921): the document's `track`, the last 24 hours as marks in four lanes, each linked to its row, with
@@ -487,6 +509,10 @@ window.PAGE_FILTER = { '': 'Needs you' };
       const tr = e.target.closest('tr[data-id]'); if (tr) select(tr.dataset.id, true);
     });
     $('active').addEventListener('click', e => { if (e.target.closest('#motion-more')) { motionAll = true; motion(); } });
+    $('queues-repos').addEventListener('click', e => {
+      const c = e.target.closest('[data-qrepo]'); if (!c) return;
+      qRepo = c.dataset.qrepo && c.dataset.qrepo !== qRepo ? c.dataset.qrepo : null; queues();
+    });
     $('intents').addEventListener('click', e => {
       const c = e.target.closest('[data-intent]'); if (!c) return;
       intent = c.dataset.intent && c.dataset.intent !== intent ? c.dataset.intent : null; intents(); applyFilter();
