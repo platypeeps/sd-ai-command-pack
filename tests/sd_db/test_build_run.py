@@ -897,6 +897,36 @@ class Tick(Case):
         self.assertEqual((row["outcome"], row["released_at"] is not None), ("lane_failed", True))
         self.assertIn("gate red", row["detail"])
         self.assertEqual(self.spawned, [])
+        self.assertEqual(self.statuses(), ["in_progress"], "only a catch-up conflict goes back to a builder")
+
+    CONFLICT = ("merging origin/main into build/sd-1 conflicts; the branch is unchanged; "
+                "sd-ship lane retry --item 1 queues it again")
+
+    def test_a_catch_up_conflict_goes_back_to_its_builder(self):
+        """pack sd:6940: a conflict with main alone queues the bundle again under its lead, with a finding."""
+        run = self.enqueued()
+        self.entries[self.items[0]] = {"id": "e1", "status": "failed", "reason": self.CONFLICT}
+        result = self.tick()
+        self.assertEqual(build.run(self.db, run["id"])["outcome"], "lane_failed")
+        self.assertEqual(self.statuses(), ["in_progress"], "the same tick claims it again")
+        again = build.run(self.db, result["claimed"][0])
+        self.assertEqual((again["assignment"], again["branch"]), (run["assignment"], run["branch"]))
+        notes = [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ?", self.items)]
+        self.assertTrue(any(body.startswith(build.REBUILD) for body in notes), notes)
+
+    def test_conflict_rebuilds_stop_at_their_cap(self):
+        """pack sd:6940: past `CONFLICT_REBUILDS` the bundle stays lane_failed for the operator."""
+        run = self.enqueued()
+        for _ in range(build.CONFLICT_REBUILDS):
+            self.entries[self.items[0]] = {"id": "e1", "status": "failed", "reason": self.CONFLICT}
+            claimed = self.tick()["claimed"][0]
+            build.write(self.db, claimed, step="enqueuing")
+            self.assertTrue(build.enqueued(self.db, claimed))
+        self.tick()
+        self.assertEqual(self.tick()["claimed"], [])
+        self.assertEqual(self.statuses(), ["in_progress"])
+        self.assertEqual(self.db.execute("SELECT status FROM assignment WHERE id = ?",
+                                         (run["assignment"],)).fetchone()[0], "done")
 
     def test_every_lane_end_short_of_a_merge_ends_the_run(self):
         """Review round 1: the lane's own list of ends short of a merge, and a cancel, each end the run."""

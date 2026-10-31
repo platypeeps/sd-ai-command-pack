@@ -253,6 +253,7 @@ def _lead_item(connection, ident: str) -> tuple[int, list[int]]:
 def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=Probe) -> list[dict]:
     """Step 7's start: each open `enqueued` run whose lane entry merged moves to `cleaning`; one whose entry
     failed, was skipped or was cancelled ends `lane_failed`. An unread lane changes nothing this tick.
+    One that failed only on prepare's merge of main also goes back to its builder (`build.lane_failed`, sd:6940).
 
     A merged run moves only once `verdict` reads its last supervisor and child gone, so the fresh supervisor
     never shares the worktree.
