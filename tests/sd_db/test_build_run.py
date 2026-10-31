@@ -839,13 +839,14 @@ class Tick(Case):
                                   root=self.root / "worktrees",
                                   **{"load": 1.0, "load_cap": 40.0, "interactive": [], **inputs})
 
-    def enqueued(self):
-        self.items = [create_item(self.db, kind="task", title="Built", repo=str(self.repo), status="ready")]
+    def enqueued(self, count=1, skip_lead=False):
+        self.items = [create_item(self.db, kind="task", title="Built", repo=str(self.repo), status="ready")
+                      for _ in range(count)]
         build.queue(self.db, self.items, who="operator")
         self.tick()
         run = next(row for row in build.open_runs(self.db) if row["step"] != "enqueued")  # this item's, not an older
         build.write(self.db, run["id"], step="enqueuing")
-        self.assertTrue(build.enqueued(self.db, run["id"]))
+        self.assertTrue(build.enqueued(self.db, run["id"], self.items[1:] if skip_lead else None))
         self.spawned.clear()
         return run
 
@@ -913,6 +914,21 @@ class Tick(Case):
         self.assertEqual((again["assignment"], again["branch"]), (run["assignment"], run["branch"]))
         notes = [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ?", self.items)]
         self.assertTrue(any(body.startswith(build.REBUILD) for body in notes), notes)
+
+    def test_a_conflict_without_its_lead_is_left_to_the_operator(self):
+        """Review: a rebuild that lost its lead would claim under a child's branch, so none is queued."""
+        for case in ("moved", "skipped"):
+            with self.subTest(case=case):
+                run = self.enqueued(2, skip_lead=case == "skipped")  # a skipped lead ends blocked
+                lead, child = self.items
+                if case == "moved":
+                    writes.transition(self.db, lead, "planning", who="operator", reason="moved on")
+                self.entries = {child: {"id": "e1", "status": "failed", "reason": self.CONFLICT}}
+                self.assertEqual(self.tick()["claimed"], [])
+                self.assertEqual(build.run(self.db, run["id"])["outcome"], "lane_failed")
+                self.assertEqual(item_state(self.db, child)["item"]["status"], "in_progress")
+                self.assertEqual(self.db.execute("SELECT status FROM assignment WHERE item = ?",
+                                                 (child,)).fetchone()[0], "done")
 
     def test_conflict_rebuilds_stop_at_their_cap(self):
         """pack sd:6940: past `CONFLICT_REBUILDS` the bundle stays lane_failed for the operator."""

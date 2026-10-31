@@ -666,13 +666,14 @@ def lane_failed(connection, read: dict, reason: str) -> bool:
 def _rebuild(connection, read: dict, reason: str, stamp: str) -> None:
     """Queue a bundle whose lane entry conflicted with main again under its lead, as Send to builder does, so the
     next builder merges main into the same branch (pack sd:6940). Each member still `in_progress` goes back to
-    `ready`; one the operator moved stays out. Past `CONFLICT_REBUILDS` on the lead's item, nothing is queued."""
+    `ready`; one the operator moved stays out. A lead moved or left out of delivery, or past `CONFLICT_REBUILDS`
+    on the lead's item, queues nothing: the run stays `lane_failed` for the operator."""
     lead = read["assignment"]
     members = [member for member in _members(connection, lead, "done")
                if connection.execute("SELECT status FROM item WHERE id = ?",
                                      (member["item"],)).fetchone()["status"] == "in_progress"]
-    if not members:
-        return
+    if not members or members[0]["id"] != lead:
+        return  # without its lead the claim would pick a child's branch and worktree: the operator's call
     done = connection.execute("SELECT COUNT(*) FROM note WHERE item = ? AND body LIKE ?",
                               (members[0]["item"], REBUILD + "%")).fetchone()[0]
     if done >= CONFLICT_REBUILDS:
