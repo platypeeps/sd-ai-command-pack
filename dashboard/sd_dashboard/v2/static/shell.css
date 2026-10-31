@@ -433,6 +433,8 @@ dialog.palette::backdrop { background: var(--color-scrim); }
  * as well as a colour: a copy is filled, a queued one a dashed accent edge, a designated one with no copy a caution outline,
  * and one not read a dashed unknown edge. */
 .pub { display: inline-flex; align-items: center; gap: 0; margin-right: var(--space-2xs); vertical-align: middle; }
+/* pack sd:6704: the row's actions sit on the marks' middle too, not the baseline, so Read lines up with them. */
+.pub + .rowact { vertical-align: middle; }
 .pub a, .pub span { display: inline-flex; align-items: center; justify-content: center; min-width: 1.75rem; min-height: 1.75rem; color: var(--color-ink-2); border: var(--rule-hair) solid transparent; border-radius: var(--radius-sm); }
 .pub .has { color: var(--color-ink); background: var(--color-accent-bg); border-color: var(--color-accent); }
 .pub a:hover { color: var(--color-accent); background: var(--color-well); }
