@@ -125,7 +125,7 @@ class TheBuildControls(unittest.TestCase):
     def test_each_build_control_link_and_fold_is_touch_sized(self):
         for name, css, selector in (("today.css", TODAY_CSS, "#active-tally a"), ("today.css", TODAY_CSS, ".digest .lines a"),
                                     ("today.css", TODAY_CSS, ".active .what a"),
-                                    ("queue.css", QUEUE_CSS, "#builds details.ended summary")):
+                                    ("queue.css", QUEUE_CSS, "#ended details.ended summary")):
             with self.subTest(selector):
                 touch = [body for sels, body in rules(blocks(css, "(pointer: coarse)")) if selector in sels]
                 self.assertTrue(any("min-height: var(--row-touch)" in body for body in touch), f"{selector} in {name}")
