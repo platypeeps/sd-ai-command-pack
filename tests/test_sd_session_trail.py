@@ -56,7 +56,7 @@ class SessionTrail(unittest.TestCase):
 
     def test_the_trail_is_this_sessions_filed_items_decisions_and_questions_newest_first(self):
         mine = self.file("Filed by this session", "session-a")
-        self.note(mine, "Which way?\nSecond line stays out", "question", "session-a")
+        self.note(mine, "Which way?\nSecond line stays out\nOption: Yes (Recommended)\nOption: No", "question", "session-a")
         self.note(mine, "A comment is not trail", "comment", "session-a")
         other = self.file("Filed by another session", "session-b")
         self.note(other, "Another session's ruling", "decision", "session-b")

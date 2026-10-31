@@ -155,8 +155,10 @@ class TheSections(TodayCase):
 
     def test_decisions_and_followups_leave_out_plain_questions_and_reports_own(self):
         asked = self.item("Asked")
-        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack\nOption: Rows")
-        add_note(self.connection, asked, "question", "A plain question")
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
+        # A plain question from before pack sd:6708, which `add_note` now refuses.
+        self.connection.execute("INSERT INTO note (item, timestamp, kind, body) VALUES (?, ?, 'question', ?)",
+                                (asked, "2026-10-01T00:00:00+00:00", "A plain question"))
         chase = add_note(self.connection, asked, "followup", "Chase the vendor")
         report = self.item("Report", kind="report", fields={"attention": "two stale rows"})
         add_note(self.connection, report, "followup", "The report's own")
@@ -169,7 +171,7 @@ class TheSections(TodayCase):
     def test_closing_an_item_keeps_its_unanswered_question_in_decisions(self):
         """Pack sd:6329: a close answers no question; the followups it owed go."""
         asked = self.item("Asked")
-        decision = add_note(self.connection, asked, "question", "Move all 45?\nOption: Approve all\nOption: Videos only")
+        decision = add_note(self.connection, asked, "question", "Move all 45?\nOption: Approve all (Recommended)\nOption: Videos only")
         add_note(self.connection, asked, "followup", "Chase the vendor")
         workflow.change_status(self.connection, asked, "done", who="operator", reason="landed")
         self.assertEqual([(row["id"], row["note"], row["status"]) for row in today.decisions(self.connection)],
@@ -188,12 +190,12 @@ class TheSections(TodayCase):
         """sd:5130: `sd-next` walks the Decisions rows; a batch's questions wait on the Review page."""
         batch = self.batch("B1", questions=2)
         asked = self.item("Asked")
-        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack\nOption: Rows")
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
         # Older state: a ref task that is no batch, and an approval's task, keep their questions as rows.
         bare = self.item("Bare ref", source="task-ref")
-        unbatched = add_note(self.connection, bare, "question", "Keep it?\nOption: Yes\nOption: No")
+        unbatched = add_note(self.connection, bare, "question", "Keep it?\nOption: Yes (Recommended)\nOption: No")
         approved = self.item("Approved", source="task-ref", external_id="review-approved:1")
-        followed = add_note(self.connection, approved, "question", "Ship it?\nOption: Yes\nOption: No")
+        followed = add_note(self.connection, approved, "question", "Ship it?\nOption: Yes (Recommended)\nOption: No")
         self.assertEqual([row["note"] for row in today.decisions(self.connection)], [decision, unbatched, followed])
         self.assertEqual(today.review_questions(self.connection), 2)
         self.assertEqual(today.sections(self.connection, now=NOW)["summary"]["review_questions"], 2)
@@ -209,7 +211,7 @@ class TheSections(TodayCase):
         """The batch is left out in the query: 250 older batch questions do not fill `open_notes`' 200."""
         self.batch("Big", questions=250)
         asked = self.item("Asked")
-        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack\nOption: Rows")
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
         self.assertEqual([row["note"] for row in today.decisions(self.connection)], [decision])
         self.assertEqual(today.review_questions(self.connection), 250)
 
@@ -220,17 +222,17 @@ class TheSections(TodayCase):
     def grill(self, ref="grill:2026-09-07", repo=APP, questions=2):
         """A weekly grill as the KISS audit files it: `sd task add --ref grill:<date>`, then question notes."""
         item = self.item("Weekly grill", repo=repo, source="task-ref", external_id=ref)
-        return item, [add_note(self.connection, item, "question", f"Keep mechanism {n}?\nOption: Keep\nOption: Drop")
+        return item, [add_note(self.connection, item, "question", f"Keep mechanism {n}?\nOption: Keep (Recommended)\nOption: Drop")
                       for n in range(questions)]
 
     def test_a_grills_questions_are_one_ready_line_not_decisions(self):
         """pack sd:6022: the audit's seed questions wait for the operator to say 'grill', not in every walk."""
         grilled, (first, _) = self.grill()
         asked = self.item("Asked")
-        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack\nOption: Rows")
+        decision = add_note(self.connection, asked, "question", "Which store?\nOption: Pack (Recommended)\nOption: Rows")
         # Older state: a ref task under another prefix keeps its questions as Decisions rows.
         other = self.item("Other ref", source="task-ref", external_id="grilled:1")
-        kept = add_note(self.connection, other, "question", "Keep it?\nOption: Yes\nOption: No")
+        kept = add_note(self.connection, other, "question", "Keep it?\nOption: Yes (Recommended)\nOption: No")
         self.assertEqual([row["note"] for row in today.decisions(self.connection)], [decision, kept])
         self.assertEqual([(row["id"], row["questions"]) for row in today.grill(self.connection)], [(grilled, 2)])
         found = today.sections(self.connection, now=NOW)
@@ -314,7 +316,7 @@ class TheRepositoryFilter(TodayCase):
         mine, theirs, loose = self.item("Mine", repo=APP), self.item("Theirs", repo=LIB), self.item("Loose")
         for item in (mine, theirs, loose):
             add_note(self.connection, item, "followup", f"Chase {item}")
-            add_note(self.connection, item, "question", f"Pick {item}\nOption: A\nOption: B")
+            add_note(self.connection, item, "question", f"Pick {item}\nOption: A (Recommended)\nOption: B")
         self.lane("example-owner/app", "a", item=mine, status="pending", position=1)
         self.lane("example-owner/lib", "b", item=theirs, status="pending", position=2)
         planned = [self.item(f"Due {repo}", repo=repo, due="2026-09-09") for repo in (APP, LIB)]
@@ -344,7 +346,7 @@ class TheRepositoryFilter(TodayCase):
         for repo in (APP, None):
             item = self.item(f"Open {repo}", repo=repo)
             add_note(self.connection, item, "followup", f"Chase {item}")
-            add_note(self.connection, item, "question", f"Pick {item}\nOption: A\nOption: B")
+            add_note(self.connection, item, "question", f"Pick {item}\nOption: A (Recommended)\nOption: B")
             self.item(f"Report {repo}", repo=repo, kind="report", fields={"attention": "look"})
             self.item(f"Due {repo}", repo=repo, due="2026-09-09")
             self.item(f"Stuck {repo}", repo=repo, status="blocked")

@@ -6,9 +6,9 @@ A decision is a `question` note whose body names its choices, one line each:
     Option: A pack store kind
     Option: Workflow database rows
 
-`sd task note N "$(printf 'Q\\nOption: A\\nOption: B')" --kind question` writes one. A line that starts
-`Option:` is a choice and every other line is the question. A repeated choice counts once. A question with fewer
-than two choices is a free-text question (sd:5064): it lists here too, and the page answers it with a text box in
+`sd task note N "$(printf 'Q\\nOption: A (Recommended)\\nOption: B')" --kind question` writes one. A line that starts
+`Option:` is a choice and every other line is the question. A repeated choice counts once. `writes.add_note` refuses a new one
+with fewer than two choices or none recommended (pack sd:6708); an older free-text question (sd:5064) lists here too, and the page answers it with a text box in
 place of buttons. An old prose "Decision needed" comment stays a comment: it lists nothing here, because only a
 `question` note asks.
 
@@ -49,14 +49,12 @@ from __future__ import annotations
 import re
 
 from sd_db import draft, reads, workflow
+from sd_db.writes import parse, recommended
 
 from .tasks_screen import is_scheduled
 
 __all__ = ["answer", "document", "parse", "recommended", "request", "reverse", "reverse_request", "rulings"]
 
-OPTION = re.compile(r"^[ \t]*Option:[ \t]*(.*?)[ \t]*$")
-MARKED = re.compile(r"\(recommended\)$|^(?:\(recommended\)|recommended:)", re.IGNORECASE)
-ADVICE = re.compile(r"^[ \t]*Recommendation:[ \t]*(.*?)[ \t.]*$", re.IGNORECASE)
 #: A review batch's ref, as `sd_db.review` files it (`REF_SOURCE`, `review:<queue>:<batch>`); named here so Decisions reads
 #: without that module, and a test holds the two equal.
 BATCH_SOURCE, BATCH_PREFIX = "task-ref", "review:"
@@ -67,36 +65,6 @@ RULINGS_DAYS = 7
 #: A ruling that answered a question, as `answer` and `sd task note --answers` write it; and its reversal.
 RULING = re.compile(r"\ARuling on note #([0-9]+): (.*)\Z", re.S)
 REVERSAL = re.compile(r"\AReversed ruling #([0-9]+)\b")
-
-
-def parse(body: str) -> tuple[str, list[str]]:
-    """The question text and the choices, in the order written."""
-    question, options = [], []
-    for line in body.splitlines():
-        found = OPTION.match(line)
-        if found is None:
-            question.append(line)
-        elif found[1] and found[1] not in options:
-            options.append(found[1])
-    return "\n".join(question).strip(), options
-
-
-def recommended(body: str, options: list[str]) -> int | None:
-    """The index of the recommended option, or None; the posted text stays the option as written."""
-    if len(options) < 2:
-        return None
-    marked = [i for i, option in enumerate(options) if MARKED.search(option)]
-    if marked:
-        return marked[0] if len(marked) == 1 else None
-    for line in body.splitlines():
-        found = ADVICE.match(line)
-        if found:
-            said = found[1].casefold() + " "
-            # The longest option the line starts with, whole words, so "Rows" does not take "Rows and a cache".
-            named = [i for i, option in enumerate(map(str.casefold, options))
-                     if said.startswith(option) and not said[len(option)].isalnum()]
-            return max(named, key=lambda i: len(options[i])) if named else None
-    return None
 
 
 def document(connection, *, now: str | None = None) -> dict:

@@ -232,7 +232,10 @@ class AManagedRepositoryWithIssuesAsk(Fixture):
             connection.close()
 
     def test_an_update_of_this_repository_asks_the_operator(self) -> None:
-        self.assertIn("--kind question", self.assert_asked(issue_write()))
+        asked = self.assert_asked(issue_write())
+        self.assertIn("--kind question", asked)
+        # pack sd:6708: a question with no options and no pick is refused, so the draft it names carries them.
+        self.assertIn("Option: File it (Recommended)", asked)
         self.assert_asked(issue_write(owner="Example", repo="MANAGED"))
 
     def test_filing_an_issue_is_still_denied(self) -> None:

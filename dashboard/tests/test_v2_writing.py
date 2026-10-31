@@ -116,13 +116,17 @@ class TheDocument(Pieces):
 
         item = self.ids["fixture"]
         asked = [workflow.add_item_note(self.connection, item, kind="question", who="claude", body=body)["note"]["id"]
-                 for body in ("Who is this for?\nOption: Engineers\nOption: Managers", "What is the one point?")]
+                 for body in ("Who is this for?\nOption: Engineers (Recommended)\nOption: Managers",
+                             "What is the one point?\nOption: Rows win (Recommended)\nOption: Files win")]
         grill = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[item]["grill"]
-        self.assertEqual(grill, {"open": [{"note": asked[0], "question": "Who is this for?", "options": ["Engineers", "Managers"]},
-                                          {"note": asked[1], "question": "What is the one point?", "options": []}],
+        self.assertEqual(grill, {"open": [{"note": asked[0], "question": "Who is this for?",
+                                           "options": ["Engineers (Recommended)", "Managers"]},
+                                          {"note": asked[1], "question": "What is the one point?",
+                                           "options": ["Rows win (Recommended)", "Files win"]}],
                                  "answered": 0})
         revision = workflow.item_state(self.connection, item)["revision"]
-        decisions.answer(self.connection, item, asked[0], "Engineers", expected_revision=revision, who="dashboard")
+        decisions.answer(self.connection, item, asked[0], "Engineers (Recommended)", expected_revision=revision,
+                         who="dashboard")
         grill = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}[item]["grill"]
         self.assertEqual(([q["note"] for q in grill["open"]], grill["answered"]), ([asked[1]], 1))
 

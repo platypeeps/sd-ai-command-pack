@@ -91,7 +91,8 @@ Rules:
 - Leave the worktree clean, with your commits on the branch.
 - End only a process you started, by its pid: never `pkill` or `killall`, which end other sessions'
   gates too (sd:6815).
-- An item that needs the operator: record it with `sd task note N '<question>' --kind question` and skip it.
+- An item that needs the operator: record it with `sd task note N $'<question>\\nOption: <a> (Recommended)\\nOption: <b>'
+  --kind question` and skip it.
 
 Your final message is your report: the commits, the tests run with their result lines, and anything not done.
 """
@@ -634,12 +635,25 @@ class Supervisor:
             problem = self.unfinished()
             return self.finish("blocked", problem) if problem else then
         if verdict["state"] == "denied":
-            return self.finish("blocked", verdict["why"],
-                               question=f"Build run {self.ident}: the builder was denied {', '.join(verdict['tools'])}. "
-                                        f"Allow it, or change the brief, then requeue.")
+            return self.finish("blocked", verdict["why"], question=self.denial_question(verdict))
         if verdict["state"] == "max_turns":
             return self.finish("error_max_turns", verdict["why"])
         return self.finish("blocked", f"{verdict['why']}; log {self.log}")
+
+    def denial_question(self, verdict: dict) -> str:
+        """The question a denial asks, with its options (pack sd:6708).
+
+        A requeue is the pick unless the run before was denied the same tools, so the denial looks
+        transient; the same denial twice needs the brief changed.
+        """
+        before = self.db.execute("SELECT outcome, detail FROM runner_run WHERE assignment = ? AND run < ? "
+                                 "ORDER BY run DESC LIMIT 1", (self.row["assignment"], self.row["run"])).fetchone()
+        again = before is not None and before["outcome"] == "blocked" and before["detail"] == verdict["why"]
+        options = (["Change the brief, then requeue (Recommended)", "Requeue as is"] if again else
+                   ["Requeue as is (Recommended)", "Change the brief, then requeue"]) + ["Drop the build"]
+        return (f"Build run {self.ident}: the builder was denied {', '.join(verdict['tools'])}. "
+                f"Allow it, or change the brief, then requeue.\n"
+                + "\n".join(f"Option: {option}" for option in options))
 
     def cost(self, final: dict) -> None:
         usage = final.get("usage")
@@ -898,7 +912,7 @@ class DraftSupervisor(Supervisor):
         parsed = draft.parse(final.get("result") if isinstance(final, dict) else None)
         if parsed is None:
             return self.finish("blocked", f"the reply has no `## Spec`, or a question short of two Option: "
-                                          f"lines; nothing was written; log {self.log}")
+                                          f"lines or of a recommended one; nothing was written; log {self.log}")
         if not draft.write(self.db, self.ident, *parsed):
             raise Lost
         return {"run": self.ident, "outcome": "done", "questions": len(parsed[1])}

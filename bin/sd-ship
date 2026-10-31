@@ -1492,18 +1492,36 @@ class Ship(SharedReview):
         # Only an open pull request binds. A merged or closed one that once
         # used this branch name keeps its frozen head, so binding it refused
         # every later push as a changed head (sd:2656).
-        pulls = self.api.pages(f"{self.api.prefix}/pulls?state=open&head={quote_branch(self.repository, self.branch)}&base={base}")
-        candidates = [pull for pull in pulls if pull.get("head", {}).get("ref") == self.branch
-                      and str(pull.get("head", {}).get("repo", {}).get("full_name", "")).lower() == self.repository
-                      and pull.get("base", {}).get("ref") == base]
+        def matching(state: str) -> list[dict]:
+            pulls = self.api.pages(f"{self.api.prefix}/pulls?state={state}"
+                                   f"&head={quote_branch(self.repository, self.branch)}&base={base}")
+            return [pull for pull in pulls if pull.get("head", {}).get("ref") == self.branch
+                    and str(pull.get("head", {}).get("repo", {}).get("full_name", "")).lower() == self.repository
+                    and pull.get("base", {}).get("ref") == base]
+
+        candidates = matching("open")
         if len(candidates) > 1:
             raise Refusal("multiple PRs match this branch; resolve explicitly before continuing")
         if not candidates:
-            if self.state.get("create_dispatched"):
-                raise Refusal("prior PR creation outcome is uncertain; an empty search cannot authorize another PR")
+            # A create a 5xx left uncertain (sd:6858) may run again: GitHub
+            # makes at most one open PR per head and base, and answers 422
+            # to a second. A closed one at this head means someone closed
+            # what the create made, so that one refuses.
+            retry = bool(self.state.get("create_dispatched"))
+            if retry and any(
+                    pull.get("head", {}).get("sha") == head for pull in matching("closed")):
+                raise Refusal("the PR an earlier create made at this head is closed; reopen it or push a new head")
             self.save(create_dispatched=True, phase="create_dispatch")
-            pull = self.api.api(f"{self.api.prefix}/pulls", method="POST",
-                                body={"title": title, "body": body, "head": self.branch, "base": base, "draft": False})
+            try:
+                pull = self.api.api(f"{self.api.prefix}/pulls", method="POST",
+                                    body={"title": title, "body": body, "head": self.branch, "base": base,
+                                          "draft": False})
+            except Refusal:
+                # A refused retry (422) or a lost answer: the one GitHub holds, if any.
+                candidates = matching("open") if retry else []
+                if len(candidates) != 1:
+                    raise
+                pull = candidates[0]
         else:
             pull = candidates[0]
         number = pull.get("number")

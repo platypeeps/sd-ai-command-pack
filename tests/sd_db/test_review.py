@@ -311,7 +311,7 @@ class LabelAndWithdraw(ReviewCase):
     def test_a_note_outside_the_batch_is_refused(self):
         item = self.file(batch())
         extra = workflow.add_item_note(self.db, item, kind="question", who="tester",
-                                       body="Hand filed?\nOption: yes\nOption: no")["note"]["id"]
+                                       body="Hand filed?\nOption: yes (Recommended)\nOption: no")["note"]["id"]
         revision = workflow.item_state(self.db, item)["revision"]
         with self.assertRaisesRegex(review.ReviewError, "not a question of"):
             review.rule(self.db, item, extra, "yes", expected_revision=revision, who="tester")

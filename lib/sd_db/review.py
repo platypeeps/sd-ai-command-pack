@@ -497,7 +497,8 @@ def file(connection: sqlite3.Connection, batch: Any, *, who: str, now: str | Non
         writes.set_item_fields(connection, item, source=REF_SOURCE, external_id=ref)
         add_note(connection, item, "comment", _header_body(found, digest, kept), session=who)
         for question in kept:
-            add_note(connection, item, "question", _question_body(question), session=who)
+            add_note(connection, item, "question", _question_body(question), session=who,
+                     labelling=True)
     return {"item": item, "ref": ref, "created": True, "filed": len(kept), "dropped": dropped}
 
 

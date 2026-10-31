@@ -297,7 +297,7 @@ class DraftGuard(unittest.TestCase):
     def test_mark_ready_names_open_draft_questions(self):
         """Failure table, Mark ready: each open draft question is named, and nothing moves."""
         asked = self.run_draft("Which store?\nOption: Rows (Recommended)\nOption: Files",
-                               "Who taps?\nOption: Operator\nOption: Lead")
+                               "Who taps?\nOption: Operator (Recommended)\nOption: Lead")
         with self.assertRaises(TransitionRefused) as caught:
             change_status(self.db, self.item, "ready", who="dashboard")
         self.assertIn("2 open draft questions", str(caught.exception))
@@ -309,8 +309,9 @@ class DraftGuard(unittest.TestCase):
         """Failure table, Mark ready: an answer resolves its question; after the last, the move lands."""
         from sd_db import workflow
 
-        asked = self.run_draft("Which store?\nOption: Rows\nOption: Files", "Who taps?\nOption: Operator\nOption: Lead")
-        workflow.add_item_note(self.db, self.item, kind="question", who="operator", body="An operator's own question")
+        asked = self.run_draft("Which store?\nOption: Rows (Recommended)\nOption: Files",
+                               "Who taps?\nOption: Operator (Recommended)\nOption: Lead")
+        workflow.add_item_note(self.db, self.item, kind="question", who="operator", body="An operator's own question\nOption: Yes (Recommended)\nOption: No")
         for note in asked:
             with self.assertRaises(TransitionRefused):
                 change_status(self.db, self.item, "ready", who="dashboard")

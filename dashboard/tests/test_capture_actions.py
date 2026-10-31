@@ -101,8 +101,15 @@ class CaptureActions(BrowserSession):
                 status, _, body = self.request(f"/api/items/{item}/capture-context")
                 self.assertEqual(status, 200)
                 context = json.loads(body)
+                body = f"Captured {kind}"
+                if kind == "question":
+                    status, _, result = self.post(f"/api/items/{item}/notes", {
+                        "revision": context["revision"], "kind": kind, "body": body})
+                    self.assertEqual(status, 400)
+                    self.assertIn("Option:", result["error"])
+                    body += "\nOption: Keep (Recommended)\nOption: Drop"
                 status, _, result = self.post(f"/api/items/{item}/notes", {
-                    "revision": context["revision"], "kind": kind, "body": f"Captured {kind}"})
+                    "revision": context["revision"], "kind": kind, "body": body})
                 self.assertEqual(status, 200)
                 self.assertEqual(result["note"]["item"], item)
                 self.assertEqual(result["note"]["kind"], kind)

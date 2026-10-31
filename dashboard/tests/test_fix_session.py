@@ -400,7 +400,7 @@ class TheGrill(FixCase):
         upsert_repo(self.connection, str(self.work), pieces_source="row")
         return item
 
-    def ask(self, item, body="Who is this for?"):
+    def ask(self, item, body="Who is this for?\nOption: Engineers\nOption: Managers\nRecommendation: Engineers"):
         return workflow.add_item_note(self.connection, item, kind="question", who="claude", body=body)["note"]
 
     def test_grill_starts_the_grill_prompt_in_the_pieces_repository(self):
