@@ -44,6 +44,21 @@ def market(connection, title, stage, body="", **fields):
                        fields={"kind": "market", "dateCreated": "2026-01-06", **fields}, body={"markdown": body})
 
 
+def plugin(kind, base, status, transitions, human):
+    """One `sd plugin list --json` entry declaring `kind` on the `db` driver, so a stage move never reads the real pack."""
+    rules = {"fields": ["status", "slug", "dateCreated", "content-type", "area", "description", "tags"],
+             "initial-status": "candidate", "transitions": transitions, "human-only": human}
+    return {"root": "/plugins/sdw", "readable": True, "prefix": "sdw",
+            "store": {"driver": "db", "root": "$OBSIDIAN_VAULT", "bases": {kind: base}},
+            "workflow": {kind: {"status": status}}, "rules": {kind: rules}}
+
+
+MARKET = plugin("market", "Market Watch", {"active": "ready", "candidate": "planning", "declined": "done", "paused": "blocked"},
+                {"active": ["paused", "declined"], "candidate": ["active", "paused", "declined"], "paused": ["active", "declined"],
+                 "declined": ["candidate"]},
+                {"decline": "declined"})
+
+
 def profile(*dates, source=""):
     """A profile body: an imported lead-in above `## What it is`, then the routine's own, then its Sources."""
     lead = [f"*Profile maintained in place by the daily `market-watch` routine. Last full refresh: {d}.*" for d in dates]
@@ -201,6 +216,65 @@ class TheActions(Run):
         self.assertEqual(self.ran()[-1].split(" --field")[0:3],
                          ["sd store add sdw.market Example Cloud Ops", " content-type=company", " slug=example-cloud-ops"])
 
+    def test_remove_declines_the_watch_and_keeps_its_body(self):
+        """sd:6703: Remove retires, it does not delete: the stage goes to declined, the profile stays."""
+        item = self.ids["candidate"]
+        with patch("sd_db.records.plugin_entries", return_value=[MARKET]):
+            status, body = self.run_("watch.remove", item=item)
+            self.assertEqual((status, body["exit"], body["label"]), (200, 0, "Remove watch"), body)
+            stage, state, kept = self.connection.execute("SELECT stage, status, body FROM item WHERE id=?", (item,)).fetchone()
+            self.assertEqual((stage, state), ("declined", "done"))
+            self.assertIn("maybe.example.test", kept)
+            self.assertIn("stage candidate -> declined", body["output"])
+            self.refused([({"action": "watch.remove", "item": item}, 400, "is declined already"),
+                          ({"action": "watch.remove", "item": str(item)}, 400, "by its item number")])
+
+    def test_restore_brings_a_declined_watch_back_to_candidate(self):
+        """sd:6703: Restore undoes Remove: declined goes back to candidate (sd-writing sd:6828), the profile kept."""
+        item = self.ids["candidate"]
+        with patch("sd_db.records.plugin_entries", return_value=[MARKET]):
+            self.refused([({"action": "watch.restore", "item": item}, 400, "is candidate, not declined")])
+            self.assertEqual(self.run_("watch.remove", item=item)[1]["exit"], 0)
+            status, body = self.run_("watch.restore", item=item)
+            self.assertEqual((status, body["exit"], body["label"]), (200, 0, "Restore watch"), body)
+            stage, kept = self.connection.execute("SELECT stage, body FROM item WHERE id=?", (item,)).fetchone()
+            self.assertEqual(stage, "candidate")
+            self.assertIn("maybe.example.test", kept)
+            self.assertIn("stage declined -> candidate", body["output"])
+
+    def same_store(self):
+        """`sd-db` opens `default_path(HOME)`; here it is the database the dashboard serves, so Delete may run."""
+        same = patch("sd_db.database.default_path", return_value=Path(self.path))
+        same.start()
+        self.addCleanup(same.stop)
+
+    def test_delete_refuses_when_sd_db_would_open_another_database(self):
+        """Review of build/sd-206: the dashboard may serve `--database` elsewhere, and `sd-db item remove` opens the
+        default store; the same id there is another row, so Delete refuses and runs nothing."""
+        self.stub("sd-db", 'echo "sd-db: fingerprint: 0a1b2c"')
+        other = Path(self.tmp.name).resolve() / "other" / "workflow.sqlite3"
+        with patch("sd_db.database.default_path", return_value=other):
+            self.refused([({"action": "watch.delete", "item": self.ids["paused"]}, 400, "another database")])
+
+    def test_delete_previews_then_applies_the_fingerprint_it_printed(self):
+        """sd:6703: Delete runs `sd-db item remove`, whose apply needs the fingerprint its preview printed."""
+        self.same_store()
+        self.stub("sd-db", 'case "$*" in *--apply*) echo "sd-db: removed 1 item";; *) echo "sd-db: fingerprint: 0a1b2c";; esac')
+        status, body = self.run_("watch.delete", item=self.ids["paused"])
+        self.assertEqual((status, body["exit"], body["label"]), (200, 0, "Delete watch"), body)
+        reason = "--reason Deleted on the dashboard: sdw.market Old Co"
+        self.assertEqual(self.ran(), [f"sd-db item remove {self.ids['paused']} --who dashboard {reason}",
+                                      f"sd-db item remove {self.ids['paused']} --who dashboard {reason} --apply --if-fingerprint 0a1b2c"])
+        self.assertIn("sd-db: removed 1 item", body["output"])
+
+    def test_a_refused_delete_preview_applies_nothing(self):
+        self.same_store()
+        self.stub("sd-db", 'echo "sd-db:   I7 note 9: note 9 is an unresolved question"; echo "sd-db: fingerprint: 0a1b2c"; exit 3')
+        status, body = self.run_("watch.delete", item=self.ids["paused"])
+        self.assertEqual((status, body["exit"]), (200, 3))
+        self.assertEqual(len(self.ran()), 1)
+        self.assertIn("unresolved question", body["output"])
+
     def test_add_refuses_what_is_not_a_web_url_or_a_name(self):
         self.refused([({"action": "watch.add", "url": "javascript:alert(1)", "name": ""}, 400, "http or https URL"),
                       ({"action": "watch.add", "url": "https://example.test/a b", "name": ""}, 400, "no spaces"),
@@ -342,6 +416,29 @@ FIELD_VALUES = { url: '', name: 'x' }; C.run(cmd('watch.add'), OBJ.get('watches'
                          [["/api/actions/run", {"action": "watch.add", "url": "https://github.com/example/widget-agent", "name": ""}]])
         self.assertEqual(out["gets"], ["/api/watches", "/api/watches"])
         self.assertIn(["not run: OK is off until URL is typed", False], out["toasts"])
+
+    def test_remove_and_delete_ask_first_and_a_declined_watch_offers_no_remove(self):
+        """sd:6703: Remove declines a watch and is off on a declined one; Delete asks first and names what is lost."""
+        self.doc["rows"].append(dict(self.doc["rows"][0], id=4242, title="Gone Co", stage="declined"))
+        out = self.run_page(f"""const maybe = OBJ.get('watch:{self.ids["candidate"]}'), gone = OBJ.get('watch:4242');
+R.off = cmd('watch.remove').when(gone); R.consequence = cmd('watch.delete').consequence(maybe);
+C.run(cmd('watch.remove'), gone); await flush(); C.run(cmd('watch.remove'), maybe); await flush(); C.run(cmd('watch.delete'), gone); await flush();""")
+        self.assertEqual(out["R"]["off"], "declined already")
+        self.assertIn("for good: its profile, its Sources and its notes are lost", out["R"]["consequence"])
+        self.assertEqual([p[:2] for p in out["posts"]], [["/api/actions/run", {"action": "watch.remove", "item": self.ids["candidate"]}],
+                                                         ["/api/actions/run", {"action": "watch.delete", "item": 4242}]])
+        self.assertEqual(out["confirms"], ["watch.remove", "watch.delete"])
+        self.assertEqual(out["gets"], ["/api/watches", "/api/watches", "/api/watches"], "each write reads the page again")
+
+    def test_a_declined_watch_offers_restore_and_an_open_one_does_not(self):
+        """sd:6703: Restore shows on a declined watch only, asks first, and posts watch.restore."""
+        self.doc["rows"].append(dict(self.doc["rows"][0], id=4242, title="Gone Co", stage="declined"))
+        out = self.run_page(f"""const maybe = OBJ.get('watch:{self.ids["candidate"]}'), gone = OBJ.get('watch:4242');
+R.off = cmd('watch.restore').when(maybe); R.on = cmd('watch.restore').when(gone);
+C.run(cmd('watch.restore'), maybe); await flush(); C.run(cmd('watch.restore'), gone); await flush();""")
+        self.assertEqual((out["R"]["off"], out["R"]["on"]), ("candidate: Restore brings back a declined watch", True))
+        self.assertEqual([p[:2] for p in out["posts"]], [["/api/actions/run", {"action": "watch.restore", "item": 4242}]])
+        self.assertEqual(out["confirms"], ["watch.restore"])
 
     def test_a_failed_read_says_so(self):
         out = self.run_page("R.details = ELS.details.html; R.sub = ELS.sub.html;",

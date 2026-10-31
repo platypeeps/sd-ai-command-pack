@@ -31,12 +31,19 @@ from unittest import mock
 from sd_dashboard import briefs_screen, review_screen, server, v2
 from sd_db import create_item, review, routine_briefs, workflow
 from support import NOW, ScreenCase
+from test_run_actions import Run
 from test_v2_read import READ_SHELL
 from test_v2_registry import Registers
 from test_v2_shell_shared import cell_grammar
 from test_v2_tasks import SHELL, STAND_IN
 from test_v2_today import OSASCRIPT, Refused
+from test_v2_watches import plugin
 from test_workflow_actions import BrowserSession
+
+TOPIC = plugin("topic", "Topics", {"active": "ready", "candidate": "planning", "parked": "blocked", "retired": "done"},
+               {"active": ["parked", "retired"], "candidate": ["active", "parked", "retired"], "parked": ["active", "retired"],
+                "retired": ["candidate"]},
+               {"retire": "retired"})
 
 V2 = Path(v2.__file__).resolve().parent
 BRIEFS_JS = (V2 / "static" / "briefs.js").read_text(encoding="utf-8")
@@ -59,6 +66,11 @@ COMMANDS = [
     # A designated destination with no copy: queue it again.
     ["brief.queue-copy", "brief", "Queue copy", None, "safe"],
     ["brief.publish-now", "brief", "Publish now", None, "safe"],
+    # sd:6703: the Topics view's Add, and each topic row's Remove (retire) and Delete.
+    ["topic.add", "topic list", "Add topic", "a", "safe"],
+    ["topic.remove", "topic", "Remove", "m", "confirm"],
+    ["topic.delete", "topic", "Delete", "x", "confirm"],
+    ["topic.restore", "topic", "Restore", "e", "confirm"],
 ]
 
 #: The briefs a small store holds: stem, when first filed, the body's first line.
@@ -306,6 +318,75 @@ class TheTopics(BriefCase):
                          [["graphs", "agents"], None, [], None])
 
 
+class TheTopicActions(Run):
+    """sd:6703: Add topic files a candidate, Remove retires a topic, Delete removes its row, through /api/actions/run."""
+
+    def setUp(self):
+        super().setUp()
+        self.topics = seed_topics(self.connection)
+        self.connection.commit()
+        vault = mock.patch.dict(os.environ, {"OBSIDIAN_VAULT": str(Path(self.tmp.name).resolve() / "vault")})
+        vault.start()
+        self.addCleanup(vault.stop)
+
+    def test_add_files_a_candidate_topic_with_its_slug(self):
+        status, body = self.run_("topic.add", title="Edge AI: chips")
+        self.assertEqual((status, body["exit"], body["label"]), (200, 0, "Add topic"), body)
+        [line] = self.ran()
+        self.assertTrue(line.startswith("sd store add sdw.topic Edge AI chips --field slug=edge-ai-chips --field dateCreated="), line)
+        status, body = self.run_("topic.add", title="  ")
+        self.assertEqual(status, 400)
+        self.assertIn("Name the topic", body["error"])
+
+    def test_remove_retires_the_topic_and_keeps_its_memory(self):
+        item = self.topics["Graphs"]
+        with mock.patch("sd_db.records.plugin_entries", return_value=[TOPIC]):
+            status, body = self.run_("topic.remove", item=item)
+            self.assertEqual((status, body["exit"], body["label"]), (200, 0, "Remove topic"), body)
+            stage, kept = self.connection.execute("SELECT stage, body FROM item WHERE id=?", (item,)).fetchone()
+            self.assertEqual(stage, "retired")
+            self.assertIn("a running story", kept)
+            status, body = self.run_("topic.remove", item=item)
+            self.assertEqual(status, 400)
+            self.assertIn("is retired already", body["error"])
+
+    def test_restore_brings_a_retired_topic_back_to_candidate(self):
+        """sd:6703: Restore undoes Remove: retired goes back to candidate (sd-writing sd:6828), Memory kept."""
+        item = self.topics["Graphs"]
+        with mock.patch("sd_db.records.plugin_entries", return_value=[TOPIC]):
+            status, body = self.run_("topic.restore", item=item)
+            self.assertEqual(status, 400)
+            self.assertIn("not retired; nothing ran", body["error"])
+            self.assertEqual(self.run_("topic.remove", item=item)[1]["exit"], 0)
+            status, body = self.run_("topic.restore", item=item)
+            self.assertEqual((status, body["exit"], body["label"]), (200, 0, "Restore topic"), body)
+            stage, kept = self.connection.execute("SELECT stage, body FROM item WHERE id=?", (item,)).fetchone()
+            self.assertEqual(stage, "candidate")
+            self.assertIn("a running story", kept)
+
+    def test_delete_removes_the_topic_row_through_item_remove(self):
+        same = mock.patch("sd_db.database.default_path", return_value=Path(self.path))
+        same.start()
+        self.addCleanup(same.stop)
+        self.stub("sd-db", 'case "$*" in *--apply*) echo "sd-db: removed 1 item";; *) echo "sd-db: fingerprint: ff00";; esac')
+        status, body = self.run_("topic.delete", item=self.topics["Climate"])
+        self.assertEqual((status, body["exit"], body["label"]), (200, 0, "Delete topic"), body)
+        self.assertTrue(self.ran()[-1].endswith("sdw.topic Climate --apply --if-fingerprint ff00"), self.ran())
+        status, body = self.run_("topic.delete", item=999999)
+        self.assertEqual(status, 400)
+        self.assertIn("is not a topic row", body["error"])
+
+    def test_delete_refuses_when_sd_db_would_open_another_database(self):
+        """Review of build/sd-206: Delete is bound to the database the dashboard read the row from."""
+        self.stub("sd-db", 'echo "sd-db: fingerprint: ff00"')
+        other = Path(self.tmp.name).resolve() / "other" / "workflow.sqlite3"
+        with mock.patch("sd_db.database.default_path", return_value=other):
+            status, body = self.run_("topic.delete", item=self.topics["Climate"])
+        self.assertEqual(status, 400)
+        self.assertIn("another database", body["error"])
+        self.assertEqual(self.ran(), [])
+
+
 class TheItemPage(BriefCase):
     """Read's target: `/item/<id>` renders the brief's Markdown, and offers no report control and no Fix."""
 
@@ -437,7 +518,8 @@ R.primary = REG.filter(c => c.primary && c.primary({})).map(c => c.id); R.gated 
         self.assertEqual(out["R"]["reg"], COMMANDS)
         # Read is every row's primary action and is never off, so a row without a vault copy offers it too (the shell draws
         # the primary in each row: the browser check on the pull request).
-        self.assertEqual((out["R"]["primary"], out["R"]["gated"]), (["brief.read"], ["brief.open", "brief.adversarial-review", "brief.publish", "brief.unpublish", "brief.queue-copy", "brief.publish-now"]))
+        self.assertEqual((out["R"]["primary"], out["R"]["gated"]), (["brief.read"], ["brief.open", "brief.adversarial-review", "brief.publish", "brief.unpublish", "brief.queue-copy", "brief.publish-now",
+                                                                         "topic.remove", "topic.restore"]))
 
     def test_adversarial_review_on_a_brief_posts_its_item(self):
         """sd:5064: a brief row asks for {kind: brief, target: <its item>}; the run starts in the background."""
@@ -871,6 +953,39 @@ await flush(); R.lane = OUT.shown.slice(); R.rows = ELS.rows.html;""")
                             answer=f"() => [200, {json.dumps(self.doc())}]")
         self.assertIn("none in 7 days", re.split(r'(?=<tr data-topic=)', out["R"]["rows"])[3])
         self.assertEqual(out["R"]["note"], "")
+
+    def test_a_topic_row_offers_remove_and_delete_behind_a_confirm_and_a_retired_one_no_remove(self):
+        """sd:6703: Remove retires an active topic and is off on a retired one; Delete asks first and names the loss."""
+        seeded, doc = self.topics_page()
+        next(t for t in doc["topics"]["rows"] if t["title"] == "Climate")["stage"] = "retired"
+        graphs, climate = seeded["Graphs"], seeded["Climate"]
+        out = self.run_page(f"""const g = OBJ.get('topic:{graphs}'), c = OBJ.get('topic:{climate}');
+R.retired = cmd('topic.remove').when(c); R.consequence = cmd('topic.delete').consequence(g); R.head = ELS['topic-rows'].html;
+C.run(cmd('topic.remove'), c); await flush(); C.run(cmd('topic.remove'), g); await flush(); C.run(cmd('topic.delete'), c); await flush();
+FIELD_VALUES = {{ title: 'Edge AI' }}; C.run(cmd('topic.add'), OBJ.get('topics')); await flush();""",
+                            answer=f"(p) => p === '/api/actions/run' ? [200, {{ action: 'x', label: 'Ran', line: 'l', exit: 0, output: 'ok', cut: false }}] : [200, {json.dumps(doc)}]")
+        self.assertEqual(out["R"]["retired"], "retired already")
+        self.assertIn("for good: its body, its Memory and its Sources are lost", out["R"]["consequence"])
+        self.assertEqual([p[:2] for p in out["posts"]], [["/api/actions/run", {"action": "topic.remove", "item": graphs}],
+                                                         ["/api/actions/run", {"action": "topic.delete", "item": climate}],
+                                                         ["/api/actions/run", {"action": "topic.add", "title": "Edge AI"}]])
+        self.assertEqual(out["confirms"], ["topic.remove", "topic.delete", "topic.add"])
+        self.assertIn(["off: retired already", False], out["toasts"])
+        self.assertIn('<td class="act">', out["R"]["head"])
+
+    def test_a_retired_topic_offers_restore_and_an_active_one_does_not(self):
+        """sd:6703: Restore shows on a retired topic only, asks first, and posts topic.restore."""
+        seeded, doc = self.topics_page()
+        next(t for t in doc["topics"]["rows"] if t["title"] == "Climate")["stage"] = "retired"
+        graphs, climate = seeded["Graphs"], seeded["Climate"]
+        out = self.run_page(f"""const g = OBJ.get('topic:{graphs}'), c = OBJ.get('topic:{climate}');
+R.off = cmd('topic.restore').when(g); R.on = cmd('topic.restore').when(c);
+C.run(cmd('topic.restore'), g); await flush(); C.run(cmd('topic.restore'), c); await flush();""",
+                            answer=f"(p) => p === '/api/actions/run' ? [200, {{ action: 'x', label: 'Ran', line: 'l', exit: 0, output: 'ok', cut: false }}] : [200, {json.dumps(doc)}]")
+        self.assertEqual(out["R"]["on"], True)
+        self.assertRegex(out["R"]["off"], r": Restore brings back a retired topic$")
+        self.assertEqual([p[:2] for p in out["posts"]], [["/api/actions/run", {"action": "topic.restore", "item": climate}]])
+        self.assertEqual(out["confirms"], ["topic.restore"])
 
     def test_with_no_brief_recording_its_topics_signal_is_not_recorded_never_quiet(self):
         _seeded, doc = self.topics_page()
