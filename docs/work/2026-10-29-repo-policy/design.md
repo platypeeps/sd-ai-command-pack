@@ -2,7 +2,7 @@
 title: Per-repo policy for org repositories, held in the repo row
 created: 2026-10-29
 item: sd:6715
-branch: build/sd-210
+branch: build/sd-244
 ---
 
 # Design — repo-policy
@@ -53,7 +53,7 @@ The `review` kind stays what it is, the `sd-review` routing; `policy.review` cov
 - **Values stay in the config folder.** The pack is public; a preset is a JSON file under `<config>/policy/<org>.json`, applied as `repo declare PATH policy "$(cat …)"`. Per-key override is an edit of that row. No preset verb, no inheritance store.
 - **`ask` never becomes `auto` for an org repository** (note #34749). The reader refuses `auto` for `commit`, `push`, `pr` and `issues` unless `mode` is `managed`. So no generated allow rules are needed, and the `settings.local.json` writer in note #34687 is dropped.
 - **`issues`** takes `off|read|ask`. `read`: agents read issues and map one to an sd item with `--ref github:<owner>/<repo>#N`. `ask`: an agent drafts a comment, an open or a close as a question on the item; the operator approves it on the Review page, which may batch them; then the tool writes it. The `github_issues` column migrates into the kind and is dropped in the same PR (2 rows are on).
-- **Commit convention** is checked by the agent's commit step (`sd-ship` and the builder), not by a hook installed into the repository: an org repository owns its hooks (husky, commitlint). An alias is rewritten before the commit; anything else refuses with the rule it broke.
+- **Commit convention** is checked where sd moves a commit out, not by a hook installed into the repository: an org repository owns its hooks (husky, commitlint). `sd-ship lane enqueue` checks the title and each branch commit before the push, naming the reworded subject for an alias; `sd-ship merge` rewrites an alias in the squash subject. Anything else refuses with the rule it broke.
 - **Columns that already work stay columns:** `runner_merge` is the merge key, `lane_host` the lane host, `jira_project` the Jira key. `ci` gains the value `jenkins`; `policy.ci` holds only the job name.
 - **Freeze windows** are rows in the `state` table (`freeze:<target>` with `until` and `reason`), not policy: they are short-lived. `sd-ship merge`, the release chain and a repository's own ship script read them first and refuse inside a window.
 - **The session-start summary** prints a repository's policy in one line, so an agent sees `commit=ask, issues=read, review=human(1)` before it acts.
@@ -72,7 +72,7 @@ Rejected: a column per key (16 columns for 30 rows, and a migration per new key)
 | Step | State moved | Failure | Recovery | Test |
 | --- | --- | --- | --- | --- |
 | Migrate `github_issues` into `policy.issues` | 2 repo rows; the column dropped | the migration stops between writing the kind and dropping the column | the migration is one transaction; a rerun finds the column gone, or the kinds written and the column still there, and finishes | `test_migration_moves_github_issues_in_one_transaction` stops after the kind write and reruns |
-| Commit step checks the convention | the commit, after an alias rewrite | the rewrite yields a message the org's hook still refuses | the commit is refused before `git commit`, the message file kept; nothing to undo | `test_alias_rewrite_then_footer_missing_refuses_before_commit` |
+| Enqueue and merge check the convention | the push, then the squash subject after an alias rewrite | a branch commit or the rewritten squash message breaks a rule | enqueue refuses before the push, merge before GitHub writes the squash; nothing to undo | `test_a_commit_the_convention_refuses_is_named_before_any_push`, `test_the_squash_message_takes_the_declared_convention` |
 | Issue action on `ask` | a question note, then an approval, then the GitHub write | the GitHub write fails after the approval | the approval note stays with `pending_write`; the next run retries the write once, then files a followup; no second approval is asked | `test_approved_issue_comment_retries_after_a_failed_write` |
 | Review hold in `sd-ship merge` | none until merge | the approval drops after a push (dismiss-stale-reviews) | `sd-ship` reads the setting and the current approvals at merge time, not at enqueue; a dropped approval holds the entry with the reason | `test_dismissed_approval_holds_the_merge` |
 | Jenkins status wait | the lane entry's phase | Jenkins unreachable (StrongDM signed out) | the entry holds as `ci_unreachable`, names `sdm-login`, and never reads unreachable as green | `test_unreachable_jenkins_is_not_green` |
