@@ -5000,7 +5000,7 @@ class HostedParallel(Lane):
                 if argv[4] == "1":
                     sd_lane.enqueue_entry(self.zeta_feature, 3, "fix: three", self.body, self.environ, manual=True,
                                           claim="deliver")
-                    late.wait(5)
+                    late.wait(60)  # bounds a hang, not a speed: a loaded gate starts item 3 late
                 else:
                     late.set()
                 seen.append(f"end {argv[4]}")
