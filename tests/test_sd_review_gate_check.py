@@ -92,6 +92,24 @@ class GateSlotBound(GateRepo):
         self.assertGreaterEqual(call["timeout"], 120 + slot)
 
 
+class RecipeBinding(GateRepo):
+    def test_the_test_recipe_binds_the_gate_receipt(self) -> None:
+        """Review of build 317: a changed policy `test` recipe (sd:6882) moves the tree binding."""
+        from unittest import mock
+
+        import sd_gate_receipts
+
+        root, _database = self.repo()
+        head = git(root, "rev-parse", "HEAD")
+        parts = []
+        for recipe in ({"setup": "true"}, {"setup": "exit 1"}, {"setup": "exit 1", "env": ["SD_RECIPE_TOKEN"]}):
+            with mock.patch.object(sd_gate_receipts.sd_lib, "repo_declaration",
+                                   side_effect=lambda tree, kind, recipe=recipe: {"test": recipe} if kind == "policy" else None):
+                parts.append(sd_gate_receipts.tree_binding(root, head, "inputs", "main"))
+        self.assertNotIn(None, parts)
+        self.assertEqual(len({json.dumps(part, sort_keys=True) for part in parts}), 3, parts)
+
+
 class GateCheck(GateRepo):
     def test_a_second_prepare_at_the_head_reuses_the_first_ones_pass(self) -> None:
         """sd:1912: one passing check per head. A second prepare at the same head

@@ -15,6 +15,8 @@ The `review` declaration stays the `sd-review` routing; `policy.review` is peopl
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from typing import Any
 
@@ -134,6 +136,17 @@ def _test_problems(test: Any, where: str) -> list[str]:
                               and all(isinstance(name, str) and ENV_NAME.match(name) for name in test["env"])):
         found.append(f"{where}: env is a list of environment variable names")
     return found
+
+
+def recipe_digest(policy: dict | None, env: Any) -> str:
+    """The `test` recipe of `policy` and which of its `env` names `env` sets, as one digest (sd:6882).
+
+    Its setup, teardown and env names change what `sd-check` runs, so a check receipt binds them.
+    """
+    recipe = (policy or {}).get("test") or {}
+    names = recipe.get("env")
+    held = {"recipe": recipe, "set": sorted(name for name in names if env.get(name)) if isinstance(names, list) else []}
+    return hashlib.sha256(json.dumps(held, sort_keys=True).encode()).hexdigest()
 
 
 def problems(value: Any) -> list[str]:

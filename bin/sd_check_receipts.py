@@ -264,17 +264,17 @@ def check_binding(root: pathlib.Path, env: Mapping[str, str]) -> dict[str, Any]:
     tools = sorted(set(value["tools"]) | {argv[0] for argv in detection.commands.values()})
     build_outputs(root, value)
     files = dependency_files(root, value["dependencies"], secret_name_exceptions(root, value))
-    for name in ("sd-check", "sd_check_receipts.py", "sd_lib.py"):
-        files["pack:" + name] = file_digest(BIN / name)
+    files.update({"pack:" + name: file_digest(BIN / name) for name in ("sd-check", "sd_check_receipts.py", "sd_lib.py")})
     for name in ("CLAUDE.local.md", CONTRACT):
         path = sd_lib.local_block_path(root) if name == "CLAUDE.local.md" else root / name
         files["policy:" + name] = file_digest(path) if path.exists() else "absent"
-    # The row's review declaration, which `.github/sd-review.json` held (sd:5109); an unread one refuses the binding.
+    # The row's review declaration (sd:5109) and its policy's test recipe (sd:6882); an unread one refuses the binding.
     try:
-        declared = sd_lib.repo_declaration(root, "review")
+        declared, policy = (sd_lib.repo_declaration(root, kind) for kind in ("review", "policy"))
     except sd_lib.DatabaseUnreadable as error:
-        raise Unavailable(f"the review declaration cannot be read: {error}") from None
+        raise Unavailable(f"the review declaration or test recipe cannot be read: {error}") from None
     files["policy:review_declaration"] = hashlib.sha256(json.dumps(declared, sort_keys=True).encode()).hexdigest()
+    files["policy:test_recipe"] = sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py").recipe_digest(policy, controlled)
     return {"schema_version": 1, "checkout": str(root), "head": sd_lib.git_output(["rev-parse", "HEAD"], root),
             "tree": sd_lib.git_output(["rev-parse", "HEAD^{tree}"], root),
             "argv": [sys.executable, str(BIN / "sd-check"), "--json"],
