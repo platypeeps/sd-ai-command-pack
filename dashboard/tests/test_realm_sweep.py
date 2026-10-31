@@ -304,7 +304,7 @@ class Run(unittest.TestCase):
         [add] = [tool[len("Bash(sd "):-len(":*)")].split() for tool in realm_sweep.allowed_tools("personal", Path("/runs/x"))
                  if tool.startswith("Bash(sd task add")]
         ref = "personal-sweep:gmail-m1"
-        first, again = (subprocess.run([sys.executable, str(PACK_LIB.parent / "bin" / "sd"), *add, "--ref", ref, title],
+        first, again = (subprocess.run([sys.executable, str(PACK_LIB.parent / "bin" / "sd"), *add, "--priority", "3", "--ref", ref, title],
                                        cwd=self.root, env=env, capture_output=True, text=True, timeout=60)
                         for title in ("Example", "Example again"))
         self.assertEqual(first.returncode, 0, first.stdout + first.stderr)

@@ -330,7 +330,7 @@ def _configuration(connection, item: int, old: dict, changes: dict) -> dict:
 def capture(connection, *, title, changes, who) -> dict:
     """Create an explicit local task; ordinary observed PRs never call this."""
     with transaction(connection):
-        result = capture_task(connection, title=title, who=who)
+        result = capture_task(connection, title=title, priority=3, who=who)  # a filer names a rank (sd:6726)
         return configure(connection, result["item"]["id"], changes, who=who,
                          expected_revision=result["revision"])
 

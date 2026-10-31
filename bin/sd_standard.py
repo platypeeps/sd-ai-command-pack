@@ -356,7 +356,7 @@ def _file_stamp_item(connection: Any, path: str, paths: str) -> None:
     from sd_db import workflow  # noqa: PLC0415
 
     if open_stamp_item(connection, path) is None:
-        workflow.capture_task(connection, title=STAMP_TITLE, repo=path, who=WHO,
+        workflow.capture_task(connection, title=STAMP_TITLE, repo=path, who=WHO, priority=3,  # sd:6726
                               body=f"`sd fleet standard` found these tracked fleet files out of date: {paths}. "
                                    "Run `sd fleet stamp` in a worktree on a feature branch and ship the result.")
 

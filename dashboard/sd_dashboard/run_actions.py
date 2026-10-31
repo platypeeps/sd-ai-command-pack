@@ -13,6 +13,7 @@ mounted volume, a port number, a Home Assistant tile, a registered repo row, a c
 | volume.df          | a mount point or a configured storage folder | `df -h <path>`                                |
 | port.lsof          | an integer port                              | `lsof -nP -iTCP:<port> -sTCP:LISTEN`          |
 | credentials.probe  | nothing                                      | `credentials.check`, as `sd-db credentials`   |
+| credentials.signin | a probe `credentials.signin` finds on disk   | its login, typed into claude in herdr         |
 | check.run          | a Health check row id this module knows      | the row's read, see `CHECKS`                  |
 | sensor.read        | a tile in Home's tile list                   | `GET /api/states/<entity>`                    |
 | skill.scan         | nothing                                      | `sd skill scan`                               |
@@ -36,6 +37,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import shlex
 import subprocess
 import urllib.parse
 from dataclasses import dataclass
@@ -211,12 +213,14 @@ def port_lsof(connection, values, jobs=None) -> Step:
                 shape=lambda code, out: out if out.strip() else f"Nothing listens on TCP port {port}.")
 
 
-def _credentials(connection) -> Callable[[], tuple[int, str]]:
+def _credentials(connection, only: str | None = None) -> Callable[[], tuple[int, str]]:
     def call():
         from sd_db import credentials
 
-        body = credentials.check(connection, env=os.environ)
-        return 0, "\n".join(credentials.describe(probe) for probe in body["probes"])
+        body = credentials.check(connection, env=os.environ, **({"only": only} if only else {}))
+        family = only.split(":")[0] if only else None
+        return 0, "\n".join(credentials.describe(probe) for probe in body["probes"]
+                            if family is None or str(probe.get("id", "")).split(":")[0] == family)
 
     return call
 
@@ -226,11 +230,33 @@ def credentials_probe(connection, values, jobs=None) -> Step:
     return Step(line="sd-db credentials", call=_credentials(connection), seconds=60)
 
 
+def credentials_signin(connection, values, jobs=None) -> Step:
+    """Sign in (sd:6722): claude in a new herdr workspace, given the probe's login as typed text, read from disk now."""
+    from sd_db import credentials
+
+    probe = _text(_fields(values, {"probe"})["probe"], "probe")
+    text = credentials.signin(probe, os.environ)
+    if text is None:
+        raise ValueError(f"{probe} is not a credential this machine can sign in; nothing ran.")
+    home = Path.home()
+    label = "signin-" + re.sub(r"[^a-z0-9]+", "-", probe.lower()).strip("-")
+    return Step(line=f"cd {home} && claude {shlex.quote(text)}", call=_herdr(home, label, text), seconds=100)
+
+
+def _credential_check(connection, row: str) -> Step:
+    """A credential row's Re-check runs its own probe family again (sd:6722); a heartbeat row runs every probe."""
+    from sd_db import credentials
+
+    probe = row.removeprefix("cred:")
+    only = probe if probe.split(":")[0] in credentials.FAMILIES else None
+    return Step(line="sd-db credentials", call=_credentials(connection, only), seconds=60)
+
+
 #: Health check rows whose read this module runs, by the id's prefix; every other check's Re-check reads Health again.
 CHECKS = {
-    "doc:": lambda connection: Step(line="local-machine-setup/machine-setup.sh doctor", seconds=120,
-                                    argv=("/bin/sh", str(CHECKOUT / "local-machine-setup" / "machine-setup.sh"), "doctor")),
-    "cred:": lambda connection: Step(line="sd-db credentials", call=_credentials(connection), seconds=60),
+    "doc:": lambda connection, row: Step(line="local-machine-setup/machine-setup.sh doctor", seconds=120,
+                                         argv=("/bin/sh", str(CHECKOUT / "local-machine-setup" / "machine-setup.sh"), "doctor")),
+    "cred:": _credential_check,
 }
 
 
@@ -239,7 +265,7 @@ def check_run(connection, values, jobs=None) -> Step:
     found = next((make for prefix, make in CHECKS.items() if row.startswith(prefix)), None)
     if found is None:
         raise ValueError(f"{row} has no read the dashboard runs; Re-check reads Health again.")
-    return found(connection)
+    return found(connection, row)
 
 
 def sensor_read(connection, values, jobs=None):
@@ -579,6 +605,7 @@ ACTIONS = {
     "volume.df": ("Show use", volume_df),
     "port.lsof": ("Inspect listener", port_lsof),
     "credentials.probe": ("Probe again", credentials_probe),
+    "credentials.signin": ("Sign in", credentials_signin),
     "check.run": ("Re-check", check_run),
     "sensor.read": ("Read state", sensor_read),
     "skill.scan": ("Scan", skill_scan),

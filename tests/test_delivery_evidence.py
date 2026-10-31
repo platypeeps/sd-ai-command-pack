@@ -437,7 +437,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
     def test_a_task_closes_carrying_the_commit_that_delivered_it(self) -> None:
         case = self.host()
         root = self.repository(case)
-        state = json.loads(case.call("task", "add", "Fix the thing", "--json",
+        state = json.loads(case.call("task", "add", "--priority", "3", "Fix the thing", "--json",
                                      cwd=root).stdout)
         item = state["item"]["id"]
         sha = self.commit(root, f"fix: the thing\n\nDelivers: sd:{item}\n", "one\n")
@@ -457,7 +457,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         """
         case = self.host()
         root = self.repository(case)
-        state = json.loads(case.call("task", "add", "Fix the thing", "--json",
+        state = json.loads(case.call("task", "add", "--priority", "3", "Fix the thing", "--json",
                                      cwd=root).stdout)
         item = state["item"]["id"]
         case.call("task", "status", item, "done", cwd=root)
@@ -467,7 +467,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         """A task worked on `branch`, as `sd work register` records it."""
         import sd_db
 
-        item = json.loads(case.call("task", "add", "Fix the thing", "--json", cwd=root).stdout)["item"]["id"]
+        item = json.loads(case.call("task", "add", "--priority", "3", "Fix the thing", "--json", cwd=root).stdout)["item"]["id"]
         with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
             connection.execute("UPDATE item SET branch = ? WHERE id = ?", (branch, item))
         return item
@@ -522,7 +522,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         found to have no evidence is the hole, not a smaller version of it."""
         case = self.host()
         root = self.repository(case)
-        state = json.loads(case.call("task", "add", "Fix the thing", "--json",
+        state = json.loads(case.call("task", "add", "--priority", "3", "Fix the thing", "--json",
                                      cwd=root).stdout)
         item = state["item"]["id"]
         sha = self.commit(root, "fix: the thing, with no trailer\n", "one\n")
@@ -557,7 +557,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         case = self.host()
         filed = self.repository(case)
         shipped = self.second_repository(case, "pack")
-        state = json.loads(case.call("task", "add", "Fix the thing", "--json",
+        state = json.loads(case.call("task", "add", "--priority", "3", "Fix the thing", "--json",
                                      cwd=filed).stdout)
         item = state["item"]["id"]
         sha = self.commit(shipped, f"fix: the thing\n\nDelivers: sd:{item}\n", "one\n")
@@ -579,7 +579,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         case = self.host()
         filed = self.repository(case)
         stray = self.second_repository(case, "stray", register=False)
-        item = json.loads(case.call("task", "add", "Fix the thing", "--json",
+        item = json.loads(case.call("task", "add", "--priority", "3", "Fix the thing", "--json",
                                     cwd=filed).stdout)["item"]["id"]
         sha = self.commit(stray, f"fix: the thing\n\nDelivers: sd:{item}\n", "one\n")
 
@@ -592,7 +592,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
     def test_delivered_in_needs_delivered_by(self) -> None:
         case = self.host()
         filed = self.repository(case)
-        item = json.loads(case.call("task", "add", "Fix the thing", "--json",
+        item = json.loads(case.call("task", "add", "--priority", "3", "Fix the thing", "--json",
                                     cwd=filed).stdout)["item"]["id"]
         refused = case.call("task", "status", item, "done", "--delivered-in", str(filed),
                             code=1, cwd=filed)
@@ -607,7 +607,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         """
         case = self.host()
         root = self.repository(case)
-        state = json.loads(case.call("task", "add", "Fix the thing", "--json",
+        state = json.loads(case.call("task", "add", "--priority", "3", "Fix the thing", "--json",
                                      cwd=root).stdout)
         item = state["item"]["id"]
         sha = self.commit(root, f"fix: the thing\n\nDelivers: sd:{item}\n", "one\n")
@@ -624,7 +624,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
 
         case = self.host()
         root = self.repository(case)
-        state = json.loads(case.call("task", "add", "Ship the feature", "--json",
+        state = json.loads(case.call("task", "add", "--priority", "3", "Ship the feature", "--json",
                                      cwd=root).stdout)
         item = state["item"]["id"]
         with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
@@ -664,7 +664,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         for kind in ("followup", "personal"):
             with self.subTest(kind=kind, closes=closes):
                 case = self.host()
-                state = json.loads(case.call("task", "add", f"A {kind}", "--kind", kind,
+                state = json.loads(case.call("task", "add", "--priority", "3", f"A {kind}", "--kind", kind,
                                              "--json").stdout)
                 item = state["item"]["id"]
                 self.assertIsNone(state["item"]["repo"])
@@ -692,7 +692,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
         one and the row does not move."""
         case = self.host()
         root = self.repository(case)
-        state = json.loads(case.call("task", "add", "A review finding", "--kind", "followup",
+        state = json.loads(case.call("task", "add", "--priority", "3", "A review finding", "--kind", "followup",
                                      "--json", cwd=root).stdout)
         item = state["item"]["id"]
         self.assertEqual(state["item"]["repo"], sd_lib.stored_repo(root))
@@ -723,9 +723,9 @@ class TaskDeliveryCLITests(unittest.TestCase):
         case = self.host()
         root = self.repository(case)
 
-        unscoped = json.loads(case.call("task", "add", "A personal note", "--kind", "personal",
+        unscoped = json.loads(case.call("task", "add", "--priority", "3", "A personal note", "--kind", "personal",
                                         "--json").stdout)["item"]["id"]
-        scoped = json.loads(case.call("task", "add", "A review finding", "--kind", "followup",
+        scoped = json.loads(case.call("task", "add", "--priority", "3", "A review finding", "--kind", "followup",
                                       "--json", cwd=root).stdout)["item"]["id"]
         sha = "0" * 40
         no_checkout = case.call("task", "status", unscoped, "done", "--delivered-by", sha,
@@ -786,7 +786,7 @@ class TaskDeliveryCLITests(unittest.TestCase):
                       "has nothing to verify\n", refused.stderr)
 
         root = self.repository(case)
-        report = json.loads(case.call("task", "add", "A report", "--json",
+        report = json.loads(case.call("task", "add", "--priority", "3", "A report", "--json",
                                       cwd=root).stdout)["item"]["id"]
         with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
             sd_db.writes.set_item_fields(connection, report, kind="report")
@@ -819,7 +819,7 @@ class AssociatedDeliveryCLITests(unittest.TestCase):
         import sd_db
         import sd_db.writes
 
-        item = json.loads(case.call("task", "add", "Ship the feature", "--json",
+        item = json.loads(case.call("task", "add", "--priority", "3", "Ship the feature", "--json",
                                     cwd=root).stdout)["item"]["id"]
         with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
             sd_db.writes.set_item_fields(connection, item, kind="work")
@@ -890,7 +890,7 @@ class AssociatedDeliveryCLITests(unittest.TestCase):
         the move to done records the delivery sentence and the reason."""
         case = self.host()
         root = self.repository(case)
-        item = json.loads(case.call("task", "add", "Fix the thing", "--json",
+        item = json.loads(case.call("task", "add", "--priority", "3", "Fix the thing", "--json",
                                     cwd=root).stdout)["item"]["id"]
         sha = self.commit(root, f"fix: the thing\n\nItem: sd:{item}\n", "one\n")
         done = json.loads(case.call("work", "deliver", item, sha, "--associated",
@@ -905,7 +905,7 @@ class AssociatedDeliveryCLITests(unittest.TestCase):
 
         case = self.host()
         root = self.repository(case)
-        item = json.loads(case.call("task", "add", "Follow the thing up", "--json",
+        item = json.loads(case.call("task", "add", "--priority", "3", "Follow the thing up", "--json",
                                     cwd=root).stdout)["item"]["id"]
         with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
             sd_db.writes.set_item_fields(connection, item, kind="followup")
@@ -920,7 +920,7 @@ class AssociatedDeliveryCLITests(unittest.TestCase):
         import sd_db
         import sd_db.writes
 
-        item = json.loads(case.call("task", "add", "Follow the thing up", "--json",
+        item = json.loads(case.call("task", "add", "--priority", "3", "Follow the thing up", "--json",
                                     cwd=root).stdout)["item"]["id"]
         with sd_db.connect(sd_db.default_path(case.home), write=True) as connection:
             sd_db.writes.set_item_fields(connection, item, kind="followup")
@@ -954,7 +954,7 @@ class AssociatedDeliveryCLITests(unittest.TestCase):
     def test_associated_on_a_task_still_needs_the_item_trailer(self) -> None:
         case = self.host()
         root = self.repository(case)
-        item = json.loads(case.call("task", "add", "Fix the thing", "--json",
+        item = json.loads(case.call("task", "add", "--priority", "3", "Fix the thing", "--json",
                                     cwd=root).stdout)["item"]["id"]
         sha = self.commit(root, f"fix: the thing\n\nRefs: sd:{item}\n", "one\n")
         refused = case.call("work", "deliver", item, sha, "--associated",

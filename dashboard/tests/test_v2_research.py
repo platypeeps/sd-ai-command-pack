@@ -981,14 +981,14 @@ await lastToast().undo(); await flush();""")
         draft = out["R"]["draft"]
         self.assertEqual((draft["q"], draft["repo"], draft["depth"]), ("how do vendors detect spans?", "research/beta", "deep"))
         self.assertEqual(draft["cmd"], "sd task add 'Research: how do vendors detect spans?' --belongs-to ~/'repos/research/beta'"
-                                       " --body 'repo=beta depth=deep skill=sd-research-repo stage=draft'")
+                                       " --body 'repo=beta depth=deep skill=sd-research-repo stage=draft' --priority 3")
         # The copied line runs as it is: no bare <item>, which the shell reads as a redirect from a file named item.
         self.assertNotRegex(draft["cmd"], r"(?<![\"'])<\w")
         self.assertEqual((out["R"]["when"], out["R"]["executes"]), (True, True))
         self.assertIn('data-copy="sd task add', out["R"]["req"])
         self.assertEqual([p[:2] for p in out["posts"]],
                          [["/api/items", {"title": "Research: how do vendors detect spans?",
-                                          "body": "repo=beta depth=deep skill=sd-research-repo stage=draft",
+                                          "body": "repo=beta depth=deep skill=sd-research-repo stage=draft", "priority": 3,
                                           "repo": "~/repos/research/beta"}],
                           ["/api/items/71/cancel-task", {"reason": "withdrawn on Research right after filing", "revision": "r71"}]])
         self.assertEqual(out["toasts"][0][0], "Research filed · #71 · how do vendors detect spans?")
@@ -1006,7 +1006,7 @@ R.draft = Object.assign({}, C.get('draft:research'));
         self.assertNotIn("--belongs-to", out["R"]["draft"]["cmd"])
         self.assertEqual([p[:2] for p in out["posts"]],
                          [["/api/items", {"title": "Research: how do vendors detect spans?",
-                                          "body": "repo=fresh depth=standard skill=sd-research-repo stage=draft"}]])
+                                          "body": "repo=fresh depth=standard skill=sd-research-repo stage=draft", "priority": 3}]])
 
     def test_start_mode_after_an_empty_filter_selects_a_shown_row_again(self):
         # Start mode cleared the filter and redrew the board but kept the selection the empty filter had cleared.
