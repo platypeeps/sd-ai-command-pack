@@ -1680,6 +1680,24 @@ roles:
         with patch.object(ship.time, "sleep"):
             self.assertEqual(self.merge()["phase"], "merged")
 
+    def test_a_jenkins_policy_holds_the_merge_until_the_head_build_is_green(self):
+        """sd:6880, design § Failure table. A policy naming Jenkins makes its job the CI: an unreachable Jenkins
+        holds the merge as ci_unreachable, never green; a green build of the head merges."""
+        ci = {"provider": "jenkins", "url": "http://127.0.0.1:9", "job": "team/repo/PR-{pr}"}
+        set_declaration(self.connection, str(self.operator), "policy", {"ci": ci})
+        self.prepare()
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaises(ship.Refusal) as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "ci_unreachable")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        head = _git(self.root, "rev-parse", "HEAD")
+        green = {"result": "SUCCESS", "building": False, "actions": [{"lastBuiltRevision": {"SHA1": head}}]}
+        with patch.object(ship.time, "sleep"), \
+                patch.object(ship.sd_ship_jenkins, "head_build", return_value=green) as read:
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(read.call_args.args[:3], (ci, 1, head))
+
     def test_a_pending_refusal_names_who_did_review_the_head(self):
         """sd:3499. A renamed Copilot bot's review read as pending forever,
         with "wait, then retry"; the refusal names the logins that reviewed the head."""
@@ -6600,6 +6618,31 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(result["protection"], {"declared_gap": "unprotected", "until": "a second account with push or merge rights exists"})
         key = receipts.receipt_key(self.remote.slug, "topic", self.item)
         self.assertEqual(receipts.read(self.connection, key)[1]["protection"]["declared_gap"], "unprotected")
+
+    def jenkins_green(self, *, workflows=None) -> None:
+        """A policy naming Jenkins, its build of the head green, and no check run or status on GitHub."""
+        self.declare(workflows=workflows)
+        set_declaration(self.connection, str(self.operator), "policy", {"ci": {
+            "provider": "jenkins", "url": "http://127.0.0.1:9", "job": "team/repo/PR-{pr}"}})
+        self.prepare()
+        next(iter(self.remote.pull_requests.values())).checks = []
+        self.double.workflow_runs = []
+        build = {"result": "SUCCESS", "building": False, "actions": [{"lastBuiltRevision": {"SHA1": self.head()}}]}
+        patcher = patch.object(ship.sd_ship_jenkins, "head_build", return_value=build)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_green_jenkins_build_validates_the_head_under_a_declared_gap(self):
+        """sd:6880, review of build 317. every_check refused ci_missing on a head only Jenkins validated."""
+        self.jenkins_green(workflows={})
+        with patch.object(ship.time, "sleep"):
+            self.merge()
+        self.assertEqual(self.puts(), 1)
+
+    def test_a_green_jenkins_build_still_needs_the_heads_pull_request_runs(self):
+        self.jenkins_green()
+        with patch.object(ship.time, "sleep"):
+            self.refuse(r"workflow .* has no successful pull_request run", "ci_missing")
 
     # -- sd:1843: `repo.ci = local` swaps pull_request runs for sd/local-gate --
 
