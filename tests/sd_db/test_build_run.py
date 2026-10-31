@@ -330,6 +330,15 @@ class Supervise(Case):
                               capture_output=True, text=True, env=self.env, check=False)
         self.assertEqual(done.returncode, 2, done.stderr)
 
+    def test_the_builder_env_carries_the_run_and_items_for_otel(self):
+        """pack sd:6943: Claude Code's OTel joins the run's trace; a value already there stays first."""
+        self.press(2)
+        self.env["OTEL_RESOURCE_ATTRIBUTES"] = "host.name=fixture"
+        env = self.supervisor().env
+        self.assertEqual(env["OTEL_RESOURCE_ATTRIBUTES"], f"host.name=fixture,sd.build_run={self.bundle['id']},"
+                         f"sd.items={self.items[0]};{self.items[1]}")
+        self.assertNotIn("CLAUDE_CODE_ENABLE_TELEMETRY", {key for key in env if key not in os.environ})
+
     def test_a_press_runs_to_the_lane(self):
         """Two items, one run, one branch, one lane entry; the members end done and the items stay in progress."""
         self.press(2)
