@@ -83,8 +83,8 @@ other halves are, is in [domain packs](docs/domain-packs.md).
   `UserPromptSubmit` for `sd-skill-use`, and `PreToolUse` on `Bash` and `mcp__github__issue_write`
   for `sd-issue-guard`, which decides by the target an `issue_write` call names: it
   denies an issue in a managed repository and points to `sd task add`, and
-  asks the operator about an issue anywhere else; with `repo.github_issues`
-  on, it lets an update of a managed repository's own issue through;
+  asks the operator about an issue anywhere else; with `policy.issues`
+  ask, it asks about an update of a managed repository's own issue too;
   `PreToolUse` on `Bash`, `Edit`, `Write`, `NotebookEdit`, `Read`,
   `Grep` and `Glob`, and
   `SessionEnd`, for `sd-session-beat`, which keeps the session's heartbeat

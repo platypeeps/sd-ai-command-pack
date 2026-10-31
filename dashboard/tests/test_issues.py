@@ -354,9 +354,9 @@ class TheIntake(ScreenCase):
         with mock.patch.object(repos, "intake_issues", None, create=True):
             self.assertEqual(issues.intake(self.connection), {"intake": [], "intake_error":
                              "this sd_db has no repos.intake_issues; update the command pack"})
-        with stub_intake(side_effect=sqlite3.OperationalError("no such column: github_issues")):
+        with stub_intake(side_effect=sqlite3.OperationalError("no such column: declarations")):
             self.assertEqual(issues.intake(self.connection), {"intake": [], "intake_error":
-                             "no such column: github_issues; run sd-db migrate"})
+                             "no such column: declarations"})
         with stub_intake(side_effect=sqlite3.OperationalError("database is locked")):
             self.assertEqual(issues.intake(self.connection), {"intake": [], "intake_error": "database is locked"})
 

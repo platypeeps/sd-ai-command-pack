@@ -36,6 +36,7 @@ from ..repos import (
     absolute_under_home,
     clone_lines,
     declarations,
+    issues_policy,
     item_ref,
     item_refs,
     registered,
@@ -650,7 +651,7 @@ def command_repo(argv: list[str]) -> int:
     `repo ci <path> <github|local>`, `repo lane-host <path> <host|hub>`,
     `repo channels <path> [obsidian=.. notion=.. drive=.. feed=URL jira=KEY github=OWNER/NAME email=LABEL,.. | none]`,
     `repo clones <path> <P,Q | none | +P | -P>`, `repo dependabot <path> <yes|no>`,
-    `repo github-issues <path> <on|off>`, `repo jira-project <path> <KEY|off>`,
+    `repo github-issues <path> <off|read|ask>`, `repo jira-project <path> <KEY|off>`,
     `repo declare <path> [KIND [JSON|off]]`, `repo remove <path> ...`.
 
     The `repo` table is what criterion 6 enumerates from, so an empty one
@@ -673,8 +674,9 @@ def command_repo(argv: list[str]) -> int:
     sweep's list outside its owner rule. `seed --clones PROFILE` adds PROFILE
     to the row of each line repo-sync's lists give it, and `list --clones
     PROFILE` prints those lines back, `<subdir> <owner/repo>`, for repo-sync.
-    `github-issues` sets `repo.github_issues` (sd:4827): whether the
-    repository takes third-party GitHub issues.
+    `github-issues` sets the `policy` declaration's `issues` key (sd:4827,
+    pack sd:6849): whether agents read the repository's third-party GitHub
+    issues (`read`), and draft writes the operator approves (`ask`).
     `jira-project` sets `repo.jira_project` (sd:5103): the Jira project the
     dashboard files a sanitized issue in, or `off`. `list` does not show it,
     so no reader that counts fields moves. `declare` prints or sets
@@ -682,9 +684,9 @@ def command_repo(argv: list[str]) -> int:
     from `.github/sd-<kind>.json`; `bin/sd-db` checks a kind's object with its
     reader before this writes it.
 
-    `list` prints `managed`, `ci`, `github_issues`, `lane_host`, then
+    `list` prints `managed`, `ci`, `policy.issues`, `lane_host`, then
     `runner_merge`, so the merge setting stays the last field of each row,
-    where the operator's instructions read it. `github_issues` sits before
+    where the operator's instructions read it. `policy.issues` sits before
     `lane_host` so the first four fields and the last two stay put.
     """
     verbs = ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "clones",
@@ -775,10 +777,10 @@ def command_repo(argv: list[str]) -> int:
             return 0
         if verb == "github-issues":
             if len(rest) != 2:
-                print("sd-db repo github-issues: needs a path and on or off", file=sys.stderr)
+                print("sd-db repo github-issues: needs a path and off, read or ask", file=sys.stderr)
                 return 1
             path, before = set_github_issues(connection, rest[0], rest[1])
-            print(f"sd-db: {path} github_issues {before} -> {rest[1]}")
+            print(f"sd-db: {path} policy.issues {before} -> {rest[1]}")
             return 0
         if verb == "jira-project":
             if len(rest) != 2:
@@ -811,7 +813,7 @@ def command_repo(argv: list[str]) -> int:
         for row in rows:
             print(f"sd-db: {row['path']}  {row['remote'] or '-'}  "
                   f"{'yes' if row['managed'] else 'no'}  "
-                  f"{row['ci']}  {'on' if row['github_issues'] else 'off'}  "
+                  f"{row['ci']}  {issues_policy(connection, row['path'])}  "
                   f"{row['lane_host'] or LANE_HUB}  {row['runner_merge']}")
         return 0
     finally:

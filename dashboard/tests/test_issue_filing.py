@@ -94,7 +94,7 @@ class FilingCase(BrowserSession):
         shim = install_gh(hub, self.root / "bin")
         return {**gh_environment(hub, shim.parent, {}), "PATH": os.environ["PATH"], "GH_BIN": str(shim)}
 
-    def enable(self, github="on", jira="off"):
+    def enable(self, github="ask", jira="off"):
         repos.set_github_issues(self.connection, str(self.checkout), github)
         repos.set_jira_project(self.connection, str(self.checkout), jira)
 
@@ -167,10 +167,10 @@ class TheSetting(FilingCase):
         item = self.task()
         row = {r["id"]: r for r in tasks_screen.document(self.connection, now=self.now)["rows"]}[item]
         self.assertFalse(row["issue_targets"]["github"]["ok"])
-        self.assertIn("GitHub issues are off", row["issue_targets"]["github"]["why"])
+        self.assertIn("not ask for this repository", row["issue_targets"]["github"]["why"])
         self.assertIn("no Jira project", row["issue_targets"]["jira"]["why"])
         self.assertIsNone(row["issue_link"])
-        self.enable(github="on", jira="EXAMPLE")
+        self.enable(github="ask", jira="EXAMPLE")
         row = {r["id"]: r for r in tasks_screen.document(self.connection, now=self.now)["rows"]}[item]
         self.assertEqual(row["issue_targets"]["github"], {"ok": True, "target": {"kind": "github", "repo": "example/tool"},
                                                           "why": None})
@@ -180,7 +180,7 @@ class TheSetting(FilingCase):
         item = self.task()
         status, _, answer = self.start(item, "github")
         self.assertEqual(status, 409)
-        self.assertIn("GitHub issues are off", answer["error"])
+        self.assertIn("not ask for this repository", answer["error"])
         self.assertFalse((self.double / "claude.stdin").exists())
 
 
@@ -429,11 +429,11 @@ class TheConfirm(FilingCase):
         self.assertEqual(self.asked("POST"), 0)
 
     def test_a_target_switched_off_or_moved_after_the_preview_refuses(self):
-        self.enable(github="on")
+        self.enable(github="ask")
         run = self.drafted(self.task())
         repos.set_github_issues(self.connection, str(self.checkout), "off")
         self.assertEqual(self.confirm(run)[0], 409)
-        repos.set_github_issues(self.connection, str(self.checkout), "on")
+        repos.set_github_issues(self.connection, str(self.checkout), "ask")
         repos.upsert_repo(self.connection, str(self.checkout), remote="git@github.com:example/elsewhere.git")
         self.assertEqual(self.confirm(run)[0], 409)
         self.assertEqual(self.asked("POST"), 0)
@@ -501,7 +501,7 @@ class TheConfirm(FilingCase):
     def test_the_draft_ends_with_a_random_token_line_the_preview_shows_and_the_digest_covers(self):
         """Round 2: the body carries an opaque token of this run, hidden on GitHub, a plain line on Jira; it names nothing
         internal and the scan and the digest read it."""
-        self.enable(github="on", jira="EXAMPLE")
+        self.enable(github="ask", jira="EXAMPLE")
         item = self.task()
         github = self.drafted(item)
         self.assertRegex(github["token"], r"^[0-9a-f]{16}$")

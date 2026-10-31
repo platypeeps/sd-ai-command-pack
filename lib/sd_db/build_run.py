@@ -32,7 +32,6 @@ from __future__ import annotations
 import json
 import os
 import signal
-import sqlite3
 import subprocess
 import sys
 import time
@@ -43,6 +42,7 @@ from typing import Any, Callable
 
 from . import build, draft, paths, sessions
 from .build import Probe
+from .database import Patient
 from .ship import this_host
 from .writes import add_note, now, record_cost, record_state
 
@@ -61,10 +61,6 @@ HEARTBEAT = "build-dispatch"
 #: The lane entry states that end an `enqueued` run without a merge: the lane's `BLOCKED` ends, which
 #: `lane retry` queues again (`prepared` is a merge the lane refused), and a cancel.
 LANE_ENDED = ("failed", "skipped", "prepared", "cancelled")
-
-#: The waits, in seconds, before a supervisor statement a locked database refused is sent again (pack sd:6588).
-#: With each try's own `busy_timeout` they total about a minute, well under `build.STALE_SECONDS`.
-LOCK_WAITS = (1, 2, 4, 8, 16)
 
 #: The child waits for one byte on its pipe, written once its group is recorded, then execs the command.
 GATE = ("import os, sys\n"
@@ -338,31 +334,6 @@ def _environ(environ: dict | None) -> dict:
     if env.get("CUSTOM_CLAUDE_CODE_OAUTH_TOKEN"):
         env["CLAUDE_CODE_OAUTH_TOKEN"] = env["CUSTOM_CLAUDE_CODE_OAUTH_TOKEN"]
     return env
-
-
-class Patient:
-    """A supervisor's connection: a statement a locked database refused outside a transaction is sent again.
-
-    A statement refused outside a transaction (a `BEGIN`, a read, one
-    autocommit write) wrote nothing, so a retry cannot write twice; one
-    inside a transaction fails as it did. Each try waits its `busy_timeout`.
-    """
-
-    def __init__(self, connection):
-        self.connection = connection
-
-    def __getattr__(self, name: str):
-        return getattr(self.connection, name)
-
-    def execute(self, sql: str, parameters=()):
-        for wait in (*LOCK_WAITS, None):
-            try:
-                return self.connection.execute(sql, parameters)
-            except sqlite3.OperationalError as error:
-                if wait is None or self.connection.in_transaction or not (
-                        "locked" in str(error) or "busy" in str(error)):
-                    raise
-            time.sleep(wait)
 
 
 class Supervisor:

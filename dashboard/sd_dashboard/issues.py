@@ -135,8 +135,6 @@ def intake(connection: sqlite3.Connection) -> dict:
         found = read(connection)
     except sqlite3.OperationalError as failure:
         reason = str(failure) or "the issue intake could not be read"
-        if "no such column: github_issues" in reason:
-            reason += "; run sd-db migrate"
         return {"intake": [], "intake_error": reason}
     except (SdDbError, sqlite3.Error) as failure:
         return {"intake": [], "intake_error": str(failure) or "the issue intake could not be read"}
