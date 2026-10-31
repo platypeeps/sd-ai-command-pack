@@ -28,9 +28,9 @@ which edits the draft to follow each ruling and leaves the edit uncommitted; it 
 before one is answered.
 
 **Apply review on a piece** (pack sd:6699). Writing posts `/api/items/<id>/fix` with `{"apply": "adversarial"}` for a
-piece whose `adversarial.md` exists: step 2 then starts claude on `APPLY`, which edits the draft for each finding or
-rejects it with a reason, records each with `sd writing reconcile`, and leaves the edit an uncommitted diff in the
-piece's repository. It commits, stages and publishes nothing.
+piece whose `adversarial.md` digest stamp names the current draft (pack sd:6977): step 2 then starts claude on `APPLY`,
+which edits the draft for each finding or rejects it with a reason, records each with `sd writing reconcile`, and
+leaves the edit an uncommitted diff in the piece's repository. It commits, stages and publishes nothing.
 
 **Fix on a Today Now row** (sd:5652). Today posts `/api/now/fix` with a Now row's id for the rows no other command
 addresses: a repo ahead, dirty or pinned, the abandoned worktrees, and every dark row but the pull request collector's
@@ -156,7 +156,7 @@ def start(connection, item: int, *, expected_revision: str, who: str, grill: str
         if grill:
             _grillable(row, state["notes"], grill)
         if apply:
-            _reviewed(row)
+            _reviewed(connection, row)
         directory = checkout(row)
         session = ({"ask": "grill", "apply": "apply-answers"}.get(grill)
                    or ("apply-review" if apply else "debug" if row["kind"] == "report" else "builder"))
@@ -187,14 +187,17 @@ def _grillable(row: dict, notes: list[dict], grill: str) -> None:
         raise workflow.WorkflowError("no grill question is answered yet; answer one grill question first")
 
 
-def _reviewed(row: dict) -> None:
-    """Apply review's item: a piece with an `adversarial.md`, else `WorkflowError` naming what is missing."""
+def _reviewed(connection, row: dict) -> None:
+    """Apply review's item: a piece whose `adversarial.md` digest stamp names the current draft (pack sd:6977), else
+    `WorkflowError` naming its state: missing, unstamped or stale."""
     from sd_db import writing
 
     if row["kind"] != "idea" or not row.get("piece"):
         raise workflow.WorkflowError(f"item {row['id']} is not a writing piece; Apply review applies a piece's review")
-    if not writing.piece_files(row).get("adversarial.md"):
-        raise workflow.WorkflowError(f"{row['piece']} has no adversarial.md; run Refresh review first")
+    report = writing.piece_state(connection, row["id"])["writing"]["gates"]["companions"].get("adversarial")
+    if not report or report["state"] != "current":
+        said = f"{report['state']}: {report['detail']}" if report else "not readable"
+        raise workflow.WorkflowError(f"{row['piece']} adversarial.md is {said}; run Refresh review first")
 
 
 def _launch(directory: Path, label: str, text: str):

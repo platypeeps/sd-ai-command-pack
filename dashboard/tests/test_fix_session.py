@@ -389,18 +389,20 @@ def mock_lanes(read):
 class TheApplyReview(FixCase):
     """pack sd:6699: Apply review on a piece starts claude on the fixed apply prompt, in the piece's repository."""
 
-    def piece(self, report=True):
+    def piece(self, report="current"):
+        """A piece whose adversarial.md is `current` (stamped with its draft's digest), `unstamped`, or None: absent."""
         from sd_db import upsert_repo, writing
 
         folder = self.work / "content" / "2026" / "fixture"
         folder.mkdir(parents=True)
         (folder / "index.md").write_text("---\ntitle: Fixture piece\nstatus: review\n---\n\n## Draft\n\nAn argument.\n")
-        if report:
-            (folder / "adversarial.md").write_text("Adversarial fixture report\n")
         upsert_repo(self.connection, str(self.work), pieces_source="file")
-        item = writing.import_piece(self.connection, str(self.work), "2026/fixture", who="operator")["item"]["id"]
+        state = writing.import_piece(self.connection, str(self.work), "2026/fixture", who="operator")
         upsert_repo(self.connection, str(self.work), pieces_source="row")
-        return item
+        stamp = f"<!-- reconciled-with-draft: {state['writing']['gates']['digest']} on 2026-09-20 gen=0 -->\n\n"
+        if report:
+            (folder / "adversarial.md").write_text((stamp if report == "current" else "") + "Adversarial fixture report\n")
+        return state["item"]["id"]
 
     def test_apply_review_starts_the_apply_prompt_in_the_pieces_repository(self):
         self.running()
@@ -422,6 +424,16 @@ class TheApplyReview(FixCase):
             self.assertEqual(status, 400, said)
         self.assertEqual(self.calls(), [])
         self.assertEqual(self.fix(self.task(), apply="other")[0], 400)
+
+    def test_apply_review_refuses_a_report_that_answers_no_current_draft(self):
+        """pack sd:6977: an adversarial.md that exists but carries no stamp of this draft is not a current review."""
+        self.running()
+        item = self.piece(report="unstamped")
+        status, _, said = self.fix(item, apply="adversarial")
+        self.assertEqual(status, 400, said)
+        self.assertIn("adversarial.md is unstamped", said["error"])
+        self.assertIn("run Refresh review first", said["error"])
+        self.assertEqual(self.calls(), [])
 
 
 class TheGrill(FixCase):

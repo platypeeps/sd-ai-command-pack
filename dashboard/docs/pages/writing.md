@@ -12,8 +12,9 @@ because going back is a correction. Correct asks for a reason and posts the
 same route with `correct`. Park and Revive post `/park` and `/revive` and
 undo each other. Publish and Capture are copy only. Refresh review posts
 `/api/adversarial` with kind `piece`: codex reads the draft in the
-background and rewrites `adversarial.md` (pack sd:6699). Once that file is
-newer than the draft, Apply review asks first and posts `/fix` with
+background and rewrites `adversarial.md` (pack sd:6699). Once that file's
+digest stamp names the current draft (pack sd:6977; file times do not
+count), Apply review asks first and posts `/fix` with
 `apply: adversarial`: claude edits the draft for each finding or rejects it
 with a reason, records each with `sd writing reconcile`, and leaves the edit
 uncommitted. It publishes nothing. The page reads through

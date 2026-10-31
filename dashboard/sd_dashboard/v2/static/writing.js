@@ -225,7 +225,8 @@ addEventListener('DOMContentLoaded', () => {
   // each other's inverse, so each undoes the other with the revision its own write returned.
   let target = null, reading = null;
   const P_ = o => byId(o.id);
-  const reviewed = p => { const a = p.files['adversarial.md'], d = p.files['index.md']; return !!(a && d && a.mtime > d.mtime); };
+  // pack sd:6977: the report's digest stamp says whether it answers this draft; file times do not.
+  const reviewed = p => { const a = p.adversarial; return a?.state === 'current' || `adversarial.md is ${a ? `${a.state}: ${a.detail}` : 'not readable'}; run Refresh review first`; };
   const nextOf = p => target && p.next.includes(target) ? target : p.next[0];
   const write = (p, suffix, body) => window.shell.post(`/api/items/${p.id}/${suffix}`, { ...body, revision: p.revision })
     .then(out => { reading?.reread(); return out; }, e => { reading?.load(); throw e; });
@@ -290,7 +291,7 @@ addEventListener('DOMContentLoaded', () => {
       when: o => { const p = P_(o); return !p ? 'not listed' : p.words ? true : 'no draft to review yet'; } }),
     // Apply review is the shared Fix with apply: adversarial; the page reads again once the session starts.
     window.commands.applyReview('piece', { item: o => P_(o).id,
-      ready: o => { const p = P_(o); return !p ? 'not listed' : reviewed(p) || 'adversarial.md is older than the draft; run Refresh review first'; },
+      ready: o => { const p = P_(o); return !p ? 'not listed' : reviewed(p); },
       post: fixPost }),
   ];
   // A piece's review that lands rewrites adversarial.md, so the page reads again for its time.

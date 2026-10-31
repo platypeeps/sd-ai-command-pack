@@ -109,6 +109,16 @@ class TheDocument(Pieces):
                          {"claim": "c1aim0000000", "url": "https://example.test/p", "phase": "published", "href": "https://example.test/p"})
         self.assertIsNone(by[self.ids["parked"]]["publication"]["href"])
 
+    def test_each_piece_carries_its_adversarial_reports_currency_against_the_draft(self):
+        """pack sd:6977: the digest stamp Apply review gates on; an unstamped report is not current however new it is."""
+        folder = self.root / "content" / "2026" / "fixture"
+        by = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}
+        self.assertEqual(by[self.ids["fixture"]]["adversarial"]["state"], "unstamped")
+        digest = writing.piece_state(self.connection, self.ids["fixture"])["writing"]["gates"]["digest"]
+        (folder / "adversarial.md").write_text(f"<!-- reconciled-with-draft: {digest} on 2026-09-20 gen=0 -->\n\nReport\n")
+        by = {p["id"]: p for p in writing_screen.document(self.connection, now=NOW)["pieces"]}
+        self.assertEqual(by[self.ids["fixture"]]["adversarial"], {"state": "current", "detail": f"draft {digest}"})
+
     def test_each_piece_carries_its_open_grill_questions_and_its_rulings(self):
         # pack sd:6700: the piece's open question notes, oldest first, each with its options; and the count it ruled.
         from sd_dashboard import decisions
@@ -187,7 +197,8 @@ def piece(id, title, stage, **fields):
              "owner": "row", "ready_recorded": False, "publication": None, "next": [], "corrections": [],
              "files": {"index.md": {"bytes": 4096, "mtime": "2026-09-20T10:00:00Z"}, "research.md": {"bytes": 2048, "mtime": "2026-09-19T10:00:00Z"},
                        "fact-check.md": {"bytes": 1024, "mtime": "2026-09-19T10:00:00Z"}, "adversarial.md": {"bytes": 1024, "mtime": "2026-09-19T10:00:00Z"}},
-             "draft": ["First paragraph.", "Second paragraph."], "words": 1200, "grill": {"open": [], "answered": 0}}
+             "draft": ["First paragraph.", "Second paragraph."], "words": 1200, "grill": {"open": [], "answered": 0},
+             "adversarial": {"state": "stale", "detail": "reconciled with 0123456789ab, draft is now ba9876543210"}}
     entry.update(fields)
     return entry
 
@@ -399,11 +410,15 @@ R.icon = btn.html;""")
         self.assertIn("Adversarial review written · run piece-12-20260920T100000Z · /w/adversarial.md", toasts)
         self.assertEqual(out["gets"][-1], "/api/writing", "the page did not read again once the review landed")
 
-    def test_apply_review_shows_once_adversarial_md_is_newer_than_the_draft(self):
-        """pack sd:6699: Apply review asks first, then posts Fix with apply: adversarial and the revision."""
-        newer = "DOC.pieces[1].files['adversarial.md'] = { bytes: 1024, mtime: '2026-09-21T10:00:00Z' };\n"
-        out = self.run_page("R.off = [cmd('piece.apply-review').when(C.get('12')), cmd('piece.apply-review').when(C.get('11'))];")
-        self.assertEqual(out["R"]["off"], ["adversarial.md is older than the draft; run Refresh review first"] * 2)
+    def test_apply_review_shows_once_adversarial_md_answers_the_current_draft(self):
+        """pack sd:6699: Apply review asks first, then posts Fix with apply: adversarial and the revision. pack sd:6977:
+        the report's digest stamp decides, not file times: a newer stale report stays off, an older current one is on."""
+        stale = "DOC.pieces[1].files['adversarial.md'] = { bytes: 1024, mtime: '2026-09-21T10:00:00Z' };\n"
+        out = self.run_page("R.off = [cmd('piece.apply-review').when(C.get('12')), cmd('piece.apply-review').when(C.get('11'))];",
+                            prelude=stale)
+        self.assertEqual(out["R"]["off"], ["adversarial.md is stale: reconciled with 0123456789ab, draft is now ba9876543210;"
+                                           " run Refresh review first"] * 2)
+        newer = "DOC.pieces[1].adversarial = { state: 'current', detail: 'draft ba9876543210' };\n"
         out = self.run_page("R.on = cmd('piece.apply-review').when(C.get('12')); shellRun(cmd('piece.apply-review'), C.get('12')); await flush();",
                             answer="(path) => path === '/api/writing' ? [200, DOC] : [200, { fix: { session: 'apply-review', pane: 'w9:p1' } }]",
                             prelude=newer)
