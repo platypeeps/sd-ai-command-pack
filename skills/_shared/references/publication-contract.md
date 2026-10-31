@@ -520,7 +520,8 @@ Draining is six steps per request, and the order matters:
      update with no properties writes nothing and still goes to step 6. A
      plan that refuses exits 1 and records nothing: report it and leave the
      request. A refusal that ends with `Option:` lines is a question: file it
-     on the item with `sd task note <n> '<text>' --kind question` unless an
+     on the item with `sd task note <n> '<text>' --kind question`, the
+     pick marked ` (Recommended)` (the note refuses one with none), unless an
      open question already says the same, and leave the request. Never
      create a row the plan did not print, and never edit the schema or add
      a select option.

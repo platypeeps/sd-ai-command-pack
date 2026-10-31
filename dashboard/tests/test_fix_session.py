@@ -384,3 +384,67 @@ def mock_lanes(read):
     from sd_dashboard import now_screen
 
     return patch.object(now_screen, "_lanes", read)
+
+
+class TheGrill(FixCase):
+    """pack sd:6700: Grill on a piece starts claude on the fixed grill prompt; Apply answers on the answers prompt."""
+
+    def piece(self):
+        from sd_db import upsert_repo, writing
+
+        folder = self.work / "content" / "2026" / "fixture"
+        folder.mkdir(parents=True)
+        (folder / "index.md").write_text("---\ntitle: Fixture piece\nstatus: review\n---\n\n## Draft\n\nAn argument.\n")
+        upsert_repo(self.connection, str(self.work), pieces_source="file")
+        item = writing.import_piece(self.connection, str(self.work), "2026/fixture", who="operator")["item"]["id"]
+        upsert_repo(self.connection, str(self.work), pieces_source="row")
+        return item
+
+    def ask(self, item, body="Who is this for?\nOption: Engineers\nOption: Managers\nRecommendation: Engineers"):
+        return workflow.add_item_note(self.connection, item, kind="question", who="claude", body=body)["note"]
+
+    def test_grill_starts_the_grill_prompt_in_the_pieces_repository(self):
+        self.running()
+        item = self.piece()
+        status, _, state = self.fix(item, grill="ask")
+        self.assertEqual(status, 200, state)
+        self.assertEqual(self.calls()[1][3], str(self.work))
+        self.assertEqual(self.calls()[3][3], fix_session.prompt("idea", item, grill="ask"))
+        self.assertIn(f"`sd task note {item} ", self.calls()[3][3])
+        self.assertIn("--kind question", self.calls()[3][3])
+        self.assertEqual(state["fix"]["session"], "grill")
+
+    def test_apply_answers_waits_for_every_question_and_one_ruling(self):
+        self.running()
+        item = self.piece()
+        for says in ("answer one grill question first", "1 grill question is open"):
+            with self.subTest(says=says):
+                if says.startswith("1"):
+                    self.ask(item)
+                status, _, answer = self.fix(item, grill="apply")
+                self.assertEqual(status, 400, answer)
+                self.assertIn(says, answer["error"])
+        self.assertEqual(self.calls(), [])
+
+    def test_apply_answers_starts_the_answers_prompt_once_answered(self):
+        from sd_dashboard import decisions
+
+        self.running()
+        item = self.piece()
+        note = self.ask(item)
+        decisions.answer(self.connection, item, note["id"], "Engineers", expected_revision=self.revision(item), who="dashboard")
+        status, _, state = self.fix(item, grill="apply")
+        self.assertEqual(status, 200, state)
+        self.assertEqual(self.calls()[3][3], fix_session.prompt("idea", item, grill="apply"))
+        self.assertIn("Ruling on note #", self.calls()[3][3])
+        self.assertIn("Commit nothing", self.calls()[3][3])
+        self.assertEqual(state["fix"]["session"], "apply-answers")
+
+    def test_grill_on_a_task_and_a_bad_grill_value_launch_nothing(self):
+        self.running()
+        task = self.task()
+        status, _, answer = self.fix(task, grill="ask")
+        self.assertEqual(status, 400)
+        self.assertIn("is not a writing piece", answer["error"])
+        self.assertEqual(self.fix(task, grill="other")[0], 400)
+        self.assertEqual(self.calls(), [])

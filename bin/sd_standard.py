@@ -7,7 +7,7 @@ from GitHub (design: system `docs/work/2026-10-21-manage-standard/design.md`):
     review declaration's `copilot_review.automatic_deep` false;
   * GitHub, for an owner in `sd.fleet_owners` only: squash commits built from
     PR_TITLE / PR_BODY, rebase merging off, head branches deleted on merge,
-    Issues only where `repo.github_issues` takes them, no Wiki or Projects,
+    Issues only where `policy.issues` reads or asks, no Wiki or Projects,
     secret scanning and push protection on a public repository, classic
     protection on the default branch (`sd/local-gate` strict, admins
     enforced, a pull request with 0 approvals), and Actions as `sd ci local`
@@ -356,7 +356,7 @@ def _file_stamp_item(connection: Any, path: str, paths: str) -> None:
     from sd_db import workflow  # noqa: PLC0415
 
     if open_stamp_item(connection, path) is None:
-        workflow.capture_task(connection, title=STAMP_TITLE, repo=path, who=WHO,
+        workflow.capture_task(connection, title=STAMP_TITLE, repo=path, who=WHO, priority=3,  # sd:6726
                               body=f"`sd fleet standard` found these tracked fleet files out of date: {paths}. "
                                    "Run `sd fleet stamp` in a worktree on a feature branch and ship the result.")
 
@@ -446,7 +446,7 @@ def build_plan(root: pathlib.Path, sources: Sources) -> Plan:
     if owned and not (isinstance(repo.get("permissions"), dict) and repo["permissions"].get("admin") is True):
         raise StandardRefusal(f"{slug}: this token has no admin on the repository, so its settings cannot be "
                               "changed")
-    takes_issues = bool(row["github_issues"]) if "github_issues" in row.keys() else False
+    takes_issues = repos.issues_policy(sources.connection, row["path"]) != "off"
     steps = (github_steps(sources.call, repo, takes_issues) if owned else
              [Step("G", "github", "GitHub settings", "skip", "employer repository: its owner sets them")])
     steps += checkout_steps(root, row, sources) + row_steps(sources.connection, row)

@@ -28,6 +28,7 @@ import sd_local_gate
 import sd_ship_body
 import sd_ship_dispositions as sd_ship_dispositions
 import sd_ship_hold
+import sd_ship_jenkins
 import sd_ship_squash
 from sd_ship_bindings import binding_manifest, review_binding
 from sd_ship_history import ItemHistory, digest
@@ -1491,18 +1492,36 @@ class Ship(SharedReview):
         # Only an open pull request binds. A merged or closed one that once
         # used this branch name keeps its frozen head, so binding it refused
         # every later push as a changed head (sd:2656).
-        pulls = self.api.pages(f"{self.api.prefix}/pulls?state=open&head={quote_branch(self.repository, self.branch)}&base={base}")
-        candidates = [pull for pull in pulls if pull.get("head", {}).get("ref") == self.branch
-                      and str(pull.get("head", {}).get("repo", {}).get("full_name", "")).lower() == self.repository
-                      and pull.get("base", {}).get("ref") == base]
+        def matching(state: str) -> list[dict]:
+            pulls = self.api.pages(f"{self.api.prefix}/pulls?state={state}"
+                                   f"&head={quote_branch(self.repository, self.branch)}&base={base}")
+            return [pull for pull in pulls if pull.get("head", {}).get("ref") == self.branch
+                    and str(pull.get("head", {}).get("repo", {}).get("full_name", "")).lower() == self.repository
+                    and pull.get("base", {}).get("ref") == base]
+
+        candidates = matching("open")
         if len(candidates) > 1:
             raise Refusal("multiple PRs match this branch; resolve explicitly before continuing")
         if not candidates:
-            if self.state.get("create_dispatched"):
-                raise Refusal("prior PR creation outcome is uncertain; an empty search cannot authorize another PR")
+            # A create a 5xx left uncertain (sd:6858) may run again: GitHub
+            # makes at most one open PR per head and base, and answers 422
+            # to a second. A closed one at this head means someone closed
+            # what the create made, so that one refuses.
+            retry = bool(self.state.get("create_dispatched"))
+            if retry and any(
+                    pull.get("head", {}).get("sha") == head for pull in matching("closed")):
+                raise Refusal("the PR an earlier create made at this head is closed; reopen it or push a new head")
             self.save(create_dispatched=True, phase="create_dispatch")
-            pull = self.api.api(f"{self.api.prefix}/pulls", method="POST",
-                                body={"title": title, "body": body, "head": self.branch, "base": base, "draft": False})
+            try:
+                pull = self.api.api(f"{self.api.prefix}/pulls", method="POST",
+                                    body={"title": title, "body": body, "head": self.branch, "base": base,
+                                          "draft": False})
+            except Refusal:
+                # A refused retry (422) or a lost answer: the one GitHub holds, if any.
+                candidates = matching("open") if retry else []
+                if len(candidates) != 1:
+                    raise
+                pull = candidates[0]
         else:
             pull = candidates[0]
         number = pull.get("number")
@@ -1986,12 +2005,16 @@ class Ship(SharedReview):
                 for row in claim.get("criteria") or [] if row.get("passed") is False and isinstance(row.get("waived"), dict)]
 
     def squash_message(self, reviewed: str) -> tuple[str, dict]:
-        """The squash message, with the owed `Closes:` lines inside its one trailer block (sd:1600)."""
+        """The squash message, with the owed `Closes:` lines inside its one trailer block (sd:1600).
+
+        The title in `state` and the body then take the declared commit convention (`conventional`).
+        """
         body = self.squash_body(reviewed)
         carried, left = sd_ship_squash.owed_closes(
             self.connection, self.repository, body,
             lambda item: slug(self.store.identity(self.connection, item)["repo"]["remote"] or ""))
         body += "".join(f"{sd_lib.CLOSES_TRAILER} sd:{debt['item']}\n" for debt in carried)
+        self.state["title"], body = self.conventional(self.state["title"], body)
         return body, {
             "carried_closes": carried, "closes_left": [debt["item"] for debt in left]}
 
@@ -2207,7 +2230,7 @@ class Ship(SharedReview):
         # Under `repo.ci = local` no remote check is coming, and `gh pr checks
         # --watch` fails on a pull request that has none; the local gate
         # below runs to completion in this process, so it is the wait (sd:1875).
-        if self.args.watch and not self.state.get("watch_started") and self.api.ci != "local":
+        if self.args.watch and not self.state.get("watch_started") and self.api.ci != "local" and not self.jenkins_ci():
             self.save(watch_started=True)
             run(self.root, ["gh", "pr", "checks", str(observed["number"]), "--repo", self.repository,
                             "--watch", "--fail-fast"], timeout=self.args.wait_seconds)
@@ -2216,7 +2239,7 @@ class Ship(SharedReview):
         if base != self.state["base"] or metadata.get("allow_squash_merge") is not True:
             raise Refusal("default branch changed or squash merging is disabled")
         protection = self.api.gate(base, head)  # the object, or the declared gap at this head (sd:1110)
-        squash_allowed(base, protection)
+        self.merge_rules(base, observed["number"], head, protection)
         # `repo.ci = local` (sd:1843): no Actions run, so the checks run here,
         # at the reviewed head in a clean worktree, before readiness reads them.
         if self.api.ci == "local":
@@ -2254,7 +2277,7 @@ class Ship(SharedReview):
         if self.merge_head() != head:
             raise Refusal("HEAD moved immediately before merge")
         self.merge_authority()
-        self.still_gated(base, head, protection)
+        self.still_allowed(base, observed["number"], head, protection)
         # `row_authorized_merge` is written here, with the phase that says a
         # merge is going out, and it is written on every dispatch rather than
         # only when there is something to say: `still_gated` above took the
@@ -2269,13 +2292,111 @@ class Ship(SharedReview):
         self.still_hosted()
         try:
             self.api.api(f"{self.api.prefix}/pulls/{observed['number']}/merge", method="PUT",
-                         body={"sha": head, "merge_method": "squash", "commit_title": f"{title} (#{observed['number']})",
+                         body={"sha": head, "merge_method": "squash", "commit_title": f"{self.state['title']} (#{observed['number']})",
                                "commit_message": body})
         except Refusal:
             # A response can be lost after GitHub merged. Read back the same
             # PR once; never call merge again to discover what happened.
             return self.reconcile()
         return self.reconcile()
+
+    def merge_rules(self, base: str, number: int, head: str, protection: dict) -> None:
+        """The base ruleset's merge methods, the repository's policy (sd:6715), then its Jenkins job (sd:6880)."""
+        squash_allowed(base, protection)
+        self.freeze_hold()
+        self.policy_hold(number, head)
+        jenkins = self.jenkins_ci()
+        if jenkins:  # the job the policy names is the CI, waited on at this exact head
+            sd_ship_jenkins.wait_green(jenkins, number, head,
+                                       wait_seconds=self.args.wait_seconds if self.args.watch else 0)
+            self.api.jenkins_green = head
+
+    def still_allowed(self, base: str, number: int, head: str, protection: dict) -> None:
+        """`still_gated`, then the policy again: an approval can be dismissed during the gate's minutes."""
+        self.still_gated(base, head, protection)
+        self.freeze_hold()
+        self.policy_hold(number, head)
+
+    def freeze_hold(self) -> None:
+        """Refuse a merge inside the repository's freeze window, `sd-db repo freeze` (sd:6879).
+
+        Read before the gate and again just before the merge: a window can open during the gate's minutes.
+        """
+        sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+        from sd_db.writes import freeze_window
+        window = freeze_window(self.connection, self.repository)
+        if window is not None:
+            raise Refusal(f"{self.repository} is frozen until {window['until']}: {window['reason']}",
+                          code="freeze_window", state="operator_decision",
+                          next_action="Wait for the window to end, or lift it with `sd-db repo freeze <path> off`, "
+                                      "then retry merge.")
+
+    def policy_hold(self, number: int, head: str) -> None:
+        """Refuse what the repository's `policy` declaration does not allow at merge time (sd:6715).
+
+        `merge_method` other than squash refuses: the `Delivers:` and `Closes:` trailers ride the squash message,
+        so sd-ship lands no other method. `review.human` counts the human approvals of `head` GitHub holds now,
+        not at enqueue. No declaration is the managed default, squash with no human review; a policy that could
+        not be read refuses, since an org repository's rules are then unknown.
+        """
+        policy = sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py")
+        held = policy.effective(self.declared_policy())
+        if held["merge_method"] != "squash":
+            raise Refusal(f"this repository's policy declares merge_method {held['merge_method']}, and sd-ship merges "
+                          "by squash only: its Delivers: and Closes: trailers ride the squash message",
+                          code="policy_merge_method", state="operator_decision",
+                          next_action=f"Merge this pull request by hand by {held['merge_method']}, "
+                                      "or declare merge_method squash in the policy.")
+        need = held["review"].get("human") or 0
+        if not need:
+            return
+        approved = policy.approvals(self.api.pages(f"{self.api.prefix}/pulls/{number}/reviews"), head)
+        if len(approved) < need:
+            who = ", ".join(held["review"].get("reviewers") or []) or "the repository's reviewers"
+            raise Refusal(f"this repository's policy requires {need} human approval{'s' if need > 1 else ''} of "
+                          f"{head[:12]}; {len(approved)} approve it{': ' + ', '.join(approved) if approved else ''}",
+                          code="approval_required", state="operator_decision",
+                          next_action=f"Ask {who} to approve the pull request at this head, then retry merge.")
+
+    def jenkins_ci(self) -> dict | None:
+        """The policy's `ci` when it names Jenkins, else None (sd:6880)."""
+        ci = (self.declared_policy() or {}).get("ci") or {}
+        return ci if ci.get("provider") == "jenkins" else None
+
+    def declared_policy(self) -> dict | None:
+        """The repository's `policy` declaration, None for none; a failed read refuses (sd:6715)."""
+        try:
+            return sd_lib.repo_declaration(self.root, "policy")
+        except (sd_lib.DatabaseUnreadable, sd_lib.ConfigError) as error:
+            raise Refusal(f"the repository's policy was not read, so its merge rules are unknown: {error}",
+                          code="policy_unread", state="retryable_failure",
+                          next_action="Restore the workflow database read, then retry merge.") from None
+
+    def conventional(self, title: str, body: str) -> tuple[str, str]:
+        """The squash title and body under the declared `commit_convention` (sd:6715).
+
+        A footer line in the body moves into the trailer block this merge
+        appends (`footer_last`), and an alias type in the title is
+        rewritten; any other rule the message
+        breaks refuses before GitHub writes it. `title_max` counts the title,
+        not the ` (#N)` GitHub adds. No declared convention returns both as
+        they are.
+        """
+        declared = self.declared_policy()
+        if not declared or "commit_convention" not in declared:
+            return title, body
+        policy = sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py")
+        convention = declared["commit_convention"]
+        body = policy.footer_last(body, convention.get("footer"))
+        try:
+            message = policy.check_message(f"{title}\n\n{body}", convention)
+        except policy.ConventionRefused as error:
+            raise Refusal(f"this repository's commit convention refuses the squash message: {error}",
+                          code="commit_convention", state="operator_decision",
+                          next_action="Retitle the pull request or edit its body to meet the convention, "
+                                      "then retry merge.") from None
+        title, _, rest = message.partition("\n\n")
+        return title, rest if body.endswith("\n") else rest.rstrip("\n")
 
     def merge_local_gate(self, observed: dict, base: str, head: str) -> None:
         """The merge's `sd/local-gate` at `head` under `repo.ci = local`, saved on the receipt; refuse a failure."""
@@ -2997,7 +3118,7 @@ def main(argv=None) -> int:
         return 3
     try:
         from sd_db import ship
-        from sd_db.database import connect, default_path
+        from sd_db.database import Patient, connect, default_path
         from sd_db.errors import SdDbError
         from sd_db.workflow import WorkflowError
     except ImportError as error:
@@ -3012,7 +3133,8 @@ def main(argv=None) -> int:
         sd_lib.refuse_unmanaged(root, unmanaged_refusal, args.database)
         database = args.database or default_path()
         readonly = args.command in ("observe", "verify-review") or (args.command == "adjudicate" and args.dispositions_file is None)
-        connection = connect(database, write=not readonly)
+        # A write a locked database refused is sent again, not a failed lane entry (sd:6855).
+        connection = Patient(connect(database, write=not readonly))
         try:
             if args.command in ("review", "verify-review") and not args.no_item:
                 raise Refusal("item-backed review and clearance run inside prepare and merge; --no-item selects the standalone record path")

@@ -1,7 +1,8 @@
 """Queue (sd:2585): each repository's ship lane, one row per item as merging, next, building, blocked, cancelled or
 landed, read by `queue_screen`. Up, down, top, hold, release and cancel, a blocked row's retry and approve, a cancelled
 row's Re-queue and a running row's Release post /api/queue/move, which runs `sd-ship lane move|hold|release|cancel|retry` and nothing else.
-The Builds panel (pack sd:6095) reads /api/queue/builds (`builds.panel`); a blocked or cancelled run's Retry posts
+The Builds panel (pack sd:6095) reads /api/queue/builds (`builds.panel`), with ?show=all the ended runs too (pack
+sd:6834); a blocked or cancelled run's Retry posts
 /api/queue/builds/retry, and its Send to builder posts the same route with a `finding` (pack sd:6020); a running
 build's Cancel posts the assignment cancel route that exists."""
 
@@ -19,7 +20,8 @@ def _read(read):
 def _builds(read):
     from ... import builds
 
-    return builds.panel(read.connection, now=read.now)
+    shown = (read.parameters.get("show") or ["active"])[0]
+    return builds.panel(read.connection, now=read.now, show="all" if shown == "all" else "active")
 
 
 def _retry(payload, principal):
@@ -52,7 +54,7 @@ PAGE = Page(
     routes=("/queue",),
     html="queue.html",
     item="sd:2585",
-    api=(Api("/api/queue", _read), Api("/api/queue/move", write=_move), Api("/api/queue/builds", _builds),
+    api=(Api("/api/queue", _read), Api("/api/queue/move", write=_move), Api("/api/queue/builds", _builds, query=True),
          Api("/api/queue/builds/retry", write=_retry)),
     # No rail badge (sd:5921): a blocked entry is a broken row of Today's Needs you, which counts it there.
 )

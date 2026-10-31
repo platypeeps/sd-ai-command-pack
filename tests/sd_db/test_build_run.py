@@ -24,7 +24,16 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from sd_db import build, build_run, draft, operations, runner, sessions
+from sd_db import (
+    build,
+    build_run,
+    database,
+    draft,
+    operations,
+    runner,
+    sessions,
+    writes,
+)
 from sd_db.database import connect
 from sd_db.migrate import initialise
 from sd_db.ship import this_host
@@ -362,7 +371,7 @@ class Supervise(Case):
         self.press()
         self.write_pr()
         self.plan(claude=["pass"], sd_review=["clean"])
-        add_note(self.db, self.items[0], "question", "Which option?")
+        add_note(self.db, self.items[0], "question", "Which option?\nOption: Yes (Recommended)\nOption: No")
         ended = self.supervisor().run()
         self.assertEqual(ended["outcome"], "blocked")
         self.assertIn("open question", ended["blocked"])
@@ -372,7 +381,7 @@ class Supervise(Case):
         self.press(2)
         self.write_pr()
         self.plan(claude=["pass"], sd_review=["clean"])
-        add_note(self.db, self.items[1], "question", "Which option?")
+        add_note(self.db, self.items[1], "question", "Which option?\nOption: Yes (Recommended)\nOption: No")
         self.assertEqual(self.supervisor().run()["step"], "enqueued")
         enqueue = next(call["argv"] for call in self.calls("sd-ship") if "enqueue" in call["argv"])
         self.assertEqual([enqueue[n + 1] for n, arg in enumerate(enqueue) if arg == "--item"], [str(self.items[0])])
@@ -433,6 +442,10 @@ class Supervise(Case):
         self.assertIs(build.Probe.group(leader.pid), False)
         self.assertTrue(self.supervisor().end_group(leader.pid))
 
+    def questions(self):
+        return [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ? AND kind = 'question'",
+                                                       (self.items[0],))]
+
     def test_judge_last_line_not_exit(self):
         """Failure table, Judge: exit 0 (here 3) with a permission denial blocks with a question; the exit code is no verdict."""
         self.press()
@@ -440,10 +453,13 @@ class Supervise(Case):
         ended = self.supervisor().run()
         self.assertEqual(ended["outcome"], "blocked")
         self.assertEqual(self.statuses(), ["blocked"])
-        question = self.db.execute("SELECT body FROM note WHERE item = ? AND kind = 'question'",
-                                   (self.items[0],)).fetchone()
-        self.assertIn("denied Bash", question["body"])
+        self.assertEqual(len(self.questions()), 1)
+        self.assertIn("denied Bash", self.questions()[0])
         self.assertEqual(self.calls("sd-review"), [], "no review after a denial")
+        # pack sd:6708: a first denial looks transient, so the pick is a requeue.
+        _, options = writes.parse(self.questions()[0])
+        self.assertEqual(writes.recommended(self.questions()[0], options),
+                         options.index("Requeue as is (Recommended)"))
 
     def test_a_success_line_passes_whatever_the_exit_code(self):
         self.press()
@@ -630,7 +646,7 @@ class Supervise(Case):
                                           grace=0.5)
         supervisor.logs.mkdir(parents=True, exist_ok=True)
         locked.armed = True
-        with mock.patch.object(build_run, "LOCK_WAITS", (0.01,)):
+        with mock.patch.object(database, "LOCK_WAITS", (0.01,)):
             code = supervisor.child([*self.tools.claude, "-p", "x"], cwd=self.root, name="locked")
         self.assertFalse(locked.armed, "the lock was met")
         self.assertEqual(code, 0)

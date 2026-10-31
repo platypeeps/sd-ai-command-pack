@@ -974,6 +974,27 @@ class Runner(Lane):
             sd_lane.run_lane(self.repo, environ, self.ship)
         self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
 
+    def test_a_frozen_repository_claims_no_entry_until_the_window_ends(self) -> None:
+        """sd:6879. A freeze window holds the lane: every entry stays pending, and a lift lets the run take them."""
+        import sd_db
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            sd_db.set_freeze(connection, self.store().repository, "2099-01-01T00:00:00Z", "release",
+                         now="2098-12-31T00:00:00Z")
+        finally:
+            connection.close()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.calls, [row["status"] for row in self.entries()]), ([], ["pending"]))
+        self.assertIn("is frozen until 2099-01-01T00:00:00+00:00: release", answer["stopped"])
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            sd_db.set_freeze(connection, self.store().repository, None)
+        finally:
+            connection.close()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
+
     def test_no_gate_load_limit_claims_whatever_the_load(self) -> None:
         sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         with mock.patch.object(sd_lane.os, "getloadavg", lambda: (99.0, 99.0, 99.0)):
@@ -2569,6 +2590,53 @@ class CitedCloses(SharedQueue):
                          (sd_lane.HUB_UNAVAILABLE, [], False))
 
 
+class CommitConvention(SharedQueue):
+    """sd:6715, run 210 blocker: enqueue applies the repository's declared `commit_convention` to the title
+    and each branch commit, before anything is pushed or queued. A lane merge commit is exempt."""
+
+    CONVENTION = {"types": ["feat", "fix", "doc"], "aliases": {"docs": "doc"}, "body": "required",
+                  "footer": r"^Ref: LOG-\d+$"}
+
+    def declare(self, convention: dict) -> None:
+        import sd_db
+        from sd_db.repos import set_declaration
+        self.register_items(0)
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            set_declaration(connection, str(self.repo), "policy", {"mode": "org", "commit_convention": convention})
+        finally:
+            connection.close()
+
+    def enqueue(self, tree: pathlib.Path, title: str) -> dict:
+        return sd_lane.enqueue_entry(tree, 1, title, self.body, self.environ, claim="deliver")
+
+    def test_a_commit_the_convention_refuses_is_named_before_any_push(self) -> None:
+        self.declare(self.CONVENTION)
+        tree, [bare, alias, _] = self.committed(
+            "topic", "fix: no body", "docs: words\n\nWhy.\n\nRef: LOG-1", "fix: good\n\nWhy.\n\nRef: LOG-2")
+        with self.assertRaises(sd_lane.LaneError) as refused:
+            self.enqueue(tree, "chore: the slice")
+        self.assertEqual((refused.exception.code, self.rows(), "push" in self.git_verbs, self.remote_tip("topic")),
+                         ("commit_convention", [], False, None))
+        message = str(refused.exception)
+        self.assertIn("the title: type 'chore' is not one of feat, fix, doc", message)
+        self.assertIn(f"commit {bare[:12]}: no footer line matches", message)
+        self.assertIn(f"commit {alias[:12]}: reword its subject to 'doc: words'", message)
+
+    def test_conforming_commits_and_a_lane_merge_are_queued(self) -> None:
+        self.declare(self.CONVENTION)
+        tree, _ = self.committed("topic", "fix: good\n\nWhy.\n\nRef: LOG-2")
+        git(self.repo, "commit", "-q", "--allow-empty", "-m", "main moves")
+        git(self.repo, "push", "-q", "origin", "main")
+        git(tree, "merge", "-q", "--no-ff", "-m", "chore: merge origin/main", "origin/main")
+        entry = self.enqueue(tree, "docs: the slice")
+        self.assertEqual(entry["status"], "pending")
+
+    def test_no_declared_convention_changes_nothing(self) -> None:
+        tree, _ = self.committed("topic", "chore: no body")
+        self.assertEqual(self.enqueue(tree, "chore: the slice")["status"], "pending")
+
+
 class LineLimits(SharedQueue):
     """sd:5793: enqueue refuses a title over 63 characters, or a body or commit line over 72.
 
@@ -3996,6 +4064,18 @@ class AnyHost(SharedQueue):
         answer = sd_lane.sd_ship_workflow.failure("merge", LaneElsewhere("example/pack", "build-2", None))
         self.assertEqual(answer["workflow"]["blocker"]["code"], "lane_elsewhere")
 
+    def test_enqueue_off_the_lane_host_forwards_to_it(self) -> None:
+        """Failure table, lane host routing: enqueue elsewhere records the entry for the lane host (sd:6884)."""
+        self.repo_row("build-2")
+        entry = sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
+        self.assertEqual((entry["status"], entry["forwarded_to"]), ("pending", "build-2"))
+        self.assertEqual(self.entries()[0]["forwarded_to"], "build-2")
+
+    def test_enqueue_on_the_lane_host_forwards_nothing(self) -> None:
+        self.repo_row(sd_lane.this_host())
+        entry = sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
+        self.assertNotIn("forwarded_to", entry)
+
     def test_every_verb_but_run_works_off_the_lane_host(self) -> None:
         """Failure table, verbs: with the lane on another host, the queue verbs work here; only `run` refuses."""
         import argparse
@@ -4941,7 +5021,7 @@ class HostedParallel(Lane):
                 if argv[4] == "1":
                     sd_lane.enqueue_entry(self.zeta_feature, 3, "fix: three", self.body, self.environ, manual=True,
                                           claim="deliver")
-                    late.wait(5)
+                    late.wait(60)  # bounds a hang, not a speed: a loaded gate starts item 3 late
                 else:
                     late.set()
                 seen.append(f"end {argv[4]}")
@@ -5259,6 +5339,66 @@ class FailureNotes(SharedQueue):
         self.make_dead()
         sd_lane.run_lane(self.repo, self.environ, self.ship)
         self.assertEqual([item for item, _ in self.lane_notes()], [1])
+
+
+
+#: A `dashboard.sh` whose `shots --out DIR --changed BASE` draws home in two variants, or fails with FAKE_SHOTS=fail.
+FAKE_SHOTS = """#!/bin/sh
+[ "$1 $2 $4" = "shots --out --changed" ] || exit 9
+[ "$FAKE_SHOTS" = fail ] && { echo "shots: no Chrome found" >&2; exit 1; }
+mkdir -p "$3"
+for variant in dark-1440 light-375; do : > "$3/home-$variant.png"; echo "$3/home-$variant.png"; done
+"""
+
+
+class Shots(Lane):
+    """sd:6728: the lane draws the dashboard pages a branch changed, names them in the body, records the PNGs."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.bodies: list[str] = []
+
+    def ship(self, argv: list[str], log: pathlib.Path) -> dict:
+        if argv[2] == "prepare":
+            self.bodies.append(pathlib.Path(argv[argv.index("--body-file") + 1]).read_text(encoding="utf-8"))
+        return super().ship(argv, log)
+
+    def dashboard(self) -> None:
+        script = self.feature / "dashboard" / "dashboard.sh"
+        script.parent.mkdir()
+        script.write_text(FAKE_SHOTS, encoding="utf-8")
+        script.chmod(0o755)
+        git(self.feature, "add", ".")
+        git(self.feature, "commit", "-q", "-m", "dashboard")
+
+    def run_one(self) -> dict:
+        sd_lane.enqueue_entry(self.feature, 7, "fix: Topic", self.body, self.environ, claim="deliver")
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        [entry] = self.entries()
+        return entry
+
+    def test_a_changed_page_is_named_in_the_body_and_its_pngs_on_the_entry(self) -> None:
+        self.dashboard()
+        entry = self.run_one()
+        self.assertEqual(entry["status"], "prepared")
+        self.assertEqual([pathlib.Path(file).name for file in entry["shots"]], ["home-dark-1440.png", "home-light-375.png"])
+        self.assertTrue(all(pathlib.Path(file).is_file() for file in entry["shots"]))
+        [body] = self.bodies
+        self.assertTrue(body.startswith("Item: sd:1\n\n## Screenshots\n"), body)
+        self.assertIn("\n- home: dark 1440, light 375\n", body)
+        self.assertNotIn(str(self.tmp), body)
+
+    def test_a_failed_capture_is_a_warning_and_prepare_still_runs(self) -> None:
+        self.dashboard()
+        with mock.patch.dict(os.environ, {"FAKE_SHOTS": "fail"}):
+            entry = self.run_one()
+        self.assertEqual((entry["status"], entry["shots_warning"], "shots" in entry),
+                         ("prepared", "shots: no Chrome found", False))
+        self.assertEqual(self.bodies, ["Item: sd:1\n"])
+
+    def test_a_repository_without_the_dashboard_draws_nothing(self) -> None:
+        entry = self.run_one()
+        self.assertEqual(("shots" in entry, "shots_warning" in entry, self.bodies), (False, False, ["Item: sd:1\n"]))
 
 
 if __name__ == "__main__":

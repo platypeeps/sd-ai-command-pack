@@ -13,10 +13,12 @@ from sd_db import (
     create_assignment,
     create_item,
     end_trial,
+    freeze_window,
     record_cost,
     record_skill_use,
     record_state,
     resolve_state,
+    set_freeze,
     set_item_fields,
     set_view,
     skill_use_since,
@@ -126,6 +128,17 @@ class TheOtherWrites(WriteCase):
         with self.assertRaisesRegex(sqlite3.IntegrityError, "CHECK constraint failed"):
             add_note(self.connection, item, "comment", "no", exit_code=1)
 
+    def test_a_question_carries_options_and_a_pick(self):
+        """pack sd:6708: a bare question, one option, or none recommended is refused, naming the shape."""
+        item = create_item(self.connection, kind="task", title="Ask")
+        for body in ("Which store?", "Which store?\nOption: Rows (Recommended)",
+                     "Which store?\nOption: Rows\nOption: Files"):
+            with self.subTest(body=body), self.assertRaisesRegex(SdDbError, "two or more `Option:` lines"):
+                add_note(self.connection, item, "question", body)
+        add_note(self.connection, item, "question", "Which store?\nOption: Rows (Recommended)\nOption: Files")
+        add_note(self.connection, item, "question", "Label it.\nOption: Yes\nOption: No", labelling=True)
+        self.assertEqual(len(self.notes(item, "question")), 2)
+
     def test_one_tracker_re_reading_a_url_updates_its_own_row(self):
         upsert_shadow(self.connection, tracker="github", url="u", title="first")
         upsert_shadow(self.connection, tracker="github", url="u", title="second")
@@ -186,6 +199,33 @@ class TheStateTable(WriteCase):
                 row = record_state(self.connection, "checkpoint", key="body-test", body=body)
                 stored = self.connection.execute("SELECT body FROM state WHERE id=?", (row,)).fetchone()[0]
                 self.assertEqual(json.loads(stored), body)
+
+
+class TheFreeze(WriteCase):
+    """A repository's freeze window (sd:6879): a `freeze` state row per
+    write, keyed by owner/name, the latest the answer, the reader's clock
+    the end."""
+
+    NOW = "2026-10-10T12:00:00Z"
+
+    def test_a_window_holds_until_its_end_and_a_lift_ends_it(self):
+        set_freeze(self.connection, "Example/Pack", "2026-10-11T08:00:00-06:00", "release", now=self.NOW)
+        held = {"until": "2026-10-11T14:00:00+00:00", "reason": "release"}
+        self.assertEqual(freeze_window(self.connection, "example/pack", now=self.NOW), held)
+        self.assertIsNone(freeze_window(self.connection, "example/other", now=self.NOW))
+        self.assertIsNone(freeze_window(self.connection, "example/pack", now="2026-10-11T14:00:00Z"))
+        set_freeze(self.connection, "example/pack", None)
+        self.assertIsNone(freeze_window(self.connection, "example/pack", now=self.NOW))
+
+    def test_a_bad_window_is_refused_and_an_unreadable_row_freezes(self):
+        for target, until, reason in (("pack", "2026-10-11T00:00:00Z", "r"),
+                                      ("example/pack", "2026-10-09T00:00:00Z", "r"),
+                                      ("example/pack", "2026-12-30T00:00:00Z", "r"),
+                                      ("example/pack", "2026-10-11T00:00:00Z", " ")):
+            with self.subTest(target=target, until=until), self.assertRaises(SdDbError):
+                set_freeze(self.connection, target, until, reason, now=self.NOW)
+        record_state(self.connection, "freeze", key="example/pack", body={"until": "soon"})
+        self.assertEqual((freeze_window(self.connection, "example/pack", now=self.NOW) or {}).get("until"), "unknown")
 
 
 class TheSnooze(WriteCase):

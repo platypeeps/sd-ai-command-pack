@@ -19,6 +19,7 @@ import os
 import shlex
 import sqlite3
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .. import channels, credentials, judgment, records, removal, review, usage
@@ -35,6 +36,7 @@ from ..repos import (
     absolute_under_home,
     clone_lines,
     declarations,
+    issues_policy,
     item_ref,
     item_refs,
     registered,
@@ -486,8 +488,27 @@ REVIEW_USAGE = ("sd-db review: takes `file <batch.json>`, `file --kev <file.json
                 "`export <item> [--key <file>] --out <path> [--format review|reviews]` or `apply <queue>`")
 
 
+def _review_priorities() -> int:
+    """`review priorities`: the nightly priority sweep (`sd_db.priority_sweep`, sd:6726)."""
+    from .. import priority_sweep
+
+    connection = _open_for_write()
+    try:
+        done = priority_sweep.sweep(connection, who=getpass.getuser(), now=datetime.now(timezone.utc))
+    finally:
+        connection.close()
+    print(f"sd-db: priority sweep ranked {len(done['ranked'])}, closed {len(done['closed'])} unranked after "
+          f"{priority_sweep.CLOSE_DAYS} days, asked {done['asked']}"
+          + (f" in sd:{done['batch']}" if done["batch"] else ""))
+    for item in done["closed"]:
+        print(f"sd-db: closed sd:{item}: no priority after {priority_sweep.CLOSE_DAYS} days")
+    for item, reason in done["held"]:
+        print(f"sd-db: kept sd:{item} open: {reason}")
+    return 0
+
+
 def command_review(argv: list[str]) -> int:
-    """`review file|export|apply`: the review queue's plumbing (`sd_db.review`, sd:3635).
+    """`review file|export|apply|priorities`: the review queue's plumbing (`sd_db.review`, sd:3635).
 
     `file` files a batch file and prints what it dropped; `export` writes the
     batch's labels as JSONL through a `.part` file, and with `--key` closes a
@@ -512,6 +533,8 @@ def command_review(argv: list[str]) -> int:
                 and options.get("format", "review") in ("review", "reviews")):
             return _review_export(int(item), options.get("key"), Path(options["out"]),
                                   as_reviews=options.get("format") == "reviews")
+    if action == "priorities" and not rest:
+        return _review_priorities()
     if action == "apply" and len(rest) == 1:
         connection = _open_for_write()
         try:
@@ -628,8 +651,9 @@ def command_repo(argv: list[str]) -> int:
     `repo ci <path> <github|local>`, `repo lane-host <path> <host|hub>`,
     `repo channels <path> [obsidian=.. notion=.. drive=.. feed=URL jira=KEY github=OWNER/NAME email=LABEL,.. | none]`,
     `repo clones <path> <P,Q | none | +P | -P>`, `repo dependabot <path> <yes|no>`,
-    `repo github-issues <path> <on|off>`, `repo jira-project <path> <KEY|off>`,
-    `repo declare <path> [KIND [JSON|off]]`, `repo remove <path> ...`.
+    `repo github-issues <path> <off|read|ask>`, `repo jira-project <path> <KEY|off>`,
+    `repo declare <path> [KIND [JSON|off]]`, `repo freeze <path> [UNTIL REASON | off]`,
+    `repo remove <path> ...`.
 
     The `repo` table is what criterion 6 enumerates from, so an empty one
     makes that criterion pass over nothing. `add` and `seed` are the two ways
@@ -651,22 +675,26 @@ def command_repo(argv: list[str]) -> int:
     sweep's list outside its owner rule. `seed --clones PROFILE` adds PROFILE
     to the row of each line repo-sync's lists give it, and `list --clones
     PROFILE` prints those lines back, `<subdir> <owner/repo>`, for repo-sync.
-    `github-issues` sets `repo.github_issues` (sd:4827): whether the
-    repository takes third-party GitHub issues.
+    `github-issues` sets the `policy` declaration's `issues` key (sd:4827,
+    pack sd:6849): whether agents read the repository's third-party GitHub
+    issues (`read`), and draft writes the operator approves (`ask`).
     `jira-project` sets `repo.jira_project` (sd:5103): the Jira project the
     dashboard files a sanitized issue in, or `off`. `list` does not show it,
     so no reader that counts fields moves. `declare` prints or sets
     `repo.declarations` (sd:5109), the objects the pack's readers once read
     from `.github/sd-<kind>.json`; `bin/sd-db` checks a kind's object with its
-    reader before this writes it.
+    reader before this writes it. `freeze` prints, sets or lifts the
+    repository's freeze window (sd:6879), a `freeze` state row keyed by its
+    GitHub `owner/name`: the lane claims nothing and `sd-ship merge` refuses
+    until UNTIL.
 
-    `list` prints `managed`, `ci`, `github_issues`, `lane_host`, then
+    `list` prints `managed`, `ci`, `policy.issues`, `lane_host`, then
     `runner_merge`, so the merge setting stays the last field of each row,
-    where the operator's instructions read it. `github_issues` sits before
+    where the operator's instructions read it. `policy.issues` sits before
     `lane_host` so the first four fields and the last two stay put.
     """
     verbs = ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "clones",
-             "dependabot", "github-issues", "jira-project", "declare", "remove")
+             "dependabot", "github-issues", "jira-project", "declare", "freeze", "remove")
     if not argv or argv[0] not in verbs:
         print(f"sd-db repo: expected {', '.join(verbs[:-1])} or {verbs[-1]}",
               file=sys.stderr)
@@ -736,6 +764,8 @@ def command_repo(argv: list[str]) -> int:
             return _repo_channels(connection, rest)
         if verb == "declare":
             return _repo_declare(connection, rest)
+        if verb == "freeze":
+            return _repo_freeze(connection, rest)
         if verb == "clones":
             if len(rest) != 2:
                 print("sd-db repo clones: needs a path and P,Q, none, +P or -P (P is personal, work or terra)",
@@ -753,10 +783,10 @@ def command_repo(argv: list[str]) -> int:
             return 0
         if verb == "github-issues":
             if len(rest) != 2:
-                print("sd-db repo github-issues: needs a path and on or off", file=sys.stderr)
+                print("sd-db repo github-issues: needs a path and off, read or ask", file=sys.stderr)
                 return 1
             path, before = set_github_issues(connection, rest[0], rest[1])
-            print(f"sd-db: {path} github_issues {before} -> {rest[1]}")
+            print(f"sd-db: {path} policy.issues {before} -> {rest[1]}")
             return 0
         if verb == "jira-project":
             if len(rest) != 2:
@@ -789,7 +819,7 @@ def command_repo(argv: list[str]) -> int:
         for row in rows:
             print(f"sd-db: {row['path']}  {row['remote'] or '-'}  "
                   f"{'yes' if row['managed'] else 'no'}  "
-                  f"{row['ci']}  {'on' if row['github_issues'] else 'off'}  "
+                  f"{row['ci']}  {issues_policy(connection, row['path'])}  "
                   f"{row['lane_host'] or LANE_HUB}  {row['runner_merge']}")
         return 0
     finally:
@@ -921,6 +951,29 @@ def _repo_declare(connection, rest: list[str]) -> int:
     target, before = set_declaration(connection, path, kind, declaration_value(kind, word))
     print(f"sd-db: {target} {kind} {'declared' if before is not None else 'none'} -> "
           f"{'none' if word == DECLARATION_OFF else 'declared'}")
+    return 0
+
+
+def _repo_freeze(connection, rest: list[str]) -> int:
+    """`repo freeze PATH` prints the open window, `PATH UNTIL REASON` sets one, `PATH off` lifts it (sd:6879)."""
+    from ..protection import github_slug
+    from ..writes import freeze_window, set_freeze
+
+    if not rest or len(rest) == 2 and rest[1] != "off" or len(rest) > 3:
+        print("sd-db repo freeze: needs a path, then nothing, off, or an end time and a reason", file=sys.stderr)
+        return 1
+    row = row_for(connection, rest[0])
+    found = github_slug(row["remote"]) if row is not None else None
+    if found is None:
+        raise SdDbError(f"sd-db repo freeze: {rest[0]} is not a registered repository with a GitHub remote")
+    target = "/".join(found).lower()
+    if len(rest) == 2:
+        set_freeze(connection, target, None)
+    elif len(rest) == 3:
+        set_freeze(connection, target, rest[1], rest[2])
+    window = freeze_window(connection, target)
+    print(f"sd-db: {target} frozen until {window['until']}: {window['reason']}" if window else
+          f"sd-db: {target} not frozen")
     return 0
 
 

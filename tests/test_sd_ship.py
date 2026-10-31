@@ -1616,6 +1616,103 @@ roles:
             self.assertEqual(self.merge()["phase"], "merged")
         self.assertEqual(self.operation().state["copilot_reviews"][0]["status"], "completed")
 
+    def test_a_freeze_window_refuses_the_merge_and_a_lift_lets_it_land(self):
+        """sd:6879. sd-ship merge reads the repository's freeze window before the gate and refuses inside it."""
+        from sd_db.writes import set_freeze
+        self.prepare()
+        repository = self.operation().repository
+        set_freeze(self.connection, repository, "2099-01-01T00:00:00Z", "release 4.2", now="2098-12-31T00:00:00Z")
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, "is frozen until 2099-01-01T00:00:00\\+00:00: release 4.2") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "freeze_window")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        set_freeze(self.connection, repository, None)
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_policy_merge_method_other_than_squash_refuses_before_any_merge(self):
+        """sd:6715. sd-ship merges by squash only: its trailers ride the squash message. A policy that says
+        rebase or merge refuses, naming it, rather than landing a squash the repository did not ask for."""
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "rebase"})
+        self.prepare()
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, "policy declares merge_method rebase") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "policy_merge_method")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+
+    def test_the_squash_message_takes_the_declared_convention(self):
+        """sd:6715, run 210 blocker. The squash subject's alias type is rewritten before GitHub writes it; a
+        squash message the convention still refuses (no footer) refuses the merge, naming the rule."""
+        set_declaration(self.connection, str(self.operator), "policy", {"commit_convention": {
+            "types": ["doc", "fix"], "aliases": {"docs": "doc"}, "footer": r"^Ref: LOG-\d+$"}})
+        self.prepare("--title", "docs: words")
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, r"no footer line matches") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "commit_convention")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        set_declaration(self.connection, str(self.operator), "policy", {"commit_convention": {
+            "types": ["doc", "fix"], "aliases": {"docs": "doc"}}})
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertTrue(self.remote.pull(1).title.startswith("doc: words (#1)\n\n"), self.remote.pull(1).title)
+
+    def test_a_declared_footer_in_the_body_moves_into_the_trailer_block(self):
+        """sd:6715, review of build 244. squash_body adds a paragraph of Item:/Delivers: trailers after the body,
+        so the author's `Ref: LOG-1` footer sat in the second-last paragraph and the convention refused it."""
+        set_declaration(self.connection, str(self.operator), "policy", {"commit_convention": {
+            "footer": r"^Ref: LOG-\d+$"}})
+        body = self.directory / "body.md"
+        body.write_text("Concrete change.\n\nRef: LOG-1\n")
+        self.prepare("--title", "fix: words", "--body-file", str(body))
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+        message = self.remote.pull(1).title
+        self.assertEqual(message.count("Ref: LOG-1"), 1, message)
+        self.assertIn("Ref: LOG-1", message.rstrip("\n").split("\n\n")[-1], message)
+
+    def test_dismissed_approval_holds_the_merge(self):
+        """sd:6715, design § Failure table. review.human is read at merge time, bound to the head commit: an
+        approval of an earlier commit (dismissed by a push) or by a bot holds the merge; one of the head merges."""
+        set_declaration(self.connection, str(self.operator), "policy", {"review": {"human": 1}})
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+        review = {"state": "APPROVED", "submitted_at": "2026-09-19T20:00:00Z", "body": ""}
+        self.double.review_payload["reviews"] = [
+            {**review, "user": {"login": "reviewer-a", "type": "User"}, "commit_id": "0" * 40},
+            {**review, "user": {"login": "helper[bot]", "type": "Bot"}, "commit_id": head},
+            {**review, "user": {"login": "reviewer-b", "type": "User"}, "commit_id": head},
+            {**review, "state": "DISMISSED", "user": {"login": "reviewer-b", "type": "User"}, "commit_id": head}]
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaisesRegex(ship.Refusal, r"requires 1 human approval of .*; 0 approve it") as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "approval_required")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        self.double.review_payload["reviews"].append(
+            {**review, "user": {"login": "reviewer-a", "type": "User"}, "commit_id": head})
+        with patch.object(ship.time, "sleep"):
+            self.assertEqual(self.merge()["phase"], "merged")
+
+    def test_a_jenkins_policy_holds_the_merge_until_the_head_build_is_green(self):
+        """sd:6880, design § Failure table. A policy naming Jenkins makes its job the CI: an unreachable Jenkins
+        holds the merge as ci_unreachable, never green; a green build of the head merges."""
+        ci = {"provider": "jenkins", "url": "http://127.0.0.1:9", "job": "team/repo/PR-{pr}"}
+        set_declaration(self.connection, str(self.operator), "policy", {"ci": ci})
+        self.prepare()
+        with patch.object(ship.time, "sleep"):
+            with self.assertRaises(ship.Refusal) as caught:
+                self.merge()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "ci_unreachable")
+        self.assertNotEqual(self.remote.pull(1).state, "MERGED")
+        head = _git(self.root, "rev-parse", "HEAD")
+        green = {"result": "SUCCESS", "building": False, "actions": [{"lastBuiltRevision": {"SHA1": head}}]}
+        with patch.object(ship.time, "sleep"), \
+                patch.object(ship.sd_ship_jenkins, "head_build", return_value=green) as read:
+            self.assertEqual(self.merge()["phase"], "merged")
+        self.assertEqual(read.call_args.args[:3], (ci, 1, head))
+
     def test_a_pending_refusal_names_who_did_review_the_head(self):
         """sd:3499. A renamed Copilot bot's review read as pending forever,
         with "wait, then retry"; the refusal names the logins that reviewed the head."""
@@ -2280,6 +2377,42 @@ roles:
                                    "--abandon-copilot-review", "chose to stop waiting")
         with self.assertRaisesRegex(ship.Refusal, "requires explicit manual merge authority"):
             operation.merge()
+
+    def test_a_locked_database_once_does_not_fail_the_merge(self):
+        """pack sd:6855: merge's first write meets one `database is locked`, retries, and merges."""
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+
+        met = []
+
+        class Locked:
+            """A connection whose first `BEGIN IMMEDIATE` fails once, as a held write lock does."""
+            def __init__(self, connection):
+                self.connection = connection
+
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+
+            def execute(self, sql, parameters=()):
+                if not met and sql == "BEGIN IMMEDIATE":
+                    met.append(sql)
+                    raise sqlite3.OperationalError("database is locked")
+                return self.connection.execute(sql, parameters)
+
+        def locked_connect(*args, **kwargs):
+            return Locked(connect(*args, **kwargs))
+
+        output, previous = io.StringIO(), pathlib.Path.cwd()
+        try:
+            with (patch("sd_db.database.connect", locked_connect), patch("sd_db.database.LOCK_WAITS", (0.01,)),
+                  contextlib.redirect_stdout(output)):
+                code = ship.main(["-C", str(self.root), "merge", "--item", str(self.item), "--manual",
+                                  "--expected-head", head, "--database", str(self.database), "--json"])
+        finally:
+            os.chdir(previous)
+        self.assertEqual(met, ["BEGIN IMMEDIATE"], "the lock was met")
+        self.assertEqual(code, 0, output.getvalue())
+        self.assertEqual(json.loads(output.getvalue())["phase"], "merged")
 
     def test_merge_takes_no_runner_lease(self):
         """sd:3085. The sd runner is gone, so `--run` and its lease went with it."""
@@ -3537,14 +3670,49 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "--acceptance-file"):
             self.unanswered("--deliver").prepare()
 
-    def test_empty_search_after_uncertain_create_cannot_duplicate_pr(self):
+    def test_a_create_a_5xx_left_uncertain_is_recovered_by_one_more_create(self):
+        # sd:6858: GitHub answered 5xx and made no pull request; the next
+        # prepare finds none, open or closed, at this head, so it creates
+        # again. GitHub refuses a second open one per head and base.
         self.double.no_create_result = True
         with self.assertRaises(ship.Refusal):
             self.prepare()
         self.double.no_create_result = False
-        with self.assertRaisesRegex(ship.Refusal, "empty search"):
+        self.assertEqual(self.prepare()["pull_request"]["number"], 1)
+        self.assertEqual(len(self.remote.pull_requests), 1)
+        self.assertEqual(len([call for call in self.remote.calls
+                              if call.method == "POST" and call.path.endswith("/pulls")]), 2)
+
+    def test_a_create_whose_pr_was_closed_since_still_refuses(self):
+        # The uncertain create did make one, and someone closed it: that is
+        # an operator's act, so no second pull request is made.
+        self.double.lose_create = True
+        with self.assertRaises(ship.Refusal):
             self.prepare()
-        self.assertEqual(len([call for call in self.remote.calls if call.method == "POST"]), 1)
+        self.remote.pull(1).state = "CLOSED"
+        with self.assertRaisesRegex(ship.Refusal, "closed"):
+            self.prepare()
+        self.assertEqual(len(self.remote.pull_requests), 1)
+
+    def test_a_retried_create_github_refuses_reads_the_one_it_made(self):
+        # The list missed the pull request the lost create made, and GitHub
+        # refuses the second create (422): the re-read binds that one.
+        self.double.lose_create = True
+        with self.assertRaises(ship.Refusal):
+            self.prepare()
+        self.double.lose_create = False
+        original, seen = self.double._route, []
+
+        def lagging(method, path, body):
+            if method == "GET" and urlsplit(path).path.endswith("/pulls") and "base=" in path and not seen:
+                seen.append(path)
+                return 200, []
+            if method == "POST" and urlsplit(path).path.endswith("/pulls"):
+                raise RemoteRefusal(422, "A pull request already exists")
+            return original(method, path, body)
+        with patch.object(self.double, "_route", lagging):
+            self.assertEqual(self.prepare()["pull_request"]["number"], 1)
+        self.assertEqual(len(self.remote.pull_requests), 1)
 
     def test_lost_create_response_finds_one_matching_pr(self):
         self.double.lose_create = True
@@ -3998,13 +4166,17 @@ roles:
         self.assertIn("waited 5s", str(refused.exception))
 
     def test_merge_wait_runs_once_the_holder_releases(self):
-        """sd:1937. With the lock released at 2 s, `--wait 5` runs the merge once."""
-        self.hold_ship_lock(self.operation().repository, seconds=2)
+        """sd:1937. With the lock released at 1 s, `--wait 60` runs the merge once.
+
+        The wait is far past the release: a 5 s wait against a 2 s holder lost the race
+        when gate load slowed the holder's release (sd:6855 review).
+        """
+        self.hold_ship_lock(self.operation().repository, seconds=1)
         started = time.monotonic()
         with patch.object(ship.Ship, "merge", return_value={"ok": True}) as merge:
-            ship.dispatch(self.root, self.connection, self.database, self.locked_merge("--wait", "5"), receipts, False)
+            ship.dispatch(self.root, self.connection, self.database, self.locked_merge("--wait", "60"), receipts, False)
         self.assertEqual(merge.call_count, 1)
-        self.assertLess(time.monotonic() - started, 2 + receipts.WAIT_POLL_SECONDS + 2)
+        self.assertGreaterEqual(time.monotonic() - started, 0.5, "the merge waited for the holder")
 
     def test_without_wait_a_held_lock_refuses_at_once(self):
         self.hold_ship_lock(self.operation().repository)
@@ -6496,6 +6668,31 @@ class DeclaredGapCase(unittest.TestCase):
         self.assertEqual(result["protection"], {"declared_gap": "unprotected", "until": "a second account with push or merge rights exists"})
         key = receipts.receipt_key(self.remote.slug, "topic", self.item)
         self.assertEqual(receipts.read(self.connection, key)[1]["protection"]["declared_gap"], "unprotected")
+
+    def jenkins_green(self, *, workflows=None) -> None:
+        """A policy naming Jenkins, its build of the head green, and no check run or status on GitHub."""
+        self.declare(workflows=workflows)
+        set_declaration(self.connection, str(self.operator), "policy", {"ci": {
+            "provider": "jenkins", "url": "http://127.0.0.1:9", "job": "team/repo/PR-{pr}"}})
+        self.prepare()
+        next(iter(self.remote.pull_requests.values())).checks = []
+        self.double.workflow_runs = []
+        build = {"result": "SUCCESS", "building": False, "actions": [{"lastBuiltRevision": {"SHA1": self.head()}}]}
+        patcher = patch.object(ship.sd_ship_jenkins, "head_build", return_value=build)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_green_jenkins_build_validates_the_head_under_a_declared_gap(self):
+        """sd:6880, review of build 317. every_check refused ci_missing on a head only Jenkins validated."""
+        self.jenkins_green(workflows={})
+        with patch.object(ship.time, "sleep"):
+            self.merge()
+        self.assertEqual(self.puts(), 1)
+
+    def test_a_green_jenkins_build_still_needs_the_heads_pull_request_runs(self):
+        self.jenkins_green()
+        with patch.object(ship.time, "sleep"):
+            self.refuse(r"workflow .* has no successful pull_request run", "ci_missing")
 
     # -- sd:1843: `repo.ci = local` swaps pull_request runs for sd/local-gate --
 

@@ -28,7 +28,7 @@ retire with no successor was reversed by the 2026-09-12 decision on sd:361:
 Jira tickets are shadowed the way GitHub issues are. The second module is
 `shadow_jira`, which collects Jira tickets into the same `Collected` shape
 over its own JQL window. `sync`'s `tracker` chooses the collector: `github`
-runs the four buckets here, the intake sweep of `github_issues`
+runs the four buckets here, the intake sweep of `policy.issues`
 repositories, their contribution details and the protection sweep; `jira`
 runs `shadow_jira` with none of that, and any other name is a `ValueError`. `sync` stays one tracker per call; the caller -- the pack's
 `sd shadow sync` -- iterates `TRACKERS` and reports each tracker on its own.
@@ -104,7 +104,7 @@ BUCKETS = (
 )
 
 #: The `why` of a row the intake sweep found (sd:4880): an open issue of a
-#: repository with `github_issues` on, whoever opened it.
+#: repository whose `policy.issues` is read or ask, whoever opened it.
 INTAKE = "intake"
 #: Repositories per intake sweep: GitHub refuses a long search query.
 INTAKE_GROUP = 5
@@ -599,8 +599,8 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
     collect as a complete one and stepping the window past the part that
     failed.
 
-    `intake` names the `owner/name` of each repository with `github_issues`
-    on (sd:4880). After the buckets, one unwindowed search lists the open
+    `intake` names the `owner/name` of each repository with `policy.issues`
+    read or ask (sd:4880). After the buckets, one unwindowed search lists the open
     issues of up to `INTAKE_GROUP` of them, whoever opened them, so a
     repository switched on today has its old issues read on the next run.
     The sweep reads outside the window the operator's buckets covered, so a
@@ -950,6 +950,8 @@ class Synced:
     #: The intake sweeps that failed or capped (sd:4880). Unknown, so named;
     #: not a failure, since the next run repeats each sweep whole.
     intake_incomplete: list[str] = field(default_factory=list)
+    #: What `pr_attention` filed and cleared after the sync (sd:6712); never a failure of the sync.
+    attention: list[str] = field(default_factory=list)
 
     def report(self) -> list[str]:
         lines = [
@@ -969,6 +971,7 @@ class Synced:
             lines.append(f"shadow sync: contribution detail backlog: {self.queued} queued")
         if self.intake_incomplete:
             lines.append(f"shadow sync: intake sweep incomplete: {'; '.join(self.intake_incomplete)}")
+        lines += [f"shadow sync: {line}" for line in self.attention]
         return lines
 
 
@@ -1027,8 +1030,12 @@ def _sync(
     max_seconds: float = MAX_SECONDS,
     contribution_client=None,
     notifier=None,
+    alerts: bool = False,
 ) -> Synced:
     """Collect, write the rows, and advance the cursor only on success.
+
+    `alerts` runs `pr_attention` after a GitHub sync (sd:6712): the pack's
+    verb asks for it on a scheduled run, not on a recovery window.
 
     This is what `sd shadow sync` calls. The order is the whole design: rows
     are written whether or not the collect succeeded, because a partial
@@ -1162,6 +1169,7 @@ def _sync(
         )
     contribution_sync.dispatch_pending(connection, notifier=notifier, keys=detail["completed_keys"],
                                        deadline=budget.deadline)
+    attention = _pr_attention(connection, runner, moment, budget) if alerts else []
     return Synced(
         ok=result.ok,
         reason=result.reason,
@@ -1175,7 +1183,32 @@ def _sync(
         queued=detail["queued"],
         incomplete=detail["incomplete"],
         intake_incomplete=result.incomplete,
+        attention=attention,
     )
+
+
+def _pr_attention(connection: sqlite3.Connection, runner, moment: datetime, budget: _SearchBudget) -> list[str]:
+    """`pr_attention` after the sync, as report lines: a side observation, so its failure is named, never raised (sd:6712).
+
+    Its searches spend the sync's budget last; a budget the sync spent reads nothing and clears nothing."""
+    from . import pr_attention
+
+    left = budget.deadline - time.monotonic()
+    if budget.remaining < len(pr_attention.SEARCHES) or left <= 0:
+        return ["pull request alerts not read: the sync spent its request or time limit"]
+    budget.remaining -= len(pr_attention.SEARCHES)
+    budget.requests += len(pr_attention.SEARCHES)
+    try:
+        found, complete, reason = pr_attention.read(runner, timeout=min(GH_TIMEOUT_SECONDS, left))
+        done = pr_attention.alert(connection, found, complete, now=moment)
+    except (SdDbError, sqlite3.Error, OSError, ValueError) as error:
+        return [f"pull request alerts not filed: {error}"]
+    lines = [f"pull request alerts: {len(done['filed'])} filed, {len(done['cleared'])} cleared, "
+             f"{len(found)} state(s) open"]
+    if not complete:
+        lines.append(f"pull request alerts: read incomplete, nothing cleared: {reason}")
+    lines += [f"pull request alerts: {problem}" for problem in done["problems"]]
+    return lines
 
 
 def _sync_jira(connection: sqlite3.Connection, moment: datetime, transport, since) -> Synced:

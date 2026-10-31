@@ -246,7 +246,7 @@ class TheBriefIsTheLibrarys(RowCase):
     def test_the_hook_injects_the_brief_verbatim(self):
         item = self.item()
         self.followup(item, "rebase onto main")
-        sd_db.add_note(self.connection, item, "question", "which tag?\nthe pin or HEAD")
+        sd_db.add_note(self.connection, item, "question", "which tag?\nthe pin or HEAD\nOption: Yes (Recommended)\nOption: No")
         sd_db.add_note(self.connection, item, "decision", "we chose sqlite")
         self.followup(item, "answer the review")
         brief = sd_db.note_brief(self.connection, str(self.root), branch="")
@@ -261,7 +261,7 @@ class TheBriefIsTheLibrarys(RowCase):
         next session too.
         """
         item = self.item()
-        note = sd_db.add_note(self.connection, item, "question", "which tag?")
+        note = sd_db.add_note(self.connection, item, "question", "which tag?\nOption: Yes (Recommended)\nOption: No")
         self.assertIn(f"#{note} ", self.injected())
 
     def test_the_cut_names_the_list_verb(self):
@@ -441,6 +441,28 @@ class TheHookStaysSilent(unittest.TestCase):
         self.addCleanup(setattr, sd_handoff_rows, "brief_for", original)
         self.assertEqual(restore.followup_lines("/nowhere"), [])
 
+    def test_a_declared_policy_is_one_line_and_none_or_a_failed_read_is_none(self):
+        """sd:6715: the session-start summary prints the repository's policy before the agent acts."""
+        import sd_lib
+
+        original = sd_lib.repo_declaration
+        self.addCleanup(setattr, sd_lib, "repo_declaration", original)
+        sd_lib.repo_declaration = lambda root, kind: {"mode": "org", "issues": "read", "review": {"human": 1}}
+        self.assertEqual(restore.policy_lines("/nowhere"),
+                         ["Repository policy (sd-db repo declare . policy): mode=org, commit=ask, push=ask, pr=ask, "
+                          "merge=squash, issues=read, review=human(1)"])
+        sd_lib.repo_declaration = lambda root, kind: None
+        self.assertEqual(restore.policy_lines("/nowhere"), [])
+
+        def unread(root, kind):
+            raise sd_lib.DatabaseUnreadable("locked")
+
+        sd_lib.repo_declaration = unread
+        # A failed read is not "no policy": that would read as managed defaults and lift an org repository's
+        # ask rules, so the session is told to read the policy before it commits, pushes or opens a PR.
+        self.assertEqual(restore.policy_lines("/nowhere"), [restore.POLICY_UNREAD.format(reason="locked")])
+        self.assertIn("before you commit, push or open a pull request", restore.POLICY_UNREAD)
+
     def test_the_reader_never_writes(self):
         """A read that claimed would hand the second session nothing.
 
@@ -607,7 +629,7 @@ class TheLister(RowCase):
     def test_every_note_is_listed_oldest_first_with_kind_id_and_resolution(self):
         item = self.item()
         first = self.followup(item, "wire the hook")
-        question = sd_db.add_note(self.connection, item, "question", "which tag?\nthe pin or HEAD")
+        question = sd_db.add_note(self.connection, item, "question", "which tag?\nthe pin or HEAD\nOption: Yes (Recommended)\nOption: No")
         decision = sd_db.add_note(self.connection, item, "decision", "we chose sqlite")
         sd_db.resolve_note(self.connection, first)
         code, out, err = self.note(["list", str(item)])
@@ -619,9 +641,9 @@ class TheLister(RowCase):
         self.assertRegex(lines[2], rf"^- \[followup #{first} \d{{4}}-\d\d-\d\d, "
                                    rf"resolved \d{{4}}-\d\d-\d\d\] wire the hook$")
         self.assertRegex(lines[3], rf"^- \[question #{question} [0-9-]+\] which tag\?$")
-        self.assertEqual(lines[4], "  the pin or HEAD")
-        self.assertRegex(lines[5], rf"^- \[decision #{decision} [0-9-]+\] we chose sqlite$")
-        self.assertEqual(len(lines), 6, lines)
+        self.assertEqual(lines[4:7], ["  the pin or HEAD", "  Option: Yes (Recommended)", "  Option: No"])
+        self.assertRegex(lines[7], rf"^- \[decision #{decision} [0-9-]+\] we chose sqlite$")
+        self.assertEqual(len(lines), 8, lines)
 
     def test_an_item_with_no_notes_says_so(self):
         item = self.item()

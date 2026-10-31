@@ -1065,13 +1065,15 @@ class StalledRootTests(PluginFixture):
         return self.plugin("owner", config=ConfigTests.DECLARED)
 
     def test_the_owner_s_key_answers_while_a_later_root_hangs(self) -> None:
+        """A lookup that waited for the later root would time it out and warn that it skipped it.
+
+        sd:6885: the old wall-clock bound on the child failed under load; the warning does not.
+        """
         self.write_config({"plugins": [str(self.owner()), str(self.stalled())],
                            "config": {"pp": {"google_account": "personal"}}})
-        started = time.monotonic()
         got = self.run_sd("config", "get", "pp.google_account", timeout=30)
-        self.assertEqual((got.returncode, got.stdout.strip()), (0, "personal"), got.stderr)
-        self.assertLess(time.monotonic() - started, load_sd().ROOT_READ_SECONDS,
-                        "the lookup waited for a root listed after its owner")
+        self.assertEqual((got.returncode, got.stdout.strip(), got.stderr), (0, "personal", ""),
+                         "the lookup waited for a root listed after its owner")
 
     def test_an_earlier_silent_root_makes_the_key_refuse_within_the_bound(self) -> None:
         stalled, owner = self.stalled(), self.owner()

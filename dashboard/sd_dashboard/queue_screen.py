@@ -329,6 +329,22 @@ def closed(connection, entries: list[dict]) -> set:
     return {item for item, row in found.items() if row is not None and row["status"] == "done"}
 
 
+def shots(entry: dict, lane: Path) -> dict:
+    """sd:6728: the PNGs the lane drew of the entry's changed pages, each `{name, url}` at `/lane-shots/`, or why none.
+
+    A file outside the lane's `logs/` gets no link: the route serves only those.
+    """
+    found = {}
+    logs = lane / "logs"
+    links = [{"name": Path(file).stem, "url": f"/lane-shots/{Path(file).relative_to(lane.parent.parent).as_posix()}"}
+             for file in entry.get("shots") or () if isinstance(file, str) and Path(file).parent.parent == logs]
+    if links:
+        found["shots"] = links
+    if entry.get("shots_warning"):
+        found["shots_warning"] = str(entry["shots_warning"])
+    return found
+
+
 def rows(entries: list[dict], *, path: str, lane: Path, now: float, done: frozenset | set = frozenset()) -> list[dict]:
     """The lane's rows in page order: merging, next, building, blocked, cancelled, landed.
 
@@ -340,7 +356,8 @@ def rows(entries: list[dict], *, path: str, lane: Path, now: float, done: frozen
     for entry in entries:
         status, item = entry.get("status"), entry.get("item")
         # The worktree `lane enqueue` recorded: an adversarial review of the change reads it (sd:5064).
-        base = {"item": item, "title": entry.get("title") or "", "worktree": entry.get("worktree") or None}
+        base = {"item": item, "title": entry.get("title") or "", "worktree": entry.get("worktree") or None,
+                **shots(entry, lane)}
         if status == "running":
             started, holder = _when(entry.get("started_at")), entry.get("holder")
             holder = holder if isinstance(holder, dict) else {}

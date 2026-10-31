@@ -30,6 +30,27 @@
         err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Fix again`); }) };
   }
 
+  // Grill and Apply answers on a piece (pack sd:6700): Fix with grill: ask or apply. Ask starts claude to write the piece's
+  // grill questions as question notes; apply starts claude to edit the draft to follow each ruling, uncommitted. `ready(o)`
+  // is true or why not; `post(o, path, body)` answers the server's reply.
+  const GRILL = {
+    ask: { label: 'Grill', does: 'Asks first, then starts claude in herdr to write 5 to 10 questions about the draft.',
+      consequence: n => `Opens a herdr workspace in the piece's repository and starts claude on #${n}: it reads the draft and writes 5 to 10 questions as question notes. You answer them here in Details.` },
+    apply: { label: 'Apply answers', does: 'Asks first, then starts claude in herdr to edit the draft to follow your answers.',
+      consequence: n => `Opens a herdr workspace in the piece's repository and starts claude on #${n}: it edits the draft to follow each answer. The edit stays uncommitted for you to read; nothing is published.` },
+  };
+  function grill(on, step, { item, ready, post }) {
+    const g = GRILL[step];
+    return { id: `${on}.${step === 'ask' ? 'grill' : 'apply-answers'}`, on, label: g.label, does: g.does,
+      icon: 'bot', risk: 'safe', askFirst: true, executes: true, when: ready,
+      cli: () => 'no sd verb: the dashboard runs local-herdr/herdr.sh launch',
+      sends: o => `POST /api/items/${item(o)}/fix {grill: "${step}", revision}`,
+      consequence: o => g.consequence(item(o)),
+      run: o => Promise.resolve().then(() => post(o, `/api/items/${item(o)}/fix`, { grill: step })).then(
+        out => `${g.label} started · #${item(o)} · herdr pane ${out.fix.pane}`,
+        err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press ${g.label} again`); }) };
+  }
+
   // Run now (jobs.retry): `sd jobs retry`, which sends the kickstart; the run-now pack allows an idle job's run too (sd:4982).
   // `job(o)` names the row's facts: { name, service, failed, exit,
   // capability }; capability is operations.inventory's retry answer, and its reason is the off text. Exit 127 is "command
@@ -92,10 +113,12 @@
       run: o => runAction(o, 'job.print', { job: job(o).name }) };
   }
 
-  // Show assignment: `sd assignments get` prints what the page's Details show, so the line is copy only. run(o) shows it.
-  function showAssignment({ primary = () => true, run }) {
-    return { id: 'asg.get', on: 'assignment', label: 'Show assignment', does: 'Shows the assignment\'s record in Details.', key: 'o', icon: 'clipboard-list', risk: 'safe', primary, executes: false,
-      cli: o => `sd assignments get ${o.n}`, run };
+  // Show assignment (sd:6682): the server runs `sd assignments get` for the row's number and Details shows its output,
+  // which a row click does not. `o.n` is the assignment's number.
+  function showAssignment({ primary = () => true } = {}) {
+    return { id: 'asg.get', on: 'assignment', label: 'Show assignment', does: 'Prints the assignment\'s record in Details.', key: 'o', icon: 'clipboard-list', risk: 'safe', primary, executes: true,
+      cli: o => `sd assignments get ${o.n}`, sends: o => `POST /api/actions/run {action: assignment.get, assignment: ${o.n}}`,
+      run: o => runAction(o, 'assignment.get', { assignment: o.n }) };
   }
 
   // Open a pull request on GitHub, in a new tab, from a pull request row or a review of one (`on`). `pr(o)` names
@@ -318,5 +341,5 @@
       ${state ? html`<p class="why">${state}</p>` : ''}</section>`;
   }
 
-  window.commands = { answered, fix, retry, runAction, showLog, logLine, printJob, showAssignment, openPullRequest, syncCollector, adversarialReview, reviewPane, published, PUB_STATE, pubLegend, publishCommands, publishPane };
+  window.commands = { answered, fix, grill, retry, runAction, showLog, logLine, printJob, showAssignment, openPullRequest, syncCollector, adversarialReview, reviewPane, published, PUB_STATE, pubLegend, publishCommands, publishPane };
 })();

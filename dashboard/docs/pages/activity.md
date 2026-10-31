@@ -22,7 +22,8 @@ and lanes filter by kind. The shell draws that bar for every table page
 and asks first after exit 127, command not found, naming the exit (sd:3392). Its toast says "Retry
 started" only when launchctl accepted the request; a refusal names launchctl's
 message, and a timeout or a lost answer says the outcome is not known, as
-Management words it (sd:3391). Show output reads the
+Management words it (sd:3391). Show assignment runs `sd assignments get` through
+`/api/actions/run` and Details shows its output (sd:6682). Show output reads the
 execution record, page by page past 64 KiB (sd:2416). Reconcile, on an
 unfinished palette record, posts `/api/palette/<note>/reconcile`, which observes
 the target and never replays the command (sd:3391). With Show output it takes

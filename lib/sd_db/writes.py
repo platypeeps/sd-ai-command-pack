@@ -36,7 +36,8 @@ STATUS_CHANGE = "status_change"
 #: `state.kind` since migration 031 (sd:3506), so a new kind is added here,
 #: with no table rebuild. `record_state` refuses a kind outside it, and
 #: `TheStateKindList` holds every raw insert in the pack to it.
-STATE_KINDS = ("checkpoint", "verified", "restore", "watermark", "heartbeat", "check", "snooze", "view", "setting")
+STATE_KINDS = ("checkpoint", "verified", "restore", "watermark", "heartbeat", "check", "snooze", "view", "setting",
+               "freeze")
 #: The kinds whose NULL `resolved_at` is open work; the rest are logs and
 #: cursors read latest-per-key, where NULL means nothing (sd:2849).
 OPEN_STATE_KINDS = ("restore", "verified", "check")
@@ -44,6 +45,55 @@ OPEN_STATE_KINDS = ("restore", "verified", "check")
 
 class TransitionRefused(SdDbError):
     """A status change the kind's table does not allow."""
+
+
+class QuestionRefused(SdDbError):
+    """A question note with no choices, or none it recommends (pack sd:6708)."""
+
+
+#: A question's choice line, and the two ways it recommends one (sd:5306); Decisions reads them here.
+OPTION = re.compile(r"^[ \t]*Option:[ \t]*(.*?)[ \t]*$")
+MARKED = re.compile(r"\(recommended\)$|^(?:\(recommended\)|recommended:)", re.IGNORECASE)
+ADVICE = re.compile(r"^[ \t]*Recommendation:[ \t]*(.*?)[ \t.]*$", re.IGNORECASE)
+#: The shape a question note must have, as the refusal names it.
+QUESTION_SHAPE = ("a question needs two or more `Option:` lines and one recommended, "
+                  "e.g. 'Which store?' then 'Option: Rows (Recommended)' and 'Option: Files', one per line")
+
+
+def parse(body: str) -> tuple[str, list[str]]:
+    """The question text and the choices, in the order written."""
+    question, options = [], []
+    for line in body.splitlines():
+        found = OPTION.match(line)
+        if found is None:
+            question.append(line)
+        elif found[1] and found[1] not in options:
+            options.append(found[1])
+    return "\n".join(question).strip(), options
+
+
+def recommended(body: str, options: list[str]) -> int | None:
+    """The index of the recommended option, or None; the posted text stays the option as written."""
+    if len(options) < 2:
+        return None
+    marked = [i for i, option in enumerate(options) if MARKED.search(option)]
+    if marked:
+        return marked[0] if len(marked) == 1 else None
+    for line in body.splitlines():
+        found = ADVICE.match(line)
+        if found:
+            said = found[1].casefold() + " "
+            # The longest option the line starts with, whole words, so "Rows" does not take "Rows and a cache".
+            named = [i for i, option in enumerate(map(str.casefold, options))
+                     if said.startswith(option) and not said[len(option)].isalnum()]
+            return max(named, key=lambda i: len(options[i])) if named else None
+    return None
+
+
+def check_question(body: str) -> None:
+    """Refuse a question the operator could only answer in words: every question carries a pick (pack sd:6708)."""
+    if recommended(body, parse(body)[1]) is None:
+        raise QuestionRefused(QUESTION_SHAPE)
 
 
 def now() -> str:
@@ -436,17 +486,22 @@ def add_note(
     exit_code: int | None = None,
     output_path: str | None = None,
     harness_session: str | None = None,
+    labelling: bool = False,
 ) -> int:
     """Any note but a status change, which only `transition` writes.
 
     `harness_session` is the harness session that wrote a note whose
     `session` names someone else, as a CLI ruling does (pack sd:6046).
+    A question must pass `check_question`, but for a review batch's
+    `labelling` one: Scoring asks it, and a pick would bias a blind batch.
     """
     if kind == STATUS_CHANGE:
         raise TransitionRefused(
             "a status_change note is written by `transition`, with the status, "
             "in one transaction"
         )
+    if kind == "question" and not labelling:
+        check_question(body)
     with transaction(connection):
         cursor = connection.execute(
             "INSERT INTO note (item, timestamp, kind, body, session, started, "
@@ -608,6 +663,64 @@ def snoozed(connection: sqlite3.Connection, *, now: str) -> dict[str, dict[str, 
         if until and isinstance(seen, str) and seen:
             found[row["key"]] = {"until": until, "seen": seen}
     return found
+
+
+#: A freeze window is short-lived: a release, an incident, a holiday.
+FREEZE_DAYS = 31
+FREEZE_REASON_LENGTH = 200
+
+
+def set_freeze(
+    connection: sqlite3.Connection,
+    target: str,
+    until: str | None,
+    reason: str | None = None,
+    *,
+    now: str | None = None,
+) -> int:
+    """Freeze `target`, a repository's `owner/name`, until `until`, or lift it (sd:6879).
+
+    One `freeze` row per write, through `record_state`, as `snooze` writes:
+    the latest row for a key is the answer (`freeze_window`), so a lift is the
+    same write with `until=None`. Nothing expires a row; the reader compares the
+    time with its own clock. A window needs a reason, so a held lane says why.
+    """
+    if not isinstance(target, str) or not re.fullmatch(r"[\w.-]+/[\w.-]+", target):
+        raise SdDbError(f"a freeze needs the repository's owner/name, not {target!r}")
+    if until is None:
+        return record_state(connection, "freeze", key=target.lower(), body={"until": None, "reason": None})
+    if not isinstance(reason, str) or not reason.strip() or len(reason) > FREEZE_REASON_LENGTH:
+        raise SdDbError(f"a freeze needs a reason, 1 to {FREEZE_REASON_LENGTH} characters")
+    until = stamp(until)
+    moment = datetime.fromisoformat(until)
+    start = datetime.fromisoformat(stamp(now)) if now else datetime.now(UTC)
+    if moment <= start:
+        raise SdDbError(f"freeze end {until} is already past; pick a later one")
+    if moment - start > timedelta(days=FREEZE_DAYS):
+        raise SdDbError(f"freeze end {until} is more than {FREEZE_DAYS} days away; pick a nearer one")
+    return record_state(connection, "freeze", key=target.lower(), body={"until": until, "reason": reason.strip()})
+
+
+def freeze_window(connection: sqlite3.Connection, target: str, *, now: str | None = None) -> dict[str, str] | None:
+    """`target`'s open freeze window at `now`, `{"until", "reason"}`, or None (sd:6879).
+
+    A body this cannot read freezes: a window someone set is not lifted by
+    a reader that cannot parse it.
+    """
+    row = connection.execute("SELECT body FROM state WHERE id = (SELECT max(id) FROM state "
+                             "WHERE kind = 'freeze' AND key = ?)", (target.lower(),)).fetchone()
+    if row is None:
+        return None
+    try:
+        body = json.loads(row["body"])
+        if body["until"] is None:
+            return None
+        moment = datetime.fromisoformat(stamp(body["until"]))
+        reason = str(body["reason"])
+    except (TypeError, ValueError, AttributeError, KeyError, SdDbError):
+        return {"until": "unknown", "reason": f"an unreadable freeze row: {row['body']!r}"}
+    at = datetime.fromisoformat(stamp(now)) if now else datetime.now(UTC)
+    return {"until": moment.isoformat(timespec="seconds"), "reason": reason} if moment > at else None
 
 
 #: A view key is a Documents root key and a file under it (`system/index.html`).

@@ -813,7 +813,7 @@ class TheScript(ScreenCase):
             ["work.cancel", "item", "confirm", "w", True, True, False],
             ["note.resolve", "note", "confirm", "v", None, True, False],
             ["asg.cancel", "assignment", "confirm", "x", None, True, False],
-            ["asg.get", "assignment", "safe", "o", False, True, False],  # copy only: Details show it (sd:3524)
+            ["asg.get", "assignment", "safe", "o", True, True, False],  # runs sd assignments get (sd:6682)
             ["item.build", "item", "safe", None, True, True, False],  # Build (pack sd:6095)
             ["realm-sweep.run", "sweep", "safe", None, True, True, False],  # Realm Personal and Work (sd:5096, sd:5097)
         ])

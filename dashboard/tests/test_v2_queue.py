@@ -28,6 +28,8 @@ import sys
 import tempfile
 import time
 import unittest
+import urllib.error
+import urllib.request
 from pathlib import Path
 from unittest import mock
 
@@ -140,6 +142,15 @@ class Lane:
     def calls(self):
         return [line.split() for line in self.log.read_text().splitlines()]
 
+    def shot_entries(self):
+        """sd:6728: item 5 carries two PNGs the lane drew and one outside its logs; item 4 the warning of none."""
+        drawn = self.lane / "logs" / "shots-5-20260906T090000"
+        drawn.mkdir()
+        (drawn / "home-dark-1440.png").write_bytes(b"\x89PNG\r\n\x1a\nshot")
+        files = [str(drawn / "home-dark-1440.png"), str(drawn / "home-light-375.png"), "/elsewhere/x-dark-1440.png"]
+        self.list([{**e, "shots": files} if e["item"] == 5 else {**e, "shots_warning": "shots: no Chrome found"}
+                   if e["item"] == 4 else e for e in self.entries()])
+
 
 class TheRows(Lane, ScreenCase):
     """`queue_screen.document` from the fixture `lane list`, the gate log and `sd gate status`."""
@@ -157,6 +168,15 @@ class TheRows(Lane, ScreenCase):
                 conf.write_text(text)
             with self.subTest(realm=realm), mock.patch.object(places, "REALMS_CONFIG", conf):
                 self.assertEqual([lane["realm"] for lane in queue_screen.document(self.connection, now=NOW)["lanes"]], [realm])
+
+    def test_a_row_links_each_screenshot_the_lane_drew_and_says_why_it_drew_none(self):
+        self.shot_entries()
+        rows = {row.get("item"): row for row in self.doc()["lanes"][0]["rows"]}
+        self.assertEqual(rows[5]["shots"], [
+            {"name": "home-dark-1440", "url": "/lane-shots/system/lane/logs/shots-5-20260906T090000/home-dark-1440.png"},
+            {"name": "home-light-375", "url": "/lane-shots/system/lane/logs/shots-5-20260906T090000/home-light-375.png"}])
+        self.assertEqual((rows[4]["shots_warning"], "shots" in rows[4], "shots" in rows[7]),
+                         ("shots: no Chrome found", False, False))
 
     def test_each_of_the_six_states_has_its_row(self):
         rows = self.doc()["lanes"][0]["rows"]
@@ -1041,6 +1061,34 @@ class TheInProcessRead(RealLane):
         self.assertIn("database is locked", doc["problems"][0]["error"])
 
 
+class TheShotRoute(Lane, BrowserSession):
+    """sd:6728: `/lane-shots/` serves a PNG under a lane's `logs/shots-*`, and nothing else under the lane root."""
+
+    def setUp(self):
+        super().setUp()
+        patch = mock.patch.dict(os.environ, {"SD_LANE_ROOT": str(self.lane.parent.parent)})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.shot_entries()
+
+    def fetch(self, path):
+        try:
+            with urllib.request.urlopen(self.base + path, timeout=10) as answer:
+                return answer.status, answer.headers["Content-Type"], answer.read()
+        except urllib.error.HTTPError as error:
+            with error:
+                return error.code, None, b""
+
+    def test_a_drawn_png_is_served_and_any_other_file_is_not(self):
+        self.assertEqual(self.fetch("/lane-shots/system/lane/logs/shots-5-20260906T090000/home-dark-1440.png"),
+                         (200, "image/png", b"\x89PNG\r\n\x1a\nshot"))
+        for path in ("/lane-shots/system/lane/logs/prepare-3-20260906T115500.log",
+                     "/lane-shots/system/lane/logs/shots-5-20260906T090000/home-light-375.png",
+                     "/lane-shots/system/lane/logs/shots-5-20260906T090000/../../logs/x.png",
+                     "/lane-shots/system/lane/gate-stale.log"):
+            self.assertEqual(self.fetch(path)[0], 404, path)
+
+
 class TheScript(Lane, ScreenCase):
     """queue.js against the document `queue_screen` builds from the fixture."""
 
@@ -1059,16 +1107,16 @@ class TheScript(Lane, ScreenCase):
         out = json.loads(result.stdout)
         self.assertIsNone(out["error"])
         # The Builds panel (pack sd:6095) reads beside the lanes on each load; its own test reads it, the lane tests do not.
-        out["gets"] = [path for path in out.get("gets", []) if path != "/api/queue/builds"]
+        out["gets"] = [path for path in out.get("gets", []) if path.split("?")[0] != "/api/queue/builds"]
         return out
 
-    BUILDS = {"error": "", "read": NOW, "hours": 24, "quiet_seconds": 900, "stale_seconds": 180,
+    BUILDS = {"error": "", "read": NOW, "show": "all", "quiet_seconds": 900, "stale_seconds": 180,
               "runs": [{"run": "r1", "attempt": 1, "repo": "/repos/alpha", "name": "alpha", "model": "opus", "step": "building",
                         "state": "stalled", "why": "", "outcome": None, "started": NOW, "elapsed": 1200, "beat": 20,
                         "quiet": 960, "usd": 0.42, "log": "/logs/r1.jsonl", "branch": "build/sd-7", "worktree": "/w/r1",
                         "items": [{"item": 7, "assignment": 7, "status": "running", "title": "Seven"}],
                         "cancel": {"assignment": 7, "allowed": True, "reason": "", "revision": "a" * 64}}],
-              "recent": [{"run": "r0", "repo": "/repos/alpha", "name": "alpha", "outcome": "interrupted", "detail": "lost twice",
+              "recent": [{"run": "r0", "assignment": 5, "repo": "/repos/alpha", "name": "alpha", "outcome": "interrupted", "detail": "lost twice",
                           "ended": NOW, "step": "building", "model": "opus", "usd": 1.1, "log": "", "worktree": "/w/r0",
                           "items": [{"item": 5, "assignment": 5, "status": "blocked", "title": "Five"}],
                           "retry": {"assignment": 5, "revision": "b" * 64, "allowed": True, "reason": "", "bundle": "blocked"}}]}
@@ -1076,7 +1124,7 @@ class TheScript(Lane, ScreenCase):
     def test_the_builds_panel_draws_each_run_with_cancel_and_log_and_retry_posts_the_blocked_run(self):
         """Pack sd:6095: a run row carries its state, Cancel and Log; a blocked ended run's Retry posts its lead."""
         out = self.run_page(f"""const B = {json.dumps(self.BUILDS)};
-window.ELSE = (p, b) => p === '/api/queue/builds' ? [200, B] : p === '/api/queue/builds/retry' ? [200, {{ run: 'r0', queued: [] }}] : [404, {{ error: 'no' }}];
+window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : p === '/api/queue/builds/retry' ? [200, {{ run: 'r0', queued: [] }}] : [404, {{ error: 'no' }}];
 await window.PAGE_AGAIN.run(); await flush(); await flush();
 R.builds = ELS.builds.html;
 await window.queueBuildAct({{ dataset: {{ build: 'retry', run: 'r0' }} }}); await flush();
@@ -1090,6 +1138,26 @@ R.after = ELS.builds.html;""")
         self.assertIn(["/api/queue/builds/retry", {"assignment": 5, "revision": "b" * 64}], [post[:2] for post in out["posts"]])
         self.assertIn("sd:5 queued again for build.", out["R"]["after"])
 
+    def test_a_released_blocked_run_shows_under_all_with_show_assignment_not_under_active(self):
+        """Pack sd:6834: a parked item's note points to Retry on the Builds panel. The panel's Show reads the ended
+        runs only under All (?show=all), each with Retry and Show assignment; Active draws none of them."""
+        script = f"""const B = {json.dumps(self.BUILDS)}, A = {json.dumps(dict(self.BUILDS, recent=[]))};
+OUT.paths = [];
+window.ELSE = (p, b) => {{ OUT.paths.push(p); return p === '/api/queue/builds?show=all' ? [200, B] : p === '/api/queue/builds' ? [200, A] : [404, {{ error: 'no' }}]; }};
+await window.PAGE_AGAIN.run(); await flush(); await flush();
+R.builds = ELS.builds.html;"""
+        active = self.run_page(script, search="")
+        self.assertIn("/api/queue/builds", active["paths"])
+        self.assertNotIn('data-run="r0"', active["R"]["builds"])
+        self.assertIn('data-show="all" aria-pressed="false"', active["R"]["builds"])
+        every = self.run_page(script)
+        self.assertIn("/api/queue/builds?show=all", every["paths"])
+        shown = every["R"]["builds"]
+        self.assertIn('data-show="all" aria-pressed="true"', shown)
+        self.assertIn('data-build="retry" data-run="r0"', shown)
+        self.assertIn('data-copy="sd assignments get 5"', shown)
+        self.assertIn("interrupted at building", shown)
+
     def test_a_build_row_with_a_pull_request_links_it_and_one_without_shows_nothing(self):
         """Pack sd:6020 ruling #31553: no diff Review page; a row whose branch has a pull request opens it on GitHub."""
         url = "https://github.com/example/alpha/pull/7"
@@ -1097,7 +1165,7 @@ R.after = ELS.builds.html;""")
                       recent=[dict(self.BUILDS["recent"][0], pull=""),
                               dict(self.BUILDS["recent"][0], run="r9", pull="https://github.com/example/alpha/pull/9")])
         out = self.run_page(f"""const B = {json.dumps(builds)};
-window.ELSE = (p, b) => p === '/api/queue/builds' ? [200, B] : [404, {{ error: 'no' }}];
+window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : [404, {{ error: 'no' }}];
 await window.PAGE_AGAIN.run(); await flush(); await flush();
 R.builds = ELS.builds.html;""")
         rows = re.findall(r'<li class="qrow".*?</li>', out["R"]["builds"], re.S)
@@ -1113,7 +1181,7 @@ R.builds = ELS.builds.html;""")
                          retry={"assignment": 6, "revision": "c" * 64, "allowed": True, "reason": "", "bundle": "cancelled"})
         builds = dict(self.BUILDS, recent=[*self.BUILDS["recent"], cancelled])
         out = self.run_page(f"""const B = {json.dumps(builds)};
-window.ELSE = (p, b) => p === '/api/queue/builds' ? [200, B] : p === '/api/queue/builds/retry' ? [200, {{ run: 'r2', queued: [] }}] : [404, {{ error: 'no' }}];
+window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : p === '/api/queue/builds/retry' ? [200, {{ run: 'r2', queued: [] }}] : [404, {{ error: 'no' }}];
 window.shell.ask = a => {{ OUT.asked = a; return Promise.resolve({{ yes: true, values: {{ finding: 'The label reads wrong on phones' }} }}); }};
 await window.PAGE_AGAIN.run(); await flush(); await flush();
 R.builds = ELS.builds.html;
@@ -1128,6 +1196,14 @@ R.after = ELS.builds.html;""")
         self.assertEqual([post[:2] for post in out["posts"]], [["/api/queue/builds/retry", {
             "assignment": 6, "revision": "c" * 64, "finding": "The label reads wrong on phones"}]])
         self.assertIn("sd:6 sent to the builder with your finding.", out["R"]["after"])
+
+    def test_a_row_draws_its_screenshot_links_and_a_warning(self):
+        """sd:6728: the Queue row links the local PNGs; a failed capture says why, as a warning."""
+        self.shot_entries()
+        lanes = self.run_page("R.lanes = ELS.details.html;")["R"]["lanes"]
+        self.assertIn('screenshots <a href="/lane-shots/system/lane/logs/shots-5-20260906T090000/home-dark-1440.png" '
+                      'target="_blank" rel="noopener">home-dark-1440</a>, <a ', lanes)
+        self.assertIn("screenshots not drawn: shots: no Chrome found", lanes)
 
     def test_each_state_renders_its_glyph_and_label(self):
         lanes = self.run_page("R.lanes = ELS.details.html;")["R"]["lanes"]

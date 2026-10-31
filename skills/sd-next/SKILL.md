@@ -39,7 +39,7 @@ After the answer, take the operator through the waiting questions, oldest first:
 Skip review questions: `sd today` leaves a review batch's questions out of `Decisions` and counts them in its `+N review questions wait` line, as the operator labels them on the dashboard's Review page.
 Skip the grill's questions too: `sd today` leaves them out of `Decisions` and names them in its `Grill ready` line, as the operator answers them in a session of their own (below).
 
-1. File an unfiled question first: `sd task note N $'<question>\nOption: <a>\nOption: <b>' --kind question`.
+1. File an unfiled question first: `sd task note N $'<question>\nOption: <a> (Recommended)\nOption: <b>' --kind question`.
 2. Ask one question per `AskUserQuestion` call. Give its context in one or two lines, and put your recommended option first, marked "(Recommended)".
 3. Record each answer at once: `sd task note N "<ruling>" --kind decision --answers <note>`.
 4. Stop when the operator says stop, or when no question waits.

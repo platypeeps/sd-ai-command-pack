@@ -452,13 +452,13 @@ def open_runs(connection) -> list[dict]:
         (SCOPE,))]
 
 
-def ended_runs(connection, since: str, *, limit: int = 50) -> list[dict]:
-    """The build runs released at or after `since`, newest first (Queue's Builds panel, pack sd:6095)."""
+def ended_runs(connection, *, limit: int) -> list[dict]:
+    """The released build runs, newest first, up to `limit` (Queue's Builds panel, pack sd:6095, sd:6834)."""
     return [dict(row) for row in connection.execute(
         "SELECT runner_run.* FROM runner_run JOIN assignment ON assignment.id = runner_run.assignment "
-        "WHERE assignment.scope = ? AND runner_run.released_at IS NOT NULL AND runner_run.released_at >= ? "
+        "WHERE assignment.scope = ? AND runner_run.released_at IS NOT NULL "
         "ORDER BY runner_run.released_at DESC, runner_run.run DESC, runner_run.rowid DESC LIMIT ?",
-        (SCOPE, since, limit))]
+        (SCOPE, limit))]
 
 
 def pull_url(connection, repo: str, branch: str | None, items: list[int]) -> str:

@@ -33,6 +33,7 @@ from sd_db import (
 )
 from sd_db.migrate import initialise
 from sd_db.testing import patience
+from sd_db.writes import now
 
 NOW = "2026-09-06T12:00:00Z"
 
@@ -93,7 +94,15 @@ class ScreenCase(unittest.TestCase):
         return create_item(self.connection, title=title, **columns)
 
     def note(self, item: int, body: str, kind: str = "followup", **columns) -> int:
-        return add_note(self.connection, item, kind=kind, body=body, **columns)
+        """A note; a question is seeded as written, so a page may read one older than pack sd:6708's shape."""
+        if kind != "question":
+            return add_note(self.connection, item, kind=kind, body=body, **columns)
+        names = ["item", "timestamp", "kind", "body", *columns]
+        cursor = self.connection.execute(
+            f"INSERT INTO note ({', '.join(names)}) VALUES ({', '.join('?' for _ in names)})",
+            (item, now(), kind, body, *columns.values()))
+        self.connection.commit()
+        return int(cursor.lastrowid)
 
     def age(self, item: int, days: int) -> None:
         """Backdate the item's status history so the row reads as `days` old.

@@ -390,7 +390,7 @@ class DoneResolvesOpenNotes(WorkflowCase):
     def test_done_leaves_an_unanswered_question_open(self):
         item = self.capture()["item"]["id"]
         followup = add_note(self.db, item, "followup", "Check the backup")
-        question = add_note(self.db, item, "question", "Move all 45?\nOption: Approve all\nOption: Videos only")
+        question = add_note(self.db, item, "question", "Move all 45?\nOption: Approve all (Recommended)\nOption: Videos only")
         finished = change_status(self.db, item, "done", who="sd-ship", reason="delivered at " + "a" * 40)
         self.assertEqual(self.notes(item), {followup: ("followup", False), question: ("question", True)})
         self.assertEqual(finished["notes"][-1]["body"],

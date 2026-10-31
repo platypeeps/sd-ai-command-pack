@@ -123,7 +123,7 @@ class ItemRefs(unittest.TestCase):
 
         item("report", "nightly-sweep: needs attention", kind="report", fields={"attention": "two stale rows"})
         asked = item("asked", "Pick a store", repo=APP)
-        add_note(connection, asked, "question", "Which store holds the rows?\nOption: Pack\nOption: Database")
+        add_note(connection, asked, "question", "Which store holds the rows?\nOption: Pack (Recommended)\nOption: Database")
         owed = item("owed", "Owed work", repo=LIB, priority=2)
         add_note(connection, owed, "followup", "Chase the vendor")
         stuck = item("stuck", "Wire the webhook", repo=LIB)

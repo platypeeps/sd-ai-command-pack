@@ -30,7 +30,7 @@ Keep uncertain, unfixed, or untraceable findings open.
 Do not dismiss formal reviews, delete comments, or request another Copilot review.
 
 Create follow-ups only within existing authorization.
-For an authorized local follow-up, use `sd task add TITLE --kind followup --here --body BODY --json`.
+For an authorized local follow-up, use `sd task add TITLE --kind followup --priority 3 --here --body BODY --json`.
 Read back its identity and scope before naming it as a carried finding's successor.
 Creating an external issue needs authorization for that destination.
 If that authorization is absent, record the follow-up locally and disclose its limited visibility.
