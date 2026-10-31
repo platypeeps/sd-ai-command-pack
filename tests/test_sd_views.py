@@ -84,7 +84,7 @@ GATE = {"holders": [{"slot": 1, "pid": 7, "label": "app tests", "since": "2026-0
         "waiters": [{"place": 1, "pid": 8, "label": "lib tests", "since": "2026-09-06T17:58:00Z", "cwd": "/tmp"}]}
 
 TODAY = """\
-1 attention · 0 on this machine · 1 decisions · 2 landing · 1 delivered · 1 planned this week · 1 blocked · 8 unscheduled · 7 followups · 1 work
+1 attention · 0 on this machine · 1 decisions · 2 landing · 2 queues · 1 delivered · 1 planned this week · 1 blocked · 8 unscheduled · 7 followups · 1 work
 
 Attention (1)
 ID  Repo  State     Why             Title                           When
@@ -104,6 +104,12 @@ ID   Repo  State    Position  Title             When
 ---  ----  -------  --------  ----------------  ---------
 #11  app   running  1         Land the cache    11:50 MDT
 #12  app   pending  2         Land the index    12:00 MDT
+
+Queues (2)
+ID   Repo  State    Queue  Detail   Title             When
+---  ----  -------  -----  -------  ----------------  --------
+#11  app   running  lane   prepare  Land the cache    10 m ago
+#12  app   pending  lane   -        Land the index    now
 
 Delivered (1)
 ID   Repo  State   PR   Commit     Title             When

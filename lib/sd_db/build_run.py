@@ -62,6 +62,10 @@ HEARTBEAT = "build-dispatch"
 #: `lane retry` queues again (`prepared` is a merge the lane refused), and a cancel.
 LANE_ENDED = ("failed", "skipped", "prepared", "cancelled")
 
+#: The builder's pre-approved calls: the brief's two commit forms (pack sd:6723). A prefix rule cannot pin
+#: the -F file inside the worktree; the brief does.
+ALLOWED = ("Bash(git commit -m:*)", "Bash(git commit -F:*)")
+
 #: The child waits for one byte on its pipe, written once its group is recorded, then execs the command.
 GATE = ("import os, sys\n"
         "fd = int(sys.argv[1])\n"
@@ -75,9 +79,11 @@ BRIEF = """You are a headless builder run by the build dispatcher (pack sd:6094)
 
 Build these items, one commit per item, in the worktree {worktree} on branch {branch}:
 {items}
-{findings}
+{findings}{denied}
 Rules:
 - Work only in {worktree}. Read each item with `sd task show N` and the repository's CLAUDE.md first.
+- Write no file outside the worktree but the title and body below, not even in /tmp. Commit with
+  `git commit -m` or `git commit -F <file inside the worktree>`; add new commits and never amend.
 - The dispatcher owns every item's status: never run `sd task status`, never push, never open a pull request.
 - Write a test that fails before each fix, then make it pass; skip no test.
 - End the commit that delivers a whole item with a `Closes: sd:N` trailer: an item no trailer names
@@ -88,6 +94,11 @@ Rules:
 - Write the pull-request body, with `## Summary` and `## Test plan`, to {body}; quote each fail-first line.
   The body is public, so it names no local path (the worktree, a home directory): use repo-relative paths.
   The body carries no `Closes:` line: enqueue takes items by `--item` and refuses one (sd:3704).
+- Fence each failure table and any other line over 72 characters in the body in a code block.
+- Use synthetic names in tests and commits (`operator`, `example.test`), never a real person, host or path:
+  the pre-push leak guard refuses them.
+- Before your report, check the commits since origin/main and the body for both: the supervisor runs
+  the enqueue's line check and the leak guard after you, and sends each failure back to fix.
 - Leave the worktree clean, with your commits on the branch.
 - End only a process you started, by its pid: never `pkill` or `killall`, which end other sessions'
   gates too (sd:6815).
@@ -135,7 +146,7 @@ is none.>
 
 RESUME = """Your run was interrupted. Continue the brief in {worktree}: finish the items, commit, write the
 title to {title} and the body to {body}, and leave the worktree clean. Your final message is your report.
-"""
+{denied}"""
 
 
 class Unread(Exception):
@@ -208,13 +219,24 @@ def judge(lines: list[str], *, session: str | None = None) -> dict:
         return {**result, "state": "unknown", "why": "the result has no permission_denials list"}
     if denials:
         tools = sorted({str(row.get("tool_name") if isinstance(row, dict) else row) for row in denials})
-        return {**result, "state": "denied", "tools": tools, "why": f"permission denied: {', '.join(tools)}"}
+        return {**result, "state": "denied", "tools": tools, "why": f"permission denied: {', '.join(tools)}",
+                "calls": "; ".join(_denied_call(row) for row in denials)}
     if final.get("subtype") == "error_max_turns":
         return {**result, "state": "max_turns", "why": "the builder hit its turn limit"}
     if final.get("subtype") != "success" or final.get("is_error") is not False:
         return {**result, "state": "failed", "why": f"the result is {final.get('subtype')}, is_error "
                                                     f"{final.get('is_error')}"}
     return {**result, "state": "pass", "why": ""}
+
+
+def _denied_call(row) -> str:
+    """One denial as the retry's brief names it: the tool and its command or path."""
+    if not isinstance(row, dict):
+        return str(row)
+    given = row.get("tool_input")
+    given = given if isinstance(given, dict) else {}
+    what = given.get("command") or given.get("file_path") or given.get("path")
+    return f"{row.get('tool_name')} `{str(what)[:300]}`" if what else str(row.get("tool_name"))
 
 
 def _read(argv: list[str], *, env: dict | None = None) -> str:
@@ -343,11 +365,13 @@ class Supervisor:
     def __init__(self, connection, ident: str, *, tools: Tools, log_root: Path,
                  cited: Callable[[Path, str, str, str], Collection[int] | None], environ: dict | None = None,
                  beat_seconds: float = BEAT_SECONDS, timeout: float = TIMEOUT_SECONDS, grace: float = GRACE_SECONDS,
-                 probe=Probe):
+                 probe=Probe, checked: Callable[[Path, str, str, str, str], list[str]] | None = None):
         """`cited(worktree, base, head, body)` is the items the lane reads the branch as delivering, None when unread:
-        the lane's own reader, which lives beside it in `bin/`."""
+        the lane's own reader, which lives beside it in `bin/`. `checked(worktree, base, head, title, body)` is
+        what enqueue and its push would refuse, the line check and the leak guard (pack sd:6926); None checks
+        nothing."""
         self.db: Any = Patient(connection)  # duck-types the connection the writes are annotated with
-        self.ident, self.tools, self.probe, self.cited = ident, tools, probe, cited
+        self.ident, self.tools, self.probe, self.cited, self.checked = ident, tools, probe, cited, checked
         self.beat_seconds, self.timeout, self.grace = beat_seconds, timeout, grace
         self.row = build.run(self.db, ident)
         self.logs = log_dir(log_root, self.row["repo"])
@@ -449,6 +473,10 @@ class Supervisor:
     def reviewing(self) -> str | dict:
         self.enter("reviewing")
         head = self.head()
+        # What enqueue would refuse goes back to the builder before a review is spent (pack sd:6926).
+        refused = self.prechecked(head)
+        if refused:
+            return self.blocked_round([{"path": "enqueue check", "line": "-", "summary": text} for text in refused])
         answer: dict | None = None
         for _attempt in range(2):
             out = self.out("review")
@@ -463,10 +491,19 @@ class Supervisor:
         if answer["status"] in ("clean", "advisory"):
             self.reviewed = head
             return "enqueuing"
+        return self.blocked_round(answer["blockers"])
+
+    def prechecked(self, head: str) -> list[str]:
+        if self.checked is None:
+            return []
+        title, body = (path.read_text(encoding="utf-8") if path.exists() else "" for path in (self.title, self.body))
+        return self.checked(self.work, self.base(), head, title.strip(), body)
+
+    def blocked_round(self, blockers: list[dict]) -> str | dict:
         rounds = (self.fresh()["review_round"] or 0) + 1
         if not build.write(self.db, self.ident, review_round=rounds):
             raise Lost
-        self.blockers = answer["blockers"]
+        self.blockers = blockers
         if rounds >= REVIEW_ROUNDS:
             return self.finish("blocked", f"{rounds} review rounds left blockers: {self.summary(self.blockers)}")
         return self.fix()
@@ -595,7 +632,7 @@ class Supervisor:
             f"SELECT id, title FROM item WHERE id IN ({', '.join('?' for _ in items)})", items)}
         return {"worktree": self.work, "branch": self.row["branch"], "title": self.title, "body": self.body,
                 "title_max": TITLE_MAX, "items": "\n".join(f"- sd:{item} {titles.get(item, '')}" for item in items),
-                "findings": self.findings(items)}
+                "findings": self.findings(items), "denied": self.denied()}
 
     def findings(self, items: list[int]) -> str:
         """The Send to builder notes on `items` since the lead's first run, up to this run (pack sd:6020); "" for none.
@@ -617,7 +654,8 @@ class Supervisor:
 
     def claude(self, prompt: str, *, session: str | None, then: str) -> str | dict:
         argv = [*self.tools.claude, "-p", prompt, "--output-format", "stream-json", "--verbose",
-                "--permission-mode", "auto", "--max-turns", str(MAX_TURNS), "--model", self.row["model"] or build.OPUS]
+                "--allowedTools", *ALLOWED, "--permission-mode", "auto", "--max-turns", str(MAX_TURNS),
+                "--model", self.row["model"] or build.OPUS]
         if session:
             argv += ["--resume", session]
         offset = self.log.stat().st_size if self.log.exists() else 0
@@ -640,6 +678,10 @@ class Supervisor:
             problem = self.unfinished()
             return self.finish("blocked", problem) if problem else then
         if verdict["state"] == "denied":
+            # The first denial at a step is a loss: `_settle` requeues it once, the call in its brief (pack
+            # sd:6723). One with no retry left asks the operator.
+            if self.losses() < build.RETRIES:
+                return self.finish("denied", f"permission denied: {verdict['calls']}"[:2000])
             return self.finish("blocked", verdict["why"], question=self.denial_question(verdict))
         if verdict["state"] == "max_turns":
             return self.finish("error_max_turns", verdict["why"])
@@ -653,12 +695,31 @@ class Supervisor:
         """
         before = self.db.execute("SELECT outcome, detail FROM runner_run WHERE assignment = ? AND run < ? "
                                  "ORDER BY run DESC LIMIT 1", (self.row["assignment"], self.row["run"])).fetchone()
-        again = before is not None and before["outcome"] == "blocked" and before["detail"] == verdict["why"]
+        # A run `_settle` requeued after a denial counts as the same denial again (pack sd:6723).
+        again = before is not None and (before["outcome"] == "denied" or
+                                        (before["outcome"] == "blocked" and before["detail"] == verdict["why"]))
         options = (["Change the brief, then requeue (Recommended)", "Requeue as is"] if again else
                    ["Requeue as is (Recommended)", "Change the brief, then requeue"]) + ["Drop the build"]
-        return (f"Build run {self.ident}: the builder was denied {', '.join(verdict['tools'])}. "
+        return (f"Build run {self.ident}: the builder was denied {', '.join(verdict['tools'])}"
+                f" ({verdict['calls'][:500]}). "
                 f"Allow it, or change the brief, then requeue.\n"
                 + "\n".join(f"Option: {option}" for option in options))
+
+    def losses(self) -> int:
+        """The losses earlier runs of this bundle had at this run's step: `_settle` retries while under `RETRIES`."""
+        marks = ", ".join("?" for _ in build.LOSSES)
+        return self.db.execute(f"SELECT COUNT(*) FROM runner_run WHERE assignment = ? AND step IS ? AND id != ? "
+                               f"AND outcome IN ({marks})",
+                               (self.row["assignment"], self.fresh()["step"], self.ident, *build.LOSSES)).fetchone()[0]
+
+    def denied(self) -> str:
+        """The call the run before this one was denied, for the brief; "" when it was not denied."""
+        row = self.db.execute("SELECT outcome, detail FROM runner_run WHERE assignment = ? AND run < ? "
+                              "ORDER BY run DESC LIMIT 1", (self.row["assignment"], self.row["run"])).fetchone()
+        if row is None or row["outcome"] != "denied":
+            return ""
+        return (f"\nThe run before this one lost to a denied call: {row['detail']}. Do that step another way:\n"
+                f"write no file outside the worktree, commit with -m or with -F on a file inside it, never amend.\n")
 
     def cost(self, final: dict) -> None:
         usage = final.get("usage")
