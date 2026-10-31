@@ -539,7 +539,7 @@ def action_route(path, payload, *, principal, operations_backend=None, services_
             if match[1] in ("lane-host", "jira-project"):
                 # A Jira key or `off` (sd:5103): `repos.set_jira_project` refuses a bad key by its rule.
                 return isinstance(value, str) and value != ""
-            return value in {"runner-merge": ("manual", "auto"), "github-issues": ("on", "off")}.get(match[1], ("yes", "no"))
+            return value in {"runner-merge": ("manual", "auto"), "github-issues": ("off", "read", "ask")}.get(match[1], ("yes", "no"))
 
         if (set(values) != {"path", "value", "before"} or not isinstance(values["path"], str)
                 or not word(values["value"]) or not word(values["before"]) or values["value"] == values["before"]):

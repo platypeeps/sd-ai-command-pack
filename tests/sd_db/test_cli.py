@@ -349,7 +349,7 @@ class TheMigrationVerbs(MigrationVerbCase):
         self.sd_db("repo", "add", str(self.checkout))
         self.sd_db("repo", "ci", str(self.checkout), "local")
         self.sd_db("repo", "managed", str(self.checkout), "yes")
-        self.sd_db("repo", "github-issues", str(self.checkout), "on")
+        self.sd_db("repo", "github-issues", str(self.checkout), "ask")
         self.assertEqual(self._list_row()[-1], "manual")
         self.sd_db("repo", "runner-merge", str(self.checkout), "auto")
         self.assertEqual(self._list_row()[-1], "auto")
@@ -376,30 +376,30 @@ class TheMigrationVerbs(MigrationVerbCase):
         self.assertIn("needs a path and yes or no", completed.stderr)
         self.assertEqual(self._list_row()[-5], "no")
 
-    def test_repo_github_issues_sets_the_switch_and_list_shows_it_before_lane_host(self):
-        """sd:4827. `github_issues` sits between `ci` and `lane_host`, so the
+    def test_repo_github_issues_sets_the_policy_key_and_list_shows_it_before_lane_host(self):
+        """sd:4827, pack sd:6849. `policy.issues` sits between `ci` and `lane_host`, so the
         first four fields and the last two stay where their readers find them."""
         self.sd_db("repo", "add", str(self.checkout))
         self.assertEqual(self._list_row()[-3:], ["off", "hub", "manual"])
-        completed = self.sd_db("repo", "github-issues", str(self.checkout), "on")
-        self.assertIn("github_issues off -> on", completed.stdout)
-        self.assertEqual(self._list_row()[-3:], ["on", "hub", "manual"])
+        completed = self.sd_db("repo", "github-issues", str(self.checkout), "ask")
+        self.assertIn("policy.issues off -> ask", completed.stdout)
+        self.assertEqual(self._list_row()[-3:], ["ask", "hub", "manual"])
         self.sd_db("repo", "runner-merge", str(self.checkout), "auto")
-        self.assertEqual(self._list_row()[-3:], ["on", "hub", "auto"])
-        completed = self.sd_db("repo", "github-issues", str(self.checkout), "off")
-        self.assertIn("github_issues on -> off", completed.stdout)
-        self.assertEqual(self._list_row()[-3:], ["off", "hub", "auto"])
+        self.assertEqual(self._list_row()[-3:], ["ask", "hub", "auto"])
+        completed = self.sd_db("repo", "github-issues", str(self.checkout), "read")
+        self.assertIn("policy.issues ask -> read", completed.stdout)
+        self.assertEqual(self._list_row()[-3:], ["read", "hub", "auto"])
 
     def test_repo_github_issues_refuses_a_bad_word_an_unknown_path_and_a_wrong_count(self):
         self.sd_db("repo", "add", str(self.checkout))
-        for word in ("On", "yes", "1", "", " on"):
+        for word in ("on", "Ask", "auto", "1", "", " ask"):
             completed = self.sd_db("repo", "github-issues", str(self.checkout), word, expect=1)
-            self.assertIn("on or off", completed.stdout + completed.stderr)
-        completed = self.sd_db("repo", "github-issues", str(self.home / "absent"), "on", expect=1)
+            self.assertIn("off, read, ask", completed.stdout + completed.stderr)
+        completed = self.sd_db("repo", "github-issues", str(self.home / "absent"), "ask", expect=1)
         self.assertIn("not a registered repository", completed.stdout + completed.stderr)
-        for extra in ([], ["on", "off"]):
+        for extra in ([], ["ask", "off"]):
             completed = self.sd_db("repo", "github-issues", str(self.checkout), *extra, expect=1)
-            self.assertIn("needs a path and on or off", completed.stderr)
+            self.assertIn("needs a path and off, read or ask", completed.stderr)
         self.assertEqual(self._list_row()[-3], "off")
 
     def test_repo_jira_project_sets_and_clears_the_key_and_leaves_list_alone(self):

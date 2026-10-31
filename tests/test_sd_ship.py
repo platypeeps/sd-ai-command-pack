@@ -2345,6 +2345,42 @@ roles:
         with self.assertRaisesRegex(ship.Refusal, "requires explicit manual merge authority"):
             operation.merge()
 
+    def test_a_locked_database_once_does_not_fail_the_merge(self):
+        """pack sd:6855: merge's first write meets one `database is locked`, retries, and merges."""
+        self.prepare()
+        head = _git(self.root, "rev-parse", "HEAD")
+
+        met = []
+
+        class Locked:
+            """A connection whose first `BEGIN IMMEDIATE` fails once, as a held write lock does."""
+            def __init__(self, connection):
+                self.connection = connection
+
+            def __getattr__(self, name):
+                return getattr(self.connection, name)
+
+            def execute(self, sql, parameters=()):
+                if not met and sql == "BEGIN IMMEDIATE":
+                    met.append(sql)
+                    raise sqlite3.OperationalError("database is locked")
+                return self.connection.execute(sql, parameters)
+
+        def locked_connect(*args, **kwargs):
+            return Locked(connect(*args, **kwargs))
+
+        output, previous = io.StringIO(), pathlib.Path.cwd()
+        try:
+            with (patch("sd_db.database.connect", locked_connect), patch("sd_db.database.LOCK_WAITS", (0.01,)),
+                  contextlib.redirect_stdout(output)):
+                code = ship.main(["-C", str(self.root), "merge", "--item", str(self.item), "--manual",
+                                  "--expected-head", head, "--database", str(self.database), "--json"])
+        finally:
+            os.chdir(previous)
+        self.assertEqual(met, ["BEGIN IMMEDIATE"], "the lock was met")
+        self.assertEqual(code, 0, output.getvalue())
+        self.assertEqual(json.loads(output.getvalue())["phase"], "merged")
+
     def test_merge_takes_no_runner_lease(self):
         """sd:3085. The sd runner is gone, so `--run` and its lease went with it."""
         self.prepare()
@@ -4062,29 +4098,17 @@ roles:
         self.assertIn("waited 5s", str(refused.exception))
 
     def test_merge_wait_runs_once_the_holder_releases(self):
-        """sd:1937. The holder ends at the waiter's first poll, so `--wait` runs the merge once.
+        """sd:1937. With the lock released at 1 s, `--wait 60` runs the merge once.
 
-        The release follows the poll, not a clock: a holder that slept 2 s against a 5 s wait missed it on a loaded
-        gate. Killing the holder frees its flock, as an exit does.
+        The wait is far past the release: a 5 s wait against a 2 s holder lost the race
+        when gate load slowed the holder's release (sd:6855 review).
         """
-        from sd_db import runner_journal
-
-        holder = self.hold_ship_lock(self.operation().repository)
-        sleep, polls = runner_journal.time.sleep, []
-
-        def poll(seconds):
-            polls.append(seconds)
-            if len(polls) == 1:
-                holder.kill()
-                holder.wait()
-            sleep(seconds)
-
-        clock = SimpleNamespace(monotonic=runner_journal.time.monotonic, sleep=poll)
-        with patch.object(ship.Ship, "merge", return_value={"ok": True}) as merge, \
-                patch.object(runner_journal, "time", clock):
-            ship.dispatch(self.root, self.connection, self.database, self.locked_merge("--wait", "600"), receipts, False)
+        self.hold_ship_lock(self.operation().repository, seconds=1)
+        started = time.monotonic()
+        with patch.object(ship.Ship, "merge", return_value={"ok": True}) as merge:
+            ship.dispatch(self.root, self.connection, self.database, self.locked_merge("--wait", "60"), receipts, False)
         self.assertEqual(merge.call_count, 1)
-        self.assertGreaterEqual(len(polls), 1, "the merge never waited for the held lock")
+        self.assertGreaterEqual(time.monotonic() - started, 0.5, "the merge waited for the holder")
 
     def test_without_wait_a_held_lock_refuses_at_once(self):
         self.hold_ship_lock(self.operation().repository)
