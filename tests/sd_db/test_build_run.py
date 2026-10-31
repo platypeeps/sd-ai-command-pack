@@ -927,10 +927,33 @@ class Sweep(Case):
     def test_a_blocked_build_whose_items_are_done_is_removed(self):
         work = self.blocked()
         self.done()
+        head = support.git(self.repo, "rev-parse", self.bundle["branch"])
         self.assertEqual(build_run.sweep(self.db), [str(work)])
         self.assertFalse(work.exists())
         self.assertEqual(self.branches(), "")
         self.assertEqual(build_run.sweep(self.db), [], "a removed worktree is not swept again")
+        # Review round 1: item status is no proof the commits landed, so the head stays reachable.
+        kept = f"refs/sd-swept/{self.bundle['branch']}"
+        self.assertEqual(support.git(self.repo, "rev-parse", kept), head)
+        note = self.db.execute("SELECT body FROM note WHERE item = ? ORDER BY id DESC", (self.items[0],)).fetchone()
+        self.assertIn(kept, note["body"])
+
+    def test_a_head_off_its_branch_is_not_removed(self):
+        """A worktree whose HEAD left its branch holds commits the branch's ref would not keep."""
+        work = self.blocked()
+        self.done()
+        support.git(work, "checkout", "-q", "--detach")
+        support.git(work, "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "fix: stray")
+        self.assertEqual(build_run.sweep(self.db), [])
+        self.assertTrue(work.is_dir())
+
+    def test_a_branch_that_cannot_be_kept_is_not_removed(self):
+        work = self.blocked()
+        self.done()
+        support.git(self.repo, "update-ref", f"refs/sd-swept/{self.bundle['branch']}/x", "HEAD")
+        self.assertEqual(build_run.sweep(self.db), [], "a ref in the way: nothing is removed")
+        self.assertTrue(work.is_dir())
+        self.assertNotEqual(self.branches(), "")
 
     def test_the_tick_sweeps(self):
         work = self.blocked()

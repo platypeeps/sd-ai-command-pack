@@ -286,19 +286,28 @@ def sweep(connection, *, git: Collection[str] = ("git",)) -> list[str]:
     unpushed forever (pack sd:6909). Kept: an unreleased run on the path, an
     item of any run on it not done, a dirty or unread worktree, a live session
     other than a builder's. The paths removed.
+
+    An item marked done is no proof its commits landed: a squash merge leaves
+    no ancestry to check, and an item can be closed by hand. So the branch
+    head is first kept at `refs/sd-swept/<branch>`, outside `refs/heads`, and
+    a note on the lead item names it; a head that cannot be kept removes
+    nothing. `git branch <name> refs/sd-swept/<name>` brings it back.
     """
     rows = connection.execute(
         "SELECT runner_run.work_path, runner_run.repo, runner_run.branch, runner_run.session_id, "
-        "runner_run.released_at, item.status FROM runner_run "
+        "runner_run.released_at, item.status, item.id AS item, "
+        "assignment.id = runner_run.assignment AS lead FROM runner_run "
         "JOIN assignment ON assignment.id = runner_run.assignment OR assignment.parent = runner_run.assignment "
         "JOIN item ON item.id = assignment.item WHERE assignment.scope = ? AND runner_run.work_path IS NOT NULL",
         (build.SCOPE,)).fetchall()
     paths_: dict[str, dict] = {}
     for row in rows:
         entry = paths_.setdefault(row["work_path"], {"repo": row["repo"], "branch": row["branch"], "keep": False,
-                                                     "sessions": set()})
+                                                     "sessions": set(), "lead": row["item"]})
         entry["keep"] |= row["released_at"] is None or row["status"] != "done"
         entry["sessions"].add(row["session_id"])
+        if row["lead"]:
+            entry["lead"] = row["item"]
     removed = []
     for work, entry in paths_.items():
         if entry["keep"] or not Path(work).is_dir():
@@ -311,15 +320,25 @@ def sweep(connection, *, git: Collection[str] = ("git",)) -> list[str]:
         if sessions.holders(connection, work, machine=this_host(), exclude=tuple(filter(None, entry["sessions"]))):
             continue
         repo = str(paths.expand(entry["repo"]))
+        kept = f"refs/sd-swept/{entry['branch']}"
+        try:
+            head = _read([*git, "-C", work, "rev-parse", "--verify", "HEAD"]).strip()
+            if head != _read([*git, "-C", repo, "rev-parse", "--verify", f"refs/heads/{entry['branch']}"]).strip():
+                continue  # a detached HEAD off its branch: two heads to keep, so the sweep keeps both
+            _read([*git, "-C", repo, "update-ref", kept, head])
+        except Unread:
+            continue
         try:
             _read([*git, "-C", repo, "worktree", "remove", work])
         except Unread:
             continue
         removed.append(work)
+        add_note(connection, entry["lead"], "comment",
+                 f"Build worktree {work} swept: every item is done; its head {head[:12]} is kept at {kept}")
         try:
             _read([*git, "-C", repo, "branch", "-D", entry["branch"]])
         except Unread:
-            pass  # the worktree is gone; a branch left over costs nothing
+            pass  # the worktree is gone and the head kept; a branch left over costs nothing
     return removed
 
 
