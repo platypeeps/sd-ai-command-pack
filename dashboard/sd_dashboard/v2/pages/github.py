@@ -3,7 +3,8 @@ and issues: `/api/today/github` (`today_github`); a pull request's Copilot revie
 `/api/today/github/copilot-review`, and its Merge (sd:5668) previews with a GET and copies into the lane with a POST
 (`pr_merge`); Close original (sd:5669) previews its comment with a GET and closes with a POST (`pr_close`). Your issues
 (sd:4628) and Intake (sd:4840) are `/api/github/issues` (`issues`); File as item posts `/api/items` with the ref.
-Their rows' Hide (sd:6175) is the view state that read carries; Sync now posts `/api/jobs/shadow-sync-nightly/retry`.
+Their rows' Hide (sd:6175) is the view state that read carries; Refresh from GitHub, on all three views,
+posts `/api/jobs/shadow-sync-nightly/retry` (pack sd:6702).
 Your issues holds the operator's GitHub issues `today_github` reads too (sd:5899), so the Pull requests view lists none."""
 
 from __future__ import annotations
@@ -22,10 +23,13 @@ def _issues(read):
 
     from ... import issues, today_github
 
-    found = issues.with_github(issues.document(read.connection), today_github.document(read.connection, now=read.now))
-    # sd:6175: each row's Hide state, and Sync now's job, as HOA's Refresh now reads its own.
+    github = today_github.document(read.connection, now=read.now)
+    found = issues.with_github(issues.document(read.connection), github)
+    # sd:6175: each row's Hide state, and Refresh from GitHub's job, as HOA's Refresh now reads its own; `synced` is
+    # when GitHub was last read, shown beside it (pack sd:6702).
     return {**issues.with_views({**found, **issues.intake(read.connection)}, read.connection),
-            "sync": issues.sync_job(read.connection, read.jobs or operations.LaunchdBackend())}
+            "sync": issues.sync_job(read.connection, read.jobs or operations.LaunchdBackend()),
+            "synced": github["collector"]}
 
 
 def _view(payload, principal):

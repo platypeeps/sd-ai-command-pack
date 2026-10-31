@@ -287,7 +287,7 @@ class DedupeTests(ReviewFixture):
         environment = {key: value for key, value in os.environ.items()
                        if not key.startswith(("JEV_", "SD_JEV_"))}
         environment.update(HOME=str(self.home), PATH=str(self.tool_bin) + os.pathsep + os.defpath, **env)
-        return subprocess.run([sys.executable, str(ROOT / "bin" / "sd"), "task", "add", title, "--json"],
+        return subprocess.run([sys.executable, str(ROOT / "bin" / "sd"), "task", "add", "--priority", "3", title, "--json"],
                               cwd=str(self.root), env=environment, capture_output=True, text=True, check=True)
 
     def test_a_new_item_records_a_duplicate_pick_and_prints_the_same(self):

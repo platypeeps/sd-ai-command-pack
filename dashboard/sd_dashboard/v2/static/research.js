@@ -684,8 +684,8 @@ const DRAFT = { id: 'draft:research', type: 'research request', label: 'new rese
 // sd:5958: the item belongs to the project's checkout (`path`), as the line's --belongs-to says; a new: project has none.
 const START = { id: 'research.start', on: 'research request', label: 'Run', does: 'Files this research request as a task; Undo closes it.', key: 'r', icon: 'flask-conical', risk: 'undo', executes: true, primary: () => true,
   when: o => (!o.q ? 'type the question first' : !o.repo ? 'name the project: add repo:<name>' : true), cli: o => o.cmd,
-  sends: o => `POST /api/items {title, body${o.path ? ', repo' : ''}${o.due ? ', due' : ''}}`,
-  run: o => window.shell.post('/api/items', { title: `Research: ${o.q}`, body: `repo=${scopeOf(o.repo)} depth=${o.depth} skill=sd-research-repo stage=draft`,
+  sends: o => `POST /api/items {title, body, priority${o.path ? ', repo' : ''}${o.due ? ', due' : ''}}`,
+  run: o => window.shell.post('/api/items', { title: `Research: ${o.q}`, body: `repo=${scopeOf(o.repo)} depth=${o.depth} skill=sd-research-repo stage=draft`, priority: 3,
     ...(o.path ? { repo: o.path } : {}), ...(o.due ? { due: o.due } : {}) })
     .then(out => ({ text: `Research filed · #${out.item.id} · ${o.q}`, item: out.item.id, revision: out.revision })),
   undo: (o, v) => window.shell.post(`/api/items/${v.item}/cancel-task`, { reason: 'withdrawn on Research right after filing', revision: v.revision }) };
@@ -780,7 +780,7 @@ function renderShift() {
   reqEl.hidden = false;
   const path = PROJECTS.find(p => p.key === repo)?.path || '';
   Object.assign(DRAFT, { q: o.q, repo, path, depth: o.depth, budget: o.budget, due: o.due,
-    cmd: `sd task add ${shq('Research: ' + o.q)}${path ? ` --belongs-to ${shPath(path)}` : ''} --body ${shq(`repo=${scope} depth=${o.depth} skill=sd-research-repo stage=draft`)}${o.due ? ` --due ${shq(o.due)}` : ''}` });
+    cmd: `sd task add ${shq('Research: ' + o.q)}${path ? ` --belongs-to ${shPath(path)}` : ''} --body ${shq(`repo=${scope} depth=${o.depth} skill=sd-research-repo stage=draft`)}${o.due ? ` --due ${shq(o.due)}` : ''} --priority 3` });
   put(reqEl, html`<p class="why">Creates an item in ${scope}: Run files it, and Undo closes it. Review rounds start at 0 of ${CAP}.</p>
     ${o.q ? html`<div class="cli"><code>${DRAFT.cmd}</code><button class="icon-btn" type="button" data-copy="${DRAFT.cmd}" aria-label="Copy command">${I('copy')}</button></div>
     <div class="actions">${shell.commands.rowActions(DRAFT.id)}</div>` : ''}`);

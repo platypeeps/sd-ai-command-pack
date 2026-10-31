@@ -140,6 +140,14 @@ def item_for(connection, sd_db, root, item_dir):
     return None if row is None else dict(row)
 
 
+def policy_for(root) -> str:
+    """The repository's policy line (sd:6715, `sd_repo_policy.summary`); "" when it declares none."""
+    import sd_lib
+
+    policy = sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py")
+    return policy.summary(sd_lib.repo_declaration(root, "policy"))
+
+
 def brief_for(root) -> list[str]:
     """The whole read for a hook: open, `sd_db.note_brief`, close. Never writes.
 

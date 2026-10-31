@@ -1671,6 +1671,7 @@ class TheScript(Collectors, ScreenCase):
             ["dependabot alerts.fix", "dependabot alerts", "safe", "f", True, False],
             ["secret scanning.review", "secret scanning", "safe", "o", False, False],
             ["credential.probe", "credential", "safe", "r", True, False],
+            ["credential.signin", "credential", "safe", "i", True, False],
         ] + [[f"{t}.snooze", t, "undo", "z", None, True] for t in SNOOZED_TYPES]
           + [[f"{t}.ignore", t, "undo", "h", None, True] for t in SNOOZED_TYPES]
           + [["snoozed row.unsnooze", "snoozed row", "undo", "s", None, True],
@@ -1972,6 +1973,24 @@ shellRun(cmd('worktree registrations.prune'), o); await flush();""",
                          [["/api/health/cleanup", {"row": "gone:group/alpha", "revision": out["R"]["rev"]}]])
         self.assertEqual(out["gets"], ["/api/health/checkouts", "/api/health/summary"])
         self.assertEqual(out["toasts"][-1][0], "group/alpha: 2 worktrees registered, directory gone: 1 done · kept 1: b (locked)")
+
+    def test_an_expired_login_offers_sign_in_and_posts_its_probe(self):
+        """sd:6722: a signed-out login's row leads with Sign in; Probe again checks that row's probe only."""
+        record_state(self.connection, "heartbeat", key=credentials.HEARTBEAT_KEY, timestamp="2026-09-06T03:10:00Z", body={"probes": [
+            {"id": "aws:dev", "name": "AWS profile (dev)", "signin": "aws sso login --profile dev", "signed_in": False},
+            {"id": "gh", "name": "gh CLI sign-in (gh auth status)", "signed_in": True}]})
+        self.connection.commit()
+        answer = "ANSWER = (path, body) => HEALTH_READ(path) ? HEALTH(path) : path === '/api/actions/run' ? [200, { action: body.action, label: 'Sign in', line: 'x', exit: 0, output: 'Started' }] : [404, { error: 'no answer' }];\n"
+        out = self.run_page(answer + """var o = C.get('cred:aws:dev'), g = C.get('cred:gh'), c = cmd('credential.signin');
+R.row = [o.state, o.what, o.detail]; R.on = c.when(o); R.lead = c.primary(o); R.cli = c.cli(o); R.off = c.when(g);
+shellRun(c, o); await flush(); shellRun(cmd('credential.probe'), o); await flush();""", view="jobs")
+        R = out["R"]
+        self.assertEqual(R["row"], ["warning", "AWS profile (dev): rejected", "signed out: Sign in starts the login"])
+        self.assertEqual((R["on"], R["lead"], R["cli"]), (True, True, "aws sso login --profile dev"))
+        self.assertEqual(R["off"], "this credential has no sign-in")
+        self.assertEqual([post[:2] for post in out["posts"]],
+                         [["/api/actions/run", {"action": "credentials.signin", "probe": "aws:dev"}],
+                          ["/api/actions/run", {"action": "check.run", "row": "cred:aws:dev"}]])
 
     SERVICE_ANSWER = ("ANSWER = (path, body) => HEALTH_READ(path) ? HEALTH(path) : path.startsWith('/api/services/') "
                       "? [STATUS_W, WROTE] : [404, { error: 'no answer' }];\n")
