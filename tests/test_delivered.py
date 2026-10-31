@@ -235,6 +235,20 @@ class DeliveredTests(GitFixture):
         self.git(work, "push", "--quiet", "origin", "main")
         self.assertEqual(sd_lib.delivered(work, ITEM), "yes")
 
+    def test_a_merged_branch_commit_closes_nothing(self) -> None:
+        """sd:6790 review. A merge commit lands its branch's own commits on
+        main's history; only main's first-parent commits speak for it, so a
+        branch commit's `Closes:` the merge never validated closes nothing."""
+        work = self.clone(self.seeded_remote(), "work")
+        self.git(work, "checkout", "--quiet", "-b", "slice")
+        (work / "work.txt").write_text("slice\n", encoding="utf-8")
+        self.git(work, "add", "-A")
+        self.git(work, "commit", "--quiet", "-m", merge_message("feat: a change", f"Closes: {ITEM}"))
+        self.git(work, "checkout", "--quiet", "main")
+        self.git(work, "merge", "--no-ff", "--quiet", "-m", merge_message("feat: the slice (#1)", f"Item: {OTHER}"), "slice")
+        self.git(work, "push", "--quiet", "origin", "main")
+        self.assertEqual(sd_lib.delivered(work, ITEM), "no")
+
     def test_a_merge_carrying_item_alone_answers_no(self) -> None:
         """Case 2. A slice shipped without `--deliver` is exactly this, and the
         item is still open. `no` and not `unknown`: the checkout is a whole,

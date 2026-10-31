@@ -2809,7 +2809,9 @@ def _closed_by(root: pathlib.Path, ref: str, item: "str | tuple[str, ...]") -> b
     """Whether a commit reachable from `ref` closes `item`; a ref git cannot
     resolve closes nothing. `--grep` only narrows the walk; `_closes` decides."""
     grep = f"{DELIVERS_TRAILER}|{CLOSES_TRAILER}"
-    raw = git_output(["log", "--format=%H%x1f%P%x1f%B%x1e", "-E", "--grep", grep, ref], root) or ""
+    # First parent only: a merge commit lands its branch's own commits on the
+    # history too, and only the merge's message was validated (sd:6790).
+    raw = git_output(["log", "--first-parent", "--format=%H%x1f%P%x1f%B%x1e", "-E", "--grep", grep, ref], root) or ""
     return any(_closes(message, item, parents, functools.partial(_ancestor, root, commit.strip()))
                for commit, parents, message in (c.split("\x1f", 2) for c in raw.split("\x1e") if c.count("\x1f") >= 2))
 

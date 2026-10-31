@@ -1667,12 +1667,51 @@ roles:
         tip, first = landed[0].strip(), landed[1].strip()
         self.assertTrue(tip.startswith("fix: second\n\n"), tip)
         self.assertIn(f"Item: sd:{self.item}\nDelivers: sd:{self.item}\nReviewed-base: {base} ~2", tip)
-        self.assertEqual(ship.sd_lib.trailer_block(tip).count("Closes:"), 1, tip)
+        self.assertNotIn("Closes:", ship.sd_lib.trailer_block(tip), tip)  # the builder's became Refs:
+        self.assertIn(f"Refs: sd:{self.item}", ship.sd_lib.trailer_block(tip), tip)
         self.assertTrue(first.startswith("change\n\n") and "Delivers:" not in first, first)
         self.assertEqual(_git(self.remote.path, "show", "main:src.py"), "value = 2")
         self.assertEqual(result["merge_commit"], _git(self.remote.path, "rev-parse", "main"))
         self.assertEqual(self.connection.execute("SELECT status FROM item WHERE id = ?", (self.item,)).fetchone()[0],
                          "done")
+
+    def test_a_rebase_lands_no_closing_trailer_prepare_did_not_validate(self):
+        """sd:6790 review. A rebase lands every commit's message on main, so a `Closes:` or `Delivers:`
+        a builder wrote becomes `Refs:`; only the trailers prepare composes close anything."""
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "rebase"})
+        _git(self.root, "commit", "--amend", "-q", "-m", "change\n\nDelivers: sd:43\nAuthored-with: human")
+        _git(self.root, "commit", "--allow-empty", "-q", "-m", "fix: tip\n\nCloses: sd:42\nAuthored-with: human")
+        _git(self.root, "push", "-q", "--force", "origin", "topic")
+        self.prepare()
+        base = _git(self.root, "rev-parse", "origin/main")
+        messages = _git(self.root, "log", "--format=%B%x1e", f"{base}..HEAD").split("\x1e")
+        for message in messages:
+            for number in ("sd:42", "sd:43"):
+                self.assertFalse(ship.sd_lib._closes(message, number), message)
+        tip = messages[0].strip()
+        self.assertIn("Refs: sd:42", tip)
+        self.assertIn(f"Item: sd:{self.item}", tip)
+        self.assertIn("Refs: sd:43", messages[1])
+
+    def test_a_rebase_that_would_drop_a_merge_commits_own_edit_refuses(self):
+        """sd:6790 review. Linearizing drops merge commits; a catch-up merge that also edited a file would
+        lose that edit, so prepare refuses when the replayed tree differs and pushes nothing."""
+        set_declaration(self.connection, str(self.operator), "policy", {"merge_method": "rebase"})
+        _git(self.root, "commit", "--amend", "-q", "-m", f"change\n\nRefs: sd:{self.item}\nAuthored-with: human")
+        _git(self.root, "push", "-q", "--force", "origin", "topic")
+        pushed = _git(self.root, "rev-parse", "HEAD")
+        self.remote.commit_on("main", "later main work\n\nAuthored-with: human", files={"main.py": "x = 1\n"})
+        _git(self.root, "fetch", "-q", "origin", "main")
+        _git(self.root, "merge", "-q", "--no-ff", "--no-commit", "origin/main")
+        (self.root / "resolution.py").write_text("edited = 1\n")
+        _git(self.root, "add", "resolution.py")
+        _git(self.root, "commit", "-q", "-m", f"Merge origin/main\n\nRefs: sd:{self.item}\nAuthored-with: human")
+        head = _git(self.root, "rev-parse", "HEAD")
+        with self.assertRaisesRegex(ship.Refusal, "would change the tree") as caught:
+            self.prepare()
+        self.assertEqual(caught.exception.workflow["blocker"]["code"], "rebase_changes_tree")
+        self.assertEqual(_git(self.root, "rev-parse", "HEAD"), head)
+        self.assertEqual(_git(self.remote.path, "rev-parse", "topic"), pushed)
 
     def test_a_rebase_branch_commit_naming_no_item_refuses_at_prepare(self):
         """sd:6790. A rebase lands every commit on main as it is, so one that names no item refuses before

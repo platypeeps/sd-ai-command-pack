@@ -446,6 +446,28 @@ def merge_allowed(base: str, protection: dict, method: str = "squash") -> None:
 ALLOW_FIELD = {"squash": "allow_squash_merge", "rebase": "allow_rebase_merge", "merge": "allow_merge_commit"}
 #: The trailers sd-ship writes into a rebase tip, taken out again when a later prepare writes them anew.
 SHIP_TRAILERS = (sd_lib.ITEM_TRAILER, sd_lib.DELIVERS_TRAILER, sd_lib.REVIEWED_BASE_TRAILER)
+#: The trailers that close an item; a rebase lands a branch commit's own as `Refs:` (sd:6790).
+CLOSING_TRAILERS = (sd_lib.DELIVERS_TRAILER, sd_lib.CLOSES_TRAILER)
+
+
+def without_closes(message: str) -> str:
+    """`message` with each closing trailer in its trailer block turned into `Refs:` and no `Reviewed-base:`.
+
+    A rebase lands every branch commit's message on the base, and only the trailers prepare composes
+    are validated against the claim (sd:6790); a builder's `Closes:` would otherwise close an item
+    the receipt leaves open.
+    """
+    text = message.strip()
+    rest, separator, last = text.rpartition("\n\n")
+    if not separator or not sd_lib.trailer_block(text):
+        return text
+    lines: list[str] = []
+    for line in last.splitlines():
+        if line.startswith(CLOSING_TRAILERS):
+            line = "Refs:" + line.partition(":")[2]
+        if not line.startswith(sd_lib.REVIEWED_BASE_TRAILER) and line not in lines:
+            lines.append(line)
+    return f"{rest}\n\n" + "\n".join(lines)
 
 
 #: The words that mark a merge warning as the Copilot ancestor clearance.
@@ -2338,24 +2360,31 @@ class Ship(SharedReview):
 
         Each commit lands on the base as it is, so the branch is made linear and its `fixup!` commits fold
         into theirs: on origin/<base> under --catch-up, else on the base it already holds. Every commit but
-        the tip must name an item and pass the commit convention; the tip's message then gets `Item:`,
-        `Delivers:`, `Reviewed-base: <base> ~N` and the owed `Closes:`. The tree never changes, and the
-        review and the gate run at the head this returns, which `lease` lets prepare force-push.
+        the tip must name an item and pass the commit convention, and each closing trailer a commit wrote
+        becomes `Refs:`; the tip's message then gets `Item:`, `Delivers:`, `Reviewed-base: <base> ~N` and
+        the owed `Closes:`. A merge commit whose own edit the replay would drop refuses. The tree never
+        changes, and the review and the gate run at the head this returns, which `lease` force-pushes.
         """
         if git(self.root, "status", "--porcelain", "--untracked-files=no"):
             raise Refusal("a rebase repository's prepare rewrites the branch and needs a clean working tree",
                           code="dirty_worktree", boundary="input", state="operator_decision",
                           next_action="Commit or stash the changes, then run prepare again.")
         remote = f"refs/remotes/origin/{base}"
-        onto = git(self.root, "rev-parse", remote) if getattr(self.args, "catch_up", False) else git(self.root, "merge-base", head, remote)
-        if sd_lib.git_output(["-c", "sequence.editor=true", "rebase", "-i", "--autosquash", "--no-autostash",
-                              "--no-verify", onto], self.root) is None:
-            sd_lib.git_output(["rebase", "--abort"], self.root)
-            if current_head(self.root) != head:
-                git(self.root, "reset", "--keep", head)
-            raise Refusal(f"rebasing {self.branch} onto {onto[:12]} conflicts; the branch is unchanged",
-                          code="merge_conflict", boundary="ci", state="operator_decision",
-                          next_action=f"Run git rebase {onto[:12]}, resolve the conflict, then run prepare again.")
+        onto = git(self.root, "merge-base", head, remote)
+        self.rebase_onto(head, onto, "-i", "--autosquash")
+        # Linearizing drops merge commits; one that edited a file on its own
+        # (a conflict resolution, say) would lose that edit here (sd:6790).
+        if git(self.root, "rev-parse", "HEAD^{tree}") != git(self.root, "rev-parse", f"{head}^{{tree}}"):
+            git(self.root, "reset", "-q", "--keep", head)
+            raise Refusal(f"rebasing {self.branch} would change the tree: a merge commit on it holds an edit of "
+                          "its own, which a rebase merge drops; the branch is unchanged",
+                          code="rebase_changes_tree", boundary="input", state="operator_decision",
+                          next_action="Move the merge commit's own edit into an ordinary commit, then run "
+                                      "prepare again.")
+        if getattr(self.args, "catch_up", False) and onto != git(self.root, "rev-parse", remote):
+            onto = git(self.root, "rev-parse", remote)
+            self.rebase_onto(head, onto)
+        self.relink(onto, (self.state.get("rebase_tip") or {}).get("commit"))
         commits = git(self.root, "rev-list", "--reverse", f"{onto}..HEAD").split()
         if not commits:
             raise Refusal(f"{self.branch} lands no commit on {base}", code="empty_branch", boundary="input",
@@ -2371,6 +2400,37 @@ class Ship(SharedReview):
         head = current_head(self.root)
         self.save(rebase_tip={"commit": head, "message": original}, landed_commits=len(commits))
         return head
+
+    def rebase_onto(self, head: str, onto: str, *flags: str) -> None:
+        """`git rebase` onto `onto`; a conflict aborts, puts the branch back at `head` and refuses."""
+        if sd_lib.git_output(["-c", "sequence.editor=true", "rebase", *flags, "--no-autostash", "--no-verify", onto],
+                             self.root) is None:
+            sd_lib.git_output(["rebase", "--abort"], self.root)
+            if current_head(self.root) != head:
+                git(self.root, "reset", "--keep", head)
+            raise Refusal(f"rebasing {self.branch} onto {onto[:12]} conflicts; the branch is unchanged",
+                          code="merge_conflict", boundary="ci", state="operator_decision",
+                          next_action=f"Run git rebase {onto[:12]}, resolve the conflict, then run prepare again.")
+
+    def relink(self, onto: str, prepared: str | None) -> None:
+        """Rewrite each commit after `onto` whose message carries a closing trailer (`without_closes`).
+
+        Same trees and authors; a commit with nothing to change and an unchanged parent is kept as it is,
+        and so is the tip an earlier prepare wrote (`prepared`), whose trailers `compose_tip` checks.
+        """
+        parent = onto
+        for commit in git(self.root, "rev-list", "--reverse", f"{onto}..HEAD").split():
+            message = git(self.root, "show", "-s", "--format=%B", commit)
+            changed = message.strip() if commit == prepared else without_closes(message)
+            if changed == message.strip() and git(self.root, "rev-parse", f"{commit}^") == parent:
+                parent = commit
+                continue
+            name, email, date = git(self.root, "show", "-s", "--format=%an%x00%ae%x00%aI", commit).split("\0")
+            parent = run(self.root, ["env", f"GIT_AUTHOR_NAME={name}", f"GIT_AUTHOR_EMAIL={email}",
+                                     f"GIT_AUTHOR_DATE={date}", "git", "commit-tree", f"{commit}^{{tree}}",
+                                     "-p", parent, "-F", "-"], input=changed + "\n")
+        if parent != current_head(self.root):
+            git(self.root, "reset", "-q", "--keep", parent)
 
     def refuse_landing_commit(self, commit: str) -> None:
         """Refuse a commit a rebase would land on the base without an item or against the convention (sd:6790)."""
@@ -2402,7 +2462,7 @@ class Ship(SharedReview):
         Joined to the tip's own trailer block when it has one, so git reads both as one; the trailers an
         earlier prepare wrote are taken out first. `~N` names how many commits land, and is left out at one.
         """
-        subject, _, rest = original.strip().partition("\n\n")
+        subject, _, rest = without_closes(original).partition("\n\n")
         if sd_lib.trailer_block(original):
             paragraphs = rest.split("\n\n")
             kept = [line for line in paragraphs[-1].splitlines() if not line.startswith(SHIP_TRAILERS)]
