@@ -974,6 +974,27 @@ class Runner(Lane):
             sd_lane.run_lane(self.repo, environ, self.ship)
         self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
 
+    def test_a_frozen_repository_claims_no_entry_until_the_window_ends(self) -> None:
+        """sd:6879. A freeze window holds the lane: every entry stays pending, and a lift lets the run take them."""
+        import sd_db
+        sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            sd_db.set_freeze(connection, self.store().repository, "2099-01-01T00:00:00Z", "release",
+                         now="2098-12-31T00:00:00Z")
+        finally:
+            connection.close()
+        answer = sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual((self.calls, [row["status"] for row in self.entries()]), ([], ["pending"]))
+        self.assertIn("is frozen until 2099-01-01T00:00:00+00:00: release", answer["stopped"])
+        connection = sd_db.connect(home=self.tmp)
+        try:
+            sd_db.set_freeze(connection, self.store().repository, None)
+        finally:
+            connection.close()
+        sd_lane.run_lane(self.repo, self.environ, self.ship)
+        self.assertEqual([row["status"] for row in self.entries()], ["prepared"])
+
     def test_no_gate_load_limit_claims_whatever_the_load(self) -> None:
         sd_lane.enqueue_entry(self.feature, 1, "fix: one", self.body, self.environ, claim="deliver")
         with mock.patch.object(sd_lane.os, "getloadavg", lambda: (99.0, 99.0, 99.0)):

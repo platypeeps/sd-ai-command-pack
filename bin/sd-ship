@@ -2284,12 +2284,28 @@ class Ship(SharedReview):
     def merge_rules(self, base: str, number: int, head: str, protection: dict) -> None:
         """The base ruleset's merge methods, then the repository's policy (sd:6715)."""
         squash_allowed(base, protection)
+        self.freeze_hold()
         self.policy_hold(number, head)
 
     def still_allowed(self, base: str, number: int, head: str, protection: dict) -> None:
         """`still_gated`, then the policy again: an approval can be dismissed during the gate's minutes."""
         self.still_gated(base, head, protection)
+        self.freeze_hold()
         self.policy_hold(number, head)
+
+    def freeze_hold(self) -> None:
+        """Refuse a merge inside the repository's freeze window, `sd-db repo freeze` (sd:6879).
+
+        Read before the gate and again just before the merge: a window can open during the gate's minutes.
+        """
+        sd_lib.import_sd_db()  # the gateway first, as for every sd_db import here
+        from sd_db.writes import freeze_window
+        window = freeze_window(self.connection, self.repository)
+        if window is not None:
+            raise Refusal(f"{self.repository} is frozen until {window['until']}: {window['reason']}",
+                          code="freeze_window", state="operator_decision",
+                          next_action="Wait for the window to end, or lift it with `sd-db repo freeze <path> off`, "
+                                      "then retry merge.")
 
     def policy_hold(self, number: int, head: str) -> None:
         """Refuse what the repository's `policy` declaration does not allow at merge time (sd:6715).

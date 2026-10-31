@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from sd_db.schema import SCHEMA_VERSION
@@ -426,6 +427,22 @@ class TheMigrationVerbs(MigrationVerbCase):
             self.assertIn("needs a path and a Jira project key or off", completed.stderr)
         completed = self.sd_db("repo", "jira-project", str(self.checkout), "off")
         self.assertIn("jira_project EXAMPLE -> off", completed.stdout)
+
+    def test_repo_freeze_sets_prints_and_lifts_a_window(self):
+        """sd:6879. `repo freeze PATH UNTIL REASON` writes a `freeze` row keyed by owner/name; `off` lifts it."""
+        subprocess.run(["git", "-C", str(self.checkout), "remote", "add", "origin",
+                        "https://github.com/Example/Pack.git"], check=True, capture_output=True)
+        self.sd_db("repo", "add", str(self.checkout))
+        self.assertIn("example/pack not frozen", self.sd_db("repo", "freeze", str(self.checkout)).stdout)
+        until = (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(timespec="seconds")
+        completed = self.sd_db("repo", "freeze", str(self.checkout), until, "release 4.2")
+        self.assertIn(f"example/pack frozen until {until}: release 4.2", completed.stdout)
+        self.assertIn("frozen until", self.sd_db("repo", "freeze", str(self.checkout)).stdout)
+        self.assertIn("not frozen", self.sd_db("repo", "freeze", str(self.checkout), "off").stdout)
+        completed = self.sd_db("repo", "freeze", str(self.checkout), until, expect=1)
+        self.assertIn("needs a path", completed.stderr)
+        completed = self.sd_db("repo", "freeze", str(self.home / "absent"), "off", expect=1)
+        self.assertIn("not a registered repository", completed.stdout + completed.stderr)
 
     def test_repo_declare_sets_prints_and_removes_one_kind(self):
         """sd:5109. `repo declare PATH KIND JSON|off` writes the row; `PATH [KIND]` prints it; `$schema` is dropped."""

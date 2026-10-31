@@ -48,7 +48,8 @@ database and runs it under one runner lock per repository:
            (sd:3239, below); so does one whose prepare refused retryably
            and spent no review pass, once (sd:3478, below). It claims
            nothing while load5 is at or above the gate's load limit,
-           `sd.gate_load_max` (`load_stop`, sd:3479);
+           `sd.gate_load_max` (`load_stop`, sd:3479), nor inside the
+           repository's freeze window (`freeze_stop`, sd:6879);
   watch    print each gate end a lane or builder log records, once; with
            `--item N`, repeated, wait until each item's newest entry that is
            not cancelled ends, print one line each, and exit 0 only when all
@@ -3387,6 +3388,22 @@ def load_stop(environ: dict[str, str]) -> str | None:
     return None
 
 
+def freeze_stop(queue: Queue) -> str | None:
+    """Why the runner claims no entry inside the repository's freeze window, or None (sd:6879).
+
+    The window is a `freeze` state row, set by `sd-db repo freeze`. Every
+    entry stays pending, in order, and the first run after the window takes
+    them; a hub that does not answer raises, as a claim would.
+    """
+    require_sd_db()
+    from sd_db.writes import freeze_window  # noqa: PLC0415
+    window = on_hub(queue, lambda connection: freeze_window(connection, queue.repository))
+    if window is None:
+        return None
+    return (f"{queue.repository} is frozen until {window['until']}: {window['reason']}; "
+            "the first run after the window takes the pending entries")
+
+
 def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_ship,
              gate: Gate = default_gate, note: Note | None = None, deadline: float | None = None) -> dict[str, Any]:
     """Drain this repository's queue in order under its runner lock; never wait for the lock.
@@ -3468,6 +3485,14 @@ def next_claim(queue: Queue, environ: dict[str, str], deadline: float,
     loaded = load_stop(environ)
     if loaded is not None:
         answer["stopped"] = loaded
+        return None, ""
+    try:
+        held = freeze_stop(queue)
+    except LaneError as error:
+        answer["stopped"] = str(error)
+        return None, ""
+    if held is not None:
+        answer["stopped"] = held
         return None, ""
     token = secrets.token_hex(16)
     try:

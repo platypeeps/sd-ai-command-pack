@@ -652,7 +652,8 @@ def command_repo(argv: list[str]) -> int:
     `repo channels <path> [obsidian=.. notion=.. drive=.. feed=URL jira=KEY github=OWNER/NAME email=LABEL,.. | none]`,
     `repo clones <path> <P,Q | none | +P | -P>`, `repo dependabot <path> <yes|no>`,
     `repo github-issues <path> <off|read|ask>`, `repo jira-project <path> <KEY|off>`,
-    `repo declare <path> [KIND [JSON|off]]`, `repo remove <path> ...`.
+    `repo declare <path> [KIND [JSON|off]]`, `repo freeze <path> [UNTIL REASON | off]`,
+    `repo remove <path> ...`.
 
     The `repo` table is what criterion 6 enumerates from, so an empty one
     makes that criterion pass over nothing. `add` and `seed` are the two ways
@@ -682,7 +683,10 @@ def command_repo(argv: list[str]) -> int:
     so no reader that counts fields moves. `declare` prints or sets
     `repo.declarations` (sd:5109), the objects the pack's readers once read
     from `.github/sd-<kind>.json`; `bin/sd-db` checks a kind's object with its
-    reader before this writes it.
+    reader before this writes it. `freeze` prints, sets or lifts the
+    repository's freeze window (sd:6879), a `freeze` state row keyed by its
+    GitHub `owner/name`: the lane claims nothing and `sd-ship merge` refuses
+    until UNTIL.
 
     `list` prints `managed`, `ci`, `policy.issues`, `lane_host`, then
     `runner_merge`, so the merge setting stays the last field of each row,
@@ -690,7 +694,7 @@ def command_repo(argv: list[str]) -> int:
     `lane_host` so the first four fields and the last two stay put.
     """
     verbs = ("add", "seed", "list", "runner-merge", "managed", "ci", "lane-host", "channels", "clones",
-             "dependabot", "github-issues", "jira-project", "declare", "remove")
+             "dependabot", "github-issues", "jira-project", "declare", "freeze", "remove")
     if not argv or argv[0] not in verbs:
         print(f"sd-db repo: expected {', '.join(verbs[:-1])} or {verbs[-1]}",
               file=sys.stderr)
@@ -760,6 +764,8 @@ def command_repo(argv: list[str]) -> int:
             return _repo_channels(connection, rest)
         if verb == "declare":
             return _repo_declare(connection, rest)
+        if verb == "freeze":
+            return _repo_freeze(connection, rest)
         if verb == "clones":
             if len(rest) != 2:
                 print("sd-db repo clones: needs a path and P,Q, none, +P or -P (P is personal, work or terra)",
@@ -945,6 +951,29 @@ def _repo_declare(connection, rest: list[str]) -> int:
     target, before = set_declaration(connection, path, kind, declaration_value(kind, word))
     print(f"sd-db: {target} {kind} {'declared' if before is not None else 'none'} -> "
           f"{'none' if word == DECLARATION_OFF else 'declared'}")
+    return 0
+
+
+def _repo_freeze(connection, rest: list[str]) -> int:
+    """`repo freeze PATH` prints the open window, `PATH UNTIL REASON` sets one, `PATH off` lifts it (sd:6879)."""
+    from ..protection import github_slug
+    from ..writes import freeze_window, set_freeze
+
+    if not rest or len(rest) == 2 and rest[1] != "off" or len(rest) > 3:
+        print("sd-db repo freeze: needs a path, then nothing, off, or an end time and a reason", file=sys.stderr)
+        return 1
+    row = row_for(connection, rest[0])
+    found = github_slug(row["remote"]) if row is not None else None
+    if found is None:
+        raise SdDbError(f"sd-db repo freeze: {rest[0]} is not a registered repository with a GitHub remote")
+    target = "/".join(found).lower()
+    if len(rest) == 2:
+        set_freeze(connection, target, None)
+    elif len(rest) == 3:
+        set_freeze(connection, target, rest[1], rest[2])
+    window = freeze_window(connection, target)
+    print(f"sd-db: {target} frozen until {window['until']}: {window['reason']}" if window else
+          f"sd-db: {target} not frozen")
     return 0
 
 
