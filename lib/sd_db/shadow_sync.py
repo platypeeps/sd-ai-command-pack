@@ -28,7 +28,7 @@ retire with no successor was reversed by the 2026-09-12 decision on sd:361:
 Jira tickets are shadowed the way GitHub issues are. The second module is
 `shadow_jira`, which collects Jira tickets into the same `Collected` shape
 over its own JQL window. `sync`'s `tracker` chooses the collector: `github`
-runs the four buckets here, the intake sweep of `github_issues`
+runs the four buckets here, the intake sweep of `policy.issues`
 repositories, their contribution details and the protection sweep; `jira`
 runs `shadow_jira` with none of that, and any other name is a `ValueError`. `sync` stays one tracker per call; the caller -- the pack's
 `sd shadow sync` -- iterates `TRACKERS` and reports each tracker on its own.
@@ -104,7 +104,7 @@ BUCKETS = (
 )
 
 #: The `why` of a row the intake sweep found (sd:4880): an open issue of a
-#: repository with `github_issues` on, whoever opened it.
+#: repository whose `policy.issues` is read or ask, whoever opened it.
 INTAKE = "intake"
 #: Repositories per intake sweep: GitHub refuses a long search query.
 INTAKE_GROUP = 5
@@ -599,8 +599,8 @@ def collect(watermark: str | None, now: datetime, runner=None, *, since=None,
     collect as a complete one and stepping the window past the part that
     failed.
 
-    `intake` names the `owner/name` of each repository with `github_issues`
-    on (sd:4880). After the buckets, one unwindowed search lists the open
+    `intake` names the `owner/name` of each repository with `policy.issues`
+    read or ask (sd:4880). After the buckets, one unwindowed search lists the open
     issues of up to `INTAKE_GROUP` of them, whoever opened them, so a
     repository switched on today has its old issues read on the next run.
     The sweep reads outside the window the operator's buckets covered, so a

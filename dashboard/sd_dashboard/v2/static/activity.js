@@ -154,8 +154,9 @@ addEventListener('DOMContentLoaded', () => {
     put($('chart-table'), html`<table><caption class="sr">Events per hour by kind</caption><thead><tr><th scope="col">Hour (UTC)</th>${KINDS.map(k => html`<th scope="col">${k.name}</th>`)}</tr></thead><tbody>${bins.map(t => html`<tr><td>${new Date(t).toISOString().slice(5, 16).replace('T', ' ')}</td>${KINDS.map(k => unknownWhy(k.id) ? html`<td class="u">▨</td>` : html`<td>${String(EVENTS.filter(e => e.k === k.id && (!F.repo.size || F.repo.has(e.repo)) && Date.parse(e.at) >= t && Date.parse(e.at) < t + 36e5).length)}</td>`)}</tr>`)}</tbody></table>`);
   }
   $('lanes').addEventListener('click', e => {
-    // The chart is the Cadence view (sd:5064): a tick or a lane shows the Timeline, with that event or that kind.
-    const t = e.target.closest('rect.tick'); if (t) { window.shell.view.show('timeline'); return select(t.dataset.id, true); }
+    // The chart is the Cadence view (sd:5064). A tick stays on it and opens Details with the event's commands (sd:6681);
+    // a lane shows the Timeline with that kind.
+    const t = e.target.closest('rect.tick'); if (t) return select(t.dataset.id, true);
     const b = e.target.closest('.lane-btn'); if (!b) return;
     const k = b.dataset.kind;
     if (unknownWhy(k)) return showKind(k);
@@ -376,7 +377,7 @@ addEventListener('DOMContentLoaded', () => {
     // build: the design's review.open; its review.lane re-runs a review, which a recorded one cannot ask for, so it is left out.
     window.commands.openPullRequest({ on: 'review', pr: o => ({ repo: `${o.owner}/${o.repo}`, number: o.pr, url: o.url }) }),
     { id: 'review.item', on: 'review', label: 'Open item', does: 'Opens the work item this review names.', key: 'i', risk: 'safe', when: o => !!o.item || 'the delivery names no work item', cli: o => `sd task show ${o.item}`, run: o => openItem(o.item) },
-    window.commands.showAssignment({ run: o => { select(o.id, true); return `Assignment #${o.n} shown in Details`; } }),
+    window.commands.showAssignment(),
     { id: 'asg.item', on: 'assignment', label: 'Open item', does: 'Opens the work item this assignment works on.', key: 'i', risk: 'safe', when: o => !!o.item || 'the assignment names no item', cli: o => `sd task show ${o.item}`, run: o => openItem(o.item) },
     // Retry (commands.js): it posts /api/jobs/<job>/retry with the job's revision, as Operations > Jobs does; launchd starts
     // the run.

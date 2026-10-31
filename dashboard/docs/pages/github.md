@@ -18,7 +18,7 @@ names.
 Your issues (sd:4628) lists each repo's open Jira and GitHub issues assigned
 to or filed by the operator, and their GitHub issues in other repos, which
 Pull requests listed until sd:5899. Its State filter adds their GitHub
-issues closed in the last 7 days; closed Jira issues are not read. Intake (sd:4840) lists each `github_issues`
+issues closed in the last 7 days; closed Jira issues are not read. Intake (sd:4840) lists each `policy.issues` read or ask
 repo's open third-party issues no item carries; File as item posts
 `/api/items` with the issue's `github:<owner>/<repo>#N` ref. Both are one read,
 `GET /api/github/issues` (`issues.document`, `issues.intake`), made when either

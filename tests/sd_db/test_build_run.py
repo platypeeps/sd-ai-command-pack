@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from sd_db import build, build_run, draft, operations, runner, sessions
+from sd_db import build, build_run, database, draft, operations, runner, sessions
 from sd_db.database import connect
 from sd_db.migrate import initialise
 from sd_db.ship import this_host
@@ -630,7 +630,7 @@ class Supervise(Case):
                                           grace=0.5)
         supervisor.logs.mkdir(parents=True, exist_ok=True)
         locked.armed = True
-        with mock.patch.object(build_run, "LOCK_WAITS", (0.01,)):
+        with mock.patch.object(database, "LOCK_WAITS", (0.01,)):
             code = supervisor.child([*self.tools.claude, "-p", "x"], cwd=self.root, name="locked")
         self.assertFalse(locked.armed, "the lock was met")
         self.assertEqual(code, 0)

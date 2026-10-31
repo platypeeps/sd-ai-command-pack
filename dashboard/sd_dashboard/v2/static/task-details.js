@@ -507,7 +507,7 @@
         when: o => o.can.allowed || o.can.reason, cli: o => `sd assignments cancel ${o.n}`,
         consequence: o => `Ends assignment #${o.n} in ${o.repo} as cancelled. The item's status is unchanged.`,
         run: o => landing(cancelAsg(o), () => `Cancelled · #${o.n} · sd assignments cancel ${o.n}`) },
-      window.commands.showAssignment({ primary: o => o.status !== 'blocked', run: o => `Assignment #${o.n} shown in Details` }),
+      window.commands.showAssignment({ primary: o => o.status !== 'blocked' }),
     );
     // A refused cancel reads the Details again too: they hold the revision a retry sends.
     async function cancelAsg(o) {

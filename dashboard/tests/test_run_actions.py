@@ -252,6 +252,23 @@ class TheWrites(Run):
         self.assertEqual((self.ran(), self.launched), ([], []))
         self.assertEqual(self.snapshot(), before)
 
+    def test_show_assignment_runs_sd_assignments_get_for_a_known_assignment(self):
+        """sd:6682: the page names the assignment by its number; the server runs the line for a row it holds."""
+        n = self.assignment(self.item("Port the page"))
+        self.connection.commit()
+        status, body = self.run_("assignment.get", assignment=n)
+        self.assertEqual((status, body["exit"], body["line"]), (200, 0, f"sd assignments get {n}"), body)
+        self.assertEqual(self.ran(), [f"sd assignments get {n}"])
+
+    def test_show_assignment_refuses_what_is_not_an_assignment_number(self):
+        n = self.assignment(self.item("Port the page"))
+        self.connection.commit()
+        self.refused([({"action": "assignment.get", "assignment": str(n)}, 400, "by its number"),
+                      ({"action": "assignment.get", "assignment": True}, 400, "by its number"),
+                      ({"action": "assignment.get", "assignment": 0}, 400, "by its number"),
+                      ({"action": "assignment.get", "assignment": n + 99}, 400, "is not an assignment"),
+                      ({"action": "assignment.get"}, 400, "takes assignment")])
+
     def test_capture_idea_runs_sd_store_add_with_the_idea_as_one_argument(self):
         status, body = self.run_("idea.capture", text="Gates; and $(why) they wait\n")
         self.assertEqual((status, body["exit"]), (200, 0))
