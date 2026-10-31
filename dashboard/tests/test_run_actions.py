@@ -178,6 +178,62 @@ class TheReads(Run):
         self.assertIn("aws:nope is not a credential this machine can sign in", body["error"])
         self.assertEqual(launched, [("signin-sdm", "! sdm-login")])
 
+    def test_google_sign_in_answers_that_accounts_consent_url_and_starts_no_pane(self):
+        """sd:6957: workspace-mcp's start_google_auth for the one account; the URL rides the answer, not the output."""
+        calls, launched = [], []
+
+        class Mcp:
+            session = None
+
+            def __init__(self, url, timeout):
+                pass
+
+            def connect(self):
+                pass
+
+            def call(self, name, arguments):
+                calls.append((name, arguments["user_google_email"]))
+                return f"Click [here](https://accounts.google.com/o/oauth2/auth?login_hint={arguments['user_google_email']}) to sign in."
+
+        fake = type("MailIntake", (), {"Mcp": Mcp})
+        with patch("sd_db.credentials.signin", lambda probe, env: "Sign workspace-mcp in"), \
+             patch("sd_dashboard.notes_screen._mail_intake", lambda: fake), \
+             patch.object(fix_session, "_launch", lambda directory, label, text: launched.append(label) or "p1"):
+            answers = [self.run_("credentials.signin", probe=f"google:{who}@example.test")[1] for who in "ab"]
+        self.assertEqual(calls, [("start_google_auth", "a@example.test"), ("start_google_auth", "b@example.test")])
+        self.assertEqual([(a["exit"], a["account"], a["url"]) for a in answers],
+                         [(0, f"{who}@example.test", f"https://accounts.google.com/o/oauth2/auth?login_hint={who}@example.test")
+                          for who in "ab"])
+        self.assertTrue(all("https://" not in a["output"] for a in answers))
+        self.assertEqual(launched, [])
+
+    def test_aws_sso_sign_in_answers_the_device_url_and_code_and_leaves_the_login_waiting(self):
+        """sd:6957: `aws sso login --no-browser --use-device-code` runs on; the answer carries what it printed."""
+        bin_dir = Path(self.tmp.name) / "fakebin"
+        bin_dir.mkdir()
+        pid_file = Path(self.tmp.name) / "aws.pid"
+        aws = bin_dir / "aws"
+        aws.write_text(f"#!/bin/sh\necho $$ > {pid_file}\necho \"$@\" > {pid_file}.argv\n"
+                       "printf 'Browser will not be automatically opened.\\nPlease visit the following URL:\\n\\n"
+                       "https://device.sso.example.test/\\n\\nThen enter the code:\\n\\nABCD-EFGH\\n'\nexec sleep 30\n")
+        aws.chmod(aws.stat().st_mode | stat.S_IEXEC)
+        try:
+            with patch("sd_db.credentials.signin", lambda probe, env: "! aws sso login --profile dev"), \
+                 patch.dict(os.environ, {"PATH": f"{bin_dir}:{os.environ['PATH']}"}), \
+                 patch.object(fix_session, "_launch", lambda *a: self.fail("no herdr pane for an SSO login")):
+                status, body = self.run_("credentials.signin", probe="aws:dev")
+            self.assertEqual((status, body["exit"], body["url"], body["code"], body["account"]),
+                             (200, 0, "https://device.sso.example.test/", "ABCD-EFGH", "AWS profile dev"))
+            self.assertEqual(Path(f"{pid_file}.argv").read_text().split(),
+                             ["sso", "login", "--profile", "dev", "--no-browser", "--use-device-code"])
+            os.kill(int(pid_file.read_text()), 0)  # still waiting for the code
+        finally:
+            if pid_file.exists():
+                try:
+                    os.kill(int(pid_file.read_text()), 9)
+                except ProcessLookupError:
+                    pass
+
     def test_a_credential_rows_re_check_runs_its_own_probe_only(self):
         seen = []
         with patch("sd_db.credentials.check", lambda connection, env, **only: seen.append(only) or {"probes": []}):
