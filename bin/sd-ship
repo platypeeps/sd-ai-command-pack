@@ -2290,6 +2290,7 @@ class Ship(SharedReview):
         if jenkins:  # the job the policy names is the CI, waited on at this exact head
             sd_ship_jenkins.wait_green(jenkins, number, head,
                                        wait_seconds=self.args.wait_seconds if self.args.watch else 0)
+            self.api.jenkins_green = head
 
     def still_allowed(self, base: str, number: int, head: str, protection: dict) -> None:
         """`still_gated`, then the policy again: an approval can be dismissed during the gate's minutes."""

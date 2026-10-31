@@ -151,6 +151,9 @@ class GitHub:
         #: `repo.ci` for this repository, set by the caller that read the row.
         #: `local` swaps the `pull_request` runs for the `sd/local-gate` status.
         self.ci = "github"
+        #: The head the policy's Jenkins job built green (sd:6880): it
+        #: validates the head as a check run would, under a declared gap.
+        self.jenkins_green: str | None = None
         #: The authenticated account, read once by `viewer_login`.
         self.viewer: str | None = None
 
@@ -572,10 +575,11 @@ class GitHub:
 
         Every check run `filter=latest` reports at `head` must have completed
         `success`, `neutral` or `skipped`; the newest status per context must
-        be `success`; the set must not be empty; and every workflow at `head`
-        that runs on `pull_request` must have a completed, successful run for
-        that event at this exact SHA, so a commit the Tests workflow never ran
-        on cannot pass on an advisory check alone.
+        be `success`; the set must not be empty unless Jenkins built `head`
+        green; and every workflow at `head` that runs on `pull_request` must
+        have a completed, successful run for that event at this exact SHA, so
+        a commit the Tests workflow never ran on cannot pass on an advisory
+        check alone.
 
         Under `ci = local` (sd:1843) the `pull_request` runs are not expected:
         the `sd/local-gate` status at this exact SHA is, and a missing one
@@ -585,7 +589,7 @@ class GitHub:
         statuses = self.pages(f"{self.prefix}/commits/{head}/statuses")
         if self.ci == "local":
             self.local_gate_passed(head, statuses)
-        if not runs and not statuses:
+        if not runs and not statuses and self.jenkins_green != head:
             raise Refusal(f"nothing validated {head}: no check run and no status exists for it", code="ci_missing",
                           next_action="Run the repository's checks for this exact head, then retry merge.", boundary="ci", state="retryable_failure")
         for entry in runs:
