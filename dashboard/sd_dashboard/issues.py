@@ -19,7 +19,7 @@ issue source already lists. A closed row carries its `state`; the page shows it 
 
 sd:6175: Hide is the workflow database's `view` state, the store Contributions' and Designs' Hide write, keyed
 `issue:<row key>` (`view_key`); `with_views` marks each row of both lists `hidden`, and a store that does not read hides
-nothing and says why. Sync now starts `SYNC_JOB` through the route Run now posts; `sync_job` is its launchd state.
+nothing and says why. Refresh from GitHub starts `SYNC_JOB` through the route Run now posts; `sync_job` is its launchd state.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ REF_SOURCE = "task-ref"
 #: The key prefix of an issue row's view state (sd:6175). A Contributions key starts `contribution:`, a Designs key
 #: `designs/` and a Documents key is `<root key>/<file>`, so none meets `issue:`.
 VIEW_ROOT = "issue"
-#: The job Sync now starts (sd:6175): the nightly `sd shadow sync`, through `/api/jobs/<name>/retry`.
+#: The job Refresh from GitHub starts (sd:6175): the nightly `sd shadow sync`, through `/api/jobs/<name>/retry`.
 SYNC_JOB = "shadow-sync-nightly"
 
 
@@ -173,7 +173,7 @@ def with_views(document: dict, connection) -> dict:
 
 
 def sync_job(connection: sqlite3.Connection, backend) -> dict:
-    """Sync now's job as the jobs inventory reads it (`hoa_screen.JOB_KEYS`): the revision the retry route checks and the
+    """Refresh from GitHub's job as the jobs inventory reads it (`hoa_screen.JOB_KEYS`): the revision the retry route checks and the
     retry capability. A job that is not installed says the line that installs it; a read that fails says so, never off."""
     from sd_db import operations, workflow
 
