@@ -23,5 +23,10 @@ its first source. Details shows each answer, a refusal or a failed step
 with its output. Activate (on a candidate), Pause (on an active
 watch) and Unpause (on a paused one) move the status through
 `/api/items/<n>/stage` with the row's revision, as Tasks moves a stage;
-Undo moves it back, and a declined watch gets none (sd:6694). The page reads
+Undo moves it back, and a declined watch gets none (sd:6694). Remove
+(`watch.remove`, sd:6703) moves a row to declined, which market-watch
+skips; its profile and Sources stay. Restore (`watch.restore`) moves a
+declined row back to candidate. Delete (`watch.delete`) runs `sd-db item
+remove` on the row, preview then apply, which files a removal record and
+backs the store up first. All three ask first. The page reads
 through the shell's reader, `read.js`.

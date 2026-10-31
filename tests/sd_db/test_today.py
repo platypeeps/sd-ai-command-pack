@@ -107,6 +107,36 @@ class TheSections(TodayCase):
                           "waiters": [{"place": 1, "label": "lane", "since": WHEN}], "error": None})
         self.assertEqual(today.landing(self.connection, gate="permission denied")["gate"]["error"], "permission denied")
 
+    def test_queues_is_ready_items_builds_and_the_lane_in_one_list(self):
+        """Pack sd:6946: the operator asked for these three lists 15+ times in one session."""
+        low, high = self.item("Low", repo=APP, status="ready", priority=3), self.item("High", repo=APP, status="ready", priority=1)
+        queued, stuck = self.item("Queued", repo=APP, status="ready"), self.item("Stuck", repo=LIB, status="blocked")
+        for item, status in ((queued, "queued"), (stuck, "blocked")):
+            ident = create_assignment(self.connection, item=item, role="author", status=status)
+            self.connection.execute("UPDATE assignment SET scope = 'build', queued_at = ? WHERE id = ?", (WHEN, ident))
+        landing = self.item("Landing", repo=APP)
+        self.lane("example-owner/app", "e1", item=landing, status="failed", position=1, step="prepare")
+        rows = today.queues(self.connection, now=NOW)
+        self.assertEqual([(row["queue"], row["id"], row["status"], row["detail"]) for row in rows],
+                         [("ready", high, "ready", "P1"), ("ready", low, "ready", "P3"),
+                          ("build", queued, "queued", "-"), ("build", stuck, "blocked", "-"),
+                          ("lane", landing, "failed", "prepare")])
+        self.assertEqual([row["id"] for row in today.queues(self.connection, repos=[LIB], now=NOW)], [stuck])
+        self.assertEqual(today.sections(self.connection, now=NOW)["summary"]["queues"], 5)
+
+    def test_a_failure_is_due_for_a_push_once_and_a_success_never(self):
+        """Pack sd:6946: a push only when a lane entry or a build fails or blocks, once per entry."""
+        failed, merged = self.item("Failed", repo=APP), self.item("Merged", repo=APP)
+        self.lane("example-owner/app", "e1", item=failed, status="failed", position=1, step="prepare")
+        self.lane("example-owner/app", "e2", item=merged, status="merged", position=2)
+        due = today.push_due(self.connection, now=NOW)
+        self.assertEqual([(row["key"], row["title"]) for row in due],
+                         [("lane:example-owner/app:e1", f"Lane failed: sd:{failed}")])
+        self.assertIn("step prepare", due[0]["body"])
+        self.connection.execute("INSERT INTO state(kind, key, timestamp) VALUES ('watermark', ?, ?)",
+                                (today.PUSHED + due[0]["key"], WHEN))
+        self.assertEqual(today.push_due(self.connection, now=NOW), [])
+
     def test_planned_is_open_items_due_after_today_soonest_first(self):
         later = self.item("Later", due="2026-09-30")
         sooner = self.item("Sooner", due="2026-09-07")

@@ -67,22 +67,25 @@ def _state() -> Path:
     return Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state") / "system" / "source-intake"
 
 
-def _name(raw: str) -> str:
+def _name(raw: str, suffixes: tuple[str, ...] = SUFFIXES) -> str:
     """A dropped file's name as stored: letters, digits, dot, dash and underscore, the rest dashes; its suffix kept."""
     base = os.path.basename(raw or "").strip()
     stem, suffix = os.path.splitext(base)
-    if suffix.lower() not in SUFFIXES:
-        raise ValueError(f"{base or 'A file'} is not one of {', '.join(SUFFIXES)}, so it is not added.")
+    if suffix.lower() not in suffixes:
+        raise ValueError(f"{base or 'A file'} is not one of {', '.join(suffixes)}, so it is not added.")
     stem = re.sub(r"[^A-Za-z0-9._-]+", "-", stem).strip("-._")[:100] or "source"
     return stem + suffix.lower()
 
 
-def stage(name: str, length: str, stream) -> tuple[int, dict]:
-    """Keep one dropped file's bytes under its SHA-256 until a request names it; `(status, document)`."""
-    if not length.isdigit() or not 0 < int(length) <= STAGE_BYTES:
-        return 400, {"error": f"A dropped file is 1 byte to {STAGE_BYTES // (1024 * 1024)} MB."}
+def stage(name: str, length: str, stream, *, suffixes: tuple[str, ...] = SUFFIXES,
+          limit: int = STAGE_BYTES) -> tuple[int, dict]:
+    """Keep one dropped file's bytes under its SHA-256 until a request names it; `(status, document)`.
+
+    HOA's Upload stages here too, with its own `suffixes` and `limit` (sd:6690)."""
+    if not length.isdigit() or not 0 < int(length) <= limit:
+        return 400, {"error": f"A dropped file is 1 byte to {limit // (1024 * 1024)} MB."}
     try:
-        stored = _name(unquote(name))  # the page sends it URI-encoded: a header carries ASCII only
+        stored = _name(unquote(name), suffixes)  # the page sends it URI-encoded: a header carries ASCII only
     except ValueError as problem:
         return 400, {"error": str(problem)}
     folder = _state() / "staged"
