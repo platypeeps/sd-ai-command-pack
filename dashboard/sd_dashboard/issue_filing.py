@@ -303,7 +303,7 @@ def _git(directory: Path, *args: str) -> str | None:
 def target_of(connection, repo_path: str | None, kind: str) -> dict:
     """`{"ok", "target", "why"}`: where a `kind` issue for a repository goes, or why it cannot go.
 
-    GitHub needs `github_issues` on and a github.com remote; Jira needs `jira_project` set. A store that cannot answer
+    GitHub needs `policy.issues` ask (pack sd:6849) and a github.com remote; Jira needs `jira_project` set. A store that cannot answer
     is not on: the reason says so.
     """
     from sd_db import repos
@@ -316,8 +316,9 @@ def target_of(connection, repo_path: str | None, kind: str) -> dict:
         return {"ok": False, "target": None, "why": "the item's repository is not registered"}
     try:
         if kind == "github":
-            if not repos.github_issues(connection, row["path"]):
-                return {"ok": False, "target": None, "why": "GitHub issues are off for this repository (Management)"}
+            if repos.issues_policy(connection, row["path"]) != "ask":
+                return {"ok": False, "target": None,
+                        "why": "GitHub issue writes are not ask for this repository (Management)"}
             remote = repos.parse_remote(row["remote"])
             if remote.kind != "github":
                 return {"ok": False, "target": None, "why": "the repository's remote is not on github.com"}

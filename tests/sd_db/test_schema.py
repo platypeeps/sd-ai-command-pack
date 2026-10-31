@@ -2636,11 +2636,11 @@ class TheGithubIssuesColumn(SchemaCase):
 
     def test_every_existing_row_arrives_off_and_keeps_its_values(self):
         self._before()
-        result = migrate(self.path)
-        self.assertEqual((result.before, result.applied),
-                         (self.VERSION - 1, list(range(self.VERSION, SCHEMA_VERSION + 1))))
-        self.assertEqual(migrate(self.path).applied, [])
-        connection = connect(self.path, write=True)
+        # Through this file only: 45 moves `github_issues` into the policy.
+        result = self.migrate_through(self.VERSION)
+        self.assertEqual((result.before, result.applied), (self.VERSION - 1, [self.VERSION]))
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [])
+        connection = sqlite3.connect(self.path, isolation_level=None)
         self.addCleanup(connection.close)
         self.assertEqual(self._rows(connection), self.ROWS)
         self.assertEqual([row[0] for row in connection.execute("SELECT github_issues FROM repo ORDER BY path")],
@@ -2648,8 +2648,8 @@ class TheGithubIssuesColumn(SchemaCase):
 
     def test_the_check_holds_0_and_1(self):
         self._before()
-        migrate(self.path)
-        connection = connect(self.path, write=True)
+        self.migrate_through(self.VERSION)
+        connection = sqlite3.connect(self.path, isolation_level=None)
         self.addCleanup(connection.close)
         connection.execute("UPDATE repo SET github_issues = 1 WHERE path = '/two'")
         for flag in (2, -1, None, "on", ""):
@@ -2728,11 +2728,11 @@ class TheJiraProjectColumn(SchemaCase):
 
     def test_every_existing_row_arrives_off_and_keeps_its_values(self):
         self._before()
-        result = migrate(self.path)
-        self.assertEqual((result.before, result.applied),
-                         (self.VERSION - 1, list(range(self.VERSION, SCHEMA_VERSION + 1))))
-        self.assertEqual(migrate(self.path).applied, [])
-        connection = connect(self.path, write=True)
+        # Through this file only: 45 moves `github_issues` into the policy.
+        result = self.migrate_through(self.VERSION)
+        self.assertEqual((result.before, result.applied), (self.VERSION - 1, [self.VERSION]))
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [])
+        connection = sqlite3.connect(self.path, isolation_level=None)
         self.addCleanup(connection.close)
         self.assertEqual(self._rows(connection), self.ROWS)
         self.assertEqual([row[0] for row in connection.execute("SELECT jira_project FROM repo ORDER BY path")],
@@ -2740,8 +2740,8 @@ class TheJiraProjectColumn(SchemaCase):
 
     def test_the_check_holds_a_key_spelling_or_null(self):
         self._before()
-        migrate(self.path)
-        connection = connect(self.path, write=True)
+        self.migrate_through(self.VERSION)
+        connection = sqlite3.connect(self.path, isolation_level=None)
         self.addCleanup(connection.close)
         connection.execute("UPDATE repo SET jira_project = 'OPS_2' WHERE path = '/two'")
         for key in ("", "a", "A", "ops", "1AB", "_AB", "AB-1", "AB C", "ÉTÉ", "A" * 256, 7):
@@ -2931,6 +2931,87 @@ class TheShadowMergeStateColumns(SchemaCase):
         self.assertEqual(schema_version(raw), self.VERSION - 1)
         self.assertEqual(self._rows(raw), self.ROWS)
         self.assertFalse(set(self.ADDED) & set(self._columns(raw)))
+        self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
+
+
+class TheIssuesPolicyMove(SchemaCase):
+    """Migration 45 (pack sd:6849). `repo.github_issues` moves into the
+    `policy` declaration as `issues` and the column goes, in one transaction:
+    a row on arrives as `ask` beside its other policy keys, a row off gains
+    nothing; a failed file leaves 44 with the column; the reverse returns
+    44's shape and values."""
+
+    VERSION = 45
+    COLUMNS = "path, created_at, updated_at, github_issues, declarations"
+    ROWS = [("/one", "t1", "t2", 1, None),
+            ("/three", "t1", "t2", 1, '{"policy":{"mode":"org"},"review":{"x":1}}'),
+            ("/two", "t3", "t4", 0, '{"policy":{"mode":"org"}}')]
+
+    def _before(self):
+        self.migrate_through(self.VERSION - 1)
+        raw = sqlite3.connect(self.path)
+        raw.executemany(f"INSERT INTO repo ({self.COLUMNS}) VALUES (?, ?, ?, ?, ?)", self.ROWS)
+        raw.commit()
+        raw.close()
+
+    def _declared(self, connection):
+        import json
+        return {path: json.loads(text) if text else None
+                for path, text in connection.execute("SELECT path, declarations FROM repo ORDER BY path")}
+
+    def _columns(self, connection):
+        return [row[1] for row in connection.execute("PRAGMA table_info(repo)")]
+
+    def test_migration_moves_github_issues_in_one_transaction(self):
+        """Failure table, row "Migrate `github_issues` into `policy.issues`"."""
+        self._before()
+        raw = sqlite3.connect(self.path)
+        raw.execute("CREATE VIEW stuck AS SELECT github_issues FROM repo")
+        raw.commit()
+        raw.close()
+        with self.assertRaises(sqlite3.OperationalError):
+            self.migrate_through(self.VERSION)
+        raw = sqlite3.connect(self.path)
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertIn("github_issues", self._columns(raw))
+        self.assertEqual(self._declared(raw)["/one"], None)
+        raw.execute("DROP VIEW stuck")
+        raw.commit()
+        raw.close()
+        result = migrate(self.path)
+        self.assertEqual((result.before, result.applied),
+                         (self.VERSION - 1, list(range(self.VERSION, SCHEMA_VERSION + 1))))
+        self.assertEqual(migrate(self.path).applied, [])
+        connection = connect(self.path, write=True)
+        self.addCleanup(connection.close)
+        self.assertNotIn("github_issues", self._columns(connection))
+        self.assertEqual(self._declared(connection), {
+            "/one": {"policy": {"issues": "ask"}},
+            "/three": {"policy": {"mode": "org", "issues": "ask"}, "review": {"x": 1}},
+            "/two": {"policy": {"mode": "org"}}})
+
+    def test_the_reverse_returns_the_file_to_the_prior_version(self):
+        self._before()
+        self.migrate_through(self.VERSION)
+        text = dict(schema_module.migrations())[self.VERSION].read_text(encoding="utf-8")
+        raw = sqlite3.connect(self.path, isolation_level=None)
+        self.addCleanup(raw.close)
+        raw.executescript("\n".join(line[4:] for line in text.splitlines() if line.startswith("--   ")))
+        self.assertEqual(schema_version(raw), self.VERSION - 1)
+        self.assertEqual([tuple(row) for row in raw.execute("SELECT path, github_issues FROM repo ORDER BY path")],
+                         [("/one", 1), ("/three", 1), ("/two", 0)])
+        self.assertEqual(self._declared(raw), {"/one": None, "/three": {"policy": {"mode": "org"}, "review": {"x": 1}},
+                                               "/two": {"policy": {"mode": "org"}}})
+        # The column sits where 35 put it, so a backup restore compares `repo` to 44's shape.
+        reference = sqlite3.connect(":memory:")
+        self.addCleanup(reference.close)
+        paths.install(reference)
+        for version, path in schema_module.migrations():
+            if version < self.VERSION:
+                reference.executescript(path.read_text(encoding="utf-8"))
+        self.assertEqual(raw.execute("PRAGMA table_info(repo)").fetchall(),
+                         reference.execute("PRAGMA table_info(repo)").fetchall())
+        self.assertEqual(raw.execute("PRAGMA foreign_key_check").fetchall(), [])
         self.assertEqual(self.migrate_through(self.VERSION).applied, [self.VERSION])
 
 

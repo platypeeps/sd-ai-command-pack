@@ -62,7 +62,7 @@ def seed(case):
     """Our repository with GitHub issues on, and one GitHub row for each case the view decides."""
     path = "/repos/anvil"
     upsert_repo(case.connection, path, remote="git@github.com:example/anvil.git")
-    repos.set_github_issues(case.connection, path, "on")
+    repos.set_github_issues(case.connection, path, "ask")
 
     def row(kind, number, repo="example/anvil", **columns):
         upsert_shadow(case.connection, tracker="github", url=f"{HUB}/{repo}/{kind}/{number}", repo=repo, number=number,

@@ -28,6 +28,7 @@ from sd_db.repos import (
     CI_MODES,
     DECLARATION_BYTES,
     DECLARATION_KINDS,
+    ISSUES,
     ConfMissing,
     RepoRefusal,
     add,
@@ -35,10 +36,10 @@ from sd_db.repos import (
     clone_lines,
     conf_paths,
     declarations,
-    github_issues,
     intake_issues,
     intake_repos,
     issue_sources,
+    issues_policy,
     jira_project,
     mail_aliases,
     mine_issues,
@@ -1137,55 +1138,59 @@ class TheDependabotWriter(RepoCase):
 
 
 class TheGithubIssuesSetting(RepoCase):
-    """sd:4827. `repo.github_issues`: third-party GitHub issue intake, on or off per repo.
+    """sd:4827, pack sd:6849. `policy.issues`: third-party GitHub issues, off, read or ask per repo.
 
-    The writer mirrors `set_runner_merge`; the reader answers False for no row,
-    the column default, and raises on a store without the column rather than
-    reading it as off.
+    The writer mirrors `set_runner_merge` and keeps the policy's other keys;
+    the reader answers off for no row and no key.
     """
 
     def _registered(self) -> str:
         return add(self.connection, support.repository(self.checkouts / "one"), home=self.home)
 
-    def _value(self, path: str) -> int:
-        return self.connection.execute("SELECT github_issues FROM repo WHERE path = ?", (path,)).fetchone()[0]
+    def _value(self, path: str):
+        return (declarations(self.connection, path) or {}).get("policy")
 
-    def test_it_sets_the_column_names_what_it_replaced_and_the_reader_follows(self):
+    def test_it_sets_the_key_names_what_it_replaced_and_the_reader_follows(self):
         path = self._registered()
-        self.assertEqual(self._value(path), 0)
-        self.assertFalse(github_issues(self.connection, path))
-        self.assertEqual(set_github_issues(self.connection, path, "on"), (path, "off"))
-        self.assertEqual(self._value(path), 1)
-        self.assertTrue(github_issues(self.connection, path))
-        self.assertTrue(github_issues(self.connection, paths.expand(path)))
-        self.assertEqual(set_github_issues(self.connection, path, "on"), (path, "on"))
-        self.assertEqual(set_github_issues(self.connection, path, "off"), (path, "on"))
-        self.assertFalse(github_issues(self.connection, path))
+        self.assertIsNone(self._value(path))
+        self.assertEqual(issues_policy(self.connection, path), "off")
+        self.assertEqual(set_github_issues(self.connection, path, "ask"), (path, "off"))
+        self.assertEqual(self._value(path), {"issues": "ask"})
+        self.assertEqual(issues_policy(self.connection, path), "ask")
+        self.assertEqual(issues_policy(self.connection, paths.expand(path)), "ask")
+        self.assertEqual(set_github_issues(self.connection, path, "read"), (path, "ask"))
+        self.assertEqual(set_github_issues(self.connection, path, "off"), (path, "read"))
+        self.assertEqual(issues_policy(self.connection, path), "off")
+        self.assertEqual(declarations(self.connection, path), {})
 
-    def test_it_changes_no_other_field_on_the_row(self):
+    def test_it_keeps_the_other_policy_keys_and_declarations(self):
         path = self._registered()
-        before = dict(self.connection.execute("SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
-        set_github_issues(self.connection, path, "on")
-        after = dict(self.connection.execute("SELECT * FROM repo WHERE path = ?", (path,)).fetchone())
-        self.assertEqual({key for key in before if before[key] != after[key]} - {"updated_at"}, {"github_issues"})
+        set_declaration(self.connection, path, "policy", {"mode": "org"})
+        set_declaration(self.connection, path, "review", {"default_tier": "cheap"})
+        set_github_issues(self.connection, path, "read")
+        self.assertEqual(declarations(self.connection, path),
+                         {"policy": {"mode": "org", "issues": "read"}, "review": {"default_tier": "cheap"}})
+        set_github_issues(self.connection, path, "off")
+        self.assertEqual(declarations(self.connection, path),
+                         {"policy": {"mode": "org"}, "review": {"default_tier": "cheap"}})
 
-    def test_every_word_but_on_and_off_is_refused_and_writes_nothing(self):
-        """Property over edge inputs: case, padding, other flag words, empty,
-        control and non-ASCII text, and a seeded spread of random strings."""
+    def test_every_word_but_off_read_and_ask_is_refused_and_writes_nothing(self):
+        """Property over edge inputs: case, padding, the retired words, auto,
+        empty, control and non-ASCII text, and a seeded spread of random strings."""
         import random
 
         path = self._registered()
-        set_github_issues(self.connection, path, "on")
-        words = ["On", "ON", "oN", "Off", "OFF", " on", "on ", "on\n", "\ton", "yes", "no", "true", "false",
-                 "1", "0", "", " ", "o", "onn", "of", "offf", "on,off", "auto", "manual", "\x00", "ón", "ｏｎ"]
+        set_github_issues(self.connection, path, "ask")
+        words = ["on", "On", "ASK", "Read", " ask", "ask ", "ask\n", "\task", "yes", "no", "true", "false",
+                 "1", "0", "", " ", "a", "askk", "rea", "off,ask", "auto", "manual", "\x00", "ásk", "ａｓｋ"]
         draw = random.Random(4827)
-        alphabet = "onfON \t\n\x00-_,1é"
+        alphabet = "askreadofASK \t\n\x00-_,1é"
         words += ["".join(draw.choice(alphabet) for _ in range(draw.randrange(0, 6))) for _ in range(300)]
-        for word in (word for word in words if word not in ("on", "off")):
+        for word in (word for word in words if word not in ISSUES):
             with self.subTest(word=word), self.assertRaises(RepoRefusal) as caught:
                 set_github_issues(self.connection, path, word)
-            self.assertIn("on or off", str(caught.exception))
-        self.assertEqual(self._value(path), 1)
+            self.assertIn("off, read, ask", str(caught.exception))
+        self.assertEqual(self._value(path), {"issues": "ask"})
 
     def test_an_unregistered_path_is_refused_on_write_and_reads_off(self):
         self._registered()
@@ -1193,20 +1198,10 @@ class TheGithubIssuesSetting(RepoCase):
         for where in (stranger, self.checkouts / "absent", self.root):
             with self.subTest(where=where):
                 with self.assertRaises(RepoRefusal) as caught:
-                    set_github_issues(self.connection, where, "on")
+                    set_github_issues(self.connection, where, "ask")
                 self.assertIn("not a registered repository", str(caught.exception))
-                self.assertFalse(github_issues(self.connection, where))
+                self.assertEqual(issues_policy(self.connection, where), "off")
         self.assertEqual(len(registered(self.connection)), 1)
-
-    def test_a_store_before_35_raises_and_never_reads_as_off(self):
-        """Older state: the new library over a store not yet migrated."""
-        database = self.root / "old.db"
-        with mock.patch("sd_db.migrate.migrations", return_value=[m for m in migrations() if m[0] < 35]):
-            migrate(database)
-        old = connect(database, write=False)
-        self.addCleanup(old.close)
-        with self.assertRaises(SchemaTooOld):
-            github_issues(old, self.checkouts / "one")
 
 
 class TheJiraProjectSetting(RepoCase):
@@ -1419,13 +1414,13 @@ class TheDeclarationsSetting(RepoCase):
 
 
 class TheIntake(RepoCase):
-    """sd:4880. A repository with `github_issues` on lists its open third-party
+    """sd:4880. A repository with `policy.issues` read or ask lists its open third-party
     issues that no sd item carries yet, for Today's intake (sd:4840)."""
 
     def _on(self, name: str, remote: str | None, *, on: bool = True) -> str:
         path = add(self.connection, support.repository(self.checkouts / name), home=self.home)
         upsert_repo(self.connection, path, remote=remote)
-        set_github_issues(self.connection, path, "on" if on else "off")
+        set_github_issues(self.connection, path, "ask" if on else "off")
         return path
 
     def _shadow(self, rows):
@@ -1447,7 +1442,9 @@ class TheIntake(RepoCase):
         self._on("two", "https://github.com/example/off", on=False)
         self._on("three", "https://example.test/example/elsewhere.git")
         self._on("four", None)
-        self.assertEqual(intake_repos(self.connection), {on: "Example/Project"})
+        read = self._on("five", "https://github.com/example/read")
+        set_github_issues(self.connection, read, "read")
+        self.assertEqual(intake_repos(self.connection), {read: "example/read", on: "Example/Project"})
 
     def test_it_lists_open_third_party_issues_no_item_carries(self):
         """Filed (the operator's own), closed, pull, other repository, other
