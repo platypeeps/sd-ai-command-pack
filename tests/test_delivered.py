@@ -179,6 +179,17 @@ class TrailerBlockTests(GitFixture):
         self.assertTrue(sd_lib.held_at_merge(message, "bbb"))
         self.assertIsNone(sd_lib.held_at_merge(merge_message("feat: a slice", f"Delivers: {ITEM}"), "bbb"))
 
+    def test_a_rebase_tip_is_held_against_its_nth_ancestor(self) -> None:
+        """sd:6790. A rebase merge lands N commits; the tip's parent is the PR's own
+        commit, so `Reviewed-base: <sha> ~N` is read against the tip's Nth ancestor.
+        A reader that cannot name that ancestor holds the tip."""
+        message = merge_message("fix: last", f"Item: {ITEM}", f"Delivers: {ITEM}", "Reviewed-base: aaa ~3")
+        self.assertFalse(sd_lib.held_at_merge(message, "ppp", {3: "aaa"}.get))
+        self.assertTrue(sd_lib.held_at_merge(message, "ppp", {3: "bbb"}.get))
+        self.assertTrue(sd_lib.held_at_merge(message, "aaa"))
+        self.assertTrue(sd_lib._closes(message, ITEM, "ppp", {3: "aaa"}.get))
+        self.assertFalse(sd_lib._closes(message, ITEM, "ppp"))
+
     def test_both_closing_trailers_close(self) -> None:
         for trailer in (sd_lib.DELIVERS_TRAILER, sd_lib.CLOSES_TRAILER):
             with self.subTest(trailer=trailer):
@@ -209,6 +220,34 @@ class DeliveredTests(GitFixture):
         self.ship(work, "slice", merge_message(
             "feat: the slice (#1)", f"Item: {ITEM}", f"Delivers: {ITEM}"))
         self.assertEqual(sd_lib.delivered(work, ITEM), "yes")
+
+    def test_a_rebase_landing_delivers_at_its_tip(self) -> None:
+        """sd:6790. A rebase merge lands each commit on main; the tip carries
+        `Reviewed-base: <base> ~2`, read against its second ancestor."""
+        work = self.clone(self.seeded_remote(), "work")
+        base = self.git(work, "rev-parse", "HEAD")
+        for name in ("one", "two"):
+            (work / f"{name}.txt").write_text(f"{name}\n", encoding="utf-8")
+            self.git(work, "add", "-A")
+            trailers = ([f"Item: {ITEM}", f"Delivers: {ITEM}", f"Reviewed-base: {base} ~2"]
+                        if name == "two" else ["Refs: sd:1"])
+            self.git(work, "commit", "--quiet", "-m", merge_message(f"feat: {name}", *trailers))
+        self.git(work, "push", "--quiet", "origin", "main")
+        self.assertEqual(sd_lib.delivered(work, ITEM), "yes")
+
+    def test_a_merged_branch_commit_closes_nothing(self) -> None:
+        """sd:6790 review. A merge commit lands its branch's own commits on
+        main's history; only main's first-parent commits speak for it, so a
+        branch commit's `Closes:` the merge never validated closes nothing."""
+        work = self.clone(self.seeded_remote(), "work")
+        self.git(work, "checkout", "--quiet", "-b", "slice")
+        (work / "work.txt").write_text("slice\n", encoding="utf-8")
+        self.git(work, "add", "-A")
+        self.git(work, "commit", "--quiet", "-m", merge_message("feat: a change", f"Closes: {ITEM}"))
+        self.git(work, "checkout", "--quiet", "main")
+        self.git(work, "merge", "--no-ff", "--quiet", "-m", merge_message("feat: the slice (#1)", f"Item: {OTHER}"), "slice")
+        self.git(work, "push", "--quiet", "origin", "main")
+        self.assertEqual(sd_lib.delivered(work, ITEM), "no")
 
     def test_a_merge_carrying_item_alone_answers_no(self) -> None:
         """Case 2. A slice shipped without `--deliver` is exactly this, and the
