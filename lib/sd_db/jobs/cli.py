@@ -16,6 +16,7 @@ from __future__ import annotations
 import getpass
 import json
 import os
+import re
 import shlex
 import sqlite3
 import sys
@@ -227,14 +228,18 @@ def command_usage(argv: list[str]) -> int:
 
 def command_telemetry(argv: list[str]) -> int:
     """`telemetry export [--endpoint URL]`: every ended build run as OTLP traces (pack sd:6943).
+    `telemetry report [--month YYYY-MM] [--out FILE]`: the monthly lane report draft (pack sd:6947).
 
     The endpoint is `--endpoint`, else `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`,
     else `telemetry.ENDPOINT`. No collector there is a skip, exit 0.
     """
     rest = list(argv)
     endpoint = os.environ.get("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT") or telemetry.ENDPOINT
+    if rest[:1] == ["report"]:
+        return _telemetry_report(rest[1:])
     if rest[:1] != ["export"]:
-        print("sd-db telemetry: expected export [--endpoint URL]", file=sys.stderr)
+        print("sd-db telemetry: expected export [--endpoint URL] or report [--month YYYY-MM] [--out FILE]",
+              file=sys.stderr)
         return 1
     rest.pop(0)
     if rest[:1] == ["--endpoint"] and len(rest) == 2:
@@ -251,6 +256,28 @@ def command_telemetry(argv: list[str]) -> int:
         print(f"sd-db telemetry: skip: {result['skipped']}")
     else:
         print(f"sd-db telemetry: sent {result['spans']} span(s) of {result['runs']} build run(s) to {endpoint}")
+    return 0
+
+
+def _telemetry_report(rest: list[str]) -> int:
+    """The month's report, last month by default, to `--out` (its folder made) or stdout."""
+    options = dict(zip(rest[::2], rest[1::2], strict=False))
+    month = options.get("--month") or telemetry.last_month()
+    if len(rest) % 2 or set(options) - {"--month", "--out"} or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", month):
+        print("sd-db telemetry report: takes --month YYYY-MM and --out FILE", file=sys.stderr)
+        return 1
+    connection = _open_for_read()
+    try:
+        text = telemetry.month_report(connection, month)
+    finally:
+        connection.close()
+    if "--out" not in options:
+        sys.stdout.write(text)
+        return 0
+    out = Path(options["--out"])
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text)
+    print(f"sd-db telemetry: wrote the {month} lane report to {out}")
     return 0
 
 

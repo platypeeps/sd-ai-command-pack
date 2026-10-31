@@ -491,6 +491,10 @@ The endpoint is `--endpoint`, else `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`, else `h
 No collector there prints a skip and exits 0.
 A build's spawn env appends `sd.build_run` and `sd.items` to `OTEL_RESOURCE_ATTRIBUTES`, so Claude Code's own OTel joins the trace.
 
+`sd-db telemetry report [--month YYYY-MM] [--out FILE]` writes the monthly lane report draft for the writing pipeline (pack sd:6947), last month by default, to stdout or `FILE`.
+It reads the same runs: merged PRs with cost and lead time, failure classes against the month before, review rounds and the repeat-blocker rate, denied tool calls, database-lock refusals, and a Phoenix trace link for the first run of each failure class and the three costliest merges.
+Like the export it carries item ids, PR numbers, counts and cost, never a title, note body or `detail`.
+
 ## `review`: one queue of small questions
 
 `bin/sd-db review` is the plumbing behind one review queue that any repository or experiment files into (sd:3635).
