@@ -1126,7 +1126,7 @@ class TheScript(Lane, ScreenCase):
         out = self.run_page(f"""const B = {json.dumps(self.BUILDS)};
 window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : p === '/api/queue/builds/retry' ? [200, {{ run: 'r0', queued: [] }}] : [404, {{ error: 'no' }}];
 await window.PAGE_AGAIN.run(); await flush(); await flush();
-R.builds = ELS.builds.html;
+R.builds = ELS.builds.html + ELS.ended.html;
 await window.queueBuildAct({{ dataset: {{ build: 'retry', run: 'r0' }} }}); await flush();
 R.after = ELS.builds.html;""")
         builds = out["R"]["builds"]
@@ -1145,7 +1145,7 @@ R.after = ELS.builds.html;""")
 OUT.paths = [];
 window.ELSE = (p, b) => {{ OUT.paths.push(p); return p === '/api/queue/builds?show=all' ? [200, B] : p === '/api/queue/builds' ? [200, A] : [404, {{ error: 'no' }}]; }};
 await window.PAGE_AGAIN.run(); await flush(); await flush();
-R.builds = ELS.builds.html;"""
+R.builds = ELS.builds.html + ELS.ended.html;"""
         active = self.run_page(script, search="")
         self.assertIn("/api/queue/builds", active["paths"])
         self.assertNotIn('data-run="r0"', active["R"]["builds"])
@@ -1167,7 +1167,7 @@ R.builds = ELS.builds.html;"""
         out = self.run_page(f"""const B = {json.dumps(builds)};
 window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : [404, {{ error: 'no' }}];
 await window.PAGE_AGAIN.run(); await flush(); await flush();
-R.builds = ELS.builds.html;""")
+R.builds = ELS.builds.html + ELS.ended.html;""")
         rows = re.findall(r'<li class="qrow".*?</li>', out["R"]["builds"], re.S)
         links = [re.findall(r'<a class="btn quiet sm" href="([^"]+)" target="_blank" rel="noopener noreferrer" '
                             r'aria-label="Open the pull request of run (\w+) on GitHub">Open PR</a>', row) for row in rows]
@@ -1184,7 +1184,7 @@ R.builds = ELS.builds.html;""")
 window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : p === '/api/queue/builds/retry' ? [200, {{ run: 'r2', queued: [] }}] : [404, {{ error: 'no' }}];
 window.shell.ask = a => {{ OUT.asked = a; return Promise.resolve({{ yes: true, values: {{ finding: 'The label reads wrong on phones' }} }}); }};
 await window.PAGE_AGAIN.run(); await flush(); await flush();
-R.builds = ELS.builds.html;
+R.builds = ELS.builds.html + ELS.ended.html;
 await window.queueBuildAct({{ dataset: {{ build: 'send', run: 'r2' }} }}); await flush();
 R.after = ELS.builds.html;""")
         shown = out["R"]["builds"]
@@ -1222,7 +1222,7 @@ R.after = ELS.builds.html;""")
         conf.write_text(f"realm|work|Work|{self.checkout.parent}/*\n")
         with mock.patch.object(places, "REALMS_CONFIG", conf):
             out = self.run_page("R.views = window.PAGE_VIEWS; R.personal = ELS.lanes.html; R.ptimes = ELS.times.html;"
-                                " window.shell.view.show('work'); R.work = ELS.lanes.html;", search="",
+                                " window.shell.view.show('work'); R.work = ELS.lanes.html;", search="?tab=times",
                                 shell="window.SHELL_REALMS = [{ id: 'work', label: 'Work' }];\n" + VIEW_SHELL)
         self.assertEqual([(v["id"], v["key"]) for v in out["R"]["views"]], [("personal", "p"), ("work", "w"), ("all", "a")])
         self.assertIn("No lane in this realm. All shows 1 lane.", out["R"]["personal"])
@@ -1243,7 +1243,7 @@ R.after = ELS.builds.html;""")
         read = {"days": 7, "entries": 4, "wait": 4500.0, "gate": 610.0, "over": True,
                 "slowest": {"item": 42, "title": "A slow one", "total": 9000.0}}
         with mock.patch.object(queue_screen, "times", return_value=read):
-            times = self.run_page("R.times = ELS.times.html;")["R"]["times"]
+            times = self.run_page("R.times = ELS.times.html;", search="?tab=times")["R"]["times"]
         self.assertIn('aria-label="Wait and gate time per lane, last 7 days"', times)
         cells = re.findall(r"<td[^>]*>(.*?)</td>", re.search(r"<tbody>(.*?)</tbody>", times, re.S)[1], re.S)
         self.assertEqual(cells[:4], ["system", "4", "1h 15m", "10m 10s"])
@@ -1252,8 +1252,43 @@ R.after = ELS.builds.html;""")
 
     def test_a_lane_whose_times_were_not_read_says_so(self):
         with mock.patch.object(queue_screen, "times", return_value={"error": "database is locked"}):
-            times = self.run_page("R.times = ELS.times.html;")["R"]["times"]
+            times = self.run_page("R.times = ELS.times.html;", search="?tab=times")["R"]["times"]
         self.assertIn("▨ not read: database is locked", times)
+
+    def test_ended_build_runs_sit_in_a_closed_details_after_the_lanes(self):
+        """sd:6973: the ended runs leave the Builds panel for a native <details> under the lanes, closed by default;
+        it reads what Show All reads, so collapsing changes nothing fetched."""
+        page = (V2 / "queue.html").read_text(encoding="utf-8")
+        self.assertLess(page.index('id="lanes"'), page.index('id="ended"'))
+        out = self.run_page(f"""const B = {json.dumps(self.BUILDS)};
+window.ELSE = (p, b) => p.split('?')[0] === '/api/queue/builds' ? [200, B] : [404, {{ error: 'no' }}];
+await window.PAGE_AGAIN.run(); await flush(); await flush();
+R.builds = ELS.builds.html; R.ended = ELS.ended.html;""")
+        self.assertNotIn('data-run="r0"', out["R"]["builds"])
+        ended = out["R"]["ended"]
+        self.assertTrue(ended.startswith('<details class="ended"><summary>Ended <span class="n">1</span></summary>'), ended)
+        self.assertNotIn("<details class=\"ended\" open", ended)
+        self.assertIn('data-build="retry" data-run="r0"', ended)
+        self.assertIn('data-copy="sd assignments get 5"', ended)
+        self.assertEqual(self.run_page("R.ended = ELS.ended.html;", search="")["R"]["ended"], "")
+
+    def test_last_7_days_is_its_own_tab_kept_in_the_address(self):
+        """sd:6973: tabs Queue (default) | Last 7 days; ?tab=times opens the second, and a pick writes the address."""
+        default = self.run_page("R.times = ELS.times.html; R.tab = ELS.tab.html; R.lanes = ELS.lanes.hidden;", search="")
+        self.assertNotIn("Last 7 days</h2>", default["R"]["times"] or "")
+        self.assertIs(default["R"]["lanes"], False)
+        tabs = r'data-tab="(\w+)" aria-pressed="(\w+)">([^<]+)<'
+        self.assertEqual(re.findall(tabs, default["R"]["tab"]), [("queue", "true", "Queue"), ("times", "false", "Last 7 days")])
+        times = self.run_page("R.times = ELS.times.html; R.hid = ['builds', 'lanes', 'idle', 'ended', 'show'].map(i => ELS[i].hidden);"
+                              " R.tab = ELS.tab.html;", search="?show=all&tab=times")
+        self.assertIn("Last 7 days</h2>", times["R"]["times"])
+        self.assertEqual(times["R"]["hid"], [True] * 5)
+        self.assertEqual(re.findall(tabs, times["R"]["tab"])[1], ("times", "true", "Last 7 days"))
+        pick = self.run_page("window.shell.url = q => OUT.urls.push(q); OUT.urls = [];"
+                             " ELS.tab.listeners.click[0]({ target: { closest: s => s === 'button[data-tab]' ? { dataset: { tab: 'times' } } : null } });"
+                             " R.times = ELS.times.html;", search="?show=all")
+        self.assertEqual(pick["urls"], [{"show": "all", "tab": "times"}])
+        self.assertIn("Last 7 days</h2>", pick["R"]["times"])
 
     def test_adversarial_review_on_a_lane_row_posts_its_worktree_and_item(self):
         """sd:5064: a lane row with a recorded worktree asks for {kind: change, target, item}; Details follow the run."""
