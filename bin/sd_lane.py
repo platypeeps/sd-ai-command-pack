@@ -1074,6 +1074,7 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
     queue = queue_for(root, environ)
     receipts: list[dict[str, Any]] = []
     order: dict[str, int] = {}
+    done: list[bool] = [False]
 
     def read_first(connection: Any) -> None:
         import sd_ship_squash  # noqa: PLC0415
@@ -1081,6 +1082,8 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
         if stale_prepared(stored(connection, queue.repository), item):
             receipts[:] = [receipt for receipt in sd_ship_squash.merged_receipts(connection, queue.repository)
                            if receipt.get("item") == item and receipt.get("phase") == "merged"]
+            found = connection.execute("SELECT status FROM item WHERE id = ?", (item,)).fetchone()
+            done[0] = bool(found) and found[0] == "done"
 
     def mark(entries: list[dict[str, Any]]) -> dict[str, Any]:
         check_revision(entries, expected_revision)
@@ -1103,9 +1106,9 @@ def cancel(root: pathlib.Path, item: int, environ: dict[str, str], *,
         prepared = stale_prepared(entries, item)
         if prepared:
             for row in prepared:
-                merge = merged_by_hand(root, row, receipts)
+                merge = merged_by_hand(root, row, receipts, done=done[0])
                 row.update(status="cancelled", finished_at=stamp_now(),
-                           reason=f"cancelled by the operator on {this_host()}: its head merged at {merge}")
+                           reason=f"cancelled by the operator on {this_host()}: {merge}")
             return prepared[-1]
         row = pending_entry(entries, item)
         row.update(status="cancelled", finished_at=stamp_now(), reason=f"cancelled by the operator on {this_host()}")
@@ -1145,8 +1148,9 @@ def stale_ended(entries: list[dict[str, Any]], item: int, order: dict[str, int])
     return ended
 
 
-def merged_by_hand(root: pathlib.Path, entry: dict[str, Any], receipts: list[dict[str, Any]]) -> str:
-    """The merge commit of a receipt whose head holds `entry`'s queued head, or a refusal (sd:5743).
+def merged_by_hand(root: pathlib.Path, entry: dict[str, Any], receipts: list[dict[str, Any]], *,
+                   done: bool = False) -> str:
+    """Why a receipt proves `entry`'s queued head merged, naming its merge commit, or a refusal (sd:5743).
 
     A prepared entry stopped for want of merge authority; the operator then
     merged it by hand, and the entry read `prepared` for ever. Only a
@@ -1155,14 +1159,22 @@ def merged_by_hand(root: pathlib.Path, entry: dict[str, Any], receipts: list[dic
     merged, a dispatch may not have landed, and a later head that does not
     hold the queued one is other work. A receipt that cannot be read proves
     nothing, so it can only refuse; a git read that fails refuses
-    `PUBLISH_UNKNOWN`.
+    `PUBLISH_UNKNOWN`, unless the item is `done`: a head another machine
+    queued is often absent here, and a done item's merged receipt is then
+    the proof (pack sd:6805).
     """
     item, head = entry.get("item"), str(entry.get("expected_head") or "")
     for receipt in receipts:
         merged = str(receipt.get("head") or "")
-        if head and merged and (merged == head or read_git(root, "merge-base", "--is-ancestor", head, merged,
-                                                             ok=(0, 1)).returncode == 0):
-            return str(receipt.get("merge_commit") or merged)
+        commit = str(receipt.get("merge_commit") or merged)
+        try:
+            if head and merged and (merged == head or read_git(root, "merge-base", "--is-ancestor", head, merged,
+                                                                 ok=(0, 1)).returncode == 0):
+                return f"its head merged at {commit}"
+        except LaneError as error:
+            if not done or error.code != PUBLISH_UNKNOWN:
+                raise
+            return f"sd:{item} is done; its receipt merged at {commit}, and this clone cannot read {head} or {merged}"
     raise LaneError(f"sd:{item}'s prepared entry {entry.get('id')} at {head or 'no head'} has no merged ship receipt "
                     "that holds its head; merge it with `sd-ship merge --item`, or queue it again with "
                     "`sd-ship lane retry --manual`")

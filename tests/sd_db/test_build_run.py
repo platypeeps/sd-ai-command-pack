@@ -8,6 +8,7 @@ answer from a plan file and log each call. Each fake but `claude` first
 parses its argv with the real tool's own parser, so a call the tool would
 refuse fails here too.
 """
+import dataclasses
 import importlib
 import json
 import os
@@ -538,7 +539,18 @@ class Supervise(Case):
         """Failure table, Building: a hung builder's group is ended at the timeout; a fresh row retries once."""
         self.press()
         self.plan(claude=["hang"])
-        ended = self.supervisor(timeout=1.5).run()
+        # A git call slower than the timeout, as on a loaded machine: the short timeout starts at
+        # Building, so the run times out there and not in Worktree.
+        self.tools = dataclasses.replace(self.tools, git=["sh", "-c", 'sleep 2; exec git "$@"', "git"])
+        supervisor = self.supervisor()
+        building = supervisor.building
+
+        def hung() -> str | dict:
+            supervisor.timeout = 1.5
+            return building()
+
+        supervisor.building = hung
+        ended = supervisor.run()
         old = build.run(self.db, self.bundle["id"])
         self.assertEqual(ended["outcome"], "timed_out")
         self.assertTrue(group_gone(old["builder_pgid"]))
