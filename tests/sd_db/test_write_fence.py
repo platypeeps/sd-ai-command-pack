@@ -20,7 +20,6 @@ import sqlite3
 import subprocess
 import sys
 import threading
-import time
 from collections.abc import Callable
 from pathlib import Path
 from unittest import mock
@@ -857,38 +856,68 @@ class TheLockHold(FenceCase):
         self.assertEqual(self.items(), 5)
         self.assertLessEqual(len(self.asked()) - before, 1, "a commit asked Tailscale again inside the window")
 
-    def test_a_slow_tailscale_does_not_hold_the_write_lock(self):
-        """A second writer commits within its busy timeout while the first waits on a 3 s Tailscale."""
-        self.name_hub(HUB_NAME)
-        self.node(status_delay=3)
-        failures: list[BaseException] = []
+    def slow_tailscale(self, clock: dict, *, slept: float = 0) -> list[str]:
+        """`hub._this_name` as a Tailscale slower than `FENCE_SECONDS`, `slept` more on the wall clock.
 
-        def first():
+        Before each call a second connection tries the write lock, waiting for
+        nothing; each call notes `free` or the probe's error (pack sd:7120).
+        """
+        calls: list[str] = []
+        name = hub._this_name
+
+        def slow() -> str:
+            probe = sqlite3.connect(self.path, timeout=0, isolation_level=None)
             try:
-                connection = database.connect()
-                try:
-                    create_item(connection, kind="work", title="slow")
-                finally:
-                    connection.close()
-            except BaseException as error:  # noqa: BLE001 -- reported below
-                failures.append(error)
+                probe.execute("BEGIN IMMEDIATE")
+                probe.execute("ROLLBACK")
+                calls.append("free")
+            except sqlite3.OperationalError as error:
+                calls.append(str(error))
+            finally:
+                probe.close()
+            clock["monotonic"] += hub.FENCE_SECONDS + 1
+            clock["time"] += hub.FENCE_SECONDS + 1 + slept
+            return name()
 
-        writer = threading.Thread(target=first)
-        writer.start()
-        time.sleep(0.5)
-        second = sqlite3.connect(self.path, timeout=1.0, isolation_level=None)
-        self.addCleanup(second.close)
-        started = time.monotonic()
-        try:
-            second.execute("BEGIN IMMEDIATE")
-            second.execute("INSERT INTO state (kind, key, body, timestamp) VALUES ('x', 'b', '{}', '2026')")
-            second.execute("COMMIT")
-            waited = time.monotonic() - started
-        finally:
-            writer.join(30)
-        self.assertLess(waited, 1.0)
-        self.assertEqual(failures, [])
+        self.enterContext(mock.patch.object(hub, "_this_name", slow))
+        return calls
+
+    def test_a_slow_tailscale_does_not_hold_the_write_lock(self):
+        """A Tailscale call slower than `FENCE_SECONDS` runs before the write lock, and only there.
+
+        Its answer dated from the call's start, so it was stale when it came:
+        the transaction's first write asked again under the lock (pack
+        sd:7120). The probe replaces a 0.5 s sleep and a wall-clock bound that
+        also timed a second writer's own fsync.
+        """
+        self.name_hub(HUB_NAME)
+        self.node()
+        calls = self.slow_tailscale(self.frozen())
+        create_item(self.open(), kind="work", title="slow")
+        self.assertEqual(calls, ["free"], "a Tailscale call ran under the write lock")
         self.assertEqual(self.items(), 1)
+
+    def held_after_a_slow_ask(self, slept: float) -> list[str]:
+        """The asks `Held` makes for a call slower than `FENCE_SECONDS`, then a read inside the window."""
+        clock = self.frozen()
+        held, asked = hub.Held(), []
+
+        def slow() -> str:
+            asked.append("slow")
+            clock["monotonic"] += hub.FENCE_SECONDS + 1
+            clock["time"] += hub.FENCE_SECONDS + 1 + slept
+            return "slow"
+
+        held.get(slow, hub.FENCE_SECONDS)
+        held.get(lambda: asked.append("again"), hub.FENCE_SECONDS)
+        return asked
+
+    def test_an_answer_ages_from_when_it_came(self):
+        self.assertEqual(self.held_after_a_slow_ask(0), ["slow"])
+
+    def test_a_sleep_during_the_ask_asks_again(self):
+        """The wall clock counts from the call's start, so a sleep inside it is still a jump."""
+        self.assertEqual(self.held_after_a_slow_ask(hub.CLOCK_SLACK + 1), ["slow", "again"])
 
     def test_a_held_answer_is_read_while_another_caller_asks(self):
         """One slow ask stalls only the callers that need a new answer."""
@@ -912,21 +941,38 @@ class TheLockHold(FenceCase):
         self.assertEqual(held.get(lambda: "asked again", hub.FENCE_SECONDS), "second")
 
     def test_a_write_with_a_held_answer_does_not_wait_on_a_slow_fresh_ask(self):
-        """Another thread asks a 3 s Tailscale afresh; a write inside the window does not wait."""
+        """Another thread's fresh ask stalls in Tailscale; a write inside the window does not wait.
+
+        Events, not a 0.5 s sleep: the read runs while the ask is known to stall (pack sd:7120).
+        """
         self.name_hub(HUB_NAME)
         self.node()
         self.assertEqual(hub.write_role(self.path).state, "holder")
-        self.node(status_delay=3)
-        asking = threading.Thread(target=hub.write_role, args=(self.path,), kwargs={"within": 0})
-        asking.start()
-        time.sleep(0.5)
-        started = time.monotonic()
+        asking, release = threading.Event(), threading.Event()
+        name = hub._this_name
+
+        def stalled() -> str:
+            asking.set()
+            release.wait(30)
+            return name()
+
+        self.enterContext(mock.patch.object(hub, "_this_name", stalled))
+        asker = threading.Thread(target=hub.write_role, args=(self.path,), kwargs={"within": 0})
+        found: list[hub.Role] = []
+        reader = threading.Thread(target=lambda: found.append(hub.write_role(self.path)))
+        asker.start()
         try:
-            self.assertEqual(hub.write_role(self.path).state, "holder")
-            waited = time.monotonic() - started
+            self.assertTrue(asking.wait(30))
+            reader.start()
+            # A reader that waits on the ask never ends while the ask stalls.
+            reader.join(10)
+            self.assertFalse(reader.is_alive(), "a held answer waited on another thread's ask")
         finally:
-            asking.join(30)
-        self.assertLess(waited, 1.0, "a held answer waited on another thread's ask")
+            release.set()
+            asker.join(30)
+            if reader.ident is not None:
+                reader.join(30)
+        self.assertEqual([role.state for role in found], ["holder"])
 
     def test_a_role_loss_refuses_the_first_commit_past_the_window(self):
         self.name_hub(HUB_NAME)

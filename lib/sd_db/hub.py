@@ -373,10 +373,11 @@ _FORBIDDEN_PRAGMAS = {
 }
 
 class Held:
-    """One fence answer and when it was asked (pack sd:7042).
+    """One fence answer and when it came (pack sd:7042).
 
     `get(ask, within)` returns the held answer while it is younger than
-    `within` seconds and the wall clock moved with the monotonic one;
+    `within` seconds, counted from when `ask` returned, and the wall clock
+    moved with the monotonic one since `ask` began;
     otherwise it calls `ask` and holds what it returns. One ask runs at a
     time. A caller that finds an answer young enough takes no lock, so a
     slow Tailscale stalls only the callers that need a new answer.
@@ -405,7 +406,12 @@ class Held:
                 return found
             ticks, wall = time.monotonic(), time.time()
             found = ask()
-            self._held = (ticks, wall, found)
+            # Aged from its arrival: from the call's start, an answer slower
+            # than `within` came stale, and the next write asked again under
+            # SQLite's write lock (pack sd:7120). The wall clock keeps the
+            # start, so a sleep during the call still reads as a jump.
+            done = time.monotonic()
+            self._held = (done, wall + (done - ticks), found)
             return found
 
 
