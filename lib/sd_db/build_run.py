@@ -255,8 +255,8 @@ def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=P
     failed, was skipped or was cancelled ends `lane_failed`. An unread lane changes nothing this tick.
     One that failed only on prepare's merge of main also goes back to its builder (`build.lane_failed`, sd:6940).
 
-    A merged run moves only once `verdict` reads its last supervisor and child gone, so the fresh supervisor
-    never shares the worktree.
+    A merged or failed run moves only once `verdict` reads its last supervisor and child gone, so the fresh
+    supervisor or rebuild never shares the worktree.
     """
     moved = []
     for row in build.open_runs(connection):
@@ -272,7 +272,8 @@ def watch(connection, *, lane: Callable[[dict, list[int]], dict | None], probe=P
         if status == "merged" and build.verdict(row, probe=probe)[0] == build.GONE:
             if build.merged(connection, row):
                 moved.append({"run": row["id"], "step": "cleaning"})
-        elif entry is not None and status in LANE_ENDED:
+        elif (entry is not None and status in LANE_ENDED
+              and build.verdict(row, probe=probe)[0] == build.GONE):  # a rebuild must not share a live worktree
             reason = f"lane entry {entry.get('id')} {status}: {entry.get('reason') or entry.get('code') or 'no reason'}"
             if build.lane_failed(connection, row, reason):
                 moved.append({"run": row["id"], "outcome": "lane_failed"})

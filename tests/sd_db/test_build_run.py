@@ -915,6 +915,20 @@ class Tick(Case):
         notes = [row["body"] for row in self.db.execute("SELECT body FROM note WHERE item = ?", self.items)]
         self.assertTrue(any(body.startswith(build.REBUILD) for body in notes), notes)
 
+    def test_a_conflict_waits_until_its_supervisor_is_gone(self):
+        """Review: a requeue while the old supervisor still ran let a new builder share its worktree."""
+        run = self.enqueued()
+        build.register(self.db, run["id"], pid=os.getpid(), pgid=os.getpgrp(),
+                       start=build.Probe.started(os.getpid()))
+        self.entries[self.items[0]] = {"id": "e1", "status": "failed", "reason": self.CONFLICT}
+        self.assertEqual(self.tick()["claimed"], [], "a live supervisor holds the worktree")
+        self.assertIsNone(build.run(self.db, run["id"])["outcome"])
+        gone = build.Probe()
+        gone.alive = lambda pid: False  # type: ignore[method-assign]
+        gone.group = lambda pgid: False  # type: ignore[method-assign]
+        self.assertNotEqual(self.tick(probe=gone)["claimed"], [], "once gone, the bundle goes back to a builder")
+        self.assertEqual(build.run(self.db, run["id"])["outcome"], "lane_failed")
+
     def test_a_conflict_without_its_lead_is_left_to_the_operator(self):
         """Review: a rebuild that lost its lead would claim under a child's branch, so none is queued."""
         for case in ("moved", "skipped"):
