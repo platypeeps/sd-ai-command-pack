@@ -2051,7 +2051,7 @@ class Landing(Lane):
         self.merge_lands(tree, 1, head)
         policy = {"release": {"verify": 'test "$SD_RELEASE_VERSION" = 0.1.0'}}
 
-        def killed(world, command, tag, version, sha):
+        def killed(world, command, tag, version, sha, deploy=False):
             raise Killed
         with mock.patch.object(sd_lane.ReleaseWorld, "verify", killed), self.assertRaises(Killed):
             self.released(policy)
@@ -2082,16 +2082,34 @@ class Landing(Lane):
         self.assertEqual(self.entries()[0]["release"], "owed")  # the mark waits; no chain runs
         self.assertEqual(self.tag_on_origin("v0.1.0"), "")
 
-    def test_a_release_declared_before_the_deploy_refusal_runs_nothing(self) -> None:
-        """Older state: the reader accepted any `release` object, so a stored one may name a deploy repository;
-        a tag-only chain would skip the deploy it names."""
+    def test_a_stored_release_the_reader_refuses_runs_nothing(self) -> None:
+        """Older state: the reader accepted any `release` object, so a stored one may name a deploy repository
+        with no file or key; a tag-only chain would skip the deploy it names."""
         tree, head = self.topic()
         self.feat_on_origin_main()
         self.merge_lands(tree, 1, head)
-        answer = self.released({"release": {"deploy_repo": "~/repos/org/deploy", "file": "v.yaml", "key": "image.tag"}})
-        self.assertTrue(answer["release"].startswith("not run: the policy declaration: release: deploy_repo"), answer)
-        self.assertIn("pack sd:7014", answer["release"])
+        answer = self.released({"release": {"deploy_repo": "~/repos/org/deploy"}})
+        self.assertEqual(answer["release"], "not run: the policy declaration: release: deploy_repo, file and key "
+                                            "are declared together", answer)
         self.assertEqual((self.entries()[0]["release"], self.tag_on_origin("v0.1.0")), ("owed", ""))
+
+    def test_a_run_killed_after_the_tag_push_resumes_at_the_bump(self) -> None:
+        """sd:7014: a policy naming a deploy repository runs the bump after the tag, under the deploy policy."""
+        tree, head = self.topic()
+        self.feat_on_origin_main()
+        self.merge_lands(tree, 1, head)
+        policy = {"merge_method": "rebase",
+                  "release": {"deploy_repo": str(self.tmp / "deploy"), "file": "values.yaml", "key": "image.tag"}}
+        made = []
+
+        def killed(world):
+            made.append((world.deploy, world.file, world.merge_method))
+            raise Killed
+        with mock.patch.object(sd_lane.ReleaseWorld, "deployed", killed), self.assertRaises(Killed):
+            self.released(policy)
+        chain = self.entries()[0]["release"]
+        self.assertEqual((chain["step"], chain["tag"]), ("bump", "v0.1.0"))
+        self.assertEqual(made, [(self.tmp / "deploy", "values.yaml", "rebase")], "the deploy policy's merge method")
 
 
 class Killed(BaseException):

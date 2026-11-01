@@ -59,27 +59,31 @@ saved before its external act, so a kill resumes at that step.
 | bump: compare versions | none | the deployed value drops or adds the `v` the tag has | keep the deployed value's form | `test_the_bump_keeps_the_deployed_values_v_prefix_and_form` |
 | bump: ask | a question note | `commit`, `push` or `pr` is `ask` | wait; a `go` ruling runs the step; any other stops it | `test_the_bump_asks_when_its_commit_or_push_is_held_at_ask` |
 | bump: message | none | the deploy commit convention refuses it (no ticket footer) | stop failed at bump; nothing pushed | `test_the_bump_follows_the_deploy_repositorys_commit_convention` |
-| bump: push branch | a `release/<repo>-<tag>` branch on the deploy origin | push fails | nothing on origin; rerun pushes again | to write |
+| bump: push branch | a `release/<repo>-<tag>` branch on the deploy origin | push fails | nothing on origin, no worktree left; rerun pushes again | `test_a_failed_push_leaves_nothing_on_origin_and_a_rerun_pushes` |
 | bump: open PR | a PR | push landed, `gh pr create` failed | rerun reuses the branch if it holds the same file; refuses if not | `test_a_branch_pushed_before_a_failed_pr_create_is_reused`, `test_a_pushed_branch_with_other_content_is_not_reused` |
-| bump: open PR | a PR | kill after `gh pr create`, before the save | rerun finds the open PR by head branch (`gh pr list --head`) | to write |
+| bump: open PR | a PR | kill after `gh pr create`, before the save | rerun finds the open PR by head branch (`gh pr list --head`) | `test_a_kill_after_the_pr_is_opened_finds_it_by_its_head_branch`, `test_a_deploy_release_runs_version_through_verify_against_bare_origins` |
+| bump: open PR | none | the open PR found by branch holds another file | refuse; nothing merged | `test_an_open_pr_on_the_branch_with_other_content_is_not_reused` |
+| bump: message | none | a run resumed at bump never read origin's tags, so the footer read refused | read origin's tags on first use | `test_a_resumed_run_reads_origins_tags_before_the_messages_since_one` |
 | merge: freeze | none | a freeze window on either repository | wait; PR stays open with the reason | `test_freeze_window_stops_the_chain_before_merge` |
 | merge: checks | none | checks pending, or none reported | wait, unless `ci` is Jenkins and its build stands in | `test_a_jenkins_only_deploy_repo_merges_on_its_green_build_with_no_github_check` |
 | merge: checks | none | a check red, or the PR closed | stop failed with the check names | `test_red_or_pending_checks_leave_the_pull_request_open` |
 | merge: gates | none | fewer `review.human` approvals of the head than the policy needs | wait with the count | `test_the_deploy_policy_gates_the_merge_as_sd_ship_does` |
 | merge: ask | a question note | `push` is `ask` on the deploy policy | wait for `go` | `test_each_act_the_policy_holds_at_ask_waits_for_a_go_ruling` |
 | merge: merge | the deploy main | head moved after the gates read it | `--match-head-commit` refuses; next run reads the gates again | `test_the_deploy_policy_gates_the_merge_as_sd_ship_does` (passes the gated head) |
-| merge: merge | a merge-queue entry | `gh pr merge` only adds the PR to a merge queue | stay at merge until `gh pr view` reads `MERGED`; no verify before | to write (open round-7 blocker) |
-| merge: merge | the deploy main | kill after the merge, before the save | next run reads `MERGED` and goes to verify | to write |
+| merge: merge | a merge-queue entry | `gh pr merge` only adds the PR to a merge queue | stay at merge until `gh pr view` reads `MERGED`; no verify before | `test_a_merge_that_only_queues_the_pull_request_stays_at_merge_until_merged`, `test_a_merge_queue_add_reads_as_not_merged` |
+| merge: merge | the deploy main | kill after the merge, before the save | next run reads `MERGED` first, merges nothing again, and goes to verify | `test_a_kill_after_the_merge_before_its_save_resumes_at_verify` |
 | verify | none | `verify` exits non-zero or runs past its bound | stop failed: reason names the tag and merged version; nothing rolled back | `test_failed_verify_reports_and_rolls_nothing_back` |
-| verify | a detached worktree | the deploy checkout lacks the merged commit | run `verify` in a detached worktree at the merged commit, as PR 1 does at the tagged one | to write |
+| verify | a detached worktree | the deploy checkout lacks the merged commit | fetch origin's default branch; run `verify` in a detached worktree at the merged commit, as PR 1 does at the tagged one | `test_verify_runs_in_a_detached_deploy_worktree_at_the_merged_commit`, `test_a_deploy_release_runs_version_through_verify_against_bare_origins` |
+| any | none | a chain PR 1 stored at verify, then the policy named a deploy | go back to bump | `test_a_chain_tagged_before_the_policy_named_a_deploy_bumps_before_its_verify` |
+| any | none | a chain stored at bump or merge, then the policy dropped the deploy | stop failed; act on nothing | `test_a_deploy_step_whose_policy_dropped_the_deploy_fails_rather_than_acts` |
 
-A row marked "to write" needs its test, failing first, before round 1.
+Each row once marked "to write", and each row added in the build, has a test that failed first.
 
 ## Acceptance criteria
 
-- [ ] Every "to write" row has a test that failed before its fix; the PR body quotes each failing line.
-- [ ] `tests.test_sd_release` and `tests.test_sd_lane -k release` pass.
-- [ ] A policy with `deploy_repo` runs version through verify against a bare local deploy origin in one test.
+- [x] Every "to write" row has a test that failed before its fix; the PR body quotes each failing line.
+- [x] `tests.test_sd_release` and `tests.test_sd_lane -k release` pass.
+- [x] A policy with `deploy_repo` runs version through verify against a bare local deploy origin in one test.
 - [ ] `make check` passes through the lane gate.
 
 ## Risks
