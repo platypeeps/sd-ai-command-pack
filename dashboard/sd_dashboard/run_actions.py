@@ -14,7 +14,7 @@ mounted volume, a port number, a Home Assistant tile, a registered repo row, a c
 | volume.df          | a mount point or a configured storage folder | `df -h <path>`                                |
 | port.lsof          | an integer port                              | `lsof -nP -iTCP:<port> -sTCP:LISTEN`          |
 | credentials.probe  | nothing                                      | `credentials.check`, as `sd-db credentials`   |
-| credentials.signin | a probe `credentials.signin` finds on disk   | its login, typed into claude in herdr         |
+| credentials.signin | a probe `credentials.signin` finds on disk   | its consent URL, or its login in herdr        |
 | check.run          | a Health check row id this module knows      | the row's read, see `CHECKS`                  |
 | sensor.read        | a tile in Home's tile list                   | `GET /api/states/<entity>`                    |
 | skill.scan         | nothing                                      | `sd skill scan`                               |
@@ -47,6 +47,8 @@ import os
 import re
 import shlex
 import subprocess
+import threading
+import time
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
@@ -74,6 +76,12 @@ WATCH_ROUTINE = "System/Scheduled Tasks/market-watch/SKILL.md"
 URL_MAX = 2000
 NAME = re.compile(r"[a-z0-9][a-z0-9_-]{0,99}")
 SKILL = re.compile(r"[a-z0-9][a-z0-9-]{0,79}")
+#: The bound on a login printing its device URL and code, in seconds (sd:6957).
+LOGIN_SECONDS = 20
+#: Google's consent URL in start_google_auth's answer, which words it as Markdown.
+CONSENT = re.compile(r"https://accounts\.google\.com/[^\s)\]>\"'`]+")
+DEVICE_URL = re.compile(r"https://[^\s)\]>\"'`]+")
+DEVICE_CODE = re.compile(r"\b[A-Z0-9]{4}-[A-Z0-9]{4}\b")
 SOURCE = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*")
 
 
@@ -87,7 +95,8 @@ class Step:
     argv: tuple[str, ...] = ()
     cwd: str | None = None
     stdin: str | None = None
-    call: Callable[[], tuple[int, str]] | None = None
+    #: Answers `(exit, output)`, or `(exit, output, extra)` whose fields join the answer (a login's `url`).
+    call: Callable[[], tuple] | None = None
     seconds: int = SECONDS
     env: dict | None = None
     #: How the output reads in Details: a step may sort or word it (`du`'s sizes, the largest first).
@@ -250,14 +259,77 @@ def credentials_probe(connection, values, jobs=None) -> Step:
     return Step(line="sd-db credentials", call=_credentials(connection), seconds=60)
 
 
+def _google_consent(account: str) -> Callable[[], tuple]:
+    """workspace-mcp's start_google_auth for one account: its consent URL rides the answer, never the output or a log."""
+    def call():
+        from . import notes_screen
+
+        url, _, _ = notes_screen.workspace()
+        client = notes_screen._mail_intake().Mcp(url, timeout=30)
+        try:
+            client.connect()
+            said = client.call("start_google_auth", {"service_name": "Google Workspace", "user_google_email": account})
+        except Exception as error:  # noqa: BLE001 - whatever broke, there is no URL to show
+            return 1, f"workspace-mcp at {url} gave no consent URL: {error}"
+        finally:
+            notes_screen.close_session(url, client)
+        found = CONSENT.search(said)
+        if found is None:
+            return 1, f"workspace-mcp answered with no consent URL: {said[:300]}"
+        return 0, f"workspace-mcp waits for {account}'s consent; nothing opened a browser.", \
+            {"url": found.group(0), "account": account}
+
+    return call
+
+
+def _device_login(argv: tuple[str, ...], account: str) -> Callable[[], tuple]:
+    """A login that prints a device URL and code, then waits for the code: answered with both, left running to finish."""
+    def call():
+        try:
+            child = subprocess.Popen(list(argv), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, text=True, start_new_session=True)
+        except OSError as error:
+            return 1, f"{argv[0]} did not start: {error}; nothing ran."
+        lines: list[str] = []
+
+        def drain():
+            for line in child.stdout or ():
+                lines.append(line)
+
+        threading.Thread(target=drain, daemon=True).start()
+        deadline = time.monotonic() + LOGIN_SECONDS
+        while time.monotonic() < deadline:
+            said = "".join(lines)
+            url, code = DEVICE_URL.search(said), DEVICE_CODE.search(said)
+            if url and code:
+                return 0, f"{argv[0]} waits for the code for {account}; it stops on its own when the code expires.", \
+                    {"url": url.group(0), "code": code.group(0), "account": account}
+            if child.poll() is not None:
+                break
+            time.sleep(0.1)
+        if child.poll() is None:
+            child.kill()
+        return 1, "".join(lines).strip() or f"{argv[0]} printed no URL and code in {LOGIN_SECONDS} s."
+
+    return call
+
+
 def credentials_signin(connection, values, jobs=None) -> Step:
-    """Sign in (sd:6722): claude in a new herdr workspace, given the probe's login as typed text, read from disk now."""
+    """Sign in (sd:6722, sd:6957): a Google account's consent URL or an SSO profile's device URL and code to copy into
+    the right browser profile, never opened here; any other login in a new herdr workspace, read from disk now."""
     from sd_db import credentials
 
     probe = _text(_fields(values, {"probe"})["probe"], "probe")
     text = credentials.signin(probe, os.environ)
     if text is None:
         raise ValueError(f"{probe} is not a credential this machine can sign in; nothing ran.")
+    family, _, name = probe.partition(":")
+    if family == "google":
+        return Step(line=f"workspace-mcp start_google_auth user_google_email={name}", call=_google_consent(name),
+                    seconds=60)
+    if text.startswith("! aws sso login "):
+        argv = (*shlex.split(text[2:]), "--no-browser", "--use-device-code")
+        return Step(line=shlex.join(argv), call=_device_login(argv, f"AWS profile {name}"), seconds=LOGIN_SECONDS + 5)
     home = Path.home()
     label = "signin-" + re.sub(r"[^a-z0-9]+", "-", probe.lower()).strip("-")
     return Step(line=f"cd {home} && claude {shlex.quote(text)}", call=_herdr(home, label, text), seconds=100)
@@ -762,8 +834,10 @@ ACTIONS = {
 def run(name: str, step: Step) -> tuple[int, dict]:
     """The step, bounded: 200 with its exit and output tail, or 504 when it ran past its bound."""
     answer = {"action": name, "label": ACTIONS[name][0], "line": step.line}
+    extra: dict = {}
     if step.call is not None:
-        code, output = step.call()
+        code, output, *more = step.call()
+        extra = more[0] if more else {}
     else:
         try:
             done = subprocess.run(list(step.argv), cwd=step.cwd, input=step.stdin if step.stdin is not None else "",
@@ -780,7 +854,7 @@ def run(name: str, step: Step) -> tuple[int, dict]:
         output = step.shape(code, output)
     output = output.rstrip()
     cut = len(output) > OUTPUT_CHARS
-    return 200, {**answer, "exit": code, "output": output[-OUTPUT_CHARS:], "cut": cut}
+    return 200, {**answer, **extra, "exit": code, "output": output[-OUTPUT_CHARS:], "cut": cut}
 
 
 def request(values: dict, *, jobs=None):

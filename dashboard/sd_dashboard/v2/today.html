@@ -94,14 +94,29 @@
         <p class="tally" id="active-tally"></p>
       </div>
       <table class="ledger active builds" id="builds-table" aria-label="Builder runs" hidden>
+        <caption>Headless build runs: items, stage, start, ETA from past runs, model and cost.</caption>
         <thead id="builds-head"></thead>
         <tbody id="builds"></tbody>
       </table>
       <table class="ledger active" aria-labelledby="motion-h">
+        <caption>Open items with a live worktree, lane entry, sd-* command or herdr agent, longest-running first.</caption>
         <thead id="active-head"></thead>
         <tbody id="active"><tr class="empty"><td colspan="5">Reading sessions…</td></tr></tbody>
       </table>
       <p class="filtered" id="active-note" hidden></p>
+    </section>
+
+    <section aria-labelledby="queues-h">
+      <div class="sec-head">
+        <h2 id="queues-h">Queues <button class="help" type="button" aria-label="Help: Queues" data-help="&lt;b&gt;What waits to be built and landed.&lt;/b&gt; Ready items, highest priority first, then the build queue (queued, running, blocked) and the merge lane (position, state, the step a stopped entry stopped at). A repo chip shows one repo. &lt;code&gt;sd today&lt;/code&gt; prints the same table. A failed or blocked entry also sends one push.">
+          <svg class="i" aria-hidden="true"><use href="#i-circle-help"/></svg></button></h2>
+        <p class="tally" id="queues-tally"></p>
+      </div>
+      <div class="intents" id="queues-repos" role="group" aria-label="Show one repo"></div>
+      <table class="ledger active" aria-labelledby="queues-h">
+        <thead><tr><th class="g"><span class="sr">State</span></th><th>What</th><th>Queue · detail</th><th class="num">Age</th></tr></thead>
+        <tbody id="queues"><tr class="empty"><td colspan="4">Reading the queues…</td></tr></tbody>
+      </table>
     </section>
   </main>
 

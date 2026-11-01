@@ -147,6 +147,8 @@ section[aria-labelledby="motion-h"] { margin-top: var(--space-xl); }
 /* The builder runs (sd:6003): the session rows' parts above them; the stage leads its cell. No new tokens.
  * states: default · hover (the item links) · focus · running ● · stalled ▲ · held outcome ■ · not read (one line) */
 .builds { margin-bottom: var(--space-sm); }
+/* Each In motion table says in one line what it holds (pack sd:6975), muted as the Reports and Health captions. */
+.active caption { text-align: left; padding: 0 0 var(--space-xs); font: 400 var(--text-xs)/1.4 var(--font-ui); color: var(--color-muted); }
 .builds .detail b { font-weight: 500; color: var(--color-ink); }
 @media (max-width: 899px) {
   .active tbody tr { grid-template-columns: 2rem minmax(0, 1fr) auto; grid-template-areas: "g what num" ". detail detail" ". when when"; }

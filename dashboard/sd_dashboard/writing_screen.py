@@ -52,6 +52,8 @@ def document(connection, *, now):
             "publication": {"claim": live["id"], "url": live["url"], "phase": live["phase"], "href": href(live["url"])} if live else None,
             "next": state["available_stages"], "corrections": state["correction_stages"],
             "files": files, "draft": draft, "words": words, "grill": _grill(full["notes"]),
+            # pack sd:6977: adversarial.md against the draft by its digest stamp; Apply review shows only when current.
+            "adversarial": gates.get("companions", {}).get("adversarial"),
         })
     return {"read": now, "stages": list(writing.STAGES), "pieces": pieces, "attention": _attention(pieces),
             "realms": {key: found[key] for key in ("state", "source", "problems")}}

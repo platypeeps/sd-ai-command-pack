@@ -1264,7 +1264,8 @@ class MigrateNeedsABackupOfThisStore(BackupCase):
         # Round 3: a writer puts its frames in the log before it publishes the
         # commit. The read-only run takes the write lock around the
         # fingerprint and the read that fixes its view, so it waits for the
-        # commit and copies it.
+        # commit and copies it. The wait is a minute here: under gate load
+        # the writer's 1 s hold outran the 5 s busy timeout (build 312 gate).
         self.one_back_with_an_item()
         holding = threading.Event()
 
@@ -1283,7 +1284,8 @@ class MigrateNeedsABackupOfThisStore(BackupCase):
         thread.start()
         self.assertTrue(holding.wait(10))
         try:
-            snapshot = run(home=self.home)
+            with mock.patch.object(backup_module, "BUSY_TIMEOUT", 60_000):
+                snapshot = run(home=self.home)
         finally:
             thread.join()
         copy = sqlite3.connect(f"file:{snapshot.directory / 'sd.db'}?mode=ro", uri=True)

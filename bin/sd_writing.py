@@ -73,8 +73,9 @@ def _render(brief: dict) -> str:
     return prompt
 
 
-def _codex(root: str, prompt: str, *, model: str | None, timeout: int) -> str:
-    """Run codex read-only in `root` with the prompt on stdin; return its final message.
+def _codex(root: str, prompt: str, *, model: str | None, timeout: int, effort: str | None = None) -> str:
+    """Run codex read-only in `root` at `model` and `effort`, codex's own when None, with the prompt on stdin;
+    return its final message.
 
     codex runs in a group of its own (`sd_lib.run_group`), so a timeout or a
     SIGTERM, even one during the spawn (sd:5801), stops the sandbox and the
@@ -82,7 +83,8 @@ def _codex(root: str, prompt: str, *, model: str | None, timeout: int) -> str:
     """
     with tempfile.TemporaryDirectory(prefix="sd-writing-adversarial-") as scratch:
         out = Path(scratch) / "report.md"
-        command = ["codex", "exec", *(["-m", model] if model else []), "-s", "read-only", "-C", root,
+        command = ["codex", "exec", *(["-m", model] if model else []),
+                   *(["-c", f"model_reasoning_effort={effort}"] if effort else []), "-s", "read-only", "-C", root,
                    "-o", str(out), "-"]
         try:
             ran = sd_lib.run_group(command, cwd=Path.cwd(), env=dict(os.environ), timeout=timeout,
@@ -112,7 +114,7 @@ def adversarial(writing: Any, connection: Any, item: int, args: argparse.Namespa
               "has nothing to check against", file=sys.stderr)
     prompt = _render(brief)
     print(f"# codex adversarial review: {brief['piece']} (sandbox=read-only, {brief['root']})", file=sys.stderr)
-    report = _codex(brief["root"], prompt, model=args.model, timeout=args.timeout)
+    report = _codex(brief["root"], prompt, model=args.model, timeout=args.timeout, effort=getattr(args, "effort", None))
     result = writing.record_adversarial(connection, item, report, digest=brief["digest"], record=brief["record"],
                                         generation=brief["generation"])
     print(f"# reviewed draft {result['digest']}", file=sys.stderr)

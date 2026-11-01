@@ -164,6 +164,49 @@ class TheBuilderRows(ReaderCase):
         self.assertIn("Builder runs could not be read: no such column: step", out["R"]["builds"])
 
 
+class TheQueues(TodayCase):
+    def test_the_queues_are_sd_todays_ready_build_and_lane_rows(self):
+        """Pack sd:6946: one Queues panel, read as `sd today` reads it."""
+        from sd_db import create_item
+
+        ready = create_item(self.connection, kind="task", title="Build me next", status="ready", priority=1)
+        rows = self.today()["queues"]["rows"]
+        self.assertIn(("ready", ready, "P1"), [(row["queue"], row["id"], row["detail"]) for row in rows])
+
+    def test_a_queues_read_that_failed_is_its_reason_never_empty(self):
+        from sd_db import today
+
+        with mock.patch.object(today, "queues", side_effect=sqlite3.OperationalError("database is locked")):
+            self.assertEqual(self.today()["queues"], {"rows": [], "error": "database is locked"})
+
+
+QUEUED = [{"queue": "ready", "id": 7, "repo": "~/repos/pack", "title": "Port the page", "status": "ready",
+           "detail": "P1", "since": "2026-09-06T11:00:00Z"},
+          {"queue": "build", "id": 8, "repo": "~/repos/system", "title": "Fix the job", "status": "blocked",
+           "detail": "3 review rounds left blockers", "since": "2026-09-06T10:00:00Z"},
+          {"queue": "lane", "id": 9, "repo": "~/repos/pack", "title": "Land it", "status": "pending",
+           "detail": "-", "since": "2026-09-06T11:30:00Z", "place": 2}]
+
+
+class TheQueueRows(ReaderCase):
+    def test_the_queues_panel_lists_each_queue_with_a_chip_per_repo(self):
+        self.doc["queues"] = {"rows": QUEUED, "error": ""}
+        out = self.run_page("R.rows = ELS.queues.html; R.chips = ELS['queues-repos'].html; "
+                            "R.tally = ELS['queues-tally'].html;")
+        rows = out["R"]["rows"]
+        self.assertIn("#7 Port the page</a>", rows)
+        self.assertIn("<b>build</b> · blocked", rows)
+        self.assertIn("3 review rounds left blockers", rows)
+        self.assertIn("<b>lane</b> · pending · position 2", rows)
+        self.assertIn('data-qrepo="~/repos/system"', out["R"]["chips"])
+        self.assertIn("<span>1 ready</span>", out["R"]["tally"])
+
+    def test_a_failed_queues_read_says_so(self):
+        self.doc["queues"] = {"rows": [], "error": "database is locked"}
+        out = self.run_page("R.rows = ELS.queues.html;")
+        self.assertIn("The queues could not be read: database is locked", out["R"]["rows"])
+
+
 SHA = "a" * 40
 
 

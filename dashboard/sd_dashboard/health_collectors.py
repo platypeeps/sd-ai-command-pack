@@ -208,8 +208,15 @@ def branch_scan(connection: sqlite3.Connection, *, within: float = BRANCH_SECOND
 def merged_heads(connection: sqlite3.Connection) -> dict[tuple[str, str], dict]:
     """(resolved worktree, merged head) to the lane entry's item and branch, for each entry the lane merged.
 
-    A body that is not a lane entry, or that names no full head, names no merge and is passed over.
+    A body that is not a lane entry, or that names no full head, names no merge and is passed over. `held` says
+    which live session on this machine holds the tree (pack sd:6683): the removal refuses such a tree, so the read
+    keeps it too, on the caller's thread since the walk has no connection.
     """
+    from sd_db import sessions
+    from sd_db.ship import this_host
+
+    host = this_host()
+    live = [session for session in sessions.live(connection) if session.get("machine") == host]
     found = {}
     for _, _, body in reads.lane_entries(connection):
         try:
@@ -220,7 +227,10 @@ def merged_heads(connection: sqlite3.Connection) -> dict[tuple[str, str], dict]:
             continue
         head, tree, branch = entry.get("head") or entry.get("expected_head"), entry.get("worktree"), entry.get("branch")
         if isinstance(head, str) and OBJECT.fullmatch(head) and isinstance(tree, str) and tree.startswith("/"):
-            found[(os.path.realpath(tree), head)] = {"item": entry.get("item"),
+            key = sessions._key(tree)
+            held = [session for session in live if any(isinstance(held, dict) and held.get("path") == key
+                                                       for held in session.get("worktrees") or [])]
+            found[(os.path.realpath(tree), head)] = {"item": entry.get("item"), "held": sessions.describe(held),
                                                      "branch": branch if isinstance(branch, str) else ""}
     return found
 
@@ -280,7 +290,7 @@ def merged_worktrees(walk: Walk, keys: list[str], heads: dict) -> dict:
             if entry is None or not os.path.isdir(tree["path"]):
                 continue
             tree = {**tree, "repo": key, "repo_path": str(path), "item": entry["item"], "lane_branch": entry["branch"]}
-            trees.append({**tree, "kept": merged_tree_kept(walk, tree, cwds)})
+            trees.append({**tree, "kept": entry.get("held") or merged_tree_kept(walk, tree, cwds)})
     return {"trees": trees, "unread": unread, "revision": worktrees_revision(trees)}
 
 

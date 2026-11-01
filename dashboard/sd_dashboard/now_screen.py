@@ -790,6 +790,17 @@ STAGE = {"claimed": "building", "worktree": "building", "building": "building", 
 ETA_RUNS = 3
 
 
+def queues(connection: sqlite3.Connection, now: str) -> dict:
+    """The Queues panel (pack sd:6946): `sd_db.today.queues`, ready items, builds and the lane in one list, as
+    `sd today` prints it. A read that failed is `error`, so the page says the queues were not read, never empty."""
+    from sd_db import today
+
+    try:
+        return {"rows": today.queues(connection, now=now), "error": ""}
+    except (SdDbError, sqlite3.Error, ValueError, TypeError, KeyError) as failure:
+        return {"rows": [], "error": str(failure) or "the queues could not be read"}
+
+
 def builders(connection: sqlite3.Connection, now: str) -> dict:
     """In motion's builder runs (sd:6003): each open headless build run (`sd_db.build`), oldest first, with its items,
     its stage, when it started, its ETA from past runs and what it spent so far.
@@ -863,6 +874,7 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
     Lane and Gate lamps read (`lane_summary`); `lanes` is the seam for Queue's document, `queue_screen.document` by
     default, and a lane read that failed is a dark `lane` row, as a dark collector is.
     `spend` is the spend line (sd:6031, `spend`): the last 24 hours and the 7-day trend from the cost table.
+    `queues` is the Queues panel (pack sd:6946, `queues`): ready items, build queue and merge lane in one list.
     `builders` is In motion's builder runs (sd:6003, `builders`): each open build run's items, stage, start and ETA.
     `digest` is Since yesterday (sd:6002, `digest`): merged per repo, failed with why and fix, questions waiting.
     """
@@ -927,7 +939,8 @@ def document(connection: sqlite3.Connection, *, now: str, fleet=None, jobs=None,
             "track": track(connection, now, rows=rows, briefs=reported["briefs"], active=active, lane=summary),
             "digest": digest(connection, now, rows=rows, lanes=queue.get("lanes") or [],
                              unread=digest_unread(sources, queue)),
-            "spend": spend(connection, now), "builders": builders(connection, now), "attention": _attention(listed), **mail, **reported}
+            "spend": spend(connection, now), "builders": builders(connection, now), "queues": queues(connection, now),
+            "attention": _attention(listed), **mail, **reported}
 
 
 def _attention(rows: list[dict]) -> dict:

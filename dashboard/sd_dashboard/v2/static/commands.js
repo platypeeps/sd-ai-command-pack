@@ -51,6 +51,20 @@
         err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press ${g.label} again`); }) };
   }
 
+  // Apply review (pack sd:6699): Fix with apply: adversarial. claude edits the draft for each adversarial.md finding or
+  // rejects it with a reason, and records each there; the edit stays uncommitted and nothing is published. `ready(o)` is
+  // true or why not; `post(o, path, body)` answers the server's reply.
+  function applyReview(on, { item, ready, post }) {
+    return { id: `${on}.apply-review`, on, label: 'Apply review', does: 'Asks first, then starts claude in herdr to apply adversarial.md to the draft.',
+      icon: 'bot', risk: 'safe', askFirst: true, executes: true, when: ready,
+      cli: () => 'no sd verb: the dashboard runs local-herdr/herdr.sh launch',
+      sends: o => `POST /api/items/${item(o)}/fix {apply: "adversarial", revision}`,
+      consequence: o => `Opens a herdr workspace in the piece's repository and starts claude on #${item(o)}: it edits the draft for each adversarial.md finding or rejects it with a reason, and records each in adversarial.md. The edit stays uncommitted for you to read; nothing is published.`,
+      run: o => Promise.resolve().then(() => post(o, `/api/items/${item(o)}/fix`, { apply: 'adversarial' })).then(
+        out => `Apply review started · #${item(o)} · herdr pane ${out.fix.pane}`,
+        err => { throw err.status ? err : new Error(`no answer (${err.message}), so whether a session started is not known; look in herdr before you press Apply review again`); }) };
+  }
+
   // Run now (jobs.retry): `sd jobs retry`, which sends the kickstart; the run-now pack allows an idle job's run too (sd:4982).
   // `job(o)` names the row's facts: { name, service, failed, exit,
   // capability }; capability is operations.inventory's retry answer, and its reason is the off text. Exit 127 is "command
@@ -80,7 +94,9 @@
     had?.remove();
     const r = id && RAN.get(id); if (!r) return;
     const { html, put } = window.markup;
-    put(details, html`<section class="ran" data-obj="${id}" aria-live="polite"><h3>${r.label}</h3><p class="why">Exit ${r.exit} · <code>${r.line}</code>${r.cut ? ' · the last part shown' : ''}</p><pre class="code">${r.output || '(no output)'}</pre></section>`, 'append');
+    // sd:6957: a login's URL (and device code) shows here to copy into the right browser profile; the page opens none.
+    const link = r.url ? html`<p class="why">Open on this machine, in the browser profile for ${r.account}: <a href="${r.url}" rel="noopener noreferrer">${r.url}</a> <button class="icon-btn" type="button" data-copy="${r.url}" aria-label="Copy the URL">Copy</button>${r.code ? html` · code <code>${r.code}</code> <button class="icon-btn" type="button" data-copy="${r.code}" aria-label="Copy the code">Copy</button>` : ''}. After consent, Probe again reads this login.</p>` : '';
+    put(details, html`<section class="ran" data-obj="${id}" aria-live="polite"><h3>${r.label}</h3><p class="why">Exit ${r.exit} · <code>${r.line}</code>${r.cut ? ' · the last part shown' : ''}</p>${link}<pre class="code">${r.output || '(no output)'}</pre></section>`, 'append');
   }
   // The output shows at once, for a row or for an object no row selects (Scan's use surfaces); a later Details for the
   // selected row draws that row's output again, or none.
@@ -160,6 +176,7 @@
   const settled = r => (r.state === 'failed' && r.item == null) || r.filed != null;
   function settledText(r) {
     if (r.state === 'failed') return `Adversarial review failed · run ${r.id}: ${r.reason || 'no reason recorded'}${r.filed && r.filed !== 'written' ? ` · ${r.filed}` : ''}`;
+    if (r.kind === 'piece' && r.filed === 'written') return `Adversarial review written · run ${r.id} · ${r.result}`;
     return r.filed === 'written' ? `Adversarial review filed · run ${r.id} · brief sd:${r.brief_item}; Details links it` : `Adversarial review done · run ${r.id} · ${r.filed}`;
   }
   function follow(key, run) {
@@ -341,5 +358,5 @@
       ${state ? html`<p class="why">${state}</p>` : ''}</section>`;
   }
 
-  window.commands = { answered, fix, grill, retry, runAction, showLog, logLine, printJob, showAssignment, openPullRequest, syncCollector, adversarialReview, reviewPane, published, PUB_STATE, pubLegend, publishCommands, publishPane };
+  window.commands = { answered, fix, grill, applyReview, retry, runAction, showLog, logLine, printJob, showAssignment, openPullRequest, syncCollector, adversarialReview, reviewPane, published, PUB_STATE, pubLegend, publishCommands, publishPane };
 })();
