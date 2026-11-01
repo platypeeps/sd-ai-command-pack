@@ -235,6 +235,7 @@ import time
 from typing import Any, Callable, Iterator
 
 import sd_lib
+import sd_release
 import sd_ship_workflow
 
 BIN = pathlib.Path(__file__).resolve().parent
@@ -341,6 +342,9 @@ LANDING_SECONDS = 1800
 POST_MERGE_SECONDS = 600
 #: A merged entry's `post_merge` until a run claims its target; then the claim, then `{"ran", "at"}` (sd:4630).
 POST_MERGE_OWED = "owed"
+#: A merged entry's release obligation, written with the merge as `post_merge` is (sd:6881); `release_chain`
+#: turns it into a chain when the policy declares `release`, else leaves it for when one does.
+RELEASE_OWED = "owed"
 #: The `make_post_merge` answers of a target that never started: its entries stay owed, and the next run retries.
 NOT_STARTED = ("make post-merge unknown", "make post-merge did not start")
 #: After this long a run starts no new entry (sd:3287): one started just inside it, the longest entry seen,
@@ -2537,6 +2541,114 @@ def post_merge(root: pathlib.Path, queue: Queue, environ: dict[str, str], answer
     return {**answer, "post_merge": note_post_merge(noted, ran, main)}
 
 
+def release_chain(root: pathlib.Path, queue: Queue, environ: dict[str, str], answer: dict[str, Any]) -> dict[str, Any]:
+    """`answer` with `release`: the chain this run's merges owe, run under the runner lock (`sd_release`, sd:6881).
+
+    Only a repository whose policy declares `release` has one. Each merge is
+    marked `release: owed` in the write that records it (`RELEASE_OWED`), so
+    a run that stops before this, or cannot read the policy, loses nothing:
+    a later run turns each owed mark into `{"step": "version"}`; the oldest
+    entry with an unfinished chain runs as far as it goes now, and stores its
+    step, so a later run resumes there, with no merge of its own. Its version
+    step folds the other marked entries into it: the tag covers every commit
+    since the last one, so a mark a killed run lost costs nothing. A new
+    reason notes the item, a followup when it is a failure. The chain never
+    fails the run: an error is the answer's `release` line.
+    """
+    landed = any(row.get("status") == "merged" for row in answer.get("ran", []))
+    try:
+        policy = sd_lib.repo_declaration(root, "policy", environ)
+    except Exception as error:  # noqa: BLE001 -- unknown, not "no release": say so when it matters
+        return {**answer, "release": f"not run: the policy was not read: {error}"[:600]} if landed else answer
+    release = (policy or {}).get("release")
+    if not isinstance(release, dict):
+        return answer
+    sd_repo_policy = sd_lib.sibling("sd_repo_policy", "sd_repo_policy.py")
+    refused = sd_repo_policy.problems({"release": release})  # one stored before the reader refused a deploy
+    if refused:
+        return {**answer, "release": f"not run: {'; '.join(refused)}"[:600]} if landed else answer
+    try:
+        reason = run_release(root, queue, environ, sd_repo_policy.effective(policy), release)
+    except Exception as error:  # noqa: BLE001 -- the merges stand; the next run resumes the chain
+        return {**answer, "release": f"failed: {type(error).__name__}: {error}"[:600]}
+    return answer if reason is None else {**answer, "release": reason}
+
+
+def run_release(root: pathlib.Path, queue: Queue, environ: dict[str, str], acts: dict[str, Any],
+                release: dict[str, Any]) -> str | None:
+    """Start each owed mark, advance the oldest unfinished chain, store and note it; its reason, or None for no chain."""
+    def take_release(entries: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for row in entries:
+            if row.get("status") == "merged" and row.get("release") == RELEASE_OWED:
+                row["release"] = {"step": "version"}
+        owed = sorted((row for row in entries if isinstance(row.get("release"), dict)
+                       and row["release"].get("step") not in sd_release.FINAL),
+                      key=lambda row: str(row.get("finished_at") or ""))
+        if not owed:
+            return None
+        if owed[0]["release"]["step"] == "version":
+            for row in owed[1:]:
+                if row["release"].get("step") == "version":
+                    row["release"] = {"step": "done", "reason": f"released with sd:{owed[0].get('item')}"}
+        return dict(owed[0])
+    chain = update(queue, take_release)
+    if chain is None:
+        return None
+    main = sd_lib.main_worktree_root(root).resolve()
+    world = ReleaseWorld(main, environ, release_frozen(queue), release_ruling(queue, chain["item"], main))
+    before = dict(chain["release"])
+    types = acts["commit_convention"].get("release_types") or sd_release.DEFAULT_TYPES
+
+    def save_release(state: dict[str, Any]) -> None:
+        """Store `state` on the chain's entry; the chain calls it at each step, before the next external act."""
+        def store_release(entries: list[dict[str, Any]]) -> None:
+            for row in entries:
+                if row["id"] == chain["id"]:
+                    row["release"] = {**state, "at": stamp_now()}
+        update(queue, store_release)
+    state = sd_release.advance_release(dict(before), release, acts, world, types, save=save_release)
+    save_release(state)
+    reason = str(state.get("reason") or "")
+    if reason and reason != before.get("reason"):
+        default_note(chain["item"], f"Release: {reason}", main, "followup" if state.get("failed") else "comment")
+    return reason
+
+
+#: The chain's world on disk; a suite replaces it.
+ReleaseWorld = sd_release.Repositories
+
+
+def release_frozen(queue: Queue) -> Callable[[], str | None]:
+    """The freeze window over the repository as one line; None when open."""
+    from sd_db.writes import freeze_window  # noqa: PLC0415
+
+    def frozen() -> str | None:
+        window = on_hub(queue, lambda connection: freeze_window(connection, queue.repository))
+        return None if window is None else f"{queue.repository} is frozen until {window['until']}: {window['reason']}"
+    return frozen
+
+
+def release_ruling(queue: Queue, item: int, main: pathlib.Path) -> Callable[[str, str, str], str | None]:
+    """The operator's ruling on the chain's question for one step, asked once on `item`; None while unanswered."""
+    def ruling(tag: str, step: str, question: str) -> str | None:
+        head = f"Release {tag}, {step}: "
+
+        def read_ruling(connection: Any) -> tuple[bool, str | None]:
+            asked = connection.execute("SELECT id FROM note WHERE item = ? AND kind = 'question' AND body LIKE ? "
+                                       "ORDER BY id DESC LIMIT 1", (item, head + "%")).fetchone()
+            if asked is None:
+                return False, None
+            ruled = connection.execute("SELECT body FROM note WHERE item = ? AND kind = 'decision' AND body LIKE ? "
+                                       "ORDER BY id DESC LIMIT 1", (item, f"Ruling on note #{asked['id']}:%")).fetchone()
+            return True, None if ruled is None else ruled["body"].split(":", 1)[1].strip()
+        asked, ruled = on_hub(queue, read_ruling)
+        if not asked:
+            default_note(item, f"{head}{question} Rule it with `sd task note {item} go --kind decision "
+                               "--answers <this note>`; any other ruling stops the chain.", main, "question")
+        return ruled
+    return ruling
+
+
 def note_post_merge(rows: list[dict[str, Any]], ran: str, main: pathlib.Path) -> str:
     """Note each row's item with `ran`, a comment when the target passed, else a followup; `ran` with any failure."""
     kind = "comment" if ran.startswith("make post-merge passed") else "followup"
@@ -2817,6 +2929,7 @@ def resume_stopped(row: dict[str, Any], record: dict[str, Any]) -> dict[str, Any
         row.pop("lease_until", None)
         if row["status"] == "merged":  # an older version's record has no mark; the target is owed all the same
             row.setdefault("post_merge", POST_MERGE_OWED)
+            row.setdefault("release", RELEASE_OWED)
     else:
         fault = {"step": step, "reason": str(record.get("reason") or "")[:REASON_CHARS], "at": record.get("at")}
         back_to_pending(row, str(record.get("expected_head") or row["expected_head"]), last_holder=holder,
@@ -2998,7 +3111,8 @@ def owe_post_merge(queue: Queue, entry: dict[str, Any], token: str, outcome: dic
     owed on the entry reclaim fails (sd:4630). One try: when the hub refuses it, the merged `outcome` goes to a
     hub-stop record instead, which the next run's reclaim applies if this run dies before `finish_entry`."""
     try:
-        update(queue, lambda entries: held(entries, entry, token).update(post_merge=POST_MERGE_OWED))
+        update(queue, lambda entries: held(entries, entry, token).update(post_merge=POST_MERGE_OWED,
+                                                                          release=RELEASE_OWED))
     except LaneError as error:  # unknown: the record covers a write that did not land; `settle_checkout` drops it
         record_hub_stop(queue, token, Stop(str(error), code=error.code), entry, outcome=outcome)
 
@@ -3562,6 +3676,7 @@ def run_lane(root: pathlib.Path, environ: dict[str, str], ship: Ship = default_s
                 if ahead is not None:
                     ahead.cancel_gate()
                 raise
+        answer = release_chain(root, queue, environ, answer)
     return post_merge(root, queue, environ, answer)
 
 
@@ -3670,6 +3785,7 @@ def run_checkout(root: pathlib.Path, queue: Queue, entry: dict[str, Any], token:
                         f"sd:{entry['item']} met {met} in {outcome.get('step')}")
             if outcome.get("status") == "merged":  # before the landing, so a kill in it still owes the target
                 outcome["post_merge"] = POST_MERGE_OWED
+                outcome["release"] = RELEASE_OWED
                 owe_post_merge(queue, entry, token, outcome)
             outcome.update(settle(local, outcome, environ, note, queue.lock_file, root))
     except Stop as error:
