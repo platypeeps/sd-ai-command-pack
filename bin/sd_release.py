@@ -322,6 +322,23 @@ def _verify(state: dict, release: dict, acts: dict, world: Any, types: list[str]
 STEPS = {"version": _version, "tag": _tag, "bump": _bump, "merge": _merge, "verify": _verify}
 #: The steps that act on the deploy repository, so its policy holds them, not the source's.
 DEPLOY_STEPS = ("bump", "merge")
+#: The policy keys the bump acts on. The chain keeps them from its first deploy step on, and stops when the policy
+#: names others: the PR it opened, the merge and the verify all belong to the deploy it began.
+DEPLOYED = ("deploy_repo", "file", "key")
+
+
+def _held_deploy(state: dict, release: dict) -> None:
+    """A ReleaseError once the policy names another deploy than the one the chain stored on reaching the bump.
+
+    The gates of each act (the deploy policy's acts, `review.human`, `ci`, `merge_method` and freeze windows) are
+    read at the act they hold, so they are the stored deploy repository's own.
+    """
+    named = {field: release.get(field) for field in DEPLOYED}
+    held = state.get("deploy")
+    if held is not None and held != named:
+        changed = ", ".join(field for field in DEPLOYED if held.get(field) != named[field])
+        raise ReleaseError(f"the policy's {changed} changed since the chain acted on {held.get('deploy_repo')}; "
+                           "finish this release by hand, or set the policy back")
 
 
 def advance_release(state: dict, release: dict, acts: dict, world: Any,
@@ -343,7 +360,10 @@ def advance_release(state: dict, release: dict, acts: dict, world: Any,
                                    "unknown; finish it by hand or declare it again")
             if held is None:
                 raise ReleaseError("the deploy repository's policy was not read, so its acts are unknown")
+            _held_deploy(state, release)
             state["step"] = STEPS[state["step"]](state, release, held, world, list(types))
+            if state["step"] in DEPLOY_STEPS:  # saved with the step, before the bump acts on it
+                state.setdefault("deploy", {field: release.get(field) for field in DEPLOYED})
             if state["step"] not in FINAL:
                 save(state)
     except Wait as stop:

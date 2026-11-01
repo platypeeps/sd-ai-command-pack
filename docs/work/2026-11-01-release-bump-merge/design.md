@@ -83,8 +83,14 @@ saved before its external act, so a kill resumes at that step.
 | verify | a detached worktree | the deploy checkout lacks the merged commit | fetch origin's default branch; run `verify` in a detached worktree at the merged commit, as PR 1 does at the tagged one | `test_verify_runs_in_a_detached_deploy_worktree_at_the_merged_commit`, `test_a_deploy_release_runs_version_through_verify_against_bare_origins` |
 | any | none | a chain PR 1 stored at verify, then the policy named a deploy | go back to bump | `test_a_chain_tagged_before_the_policy_named_a_deploy_bumps_before_its_verify` |
 | any | none | a chain stored at bump or merge, then the policy dropped the deploy | stop failed; act on nothing | `test_a_deploy_step_whose_policy_dropped_the_deploy_fails_rather_than_acts` |
+| bump | `deploy` (deploy_repo, file, key) on the chain | the chain reaches bump | stored with the bump step's save, before `open_bump` acts | `test_each_step_is_saved_before_the_next_external_act`, `test_a_kill_after_the_pr_opens_then_a_changed_deploy_opens_no_second_pr` |
+| merge | none | `deploy_repo`, `file` or `key` changed while the merge waits, so the new repository's gates read the old one's PR | stop failed at merge, nothing merged; the policy set back resumes | `test_a_deploy_changed_while_the_merge_waits_merges_nothing` |
+| bump | none | a kill after `gh pr create`, then `deploy_repo` changed: the rerun opened a PR in the new repository | stop failed at bump; no second PR | `test_a_kill_after_the_pr_opens_then_a_changed_deploy_opens_no_second_pr` |
+| bump: ask | none | a `go` ruling, read by tag and step, covered a deploy repository the question never named | stop failed at bump; nothing opened | `test_a_go_ruling_on_the_bump_covers_only_the_deploy_it_asked_about` |
+| verify | none | the deploy dropped or changed after the merge: verify ran tag-only on the source, or in the new checkout | stop failed at verify; no verify | `test_a_deploy_dropped_or_changed_after_the_merge_runs_no_verify` |
+| any | none | a gate changed between steps: the deploy policy's acts, `commit_convention`, `review.human`, `ci`, `merge_method`, a freeze; the source's `push`, `verify`, `release_types` | none needed: each is read at the one act it holds, in the run that acts, and no earlier step acted on it; the stored deploy keeps the deploy gates that repository's | `test_the_deploy_policy_gates_the_merge_as_sd_ship_does`, `test_freeze_window_stops_the_chain_before_merge`, `test_each_act_the_policy_holds_at_ask_waits_for_a_go_ruling` |
 
-Each row once marked "to write", each row added in the build, and each row of the review round 1 class pass ("a key path matches text that is not a block-mapping entry") has a test that failed first.
+Each row once marked "to write", each row added in the build, each row of the review round 1 class pass ("a key path matches text that is not a block-mapping entry") and of round 2 ("a resumed step reads policy that changed since an earlier step acted on it") has a test that failed first, except the round 2 row for gates, which needs no fix.
 
 ## Acceptance criteria
 

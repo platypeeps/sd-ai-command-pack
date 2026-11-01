@@ -422,6 +422,61 @@ class Saved(unittest.TestCase):
                 self.assertEqual((state["step"], state["failed"], world.acts), (step, True, []))
                 self.assertIn("no longer declares deploy_repo", state["reason"])
 
+    def test_a_deploy_changed_while_the_merge_waits_merges_nothing(self):
+        """Review round 2: a resumed merge read the new `deploy_repo`'s gates for the old repository's PR."""
+        for change in ({"deploy_repo": "~/repos/org/other"}, {"file": "other.yaml"}, {"key": "image.version"}):
+            with self.subTest(change=change):
+                world = World(checks="pending")
+                state = run(world)
+                self.assertEqual(state["step"], "merge")
+                world.checks = "green"
+                state = run(world, state=state, release={**RELEASE, **change})
+                self.assertEqual((state["step"], state["failed"]), ("merge", True))
+                self.assertIn(f"the policy's {next(iter(change))} changed since", state["reason"])
+                self.assertNotIn(f"merge {PR}", world.acts)
+                state = run(world, state=state)  # the policy set back: the chain goes on
+                self.assertEqual((state["step"], world.acts[-1]), ("done", "verify check-rollout 0.18.0"))
+
+    def test_a_go_ruling_on_the_bump_covers_only_the_deploy_it_asked_about(self):
+        """Review round 2: a ruling is read by tag and step, so a `go` on one deploy repository opened the bump
+        in the one the policy named next."""
+        world = World()
+        asked = {**MANAGED, "pr": "ask"}
+        state = run(world, deploy_acts=asked)
+        self.assertEqual((state["step"], world.asked), ("bump", ["bump"]))
+        world.rulings["bump"] = "go"
+        state = run(world, state=state, deploy_acts=asked, release={**RELEASE, "deploy_repo": "~/repos/org/other"})
+        self.assertEqual((state["step"], state["failed"]), ("bump", True))
+        self.assertNotIn("open_bump release/v0.18.0", world.acts)
+
+    def test_a_kill_after_the_pr_opens_then_a_changed_deploy_opens_no_second_pr(self):
+        """Review round 2: the rerun of a bump killed before its save opened a PR in the new deploy repository."""
+        world, saved = World(), []
+
+        def save(state):
+            if state["step"] == "merge":
+                raise Killed
+            saved.append(dict(state))
+        with self.assertRaises(Killed):
+            run(world, save=save)
+        self.assertEqual(saved[-1]["step"], "bump")
+        state = run(world, state=saved[-1], release={**RELEASE, "deploy_repo": "~/repos/org/other"})
+        self.assertEqual((state["step"], state["failed"]), ("bump", True))
+        self.assertEqual(world.acts.count("open_bump release/v0.18.0"), 1)
+
+    def test_a_deploy_dropped_or_changed_after_the_merge_runs_no_verify(self):
+        """Review round 2: a chain merged in the deploy repository, then the policy dropped the deploy, ran the
+        tag-only verify on the source commit; a changed one ran it in the new repository's checkout."""
+        for release in (TAG_ONLY, {**RELEASE, "deploy_repo": "~/repos/org/other"}):
+            with self.subTest(release=release):
+                world, saved = World(), []
+                run(world, save=lambda state, saved=saved: saved.append(dict(state)))
+                stored = next(state for state in saved if state["step"] == "verify")
+                world.acts.clear()
+                state = run(world, state=stored, release=release)
+                self.assertEqual((state["step"], state["failed"], world.acts), ("verify", True, []))
+                self.assertIn("changed since the chain acted on ~/repos/org/deploy", state["reason"])
+
     def test_a_deploy_step_with_no_deploy_policy_fails_rather_than_acts(self):
         world = World()
         state = sd_release.advance_release({"step": "version"}, RELEASE, MANAGED, world)
